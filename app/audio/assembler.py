@@ -135,7 +135,7 @@ def assemble_m4b(
             ]
         args += [
             "-map_metadata", "1", "-map_chapters", "1",
-            "-c:a", "aac", "-b:a", "64k", "-ar", "44100",
+            "-c:a", "copy",
             "-movflags", "+faststart",
             "-metadata", f"title={_safe_title(title)}",
             "-metadata", f"album={_safe_title(title)}",
