@@ -24,14 +24,17 @@ class ProjectWorkflow(QMainWindow):
         self.project: Project | None = None
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
+
         self.library = LibraryPage(self.open_project)
         self.import_page = ImportPage(self.handle_import)
         self.tabs.addTab(self.library, "Library")
         self.tabs.addTab(self.import_page, "Import")
+
         self.voice = VoicePage()
         self.tabs.addTab(self.voice, "Voice")
         self.tabs.addTab(ModelsPage(), "Models")
         self.tabs.addTab(HardwarePage(), "Hardware")
+
         self.editor: ChapterEditorPage | None = None
         self.generation: GenerationPage | None = None
 
@@ -73,7 +76,11 @@ class ProjectWorkflow(QMainWindow):
             index = self.tabs.indexOf(self.generation)
             if index >= 0:
                 self.tabs.removeTab(index)
-        self.generation = GenerationPage(self.project.chapters, self.project.folder / "audio")
+        self.generation = GenerationPage(
+            self.project.chapters,
+            self.project.folder / "audio",
+            self.project.folder,
+        )
         self.tabs.addTab(self.generation, "Generate")
 
     def open_project(self, project: Project) -> None:
