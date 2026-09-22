@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import json
 
-from app.core.paths import settings_root
+from app.core.paths import models_root, settings_root
 
 
 @dataclass(frozen=True)
@@ -16,8 +16,6 @@ class ModelSpec:
     notes: str = ""
 
 
-# This is a catalog, not a bundled model list. Model files are intentionally
-# kept outside the Git repository and can be installed separately by the user.
 BUILTIN_CATALOG = (
     ModelSpec(
         "piper",
@@ -25,8 +23,8 @@ BUILTIN_CATALOG = (
         "piper",
         False,
         True,
-        ("cpu",),
-        "Lightweight local neural TTS. Voice models are installed separately."
+        ("cpu", "cuda"),
+        "Fast local neural TTS. Individual voice models are downloaded separately."
     ),
     ModelSpec(
         "kokoro",
@@ -35,7 +33,7 @@ BUILTIN_CATALOG = (
         False,
         True,
         ("cpu", "directml", "cuda"),
-        "Small open-weight TTS model. Runtime/backend compatibility is detected separately."
+        "Open-weight TTS model. Runtime/backend compatibility is detected separately."
     ),
     ModelSpec(
         "chatterbox",
@@ -44,7 +42,7 @@ BUILTIN_CATALOG = (
         True,
         False,
         ("cuda", "cpu"),
-        "Voice-cloning capable TTS. Reference audio is used at generation time; English support is provided by the base model."
+        "English voice cloning from a reference recording."
     ),
     ModelSpec(
         "chatterbox-multilingual",
@@ -53,7 +51,7 @@ BUILTIN_CATALOG = (
         True,
         True,
         ("cuda", "cpu"),
-        "Multilingual voice-cloning capable TTS. Exact language/backend support depends on the installed model release."
+        "Multilingual zero-shot voice cloning from a reference recording."
     ),
 )
 
@@ -75,7 +73,11 @@ def installed_model_ids() -> set[str]:
 
 def installed_models() -> list[ModelSpec]:
     ids = installed_model_ids()
-    return [m for m in BUILTIN_CATALOG if m.model_id in ids]
+    result = [m for m in BUILTIN_CATALOG if m.model_id in ids]
+    if (models_root() / "piper").exists() and any((models_root() / "piper").rglob("*.onnx")):
+        if not any(m.model_id == "piper" for m in result):
+            result.append(get_model("piper"))
+    return [m for m in result if m is not None]
 
 
 def get_model(model_id: str) -> ModelSpec | None:
