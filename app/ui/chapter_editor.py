@@ -14,12 +14,14 @@ from PySide6.QtWidgets import (
 )
 from app.chapters.detector import Chapter
 from app.chapters.editor import ChapterEditor
+from app.documents.parser import remove_page_noise
 
 
 class ChapterEditorPage(QWidget):
     def __init__(self, chapters: list[Chapter], on_save=None) -> None:
         super().__init__()
-        self.editor = ChapterEditor(chapters)
+        cleaned = [Chapter(ch.number, ch.title, remove_page_noise(ch.text)) for ch in chapters]
+        self.editor = ChapterEditor(cleaned)
         self.on_save = on_save
         self.list = QListWidget()
         self.title = QTextEdit()
