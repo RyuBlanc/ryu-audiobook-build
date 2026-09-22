@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
+from app.documents.parser import remove_page_noise
+
 
 @dataclass
 class Chapter:
@@ -29,6 +31,7 @@ TITLE_WITH_NUMBER_PATTERN = re.compile(
 
 def detect_chapters(text: str) -> list[Chapter]:
     """Detect likely chapter headings without throwing away ordinary story text."""
+    text = remove_page_noise(text)
     lines = text.splitlines()
     markers: list[tuple[int, str]] = []
 
@@ -59,7 +62,6 @@ def detect_chapters(text: str) -> list[Chapter]:
 
 
 def _heading_title(line: str, lines: list[str], index: int) -> str | None:
-    # URLs and download-site watermarks are never chapter headings.
     lowered = line.lower()
     if re.search(r"(https?://|www\.)", lowered):
         return None
@@ -78,8 +80,6 @@ def _heading_title(line: str, lines: list[str], index: int) -> str | None:
     if NUMBERED_PATTERN.match(line):
         return line
 
-    # Titles such as "Life.0" are allowed, while dialogue like "FLAP" or
-    # "DON!" remains ordinary story text.
     if TITLE_WITH_NUMBER_PATTERN.match(line):
         return line
 
