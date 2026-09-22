@@ -13,6 +13,8 @@ from app.ui.import_page import ImportPage
 from app.ui.library import LibraryPage
 from app.ui.voice_page import VoicePage
 from app.ui.hardware_page import HardwarePage
+from app.ui.models_page import ModelsPage
+
 
 class ProjectWorkflow(QMainWindow):
     def __init__(self) -> None:
@@ -28,6 +30,7 @@ class ProjectWorkflow(QMainWindow):
         self.tabs.addTab(self.import_page, "Import")
         self.voice = VoicePage()
         self.tabs.addTab(self.voice, "Voice")
+        self.tabs.addTab(ModelsPage(), "Models")
         self.tabs.addTab(HardwarePage(), "Hardware")
         self.editor: ChapterEditorPage | None = None
         self.generation: GenerationPage | None = None
@@ -78,6 +81,7 @@ class ProjectWorkflow(QMainWindow):
         self.open_editor()
         self.ensure_generation_page()
         self.tabs.setCurrentWidget(self.editor)
+
 
 def build_workflow() -> ProjectWorkflow:
     return ProjectWorkflow()
