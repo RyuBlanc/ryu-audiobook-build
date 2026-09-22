@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import os
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QAudioOutput, QUrl
+from PySide6.QtMultimedia import QMediaPlayer
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QMessageBox, QPushButton, QTextEdit, QVBoxLayout, QWidget
+    QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QTextEdit,
+    QVBoxLayout, QWidget,
 )
 
 from app.tts.system_sapi import SystemSAPIProvider
@@ -17,6 +17,8 @@ from app.tts.providers.edge_tts import EdgeTTSProvider
 
 
 class VoicePage(QWidget):
+    """Voice selection page with a compact Audiobook-Maker-style setup flow."""
+
     def __init__(self) -> None:
         super().__init__()
         self.sapi = SystemSAPIProvider()
@@ -25,29 +27,46 @@ class VoicePage(QWidget):
         self.last_preview: Path | None = None
         self.edge_voices: list[dict] = []
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(18, 18, 18, 18)
+        self.player = QMediaPlayer(self)
+        self.audio_output = QAudioOutput(self)
+        self.audio_output.setVolume(0.85)
+        self.player.setAudioOutput(self.audio_output)
+        self.player.errorOccurred.connect(self._player_error)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(18, 14, 18, 14)
+        outer.setSpacing(10)
+
+        header = QHBoxLayout()
+        title = QLabel("<h2>Choose Narrator</h2>")
+        header.addWidget(title)
+        header.addStretch(1)
+        header.addWidget(QLabel("1. Choose voice  →  2. Preview  →  3. Save"))
+        outer.addLayout(header)
+        outer.addWidget(QLabel("Select a narrator for your audiobook. Preview it here before generating the full book."))
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        content = QWidget()
+        root = QVBoxLayout(content)
+        root.setContentsMargins(0, 4, 0, 10)
         root.setSpacing(12)
 
-        root.addWidget(QLabel(
-            "<h2>Voice Profiles</h2>"
-            "<span>Choose from installed voices, a large multilingual neural catalog, "
-            "or an authorized custom voice.</span>"
-        ))
-
-        voice_box = QGroupBox("Voice setup")
+        voice_box = QGroupBox("Narrator")
         form = QFormLayout(voice_box)
-        form.setContentsMargins(16, 16, 16, 16)
-        form.setVerticalSpacing(10)
+        form.setContentsMargins(16, 14, 16, 14)
+        form.setVerticalSpacing(8)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
 
         self.mode = QComboBox()
         self.mode.addItem("Windows SAPI — offline installed voices", "windows-sapi")
-        self.mode.addItem("Neural Voices — 400+ multilingual voices", "edge-tts")
+        self.mode.addItem("Neural Voices — multilingual catalog", "edge-tts")
         self.mode.addItem("Custom Voice — authorized reference audio", "chatterbox")
         form.addRow("Voice source", self.mode)
 
         self.name = QLineEdit()
-        self.name.setPlaceholderText("e.g. Ryu Narrator")
+        self.name.setPlaceholderText("Profile name")
         form.addRow("Profile name", self.name)
 
         self.sapi_voice = QComboBox()
@@ -69,10 +88,10 @@ class VoicePage(QWidget):
         form.addRow("Neural voice", self.neural_voice)
 
         neural_actions = QHBoxLayout()
-        self.refresh_neural = QPushButton("Refresh voice catalog")
+        self.refresh_neural = QPushButton("Refresh catalog")
         self.refresh_neural.clicked.connect(lambda: self.load_edge_voices(True))
-        neural_actions.addWidget(self.refresh_neural)
         self.neural_count = QLabel("")
+        neural_actions.addWidget(self.refresh_neural)
         neural_actions.addWidget(self.neural_count)
         neural_actions.addStretch(1)
         form.addRow("", neural_actions)
@@ -96,6 +115,7 @@ class VoicePage(QWidget):
 
         saved_box = QGroupBox("Saved profiles")
         saved_row = QHBoxLayout(saved_box)
+        saved_row.setContentsMargins(12, 10, 12, 10)
         self.saved_profiles = QComboBox()
         self.load_button = QPushButton("Load")
         self.load_button.clicked.connect(self.load_selected_profile)
@@ -104,34 +124,60 @@ class VoicePage(QWidget):
         root.addWidget(saved_box)
         self.refresh_profiles()
 
-        preview_box = QGroupBox("Voice preview")
+        preview_box = QGroupBox("Preview")
         preview_layout = QVBoxLayout(preview_box)
         self.preview_text = QTextEdit()
-        self.preview_text.setPlaceholderText("Enter a short sentence to preview the selected voice…")
+        self.preview_text.setPlaceholderText("Type a short sentence to hear this narrator…")
         self.preview_text.setPlainText("Welcome to Ryu's Audiobook. This is a short voice preview.")
-        self.preview_text.setMinimumHeight(90)
-        self.preview_text.setMaximumHeight(150)
+        self.preview_text.setMinimumHeight(72)
+        self.preview_text.setMaximumHeight(110)
         preview_layout.addWidget(self.preview_text)
 
         actions = QHBoxLayout()
-        self.preview_button = QPushButton("▶  Preview Voice")
+        self.preview_button = QPushButton("▶  Generate Preview")
         self.preview_button.clicked.connect(self.preview)
-        self.play_button = QPushButton("▶  Play Last Preview")
+        self.play_button = QPushButton("▶  Play")
         self.play_button.setEnabled(False)
         self.play_button.clicked.connect(self.play_last_preview)
+        self.stop_button = QPushButton("■  Stop")
+        self.stop_button.clicked.connect(self.player.stop)
         self.save_button = QPushButton("Save Voice Profile")
         self.save_button.clicked.connect(self.save_profile)
         actions.addWidget(self.preview_button)
         actions.addWidget(self.play_button)
+        actions.addWidget(self.stop_button)
         actions.addWidget(self.save_button)
         preview_layout.addLayout(actions)
+
+        progress_row = QHBoxLayout()
+        self.preview_progress = QLabel("0:00 / 0:00")
+        self.preview_progress.setMinimumWidth(90)
+        progress_row.addWidget(self.preview_progress)
+        self.volume = QComboBox()
+        self.volume.addItems(["Volume 50%", "Volume 70%", "Volume 85%", "Volume 100%"])
+        self.volume.setCurrentIndex(2)
+        self.volume.currentIndexChanged.connect(lambda i: self.audio_output.setVolume([0.5, 0.7, 0.85, 1.0][i]))
+        progress_row.addWidget(self.volume)
+        progress_row.addStretch(1)
+        preview_layout.addLayout(progress_row)
         root.addWidget(preview_box)
+
+        next_box = QGroupBox("Next step")
+        next_layout = QHBoxLayout(next_box)
+        next_layout.addWidget(QLabel("Voice selected? Save the profile, then open Generate to create the full M4B audiobook."))
+        next_layout.addStretch(1)
+        root.addWidget(next_box)
 
         self.status = QLabel("Ready. Neural voice catalog can be refreshed when online.")
         self.status.setWordWrap(True)
         root.addWidget(self.status)
         root.addStretch(1)
 
+        scroll.setWidget(content)
+        outer.addWidget(scroll, 1)
+
+        self.player.durationChanged.connect(self._duration_changed)
+        self.player.positionChanged.connect(self._position_changed)
         self.mode.currentIndexChanged.connect(self.update_mode)
         self.update_mode()
         self.load_edge_voices(False)
@@ -139,9 +185,7 @@ class VoicePage(QWidget):
     def _populate_sapi_voices(self) -> None:
         self.sapi_voice.clear()
         for voice_id in self.sapi.voices():
-            display = voice_id
-            if "\\Tokens\\TTS_MS_" in voice_id:
-                display = voice_id.rsplit("\\", 1)[-1].replace("_", " ")
+            display = voice_id.rsplit("\", 1)[-1].replace("_", " ") if "\Tokens\TTS_MS_" in voice_id else voice_id
             self.sapi_voice.addItem(display, voice_id)
 
     def load_edge_voices(self, refresh: bool = False) -> None:
@@ -171,7 +215,6 @@ class VoicePage(QWidget):
         current = self.neural_voice.currentData()
         self.neural_voice.blockSignals(True)
         self.neural_voice.clear()
-
         matches = [
             v for v in self.edge_voices
             if (gender == "All" or v.get("gender", "").lower() == gender.lower())
@@ -183,7 +226,6 @@ class VoicePage(QWidget):
             if voice.get("locale"):
                 label = f"{label}  ·  {voice['locale']}  ·  {voice.get('gender', 'Unknown')}"
             self.neural_voice.addItem(label, name)
-
         if current:
             idx = self.neural_voice.findData(current)
             if idx >= 0:
@@ -211,15 +253,12 @@ class VoicePage(QWidget):
         profile = next((p for p in self.profiles if p.name == name), None)
         if not profile:
             return
-
         index = self.mode.findData(profile.provider)
         if index >= 0:
             self.mode.setCurrentIndex(index)
-
         self.name.setText(profile.name)
         self.language.setText(profile.language or "en")
         self.authorized.setChecked(profile.authorized)
-
         if profile.provider == "windows-sapi":
             index = self.sapi_voice.findData(profile.voice_id)
             if index >= 0:
@@ -231,37 +270,31 @@ class VoicePage(QWidget):
         elif profile.sample_path:
             self.sample_path = Path(profile.sample_path)
             self.sample_label.setText(self.sample_path.name)
-
         self.status.setText(f"Loaded voice profile: {profile.name}")
 
     def update_mode(self) -> None:
         provider = self.mode.currentData()
         is_edge = provider == "edge-tts"
         custom = provider == "chatterbox"
-
         self.sapi_voice.setVisible(provider == "windows-sapi")
         self.gender.setVisible(is_edge)
         self.accent.setVisible(is_edge)
         self.neural_voice.setVisible(is_edge)
         self.refresh_neural.setVisible(is_edge)
         self.neural_count.setVisible(is_edge)
-        self.sample_button.setEnabled(custom)
         self.sample_button.setVisible(custom)
         self.sample_label.setVisible(custom)
         self.language.setEnabled(custom)
         self.authorized.setEnabled(custom)
-
         if provider == "windows-sapi":
             self.status.setText("Windows SAPI runs locally and offline.")
         elif is_edge:
-            self.status.setText("Neural catalog provides many male/female voices and regional accents. Internet is required to synthesize.")
+            self.status.setText("Neural voices require internet access when generating audio.")
         else:
             self.status.setText("Custom voice requires an authorized reference recording.")
 
     def select_sample(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select Reference Voice", "", "Audio (*.wav *.mp3 *.m4a *.flac)"
-        )
+        path, _ = QFileDialog.getOpenFileName(self, "Select Reference Voice", "", "Audio (*.wav *.mp3 *.m4a *.flac)")
         if not path:
             return
         source = Path(path)
@@ -276,46 +309,26 @@ class VoicePage(QWidget):
     def _profile_from_ui(self) -> VoiceProfile | None:
         provider = self.mode.currentData()
         name = self.name.text().strip()
-
         if provider == "windows-sapi":
             voice_id = self.sapi_voice.currentData() or self.sapi_voice.currentText().strip()
             if not voice_id:
                 self.status.setText("No Windows voice is available.")
                 return None
             return VoiceProfile(name=name or self.sapi_voice.currentText().strip(), provider=provider, voice_id=voice_id, backend="automatic", authorized=True)
-
         if provider == "edge-tts":
             voice_id = self.neural_voice.currentData()
             if not voice_id:
                 self.status.setText("Select a neural voice first.")
                 return None
             voice = next((v for v in self.edge_voices if v.get("name") == voice_id), {})
-            return VoiceProfile(
-                name=name or voice_id,
-                provider="edge-tts",
-                voice_id=voice_id,
-                backend="automatic",
-                language=voice.get("locale") or self.language.text().strip() or "en",
-                authorized=True,
-            )
-
+            return VoiceProfile(name=name or voice_id, provider="edge-tts", voice_id=voice_id, backend="automatic", language=voice.get("locale") or self.language.text().strip() or "en", authorized=True)
         if not self.sample_path:
             self.status.setText("Choose a reference voice sample first.")
             return None
         if not self.authorized.isChecked():
             self.status.setText("Confirm that you have permission to use this voice.")
             return None
-
-        return VoiceProfile(
-            name=name or self.sample_path.stem,
-            provider="chatterbox",
-            voice_id=self.sample_path.stem,
-            sample_path=str(self.sample_path),
-            model_id="chatterbox-multilingual",
-            backend="automatic",
-            language=self.language.text().strip() or "en",
-            authorized=True,
-        )
+        return VoiceProfile(name=name or self.sample_path.stem, provider="chatterbox", voice_id=self.sample_path.stem, sample_path=str(self.sample_path), model_id="chatterbox-multilingual", backend="automatic", language=self.language.text().strip() or "en", authorized=True)
 
     def preview(self) -> None:
         profile = self._profile_from_ui()
@@ -325,47 +338,62 @@ class VoicePage(QWidget):
         if not text:
             self.status.setText("Enter some preview text first.")
             return
-
         output = Path(tempfile.gettempdir()) / "ryu_audiobook_voice_preview.wav"
         try:
             self.preview_button.setEnabled(False)
             self.status.setText("Generating preview…")
-
             if profile.provider == "windows-sapi":
                 provider = self.sapi
             elif profile.provider == "edge-tts":
                 provider = EdgeTTSProvider()
             else:
                 from app.tts.providers.chatterbox import ChatterboxProvider
-                provider = ChatterboxProvider(
-                    reference_audio=Path(profile.sample_path),
-                    backend="cpu",
-                    language=profile.language,
-                    multilingual=True,
-                )
-
+                provider = ChatterboxProvider(reference_audio=Path(profile.sample_path), backend="cpu", language=profile.language, multilingual=True)
             provider.synthesize(text, output, profile.voice_id)
             if not output.exists() or output.stat().st_size < 1024:
                 raise RuntimeError("The voice engine did not produce a valid audio file.")
-
             self.last_preview = output
             self.play_button.setEnabled(True)
-            self.status.setText("Preview ready. Playing it now…")
-            self.play_last_preview()
+            self._set_player_source(output)
+            self.status.setText("Preview ready.")
+            self.player.play()
         except Exception as exc:
             QMessageBox.critical(self, "Voice Preview Failed", str(exc))
             self.status.setText(f"Preview failed: {exc}")
         finally:
             self.preview_button.setEnabled(True)
 
+    def _set_player_source(self, path: Path) -> None:
+        self.player.setSource(QUrl.fromLocalFile(str(path)))
+
     def play_last_preview(self) -> None:
         if not self.last_preview or not self.last_preview.exists():
             self.status.setText("No preview audio is available yet.")
             return
-        if os.name == "nt":
-            os.startfile(str(self.last_preview))
+        if self.player.source().toLocalFile() != str(self.last_preview):
+            self._set_player_source(self.last_preview)
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.player.pause()
+            self.play_button.setText("▶  Play")
         else:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.last_preview)))
+            self.player.play()
+            self.play_button.setText("Ⅱ  Pause")
+
+    def _player_error(self, _error, error_string: str) -> None:
+        if error_string:
+            self.status.setText(f"Preview playback error: {error_string}")
+
+    def _duration_changed(self, duration: int) -> None:
+        self._update_preview_time(0, duration)
+
+    def _position_changed(self, position: int) -> None:
+        self._update_preview_time(position, self.player.duration())
+
+    def _update_preview_time(self, position: int, duration: int) -> None:
+        def fmt(ms: int) -> str:
+            seconds = max(0, ms // 1000)
+            return f"{seconds // 60}:{seconds % 60:02d}"
+        self.preview_progress.setText(f"{fmt(position)} / {fmt(duration)}")
 
     def save_profile(self) -> None:
         profile = self._profile_from_ui()
