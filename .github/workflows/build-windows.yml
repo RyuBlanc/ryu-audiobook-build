@@ -40,7 +40,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Setup
-          path: "installer-output/Ryu's Audiobook Setup.exe"
+          path: "installer/installer-output/Ryu's Audiobook Setup.exe"
           if-no-files-found: error
 
       - name: Upload portable application
