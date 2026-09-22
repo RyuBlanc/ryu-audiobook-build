@@ -1,0 +1,5 @@
+# Optional local AI TTS runtimes.
+# These are intentionally separate from requirements.txt so the base installer
+# does not pull large ML runtimes or model files.
+piper-tts>=1.4,<2
+kokoro>=0.9,<1
