@@ -366,7 +366,7 @@ class GenerationPage(QWidget):
         self.cancel_button.setEnabled(False)
         if self.project_folder:
             state = load_state(self.project_folder)
-            state["status"] = "completed" if summary.output_path else ("failed" if summary.chapters_failed else "cancelled")
+            state["status"] = "completed" if summary.output_path else ("failed" if (summary.chapters_failed or summary.packaging_failed) else "cancelled")
             state["completed_chapters"] = [c.number for c in self.chapters[:summary.chapters_completed]]
             state["failed_chapters"] = summary.chapters_failed
             save_state(self.project_folder, state)
@@ -378,6 +378,10 @@ class GenerationPage(QWidget):
             self.play_button.setEnabled(True)
             self.open_button.setEnabled(True)
             self.status.setText("Audiobook created successfully. Intermediate generation audio has been cleaned.")
+        elif summary.packaging_failed:
+            self.stage.setText("M4B packaging failed")
+            self.result_label.setText("The chapters were generated, but the final M4B could not be packaged. Temporary files were kept so you can retry.")
+            self.status.setText("M4B creation failed. The generated audio has been kept for retry.")
         elif summary.chapters_failed:
             self.stage.setText("Generation failed")
             self.result_label.setText(f"Generation failed for chapters: {summary.chapters_failed}. Temporary files were kept so you can retry.")
