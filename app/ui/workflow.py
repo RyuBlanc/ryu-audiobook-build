@@ -1,0 +1,79 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from PySide6.QtWidgets import QMainWindow, QStackedWidget, QTabWidget, QMessageBox, QFileDialog
+
+from app.chapters.detector import detect_chapters, Chapter
+from app.core.project import Project, create_project
+from app.documents.parser import extract_text
+from app.tts.system_sapi import SystemSAPIProvider
+from app.ui.chapter_editor import ChapterEditorPage
+from app.ui.generation_page import GenerationPage
+from app.ui.import_page import ImportPage
+from app.ui.library import LibraryPage
+from app.ui.voice_page import VoicePage
+
+class ProjectWorkflow(QMainWindow):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("Ryu's Audiobook")
+        self.resize(1200, 800)
+        self.project: Project | None = None
+        self.tabs = QTabWidget()
+        self.setCentralWidget(self.tabs)
+        self.library = LibraryPage(self.open_project)
+        self.import_page = ImportPage(self.handle_import)
+        self.tabs.addTab(self.library, "Library")
+        self.tabs.addTab(self.import_page, "Import")
+        self.editor: ChapterEditorPage | None = None
+        self.voice = VoicePage()
+        self.tabs.addTab(self.voice, "Voice")
+        self.generation: GenerationPage | None = None
+
+    def handle_import(self, path: Path) -> None:
+        try:
+            book = extract_text(path)
+            chapters = detect_chapters(book.text)
+            self.project = create_project(book.title, path, chapters)
+            self.open_editor()
+        except Exception as exc:
+            QMessageBox.critical(self, "Import Failed", str(exc))
+
+    def open_editor(self) -> None:
+        if not self.project:
+            return
+        if self.editor:
+            index = self.tabs.indexOf(self.editor)
+            if index >= 0:
+                self.tabs.removeTab(index)
+        self.editor = ChapterEditorPage(self.project.chapters, self.save_project)
+        self.tabs.addTab(self.editor, "Chapters")
+        self.tabs.setCurrentWidget(self.editor)
+
+    def save_project(self, chapters: list[Chapter]) -> None:
+        if not self.project:
+            return
+        self.project.chapters = chapters
+        self.project.save()
+        self.library.refresh()
+        self.ensure_generation_page()
+
+    def ensure_generation_page(self) -> None:
+        if not self.project:
+            return
+        if self.generation:
+            index = self.tabs.indexOf(self.generation)
+            if index >= 0:
+                self.tabs.removeTab(index)
+        self.generation = GenerationPage(self.project.chapters, self.project.folder / "audio")
+        self.tabs.addTab(self.generation, "Generate")
+
+    def open_project(self, project: Project) -> None:
+        self.project = project
+        self.open_editor()
+        self.ensure_generation_page()
+        self.tabs.setCurrentWidget(self.editor)
+
+def build_workflow() -> ProjectWorkflow:
+    return ProjectWorkflow()
