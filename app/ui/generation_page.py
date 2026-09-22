@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, QUrl, QTimer
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QFileDialog, QFormLayout, QLabel, QLineEdit, QProgressBar, QPushButton,
-    QVBoxLayout, QWidget, QComboBox
+    QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+    QProgressBar, QPushButton, QVBoxLayout, QWidget, QComboBox,
 )
 
 from app.chapters.detector import Chapter
@@ -32,69 +35,185 @@ class GenerationPage(QWidget):
         self.profiles = load_profiles()
         self.signals = GenerationSignals()
         self.manager: GenerationManager | None = None
+        self.started_at: float | None = None
+        self.last_progress_value = 0
 
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("<h2>Generate Audiobook</h2>"))
+        self.player = QMediaPlayer(self)
+        self.audio_output = QAudioOutput(self)
+        self.audio_output.setVolume(0.85)
+        self.player.setAudioOutput(self.audio_output)
+        self.player.positionChanged.connect(self._player_position)
+        self.player.durationChanged.connect(self._player_duration)
 
-        form = QFormLayout()
-        self.title = QLineEdit("Audiobook")
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 14, 18, 14)
+        root.setSpacing(10)
+
+        header = QHBoxLayout()
+        header.addWidget(QLabel("<h2>Generate Audiobook</h2>"))
+        header.addStretch(1)
+        header.addWidget(QLabel("Review → Generate → Listen"))
+        root.addLayout(header)
+
+        book_name = self.project_folder.name if self.project_folder else "Audiobook"
+        self.title = QLineEdit(book_name)
         self.author = QLineEdit()
-        form.addRow("Title:", self.title)
-        form.addRow("Author:", self.author)
-        layout.addLayout(form)
+        form = QFormLayout()
+        form.addRow("Book title", self.title)
+        form.addRow("Author / narrator", self.author)
+        root.addLayout(form)
+
+        overview = QGroupBox("Audiobook")
+        overview_layout = QHBoxLayout(overview)
+        self.chapter_count = QLabel()
+        self.word_count = QLabel()
+        self.duration_estimate = QLabel()
+        overview_layout.addWidget(self.chapter_count)
+        overview_layout.addWidget(self.word_count)
+        overview_layout.addWidget(self.duration_estimate)
+        overview_layout.addStretch(1)
+        root.addWidget(overview)
+        self._update_overview()
+
+        settings = QGroupBox("Audio settings")
+        settings_form = QFormLayout(settings)
 
         self.voice_profile = QComboBox()
         self._load_profiles()
-        form.addRow("Voice Profile:", self.voice_profile)
+        settings_form.addRow("Voice", self.voice_profile)
 
         self.backend = QComboBox()
         self.backend.addItem("Automatic", "automatic")
         self.backend.addItem("CPU Only", "cpu")
         self.backend.addItem("NVIDIA CUDA", "cuda")
         self.backend.addItem("DirectML", "directml")
-        form.addRow("Backend Override:", self.backend)
-
-        self.preview_button = QPushButton("Generate Voice Preview")
-        self.preview_button.clicked.connect(self.preview)
-        layout.addWidget(self.preview_button)
-
-        self.output = QLineEdit()
-        output_button = QPushButton("Choose M4B Output")
-        output_button.clicked.connect(self.choose_output)
-        layout.addWidget(output_button)
-        layout.addWidget(self.output)
+        settings_form.addRow("Backend", self.backend)
 
         self.cover: Path | None = None
+        cover_row = QHBoxLayout()
+        self.cover_label = QLabel("No cover selected")
         cover_button = QPushButton("Choose Cover")
         cover_button.clicked.connect(self.choose_cover)
-        layout.addWidget(cover_button)
+        cover_row.addWidget(cover_button)
+        cover_row.addWidget(self.cover_label, 1)
+        settings_form.addRow("Cover", cover_row)
+        root.addWidget(settings)
 
+        output_box = QGroupBox("Output")
+        output_layout = QVBoxLayout(output_box)
+        self.output = QLineEdit()
+        self.output.setReadOnly(True)
+        output_layout.addWidget(self.output)
+        output_actions = QHBoxLayout()
+        self.change_output = QPushButton("Change output location…")
+        self.change_output.clicked.connect(self.choose_output)
+        output_actions.addWidget(self.change_output)
+        output_actions.addWidget(QLabel("M4B with embedded chapters"))
+        output_actions.addStretch(1)
+        output_layout.addLayout(output_actions)
+        root.addWidget(output_box)
+
+        self.preview_button = QPushButton("▶  Generate Voice Preview")
+        self.preview_button.clicked.connect(self.preview)
+        root.addWidget(self.preview_button)
+
+        progress_box = QGroupBox("Generation")
+        progress_layout = QVBoxLayout(progress_box)
         self.progress = QProgressBar()
-        layout.addWidget(self.progress)
-        self.status = QLabel("Ready")
-        layout.addWidget(self.status)
+        progress_layout.addWidget(self.progress)
+        stats = QHBoxLayout()
+        self.stage = QLabel("Ready")
+        self.elapsed = QLabel("Elapsed: 0:00")
+        self.remaining = QLabel("Remaining: —")
+        self.speed = QLabel("Speed: —")
+        stats.addWidget(self.stage)
+        stats.addStretch(1)
+        stats.addWidget(self.elapsed)
+        stats.addWidget(self.remaining)
+        stats.addWidget(self.speed)
+        progress_layout.addLayout(stats)
+        root.addWidget(progress_box)
 
+        result_box = QGroupBox("Audiobook Ready")
+        result_layout = QVBoxLayout(result_box)
+        self.result_label = QLabel("Your finished audiobook will appear here after M4B packaging.")
+        self.result_label.setWordWrap(True)
+        result_layout.addWidget(self.result_label)
+        result_actions = QHBoxLayout()
+        self.play_button = QPushButton("▶  Play Audiobook")
+        self.play_button.setEnabled(False)
+        self.play_button.clicked.connect(self.play_result)
+        self.stop_button = QPushButton("■  Stop")
+        self.stop_button.clicked.connect(self.player.stop)
+        self.open_button = QPushButton("Open Folder")
+        self.open_button.setEnabled(False)
+        self.open_button.clicked.connect(self.open_result_folder)
+        result_actions.addWidget(self.play_button)
+        result_actions.addWidget(self.stop_button)
+        result_actions.addWidget(self.open_button)
+        result_layout.addLayout(result_actions)
+        self.result_time = QLabel("0:00 / 0:00")
+        result_layout.addWidget(self.result_time)
+        root.addWidget(result_box)
+
+        actions = QHBoxLayout()
         self.start_button = QPushButton("Generate Audiobook")
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setEnabled(False)
-        layout.addWidget(self.start_button)
-        layout.addWidget(self.cancel_button)
+        actions.addWidget(self.start_button)
+        actions.addWidget(self.cancel_button)
+        root.addLayout(actions)
+
+        self.status = QLabel("Ready")
+        self.status.setWordWrap(True)
+        root.addWidget(self.status)
 
         self.signals.progress.connect(self.update_progress)
         self.signals.finished.connect(self.finished)
         self.start_button.clicked.connect(self.start)
         self.cancel_button.clicked.connect(self.cancel)
 
-        self._restore_state()
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._update_live_stats)
 
-    def _load_profiles(self):
+        self._restore_state()
+        self._set_default_output()
+
+    def _load_profiles(self) -> None:
         self.voice_profile.clear()
         for profile in self.profiles:
             self.voice_profile.addItem(profile.name, profile)
         if not self.profiles:
             self.voice_profile.addItem("No saved voice profiles", None)
 
-    def _restore_state(self):
+    def _update_overview(self) -> None:
+        words = sum(len(ch.text.split()) for ch in self.chapters)
+        minutes = max(1, round(words / 150))
+        self.chapter_count.setText(f"Chapters: {len(self.chapters)}")
+        self.word_count.setText(f"Words: {words:,}")
+        self.duration_estimate.setText(f"Estimated length: {minutes // 60}h {minutes % 60:02d}m")
+
+    def _default_output(self) -> Path | None:
+        if not self.project_folder:
+            return None
+        folder = self.project_folder / "Audiobook"
+        folder.mkdir(parents=True, exist_ok=True)
+        title = self.title.text().strip() or self.project_folder.name
+        safe = "".join(c if c not in '<>:"/\\|?*' else "_" for c in title).strip() or "Audiobook"
+        return folder / f"{safe}.m4b"
+
+    def _set_default_output(self) -> None:
+        default = self._default_output()
+        state = load_state(self.project_folder) if self.project_folder else {}
+        saved = Path(state["output_path"]) if state.get("output_path") else None
+        # Old versions used Downloads. New projects always default to the
+        # project's Audiobook folder unless the saved path is already there.
+        if saved and self.project_folder and saved.parent == self.project_folder / "Audiobook":
+            self.output.setText(str(saved))
+        elif default:
+            self.output.setText(str(default))
+
+    def _restore_state(self) -> None:
         if not self.project_folder:
             return
         state = load_state(self.project_folder)
@@ -103,27 +222,28 @@ class GenerationPage(QWidget):
             index = self.voice_profile.findText(profile_name)
             if index >= 0:
                 self.voice_profile.setCurrentIndex(index)
-        output = state.get("output_path")
-        if output:
-            self.output.setText(str(output))
         cover = state.get("cover_path")
-        if cover:
+        if cover and Path(cover).exists():
             self.cover = Path(cover)
+            self.cover_label.setText(self.cover.name)
 
     def _selected_profile(self) -> VoiceProfile | None:
         value = self.voice_profile.currentData()
         return value if isinstance(value, VoiceProfile) else None
 
     def choose_output(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Save M4B", "", "M4B Audiobook (*.m4b)")
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save M4B", str(self._default_output() or ""),
+            "M4B Audiobook (*.m4b)",
+        )
         if path:
-            self.output.setText(path)
+            self.output.setText(str(Path(path).with_suffix(".m4b")))
 
     def choose_cover(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Select Cover", "", "Images (*.jpg *.jpeg *.png)")
         if path:
             self.cover = Path(path)
-            self.status.setText(f"Cover: {self.cover.name}")
+            self.cover_label.setText(self.cover.name)
 
     def _provider(self):
         profile = self._selected_profile()
@@ -141,41 +261,38 @@ class GenerationPage(QWidget):
             provider.backend = backend
         return provider, voice
 
-    def preview(self):
+    def preview(self) -> None:
         provider, voice = self._provider()
         if not provider:
             self.status.setText("Create or select a Voice Profile first.")
             return
-        text = (
-            "Welcome to Ryu's Audiobook. This is a voice preview. "
-            "The selected voice profile will be used for audiobook generation."
-        )
+        text = "Welcome to Ryu's Audiobook. This is a short narration preview."
         try:
             import tempfile
             output = Path(tempfile.gettempdir()) / "ryu_audiobook_voice_preview.wav"
             provider.synthesize(text, output, voice)
             result = benchmark_provider(provider, voice, self.backend.currentData() or "automatic")
             self.status.setText(
-                f"Preview ready: {output.name} • {result.seconds:.2f}s generation "
-                f"for {result.audio_seconds:.2f}s audio"
-                if result.success else f"Preview ready: {output.name}"
+                f"Preview ready • {result.seconds:.2f}s generation for "
+                f"{result.audio_seconds:.2f}s audio" if result.success else "Preview ready."
             )
         except Exception as exc:
             self.status.setText(f"Preview failed: {exc}")
 
-    def start(self):
+    def start(self) -> None:
         if not self.chapters:
             self.status.setText("No chapters available.")
             return
-        output = Path(self.output.text().strip()) if self.output.text().strip() else None
-        if output is None:
-            self.status.setText("Choose an M4B output file.")
+        output = Path(self.output.text().strip()) if self.output.text().strip() else self._default_output()
+        if not output:
+            self.status.setText("Choose an M4B output.")
             return
         provider, voice = self._provider()
         if not provider:
             self.status.setText("Select a Voice Profile.")
             return
 
+        output.parent.mkdir(parents=True, exist_ok=True)
         if self.project_folder:
             state = load_state(self.project_folder)
             profile = self._selected_profile()
@@ -189,9 +306,15 @@ class GenerationPage(QWidget):
 
         self.progress.setRange(0, len(self.chapters))
         self.progress.setValue(0)
+        self.last_progress_value = 0
+        self.started_at = time.monotonic()
+        self.timer.start(1000)
         self.start_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
-        self.status.setText("Generating...")
+        self.play_button.setEnabled(False)
+        self.open_button.setEnabled(False)
+        self.result_label.setText("Generating chapters and packaging the final M4B…")
+        self.status.setText("Starting generation…")
 
         self.manager = GenerationManager(
             provider, voice, self.chapters, self.audio_root,
@@ -200,27 +323,96 @@ class GenerationPage(QWidget):
         )
         self.manager.start(output, self.title.text().strip(), self.author.text().strip(), self.cover)
 
-    def cancel(self):
+    def cancel(self) -> None:
         if self.manager:
             self.manager.cancel()
-            self.status.setText("Cancelling after the current chunk...")
+            self.status.setText("Cancelling after the current chunk…")
 
-    def update_progress(self, chapter, total, done, message):
-        self.progress.setValue(chapter if message == "chapter-complete" else max(0, chapter - 1))
-        self.status.setText(f"Chapter {chapter}/{total} — {message}")
+    def update_progress(self, chapter: int, total: int, done: int, message: str) -> None:
+        if message.startswith("m4b-complete"):
+            self.progress.setValue(total)
+            self.stage.setText("M4B packaging complete")
+        elif message.startswith("m4b-failed"):
+            self.stage.setText("M4B packaging failed")
+            self.status.setText(message)
+        else:
+            value = chapter if message == "chapter-complete" else max(0, chapter - 1)
+            self.progress.setValue(value)
+            self.last_progress_value = value
+            if message == "chapter-complete":
+                self.stage.setText(f"Chapter {chapter}/{total} complete")
+            elif message.startswith("chapter-failed"):
+                self.stage.setText(f"Chapter {chapter}/{total} failed")
+            else:
+                self.stage.setText(f"Chapter {chapter}/{total}")
 
-    def finished(self, summary: GenerationSummary):
+    def _update_live_stats(self) -> None:
+        if self.started_at is None:
+            return
+        elapsed = int(time.monotonic() - self.started_at)
+        self.elapsed.setText(f"Elapsed: {elapsed // 60}:{elapsed % 60:02d}")
+        current = self.progress.value()
+        total = max(1, self.progress.maximum())
+        if current > 0 and elapsed > 2:
+            estimated_total = elapsed * total / current
+            remaining = max(0, int(estimated_total - elapsed))
+            self.remaining.setText(f"Remaining: {remaining // 60}:{remaining % 60:02d}")
+            speed = current / elapsed * 60
+            self.speed.setText(f"Speed: {speed:.2f} ch/min")
+
+    def finished(self, summary: GenerationSummary) -> None:
+        self.timer.stop()
         self.start_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         if self.project_folder:
             state = load_state(self.project_folder)
             state["status"] = "completed" if summary.output_path else ("failed" if summary.chapters_failed else "cancelled")
-            state["completed_chapters"] = list(range(1, summary.chapters_completed + 1))
+            state["completed_chapters"] = [c.number for c in self.chapters[:summary.chapters_completed]]
             state["failed_chapters"] = summary.chapters_failed
             save_state(self.project_folder, state)
+
         if summary.output_path:
-            self.status.setText(f"Finished: {summary.output_path}")
+            self.progress.setValue(self.progress.maximum())
+            self.stage.setText("Audiobook ready")
+            self.result_label.setText(f"✓ Finished M4B\n{summary.output_path}")
+            self.play_button.setEnabled(True)
+            self.open_button.setEnabled(True)
+            self.status.setText("Audiobook created successfully. Intermediate generation audio has been cleaned.")
         elif summary.chapters_failed:
-            self.status.setText(f"Finished with failures: {summary.chapters_failed}")
+            self.stage.setText("Generation failed")
+            self.result_label.setText(f"Generation failed for chapters: {summary.chapters_failed}. Temporary files were kept so you can retry.")
+            self.status.setText("The final M4B was not created.")
         else:
-            self.status.setText(f"Stopped: {summary.chapters_completed}/{summary.chapters_total} chapters")
+            self.stage.setText("Generation cancelled")
+            self.result_label.setText("Generation cancelled. Temporary files were kept for resume.")
+            self.status.setText("No final M4B was created.")
+
+    def play_result(self) -> None:
+        path = Path(self.output.text().strip())
+        if not path.exists():
+            self.status.setText("Final M4B was not found.")
+            return
+        if self.player.source().toLocalFile() != str(path):
+            self.player.setSource(QUrl.fromLocalFile(str(path)))
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.player.pause()
+            self.play_button.setText("▶  Play Audiobook")
+        else:
+            self.player.play()
+            self.play_button.setText("Ⅱ  Pause")
+
+    def open_result_folder(self) -> None:
+        path = Path(self.output.text().strip())
+        if path.exists():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.parent)))
+
+    def _player_position(self, position: int) -> None:
+        self.result_time.setText(f"{self._fmt(position)} / {self._fmt(self.player.duration())}")
+
+    def _player_duration(self, duration: int) -> None:
+        self.result_time.setText(f"{self._fmt(self.player.position())} / {self._fmt(duration)}")
+
+    @staticmethod
+    def _fmt(ms: int) -> str:
+        seconds = max(0, ms // 1000)
+        return f"{seconds // 60}:{seconds % 60:02d}"
