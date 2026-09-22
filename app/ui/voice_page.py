@@ -7,23 +7,13 @@ from pathlib import Path
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QFileDialog,
-    QFormLayout,
-    QGroupBox,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QMessageBox,
-    QPushButton,
-    QTextEdit,
-    QVBoxLayout,
-    QWidget,
+    QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
+    QLabel, QLineEdit, QMessageBox, QPushButton, QTextEdit, QVBoxLayout, QWidget
 )
 
 from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.voice_profile import VoiceProfile, import_reference_audio, load_profiles, save_profiles
+from app.tts.providers.edge_tts import EdgeTTSProvider
 
 
 class VoicePage(QWidget):
@@ -33,16 +23,17 @@ class VoicePage(QWidget):
         self.profiles = load_profiles()
         self.sample_path: Path | None = None
         self.last_preview: Path | None = None
+        self.edge_voices: list[dict] = []
 
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 18, 18, 18)
         root.setSpacing(12)
 
-        header = QLabel(
+        root.addWidget(QLabel(
             "<h2>Voice Profiles</h2>"
-            "<span>Select, preview and save voices for your audiobooks.</span>"
-        )
-        root.addWidget(header)
+            "<span>Choose from installed voices, a large multilingual neural catalog, "
+            "or an authorized custom voice.</span>"
+        ))
 
         voice_box = QGroupBox("Voice setup")
         form = QFormLayout(voice_box)
@@ -50,9 +41,10 @@ class VoicePage(QWidget):
         form.setVerticalSpacing(10)
 
         self.mode = QComboBox()
-        self.mode.addItem("Windows SAPI — installed Windows voice", "windows-sapi")
+        self.mode.addItem("Windows SAPI — offline installed voices", "windows-sapi")
+        self.mode.addItem("Neural Voices — 400+ multilingual voices", "edge-tts")
         self.mode.addItem("Custom Voice — authorized reference audio", "chatterbox")
-        form.addRow("Voice type", self.mode)
+        form.addRow("Voice source", self.mode)
 
         self.name = QLineEdit()
         self.name.setPlaceholderText("e.g. Ryu Narrator")
@@ -61,6 +53,29 @@ class VoicePage(QWidget):
         self.sapi_voice = QComboBox()
         self._populate_sapi_voices()
         form.addRow("Windows voice", self.sapi_voice)
+
+        self.gender = QComboBox()
+        self.gender.addItems(["All", "Female", "Male"])
+        self.gender.currentIndexChanged.connect(self.filter_edge_voices)
+        form.addRow("Gender", self.gender)
+
+        self.accent = QComboBox()
+        self.accent.addItem("All accents / regions", "")
+        self.accent.currentIndexChanged.connect(self.filter_edge_voices)
+        form.addRow("Accent / region", self.accent)
+
+        self.neural_voice = QComboBox()
+        self.neural_voice.currentIndexChanged.connect(self._neural_voice_changed)
+        form.addRow("Neural voice", self.neural_voice)
+
+        neural_actions = QHBoxLayout()
+        self.refresh_neural = QPushButton("Refresh voice catalog")
+        self.refresh_neural.clicked.connect(lambda: self.load_edge_voices(True))
+        neural_actions.addWidget(self.refresh_neural)
+        self.neural_count = QLabel("")
+        neural_actions.addWidget(self.neural_count)
+        neural_actions.addStretch(1)
+        form.addRow("", neural_actions)
 
         sample_row = QHBoxLayout()
         self.sample_button = QPushButton("Choose reference audio…")
@@ -91,8 +106,6 @@ class VoicePage(QWidget):
 
         preview_box = QGroupBox("Voice preview")
         preview_layout = QVBoxLayout(preview_box)
-        preview_layout.setContentsMargins(16, 16, 16, 16)
-
         self.preview_text = QTextEdit()
         self.preview_text.setPlaceholderText("Enter a short sentence to preview the selected voice…")
         self.preview_text.setPlainText("Welcome to Ryu's Audiobook. This is a short voice preview.")
@@ -114,21 +127,77 @@ class VoicePage(QWidget):
         preview_layout.addLayout(actions)
         root.addWidget(preview_box)
 
-        self.status = QLabel("Ready.")
+        self.status = QLabel("Ready. Neural voice catalog can be refreshed when online.")
         self.status.setWordWrap(True)
         root.addWidget(self.status)
         root.addStretch(1)
 
         self.mode.currentIndexChanged.connect(self.update_mode)
         self.update_mode()
+        self.load_edge_voices(False)
 
     def _populate_sapi_voices(self) -> None:
         self.sapi_voice.clear()
         for voice_id in self.sapi.voices():
             display = voice_id
-            if "\Tokens\TTS_MS_" in voice_id:
-                display = voice_id.rsplit("\", 1)[-1].replace("_", " ")
+            if "\\Tokens\\TTS_MS_" in voice_id:
+                display = voice_id.rsplit("\\", 1)[-1].replace("_", " ")
             self.sapi_voice.addItem(display, voice_id)
+
+    def load_edge_voices(self, refresh: bool = False) -> None:
+        try:
+            self.edge_voices = EdgeTTSProvider.fetch_voice_metadata(refresh=refresh)
+            self.neural_count.setText(f"{len(self.edge_voices)} voices")
+            accents = sorted({v.get("locale", "") for v in self.edge_voices if v.get("locale")})
+            current = self.accent.currentData() if self.accent.count() else ""
+            self.accent.blockSignals(True)
+            self.accent.clear()
+            self.accent.addItem("All accents / regions", "")
+            for locale in accents:
+                self.accent.addItem(locale, locale)
+            idx = self.accent.findData(current)
+            self.accent.setCurrentIndex(max(0, idx))
+            self.accent.blockSignals(False)
+            self.filter_edge_voices()
+        except Exception as exc:
+            self.neural_count.setText("Catalog unavailable")
+            self.status.setText(f"Neural catalog unavailable: {exc}")
+
+    def filter_edge_voices(self) -> None:
+        if not hasattr(self, "neural_voice"):
+            return
+        gender = self.gender.currentText() if self.gender.count() else "All"
+        locale = self.accent.currentData() if self.accent.count() else ""
+        current = self.neural_voice.currentData()
+        self.neural_voice.blockSignals(True)
+        self.neural_voice.clear()
+
+        matches = [
+            v for v in self.edge_voices
+            if (gender == "All" or v.get("gender", "").lower() == gender.lower())
+            and (not locale or v.get("locale") == locale)
+        ]
+        for voice in matches:
+            name = voice.get("name", "")
+            label = voice.get("friendly_name") or name
+            if voice.get("locale"):
+                label = f"{label}  ·  {voice['locale']}  ·  {voice.get('gender', 'Unknown')}"
+            self.neural_voice.addItem(label, name)
+
+        if current:
+            idx = self.neural_voice.findData(current)
+            if idx >= 0:
+                self.neural_voice.setCurrentIndex(idx)
+        self.neural_voice.blockSignals(False)
+        self._neural_voice_changed()
+
+    def _neural_voice_changed(self) -> None:
+        voice_id = self.neural_voice.currentData()
+        if voice_id and self.mode.currentData() == "edge-tts":
+            voice = next((v for v in self.edge_voices if v.get("name") == voice_id), None)
+            if voice:
+                self.name.setText(voice.get("friendly_name") or voice_id)
+                self.language.setText(voice.get("locale", "en"))
 
     def refresh_profiles(self) -> None:
         self.saved_profiles.clear()
@@ -155,6 +224,10 @@ class VoicePage(QWidget):
             index = self.sapi_voice.findData(profile.voice_id)
             if index >= 0:
                 self.sapi_voice.setCurrentIndex(index)
+        elif profile.provider == "edge-tts":
+            index = self.neural_voice.findData(profile.voice_id)
+            if index >= 0:
+                self.neural_voice.setCurrentIndex(index)
         elif profile.sample_path:
             self.sample_path = Path(profile.sample_path)
             self.sample_label.setText(self.sample_path.name)
@@ -162,11 +235,28 @@ class VoicePage(QWidget):
         self.status.setText(f"Loaded voice profile: {profile.name}")
 
     def update_mode(self) -> None:
-        custom = self.mode.currentData() == "chatterbox"
-        self.sapi_voice.setEnabled(not custom)
+        provider = self.mode.currentData()
+        is_edge = provider == "edge-tts"
+        custom = provider == "chatterbox"
+
+        self.sapi_voice.setVisible(provider == "windows-sapi")
+        self.gender.setVisible(is_edge)
+        self.accent.setVisible(is_edge)
+        self.neural_voice.setVisible(is_edge)
+        self.refresh_neural.setVisible(is_edge)
+        self.neural_count.setVisible(is_edge)
         self.sample_button.setEnabled(custom)
+        self.sample_button.setVisible(custom)
+        self.sample_label.setVisible(custom)
         self.language.setEnabled(custom)
         self.authorized.setEnabled(custom)
+
+        if provider == "windows-sapi":
+            self.status.setText("Windows SAPI runs locally and offline.")
+        elif is_edge:
+            self.status.setText("Neural catalog provides many male/female voices and regional accents. Internet is required to synthesize.")
+        else:
+            self.status.setText("Custom voice requires an authorized reference recording.")
 
     def select_sample(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -174,7 +264,6 @@ class VoicePage(QWidget):
         )
         if not path:
             return
-
         source = Path(path)
         name = self.name.text().strip() or source.stem
         try:
@@ -193,11 +282,20 @@ class VoicePage(QWidget):
             if not voice_id:
                 self.status.setText("No Windows voice is available.")
                 return None
+            return VoiceProfile(name=name or self.sapi_voice.currentText().strip(), provider=provider, voice_id=voice_id, backend="automatic", authorized=True)
+
+        if provider == "edge-tts":
+            voice_id = self.neural_voice.currentData()
+            if not voice_id:
+                self.status.setText("Select a neural voice first.")
+                return None
+            voice = next((v for v in self.edge_voices if v.get("name") == voice_id), {})
             return VoiceProfile(
-                name=name or self.sapi_voice.currentText().strip(),
-                provider=provider,
+                name=name or voice_id,
+                provider="edge-tts",
                 voice_id=voice_id,
                 backend="automatic",
+                language=voice.get("locale") or self.language.text().strip() or "en",
                 authorized=True,
             )
 
@@ -223,7 +321,6 @@ class VoicePage(QWidget):
         profile = self._profile_from_ui()
         if not profile:
             return
-
         text = self.preview_text.toPlainText().strip()
         if not text:
             self.status.setText("Enter some preview text first.")
@@ -236,6 +333,8 @@ class VoicePage(QWidget):
 
             if profile.provider == "windows-sapi":
                 provider = self.sapi
+            elif profile.provider == "edge-tts":
+                provider = EdgeTTSProvider()
             else:
                 from app.tts.providers.chatterbox import ChatterboxProvider
                 provider = ChatterboxProvider(
@@ -246,7 +345,6 @@ class VoicePage(QWidget):
                 )
 
             provider.synthesize(text, output, profile.voice_id)
-
             if not output.exists() or output.stat().st_size < 1024:
                 raise RuntimeError("The voice engine did not produce a valid audio file.")
 
@@ -264,7 +362,6 @@ class VoicePage(QWidget):
         if not self.last_preview or not self.last_preview.exists():
             self.status.setText("No preview audio is available yet.")
             return
-
         if os.name == "nt":
             os.startfile(str(self.last_preview))
         else:
@@ -274,16 +371,13 @@ class VoicePage(QWidget):
         profile = self._profile_from_ui()
         if not profile:
             return
-
         profiles = [p for p in self.profiles if p.name.lower() != profile.name.lower()]
         profiles.append(profile)
-
         try:
             save_profiles(profiles)
         except OSError as exc:
             QMessageBox.critical(self, "Save Voice Profile Failed", str(exc))
             return
-
         self.profiles = profiles
         self.refresh_profiles()
         index = self.saved_profiles.findData(profile.name)
