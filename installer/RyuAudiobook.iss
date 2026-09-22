@@ -1,6 +1,6 @@
 # Inno Setup script for the core Ryu's Audiobook desktop application.
-# User books, voices, models, and settings live under %USERPROFILE% and are
-# intentionally NOT removed by this installer or its uninstaller.
+; User books, voices, models, and settings live under %USERPROFILE% and are
+; intentionally NOT removed by this installer or its uninstaller.
 
 #define MyAppName "Ryu's Audiobook"
 #define MyAppVersion "0.1.0"
@@ -38,5 +38,4 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; Deliberately do not remove {userappdata}, Documents, or the user's
-; Ryu's Audiobook data. Application data is outside {app}.
+; Deliberately do not remove user data outside {app}.
