@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 from pathlib import Path
-
-from PySide6.QtWidgets import QMainWindow, QStackedWidget, QTabWidget, QMessageBox, QFileDialog
+from PySide6.QtWidgets import QMainWindow, QTabWidget, QMessageBox
 
 from app.chapters.detector import detect_chapters, Chapter
 from app.core.project import Project, create_project
+from app.core.state import load_state, save_state
 from app.documents.parser import extract_text
-from app.tts.system_sapi import SystemSAPIProvider
 from app.ui.chapter_editor import ChapterEditorPage
 from app.ui.generation_page import GenerationPage
 from app.ui.import_page import ImportPage
 from app.ui.library import LibraryPage
 from app.ui.voice_page import VoicePage
+from app.ui.hardware_page import HardwarePage
 
 class ProjectWorkflow(QMainWindow):
     def __init__(self) -> None:
@@ -26,9 +26,10 @@ class ProjectWorkflow(QMainWindow):
         self.import_page = ImportPage(self.handle_import)
         self.tabs.addTab(self.library, "Library")
         self.tabs.addTab(self.import_page, "Import")
-        self.editor: ChapterEditorPage | None = None
         self.voice = VoicePage()
         self.tabs.addTab(self.voice, "Voice")
+        self.tabs.addTab(HardwarePage(), "Hardware")
+        self.editor: ChapterEditorPage | None = None
         self.generation: GenerationPage | None = None
 
     def handle_import(self, path: Path) -> None:
@@ -56,6 +57,9 @@ class ProjectWorkflow(QMainWindow):
             return
         self.project.chapters = chapters
         self.project.save()
+        state = load_state(self.project.folder)
+        state["status"] = "ready"
+        save_state(self.project.folder, state)
         self.library.refresh()
         self.ensure_generation_page()
 
