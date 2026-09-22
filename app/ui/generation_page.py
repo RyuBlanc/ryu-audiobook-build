@@ -3,15 +3,23 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QFileDialog, QFormLayout, QLabel, QLineEdit, QProgressBar, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFileDialog, QFormLayout, QLabel, QLineEdit, QProgressBar, QPushButton,
+    QVBoxLayout, QWidget, QComboBox
+)
 
 from app.chapters.detector import Chapter
 from app.tts.manager import GenerationManager, GenerationSummary
+from app.tts.providers.piper import PiperProvider
 from app.tts.system_sapi import SystemSAPIProvider
+from app.tts.benchmark import benchmark_provider
+from app.hardware.backend import detect_hardware
+
 
 class GenerationSignals(QObject):
     progress = Signal(int, int, int, str)
     finished = Signal(object)
+
 
 class GenerationPage(QWidget):
     def __init__(self, chapters: list[Chapter], audio_root: Path) -> None:
@@ -20,9 +28,10 @@ class GenerationPage(QWidget):
         self.audio_root = audio_root
         self.signals = GenerationSignals()
         self.manager: GenerationManager | None = None
+        self.hardware = detect_hardware()
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Generate Audiobook"))
+        layout.addWidget(QLabel("<h2>Generate Audiobook</h2>"))
 
         form = QFormLayout()
         self.title = QLineEdit("Audiobook")
@@ -31,10 +40,28 @@ class GenerationPage(QWidget):
         form.addRow("Author:", self.author)
         layout.addLayout(form)
 
-        self.voice = QLineEdit()
-        self.voice.setPlaceholderText("Windows SAPI voice ID")
-        layout.addWidget(QLabel("Voice ID"))
-        layout.addWidget(self.voice)
+        self.model = QComboBox()
+        self.model.addItem("Windows SAPI (offline fallback)", "sapi")
+        if PiperProvider.model_paths():
+            self.model.addItem("Piper", "piper")
+        form.addRow("TTS Model:", self.model)
+
+        self.voice = QComboBox()
+        self.voice.setEditable(True)
+        self.voice.addItem("Default")
+        self._refresh_voices()
+        form.addRow("Voice:", self.voice)
+
+        self.backend = QComboBox()
+        self.backend.addItem("Automatic", "automatic")
+        for info in self.hardware.backends:
+            if info.available:
+                self.backend.addItem(info.name, info.name)
+        form.addRow("Backend:", self.backend)
+
+        self.preview_button = QPushButton("Generate Voice Preview")
+        self.preview_button.clicked.connect(self.preview)
+        layout.addWidget(self.preview_button)
 
         self.output = QLineEdit()
         output_button = QPushButton("Choose M4B Output")
@@ -62,6 +89,21 @@ class GenerationPage(QWidget):
         self.signals.finished.connect(self.finished)
         self.start_button.clicked.connect(self.start)
         self.cancel_button.clicked.connect(self.cancel)
+        self.model.currentIndexChanged.connect(self._refresh_voices)
+
+    def _refresh_voices(self):
+        current = self.voice.currentText() if self.voice.count() else ""
+        self.voice.clear()
+        model = self.model.currentData()
+        if model == "piper":
+            names = PiperProvider().voices()
+            self.voice.addItems(names)
+        else:
+            self.voice.addItem("Default")
+        if current:
+            index = self.voice.findText(current)
+            if index >= 0:
+                self.voice.setCurrentIndex(index)
 
     def choose_output(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Save M4B", "", "M4B Audiobook (*.m4b)")
@@ -74,6 +116,35 @@ class GenerationPage(QWidget):
             self.cover = Path(path)
             self.status.setText(f"Cover: {self.cover.name}")
 
+    def _provider(self):
+        model = self.model.currentData()
+        if model == "piper":
+            backend = self.backend.currentData()
+            use_backend = "cuda" if backend == "NVIDIA CUDA" else "cpu"
+            return PiperProvider(backend=use_backend), self.voice.currentText().strip() or None
+        return SystemSAPIProvider(), self.voice.currentText().strip() or None
+
+    def preview(self):
+        provider, voice = self._provider()
+        text = (
+            "Welcome to Ryu's Audiobook. This is a local voice preview. "
+            "The selected engine will be used for audiobook generation."
+        )
+        try:
+            import tempfile
+            output = Path(tempfile.gettempdir()) / "ryu_audiobook_tts_preview.wav"
+            provider.synthesize(text, output, voice)
+            result = benchmark_provider(provider, voice, self.backend.currentData() or "automatic")
+            if result.success:
+                self.status.setText(
+                    f"Preview ready: {output.name} • {result.seconds:.2f}s generation for "
+                    f"{result.audio_seconds:.2f}s audio"
+                )
+            else:
+                self.status.setText(f"Preview ready: {output.name}")
+        except Exception as exc:
+            self.status.setText(f"Preview failed: {exc}")
+
     def start(self) -> None:
         if not self.chapters:
             self.status.setText("No chapters available.")
@@ -82,9 +153,10 @@ class GenerationPage(QWidget):
         if output is None:
             self.status.setText("Choose an M4B output file.")
             return
-        voice = self.voice.text().strip()
-        if not voice:
-            self.status.setText("Enter a Windows SAPI voice ID.")
+
+        provider, voice = self._provider()
+        if self.model.currentData() == "sapi" and not voice:
+            self.status.setText("Select a Windows SAPI voice.")
             return
 
         self.progress.setRange(0, len(self.chapters))
@@ -94,7 +166,7 @@ class GenerationPage(QWidget):
         self.status.setText("Generating...")
 
         self.manager = GenerationManager(
-            SystemSAPIProvider(),
+            provider,
             voice,
             self.chapters,
             self.audio_root,
@@ -109,7 +181,7 @@ class GenerationPage(QWidget):
             self.status.setText("Cancelling after the current chunk...")
 
     def update_progress(self, chapter: int, total: int, done: int, message: str) -> None:
-        self.progress.setValue(chapter - 1 if message != "chapter-complete" else chapter)
+        self.progress.setValue(chapter if message == "chapter-complete" else max(0, chapter - 1))
         self.status.setText(f"Chapter {chapter}/{total} — {message}")
 
     def finished(self, summary: GenerationSummary) -> None:
