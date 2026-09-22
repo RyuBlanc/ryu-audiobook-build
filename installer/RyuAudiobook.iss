@@ -1,4 +1,4 @@
-# Inno Setup script for the core Ryu's Audiobook desktop application.
+; Inno Setup script for the core Ryu's Audiobook desktop application.
 ; User books, voices, models, and settings live under %USERPROFILE% and are
 ; intentionally NOT removed by this installer or its uninstaller.
 
