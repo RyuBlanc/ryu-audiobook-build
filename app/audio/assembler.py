@@ -7,14 +7,29 @@ import tempfile
 
 import imageio_ffmpeg
 
+
 def ffmpeg_path() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
+
 def _run(args: list[str]) -> None:
-    subprocess.run([ffmpeg_path(), "-y", *args], check=True, capture_output=True, text=True)
+    result = subprocess.run(
+        [ffmpeg_path(), "-y", *args],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-4000:] or "FFmpeg failed.")
+
 
 def sorted_chunks(chapter_dir: Path) -> list[Path]:
     return sorted((chapter_dir / "chunks").glob("*.wav"))
+
+
+def _ffconcat_path(path: Path) -> str:
+    return path.as_posix().replace("'", "'\\''")
+
 
 def assemble_chapter(chapter_dir: Path) -> Path:
     chunks = sorted_chunks(chapter_dir)
@@ -22,12 +37,39 @@ def assemble_chapter(chapter_dir: Path) -> Path:
         raise ValueError(f"No audio chunks found for {chapter_dir.name}")
     output = chapter_dir / "chapter.m4a"
     concat_file = chapter_dir / "concat.txt"
-    concat_file.write_text("\n".join(f"file '{p.as_posix().replace(chr(39), chr(39)+chr(39))}'" for p in chunks), encoding="utf-8")
-    _run(["-f", "concat", "-safe", "0", "-i", str(concat_file), "-c:a", "aac", "-b:a", "128k", str(output)])
+    concat_file.write_text(
+        "\n".join(f"file '{_ffconcat_path(p)}'" for p in chunks) + "\n",
+        encoding="utf-8",
+    )
+    _run([
+        "-f", "concat", "-safe", "0", "-i", str(concat_file),
+        "-vn", "-c:a", "aac", "-b:a", "64k", "-ar", "44100", str(output),
+    ])
+    if not output.exists() or output.stat().st_size < 1024:
+        raise RuntimeError(f"Chapter audio was not created: {output}")
     return output
+
+
+def _metadata_value(value: str) -> str:
+    return (
+        str(value).replace("\\", "\\\\").replace(";", "\\;")
+        .replace("#", "\\#").replace("=", "\\=")
+        .replace("\n", " ").replace("\r", " ")
+    )
+
 
 def _safe_title(value: str) -> str:
     return re.sub(r'[<>:"/\\|?*]+', "_", value).strip() or "Audiobook"
+
+
+def _duration_ms(path: Path) -> int:
+    probe = subprocess.run([ffmpeg_path(), "-i", str(path)], capture_output=True, text=True)
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", probe.stderr)
+    if not match:
+        raise RuntimeError(f"Could not determine duration of {path.name}")
+    hours, minutes, seconds = match.groups()
+    return int((int(hours) * 3600 + int(minutes) * 60 + float(seconds)) * 1000)
+
 
 def assemble_m4b(
     chapter_dirs: list[Path],
@@ -35,46 +77,74 @@ def assemble_m4b(
     title: str,
     author: str = "",
     cover: Path | None = None,
+    chapter_titles: list[str] | None = None,
 ) -> Path:
+    """Create one M4B containing all chapters, navigation markers, metadata and cover."""
+    if not chapter_dirs:
+        raise ValueError("No chapters were supplied.")
     chapters = [assemble_chapter(directory) for directory in chapter_dirs]
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    names = chapter_titles or [
+        directory.name.split("_", 1)[1] if "_" in directory.name else directory.name
+        for directory in chapter_dirs
+    ]
+    if len(names) != len(chapters):
+        raise ValueError("Chapter title count does not match chapter audio count.")
 
-    with tempfile.TemporaryDirectory() as temp:
-        concat = Path(temp) / "chapters.txt"
-        concat.write_text("\n".join(f"file '{p.as_posix().replace(chr(39), chr(39)+chr(39))}'" for p in chapters), encoding="utf-8")
-        metadata = Path(temp) / "metadata.txt"
-        lines = [";FFMETADATA1", f"title={title}", f"album={title}"]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path = output_path.with_suffix(".m4b")
+
+    with tempfile.TemporaryDirectory(prefix="ryu-m4b-") as temp:
+        temp_dir = Path(temp)
+        concat = temp_dir / "chapters.txt"
+        concat.write_text(
+            "\n".join(f"file '{_ffconcat_path(p)}'" for p in chapters) + "\n",
+            encoding="utf-8",
+        )
+        metadata = temp_dir / "metadata.txt"
+        lines = [
+            ";FFMETADATA1",
+            f"title={_metadata_value(_safe_title(title))}",
+            f"album={_metadata_value(_safe_title(title))}",
+            "genre=Audiobook",
+            "comment=Created by Ryu's Audiobook",
+        ]
         if author:
-            lines.append(f"artist={author}")
-        chapter_seconds = []
-        for directory in chapter_dirs:
-            chapter_file = directory / "chapter.m4a"
-            probe = subprocess.run(
-                [ffmpeg_path(), "-i", str(chapter_file)],
-                capture_output=True, text=True,
-            )
-            match = re.search(r"Duration: (\d+):(\d+):(\d+\.\d+)", probe.stderr)
-            if match:
-                h, m, s = match.groups()
-                chapter_seconds.append(int((int(h) * 3600 + int(m) * 60 + float(s)) * 1000))
-            else:
-                chapter_seconds.append(0)
+            lines.append(f"artist={_metadata_value(author)}")
 
         start = 0
-        for index, directory in enumerate(chapter_dirs):
-            duration = chapter_seconds[index]
+        for chapter_file, chapter_title in zip(chapters, names):
+            duration = _duration_ms(chapter_file)
             end = start + duration
-            title_line = directory.name.split("_", 1)[1] if "_" in directory.name else directory.name
-            lines.extend([f"[CHAPTER]", "TIMEBASE=1/1000", f"START={start}", f"END={end}", f"title={title_line}"])
+            lines.extend([
+                "[CHAPTER]", "TIMEBASE=1/1000",
+                f"START={start}", f"END={end}",
+                f"title={_metadata_value(chapter_title)}",
+            ])
             start = end
         metadata.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-        args = ["-f", "concat", "-safe", "0", "-i", str(concat), "-i", str(metadata)]
+        args = [
+            "-f", "concat", "-safe", "0", "-i", str(concat),
+            "-f", "ffmetadata", "-i", str(metadata),
+            "-map", "0:a:0",
+        ]
         if cover:
-            args += ["-i", str(cover), "-map", "0:a", "-map", "2:v", "-c:v", "mjpeg", "-disposition:v:0", "attached_pic"]
-        else:
-            args += ["-map", "0:a"]
-        args += ["-map_metadata", "1", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(output_path)]
+            args += [
+                "-i", str(cover), "-map", "2:v:0",
+                "-c:v", "mjpeg", "-disposition:v:0", "attached_pic",
+            ]
+        args += [
+            "-map_metadata", "1", "-map_chapters", "1",
+            "-c:a", "aac", "-b:a", "64k", "-ar", "44100",
+            "-movflags", "+faststart",
+            "-metadata", f"title={_safe_title(title)}",
+            "-metadata", f"album={_safe_title(title)}",
+        ]
+        if author:
+            args += ["-metadata", f"artist={author}"]
+        args.append(str(output_path))
         _run(args)
 
+    if not output_path.exists() or output_path.stat().st_size < 4096:
+        raise RuntimeError("FFmpeg completed but the final M4B is missing or invalid.")
     return output_path
