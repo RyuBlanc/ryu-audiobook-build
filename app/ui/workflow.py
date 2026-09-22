@@ -55,7 +55,7 @@ class ProjectWorkflow(QMainWindow):
             if index >= 0:
                 self.tabs.removeTab(index)
         self.editor = ChapterEditorPage(self.project.chapters, self.save_project)
-        self.tabs.addTab(self.editor, "Chapters")
+        self.tabs.insertTab(2, self.editor, "Chapters")
         self.tabs.setCurrentWidget(self.editor)
 
     def save_project(self, chapters: list[Chapter]) -> None:
@@ -81,7 +81,7 @@ class ProjectWorkflow(QMainWindow):
             self.project.folder / "audio",
             self.project.folder,
         )
-        self.tabs.addTab(self.generation, "Generate")
+        self.tabs.insertTab(4, self.generation, "Generate")
 
     def open_project(self, project: Project) -> None:
         self.project = project
