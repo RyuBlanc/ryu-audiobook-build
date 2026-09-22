@@ -6,7 +6,6 @@ from threading import Thread, Event
 from typing import Callable
 
 from app.audio.assembler import assemble_m4b
-from app.audio.inspect import validate_audio_file
 from app.audio.metadata import sanitize_metadata, validate_cover
 from app.chapters.detector import Chapter
 from app.tts.base import TTSProvider
@@ -18,17 +17,10 @@ class GenerationSummary:
     chapters_completed: int
     chapters_failed: list[int]
     output_path: Path | None = None
+    cancelled: bool = False
 
 class GenerationManager:
-    def __init__(
-        self,
-        provider: TTSProvider,
-        voice: str,
-        chapters: list[Chapter],
-        project_audio_root: Path,
-        on_progress: Callable[[int, int, int, str], None] | None = None,
-        on_finished: Callable[[GenerationSummary], None] | None = None,
-    ) -> None:
+    def __init__(self, provider: TTSProvider, voice: str, chapters: list[Chapter], project_audio_root: Path, on_progress: Callable[[int, int, int, str], None] | None = None, on_finished: Callable[[GenerationSummary], None] | None = None) -> None:
         self.provider = provider
         self.voice = voice
         self.chapters = chapters
@@ -53,51 +45,38 @@ class GenerationManager:
         self.audio_root.mkdir(parents=True, exist_ok=True)
         completed = 0
         self.failed = []
+        cancelled = False
 
         for index, chapter in enumerate(self.chapters):
             if self.cancel_event.is_set():
+                cancelled = True
                 break
             try:
-                chapter_root = self.audio_root / f"{chapter.number:03d}"
-                result = generate_chapter(
-                    chapter,
-                    self.provider,
-                    self.voice,
-                    self.audio_root,
-                    progress=lambda done, total, i=index: self._progress(i, len(self.chapters), done, total),
-                )
+                result = generate_chapter(chapter, self.provider, self.voice, self.audio_root, lambda done, total, i=index: self._progress(i, len(self.chapters), done, total))
                 if result.chunks_completed != result.chunks_total:
                     raise RuntimeError("Chapter generation is incomplete.")
                 completed += 1
-                if self.on_progress:
-                    self.on_progress(index + 1, len(self.chapters), 1, "chapter-complete")
+                self._emit(index + 1, len(self.chapters), 1, "chapter-complete")
             except Exception:
                 self.failed.append(chapter.number)
-                if self.on_progress:
-                    self.on_progress(index + 1, len(self.chapters), 0, "chapter-failed")
+                self._emit(index + 1, len(self.chapters), 0, "chapter-failed")
 
         final_output = None
-        if not self.cancel_event.is_set() and not self.failed and completed == len(self.chapters) and output_path:
+        if not cancelled and not self.failed and completed == len(self.chapters) and output_path:
             cover = validate_cover(cover)
-            chapter_dirs = [
-                self.audio_root / f"{chapter.number:03d}_{self._safe_title(chapter.title)}"
-                for chapter in self.chapters
-            ]
-            final_output = assemble_m4b(
-                chapter_dirs,
-                output_path,
-                sanitize_metadata(title, "Audiobook"),
-                sanitize_metadata(author),
-                cover,
-            )
+            chapter_dirs = [self.audio_root / f"{c.number:03d}_{self._safe_title(c.title)}" for c in self.chapters]
+            final_output = assemble_m4b(chapter_dirs, output_path, sanitize_metadata(title, "Audiobook"), sanitize_metadata(author), cover)
 
-        summary = GenerationSummary(len(self.chapters), completed, list(self.failed), final_output)
+        summary = GenerationSummary(len(self.chapters), completed, list(self.failed), final_output, cancelled)
         if self.on_finished:
             self.on_finished(summary)
 
     def _progress(self, chapter_index: int, chapter_total: int, done: int, total: int) -> None:
+        self._emit(chapter_index + 1, chapter_total, done, "chunk")
+
+    def _emit(self, chapter: int, total: int, done: int, message: str) -> None:
         if self.on_progress:
-            self.on_progress(chapter_index + 1, chapter_total, done, total)
+            self.on_progress(chapter, total, done, message)
 
     @staticmethod
     def _safe_title(value: str) -> str:
