@@ -78,7 +78,7 @@ class ProjectWorkflow(QMainWindow):
                 self.tabs.removeTab(index)
         self.generation = GenerationPage(
             self.project.chapters,
-            self.project.folder / "audio",
+            self.project.folder / "working",
             self.project.folder,
         )
         self.tabs.insertTab(4, self.generation, "Generate")
