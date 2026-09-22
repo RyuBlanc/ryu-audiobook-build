@@ -16,6 +16,8 @@ class ModelSpec:
     notes: str = ""
 
 
+# This is a catalog, not a bundled model list. Model files are intentionally
+# kept outside the Git repository and can be installed separately by the user.
 BUILTIN_CATALOG = (
     ModelSpec(
         "piper",
@@ -23,17 +25,35 @@ BUILTIN_CATALOG = (
         "piper",
         False,
         True,
-        ("cpu", "directml"),
+        ("cpu",),
         "Lightweight local neural TTS. Voice models are installed separately."
+    ),
+    ModelSpec(
+        "kokoro",
+        "Kokoro 82M",
+        "kokoro",
+        False,
+        True,
+        ("cpu", "directml", "cuda"),
+        "Small open-weight TTS model. Runtime/backend compatibility is detected separately."
     ),
     ModelSpec(
         "chatterbox",
         "Chatterbox",
         "chatterbox",
         True,
+        False,
+        ("cuda", "cpu"),
+        "Voice-cloning capable TTS. Reference audio is used at generation time; English support is provided by the base model."
+    ),
+    ModelSpec(
+        "chatterbox-multilingual",
+        "Chatterbox Multilingual",
+        "chatterbox",
         True,
-        ("cuda", "rocm", "cpu", "directml"),
-        "Voice-cloning capable model. Actual backend support depends on the model/runtime build."
+        True,
+        ("cuda", "cpu"),
+        "Multilingual voice-cloning capable TTS. Exact language/backend support depends on the installed model release."
     ),
 )
 
@@ -63,6 +83,9 @@ def get_model(model_id: str) -> ModelSpec | None:
 
 
 def mark_installed(model_id: str, installed: bool = True) -> None:
+    if get_model(model_id) is None:
+        raise ValueError(f"Unknown TTS model: {model_id}")
+
     path = _manifest_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     ids = installed_model_ids()
