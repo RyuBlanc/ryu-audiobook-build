@@ -21,12 +21,6 @@ EXPLICIT_PATTERNS = [
     ),
 ]
 
-# Flexible title forms such as:
-#   1. The Beginning
-#   2 - The Beginning
-#   Life.0
-#   Volume 2
-#   Side Story 1
 NUMBERED_PATTERN = re.compile(r"^\s*(\d{1,4})\s*[.)-]\s+(.{1,120})\s*$")
 TITLE_WITH_NUMBER_PATTERN = re.compile(
     r"^(?=.{2,80}$)(?=.*\d)[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ0-9 ._'’:&/()\[\]–—-]*$"
@@ -34,12 +28,7 @@ TITLE_WITH_NUMBER_PATTERN = re.compile(
 
 
 def detect_chapters(text: str) -> list[Chapter]:
-    """Detect likely chapter headings without throwing away ordinary story text.
-
-    Detection is intentionally conservative. A heading is removed from the
-    chapter body only when it matches a strong heading pattern. Unusual titles
-    can always be marked manually in the Chapter Editor.
-    """
+    """Detect likely chapter headings without throwing away ordinary story text."""
     lines = text.splitlines()
     markers: list[tuple[int, str]] = []
 
@@ -70,26 +59,27 @@ def detect_chapters(text: str) -> list[Chapter]:
 
 
 def _heading_title(line: str, lines: list[str], index: int) -> str | None:
+    # URLs and download-site watermarks are never chapter headings.
+    lowered = line.lower()
+    if re.search(r"(https?://|www\.)", lowered):
+        return None
+
     for pattern in EXPLICIT_PATTERNS:
         match = pattern.match(line)
         if match:
-            if match.lastindex and match.lastindex >= 2:
-                number = match.group(2)
-                suffix = (match.group(3) or "").strip()
-                if pattern is EXPLICIT_PATTERNS[0]:
-                    return f"Chapter {number}" + (f" - {suffix}" if suffix else "")
-                if pattern is EXPLICIT_PATTERNS[1]:
-                    return f"Part {number}" + (f" - {suffix}" if suffix else "")
-                return match.group(1).title() + (f" - {suffix}" if suffix else "")
-            return line
+            number = match.group(2) if match.lastindex and match.lastindex >= 2 else ""
+            suffix = (match.group(3) or "").strip() if match.lastindex and match.lastindex >= 3 else ""
+            if pattern is EXPLICIT_PATTERNS[0]:
+                return f"Chapter {number}" + (f" - {suffix}" if suffix else "")
+            if pattern is EXPLICIT_PATTERNS[1]:
+                return f"Part {number}" + (f" - {suffix}" if suffix else "")
+            return match.group(1).title() + (f" - {suffix}" if suffix else "")
 
-    match = NUMBERED_PATTERN.match(line)
-    if match:
+    if NUMBERED_PATTERN.match(line):
         return line
 
-    # Titles such as "Life.0" are valid chapter names even though they do not
-    # use the word Chapter. Require a digit and title-like characters so normal
-    # dialogue such as "FLAP" or "DON!" is not promoted to a chapter.
+    # Titles such as "Life.0" are allowed, while dialogue like "FLAP" or
+    # "DON!" remains ordinary story text.
     if TITLE_WITH_NUMBER_PATTERN.match(line):
         return line
 
