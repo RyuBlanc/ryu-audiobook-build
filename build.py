@@ -28,5 +28,6 @@ PyInstaller.__main__.run([
     "--hidden-import=app.ui.library",
     "--hidden-import=app.ui.hardware_page",
     "--hidden-import=app.ui.models_page",
-    "--collect-submodules=app.ui",
+    "--collect-submodules=app",
+    "--paths=.",
 ])
