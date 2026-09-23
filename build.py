@@ -21,4 +21,12 @@ PyInstaller.__main__.run([
     "--hidden-import=PySide6.QtGui",
     "--hidden-import=PySide6.QtWidgets",
     "--hidden-import=PySide6.QtMultimedia",
+    "--hidden-import=app.ui.voice_page",
+    "--hidden-import=app.ui.generation_page",
+    "--hidden-import=app.ui.chapter_editor",
+    "--hidden-import=app.ui.import_page",
+    "--hidden-import=app.ui.library",
+    "--hidden-import=app.ui.hardware_page",
+    "--hidden-import=app.ui.models_page",
+    "--collect-submodules=app.ui",
 ])
