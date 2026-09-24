@@ -35,9 +35,16 @@ jobs:
             throw "Expected executable was not produced: $exe"
           }
 
-          $listing = & pyi-archive_viewer $exe --list 2>&1 | Out-String
+          # The executable's outer CArchive only exposes the embedded PYZ file.
+          # Inspect the PYZ itself to verify Python modules are actually frozen.
+          $pyz = "build\Ryu's Audiobook\PYZ-00.pyz"
+          if (-not (Test-Path $pyz)) {
+            throw "Expected PyInstaller PYZ archive was not produced: $pyz"
+          }
+
+          $listing = & pyi-archive_viewer $pyz --list 2>&1 | Out-String
           if ($LASTEXITCODE -ne 0) {
-            throw "Could not inspect the PyInstaller executable archive."
+            throw "Could not inspect the PyInstaller PYZ archive."
           }
 
           $required = @(
