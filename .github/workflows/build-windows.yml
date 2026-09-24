@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -84,16 +84,10 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\RyuAudiobook.iss"
 
-      - name: Publish private GitHub release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_SHA: ${{ github.sha }}
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
-          RELEASE_TARGET: ${{ github.event.before }}
-        run: |
-          $tag = "build-$env:GITHUB_RUN_NUMBER"
-          $title = "Ryu's Audiobook Windows Build #$env:GITHUB_RUN_NUMBER"
-          $notes = "Windows installer built and smoke-tested from commit $env:GITHUB_SHA. The release tag points to the previous commit to avoid the workflow-token restriction on releases targeting a commit that changes workflow files."
-          gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --repo $env:GITHUB_REPOSITORY --target $env:RELEASE_TARGET --title $title --notes $notes --latest=false
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Audiobook-Setup-${{ github.sha }}
+          path: "installer/installer-output/Ryu's Audiobook Setup.exe"
+          if-no-files-found: error
+          retention-days: 1
