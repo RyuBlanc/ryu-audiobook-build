@@ -6,8 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  actions: write
+  contents: write
 
 jobs:
   build:
@@ -85,29 +84,16 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\RyuAudiobook.iss"
 
-      - name: Clean up previous build artifacts
+      - name: Publish private GitHub release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          RELEASE_TARGET: ${{ github.event.before }}
         run: |
-          $response = gh api "/repos/$env:GITHUB_REPOSITORY/actions/artifacts?per_page=100" | ConvertFrom-Json
-          foreach ($artifact in $response.artifacts) {
-            if ($artifact.name -like "Ryu-Audiobook-*") {
-              Write-Host "Deleting previous build artifact: $($artifact.name) ($($artifact.id))"
-              gh api --method DELETE "/repos/$env:GITHUB_REPOSITORY/actions/artifacts/$($artifact.id)"
-            }
-          }
-
-      - name: Upload Windows installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ryu-Audiobook-Setup-${{ github.sha }}
-          path: "installer/installer-output/Ryu's Audiobook Setup.exe"
-          if-no-files-found: error
-
-      - name: Upload portable application
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ryu-Audiobook-Windows-Portable-${{ github.sha }}
-          path: "dist/Ryu's Audiobook/"
-          if-no-files-found: error
+          $tag = "build-$env:GITHUB_RUN_NUMBER"
+          $title = "Ryu's Audiobook Windows Build #$env:GITHUB_RUN_NUMBER"
+          $notes = "Windows installer built and smoke-tested from commit $env:GITHUB_SHA. The release tag points to the previous commit to avoid the workflow-token restriction on releases targeting a commit that changes workflow files."
+          gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --repo $env:GITHUB_REPOSITORY --target $env:RELEASE_TARGET --title $title --notes $notes --latest=false
