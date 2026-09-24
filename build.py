@@ -41,7 +41,18 @@ PyInstaller.__main__.run([
     "--hidden-import=PySide6.QtGui",
     "--hidden-import=PySide6.QtWidgets",
     "--hidden-import=PySide6.QtMultimedia",
+    # Explicitly force every UI module into the frozen import graph. The
+    # application imports these modules at runtime through the workflow, but
+    # keeping them explicit makes the Windows build deterministic.
+    *[f"--hidden-import={module}" for module in required_modules],
     "--collect-submodules=app",
     "--paths=.",
     f"--additional-hooks-dir={HOOKS}",
+    # Also keep source copies in the onedir bundle. This is an intentional
+    # fallback for environments where the embedded PYZ import graph differs
+    # from the source tree.
+    *[
+        f"--add-data={ROOT / (module.replace('.', '/') + '.py')};{module.rsplit('.', 1)[0].replace('.', '/')}"
+        for module in required_modules
+    ],
 ])
