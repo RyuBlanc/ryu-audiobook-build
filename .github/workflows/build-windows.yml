@@ -27,6 +27,35 @@ jobs:
         shell: pwsh
         run: python build.py
 
+      - name: Verify bundled UI modules
+        shell: pwsh
+        run: |
+          $exe = "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
+          if (-not (Test-Path $exe)) {
+            throw "Expected executable was not produced: $exe"
+          }
+
+          $listing = & pyi-archive_viewer $exe --list 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not inspect the PyInstaller executable archive."
+          }
+
+          $required = @(
+            "app.ui.voice_page",
+            "app.ui.generation_page",
+            "app.ui.chapter_editor",
+            "app.ui.import_page",
+            "app.ui.library",
+            "app.ui.hardware_page",
+            "app.ui.models_page"
+          )
+
+          foreach ($module in $required) {
+            if ($listing -notmatch [regex]::Escape($module)) {
+              throw "Required module is missing from the frozen executable: $module"
+            }
+          }
+
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
