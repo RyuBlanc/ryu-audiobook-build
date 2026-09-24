@@ -39,13 +39,13 @@ jobs:
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: Ryu-Audiobook-Setup
+          name: Ryu-Audiobook-Setup-${{ github.sha }}
           path: "installer/installer-output/Ryu's Audiobook Setup.exe"
           if-no-files-found: error
 
       - name: Upload portable application
         uses: actions/upload-artifact@v4
         with:
-          name: Ryu-Audiobook-Windows-Portable
+          name: Ryu-Audiobook-Windows-Portable-${{ github.sha }}
           path: "dist/Ryu's Audiobook/"
           if-no-files-found: error
