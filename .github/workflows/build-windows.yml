@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -80,6 +84,19 @@ jobs:
         shell: pwsh
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\RyuAudiobook.iss"
+
+      - name: Clean up previous build artifacts
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $response = gh api "/repos/$env:GITHUB_REPOSITORY/actions/artifacts?per_page=100" | ConvertFrom-Json
+          foreach ($artifact in $response.artifacts) {
+            if ($artifact.name -like "Ryu-Audiobook-*") {
+              Write-Host "Deleting previous build artifact: $($artifact.name) ($($artifact.id))"
+              gh api --method DELETE "/repos/$env:GITHUB_REPOSITORY/actions/artifacts/$($artifact.id)"
+            }
+          }
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
