@@ -25,7 +25,7 @@ EXPLICIT_PATTERNS = [
 
 NUMBERED_PATTERN = re.compile(r"^\s*(\d{1,4})\s*[.)-]\s+(.{1,120})\s*$")
 TITLE_WITH_NUMBER_PATTERN = re.compile(
-    r"^(?=.{2,80}$)(?=.*\d)[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ0-9 ._'’:&/()\[\]–—-]*$"
+    r"^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ ._'’:&/()\\[\\]–—-]{0,50}\\.\\d{1,4}(?:\\s+.+)?$"
 )
 
 
