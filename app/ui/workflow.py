@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from PySide6.QtWidgets import QMainWindow, QTabWidget, QMessageBox
+from PySide6.QtWidgets import QMainWindow, QTabWidget, QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QLabel
 
 from app.chapters.detector import detect_chapters, Chapter
 from app.core.project import Project, create_project
@@ -20,10 +20,32 @@ class ProjectWorkflow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Ryu's Audiobook")
-        self.resize(1200, 800)
+        self.resize(1380, 860)
         self.project: Project | None = None
+        shell = QWidget()
+        shell_layout = QVBoxLayout(shell)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(0)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(22, 16, 22, 12)
+        brand = QLabel("<b>RYU'S AUDIOBOOK</b>")
+        brand.setObjectName("brand")
+        subtitle = QLabel("Local audiobook studio  •  Import → Edit → Voice → Generate → Listen")
+        subtitle.setObjectName("muted")
+        header.addWidget(brand)
+        header.addSpacing(18)
+        header.addWidget(subtitle)
+        header.addStretch(1)
+        shell_layout.addLayout(header)
+
         self.tabs = QTabWidget()
-        self.setCentralWidget(self.tabs)
+        self.tabs.setTabPosition(QTabWidget.TabPosition.West)
+        self.tabs.setDocumentMode(True)
+        self.tabs.setMovable(False)
+        self.tabs.setUsesScrollButtons(True)
+        shell_layout.addWidget(self.tabs, 1)
+        self.setCentralWidget(shell)
 
         self.library = LibraryPage(self.open_project)
         self.import_page = ImportPage(self.handle_import)
