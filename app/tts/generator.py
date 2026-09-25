@@ -48,6 +48,10 @@ def generate_chapter(
     chunks_dir.mkdir(parents=True, exist_ok=True)
 
     chunks = split_text(chapter.text)
+    if not chunks:
+        raise ValueError(
+            f"Chapter {chapter.number} \"{chapter.title}\" contains no readable text to synthesize."
+        )
     state = load_state(chapter_dir)
     completed = set(state.get("completed", []))
 
