@@ -22,17 +22,33 @@ QTabWidget::pane {
 QTabBar {
     background: #0b0b0d;
 }
+QLabel#brand {
+    color: #ffffff;
+    font-size: 15pt;
+    letter-spacing: 1px;
+}
+QLabel#muted {
+    color: #8f8f99;
+}
 QTabBar::tab {
     background: #151519;
     color: #a9a9b2;
-    padding: 11px 18px;
-    margin: 6px 3px 0 0;
+    padding: 14px 18px;
+    margin: 0 8px 6px 0;
     border: 1px solid #25252b;
     border-radius: 9px;
 }
 QTabBar::tab:hover {
     background: #1e1e23;
     color: #ffffff;
+}
+QTabWidget::pane {
+    border: 0;
+    background: #0f0f12;
+}
+QTabBar {
+    background: #0d0d10;
+    padding: 10px 8px 10px 8px;
 }
 QTabBar::tab:selected {
     background: #7f1024;
