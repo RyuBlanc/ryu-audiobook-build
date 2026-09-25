@@ -297,7 +297,7 @@ class VoicePage(QWidget):
             self.status.setText("Custom voice requires an authorized reference recording.")
 
     def select_sample(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Select Reference Voice", "", "Audio (*.wav *.mp3 *.m4a *.flac)")
+        path, _ = QFileDialog.getOpenFileName(\n            self,\n            "Select Reference Voice",\n            "",\n            "Audio files (*.wav *.mp3 *.m4a *.flac *.aac *.ogg *.opus *.wma);;All files (*.*)",\n        )
         if not path:
             return
         source = Path(path)
