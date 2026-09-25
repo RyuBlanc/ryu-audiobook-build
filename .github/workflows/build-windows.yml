@@ -1,4 +1,5 @@
 name: Build Windows App
+# Installer artifact is intentionally short-retention to minimize Actions storage.
 
 on:
   push:
