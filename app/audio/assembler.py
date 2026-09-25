@@ -135,7 +135,9 @@ def assemble_m4b(
             ]
         args += [
             "-map_metadata", "1", "-map_chapters", "1",
-            # Re-encode the final AAC stream so chapter files with slightly\n            # different encoder/container parameters still package reliably.\n            "-c:a", "aac", "-b:a", "96k", "-ar", "44100",
+            # Re-encode the final AAC stream so chapter files with slightly
+            # different encoder/container parameters still package reliably.
+            "-c:a", "aac", "-b:a", "96k", "-ar", "44100",
             "-movflags", "+faststart",
             "-metadata", f"title={_safe_title(title)}",
             "-metadata", f"album={_safe_title(title)}",
