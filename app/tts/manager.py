@@ -70,6 +70,7 @@ class GenerationManager:
         self.audio_root.mkdir(parents=True, exist_ok=True)
         completed = 0
         self.failed = []
+        generated_chapter_dirs: list[Path] = []
         cancelled = False
         packaging_failed = False
         packaging_error = None
@@ -91,6 +92,7 @@ class GenerationManager:
                 if result.chunks_completed != result.chunks_total:
                     raise RuntimeError("Chapter generation is incomplete.")
                 completed += 1
+                generated_chapter_dirs.append(result.output_path)
                 self._emit(index + 1, len(self.chapters), 1, "chapter-complete")
             except Exception as exc:
                 self.failed.append(chapter.number)
@@ -100,12 +102,13 @@ class GenerationManager:
         if not cancelled and not self.failed and completed == len(self.chapters) and output_path:
             try:
                 cover = validate_cover(cover)
-                chapter_dirs = [
-                    self.audio_root / f"{c.number:03d}_{self._safe_title(c.title)}"
-                    for c in self.chapters
-                ]
+                # Use the exact directories returned by chapter generation.
+                # Reconstructing them from chapter titles can diverge from
+                # generator sanitization and cause false "No audio chunks" errors.
+                if len(generated_chapter_dirs) != len(self.chapters):
+                    raise RuntimeError("Chapter generation completed, but the generated audio directory list is incomplete.")
                 final_output = assemble_m4b(
-                    chapter_dirs,
+                    generated_chapter_dirs,
                     output_path,
                     sanitize_metadata(title, "Audiobook"),
                     sanitize_metadata(author),
