@@ -4,6 +4,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 import json
 import shutil
+import subprocess
+
+import imageio_ffmpeg
 
 from app.core.paths import voices_root
 
@@ -49,6 +52,36 @@ def import_reference_audio(source: Path, profile_name: str) -> Path:
     safe = "".join(c if c.isalnum() or c in " _-" else "_" for c in profile_name).strip() or "voice"
     target_dir = voices_root() / safe
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / source.name
-    shutil.copy2(source, target)
+    if not source.exists() or not source.is_file():
+        raise FileNotFoundError(source)
+
+    # Keep the original reference recording, and create a normalized WAV copy
+    # for local voice engines so MP3/M4A/FLAC/etc. can be used reliably.
+    original = target_dir / source.name
+    shutil.copy2(source, original)
+
+    target = target_dir / "reference.wav"
+    if source.suffix.lower() == ".wav":
+        shutil.copy2(source, target)
+    else:
+        result = subprocess.run(
+            [
+                imageio_ffmpeg.get_ffmpeg_exe(),
+                "-y",
+                "-i", str(source),
+                "-vn",
+                "-ac", "1",
+                "-ar", "24000",
+                "-c:a", "pcm_s16le",
+                str(target),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0 or not target.exists() or target.stat().st_size < 1024:
+            raise RuntimeError(
+                "The selected audio could not be converted to a local WAV reference. "
+                + (result.stderr[-1200:] if result.stderr else "")
+            )
     return target
