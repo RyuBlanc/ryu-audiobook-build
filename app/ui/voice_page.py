@@ -182,7 +182,19 @@ class VoicePage(QWidget):
         self.update_mode()
         self.load_edge_voices(False)
 
-    def _populate_sapi_voices(self) -> None:\n        self.sapi_voice.clear()\n        for voice_id in self.sapi.voices():\n            # SAPI voice IDs can contain Windows registry-style backslashes.\n            normalized_id = voice_id.replace("\\", "/")\n            display = (\n                normalized_id.rsplit("/", 1)[-1].replace("_", " ")\n                if "/" in normalized_id\n                else voice_id\n            )\n            self.sapi_voice.addItem(display, voice_id)\n\n    def load_edge_voices(self, refresh: bool = False) -> None:
+    def _populate_sapi_voices(self) -> None:
+        self.sapi_voice.clear()
+        for voice_id in self.sapi.voices():
+            # SAPI voice IDs can contain Windows registry-style backslashes.
+            normalized_id = voice_id.replace("\\", "/")
+            display = (
+                normalized_id.rsplit("/", 1)[-1].replace("_", " ")
+                if "/" in normalized_id
+                else voice_id
+            )
+            self.sapi_voice.addItem(display, voice_id)
+
+    def load_edge_voices(self, refresh: bool = False) -> None:
         try:
             self.edge_voices = EdgeTTSProvider.fetch_voice_metadata(refresh=refresh)
             self.neural_count.setText(f"{len(self.edge_voices)} voices")
@@ -288,7 +300,12 @@ class VoicePage(QWidget):
             self.status.setText("Custom voice requires an authorized reference recording.")
 
     def select_sample(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(\n            self,\n            "Select Reference Voice",\n            "",\n            "Audio files (*.wav *.mp3 *.m4a *.flac *.aac *.ogg *.opus *.wma);;All files (*.*)",\n        )
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Reference Voice",
+            "",
+            "Audio files (*.wav *.mp3 *.m4a *.flac *.aac *.ogg *.opus *.wma);;All files (*.*)",
+        )
         if not path:
             return
         source = Path(path)
