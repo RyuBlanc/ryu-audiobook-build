@@ -185,7 +185,10 @@ class VoicePage(QWidget):
     def _populate_sapi_voices(self) -> None:
         self.sapi_voice.clear()
         for voice_id in self.sapi.voices():
-            # SAPI voice IDs can contain Windows registry-style backslashes.\n            # Normalize the separator before taking the final token so the\n            # packaged source remains valid Python and works across voice IDs.\n            normalized_id = voice_id.replace("\\\\", "/")\n            display = normalized_id.rsplit("/", 1)[-1].replace("_", " ") if "/" in normalized_id else voice_id
+            # SAPI voice IDs can contain Windows registry-style backslashes.
+            # Normalize the separator before taking the final token.
+            normalized_id = voice_id.replace("\\", "/")
+            display = normalized_id.rsplit("/", 1)[-1].replace("_", " ") if "/" in normalized_id else voice_id
             self.sapi_voice.addItem(display, voice_id)
 
     def load_edge_voices(self, refresh: bool = False) -> None:
