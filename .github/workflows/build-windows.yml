@@ -107,3 +107,4 @@ jobs:
           path: "installer/installer-output/Ryu's Audiobook Setup.exe"
           if-no-files-found: error
           retention-days: 1
+          overwrite: true
