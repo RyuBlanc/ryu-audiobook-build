@@ -35,6 +35,8 @@ QTabBar::tab {
     color: #a9a9b2;
     padding: 14px 18px;
     margin: 0 8px 6px 0;
+    min-width: 118px;
+    text-align: left;
     border: 1px solid #25252b;
     border-radius: 9px;
 }
