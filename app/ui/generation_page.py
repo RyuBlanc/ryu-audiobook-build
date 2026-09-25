@@ -8,7 +8,7 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QProgressBar, QPushButton, QVBoxLayout, QWidget, QComboBox,
+    QProgressBar, QPushButton, QVBoxLayout, QWidget, QComboBox, QScrollArea,
 )
 
 from app.chapters.detector import Chapter
@@ -45,9 +45,17 @@ class GenerationPage(QWidget):
         self.player.positionChanged.connect(self._player_position)
         self.player.durationChanged.connect(self._player_duration)
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(18, 14, 18, 14)
-        root.setSpacing(10)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 10, 12, 10)
+        outer.setSpacing(8)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        content = QWidget()
+        root = QVBoxLayout(content)
+        root.setContentsMargins(6, 4, 6, 12)
+        root.setSpacing(12)
 
         header = QHBoxLayout()
         header.addWidget(QLabel("<h2>Generate Audiobook</h2>"))
@@ -164,9 +172,12 @@ class GenerationPage(QWidget):
         actions.addWidget(self.cancel_button)
         root.addLayout(actions)
 
+        scroll.setWidget(content)
+        outer.addWidget(scroll, 1)
+
         self.status = QLabel("Ready")
         self.status.setWordWrap(True)
-        root.addWidget(self.status)
+        outer.addWidget(self.status)
 
         self.signals.progress.connect(self.update_progress)
         self.signals.finished.connect(self.finished)
@@ -380,7 +391,11 @@ class GenerationPage(QWidget):
             self.status.setText("Audiobook created successfully. Intermediate generation audio has been cleaned.")
         elif summary.packaging_failed:
             self.stage.setText("M4B packaging failed")
-            self.result_label.setText("The chapters were generated, but the final M4B could not be packaged. Temporary files were kept so you can retry.")
+            error = f"\n\nPackaging error: {summary.packaging_error}" if summary.packaging_error else ""
+            self.result_label.setText(
+                "The chapters were generated, but the final M4B could not be packaged. "
+                "Temporary files were kept so you can retry." + error
+            )
             self.status.setText("M4B creation failed. The generated audio has been kept for retry.")
         elif summary.chapters_failed:
             self.stage.setText("Generation failed")
