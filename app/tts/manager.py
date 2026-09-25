@@ -21,6 +21,7 @@ class GenerationSummary:
     output_path: Path | None = None
     cancelled: bool = False
     packaging_failed: bool = False
+    packaging_error: str | None = None
 
 
 class GenerationManager:
@@ -71,6 +72,7 @@ class GenerationManager:
         self.failed = []
         cancelled = False
         packaging_failed = False
+        packaging_error = None
 
         for index, chapter in enumerate(self.chapters):
             if self.cancel_event.is_set():
@@ -116,6 +118,7 @@ class GenerationManager:
                 self._clean_working_audio()
             except Exception as exc:
                 packaging_failed = True
+                packaging_error = str(exc)
                 self._emit(len(self.chapters), len(self.chapters), 0, f"m4b-failed: {exc}")
 
         summary = GenerationSummary(
@@ -125,6 +128,7 @@ class GenerationManager:
             final_output,
             cancelled,
             packaging_failed,
+            packaging_error,
         )
         if self.on_finished:
             self.on_finished(summary)
