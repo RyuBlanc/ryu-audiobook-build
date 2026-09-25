@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import json
 import re
+import wave
 from typing import Callable
 
 from app.chapters.detector import Chapter
@@ -58,8 +59,29 @@ def generate_chapter(
     for index, chunk in enumerate(chunks):
         filename = f"{index + 1:05d}.wav"
         output = chunks_dir / filename
-        if index not in completed or not output.exists():
+        needs_generation = index not in completed or not output.exists()
+        if needs_generation:
             provider.synthesize(chunk, output, voice)
+
+        # Never mark a chunk complete unless the provider actually produced a
+        # readable WAV file. This also repairs stale generation state from a
+        # previous interrupted/failed run.
+        if not output.exists() or output.stat().st_size < 1024:
+            raise RuntimeError(
+                f"Audio chunk {index + 1}/{len(chunks)} was not created: {output.name}"
+            )
+        try:
+            with wave.open(str(output), "rb") as wav:
+                if wav.getnframes() <= 0 or wav.getframerate() <= 0:
+                    raise RuntimeError(
+                        f"Audio chunk {index + 1}/{len(chunks)} is empty: {output.name}"
+                    )
+        except (wave.Error, OSError) as exc:
+            raise RuntimeError(
+                f"Audio chunk {index + 1}/{len(chunks)} is not a valid WAV: {output.name} ({exc})"
+            ) from exc
+
+        if index not in completed:
             completed.add(index)
             state["completed"] = sorted(completed)
             save_state(chapter_dir, state)
