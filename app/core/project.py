@@ -49,6 +49,11 @@ class Project:
 def create_project(title: str, source_path: Path, chapters: list[Chapter]) -> Project:
     safe_title = "".join(c for c in title if c not in '<>:"/\\|?*').strip() or "Untitled Book"
     folder = library_root() / safe_title
+    if folder.exists():
+        suffix = 2
+        while (library_root() / f"{safe_title} ({suffix})").exists():
+            suffix += 1
+        folder = library_root() / f"{safe_title} ({suffix})"
     folder.mkdir(parents=True, exist_ok=True)
     source_dir = folder / "source"
     source_dir.mkdir(exist_ok=True)
@@ -69,3 +74,15 @@ def list_projects() -> list[Project]:
             except (OSError, ValueError, KeyError, json.JSONDecodeError):
                 continue
     return projects
+
+
+
+def delete_project(project: Project) -> None:
+    """Delete one imported book and all Ryu-generated data inside its folder."""
+    root = library_root().resolve()
+    folder = project.folder.resolve()
+    if folder == root or root not in folder.parents:
+        raise ValueError("Refusing to delete a folder outside the audiobook library.")
+    if not folder.exists():
+        return
+    shutil.rmtree(folder)
