@@ -48,7 +48,16 @@ class ChatterboxProvider(TTSProvider):
                 "Chatterbox is not installed. Install the optional Chatterbox runtime first."
             ) from exc
 
-        device = "cuda" if self.backend == "cuda" else "cpu"
+        if self.backend == "cuda":
+            device = "cuda"
+        elif self.backend == "cpu":
+            device = "cpu"
+        else:
+            try:
+                import torch
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+            except ImportError:
+                device = "cpu"
         if self.multilingual:
             self._model = ChatterboxMultilingualTTS.from_pretrained(device=device)
         else:
