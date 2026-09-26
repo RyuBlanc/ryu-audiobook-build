@@ -86,8 +86,8 @@ More story text here.
             chapter_dirs = []
             for number in (1, 2):
                 chapter = root / f"{number:03d}_Chapter_{number}" / "chunks"
-                _write_wav(chapter / "00001.wav", 0.05)
-                _write_wav(chapter / "00002.wav", 0.05)
+                _write_wav(chapter / "00001.wav", 1.0)
+                _write_wav(chapter / "00002.wav", 1.0)
                 chapter_dirs.append(chapter.parent)
             output = root / "book.m4b"
             result = assemble_m4b(
