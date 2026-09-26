@@ -252,6 +252,9 @@ class ProjectWorkflow(QMainWindow):
     def open_project(self, project: Project) -> None:
         self.project = project
         self.project_label.setText(project.title)
+        # Repair legacy empty chapter records before creating either editor or
+        # generation UI so both views show the same corrected chapter list.
+        self._repair_empty_chapters()
         self.open_editor()
         self.ensure_generation_page()
         self.select_section("Chapters")
