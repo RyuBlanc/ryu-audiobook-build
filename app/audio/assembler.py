@@ -212,6 +212,24 @@ def assemble_m4b(
 
     if not output_path.exists() or output_path.stat().st_size == 0:
         raise RuntimeError("FFmpeg completed but the final M4B is missing.")
-    if _duration_ms(output_path) <= 0:
-        raise RuntimeError("FFmpeg completed but the final M4B has no audio duration.")
+    # Validate the final container by actually decoding its audio stream.
+    # Some MP4/M4B files with attached artwork can report an unreliable
+    # container-level duration even though the audio track is valid.
+    probe = subprocess.run(
+        [
+            ffmpeg_path(),
+            "-v", "error",
+            "-i", str(output_path),
+            "-map", "0:a:0",
+            "-f", "null",
+            "-",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if probe.returncode != 0:
+        detail = (probe.stderr or probe.stdout or "").strip()
+        raise RuntimeError(
+            f"FFmpeg completed but the final M4B audio could not be validated.\\n{detail}"
+        )
     return output_path
