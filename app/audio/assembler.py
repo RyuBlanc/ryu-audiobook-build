@@ -210,6 +210,8 @@ def assemble_m4b(
             import shutil
             shutil.copy2(base_m4b, output_path)
 
-    if not output_path.exists() or output_path.stat().st_size < 4096:
-        raise RuntimeError("FFmpeg completed but the final M4B is missing or invalid.")
+    if not output_path.exists() or output_path.stat().st_size == 0:
+        raise RuntimeError("FFmpeg completed but the final M4B is missing.")
+    if _duration_ms(output_path) <= 0:
+        raise RuntimeError("FFmpeg completed but the final M4B has no audio duration.")
     return output_path
