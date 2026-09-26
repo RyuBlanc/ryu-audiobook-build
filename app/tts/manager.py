@@ -151,6 +151,12 @@ class GenerationManager:
             packaging_failed,
             packaging_error,
         )
+        close = getattr(self.provider, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
         if self.on_finished:
             self.on_finished(summary)
 
