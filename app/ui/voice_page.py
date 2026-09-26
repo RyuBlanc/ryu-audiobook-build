@@ -517,17 +517,17 @@ class VoicePage(QWidget):
                 f"✓ {source.name} → {self.sample_path.name}"
             )
             # Do not inherit a previous built-in/online profile name when the
-        # user selects a reference file. That used to save a custom voice
-        # under names such as "Offline Neural • Lessac", which then collided
-        # with the bundled profile and made the custom voice appear missing.
-        current_name = self.name.text().strip()
-        if (
-            not current_name
-            or current_name.startswith("Offline Neural •")
-            or current_name.startswith("Microsoft ")
-        ):
-            name = source.stem
-        self.name.setText(name)
+            # user selects a reference file. That used to save a custom voice
+            # under names such as "Offline Neural • Lessac", which then collided
+            # with the bundled profile and made the custom voice appear missing.
+            current_name = self.name.text().strip()
+            if (
+                not current_name
+                or current_name.startswith("Offline Neural •")
+                or current_name.startswith("Microsoft ")
+            ):
+                name = source.stem
+            self.name.setText(name)
             self.authorized.setChecked(False)
             self.status.setText(
                 "Reference imported locally. Confirm permission before saving. "
