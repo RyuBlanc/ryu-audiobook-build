@@ -11,6 +11,7 @@ from app.audio.metadata import sanitize_metadata, validate_cover
 from app.chapters.detector import Chapter
 from app.tts.base import TTSProvider
 from app.tts.generator import generate_chapter
+from app.tts.chunker import split_text
 
 
 @dataclass
@@ -43,6 +44,8 @@ class GenerationManager:
         self.cancel_event = Event()
         self._thread: Thread | None = None
         self.failed: list[int] = []
+        self._chunk_offsets: list[int] = []
+        self._total_chunks = 0
 
     def start(
         self,
@@ -70,7 +73,14 @@ class GenerationManager:
         self.audio_root.mkdir(parents=True, exist_ok=True)
         completed = 0
         self.failed = []
+        self._chunk_offsets = []
+        offset = 0
+        for chapter in self.chapters:
+            self._chunk_offsets.append(offset)
+            offset += len(split_text(chapter.text))
+        self._total_chunks = offset
         generated_chapter_dirs: list[Path] = []
+        self._emit(0, len(self.chapters), 0, f"plan:{self._total_chunks}")
         cancelled = False
         packaging_failed = False
         packaging_error = None
@@ -148,7 +158,14 @@ class GenerationManager:
                         pass
 
     def _progress(self, chapter_index: int, chapter_total: int, done: int, total: int) -> None:
-        self._emit(chapter_index + 1, chapter_total, done, "chunk")
+        offset = self._chunk_offsets[chapter_index] if chapter_index < len(self._chunk_offsets) else 0
+        overall_done = offset + done
+        self._emit(
+            chapter_index + 1,
+            chapter_total,
+            overall_done,
+            f"chunk:{overall_done}/{max(1, self._total_chunks)}",
+        )
 
     def _emit(self, chapter: int, total: int, done: int, message: str) -> None:
         if self.on_progress:
