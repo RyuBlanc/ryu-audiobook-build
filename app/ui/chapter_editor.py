@@ -19,11 +19,12 @@ from app.ui.character_review import CharacterReviewDialog
 
 
 class ChapterEditorPage(QWidget):
-    def __init__(self, chapters: list[Chapter], on_save=None) -> None:
+    def __init__(self, chapters: list[Chapter], on_save=None, on_rename_book=None) -> None:
         super().__init__()
         cleaned = [Chapter(ch.number, ch.title, remove_page_noise(ch.text)) for ch in chapters]
         self.editor = ChapterEditor(cleaned)
         self.on_save = on_save
+        self.on_rename_book = on_rename_book
         self.list = QListWidget()
         self.title = QTextEdit()
         self.title.setMaximumHeight(55)
@@ -239,23 +240,22 @@ class ChapterEditorPage(QWidget):
         self.refresh(min(rows[-1], len(self.editor.chapters) - 1) if self.editor.chapters else None)
 
     def rename_book(self) -> None:
-        if not self.on_save:
-            return
         value, ok = QInputDialog.getText(
             self,
             "Rename Audiobook",
             "Audiobook / project title:",
             text=self.window().windowTitle() if self.window() else "",
         )
-        if ok and value.strip():
-            # The project title is updated by the workflow on the next save.
-            self.setProperty("book_title_override", value.strip())
-            self.status = getattr(self, "status", None)
+        if not ok or not value.strip():
+            return
+        if self.on_rename_book:
+            self.on_rename_book(value.strip())
+            QMessageBox.information(self, "Renamed", f"Audiobook renamed to '{value.strip()}'.")
+        else:
             QMessageBox.information(
                 self,
-                "Audiobook Name",
-                "The chapter names can be edited directly. The audiobook/project "
-                "title will be applied when the project metadata workflow is updated.",
+                "Rename Audiobook",
+                "Open the project through the Library to rename its title.",
             )
 
     def save(self) -> None:
