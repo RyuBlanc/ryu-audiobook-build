@@ -72,21 +72,53 @@ def load_profiles() -> list[VoiceProfile]:
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             saved = []
 
-    combined = list(builtin_voice_profiles())
-    names = {p.name.casefold() for p in combined}
+    builtins = list(builtin_voice_profiles())
+    combined = list(builtins)
+
+    # A custom voice must never disappear merely because its display name
+    # happens to match a bundled Piper voice. Keep saved profiles distinct
+    # by provider/voice identity and prefer the saved custom profile when
+    # the identity is genuinely the same.
+    builtin_keys = {
+        ("piper", p.voice_id.casefold(), "")
+        for p in builtins
+    }
+    seen_names: set[str] = {p.name.casefold() for p in combined}
     for profile in saved:
-        if profile.name.casefold() not in names:
-            combined.append(profile)
-            names.add(profile.name.casefold())
+        sample_key = str(profile.sample_path or "").casefold()
+        identity = (profile.provider, profile.voice_id.casefold(), sample_key)
+
+        if identity in builtin_keys and not sample_key:
+            continue
+
+        # Preserve a custom profile even if it shares a display name with a
+        # bundled voice. The UI will make the provider visible where needed.
+        if profile.name.casefold() in seen_names:
+            if profile.provider != "piper":
+                suffix = " • Custom"
+                base = profile.name
+                candidate = base + suffix
+                n = 2
+                while candidate.casefold() in seen_names:
+                    candidate = f"{base}{suffix} {n}"
+                    n += 1
+                profile.name = candidate
+        combined.append(profile)
+        seen_names.add(profile.name.casefold())
     return combined
 
 
 def save_profiles(profiles: list[VoiceProfile]) -> None:
     voices_root().mkdir(parents=True, exist_ok=True)
+    builtins = {
+        (p.provider, p.voice_id.casefold())
+        for p in builtin_voice_profiles()
+    }
     persistent = [
         p for p in profiles
-        if not p.name.startswith("Offline Neural •")
-        and not p.notes.lower().startswith("built-in offline")
+        if (p.provider, p.voice_id.casefold()) not in builtins
+        or p.sample_path
+        or p.provider != "piper"
     ]
     profiles_file().write_text(
         json.dumps([asdict(profile) for profile in persistent], ensure_ascii=False, indent=2),
