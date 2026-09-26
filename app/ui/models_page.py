@@ -45,11 +45,32 @@ class PiperDownloadWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class ChatterboxInstallWorker(QThread):
+    finished_ok = Signal(str)
+    failed = Signal(str)
+
+    def run(self) -> None:
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-r", "requirements-voice-cloning.txt"],
+                capture_output=True,
+                text=True,
+                timeout=3600,
+            )
+            if result.returncode != 0:
+                raise RuntimeError((result.stderr or result.stdout).strip()[-3000:] or "Chatterbox installation failed.")
+            mark_installed("chatterbox-multilingual", True)
+            self.finished_ok.emit("Chatterbox")
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class ModelsPage(QWidget):
     def __init__(self):
         super().__init__()
         ensure_roots()
         self.worker: PiperDownloadWorker | None = None
+        self.chatterbox_worker: ChatterboxInstallWorker | None = None
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("<h2>Local TTS Models</h2>"))
@@ -62,8 +83,10 @@ class ModelsPage(QWidget):
 
         row = QHBoxLayout()
         self.install_piper = QPushButton("Download Piper Voice")
+        self.install_chatterbox = QPushButton("Install Custom Voice Engine")
         self.refresh_button = QPushButton("Refresh")
         row.addWidget(self.install_piper)
+        row.addWidget(self.install_chatterbox)
         row.addWidget(self.refresh_button)
         layout.addLayout(row)
 
@@ -71,6 +94,7 @@ class ModelsPage(QWidget):
         layout.addWidget(self.status)
 
         self.install_piper.clicked.connect(self.download_piper)
+        self.install_chatterbox.clicked.connect(self.install_chatterbox_runtime)
         self.refresh_button.clicked.connect(self.refresh)
         self.refresh()
 
@@ -115,3 +139,31 @@ class ModelsPage(QWidget):
         self.install_piper.setEnabled(True)
         self.status.setText("Download failed")
         QMessageBox.warning(self, "Piper Download Failed", message)
+
+
+    def install_chatterbox_runtime(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            "Install Custom Voice Engine",
+            "This installs the optional Chatterbox voice-cloning runtime and its dependencies. "
+            "It requires an internet connection and may need several GB of disk space for the "
+            "runtime and model files. Continue?",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.install_chatterbox.setEnabled(False)
+        self.status.setText("Installing Chatterbox custom voice engine…")
+        self.chatterbox_worker = ChatterboxInstallWorker()
+        self.chatterbox_worker.finished_ok.connect(self._chatterbox_ok)
+        self.chatterbox_worker.failed.connect(self._chatterbox_failed)
+        self.chatterbox_worker.start()
+
+    def _chatterbox_ok(self, name: str) -> None:
+        self.install_chatterbox.setEnabled(True)
+        self.status.setText("Custom voice engine installed. Its model will download when first used.")
+        self.refresh()
+
+    def _chatterbox_failed(self, message: str) -> None:
+        self.install_chatterbox.setEnabled(True)
+        QMessageBox.warning(self, "Custom Voice Engine Installation Failed", message)
+        self.status.setText("Custom voice engine installation failed.")
