@@ -34,6 +34,21 @@ class ChapterEditorPage(QWidget):
         self.text = QTextEdit()
         root = QVBoxLayout(self)
         root.addWidget(QLabel("Chapter Editor"))
+
+        # Keep the two recovery actions visible instead of placing them at the
+        # end of a long single-row toolbar that can be clipped on smaller windows.
+        primary = QHBoxLayout()
+        save_button = QPushButton("Save")
+        save_button.setObjectName("primary")
+        save_button.clicked.connect(self.save)
+        primary.addWidget(save_button)
+        redetect_button = QPushButton("Re-detect Chapters")
+        redetect_button.setObjectName("primary")
+        redetect_button.clicked.connect(self.redetect)
+        primary.addWidget(redetect_button)
+        primary.addStretch(1)
+        root.addLayout(primary)
+
         buttons = QHBoxLayout()
         actions = [
             ("Rename", self.rename),
@@ -45,9 +60,7 @@ class ChapterEditorPage(QWidget):
             ("Move Down", lambda: self.move(1)),
             ("Delete", self.delete),
             ("Delete Selected Chapters", self.delete_selected),
-            ("Save", self.save),
             ("Rename Book / Project", self.rename_book),
-            ("Re-detect Chapters", self.redetect),
         ]
         for label, handler in actions:
             button = QPushButton(label)
@@ -268,10 +281,13 @@ class ChapterEditorPage(QWidget):
             self.on_save(self.editor.chapters)
         QMessageBox.information(self, "Saved", "Project changes have been saved.")
 
-
-
     def redetect(self) -> None:
         if not self.on_redetect:
+            QMessageBox.information(
+                self,
+                "Re-detect Chapters",
+                "The original source is not available for this project.",
+            )
             return
         answer = QMessageBox.question(
             self,
