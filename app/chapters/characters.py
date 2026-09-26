@@ -26,7 +26,8 @@ class CharacterAnalysis:
 
 
 DIALOGUE_PATTERNS = (
-    re.compile(r'[“"]([^”"]{2,1800})[”]'),
+    re.compile(r'“([^”]{2,1800})”'),
+    re.compile(r'"([^"]{2,1800})"'),
     re.compile(r'「([^」]{2,1800})」'),
     re.compile(r'『([^』]{2,1800})』'),
 )
@@ -158,6 +159,10 @@ def _discover_candidates(text: str) -> set[str]:
         rf"\b(?:{SPEAKER_VERBS})\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\b",
         rf"\b(?:named|called)\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\b",
         rf"\b(?:girlfriend|boyfriend|friend|girl|boy|woman|man|student|teacher|classmate)\s+(?:named|called)\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\b",
+        rf"\b({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\s*[:—–-]\s*[“\"「『]",
+        rf"[”\"」』]\s*,?\s*(?:{SPEAKER_VERBS})\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\b",
+        rf"[”\"」』]\s*,?\s*({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\s+(?:{SPEAKER_VERBS})\b",
+        rf"\b({NAME_TOKEN})\s*[「『]",
     )
     for pattern in patterns:
         for match in re.finditer(pattern, text):
@@ -238,9 +243,9 @@ def _speaker_near_quote(
                 return resolved, 1.0
 
     for pattern in (
-        rf"^\s*(?:{SPEAKER_VERBS})\s+{name_phrase}\b",
-        rf"^\s*{name_phrase}\s*(?:{SPEAKER_VERBS})\b",
-        rf"^\s*{name_phrase}\s*[:—–-]",
+        rf"^\s*[,;:—–-]?\s*(?:{SPEAKER_VERBS})\s+{name_phrase}\b",
+        rf"^\s*[,;:—–-]?\s*{name_phrase}\s*(?:{SPEAKER_VERBS})\b",
+        rf"^\s*[,;:—–-]?\s*{name_phrase}\s*[:—–-]",
     ):
         match = re.search(pattern, after, re.I | re.S)
         if match:
@@ -254,6 +259,21 @@ def _speaker_near_quote(
 
     if last_speaker and re.search(rf"\b(?:he|she|they)\s+(?:{SPEAKER_VERBS})\b", before[-180:], re.I):
         return last_speaker, 0.62
+
+    # Light-novel formatting often puts a speaker name on the line directly
+    # before a quote (Name: "..." / Name「...」) or after a quote
+    # ("...", Name said). Check a wider local window without guessing from
+    # arbitrary capitalized prose.
+    local_before = text[max(0, start - 180):start]
+    local_after = text[end:min(len(text), end + 220)]
+    for candidate in candidates:
+        escaped = re.escape(candidate)
+        if re.search(rf"\b{escaped}\s*[:—–-]\s*$", local_before, re.I):
+            return candidate, 0.94
+        if re.search(rf"[”\"」』]\s*,?\s*{escaped}\s+(?:{SPEAKER_VERBS})\b", local_after, re.I):
+            return candidate, 0.94
+        if re.search(rf"\b{escaped}\s+(?:{SPEAKER_VERBS})\b", local_after, re.I):
+            return candidate, 0.92
 
     return None, 0.0
 
