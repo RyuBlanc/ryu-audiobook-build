@@ -147,9 +147,9 @@ class ProjectWorkflow(QMainWindow):
             else:
                 self.stack.setCurrentWidget(self.import_page)
         elif name == "Models":
-            self.stack.setCurrentIndex(5)
+            self.stack.setCurrentWidget(self.stack.widget(4))
         elif name == "Hardware":
-            self.stack.setCurrentIndex(6)
+            self.stack.setCurrentWidget(self.stack.widget(5))
 
     def select_section(self, name: str) -> None:
         for i in range(self.sidebar.count()):
