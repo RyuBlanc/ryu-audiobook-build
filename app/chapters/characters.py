@@ -247,6 +247,18 @@ def _speaker_near_quote(
             if resolved:
                 return resolved, 1.0
 
+    # Identity statements inside the dialogue itself are stronger than
+    # a trailing pronoun tag, e.g. "I'm Akeno Himejima," she said.
+    for identity_pattern in (
+        rf"\bmy name is\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})",
+        rf"\b(?:I['’]m|I am|this is)\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})",
+    ):
+        identity = re.search(identity_pattern, text[max(0, start):end], re.I)
+        if identity:
+            resolved = _resolve_candidate(_clean_name(identity.group(1)), candidates)
+            if resolved:
+                return resolved, 0.99
+
     # Pronoun dialogue tags are common in novels. First-person tags are
     # safe when the narrator identity is known; third-person pronouns continue
     # the immediately previous speaker rather than inventing a new character.
