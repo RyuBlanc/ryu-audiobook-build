@@ -450,8 +450,15 @@ class GenerationPage(QWidget):
             self.status.setText("M4B creation failed. The generated audio has been kept for retry.")
         elif summary.chapters_failed:
             self.stage.setText("Generation failed")
-            self.result_label.setText(f"Generation failed for chapters: {summary.chapters_failed}. Temporary files were kept so you can retry.")
-            self.status.setText("The final M4B was not created.")
+            details = []
+            for number in summary.chapters_failed:
+                reason = (summary.failure_details or {}).get(number, "Unknown generation error")
+                details.append(f"Chapter {number}: {reason}")
+            self.result_label.setText(
+                "Generation failed. Temporary files were kept so you can retry.\n\n"
+                + "\n".join(details)
+            )
+            self.status.setText("The final M4B was not created. See the chapter-specific errors above.")
         else:
             self.stage.setText("Generation cancelled")
             self.result_label.setText("Generation cancelled. Temporary files were kept for resume.")
