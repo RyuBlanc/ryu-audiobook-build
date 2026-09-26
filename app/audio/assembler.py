@@ -20,7 +20,9 @@ def _run(args: list[str]) -> None:
         text=True,
     )
     if result.returncode != 0:
-        raise RuntimeError(result.stderr[-4000:] or "FFmpeg failed.")
+        command = " ".join(str(x) for x in args)
+        detail = result.stderr[-5000:] or result.stdout[-5000:] or "FFmpeg failed."
+        raise RuntimeError(f"FFmpeg packaging command failed.\nCommand: {command}\n{detail}")
 
 
 def sorted_chunks(chapter_dir: Path) -> list[Path]:
@@ -38,7 +40,9 @@ def assemble_chapter(chapter_dir: Path) -> Path:
     output = chapter_dir / "chapter.m4a"
     concat_file = chapter_dir / "concat.txt"
     concat_file.write_text(
-        "\n".join(f"file '{_ffconcat_path(p)}'" for p in chunks) + "\n",
+        "ffconcat version 1.0\n"
+        + "\n".join(f"file '{_ffconcat_path(p)}'" for p in chunks)
+        + "\n",
         encoding="utf-8",
     )
     _run([
@@ -82,6 +86,7 @@ def assemble_m4b(
     """Create one M4B containing all chapters, navigation markers, metadata and cover."""
     if not chapter_dirs:
         raise ValueError("No chapters were supplied.")
+
     chapters = [assemble_chapter(directory) for directory in chapter_dirs]
     names = chapter_titles or [
         directory.name.split("_", 1)[1] if "_" in directory.name else directory.name
@@ -95,11 +100,19 @@ def assemble_m4b(
 
     with tempfile.TemporaryDirectory(prefix="ryu-m4b-") as temp:
         temp_dir = Path(temp)
+
+        # Give the concat demuxer explicit durations. This avoids the
+        # "Duration: N/A" timing ambiguity seen with some generated M4A files.
         concat = temp_dir / "chapters.txt"
-        concat.write_text(
-            "\n".join(f"file '{_ffconcat_path(p)}'" for p in chapters) + "\n",
-            encoding="utf-8",
-        )
+        concat_lines = ["ffconcat version 1.0"]
+        durations: list[int] = []
+        for chapter_file in chapters:
+            duration = _duration_ms(chapter_file)
+            durations.append(duration)
+            concat_lines.append(f"file '{_ffconcat_path(chapter_file)}'")
+            concat_lines.append(f"duration {duration / 1000.0:.6f}")
+        concat.write_text("\n".join(concat_lines) + "\n", encoding="utf-8")
+
         metadata = temp_dir / "metadata.txt"
         lines = [
             ";FFMETADATA1",
@@ -112,8 +125,7 @@ def assemble_m4b(
             lines.append(f"artist={_metadata_value(author)}")
 
         start = 0
-        for chapter_file, chapter_title in zip(chapters, names):
-            duration = _duration_ms(chapter_file)
+        for duration, chapter_title in zip(durations, names):
             end = start + duration
             lines.extend([
                 "[CHAPTER]", "TIMEBASE=1/1000",
@@ -123,10 +135,27 @@ def assemble_m4b(
             start = end
         metadata.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-        args = [
+        # First make one stable AAC audio stream. Then mux metadata/chapters
+        # and cover in a separate pass. Keeping concat and MP4 chapter/cover
+        # muxing separate makes failures much easier to diagnose and avoids
+        # fragile multi-input timestamp interactions.
+        audio_only = temp_dir / "audiobook-audio.m4a"
+        _run([
             "-f", "concat", "-safe", "0", "-i", str(concat),
+            "-vn", "-c:a", "aac", "-b:a", "96k", "-ar", "44100",
+            str(audio_only),
+        ])
+        if not audio_only.exists() or audio_only.stat().st_size < 4096:
+            raise RuntimeError("FFmpeg created no usable intermediate audiobook audio.")
+
+        args = [
+            "-i", str(audio_only),
             "-f", "ffmetadata", "-i", str(metadata),
             "-map", "0:a:0",
+            "-map_metadata", "1",
+            "-map_chapters", "1",
+            "-c:a", "copy",
+            "-movflags", "+faststart",
         ]
         if cover:
             args += [
@@ -139,11 +168,6 @@ def assemble_m4b(
                 "-metadata:s:v:0", "filename=cover.jpg",
             ]
         args += [
-            "-map_metadata", "1", "-map_chapters", "1",
-            # Re-encode the final AAC stream so chapter files with slightly
-            # different encoder/container parameters still package reliably.
-            "-c:a", "aac", "-b:a", "96k", "-ar", "44100",
-            "-movflags", "+faststart",
             "-metadata", f"title={_safe_title(title)}",
             "-metadata", f"album={_safe_title(title)}",
         ]
