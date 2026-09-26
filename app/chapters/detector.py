@@ -89,11 +89,29 @@ def _heading_title(line: str, lines: list[str], index: int) -> str | None:
 
 
 def _looks_like_body_sentence(line: str, suffix: str) -> bool:
-    """Reject OCR/body text that merely starts like a chapter/part heading."""
+    """Reject extracted prose that happens to begin with Chapter/Part."""
+    suffix = suffix.strip()
     if len(line) > 90:
         return True
+
+    # A real heading may be long, but a quoted sentence is overwhelmingly
+    # likely to be body prose. This specifically prevents extracted light
+    # novels such as: Chapter 8 "I even bought new pants. You can't tell..."
+    if re.search(r'["“”「」『』]', suffix):
+        return True
+
+    # Multiple sentence boundaries are a strong prose signal.
+    if len(re.findall(r"[.!?。！？]", suffix)) >= 2:
+        return True
+
     if "," in suffix and len(suffix.split()) >= 7:
         return True
     if re.search(r"[!?]$", suffix):
         return True
+
+    # Normal chapter titles are usually short. Long, sentence-like suffixes
+    # should stay in the chapter body instead of becoming a chapter marker.
+    if len(suffix.split()) > 14:
+        return True
+
     return False
