@@ -443,6 +443,8 @@ class VoicePage(QWidget):
         self.sample_path = Path(profile.sample_path) if profile.sample_path else None
         if self.sample_path and self.sample_path.exists():
             self.sample_label.setText(f"✓ {self.sample_path.name}")
+        elif profile.provider == "chatterbox":
+            self.sample_label.setText("⚠ Saved reference audio is missing from this PC.")
 
         if profile.provider == "windows-sapi":
             i = self.sapi_voice.findData(profile.voice_id)
@@ -514,10 +516,22 @@ class VoicePage(QWidget):
             self.sample_label.setText(
                 f"✓ {source.name} → {self.sample_path.name}"
             )
-            self.name.setText(name)
+            # Do not inherit a previous built-in/online profile name when the
+        # user selects a reference file. That used to save a custom voice
+        # under names such as "Offline Neural • Lessac", which then collided
+        # with the bundled profile and made the custom voice appear missing.
+        current_name = self.name.text().strip()
+        if (
+            not current_name
+            or current_name.startswith("Offline Neural •")
+            or current_name.startswith("Microsoft ")
+        ):
+            name = source.stem
+        self.name.setText(name)
             self.authorized.setChecked(False)
             self.status.setText(
-                "Reference imported locally. Confirm permission before saving."
+                "Reference imported locally. Confirm permission before saving. "
+                f"Custom voice profile name: {self.name.text().strip()}"
             )
         except Exception as exc:
             QMessageBox.critical(self, "Voice Import Failed", str(exc))
@@ -574,15 +588,20 @@ class VoicePage(QWidget):
             )
 
         if not self.sample_path or not self.sample_path.exists():
-            self.status.setText("Choose a reference audio file first.")
+            self.status.setText(
+                "Choose a reference audio file first, or load a custom profile with a valid local reference."
+            )
             return None
         if not self.authorized.isChecked():
             self.status.setText(
                 "Confirm that you have permission to use this voice."
             )
             return None
+        custom_name = name or self.sample_path.stem
+        if custom_name.startswith("Offline Neural •") or custom_name.startswith("Microsoft "):
+            custom_name = self.sample_path.stem
         return VoiceProfile(
-            name=name or self.sample_path.stem,
+            name=custom_name,
             provider="chatterbox",
             voice_id=self.sample_path.stem,
             sample_path=str(self.sample_path),
