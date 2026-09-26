@@ -50,6 +50,7 @@ class CastAwareProvider(TTSProvider):
                 for k in self.assignments if k in self.profiles
             ),
             "narrating_character": self.narrating_character,
+            "backend_override": self.backend_override,
         }
         return hashlib.sha256(
             json.dumps(payload, sort_keys=True).encode("utf-8")
