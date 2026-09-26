@@ -107,7 +107,10 @@ class ProjectWorkflow(QMainWindow):
         self.stack.addWidget(self.library)
         self.stack.addWidget(self.import_page)
         self.stack.addWidget(self.voice)
-        self.voice_cast = VoiceCastPage(\n            lambda: self.project.chapters if self.project else [],\n            lambda: self.project.source_path if self.project else None,\n        )
+        self.voice_cast = VoiceCastPage(
+            lambda: self.project.chapters if self.project else [],
+            lambda: self.project.source_path if self.project else None,
+        )
         self.stack.addWidget(self.voice_cast)
         self.stack.addWidget(ModelsPage())
         self.stack.addWidget(HardwarePage())
