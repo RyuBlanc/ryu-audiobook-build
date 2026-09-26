@@ -510,7 +510,13 @@ class VoicePage(QWidget):
         if not path:
             return
         source = Path(path)
-        name = self.name.text().strip() or source.stem
+        name = self.name.text().strip()
+        if (
+            not name
+            or name.startswith("Offline Neural •")
+            or name.startswith("Microsoft ")
+        ):
+            name = source.stem
         try:
             self.sample_path = import_reference_audio(source, name)
             self.sample_label.setText(
@@ -520,13 +526,6 @@ class VoicePage(QWidget):
             # user selects a reference file. That used to save a custom voice
             # under names such as "Offline Neural • Lessac", which then collided
             # with the bundled profile and made the custom voice appear missing.
-            current_name = self.name.text().strip()
-            if (
-                not current_name
-                or current_name.startswith("Offline Neural •")
-                or current_name.startswith("Microsoft ")
-            ):
-                name = source.stem
             self.name.setText(name)
             self.authorized.setChecked(False)
             self.status.setText(
