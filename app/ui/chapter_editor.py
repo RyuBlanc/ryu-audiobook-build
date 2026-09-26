@@ -20,12 +20,13 @@ from app.ui.character_review import CharacterReviewDialog
 
 
 class ChapterEditorPage(QWidget):
-    def __init__(self, chapters: list[Chapter], on_save=None, on_rename_book=None) -> None:
+    def __init__(self, chapters: list[Chapter], on_save=None, on_rename_book=None, on_redetect=None) -> None:
         super().__init__()
         cleaned = [Chapter(ch.number, ch.title, remove_page_noise(ch.text)) for ch in chapters]
         self.editor = ChapterEditor(cleaned)
         self.on_save = on_save
         self.on_rename_book = on_rename_book
+        self.on_redetect = on_redetect
         self.list = QListWidget()
         self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.title = QTextEdit()
@@ -46,6 +47,7 @@ class ChapterEditorPage(QWidget):
             ("Delete Selected Chapters", self.delete_selected),
             ("Save", self.save),
             ("Rename Book / Project", self.rename_book),
+            ("Re-detect Chapters", self.redetect),
         ]
         for label, handler in actions:
             button = QPushButton(label)
@@ -265,3 +267,20 @@ class ChapterEditorPage(QWidget):
         if self.on_save:
             self.on_save(self.editor.chapters)
         QMessageBox.information(self, "Saved", "Project changes have been saved.")
+
+
+
+    def redetect(self) -> None:
+        if not self.on_redetect:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Re-detect Chapters",
+            "Re-run chapter detection from the original imported book?\n\n"
+            "This replaces the current automatic chapter split. Your current manual "
+            "chapter edits will be lost unless you save/export them separately.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.on_redetect()
