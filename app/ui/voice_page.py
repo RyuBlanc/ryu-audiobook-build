@@ -327,9 +327,41 @@ class VoicePage(QWidget):
         }
         return names.get(code.lower(), code.upper())
 
+    @staticmethod
+    def _offline_neural_catalog() -> list[dict]:
+        # Fallback metadata so the Language -> Gender -> Country -> Voice UI
+        # remains populated even when Microsoft's live catalog cannot be reached.
+        # Synthesis itself still requires an internet connection for Edge TTS.
+        return [
+            {"name": "en-US-AriaNeural", "locale": "en-US", "gender": "Female", "friendly_name": "Aria"},
+            {"name": "en-US-JennyNeural", "locale": "en-US", "gender": "Female", "friendly_name": "Jenny"},
+            {"name": "en-US-GuyNeural", "locale": "en-US", "gender": "Male", "friendly_name": "Guy"},
+            {"name": "en-GB-LibbyNeural", "locale": "en-GB", "gender": "Female", "friendly_name": "Libby"},
+            {"name": "en-GB-RyanNeural", "locale": "en-GB", "gender": "Male", "friendly_name": "Ryan"},
+            {"name": "en-IN-NeerjaNeural", "locale": "en-IN", "gender": "Female", "friendly_name": "Neerja"},
+            {"name": "en-IN-PrabhatNeural", "locale": "en-IN", "gender": "Male", "friendly_name": "Prabhat"},
+            {"name": "ja-JP-NanamiNeural", "locale": "ja-JP", "gender": "Female", "friendly_name": "Nanami"},
+            {"name": "ja-JP-KeitaNeural", "locale": "ja-JP", "gender": "Male", "friendly_name": "Keita"},
+            {"name": "ko-KR-SunHiNeural", "locale": "ko-KR", "gender": "Female", "friendly_name": "SunHi"},
+            {"name": "zh-CN-XiaoxiaoNeural", "locale": "zh-CN", "gender": "Female", "friendly_name": "Xiaoxiao"},
+            {"name": "de-DE-KatjaNeural", "locale": "de-DE", "gender": "Female", "friendly_name": "Katja"},
+            {"name": "fr-FR-DeniseNeural", "locale": "fr-FR", "gender": "Female", "friendly_name": "Denise"},
+            {"name": "es-ES-ElviraNeural", "locale": "es-ES", "gender": "Female", "friendly_name": "Elvira"},
+            {"name": "ta-IN-PallaviNeural", "locale": "ta-IN", "gender": "Female", "friendly_name": "Pallavi"},
+            {"name": "ta-IN-ValluvarNeural", "locale": "ta-IN", "gender": "Male", "friendly_name": "Valluvar"},
+            {"name": "hi-IN-SwaraNeural", "locale": "hi-IN", "gender": "Female", "friendly_name": "Swara"},
+            {"name": "hi-IN-MadhurNeural", "locale": "hi-IN", "gender": "Male", "friendly_name": "Madhur"},
+        ]
+
     def load_edge_voices(self, refresh: bool = False) -> None:
         try:
             self.edge_voices = EdgeTTSProvider.fetch_voice_metadata(refresh=refresh)
+            if not self.edge_voices:
+                self.edge_voices = self._offline_neural_catalog()
+                self.status.setText(
+                    "Live neural catalog unavailable. Showing built-in voice metadata; "
+                    "internet is still required to synthesize Edge neural audio."
+                )
             self.neural_count.setText(f"{len(self.edge_voices)} voices")
 
             languages = sorted(
