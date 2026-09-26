@@ -143,6 +143,8 @@ class ProjectWorkflow(QMainWindow):
             self.stack.setCurrentWidget(self.voice_cast)
         elif name == "Generate":
             if self.generation:
+                self.generation._refresh_voice_profiles()
+                self.generation._load_voice_cast_summary()
                 self.stack.setCurrentWidget(self.generation)
             else:
                 self.stack.setCurrentWidget(self.import_page)
