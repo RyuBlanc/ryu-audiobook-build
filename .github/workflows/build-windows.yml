@@ -86,20 +86,9 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\RyuAudiobook.iss"
 
-      - name: Clean up old Ryu Audiobook artifacts
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $artifacts = gh api --paginate "/repos/$env:GITHUB_REPOSITORY/actions/artifacts?per_page=100" --jq '.artifacts[] | [.id, .name] | @tsv'
-          foreach ($line in $artifacts) {
-            $parts = $line -split [char]9, 2
-            if ($parts.Count -eq 2 -and $parts[1] -like "Ryu-Audiobook-*") {
-              Write-Host "Deleting old Ryu Audiobook artifact: $($parts[1]) ($($parts[0]))"
-              gh api --method DELETE "/repos/$env:GITHUB_REPOSITORY/actions/artifacts/$($parts[0])"
-            }
-          }
-
+      # Artifacts use a 1-day retention period. Do not delete artifacts here:
+      # concurrent push workflows can otherwise delete another run's freshly
+      # uploaded installer while that run is still completing.
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
