@@ -146,7 +146,27 @@ More story text here.
                 cover=cover,
             )
             self.assertTrue(result.exists())
-            self.assertGreater(result.stat().st_size, 4096)
+            self.assertGreater(result.stat().st_size, 0)
+
+            # Validate both streams instead of using a file-size threshold.
+            # A valid AAC file containing silence can be only a few KB, so
+            # size is not a reliable M4B validity check.
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+            audio_probe = subprocess.run(
+                [ffmpeg, "-v", "error", "-i", str(result), "-map", "0:a:0", "-f", "null", "-"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.assertEqual(audio_probe.returncode, 0, audio_probe.stderr)
+
+            cover_probe = subprocess.run(
+                [ffmpeg, "-v", "error", "-i", str(result), "-map", "0:v:0", "-frames:v", "1", "-f", "null", "-"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            self.assertEqual(cover_probe.returncode, 0, cover_probe.stderr)
 
 
 if __name__ == "__main__":
