@@ -1,8 +1,11 @@
 from pathlib import Path
 import os
-import wave
+import subprocess
+import sys
+import tempfile
 
 from ..base import TTSProvider
+from ..chatterbox_runtime import runtime_ready, runtime_python, runtime_environment, worker_script
 
 
 class ChatterboxProvider(TTSProvider):
@@ -70,20 +73,61 @@ class ChatterboxProvider(TTSProvider):
             self._model = ChatterboxTTS.from_pretrained(device=device)
         self._device = device
 
+    def _synthesize_external(self, text: str, output_path: Path) -> Path:
+        python = runtime_python()
+        if not python or not runtime_ready():
+            raise RuntimeError(
+                "Custom voice engine is not installed. Open Models → Install / Repair Custom Voice Engine "
+                "and complete the one-time runtime installation."
+            )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        reference = self.reference_audio.resolve()
+        if not reference.is_file():
+            raise RuntimeError(f"Reference voice file is missing: {reference}")
+        with tempfile.TemporaryDirectory(prefix="ryu-chatterbox-") as temp:
+            text_file = Path(temp) / "text.txt"
+            text_file.write_text(text, encoding="utf-8")
+            command = [
+                str(python), str(worker_script()),
+                "--text-file", str(text_file),
+                "--output", str(output_path),
+                "--reference", str(reference),
+                "--backend", self.backend,
+                "--language", self.language or "en",
+                "--exaggeration", str(self.exaggeration),
+                "--cfg-weight", str(self.cfg_weight),
+            ]
+            if self.multilingual:
+                command.append("--multilingual")
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=1800,
+                env=runtime_environment(),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                if sys.platform == "win32" else 0,
+            )
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout).strip()
+                raise RuntimeError(
+                    "Custom voice generation failed. " +
+                    (detail[-3500:] if detail else "The Chatterbox runtime returned an unknown error.")
+                )
+        if not output_path.exists() or output_path.stat().st_size < 1024:
+            raise RuntimeError("Custom voice engine did not produce a valid WAV output.")
+        return output_path
+
     def synthesize(self, text: str, output_path: Path, voice: str | None = None) -> Path:
         if not self.reference_audio or not self.reference_audio.exists():
             raise RuntimeError("A reference voice sample is required for Chatterbox voice cloning.")
 
+        if getattr(sys, "frozen", False) or runtime_ready():
+            return self._synthesize_external(text, output_path)
+
         self._load()
         output_path.parent.mkdir(parents=True, exist_ok=True)
-
         reference = str(self.reference_audio.resolve())
-        if not self.reference_audio.is_file():
-            raise RuntimeError(f"Reference voice file is missing: {self.reference_audio}")
-
-        # Chatterbox officially accepts the reference directly through
-        # audio_prompt_path. This is more robust across Chatterbox releases
-        # than relying on an internal cached-conditionals API.
         kwargs = {
             "audio_prompt_path": reference,
             "exaggeration": self.exaggeration,
@@ -91,7 +135,6 @@ class ChatterboxProvider(TTSProvider):
         }
         if self.multilingual:
             kwargs["language_id"] = self.language or "en"
-
         wav = self._model.generate(text, **kwargs)
 
         try:
