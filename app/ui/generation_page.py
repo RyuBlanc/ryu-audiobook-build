@@ -294,6 +294,22 @@ class GenerationPage(QWidget):
             self.cover = Path(path)
             self.cover_label.setText(self.cover.name)
 
+    def _cast_provider(self, narrator_provider, narrator_voice):
+        if not self.project_folder:
+            return narrator_provider, narrator_voice
+        state = load_state(self.project_folder)
+        assignments = state.get("voice_cast", {})
+        if not assignments:
+            return narrator_provider, narrator_voice
+        from app.tts.cast_provider import CastAwareProvider
+        profiles = {profile.name: profile for profile in self.profiles}
+        return CastAwareProvider(
+            narrator_provider,
+            narrator_voice,
+            profiles,
+            assignments,
+        ), narrator_voice
+
     def _provider(self):
         profile = self._selected_profile()
         if not profile:
@@ -349,6 +365,7 @@ class GenerationPage(QWidget):
         if not provider:
             self.status.setText("Select a Voice Profile.")
             return
+        provider, voice = self._cast_provider(provider, voice)
 
         output.parent.mkdir(parents=True, exist_ok=True)
         if self.project_folder:
