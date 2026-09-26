@@ -99,8 +99,8 @@ class VoicePage(QWidget):
         source_layout.addWidget(self.source_hint)
         root.addWidget(source_box)
 
-        neural_box = QGroupBox("2  •  Neural voice")
-        neural_layout = QVBoxLayout(neural_box)
+        self.neural_box = QGroupBox("2  •  Neural voice")
+        neural_layout = QVBoxLayout(self.neural_box)
         neural_layout.setSpacing(10)
 
         language_row = QHBoxLayout()
@@ -152,10 +152,10 @@ class VoicePage(QWidget):
         sapi_row.addWidget(self.sapi_voice, 1)
         neural_layout.addLayout(sapi_row)
 
-        root.addWidget(neural_box)
+        root.addWidget(self.neural_box)
 
-        custom_box = QGroupBox("Custom authorized voice")
-        custom_layout = QVBoxLayout(custom_box)
+        self.custom_box = QGroupBox("Custom authorized voice")
+        custom_layout = QVBoxLayout(self.custom_box)
         custom_layout.setSpacing(8)
         custom_row = QHBoxLayout()
         self.sample_button = QPushButton("Choose MP3 / audio reference…")
@@ -178,7 +178,7 @@ class VoicePage(QWidget):
             "I have permission to use this reference recording."
         )
         custom_layout.addWidget(self.authorized)
-        root.addWidget(custom_box)
+        root.addWidget(self.custom_box)
 
         profile_box = QGroupBox("3  •  Voice profile")
         profile_layout = QVBoxLayout(profile_box)
@@ -530,6 +530,8 @@ class VoicePage(QWidget):
         is_edge = provider == "edge-tts"
         custom = provider == "chatterbox"
 
+        self.neural_box.setVisible(is_edge)
+        self.custom_box.setVisible(custom)
         self.sapi_voice.setVisible(provider == "windows-sapi")
         self.sapi_voice.parentWidget().setVisible(provider == "windows-sapi")
         self.neural_voice.setVisible(is_edge)
