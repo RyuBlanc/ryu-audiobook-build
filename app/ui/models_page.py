@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.paths import models_root, ensure_roots
+from app.tts.chatterbox_runtime import install_runtime, runtime_status
 from app.tts.model_registry import BUILTIN_CATALOG, installed_models, mark_installed
 from app.tts.providers.piper import PiperProvider
 
@@ -48,29 +49,11 @@ class PiperDownloadWorker(QThread):
 class ChatterboxInstallWorker(QThread):
     finished_ok = Signal(str)
     failed = Signal(str)
+    progress = Signal(str)
 
     def run(self) -> None:
         try:
-            if getattr(sys, "frozen", False):
-                python_cmd = ["py", "-m", "pip"]
-                if subprocess.run(
-                    ["py", "--version"], capture_output=True, text=True
-                ).returncode != 0:
-                    raise RuntimeError(
-                        "The Windows Python launcher (py.exe) is required to install the "
-                        "optional custom voice engine from the packaged app. "
-                        "Install Python 3.11/3.12 with the launcher, then retry."
-                    )
-            else:
-                python_cmd = [sys.executable, "-m", "pip"]
-            result = subprocess.run(
-                python_cmd + ["install", "-r", "requirements-voice-cloning.txt"],
-                capture_output=True,
-                text=True,
-                timeout=3600,
-            )
-            if result.returncode != 0:
-                raise RuntimeError((result.stderr or result.stdout).strip()[-3000:] or "Chatterbox installation failed.")
+            install_runtime(self.progress.emit)
             mark_installed("chatterbox-multilingual", True)
             self.finished_ok.emit("Chatterbox")
         except Exception as exc:
@@ -87,7 +70,7 @@ class ModelsPage(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("<h2>Local TTS Models</h2>"))
         layout.addWidget(QLabel(
-            "Models stay on this PC. The application installer does not contain large model files."
+            "Models stay on this PC. The application installer does not contain large model files. Custom voice cloning uses an isolated local runtime so the base EXE remains lightweight."
         ))
 
         self.list = QListWidget()
@@ -95,7 +78,7 @@ class ModelsPage(QWidget):
 
         row = QHBoxLayout()
         self.install_piper = QPushButton("Download Piper Voice")
-        self.install_chatterbox = QPushButton("Install Custom Voice Engine")
+        self.install_chatterbox = QPushButton("Install / Repair Custom Voice Engine")
         self.refresh_button = QPushButton("Refresh")
         row.addWidget(self.install_piper)
         row.addWidget(self.install_chatterbox)
@@ -118,6 +101,7 @@ class ModelsPage(QWidget):
             clone = " • Voice cloning" if spec.voice_cloning else ""
             self.list.addItem(f"{spec.display_name} — {state}{clone}")
 
+        self.list.addItem(f"Custom voice runtime: {runtime_status()}")
         voices = PiperProvider.model_paths()
         if voices:
             self.list.addItem("")
@@ -168,6 +152,7 @@ class ModelsPage(QWidget):
         self.chatterbox_worker = ChatterboxInstallWorker()
         self.chatterbox_worker.finished_ok.connect(self._chatterbox_ok)
         self.chatterbox_worker.failed.connect(self._chatterbox_failed)
+        self.chatterbox_worker.progress.connect(self.status.setText)
         self.chatterbox_worker.start()
 
     def _chatterbox_ok(self, name: str) -> None:
