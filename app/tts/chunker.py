@@ -16,6 +16,17 @@ def normalize_narration_text(text: str) -> str:
     text = re.sub(r"[ \t]{2,}", " ", text)
     text = re.sub(r"\.{3,}", "…", text)
     text = re.sub(r"\s+([,!?;:])", r"\1", text)
+
+    # Prevent document formatting from being interpreted as shouting.
+    # Keep short acronyms (NASA, USA, etc.) untouched.
+    def soften_caps(match: re.Match[str]) -> str:
+        value = match.group(0)
+        letters = re.sub(r"[^A-Za-zÀ-ÖØ-öø-ÿ]", "", value)
+        if len(letters) >= 12 and letters.upper() == letters:
+            return value[:1].upper() + value[1:].lower()
+        return value
+
+    text = re.sub(r"[^\n]{12,}", soften_caps, text)
     return text.strip()
 
 
