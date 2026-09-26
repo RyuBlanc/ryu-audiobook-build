@@ -144,6 +144,7 @@ def _detect_first_person_narrator(text: str) -> str | None:
     patterns = (
         r"\b([A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30}(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30})?)\s*[—-]\s*that['’]s my name\b",
         r"\bmy name is\s+([A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30}(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30})?)\b",
+        r"\b(?:I['’]m|I am|this is)\s+([A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30}(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30})?)\b",
     )
     for pattern in patterns:
         match = re.search(pattern, text)
@@ -254,7 +255,17 @@ def _speaker_near_quote(
             if resolved:
                 return resolved, 0.98
 
-    if narrator_name and re.search(rf"\bI\s+(?:{SPEAKER_VERBS})\b", before[-180:], re.I):
+    for identity_pattern in (
+        rf"\bmy name is\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})",
+        rf"\b(?:I['’]m|I am|this is)\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})",
+    ):
+        identity = re.search(identity_pattern, dialogue, re.I)
+        if identity:
+            resolved = _resolve_candidate(_clean_name(identity.group(1)), candidates)
+            if resolved:
+                return resolved, 0.99
+
+    if narrator_name and re.search(rf"\bI\s+(?:{SPEAKER_VERBS})\b", before[-220:], re.I):
         return narrator_name, 0.96
 
     if last_speaker and re.search(rf"\b(?:he|she|they)\s+(?:{SPEAKER_VERBS})\b", before[-180:], re.I):
@@ -274,6 +285,18 @@ def _speaker_near_quote(
             return candidate, 0.94
         if re.search(rf"\b{escaped}\s+(?:{SPEAKER_VERBS})\b", local_after, re.I):
             return candidate, 0.92
+
+    # Some light-novel layouts place the character name in nearby narration
+    # without a speech verb. Only use this when exactly one known candidate
+    # occurs close to the quote, and expose the lower confidence to the UI.
+    nearby = []
+    nearby_text = local_before + "\n" + local_after
+    for candidate in candidates:
+        escaped = re.escape(candidate)
+        if re.search(rf"\b{escaped}\b", nearby_text, re.I):
+            nearby.append(candidate)
+    if len(nearby) == 1:
+        return nearby[0], 0.55
 
     return None, 0.0
 
