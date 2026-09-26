@@ -131,7 +131,12 @@ def assemble_m4b(
         if cover:
             args += [
                 "-i", str(cover), "-map", "2:v:0",
-                "-c:v", "mjpeg", "-disposition:v:0", "attached_pic",
+                "-c:v", "mjpeg",
+                "-disposition:v:0", "attached_pic",
+                "-metadata:s:v:0", "title=Cover",
+                "-metadata:s:v:0", "comment=Cover Art",
+                "-metadata:s:v:0", "mimetype=image/jpeg",
+                "-metadata:s:v:0", "filename=cover.jpg",
             ]
         args += [
             "-map_metadata", "1", "-map_chapters", "1",
