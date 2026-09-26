@@ -194,8 +194,9 @@ def assemble_m4b(
             _run([
                 "-i", str(base_m4b),
                 "-i", str(cover_jpg),
-                "-map", "0",
-                "-map", "1",
+                "-map", "0:a:0",
+                "-map", "1:v:0",
+                "-map_chapters", "0",
                 "-c", "copy",
                 "-disposition:v:0", "attached_pic",
                 "-metadata:s:v:0", "title=Cover",
