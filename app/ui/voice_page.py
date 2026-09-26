@@ -265,6 +265,8 @@ class VoicePage(QWidget):
         self.name.setText(profile.name)
         self.language.setText(profile.language or "en")
         self.authorized.setChecked(profile.authorized)
+        self.sample_path = None
+        self.sample_label.setText("No reference selected")
         if profile.provider == "windows-sapi":
             index = self.sapi_voice.findData(profile.voice_id)
             if index >= 0:
@@ -275,7 +277,11 @@ class VoicePage(QWidget):
                 self.neural_voice.setCurrentIndex(index)
         elif profile.sample_path:
             self.sample_path = Path(profile.sample_path)
-            self.sample_label.setText(self.sample_path.name)
+            if self.sample_path.exists():
+                self.sample_label.setText(self.sample_path.name)
+            else:
+                self.sample_path = None
+                self.sample_label.setText("Reference file not found")
         self.status.setText(f"Loaded voice profile: {profile.name}")
 
     def update_mode(self) -> None:
