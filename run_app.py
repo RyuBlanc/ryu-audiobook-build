@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import os
 import sys
 
-# CI/frozen-build self-test: import the modules most likely to be lost by PyInstaller
-# before loading the full GUI. This must exit quickly with a non-zero code on failure.
+# CI/frozen-build self-test: import the modules that previously caused the
+# installed EXE to fail at startup, then terminate the process immediately.
+# Avoid importing Qt/UI modules here because Qt can keep native worker threads
+# alive even after SystemExit in a windowed frozen process.
 if "--self-test" in sys.argv:
     import app.tts.chatterbox_runtime  # noqa: F401
     import app.tts.providers.chatterbox  # noqa: F401
-    import app.ui.voice_page  # noqa: F401
-    raise SystemExit(0)
+    os._exit(0)
 
 # Explicit module imports are intentional: PyInstaller must see every UI
 # module used by the runtime before freezing the application.
