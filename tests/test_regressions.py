@@ -1,10 +1,23 @@
 import tempfile
 import unittest
 from pathlib import Path
+import wave
 
+from app.audio.assembler import assemble_m4b
 from app.chapters.characters import analyze_book
 from app.chapters.detector import Chapter, detect_chapters
 from app.tts.voice_profile import VoiceProfile, save_profiles, load_profiles
+
+
+def _write_wav(path: Path, seconds: float = 0.05) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rate = 8000
+    frames = max(1, int(rate * seconds))
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(b"\x00\x00" * frames)
 
 
 class RegressionTests(unittest.TestCase):
@@ -66,6 +79,25 @@ More story text here.
                 self.assertEqual(Path(loaded[0].sample_path), sample)
             finally:
                 vp.voices_root = original
+
+    def test_m4b_packaging_with_explicit_concat_durations(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapter_dirs = []
+            for number in (1, 2):
+                chapter = root / f"{number:03d}_Chapter_{number}" / "chunks"
+                _write_wav(chapter / "00001.wav", 0.05)
+                _write_wav(chapter / "00002.wav", 0.05)
+                chapter_dirs.append(chapter.parent)
+            output = root / "book.m4b"
+            result = assemble_m4b(
+                chapter_dirs,
+                output,
+                "Regression Book",
+                chapter_titles=["Chapter 1", "Chapter 2"],
+            )
+            self.assertTrue(result.exists())
+            self.assertGreater(result.stat().st_size, 4096)
 
 
 if __name__ == "__main__":
