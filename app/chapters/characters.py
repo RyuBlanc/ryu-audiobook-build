@@ -67,7 +67,7 @@ def analyze_chapter(chapter: Chapter) -> CharacterAnalysis:
         names: dict[str, int] = {}
         for match in re.finditer(r'\b([A-Z][A-Za-zÀ-ÖØ-öø-ÿ\'’-]{2,24})\b', text):
             name = match.group(1)
-            if name in {"The", "This", "That", "Then", "Chapter", "Part"}:
+            if not _is_plausible_name(name):
                 continue
             names[name] = names.get(name, 0) + 1
         for name, count in sorted(names.items(), key=lambda x: (-x[1], x[0])):
@@ -101,8 +101,29 @@ def _clean_dialogue(value: str) -> str:
     return value[:240] + ("…" if len(value) > 240 else "")
 
 
+NAME_STOPWORDS = {
+    "I", "I'm", "I’ve", "I'd", "I'll", "We", "We're", "We've", "They",
+    "He", "He's", "She", "She's", "It", "It's", "You", "Your", "My",
+    "Our", "Their", "The", "This", "That", "These", "Those", "There",
+    "But", "And", "Or", "So", "Then", "When", "What", "Why", "How",
+    "Where", "Who", "Her", "His", "Them", "Us", "Me", "If", "As",
+    "Wake", "Chapter", "Part", "Extra", "Bonus",
+}
+
+
 def _is_plausible_name(value: str) -> bool:
     if not value or len(value) > 80:
         return False
     words = value.split()
-    return 1 <= len(words) <= 3 and all(re.match(r"^[A-ZÀ-ÖØ-Þ]", word) for word in words)
+    if not 1 <= len(words) <= 3:
+        return False
+    if any(word.strip(".,!?;:") in NAME_STOPWORDS for word in words):
+        return False
+    # Do not turn short ALL-CAPS words into characters (e.g. WAKE).
+    if len(value) <= 12 and value.replace("-", "").replace("’", "").isupper():
+        return False
+    # Speaker attributions should normally contain a proper-name token,
+    # not a sentence fragment.
+    if not all(re.match(r"^[A-ZÀ-ÖØ-Þ]", word) for word in words):
+        return False
+    return any(len(word.strip(".,!?;:")) >= 3 for word in words)
