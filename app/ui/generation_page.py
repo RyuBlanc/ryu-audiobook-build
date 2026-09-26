@@ -402,10 +402,32 @@ class GenerationPage(QWidget):
             self._repair_empty_chapters_from_source()
             empty = [c for c in self.chapters if not c.text or not c.text.strip()]
         if empty:
+            # Empty records are never synthesizable. If the source cannot be
+            # re-read, safely remove only the empty records instead of blocking
+            # an otherwise valid audiobook because of stale project state.
+            self.chapters = [c for c in self.chapters if c.text and c.text.strip()]
+            for number, chapter in enumerate(self.chapters, start=1):
+                chapter.number = number
+            if self.project_folder:
+                try:
+                    chapters_file = self.project_folder / "chapters.json"
+                    chapters_file.write_text(
+                        json.dumps(
+                            [{"number": c.number, "title": c.title, "text": c.text} for c in self.chapters],
+                            ensure_ascii=False,
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
+                except OSError:
+                    pass
+            self._update_overview()
+            empty = [c for c in self.chapters if not c.text or not c.text.strip()]
+        if empty:
             numbers = ", ".join(str(c.number) for c in empty)
             self.status.setText(
                 f"Generation stopped: chapter(s) {numbers} contain no body text. "
-                "The original source could not be used to repair the chapter split; review Chapters before generating."
+                "Please review the Chapters page."
             )
             return
 
