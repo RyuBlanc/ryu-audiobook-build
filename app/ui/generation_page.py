@@ -47,6 +47,15 @@ class GenerationPage(QWidget):
         self.player.positionChanged.connect(self._player_position)
         self.player.durationChanged.connect(self._player_duration)
 
+        self.preview_player = QMediaPlayer(self)
+        self.preview_audio_output = QAudioOutput(self)
+        self.preview_audio_output.setVolume(0.85)
+        self.preview_player.setAudioOutput(self.preview_audio_output)
+        self.preview_player.positionChanged.connect(self._preview_position)
+        self.preview_player.durationChanged.connect(self._preview_duration)
+        self.preview_player.playbackStateChanged.connect(self._preview_state_changed)
+        self.preview_path: Path | None = None
+
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 10, 12, 10)
         outer.setSpacing(8)
@@ -135,9 +144,30 @@ class GenerationPage(QWidget):
         output_layout.addLayout(output_actions)
         root.addWidget(output_box)
 
+        preview_box = QGroupBox("Voice Preview")
+        preview_layout = QVBoxLayout(preview_box)
+
+        preview_actions = QHBoxLayout()
         self.preview_button = QPushButton("▶  Generate Voice Preview")
         self.preview_button.clicked.connect(self.preview)
-        root.addWidget(self.preview_button)
+        self.preview_play_button = QPushButton("▶  Play Preview")
+        self.preview_play_button.setEnabled(False)
+        self.preview_play_button.clicked.connect(self.play_preview)
+        self.preview_stop_button = QPushButton("■  Stop")
+        self.preview_stop_button.setEnabled(False)
+        self.preview_stop_button.clicked.connect(self.stop_preview)
+        preview_actions.addWidget(self.preview_button, 1)
+        preview_actions.addWidget(self.preview_play_button)
+        preview_actions.addWidget(self.preview_stop_button)
+        preview_layout.addLayout(preview_actions)
+
+        preview_time_row = QHBoxLayout()
+        self.preview_status = QLabel("Generate a preview to listen to the selected voice.")
+        self.preview_time = QLabel("0:00 / 0:00")
+        preview_time_row.addWidget(self.preview_status, 1)
+        preview_time_row.addWidget(self.preview_time)
+        preview_layout.addLayout(preview_time_row)
+        root.addWidget(preview_box)
 
         progress_box = QGroupBox("Generation")
         progress_layout = QVBoxLayout(progress_box)
@@ -340,14 +370,57 @@ class GenerationPage(QWidget):
         try:
             import tempfile
             output = Path(tempfile.gettempdir()) / "ryu_audiobook_voice_preview.wav"
+            self.preview_player.stop()
             provider.synthesize(text, output, voice)
             result = benchmark_provider(provider, voice, self.backend.currentData() or "automatic")
-            self.status.setText(
+            self.preview_path = output
+            self.preview_player.setSource(QUrl.fromLocalFile(str(output)))
+            self.preview_play_button.setEnabled(True)
+            self.preview_stop_button.setEnabled(True)
+            self.preview_play_button.setText("▶  Play Preview")
+            message = (
                 f"Preview ready • {result.seconds:.2f}s generation for "
-                f"{result.audio_seconds:.2f}s audio" if result.success else "Preview ready."
+                f"{result.audio_seconds:.2f}s audio"
+                if result.success else "Preview ready."
             )
+            self.preview_status.setText(message)
+            self.status.setText(message)
         except Exception as exc:
+            self.preview_path = None
+            self.preview_play_button.setEnabled(False)
+            self.preview_stop_button.setEnabled(False)
+            self.preview_status.setText("Preview generation failed.")
             self.status.setText(f"Preview failed: {exc}")
+
+    def play_preview(self) -> None:
+        if not self.preview_path or not self.preview_path.exists():
+            self.preview_status.setText("Generate a voice preview first.")
+            return
+        if self.preview_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.preview_player.pause()
+        else:
+            self.preview_player.play()
+
+    def stop_preview(self) -> None:
+        self.preview_player.stop()
+
+    def _preview_state_changed(self, state) -> None:
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.preview_play_button.setText("Ⅱ  Pause Preview")
+        elif state == QMediaPlayer.PlaybackState.PausedState:
+            self.preview_play_button.setText("▶  Resume Preview")
+        else:
+            self.preview_play_button.setText("▶  Play Preview")
+
+    def _preview_position(self, position: int) -> None:
+        self.preview_time.setText(
+            f"{self._fmt(position)} / {self._fmt(self.preview_player.duration())}"
+        )
+
+    def _preview_duration(self, duration: int) -> None:
+        self.preview_time.setText(
+            f"{self._fmt(self.preview_player.position())} / {self._fmt(duration)}"
+        )
 
     def _set_generation_locked(self, locked: bool) -> None:
         controls = [
