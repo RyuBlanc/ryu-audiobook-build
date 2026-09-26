@@ -69,18 +69,31 @@ def _heading_title(line: str, lines: list[str], index: int) -> str | None:
     for pattern in EXPLICIT_PATTERNS:
         match = pattern.match(line)
         if match:
-            number = match.group(2) if match.lastindex and match.lastindex >= 2 else ""
             suffix = (match.group(3) or "").strip() if match.lastindex and match.lastindex >= 3 else ""
-            if pattern is EXPLICIT_PATTERNS[0]:
-                return f"Chapter {number}" + (f" - {suffix}" if suffix else "")
-            if pattern is EXPLICIT_PATTERNS[1]:
-                return f"Part {number}" + (f" - {suffix}" if suffix else "")
-            return match.group(1).title() + (f" - {suffix}" if suffix else "")
+            if _looks_like_body_sentence(line, suffix):
+                continue
+            # Preserve the original heading instead of reconstructing a title.
+            return line.strip()
 
     if NUMBERED_PATTERN.match(line):
+        if not _looks_like_body_sentence(line, line):
+            return line
+
+    if re.match(r"^\s*[IVXLCDM]{1,8}(?:\s+|\s*[-:–—.]\s*).{1,100}$", line, re.I):
         return line
 
     if TITLE_WITH_NUMBER_PATTERN.match(line):
         return line
 
     return None
+
+
+def _looks_like_body_sentence(line: str, suffix: str) -> bool:
+    """Reject OCR/body text that merely starts like a chapter/part heading."""
+    if len(line) > 90:
+        return True
+    if "," in suffix and len(suffix.split()) >= 7:
+        return True
+    if re.search(r"[!?]$", suffix):
+        return True
+    return False
