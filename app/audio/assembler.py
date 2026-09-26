@@ -145,8 +145,10 @@ def assemble_m4b(
             "-vn", "-c:a", "aac", "-b:a", "96k", "-ar", "44100",
             str(audio_only),
         ])
-        if not audio_only.exists() or audio_only.stat().st_size < 4096:
-            raise RuntimeError("FFmpeg created no usable intermediate audiobook audio.")
+        if not audio_only.exists() or audio_only.stat().st_size == 0:
+            raise RuntimeError("FFmpeg created no intermediate audiobook audio.")
+        if _duration_ms(audio_only) <= 0:
+            raise RuntimeError("FFmpeg created an intermediate audiobook with no audio duration.")
 
         args = [
             "-i", str(audio_only),
