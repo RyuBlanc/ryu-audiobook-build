@@ -26,14 +26,20 @@ DIALOGUE_PATTERNS = [
     re.compile(r'『([^』]{2,500})』'),
 ]
 
+SPEAKER_VERBS = (
+    "said|asked|replied|answered|shouted|yelled|whispered|muttered|called|"
+    "cried|exclaimed|continued|added|insisted|wondered|demanded|begged|"
+    "groaned|sighed|laughed|snapped|stammered|murmured|screamed"
+)
+NAME_TOKEN = r"[A-ZÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'’-]{1,30}"
 ATTRIBUTION_AFTER = re.compile(
-    r'(?i)\b(?:said|asked|replied|answered|shouted|yelled|whispered|muttered|'
-    r'called|cried|exclaimed|continued|added|insisted|wondered)\s+'
-    r'([A-Z][A-Za-zÀ-ÖØ-öø-ÿ\'’-]{1,30}(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ\'’-]{1,30}){0,2})'
+    rf"(?i)\b(?:{SPEAKER_VERBS})\s+(?:the\s+)?({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})"
 )
 ATTRIBUTION_BEFORE = re.compile(
-    r'(?i)\b([A-Z][A-Za-zÀ-ÖØ-öø-ÿ\'’-]{1,30}(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ\'’-]{1,30}){0,2})'
-    r'\s+(?:said|asked|replied|answered|shouted|yelled|whispered|muttered|called|cried|exclaimed)'
+    rf"(?i)\b({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\s+(?:{SPEAKER_VERBS})\b"
+)
+ATTRIBUTION_PAREN = re.compile(
+    rf"(?i)\((?:{SPEAKER_VERBS})\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\)"
 )
 
 
@@ -60,8 +66,20 @@ def analyze_chapter(chapter: Chapter) -> CharacterAnalysis:
         add(match.group(1), _nearest_dialogue(text[start:match.start()]))
 
     for match in ATTRIBUTION_BEFORE.finditer(text):
-        end = min(len(text), match.end() + 650)
-        add(match.group(1), _nearest_dialogue(text[match.end():end]))
+        start = max(0, match.start() - 650)
+        add(match.group(1), _nearest_dialogue(text[start:match.start()]))
+
+    for match in ATTRIBUTION_PAREN.finditer(text):
+        start = max(0, match.start() - 650)
+        add(match.group(1), _nearest_dialogue(text[start:match.start()]))
+
+    # Japanese/light-novel dialogue frequently uses a speaker's name in the
+    # sentence immediately after the quote, without an English attribution verb.
+    for quote in _all_dialogue_spans(text):
+        nearby = text[quote[1]:min(len(text), quote[1] + 180)]
+        match = re.search(r"[,\s—–-]+([A-ZÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'’-]{1,30})\s*[.!?]?", nearby)
+        if match and _is_plausible_name(match.group(1)):
+            add(match.group(1), text[quote[0]:quote[1]])
 
     if not found:
         names: dict[str, int] = {}
@@ -127,3 +145,12 @@ def _is_plausible_name(value: str) -> bool:
     if not all(re.match(r"^[A-ZÀ-ÖØ-Þ]", word) for word in words):
         return False
     return any(len(word.strip(".,!?;:")) >= 3 for word in words)
+
+
+
+def _all_dialogue_spans(text: str) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    for pattern in DIALOGUE_PATTERNS:
+        for match in pattern.finditer(text):
+            spans.append((match.start(), match.end()))
+    return sorted(spans)
