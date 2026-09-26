@@ -170,10 +170,27 @@ class ProjectWorkflow(QMainWindow):
         if self.editor:
             self.stack.removeWidget(self.editor)
             self.editor.deleteLater()
-        self.editor = ChapterEditorPage(self.project.chapters, self.save_project, self.rename_project)
+        self.editor = ChapterEditorPage(self.project.chapters, self.save_project, self.rename_project, self.redetect_chapters)
         self.stack.addWidget(self.editor)
         self._editor_index = self.stack.indexOf(self.editor)
         self.select_section("Chapters")
+
+    def redetect_chapters(self) -> None:
+        if not self.project or not self.project.source_path or not self.project.source_path.exists():
+            QMessageBox.warning(self, "Re-detect Chapters", "The original source file is not available.")
+            return
+        try:
+            book = extract_text(self.project.source_path)
+            chapters = detect_chapters(book.text)
+            if not chapters:
+                raise RuntimeError("No readable chapters were detected.")
+            self.project.chapters = chapters
+            self.project.save()
+            self.library.refresh()
+            self.open_editor()
+            self.ensure_generation_page()
+        except Exception as exc:
+            QMessageBox.critical(self, "Re-detect Chapters Failed", str(exc))
 
     def rename_project(self, title: str) -> None:
         if not self.project or not title.strip():
