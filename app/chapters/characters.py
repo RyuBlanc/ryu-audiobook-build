@@ -73,13 +73,12 @@ def analyze_chapter(chapter: Chapter) -> CharacterAnalysis:
         start = max(0, match.start() - 650)
         add(match.group(1), _nearest_dialogue(text[start:match.start()]))
 
-    # Japanese/light-novel dialogue frequently uses a speaker's name in the
-    # sentence immediately after the quote, without an English attribution verb.
+    # Quoted dialogue is the strongest signal. Look both before and after
+    # each quote for "Name said", "Name:", "Name —", or "said Name".
     for quote in _all_dialogue_spans(text):
-        nearby = text[quote[1]:min(len(text), quote[1] + 180)]
-        match = re.search(r"[,\s—–-]+([A-ZÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'’-]{1,30})\s*[.!?]?", nearby)
-        if match and _is_plausible_name(match.group(1)):
-            add(match.group(1), text[quote[0]:quote[1]])
+        speaker = _speaker_near_quote(text, quote[0], quote[1])
+        if speaker:
+            add(speaker, text[quote[0]:quote[1]])
 
     if not found:
         names: dict[str, int] = {}
@@ -154,3 +153,32 @@ def _all_dialogue_spans(text: str) -> list[tuple[int, int]]:
         for match in pattern.finditer(text):
             spans.append((match.start(), match.end()))
     return sorted(spans)
+
+
+
+def _speaker_near_quote(text: str, start: int, end: int) -> str | None:
+    before = text[max(0, start - 180):start]
+    after = text[end:min(len(text), end + 220)]
+
+    name = r"[A-ZÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'’-]{1,30}"
+    verbs = r"(?:said|asked|replied|answered|shouted|yelled|whispered|muttered|called|cried|exclaimed|continued|added|insisted|wondered|demanded|begged|sighed|laughed|snapped|murmured|screamed)"
+
+    patterns = [
+        rf"({name}(?:\s+{name}){{0,2}})\s*(?:{verbs})\s*$",
+        rf"({name}(?:\s+{name}){{0,2}})\s*[:—–-]\s*$",
+        rf"(?:{verbs})\s+({name}(?:\s+{name}){{0,2}})\s*$",
+        rf"^\s*({name}(?:\s+{name}){{0,2}})\s*(?:said|asked)?\s*[:—–-]",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, before, re.I)
+        if match and _is_plausible_name(match.group(1)):
+            return _clean_name(match.group(1))
+
+    for pattern in (
+        rf"^\s*(?:{verbs})\s+({name}(?:\s+{name}){{0,2}})\b",
+        rf"^\s*({name}(?:\s+{name}){{0,2}})\s*(?:said|asked|replied|answered)\b",
+    ):
+        match = re.search(pattern, after, re.I)
+        if match and _is_plausible_name(match.group(1)):
+            return _clean_name(match.group(1))
+    return None
