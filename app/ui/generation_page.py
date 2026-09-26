@@ -310,6 +310,7 @@ class GenerationPage(QWidget):
             profiles,
             assignments,
             narrating_character=narrating_character,
+            backend_override=self.backend.currentData() or "automatic",
         ), narrator_voice
 
     def _provider(self):
