@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QItemSelectionModel
 from PySide6.QtWidgets import (
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -12,6 +13,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QInputDialog,
+    QSizePolicy,
 )
 from app.chapters.detector import Chapter
 from app.chapters.editor import ChapterEditor
@@ -49,7 +51,12 @@ class ChapterEditorPage(QWidget):
         primary.addStretch(1)
         root.addLayout(primary)
 
-        buttons = QHBoxLayout()
+        # Use a responsive grid instead of one long toolbar. The old single-row
+        # toolbar could extend beyond the available viewport on smaller Windows
+        # displays or with display scaling enabled.
+        buttons = QGridLayout()
+        buttons.setHorizontalSpacing(6)
+        buttons.setVerticalSpacing(6)
         actions = [
             ("Rename", self.rename),
             ("Split", self.split),
@@ -62,10 +69,14 @@ class ChapterEditorPage(QWidget):
             ("Delete Selected Chapters", self.delete_selected),
             ("Rename Book / Project", self.rename_book),
         ]
-        for label, handler in actions:
+        for index, (label, handler) in enumerate(actions):
             button = QPushButton(label)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             button.clicked.connect(handler)
-            buttons.addWidget(button)
+            row, column = divmod(index, 3)
+            buttons.addWidget(button, row, column)
+        for column in range(3):
+            buttons.setColumnStretch(column, 1)
         root.addLayout(buttons)
         body = QHBoxLayout()
         body.addWidget(self.list, 1)
