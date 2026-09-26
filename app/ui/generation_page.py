@@ -303,11 +303,13 @@ class GenerationPage(QWidget):
             return narrator_provider, narrator_voice
         from app.tts.cast_provider import CastAwareProvider
         profiles = {profile.name: profile for profile in self.profiles}
+        narrating_character = state.get("voice_cast_narrating_character")
         return CastAwareProvider(
             narrator_provider,
             narrator_voice,
             profiles,
             assignments,
+            narrating_character=narrating_character,
         ), narrator_voice
 
     def _provider(self):
@@ -318,7 +320,7 @@ class GenerationPage(QWidget):
         if backend == "automatic":
             backend = profile.backend
         if profile.provider == "piper":
-            return PiperProvider(backend="cuda" if backend == "cuda" else "cpu"), profile.voice_id
+            return PiperProvider(backend=backend), profile.voice_id
         if profile.provider == "windows-sapi":
             return SystemSAPIProvider(), profile.voice_id
         provider, voice = provider_from_profile(profile)

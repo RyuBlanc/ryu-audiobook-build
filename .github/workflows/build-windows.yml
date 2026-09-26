@@ -1,5 +1,4 @@
 name: Build Windows App
-# Installer artifact is intentionally short-retention to minimize Actions storage.
 
 on:
   push:
@@ -22,58 +21,68 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install core dependencies
+      - name: Install dependencies
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
+      - name: Download built-in offline neural voices
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "bundled_models\piper" | Out-Null
+          python -m piper.download_voices --data-dir "bundled_models\piper" en_US-amy-medium en_US-lessac-medium
+          $models = Get-ChildItem "bundled_models\piper\*.onnx"
+          if ($models.Count -lt 2) {
+            throw "Expected at least two bundled Piper voice models, found $($models.Count)."
+          }
+          Get-ChildItem "bundled_models\piper" | Select-Object Name,Length
+
       - name: Build application
         shell: pwsh
         run: python build.py
 
-      - name: Verify bundled UI modules
+      - name: Verify bundled offline voices
         shell: pwsh
         run: |
           $exe = "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
           if (-not (Test-Path $exe)) {
             throw "Expected executable was not produced: $exe"
           }
-
-          # Verify the source-form fallback produced by the dedicated UI hook.
-          $voiceSource = "dist\Ryu's Audiobook\_internal\app\ui\voice_page.py"
-          if (-not (Test-Path $voiceSource)) {
-            throw "Required bundled UI source is missing: $voiceSource"
+          $models = Get-ChildItem "dist\Ryu's Audiobook\_internal\bundled_models\piper\*.onnx"
+          if ($models.Count -lt 2) {
+            throw "The frozen application does not contain the offline neural voice pack."
           }
 
+      - name: Verify bundled UI modules
+        shell: pwsh
+        run: |
           $required = @(
             "app.ui.voice_page",
+            "app.ui.voice_cast_page",
             "app.ui.generation_page",
             "app.ui.chapter_editor",
             "app.ui.import_page",
             "app.ui.library",
             "app.ui.hardware_page",
-            "app.ui.models_page"
+            "app.ui.models_page",
+            "app.tts.cast_provider"
           )
-
           foreach ($module in $required) {
             $relative = $module.Replace(".", "\") + ".py"
             $path = "dist\Ryu's Audiobook\_internal\$relative"
             if (-not (Test-Path $path)) {
-              throw "Required bundled UI source is missing: $path"
+              throw "Required bundled source is missing: $path"
             }
           }
 
-          # Smoke-test the actual frozen executable. If an import error occurs,
-          # the process exits immediately with a non-zero code. A healthy GUI
-          # remains running, so terminate it after a short startup window.
-          $process = Start-Process -FilePath $exe -PassThru
-          Start-Sleep -Seconds 8
+      - name: Smoke-test frozen executable
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath "dist\Ryu's Audiobook\Ryu's Audiobook.exe" -PassThru
+          Start-Sleep -Seconds 10
           if ($process.HasExited) {
-            if ($process.ExitCode -ne 0) {
-              throw "Frozen application exited during startup with code $($process.ExitCode)."
-            }
-            throw "Frozen application exited unexpectedly during startup."
+            throw "Frozen application exited during startup with code $($process.ExitCode)."
           }
           Stop-Process -Id $process.Id -Force
 
@@ -86,13 +95,10 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\RyuAudiobook.iss"
 
-      # Artifacts use a 1-day retention period. Do not delete artifacts here:
-      # concurrent push workflows can otherwise delete another run's freshly
-      # uploaded installer while that run is still completing.
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: Ryu-Audiobook-Setup-${{ github.sha }}
+          name: Ryu-Audiobook-Setup-\${{ github.sha }}
           path: "installer/installer-output/Ryu's Audiobook Setup.exe"
           if-no-files-found: error
           retention-days: 1

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import hashlib
 import json
 import re
 import wave
@@ -11,6 +12,7 @@ from app.chapters.detector import Chapter
 from app.tts.base import TTSProvider
 from app.tts.chunker import split_text
 
+
 @dataclass
 class GenerationResult:
     chapter_number: int
@@ -18,12 +20,15 @@ class GenerationResult:
     chunks_total: int
     chunks_completed: int
 
+
 def safe_name(value: str) -> str:
     value = re.sub(r'[<>:"/\\|?*]+', "_", value).strip()
     return value or "chapter"
 
+
 def state_path(chapter_dir: Path) -> Path:
     return chapter_dir / "generation.json"
+
 
 def load_state(chapter_dir: Path) -> dict:
     path = state_path(chapter_dir)
@@ -34,8 +39,22 @@ def load_state(chapter_dir: Path) -> dict:
     except (OSError, ValueError, json.JSONDecodeError):
         return {"completed": []}
 
+
 def save_state(chapter_dir: Path, state: dict) -> None:
     state_path(chapter_dir).write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+
+def _provider_signature(provider: TTSProvider, voice: str | None, chunks: list[tuple[str, str | None]]) -> str:
+    custom = getattr(provider, "generation_signature", None)
+    if callable(custom):
+        base = custom()
+    else:
+        base = f"{provider.__class__.__module__}.{provider.__class__.__name__}:{voice or ''}"
+    payload = {"base": base, "chunks": [(text, chunk_voice) for text, chunk_voice in chunks]}
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
 
 def generate_chapter(
     chapter: Chapter,
@@ -57,36 +76,32 @@ def generate_chapter(
         raise ValueError(
             f"Chapter {chapter.number} \"{chapter.title}\" contains no readable text to synthesize."
         )
+
+    signature = _provider_signature(provider, voice, chunks_with_voices)
     state = load_state(chapter_dir)
-    previous_total = state.get("chunks_total")
-    if previous_total is not None and previous_total != len(chunks):
-        # A changed chapter split/cast assignment invalidates the old chunk map.
-        state = {"completed": [], "chunks_total": len(chunks)}
+    if state.get("chunks_total") != len(chunks) or state.get("generation_signature") != signature:
+        state = {
+            "completed": [],
+            "chunks_total": len(chunks),
+            "generation_signature": signature,
+        }
     else:
         state.setdefault("chunks_total", len(chunks))
-    completed = set(state.get("completed", []))
+        state.setdefault("generation_signature", signature)
 
+    completed = set(state.get("completed", []))
     for index, chunk in enumerate(chunks):
         filename = f"{index + 1:05d}.wav"
         output = chunks_dir / filename
-        needs_generation = index not in completed or not output.exists()
-        if needs_generation:
-            chunk_voice = chunks_with_voices[index][1]
-            provider.synthesize(chunk, output, chunk_voice)
+        if index not in completed or not output.exists():
+            provider.synthesize(chunk, output, chunks_with_voices[index][1])
 
-        # Never mark a chunk complete unless the provider actually produced a
-        # readable WAV file. This also repairs stale generation state from a
-        # previous interrupted/failed run.
         if not output.exists() or output.stat().st_size < 1024:
-            raise RuntimeError(
-                f"Audio chunk {index + 1}/{len(chunks)} was not created: {output.name}"
-            )
+            raise RuntimeError(f"Audio chunk {index + 1}/{len(chunks)} was not created: {output.name}")
         try:
-            with wave.open(str(output), "rb") as wav:
-                if wav.getnframes() <= 0 or wav.getframerate() <= 0:
-                    raise RuntimeError(
-                        f"Audio chunk {index + 1}/{len(chunks)} is empty: {output.name}"
-                    )
+            with wave.open(str(output), "rb") as wav_file:
+                if wav_file.getnframes() <= 0 or wav_file.getframerate() <= 0:
+                    raise RuntimeError(f"Audio chunk {index + 1}/{len(chunks)} is empty: {output.name}")
         except (wave.Error, OSError) as exc:
             raise RuntimeError(
                 f"Audio chunk {index + 1}/{len(chunks)} is not a valid WAV: {output.name} ({exc})"
@@ -99,10 +114,15 @@ def generate_chapter(
         if progress:
             progress(len(completed), len(chunks))
 
-    manifest = chapter_dir / "manifest.json"
-    manifest.write_text(
+    (chapter_dir / "manifest.json").write_text(
         json.dumps(
-            {"chapter": chapter.number, "title": chapter.title, "chunks": len(chunks), "completed": len(completed)},
+            {
+                "chapter": chapter.number,
+                "title": chapter.title,
+                "chunks": len(chunks),
+                "completed": len(completed),
+                "generation_signature": signature,
+            },
             indent=2,
         ),
         encoding="utf-8",

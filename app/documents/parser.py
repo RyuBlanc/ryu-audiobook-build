@@ -14,12 +14,14 @@ class ExtractedBook:
 
 SUPPORTED_EXTENSIONS = {".txt", ".pdf", ".epub", ".docx"}
 
-# Standalone download-site watermarks that commonly appear on scanned ebook
-# pages. These are removed only when they occupy their own line so legitimate
-# URLs inside story text are preserved.
-NOISE_URL_PATTERNS = (
+# Standalone ebook download/page watermarks. These patterns are intentionally
+# narrow so normal URLs or story text are not deleted.
+NOISE_PATTERNS = (
     re.compile(r"^https?://(?:www\.)?mp4directs\.com(?:/.*)?$", re.I),
     re.compile(r"^(?:www\.)?mp4directs\.com(?:/.*)?$", re.I),
+    re.compile(r"^Goldenagato\s*\|\s*mp4directs\.com\s*$", re.I),
+    re.compile(r"^Page\s+\d+\s*$", re.I),
+    re.compile(r"^Page\s+\d+\s+.*mp4directs\.com.*$", re.I),
 )
 
 
@@ -70,11 +72,13 @@ def _extract_docx(path: Path) -> str:
 
 
 def remove_page_noise(text: str) -> str:
-    """Remove known standalone ebook download watermarks without deleting story URLs."""
     kept = []
     for raw_line in text.splitlines():
         line = raw_line.strip()
-        if any(pattern.fullmatch(line) for pattern in NOISE_URL_PATTERNS):
+        if any(pattern.fullmatch(line) for pattern in NOISE_PATTERNS):
+            continue
+        # Some PDF extractors keep the page number and watermark on one line.
+        if re.fullmatch(r"Page\s+\d+\s+.*mp4directs\.com.*", line, re.I):
             continue
         kept.append(raw_line)
     return "\n".join(kept)

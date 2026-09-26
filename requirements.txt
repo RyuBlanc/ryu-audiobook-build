@@ -7,4 +7,5 @@ pyttsx3>=2.98,<3
 edge-tts>=7,<8
 imageio-ffmpeg>=0.6,<1
 psutil>=6,<8
+piper-tts>=1.4,<2
 PyInstaller>=6.10,<7

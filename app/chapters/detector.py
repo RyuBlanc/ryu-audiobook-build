@@ -23,16 +23,15 @@ EXPLICIT_PATTERNS = [
     ),
 ]
 
-# Deliberately not used for automatic chapter detection. Numbered prose such as
-# "1. I even got..." is common in extracted novels and must remain story text.
-NUMBERED_PATTERN = re.compile(r"^\s*(\d{1,4})\s*[.)-]\s+(.{1,120})\s*$")
+# Many light novels use headings such as Life.0 / Life.1. This is deliberately
+# narrow so ordinary prose is never promoted to a chapter.
 TITLE_WITH_NUMBER_PATTERN = re.compile(
-    r"^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ ._'’:&/()\\[\\]–—-]{0,50}\\.\\d{1,4}(?:\\s+.+)?$"
+    r"^\s*[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ _'’&/-]{0,35}\.(\d{1,4})\s*(.*)$"
 )
 
 
 def detect_chapters(text: str) -> list[Chapter]:
-    """Detect likely chapter headings without throwing away ordinary story text."""
+    """Detect chapter markers conservatively without discarding story text."""
     text = remove_page_noise(text)
     lines = text.splitlines()
     markers: list[tuple[int, str]] = []
@@ -41,7 +40,7 @@ def detect_chapters(text: str) -> list[Chapter]:
         candidate = line.strip()
         if not candidate:
             continue
-        heading = _heading_title(candidate, lines, index)
+        heading = _heading_title(candidate)
         if heading is not None:
             markers.append((index, heading))
 
@@ -54,38 +53,32 @@ def detect_chapters(text: str) -> list[Chapter]:
     for position, (start, title) in enumerate(markers):
         end = markers[position + 1][0] if position + 1 < len(markers) else len(lines)
         body = "\n".join(lines[start + 1:end]).strip()
-
         if position == 0 and preamble:
             body = f"{preamble}\n\n{body}".strip()
-
         chapters.append(Chapter(len(chapters) + 1, title, body))
 
     return chapters
 
 
-def _heading_title(line: str, lines: list[str], index: int) -> str | None:
-    lowered = line.lower()
-    if re.search(r"(https?://|www\.)", lowered):
+def _heading_title(line: str) -> str | None:
+    if re.search(r"(?:https?://|www\.|mp4directs\.com)", line, re.I):
         return None
 
     for pattern in EXPLICIT_PATTERNS:
         match = pattern.match(line)
         if match:
-            suffix = (match.group(3) or "").strip() if match.lastindex and match.lastindex >= 3 else ""
+            suffix = (match.group(match.lastindex) or "").strip() if match.lastindex else ""
             if _looks_like_body_sentence(line, suffix):
                 continue
-            # Preserve the original heading instead of reconstructing a title.
-            return line.strip()
+            return line
 
-    if re.match(r"^\s*[IVXLCDM]{1,8}(?:\s+|\s*[-:–—.]\s*).{1,100}$", line, re.I):
-        return line
-
-    if TITLE_WITH_NUMBER_PATTERN.match(line):
-        return line
+    match = TITLE_WITH_NUMBER_PATTERN.match(line)
+    if match:
+        suffix = (match.group(2) or "").strip()
+        if not suffix or len(suffix.split()) <= 12:
+            return line
 
     return None
-
-
 
 
 def _looks_like_body_sentence(line: str, suffix: str) -> bool:
@@ -93,25 +86,14 @@ def _looks_like_body_sentence(line: str, suffix: str) -> bool:
     suffix = suffix.strip()
     if len(line) > 90:
         return True
-
-    # A real heading may be long, but a quoted sentence is overwhelmingly
-    # likely to be body prose. This specifically prevents extracted light
-    # novels such as: Chapter 8 "I even bought new pants. You can't tell..."
     if re.search(r'["“”「」『』]', suffix):
         return True
-
-    # Multiple sentence boundaries are a strong prose signal.
     if len(re.findall(r"[.!?。！？]", suffix)) >= 2:
         return True
-
     if "," in suffix and len(suffix.split()) >= 7:
         return True
     if re.search(r"[!?]$", suffix):
         return True
-
-    # Normal chapter titles are usually short. Long, sentence-like suffixes
-    # should stay in the chapter body instead of becoming a chapter marker.
     if len(suffix.split()) > 14:
         return True
-
     return False

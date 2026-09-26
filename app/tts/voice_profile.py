@@ -28,21 +28,68 @@ def profiles_file() -> Path:
     return voices_root() / "voices.json"
 
 
+def builtin_voice_profiles() -> list[VoiceProfile]:
+    """Return neural voices shipped with the application, when present."""
+    try:
+        from app.tts.providers.piper import PiperProvider
+        paths = PiperProvider.model_paths()
+    except Exception:
+        return []
+
+    metadata = {
+        "en_US-amy-medium": ("English", "Female", "Amy", "Recommended offline narrator voice"),
+        "en_US-lessac-medium": ("English", "Male", "Lessac", "Recommended offline narrator voice"),
+        "en_US-ryan-high": ("English", "Male", "Ryan", "High-quality offline narrator voice"),
+    }
+    result: list[VoiceProfile] = []
+    for path in paths:
+        language, gender, friendly, note = metadata.get(
+            path.stem,
+            (path.stem.split("-", 1)[0], "Neutral", path.stem, "Built-in offline neural voice"),
+        )
+        result.append(
+            VoiceProfile(
+                name=f"Offline Neural • {friendly}",
+                provider="piper",
+                voice_id=path.stem,
+                model_id="piper",
+                backend="automatic",
+                language=language,
+                notes=f"Built-in offline voice • {gender} • {note}",
+                authorized=True,
+            )
+        )
+    return result
+
+
 def load_profiles() -> list[VoiceProfile]:
     path = profiles_file()
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return [VoiceProfile(**item) for item in data]
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        return []
+    saved: list[VoiceProfile] = []
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            saved = [VoiceProfile(**item) for item in data]
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            saved = []
+
+    combined = list(builtin_voice_profiles())
+    names = {p.name.casefold() for p in combined}
+    for profile in saved:
+        if profile.name.casefold() not in names:
+            combined.append(profile)
+            names.add(profile.name.casefold())
+    return combined
 
 
 def save_profiles(profiles: list[VoiceProfile]) -> None:
     voices_root().mkdir(parents=True, exist_ok=True)
+    persistent = [
+        p for p in profiles
+        if not p.name.startswith("Offline Neural •")
+        and not p.notes.lower().startswith("built-in offline")
+    ]
     profiles_file().write_text(
-        json.dumps([asdict(profile) for profile in profiles], ensure_ascii=False, indent=2),
+        json.dumps([asdict(profile) for profile in persistent], ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -55,29 +102,18 @@ def import_reference_audio(source: Path, profile_name: str) -> Path:
     if not source.exists() or not source.is_file():
         raise FileNotFoundError(source)
 
-    # Keep the original reference recording, and create a normalized WAV copy
-    # for local voice engines so MP3/M4A/FLAC/etc. can be used reliably.
     original = target_dir / source.name
     shutil.copy2(source, original)
-
     target = target_dir / "reference.wav"
     if source.suffix.lower() == ".wav":
         shutil.copy2(source, target)
     else:
         result = subprocess.run(
             [
-                imageio_ffmpeg.get_ffmpeg_exe(),
-                "-y",
-                "-i", str(source),
-                "-vn",
-                "-ac", "1",
-                "-ar", "24000",
-                "-c:a", "pcm_s16le",
-                str(target),
+                imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-i", str(source), "-vn",
+                "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", str(target),
             ],
-            check=False,
-            capture_output=True,
-            text=True,
+            check=False, capture_output=True, text=True,
         )
         if result.returncode != 0 or not target.exists() or target.stat().st_size < 1024:
             raise RuntimeError(

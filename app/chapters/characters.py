@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
+from collections import Counter
 
 from app.chapters.detector import Chapter
 
@@ -11,124 +12,320 @@ class Character:
     name: str
     role: str
     dialogue_count: int = 0
-    examples: list[str] | None = None
+    examples: list[str] = field(default_factory=list)
+    confidence: float = 0.0
+    aliases: list[str] = field(default_factory=list)
 
 
 @dataclass
 class CharacterAnalysis:
     narrator: Character
     characters: list[Character]
+    dialogue_total: int = 0
+    unassigned_dialogue: int = 0
 
 
-DIALOGUE_PATTERNS = [
-    re.compile(r'[“"]([^”"]{2,500})[”"]'),
-    re.compile(r'「([^」]{2,500})」'),
-    re.compile(r'『([^』]{2,500})』'),
-]
+DIALOGUE_PATTERNS = (
+    re.compile(r'[“"]([^”"]{2,1800})[”]'),
+    re.compile(r'「([^」]{2,1800})」'),
+    re.compile(r'『([^』]{2,1800})』'),
+)
 
 SPEAKER_VERBS = (
     "said|asked|replied|answered|shouted|yelled|whispered|muttered|called|"
     "cried|exclaimed|continued|added|insisted|wondered|demanded|begged|"
-    "groaned|sighed|laughed|snapped|stammered|murmured|screamed"
-)
-NAME_TOKEN = r"[A-ZÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'’-]{1,30}"
-ATTRIBUTION_AFTER = re.compile(
-    rf"(?i)\b(?:{SPEAKER_VERBS})\s+(?:the\s+)?({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})"
-)
-ATTRIBUTION_BEFORE = re.compile(
-    rf"(?i)\b({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\s+(?:{SPEAKER_VERBS})\b"
-)
-ATTRIBUTION_PAREN = re.compile(
-    rf"(?i)\((?:{SPEAKER_VERBS})\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\)"
+    "groaned|sighed|laughed|snapped|stammered|murmured|screamed|"
+    "announced|introduced|explained|remarked|responded|mumbled|roared"
 )
 
-
-def analyze_chapter(chapter: Chapter) -> CharacterAnalysis:
-    """Local, reviewable first-pass character/dialogue analysis."""
-    text = chapter.text
-    found: dict[str, Character] = {}
-
-    def add(name: str, dialogue: str = "") -> None:
-        name = _clean_name(name)
-        if not _is_plausible_name(name):
-            return
-        key = name.casefold()
-        item = found.get(key)
-        if item is None:
-            item = Character(name=name, role="Story Character", examples=[])
-            found[key] = item
-        item.dialogue_count += 1
-        if dialogue and len(item.examples or []) < 3:
-            item.examples.append(_clean_dialogue(dialogue))
-
-    for match in ATTRIBUTION_AFTER.finditer(text):
-        start = max(0, match.start() - 650)
-        add(match.group(1), _nearest_dialogue(text[start:match.start()]))
-
-    for match in ATTRIBUTION_BEFORE.finditer(text):
-        start = max(0, match.start() - 650)
-        add(match.group(1), _nearest_dialogue(text[start:match.start()]))
-
-    for match in ATTRIBUTION_PAREN.finditer(text):
-        start = max(0, match.start() - 650)
-        add(match.group(1), _nearest_dialogue(text[start:match.start()]))
-
-    # Quoted dialogue is the strongest signal. Look both before and after
-    # each quote for "Name said", "Name:", "Name —", or "said Name".
-    for quote in _all_dialogue_spans(text):
-        speaker = _speaker_near_quote(text, quote[0], quote[1])
-        if speaker:
-            add(speaker, text[quote[0]:quote[1]])
-
-    if not found:
-        names: dict[str, int] = {}
-        for match in re.finditer(r'\b([A-Z][A-Za-zÀ-ÖØ-öø-ÿ\'’-]{2,24})\b', text):
-            name = match.group(1)
-            if not _is_plausible_name(name):
-                continue
-            names[name] = names.get(name, 0) + 1
-        for name, count in sorted(names.items(), key=lambda x: (-x[1], x[0])):
-            if count >= 3:
-                found[name.casefold()] = Character(name, "Possible Character", 0, [])
-
-    characters = sorted(found.values(), key=lambda c: (-c.dialogue_count, c.name.casefold()))
-    for character in characters:
-        character.role = (
-            "Primary Character" if character.dialogue_count >= 8
-            else "Supporting Character" if character.dialogue_count >= 2
-            else "Possible Character"
-        )
-
-    return CharacterAnalysis(Character("Narrator", "Narrator", 0, []), characters)
-
-
-def _nearest_dialogue(text: str) -> str:
-    matches = []
-    for pattern in DIALOGUE_PATTERNS:
-        matches.extend(pattern.findall(text))
-    return matches[-1] if matches else ""
-
-
-def _clean_name(value: str) -> str:
-    return re.sub(r'\s+', ' ', value.strip(" ,.;:!?-")).strip()
-
-
-def _clean_dialogue(value: str) -> str:
-    value = re.sub(r'\s+', ' ', value).strip()
-    return value[:240] + ("…" if len(value) > 240 else "")
-
+NAME_TOKEN = r"[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30}\b"
 
 NAME_STOPWORDS = {
-    "I", "I'm", "I’ve", "I'd", "I'll", "We", "We're", "We've", "They",
-    "He", "He's", "She", "She's", "It", "It's", "You", "Your", "My",
-    "Our", "Their", "The", "This", "That", "These", "Those", "There",
-    "But", "And", "Or", "So", "Then", "When", "What", "Why", "How",
-    "Where", "Who", "Her", "His", "Them", "Us", "Me", "If", "As",
-    "Wake", "Chapter", "Part", "Extra", "Bonus",
+    "The","A","An","I","Im","I'm","I’m","Ive","I've","I’ve","Id","I'd","I’d","Ill","I'll","I’ll",
+    "He","Hes","He's","He’s","She","Shes","She's","She’s","It","Its","It's","It’s",
+    "We","Were","We're","We’re","We've","We’ve","They","Their","Them","You","Your","Yours",
+    "My","Our","Ours","This","That","These","Those","When","What","Why","How","Where","Who","Whom","Which",
+    "And","But","So","Then","As","If","Or","There","Not","Yes","No","All","One","Someone","Whoever",
+    "Anyway","Maybe","Perhaps","Given","Honestly","However","Still","Would","Could","Should","Must","Might",
+    "Can","Will","Do","Does","Did","Done","Have","Has","Had","Was","Be","Been","Being","Is","Are","Am",
+    "To","Of","In","On","At","By","For","From","With","About","Into","Over","Under","Again","Very","Really",
+    "Just","Even","Only","More","Most","Some","Any","Each","Every","Either","Neither","Both","Another","Other",
+    "Such","Same","Too","Also","Here","Because","While","Though","Before","After","During","Until","Since","Than",
+    "Once","Yet","Chapter","Chap","Part","Life","Page","Goldenagato","Pdf","Book","President","Club",
+    "School","Building","Room","Street","Day","Night","Morning","Afternoon","Evening","God","Devil","Demon",
+    "Human","Humans","Girl","Boy","Man","Woman","Someone","Something","Anything","Nothing","Everyone","Everybody",
+    "Him","Her","Me","Us","His","Our","Their","These","Those","Wha","Heh","Ah","Oh","Uh","Hmm",
 }
 
 
+def analyze_chapter(chapter: Chapter) -> CharacterAnalysis:
+    return analyze_book([chapter])
+
+
+def analyze_book(chapters: list[Chapter]) -> CharacterAnalysis:
+    """Local, deterministic, reviewable book-wide character analysis."""
+    text = "\n\n".join(c.text for c in chapters if c.text)
+    text = _clean_analysis_text(text)
+    narrator_name = _detect_first_person_narrator(text)
+    candidates = _discover_candidates(text)
+    canonical, aliases = _canonicalize_candidates(candidates)
+
+    records: dict[str, Character] = {
+        name.casefold(): Character(
+            name=name,
+            role="Possible Character",
+            aliases=sorted(aliases.get(name, set())),
+        )
+        for name in canonical
+    }
+
+    spans = _all_dialogue_spans(text)
+    last_speaker: str | None = None
+    assigned_dialogue = 0
+
+    for start, end, dialogue in spans:
+        speaker, confidence = _speaker_near_quote(
+            text, start, end, canonical, narrator_name, last_speaker
+        )
+        if not speaker:
+            continue
+        speaker = _resolve_canonical(speaker, canonical, aliases) or speaker
+        key = speaker.casefold()
+        if key not in records:
+            records[key] = Character(name=speaker, role="Possible Character")
+        item = records[key]
+        item.dialogue_count += 1
+        item.confidence = max(item.confidence, confidence)
+        if len(item.examples) < 5:
+            item.examples.append(_clean_dialogue(dialogue))
+        assigned_dialogue += 1
+        last_speaker = speaker
+
+    if narrator_name:
+        narrator_name = _resolve_canonical(narrator_name, canonical, aliases) or narrator_name
+        records.setdefault(
+            narrator_name.casefold(),
+            Character(name=narrator_name, role="Narrating Character"),
+        )
+
+    characters = list(records.values())
+    characters.sort(key=lambda c: (-c.dialogue_count, -c.confidence, c.name.casefold()))
+    for item in characters:
+        item.role = (
+            "Primary Character" if item.dialogue_count >= 8 else
+            "Supporting Character" if item.dialogue_count >= 2 else
+            "Possible Character"
+        )
+        if narrator_name and item.name.casefold() == narrator_name.casefold():
+            item.role = "Narrating Character"
+
+    audiobook_narrator = Character(
+        name="Narrator",
+        role="Audiobook Narrator",
+        confidence=1.0,
+    )
+    return CharacterAnalysis(
+        audiobook_narrator,
+        characters,
+        dialogue_total=len(spans),
+        unassigned_dialogue=max(0, len(spans) - assigned_dialogue),
+    )
+
+
+def _clean_analysis_text(text: str) -> str:
+    text = re.sub(r"^\s*Page\s+\d+\s+.*mp4directs\.com.*$", "", text, flags=re.I | re.M)
+    text = re.sub(r"^\s*Page\s+\d+\s*$", "", text, flags=re.I | re.M)
+    text = re.sub(r"^.*mp4directs\.com.*$", "", text, flags=re.I | re.M)
+    return text
+
+
+def _detect_first_person_narrator(text: str) -> str | None:
+    patterns = (
+        r"\b([A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30}(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30})?)\s*[—-]\s*that['’]s my name\b",
+        r"\bmy name is\s+([A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30}(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30})?)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match and _is_plausible_name(match.group(1)):
+            return _clean_name(match.group(1))
+    return None
+
+
+def _discover_candidates(text: str) -> set[str]:
+    candidates: set[str] = set()
+    patterns = (
+        rf"\b({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\s+(?:{SPEAKER_VERBS})\b",
+        rf"\b(?:{SPEAKER_VERBS})\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\b",
+        rf"\b(?:named|called)\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\b",
+        rf"\b(?:girlfriend|boyfriend|friend|girl|boy|woman|man|student|teacher|classmate)\s+(?:named|called)\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\b",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            name = _clean_name(match.group(1))
+            if _is_plausible_name(name):
+                candidates.add(name)
+
+    counts = Counter()
+    mid_sentence = Counter()
+    for match in re.finditer(NAME_TOKEN, text):
+        token = _clean_name(match.group(0))
+        if not _is_plausible_name(token):
+            continue
+        counts[token] += 1
+        prefix = text[max(0, match.start() - 2):match.start()]
+        if prefix and not re.search(r"[.!?。！？\n\r][\s\"“”]*$", prefix):
+            mid_sentence[token] += 1
+    for token, count in counts.items():
+        if count >= 4 and mid_sentence[token] >= 2:
+            candidates.add(token)
+
+    for match in re.finditer(rf"\b({NAME_TOKEN}\s+{NAME_TOKEN})\b", text):
+        name = _clean_name(match.group(1))
+        if _is_plausible_name(name):
+            candidates.add(name)
+    return candidates
+
+
+def _canonicalize_candidates(candidates: set[str]) -> tuple[list[str], dict[str, set[str]]]:
+    ordered = sorted(candidates, key=lambda x: (-len(x.split()), -len(x), x.casefold()))
+    canonical: list[str] = []
+    aliases: dict[str, set[str]] = {}
+    for candidate in ordered:
+        if not _is_plausible_name(candidate):
+            continue
+        words = candidate.split()
+        target = None
+        for existing in list(canonical):
+            ewords = existing.split()
+            if len(words) == 1 and len(ewords) > 1 and words[0].casefold() in {w.casefold() for w in ewords}:
+                target = existing
+                break
+            if len(ewords) == 1 and len(words) > 1 and ewords[0].casefold() in {w.casefold() for w in words}:
+                target = candidate
+                canonical.remove(existing)
+                aliases.setdefault(candidate, set()).add(existing)
+                break
+        if target:
+            aliases.setdefault(target, set()).add(candidate)
+        elif candidate not in canonical:
+            canonical.append(candidate)
+    canonical.sort(key=lambda x: x.casefold())
+    return canonical, aliases
+
+
+def _speaker_near_quote(
+    text: str,
+    start: int,
+    end: int,
+    candidates: list[str],
+    narrator_name: str | None,
+    last_speaker: str | None,
+) -> tuple[str | None, float]:
+    before = text[max(0, start - 650):start]
+    after = text[end:min(len(text), end + 500)]
+    name_phrase = rf"({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})"
+
+    for pattern in (
+        rf"{name_phrase}\s*(?:{SPEAKER_VERBS})\b\s*$",
+        rf"(?:{SPEAKER_VERBS})\s+{name_phrase}\s*$",
+        rf"{name_phrase}\s*[:—–-]\s*$",
+    ):
+        matches = list(re.finditer(pattern, before, re.I | re.S))
+        if matches:
+            name = _clean_name(matches[-1].group(1))
+            resolved = _resolve_candidate(name, candidates)
+            if resolved:
+                return resolved, 1.0
+
+    for pattern in (
+        rf"^\s*(?:{SPEAKER_VERBS})\s+{name_phrase}\b",
+        rf"^\s*{name_phrase}\s*(?:{SPEAKER_VERBS})\b",
+        rf"^\s*{name_phrase}\s*[:—–-]",
+    ):
+        match = re.search(pattern, after, re.I | re.S)
+        if match:
+            name = _clean_name(match.group(1))
+            resolved = _resolve_candidate(name, candidates)
+            if resolved:
+                return resolved, 0.98
+
+    if narrator_name and re.search(rf"\bI\s+(?:{SPEAKER_VERBS})\b", before[-180:], re.I):
+        return narrator_name, 0.96
+
+    if last_speaker and re.search(rf"\b(?:he|she|they)\s+(?:{SPEAKER_VERBS})\b", before[-180:], re.I):
+        return last_speaker, 0.62
+
+    return None, 0.0
+
+
+def _resolve_candidate(name: str, candidates: list[str]) -> str | None:
+    key = name.casefold()
+    for candidate in candidates:
+        if candidate.casefold() == key:
+            return candidate
+        if key in {part.casefold() for part in candidate.split()}:
+            return candidate
+    return None
+
+
+def infer_speaker_for_quote(
+    text: str,
+    start: int,
+    end: int,
+    speaker_names: list[str],
+    narrator_name: str | None = None,
+    last_speaker: str | None = None,
+) -> str | None:
+    speaker, _ = _speaker_near_quote(
+        text, start, end, speaker_names, narrator_name, last_speaker
+    )
+    return speaker
+
+
+def _resolve_canonical(name: str, canonical: list[str], aliases: dict[str, set[str]]) -> str | None:
+    key = name.casefold()
+    for item in canonical:
+        if item.casefold() == key:
+            return item
+        if key in {a.casefold() for a in aliases.get(item, set())}:
+            return item
+    return None
+
+
+def _all_dialogue_spans(text: str) -> list[tuple[int, int, str]]:
+    spans: list[tuple[int, int, str]] = []
+    for pattern in DIALOGUE_PATTERNS:
+        for match in pattern.finditer(text):
+            spans.append((match.start(), match.end(), match.group(1)))
+    spans.sort(key=lambda x: (x[0], -(x[1] - x[0])))
+    result: list[tuple[int, int, str]] = []
+    for span in spans:
+        if result and span[0] < result[-1][1]:
+            continue
+        result.append(span)
+    return result
+
+
+def _clean_name(value: str) -> str:
+    value = re.sub(r"\s+", " ", value.strip(" ,.;:!?—–-\"“”"))
+    words = []
+    for word in value.split():
+        word = re.sub(r"^[A-Za-z]-", "", word)
+        if word in {"Mr","Mrs","Ms","Miss","Dr","Father","Mother","Sister","Brother","Mistress","Lord","Lady"}:
+            continue
+        if word.endswith(("’s", "'s")) and len(value.split()) == 1:
+            return ""
+        words.append(word)
+    return " ".join(words)
+
+
+def _clean_dialogue(value: str) -> str:
+    value = re.sub(r"\s+", " ", value).strip()
+    return value[:260] + ("…" if len(value) > 260 else "")
+
+
 def _is_plausible_name(value: str) -> bool:
+    value = _clean_name(value)
     if not value or len(value) > 80:
         return False
     words = value.split()
@@ -136,49 +333,8 @@ def _is_plausible_name(value: str) -> bool:
         return False
     if any(word.strip(".,!?;:") in NAME_STOPWORDS for word in words):
         return False
-    # Do not turn short ALL-CAPS words into characters (e.g. WAKE).
     if len(value) <= 12 and value.replace("-", "").replace("’", "").isupper():
         return False
-    # Speaker attributions should normally contain a proper-name token,
-    # not a sentence fragment.
     if not all(re.match(r"^[A-ZÀ-ÖØ-Þ]", word) for word in words):
         return False
     return any(len(word.strip(".,!?;:")) >= 3 for word in words)
-
-
-
-def _all_dialogue_spans(text: str) -> list[tuple[int, int]]:
-    spans: list[tuple[int, int]] = []
-    for pattern in DIALOGUE_PATTERNS:
-        for match in pattern.finditer(text):
-            spans.append((match.start(), match.end()))
-    return sorted(spans)
-
-
-
-def _speaker_near_quote(text: str, start: int, end: int) -> str | None:
-    before = text[max(0, start - 180):start]
-    after = text[end:min(len(text), end + 220)]
-
-    name = r"[A-ZÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'’-]{1,30}"
-    verbs = r"(?:said|asked|replied|answered|shouted|yelled|whispered|muttered|called|cried|exclaimed|continued|added|insisted|wondered|demanded|begged|sighed|laughed|snapped|murmured|screamed)"
-
-    patterns = [
-        rf"({name}(?:\s+{name}){{0,2}})\s*(?:{verbs})\s*$",
-        rf"({name}(?:\s+{name}){{0,2}})\s*[:—–-]\s*$",
-        rf"(?:{verbs})\s+({name}(?:\s+{name}){{0,2}})\s*$",
-        rf"^\s*({name}(?:\s+{name}){{0,2}})\s*(?:said|asked)?\s*[:—–-]",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, before, re.I)
-        if match and _is_plausible_name(match.group(1)):
-            return _clean_name(match.group(1))
-
-    for pattern in (
-        rf"^\s*(?:{verbs})\s+({name}(?:\s+{name}){{0,2}})\b",
-        rf"^\s*({name}(?:\s+{name}){{0,2}})\s*(?:said|asked|replied|answered)\b",
-    ):
-        match = re.search(pattern, after, re.I)
-        if match and _is_plausible_name(match.group(1)):
-            return _clean_name(match.group(1))
-    return None
