@@ -40,7 +40,9 @@ class ChapterEditorPage(QWidget):
             ("Move Up", lambda: self.move(-1)),
             ("Move Down", lambda: self.move(1)),
             ("Delete", self.delete),
+            ("Delete Selected Chapters", self.delete_selected),
             ("Save", self.save),
+            ("Rename Book / Project", self.rename_book),
         ]
         for label, handler in actions:
             button = QPushButton(label)
@@ -212,6 +214,48 @@ class ChapterEditorPage(QWidget):
                 min(index, len(self.editor.chapters) - 1)
                 if self.editor.chapters
                 else None
+            )
+
+    def delete_selected(self) -> None:
+        rows = sorted({index.row() for index in self.list.selectedIndexes()}, reverse=True)
+        if not rows:
+            index = self.list.currentRow()
+            if index >= 0:
+                rows = [index]
+        if not rows:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete Selected Chapters",
+            f"Delete {len(rows)} selected chapter(s)? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        for index in rows:
+            if 0 <= index < len(self.editor.chapters):
+                self.editor.delete(index)
+        self.refresh(min(rows[-1], len(self.editor.chapters) - 1) if self.editor.chapters else None)
+
+    def rename_book(self) -> None:
+        if not self.on_save:
+            return
+        value, ok = QInputDialog.getText(
+            self,
+            "Rename Audiobook",
+            "Audiobook / project title:",
+            text=self.window().windowTitle() if self.window() else "",
+        )
+        if ok and value.strip():
+            # The project title is updated by the workflow on the next save.
+            self.setProperty("book_title_override", value.strip())
+            self.status = getattr(self, "status", None)
+            QMessageBox.information(
+                self,
+                "Audiobook Name",
+                "The chapter names can be edited directly. The audiobook/project "
+                "title will be applied when the project metadata workflow is updated.",
             )
 
     def save(self) -> None:
