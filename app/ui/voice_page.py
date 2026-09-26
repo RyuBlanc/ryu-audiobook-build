@@ -121,7 +121,7 @@ class VoicePage(QWidget):
         language_row.addLayout(gender_col, 1)
 
         accent_col = QVBoxLayout()
-        accent_col.addWidget(QLabel("Accent / region"))
+        accent_col.addWidget(QLabel("Accent / country"))
         self.accent_filter = QComboBox()
         self.accent_filter.addItem("All regions", "")
         self.accent_filter.currentIndexChanged.connect(self._refresh_voice_catalog_filters)
