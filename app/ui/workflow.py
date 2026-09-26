@@ -170,10 +170,19 @@ class ProjectWorkflow(QMainWindow):
         if self.editor:
             self.stack.removeWidget(self.editor)
             self.editor.deleteLater()
-        self.editor = ChapterEditorPage(self.project.chapters, self.save_project)
+        self.editor = ChapterEditorPage(self.project.chapters, self.save_project, self.rename_project)
         self.stack.addWidget(self.editor)
         self._editor_index = self.stack.indexOf(self.editor)
         self.select_section("Chapters")
+
+    def rename_project(self, title: str) -> None:
+        if not self.project or not title.strip():
+            return
+        self.project.title = title.strip()
+        self.project.save()
+        self.project_label.setText(self.project.title)
+        self.library.refresh()
+        self.ensure_generation_page()
 
     def save_project(self, chapters: list[Chapter]) -> None:
         if not self.project:
