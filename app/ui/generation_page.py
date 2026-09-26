@@ -86,9 +86,14 @@ class GenerationPage(QWidget):
         settings = QGroupBox("Audio settings")
         settings_form = QFormLayout(settings)
 
+        voice_row = QHBoxLayout()
         self.voice_profile = QComboBox()
+        self.refresh_voice_profiles = QPushButton("Refresh")
+        self.refresh_voice_profiles.clicked.connect(self._refresh_voice_profiles)
+        voice_row.addWidget(self.voice_profile, 1)
+        voice_row.addWidget(self.refresh_voice_profiles)
+        settings_form.addRow("Voice", voice_row)
         self._load_profiles()
-        settings_form.addRow("Voice", self.voice_profile)
 
         self.backend = QComboBox()
         self.backend.addItem("Automatic", "automatic")
@@ -190,12 +195,23 @@ class GenerationPage(QWidget):
         self._restore_state()
         self._set_default_output()
 
-    def _load_profiles(self) -> None:
+    def _load_profiles(self, keep_name: str | None = None) -> None:
         self.voice_profile.clear()
         for profile in self.profiles:
             self.voice_profile.addItem(profile.name, profile)
         if not self.profiles:
             self.voice_profile.addItem("No saved voice profiles", None)
+            return
+        if keep_name:
+            index = self.voice_profile.findText(keep_name)
+            if index >= 0:
+                self.voice_profile.setCurrentIndex(index)
+
+    def _refresh_voice_profiles(self) -> None:
+        current = self.voice_profile.currentText()
+        self.profiles = load_profiles()
+        self._load_profiles(current)
+        self.status.setText("Voice profiles refreshed.")
 
     def _update_overview(self) -> None:
         words = sum(len(ch.text.split()) for ch in self.chapters)
