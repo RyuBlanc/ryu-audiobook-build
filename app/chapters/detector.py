@@ -15,7 +15,6 @@ class Chapter:
 
 EXPLICIT_PATTERNS = [
     re.compile(r"^\s*(chapter|chap\.)\s+([0-9IVXLCDM]+)(?:\s*[-:–—.]\s*)?(.*)$", re.I),
-    re.compile(r"^\s*(part)\s+([0-9IVXLCDM]+)(?:\s*[-:–—.]\s*)?(.*)$", re.I),
     re.compile(
         r"^\s*(prologue|epilogue|foreword|preface|introduction|afterword|interlude|"
         r"side story|extra|bonus)\s*(.*)$",
@@ -28,6 +27,11 @@ EXPLICIT_PATTERNS = [
 TITLE_WITH_NUMBER_PATTERN = re.compile(
     r"^\s*[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ _'’&/-]{0,35}\.(\d{1,4})\s*(.*)$"
 )
+LIFE_WITH_SPACE_PATTERN = re.compile(
+    r"^\s*Life\s+([0-9IVXLCDM]+)\s*(.*)$",
+    re.I,
+)
+NEW_LIFE_PATTERN = re.compile(r"^\s*New\s+Life(?:\s*[:–—-]\s*(.*))?\s*$", re.I)
 
 
 def detect_chapters(text: str) -> list[Chapter]:
@@ -96,6 +100,15 @@ def _heading_title(line: str) -> str | None:
         suffix = (match.group(2) or "").strip()
         if not suffix or len(suffix.split()) <= 12:
             return line
+
+    match = LIFE_WITH_SPACE_PATTERN.match(line)
+    if match:
+        suffix = (match.group(2) or "").strip()
+        if len(suffix.split()) <= 12:
+            return line
+
+    if NEW_LIFE_PATTERN.match(line):
+        return line
 
     return None
 
