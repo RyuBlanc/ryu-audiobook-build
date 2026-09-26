@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+import subprocess
 import wave
 
 from app.audio.assembler import assemble_m4b
@@ -100,21 +101,40 @@ More story text here.
             self.assertGreater(result.stat().st_size, 4096)
 
     def test_m4b_packaging_with_cover(self):
-        # Small valid JPEG fixture used to exercise the same cover-embedding
-        # path as a real user-selected cover.
-        import base64
-        jpeg = base64.b64decode(
-            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////"
-            "/2wBDAf//////////////////////////////////////////////////////////////////////////////////////"
-            "wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA"
-            "AP/aAAwDAQACEQMRAD8AqgD/2gAMAwEAAgADAAAAEP/aAAgBAQABBQJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/a"
-            "AAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/a"
-            "AAgBAQAGPwJ//8QAFhEBAQEAAAAAAAAAAAAAAAAAABEB/9oACAEBAAE/IYf/2gAMAwEAAgADAAAAEP/Z"
-        )
+        # Generate a tiny valid JPEG through the same FFmpeg toolchain used by
+        # the application instead of relying on a fragile hand-written fixture.
+        import imageio_ffmpeg
+
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             cover = root / "cover.jpg"
-            cover.write_bytes(jpeg)
+            ppm = root / "cover.ppm"
+            ppm.write_text(
+                "P3\n2 2\n255\n"
+                "255 255 255   255 0 0\n"
+                "0 255 0   0 0 255\n",
+                encoding="ascii",
+            )
+            subprocess.run(
+                [
+                    imageio_ffmpeg.get_ffmpeg_exe(),
+                    "-y",
+                    "-f",
+                    "image2",
+                    "-i",
+                    str(ppm),
+                    "-frames:v",
+                    "1",
+                    "-c:v",
+                    "mjpeg",
+                    "-q:v",
+                    "3",
+                    str(cover),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
             chapter = root / "001_Chapter" / "chunks"
             _write_wav(chapter / "00001.wav", 2.0)
             output = root / "book-cover.m4b"
