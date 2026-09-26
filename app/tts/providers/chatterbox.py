@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import os
 import subprocess
 import sys
@@ -9,11 +10,7 @@ from ..chatterbox_runtime import runtime_ready, runtime_python, runtime_environm
 
 
 class ChatterboxProvider(TTSProvider):
-    """Local Chatterbox adapter with reference-audio voice cloning.
-
-    Chatterbox supports conditioning generation on a reference audio file.
-    The reference must be a voice the user is authorized to use.
-    """
+    """Local Chatterbox adapter with reference-audio voice cloning."""
 
     provider_id = "chatterbox"
 
@@ -38,6 +35,7 @@ class ChatterboxProvider(TTSProvider):
         self._device = None
         self._conditioned_reference: str | None = None
         self._conditioned_exaggeration: float | None = None
+        self._worker: subprocess.Popen | None = None
 
     def voices(self) -> list[str]:
         return [self.reference_audio.stem] if self.reference_audio and self.reference_audio.exists() else []
@@ -45,16 +43,13 @@ class ChatterboxProvider(TTSProvider):
     def _load(self):
         if self._model is not None:
             return
-
-        # Chatterbox currently has transformer attention paths that may require
-        # eager attention when reference conditioning is used.
         os.environ.setdefault("TRANSFORMERS_ATTN_IMPLEMENTATION", "eager")
         try:
             from chatterbox.tts import ChatterboxTTS
             from chatterbox.mtl_tts import ChatterboxMultilingualTTS
         except ImportError as exc:
             raise RuntimeError(
-                "Chatterbox is not installed. Install the optional Chatterbox runtime first."
+                "Chatterbox is not installed. Open Models → Install / Repair Custom Voice Engine first."
             ) from exc
 
         if self.backend == "cuda":
@@ -73,47 +68,82 @@ class ChatterboxProvider(TTSProvider):
             self._model = ChatterboxTTS.from_pretrained(device=device)
         self._device = device
 
-    def _synthesize_external(self, text: str, output_path: Path) -> Path:
+    def _start_external_worker(self) -> None:
+        if self._worker is not None and self._worker.poll() is None:
+            return
         python = runtime_python()
         if not python or not runtime_ready():
             raise RuntimeError(
                 "Custom voice engine is not installed. Open Models → Install / Repair Custom Voice Engine "
                 "and complete the one-time runtime installation."
             )
+        command = [
+            str(python), str(worker_script()),
+            "--server",
+            "--backend", self.backend,
+            "--language", self.language or "en",
+        ]
+        if self.multilingual:
+            command.append("--multilingual")
+        self._worker = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,
+            env=runtime_environment(),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            if sys.platform == "win32" else 0,
+        )
+        try:
+            ready_line = self._worker.stdout.readline() if self._worker.stdout else ""
+            if not ready_line:
+                raise RuntimeError("The custom voice worker stopped before becoming ready.")
+            ready = json.loads(ready_line)
+            if not ready.get("ready"):
+                raise RuntimeError("The custom voice worker did not report ready.")
+        except Exception:
+            self.close()
+            raise
+
+    def _synthesize_external(self, text: str, output_path: Path) -> Path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.reference_audio:
+            raise RuntimeError("A reference voice sample is required for Chatterbox voice cloning.")
         reference = self.reference_audio.resolve()
         if not reference.is_file():
             raise RuntimeError(f"Reference voice file is missing: {reference}")
-        with tempfile.TemporaryDirectory(prefix="ryu-chatterbox-") as temp:
-            text_file = Path(temp) / "text.txt"
-            text_file.write_text(text, encoding="utf-8")
-            command = [
-                str(python), str(worker_script()),
-                "--text-file", str(text_file),
-                "--output", str(output_path),
-                "--reference", str(reference),
-                "--backend", self.backend,
-                "--language", self.language or "en",
-                "--exaggeration", str(self.exaggeration),
-                "--cfg-weight", str(self.cfg_weight),
-            ]
-            if self.multilingual:
-                command.append("--multilingual")
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=1800,
-                env=runtime_environment(),
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
-                if sys.platform == "win32" else 0,
-            )
-            if result.returncode != 0:
-                detail = (result.stderr or result.stdout).strip()
+
+        self._start_external_worker()
+        if not self._worker or not self._worker.stdin or not self._worker.stdout:
+            raise RuntimeError("The custom voice worker is unavailable.")
+        request = {
+            "text": text,
+            "output": str(output_path.resolve()),
+            "reference": str(reference),
+            "backend": self.backend,
+            "language": self.language or "en",
+            "multilingual": self.multilingual,
+            "exaggeration": self.exaggeration,
+            "cfg_weight": self.cfg_weight,
+        }
+        try:
+            self._worker.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
+            self._worker.stdin.flush()
+            line = self._worker.stdout.readline()
+            if not line:
+                raise RuntimeError("The custom voice worker stopped during generation.")
+            response = json.loads(line)
+            if not response.get("ok"):
                 raise RuntimeError(
                     "Custom voice generation failed. " +
-                    (detail[-3500:] if detail else "The Chatterbox runtime returned an unknown error.")
+                    str(response.get("error") or "The Chatterbox runtime returned an unknown error.")
                 )
+        except (BrokenPipeError, OSError, json.JSONDecodeError) as exc:
+            self.close()
+            raise RuntimeError(f"Custom voice worker communication failed: {exc}") from exc
+
         if not output_path.exists() or output_path.stat().st_size < 1024:
             raise RuntimeError("Custom voice engine did not produce a valid WAV output.")
         return output_path
@@ -154,3 +184,20 @@ class ChatterboxProvider(TTSProvider):
         if not output_path.exists() or output_path.stat().st_size < 1024:
             raise RuntimeError("Chatterbox did not produce a valid WAV output.")
         return output_path
+
+    def close(self) -> None:
+        if self._worker is not None:
+            try:
+                if self._worker.stdin:
+                    self._worker.stdin.close()
+            except OSError:
+                pass
+            try:
+                self._worker.terminate()
+                self._worker.wait(timeout=5)
+            except Exception:
+                try:
+                    self._worker.kill()
+                except Exception:
+                    pass
+            self._worker = None
