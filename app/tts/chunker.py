@@ -2,8 +2,25 @@ from __future__ import annotations
 
 import re
 
+def normalize_narration_text(text: str) -> str:
+    """Turn document line-wrapping into natural narration text.
+
+    Single newlines are usually PDF/EPUB layout wrapping rather than spoken
+    paragraph breaks. Preserve blank lines as paragraph boundaries while
+    joining wrapped lines with spaces.
+    """
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n[ \t]+", "\n", text)
+    text = re.sub(r"(?<!\n)\n(?!\n)", " ", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"\.{3,}", "…", text)
+    text = re.sub(r"\s+([,!?;:])", r"\1", text)
+    return text.strip()
+
+
 def split_text(text: str, max_chars: int = 1800) -> list[str]:
-    text = text.strip()
+    text = normalize_narration_text(text)
     if not text:
         return []
 
