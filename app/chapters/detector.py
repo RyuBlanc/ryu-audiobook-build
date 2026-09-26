@@ -23,6 +23,8 @@ EXPLICIT_PATTERNS = [
     ),
 ]
 
+# Deliberately not used for automatic chapter detection. Numbered prose such as
+# "1. I even got..." is common in extracted novels and must remain story text.
 NUMBERED_PATTERN = re.compile(r"^\s*(\d{1,4})\s*[.)-]\s+(.{1,120})\s*$")
 TITLE_WITH_NUMBER_PATTERN = re.compile(
     r"^[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ ._'’:&/()\\[\\]–—-]{0,50}\\.\\d{1,4}(?:\\s+.+)?$"
@@ -75,12 +77,6 @@ def _heading_title(line: str, lines: list[str], index: int) -> str | None:
             # Preserve the original heading instead of reconstructing a title.
             return line.strip()
 
-    numbered = NUMBERED_PATTERN.match(line)
-    if numbered:
-        remainder = numbered.group(2).strip()
-        if _looks_like_numbered_heading(remainder):
-            return line
-
     if re.match(r"^\s*[IVXLCDM]{1,8}(?:\s+|\s*[-:–—.]\s*).{1,100}$", line, re.I):
         return line
 
@@ -91,26 +87,6 @@ def _heading_title(line: str, lines: list[str], index: int) -> str | None:
 
 
 
-
-def _looks_like_numbered_heading(remainder: str) -> bool:
-    """Accept numbered headings and reject numbered prose sentences."""
-    if not remainder or len(remainder) > 90:
-        return False
-    words = remainder.split()
-    if len(words) > 12:
-        return False
-
-    first = words[0].strip("“\\\"'(").lower() if words else ""
-    if first in {
-        "i", "i'm", "i’ve", "i'd", "i'll", "we", "we're", "we’ve",
-        "he", "he's", "she", "she's", "they", "it", "it's", "this",
-        "that", "these", "those", "but", "and", "so", "then", "when",
-        "what", "why", "how", "my", "his", "her", "their", "there",
-    }:
-        return False
-    if re.search(r"[.!?]$|[.!?][”\"']$", remainder):
-        return False
-    return True
 
 def _looks_like_body_sentence(line: str, suffix: str) -> bool:
     """Reject OCR/body text that merely starts like a chapter/part heading."""
