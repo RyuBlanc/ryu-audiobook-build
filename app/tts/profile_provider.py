@@ -18,9 +18,20 @@ def provider_from_profile(profile: VoiceProfile):
         return PiperProvider(backend=profile.backend), profile.voice_id
 
     if profile.provider == "chatterbox":
+        reference = Path(profile.sample_path).expanduser() if profile.sample_path else None
+        if reference is not None:
+            try:
+                reference = reference.resolve()
+            except OSError:
+                reference = reference.absolute()
+        if reference is None or not reference.is_file():
+            raise RuntimeError(
+                f"Custom voice profile '{profile.name}' has no valid reference audio. "
+                "Reload or re-import the custom voice."
+            )
         return (
             ChatterboxProvider(
-                reference_audio=Path(profile.sample_path) if profile.sample_path else None,
+                reference_audio=reference,
                 backend=profile.backend,
                 language=profile.language,
                 multilingual=profile.model_id == "chatterbox-multilingual",
