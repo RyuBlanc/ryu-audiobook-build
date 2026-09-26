@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from PySide6.QtCore import QItemSelectionModel
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -26,6 +27,7 @@ class ChapterEditorPage(QWidget):
         self.on_save = on_save
         self.on_rename_book = on_rename_book
         self.list = QListWidget()
+        self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.title = QTextEdit()
         self.title.setMaximumHeight(55)
         self.text = QTextEdit()
