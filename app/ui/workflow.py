@@ -26,6 +26,7 @@ from app.ui.library import LibraryPage
 from app.ui.voice_page import VoicePage
 from app.ui.hardware_page import HardwarePage
 from app.ui.models_page import ModelsPage
+from app.ui.voice_cast_page import VoiceCastPage
 
 
 class ProjectWorkflow(QMainWindow):
@@ -106,8 +107,8 @@ class ProjectWorkflow(QMainWindow):
         self.stack.addWidget(self.library)
         self.stack.addWidget(self.import_page)
         self.stack.addWidget(self.voice)
-        self._placeholder_cast = self._build_cast_placeholder()
-        self.stack.addWidget(self._placeholder_cast)
+        self.voice_cast = VoiceCastPage(lambda: self.project.chapters if self.project else [])
+        self.stack.addWidget(self.voice_cast)
         self.stack.addWidget(ModelsPage())
         self.stack.addWidget(HardwarePage())
 
@@ -117,46 +118,6 @@ class ProjectWorkflow(QMainWindow):
         self._editor_index = -1
 
         self.sidebar.setCurrentRow(0)
-
-    def _build_cast_placeholder(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(22, 22, 22, 22)
-        layout.setSpacing(12)
-        layout.addWidget(QLabel("<h1>Voice Cast</h1>"))
-        intro = QLabel(
-            "Assign consistent voices to the narrator and characters. "
-            "Automatic character and dialogue detection will be connected here."
-        )
-        intro.setObjectName("muted")
-        intro.setWordWrap(True)
-        layout.addWidget(intro)
-
-        card = QWidget()
-        card.setObjectName("card")
-        card_layout = QVBoxLayout(card)
-        card_layout.addWidget(QLabel("<b>Planned narration workflow</b>"))
-        for text in (
-            "Narrator  →  choose a saved voice profile",
-            "Character detection  →  identify dialogue speakers",
-            "Character voices  →  assign one voice per character",
-            "Custom authorized reference voices  →  available as cast profiles",
-        ):
-            card_layout.addWidget(QLabel("•  " + text))
-        layout.addWidget(card)
-
-        button_row = QHBoxLayout()
-        detect = QPushButton("Detect Characters")
-        detect.setEnabled(False)
-        detect.setToolTip("Character detection is part of the Voice Cast engine planned for the next narration stage.")
-        button_row.addWidget(detect)
-        review = QPushButton("Review Voice Cast")
-        review.setEnabled(False)
-        button_row.addWidget(review)
-        button_row.addStretch(1)
-        layout.addLayout(button_row)
-        layout.addStretch(1)
-        return page
 
     def _sidebar_changed(self, row: int) -> None:
         if row < 0:
@@ -175,7 +136,8 @@ class ProjectWorkflow(QMainWindow):
         elif name == "Voice & Narration":
             self.stack.setCurrentWidget(self.voice)
         elif name == "Voice Cast":
-            self.stack.setCurrentWidget(self._placeholder_cast)
+            self.voice_cast.refresh_profiles()
+            self.stack.setCurrentWidget(self.voice_cast)
         elif name == "Generate":
             if self.generation:
                 self.stack.setCurrentWidget(self.generation)
