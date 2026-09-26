@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from app.chapters.characters import analyze_chapter
 from app.tts.voice_profile import load_profiles
+from app.core.state import load_state, save_state
 
 
 class VoiceCastPage(QWidget):
@@ -73,6 +74,7 @@ class VoiceCastPage(QWidget):
         root.addLayout(body, 1)
 
         self.refresh_profiles()
+        self._load_saved_cast()
 
     def refresh_profiles(self):
         self.profiles = load_profiles()
@@ -118,13 +120,8 @@ class VoiceCastPage(QWidget):
             self.rows[1:],
             key=lambda x: (-x["dialogue_count"], x["name"].casefold()),
         )
-        for row in self.rows:
-            self.list.addItem(
-                QListWidgetItem(
-                    f"{row['name']}  ·  {row['role']}  ·  "
-                    f"{row['dialogue_count']} dialogue cues"
-                )
-            )
+        self._refresh_cast_labels()
+        self._save_cast()
         self.summary.setText(
             f"Detected {max(0, len(self.rows)-1)} possible story characters + narrator. "
             "Review before generation."
@@ -153,6 +150,52 @@ class VoiceCastPage(QWidget):
         if index < 0 or not voice:
             return
         self.rows[index]["voice"] = voice
+        self._save_cast()
+        self._refresh_cast_labels()
+        self.list.setCurrentRow(index)
+        self.show_details(index)
         self.details.setText(
             self.details.text() + f"<br><br><b>Assigned:</b> {voice}"
         )
+
+
+
+    def _load_saved_cast(self):
+        chapters = self.get_chapters() or []
+        if not chapters:
+            return
+        project = self.window()
+        project_folder = getattr(getattr(project, "project", None), "folder", None)
+        if not project_folder:
+            return
+        state = load_state(project_folder)
+        saved = state.get("voice_cast", {})
+        for row in self.rows:
+            row["voice"] = saved.get(row["name"])
+        self._refresh_cast_labels()
+
+    def _refresh_cast_labels(self):
+        self.list.clear()
+        for row in self.rows:
+            assigned = f"  → {row.get('voice')}" if row.get("voice") else ""
+            self.list.addItem(
+                QListWidgetItem(
+                    f"{row['name']}  ·  {row['role']}  ·  "
+                    f"{row['dialogue_count']} dialogue cues{assigned}"
+                )
+            )
+        if self.rows:
+            self.list.setCurrentRow(0)
+
+    def _save_cast(self):
+        project = self.window()
+        project_folder = getattr(getattr(project, "project", None), "folder", None)
+        if not project_folder:
+            return
+        state = load_state(project_folder)
+        state["voice_cast"] = {
+            row["name"]: row.get("voice")
+            for row in self.rows
+            if row.get("voice")
+        }
+        save_state(project_folder, state)
