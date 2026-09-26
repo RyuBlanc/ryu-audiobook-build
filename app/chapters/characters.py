@@ -156,6 +156,10 @@ def _detect_first_person_narrator(text: str) -> str | None:
 def _discover_candidates(text: str) -> set[str]:
     candidates: set[str] = set()
     patterns = (
+        # Explicit self-identification is highly reliable and common in
+        # first-person/light-novel narration.
+        rf"\bmy name is\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})",
+        rf"\b(?:I['’]m|I am|this is)\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})",
         rf"\b({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\s+(?:{SPEAKER_VERBS})\b",
         rf"\b(?:{SPEAKER_VERBS})\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\b",
         rf"\b(?:named|called)\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\b",
@@ -243,15 +247,29 @@ def _speaker_near_quote(
             if resolved:
                 return resolved, 1.0
 
+    # Pronoun dialogue tags are common in novels. First-person tags are
+    # safe when the narrator identity is known; third-person pronouns continue
+    # the immediately previous speaker rather than inventing a new character.
     for pattern in (
+        rf"^\s*[,;:—–-]?\s*I\s+(?:{SPEAKER_VERBS})\b",
+        rf"^\s*[,;:—–-]?\s*(?:he|she|they)\s+(?:{SPEAKER_VERBS})\b",
         rf"^\s*[,;:—–-]?\s*(?:{SPEAKER_VERBS})\s+{name_phrase}\b",
         rf"^\s*[,;:—–-]?\s*{name_phrase}\s*(?:{SPEAKER_VERBS})\b",
         rf"^\s*[,;:—–-]?\s*{name_phrase}\s*[:—–-]",
     ):
         match = re.search(pattern, after, re.I | re.S)
         if match:
-            name = _clean_name(match.group(1))
-            resolved = _resolve_candidate(name, candidates)
+            tagged = match.group(0)
+            if re.search(r"\bI\s+(?:{SPEAKER_VERBS})\b", tagged, re.I):
+                if narrator_name:
+                    return narrator_name, 0.97
+                if last_speaker:
+                    return last_speaker, 0.72
+            if re.search(r"\b(?:he|she|they)\s+(?:{SPEAKER_VERBS})\b", tagged, re.I):
+                if last_speaker:
+                    return last_speaker, 0.62
+            name = _clean_name(match.group(1)) if match.lastindex else ""
+            resolved = _resolve_candidate(name, candidates) if name else None
             if resolved:
                 return resolved, 0.98
 
