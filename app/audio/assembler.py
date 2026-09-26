@@ -188,7 +188,7 @@ def assemble_m4b(
                 "-q:v", "3",
                 str(cover_jpg),
             ])
-            if not cover_jpg.exists() or cover_jpg.stat().st_size < 1024:
+            if not cover_jpg.exists() or cover_jpg.stat().st_size == 0:
                 raise RuntimeError("Cover image could not be converted to JPEG.")
 
             _run([
