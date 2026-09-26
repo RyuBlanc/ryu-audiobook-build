@@ -170,8 +170,10 @@ def assemble_m4b(
         args.append(str(base_m4b))
         _run(args)
 
-        if not base_m4b.exists() or base_m4b.stat().st_size < 4096:
-            raise RuntimeError("FFmpeg created no valid base M4B before cover embedding.")
+        if not base_m4b.exists() or base_m4b.stat().st_size == 0:
+            raise RuntimeError("FFmpeg created no base M4B before cover embedding.")
+        if _duration_ms(base_m4b) <= 0:
+            raise RuntimeError("FFmpeg created a base M4B with no audio duration.")
 
         if cover:
             # FFmpeg's MOV documentation recommends mapping the existing
