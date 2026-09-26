@@ -58,6 +58,12 @@ def generate_chapter(
             f"Chapter {chapter.number} \"{chapter.title}\" contains no readable text to synthesize."
         )
     state = load_state(chapter_dir)
+    previous_total = state.get("chunks_total")
+    if previous_total is not None and previous_total != len(chunks):
+        # A changed chapter split/cast assignment invalidates the old chunk map.
+        state = {"completed": [], "chunks_total": len(chunks)}
+    else:
+        state.setdefault("chunks_total", len(chunks))
     completed = set(state.get("completed", []))
 
     for index, chunk in enumerate(chunks):
