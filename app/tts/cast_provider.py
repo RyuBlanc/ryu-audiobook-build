@@ -28,12 +28,14 @@ class CastAwareProvider(TTSProvider):
         profiles: dict[str, VoiceProfile],
         assignments: dict[str, str],
         narrating_character: str | None = None,
+        backend_override: str = "automatic",
     ):
         self.narrator_provider = narrator_provider
         self.narrator_voice = narrator_voice
         self.profiles = {k.casefold(): v for k, v in profiles.items()}
         self.assignments = {k.casefold(): v for k, v in assignments.items() if v}
         self.narrating_character = (narrating_character or "").casefold()
+        self.backend_override = backend_override or "automatic"
         self._providers: dict[str, tuple[TTSProvider, str]] = {}
 
     def voices(self) -> list[str]:
@@ -99,6 +101,10 @@ class CastAwareProvider(TTSProvider):
         cached = self._providers.get(profile_name)
         if cached is None:
             cached = provider_from_profile(profile)
+            provider, provider_voice = cached
+            if self.backend_override != "automatic" and hasattr(provider, "backend"):
+                provider.backend = self.backend_override
+            cached = (provider, provider_voice)
             self._providers[profile_name] = cached
         provider, provider_voice = cached
         return provider.synthesize(text, output_path, provider_voice)
