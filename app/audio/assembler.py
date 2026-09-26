@@ -150,6 +150,10 @@ def assemble_m4b(
         if _duration_ms(audio_only) <= 0:
             raise RuntimeError("FFmpeg created an intermediate audiobook with no audio duration.")
 
+        # Build the audiobook container and chapters first, without the
+        # cover. This isolates MP4 chapter/metadata muxing from image
+        # handling and leaves a known-good audio M4B if cover embedding fails.
+        base_m4b = temp_dir / "audiobook-base.m4b"
         args = [
             "-i", str(audio_only),
             "-f", "ffmetadata", "-i", str(metadata),
@@ -158,25 +162,50 @@ def assemble_m4b(
             "-map_chapters", "1",
             "-c:a", "copy",
             "-movflags", "+faststart",
-        ]
-        if cover:
-            args += [
-                "-i", str(cover), "-map", "2:v:0",
-                "-c:v", "mjpeg",
-                "-disposition:v:0", "attached_pic",
-                "-metadata:s:v:0", "title=Cover",
-                "-metadata:s:v:0", "comment=Cover Art",
-                "-metadata:s:v:0", "mimetype=image/jpeg",
-                "-metadata:s:v:0", "filename=cover.jpg",
-            ]
-        args += [
             "-metadata", f"title={_safe_title(title)}",
             "-metadata", f"album={_safe_title(title)}",
         ]
         if author:
             args += ["-metadata", f"artist={author}"]
-        args.append(str(output_path))
+        args.append(str(base_m4b))
         _run(args)
+
+        if not base_m4b.exists() or base_m4b.stat().st_size < 4096:
+            raise RuntimeError("FFmpeg created no valid base M4B before cover embedding.")
+
+        if cover:
+            # FFmpeg's MOV documentation recommends mapping the existing
+            # media and image as separate inputs and stream-copying the
+            # attached picture. Normalize PNG/JPEG/etc. to a single JPEG
+            # first so cover embedding is independent of the source format.
+            cover_jpg = temp_dir / "cover.jpg"
+            _run([
+                "-i", str(cover),
+                "-frames:v", "1",
+                "-c:v", "mjpeg",
+                "-q:v", "3",
+                str(cover_jpg),
+            ])
+            if not cover_jpg.exists() or cover_jpg.stat().st_size < 1024:
+                raise RuntimeError("Cover image could not be converted to JPEG.")
+
+            _run([
+                "-i", str(base_m4b),
+                "-i", str(cover_jpg),
+                "-map", "0",
+                "-map", "1",
+                "-c", "copy",
+                "-disposition:v:0", "attached_pic",
+                "-metadata:s:v:0", "title=Cover",
+                "-metadata:s:v:0", "comment=Cover Art",
+                "-metadata:s:v:0", "mimetype=image/jpeg",
+                "-metadata:s:v:0", "filename=cover.jpg",
+                "-movflags", "+faststart",
+                str(output_path),
+            ])
+        else:
+            import shutil
+            shutil.copy2(base_m4b, output_path)
 
     if not output_path.exists() or output_path.stat().st_size < 4096:
         raise RuntimeError("FFmpeg completed but the final M4B is missing or invalid.")

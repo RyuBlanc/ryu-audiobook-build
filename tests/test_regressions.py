@@ -99,6 +99,35 @@ More story text here.
             self.assertTrue(result.exists())
             self.assertGreater(result.stat().st_size, 4096)
 
+    def test_m4b_packaging_with_cover(self):
+        # Small valid JPEG fixture used to exercise the same cover-embedding
+        # path as a real user-selected cover.
+        import base64
+        jpeg = base64.b64decode(
+            "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////"
+            "/2wBDAf//////////////////////////////////////////////////////////////////////////////////////"
+            "wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA"
+            "AP/aAAwDAQACEQMRAD8AqgD/2gAMAwEAAgADAAAAEP/aAAgBAQABBQJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/a"
+            "AAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/a"
+            "AAgBAQAGPwJ//8QAFhEBAQEAAAAAAAAAAAAAAAAAABEB/9oACAEBAAE/IYf/2gAMAwEAAgADAAAAEP/Z"
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cover = root / "cover.jpg"
+            cover.write_bytes(jpeg)
+            chapter = root / "001_Chapter" / "chunks"
+            _write_wav(chapter / "00001.wav", 2.0)
+            output = root / "book-cover.m4b"
+            result = assemble_m4b(
+                [chapter.parent],
+                output,
+                "Cover Regression",
+                chapter_titles=["Chapter 1"],
+                cover=cover,
+            )
+            self.assertTrue(result.exists())
+            self.assertGreater(result.stat().st_size, 4096)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -46,30 +46,48 @@ def worker_script() -> Path:
     return path
 
 
+def _python_311(command: list[str]) -> bool:
+    try:
+        result = subprocess.run(
+            command + ["-c", "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')"],
+            capture_output=True, text=True, timeout=15,
+        )
+        return result.returncode == 0 and (result.stdout or "").strip().startswith("3.11")
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def _system_python() -> list[str] | None:
-    # Chatterbox is most reliable on Python 3.11. Prefer it over the host
-    # Python used by the frozen application and reject known-incompatible 3.12
-    # environments rather than installing a broken runtime.
+    # The custom Chatterbox runtime is isolated from the main application.
+    # Its current dependency set is pinned around Python 3.11, so a newer
+    # system Python (such as 3.14) must not be used for this environment.
     candidates = (
         ["py", "-3.11"],
+        ["pymanager", "-3.11"],
         [sys.executable] if sys.version_info[:2] == (3, 11) else None,
         ["python3.11"],
         ["python"],
     )
     for command in candidates:
-        if not command:
-            continue
+        if command and _python_311(command):
+            return command
+
+    # On current Windows Python installations, the Python Installation
+    # Manager can install a side-by-side 3.11 runtime. The user already
+    # explicitly requested custom voice installation, so perform this
+    # dependency setup automatically instead of requiring a second manual
+    # Python installation step.
+    manager = shutil.which("py") or shutil.which("pymanager")
+    if manager:
         try:
-            result = subprocess.run(
-                command + ["-c", "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')"],
-                capture_output=True, text=True, timeout=15,
+            install = subprocess.run(
+                [manager, "install", "3.11"],
+                capture_output=True, text=True, timeout=900,
             )
-            if result.returncode == 0:
-                version = (result.stdout or "").strip()
-                if version.startswith("3.11"):
-                    return command
+            if install.returncode == 0 and _python_311([manager, "-3.11"]):
+                return [manager, "-3.11"]
         except (OSError, subprocess.SubprocessError):
-            continue
+            pass
     return None
 
 
