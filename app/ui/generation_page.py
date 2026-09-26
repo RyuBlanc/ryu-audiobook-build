@@ -374,6 +374,14 @@ class GenerationPage(QWidget):
         if not output:
             self.status.setText("Choose an M4B output.")
             return
+        profile = self._selected_profile()
+        if profile and profile.provider == "chatterbox" and not runtime_ready():
+            self.status.setText(
+                "Custom voice engine is not installed. Open Models → Install / Repair Custom Voice Engine, "
+                "then return to Generate."
+            )
+            return
+
         provider, voice = self._provider()
         if not provider:
             self.status.setText("Select a Voice Profile.")
