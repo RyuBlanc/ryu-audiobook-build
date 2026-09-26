@@ -48,7 +48,11 @@ def generate_chapter(
     chunks_dir = chapter_dir / "chunks"
     chunks_dir.mkdir(parents=True, exist_ok=True)
 
-    chunks = split_text(chapter.text)
+    if hasattr(provider, "split_for_cast"):
+        chunks_with_voices = provider.split_for_cast(chapter.text, voice)
+    else:
+        chunks_with_voices = [(chunk, voice) for chunk in split_text(chapter.text)]
+    chunks = [item[0] for item in chunks_with_voices]
     if not chunks:
         raise ValueError(
             f"Chapter {chapter.number} \"{chapter.title}\" contains no readable text to synthesize."
@@ -61,7 +65,8 @@ def generate_chapter(
         output = chunks_dir / filename
         needs_generation = index not in completed or not output.exists()
         if needs_generation:
-            provider.synthesize(chunk, output, voice)
+            chunk_voice = chunks_with_voices[index][1]
+            provider.synthesize(chunk, output, chunk_voice)
 
         # Never mark a chunk complete unless the provider actually produced a
         # readable WAV file. This also repairs stale generation state from a
