@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QHBoxLayout,
+    QSizePolicy,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -58,6 +61,9 @@ class ProjectWorkflow(QMainWindow):
 
         self.project_label = QLabel("No book open")
         self.project_label.setObjectName("projectTitle")
+        self.project_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.project_label.setMinimumWidth(0)
+        self.project_label.setToolTip("No book open")
         header.addWidget(self.project_label, 1)
 
         self.new_book_button = QPushButton("+  Import Book")
@@ -122,6 +128,23 @@ class ProjectWorkflow(QMainWindow):
 
         self.sidebar.setCurrentRow(0)
 
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._refresh_project_label()
+
+    def _set_project_title(self, title: str) -> None:
+        self._project_title_full = title or "No book open"
+        self._refresh_project_label()
+
+    def _refresh_project_label(self) -> None:
+        title = getattr(self, "_project_title_full", self.project_label.text() or "No book open")
+        width = max(120, self.project_label.width() - 8)
+        text = QFontMetrics(self.project_label.font()).elidedText(
+            title, Qt.TextElideMode.ElideMiddle, width
+        )
+        self.project_label.setText(text)
+        self.project_label.setToolTip(title)
+
     def _sidebar_changed(self, row: int) -> None:
         if row < 0:
             return
@@ -164,7 +187,7 @@ class ProjectWorkflow(QMainWindow):
             book = extract_text(path)
             chapters = detect_chapters(book.text)
             self.project = create_project(book.title, path, chapters)
-            self.project_label.setText(book.title)
+            self._set_project_title(book.title)
             self.open_editor()
         except Exception as exc:
             QMessageBox.critical(self, "Import Failed", str(exc))
@@ -202,7 +225,7 @@ class ProjectWorkflow(QMainWindow):
             return
         self.project.title = title.strip()
         self.project.save()
-        self.project_label.setText(self.project.title)
+        self._set_project_title(self.project.title)
         self.library.refresh()
         self.ensure_generation_page()
 
@@ -253,7 +276,7 @@ class ProjectWorkflow(QMainWindow):
 
     def open_project(self, project: Project) -> None:
         self.project = project
-        self.project_label.setText(project.title)
+        self._set_project_title(project.title)
         # Repair legacy empty chapter records before creating either editor or
         # generation UI so both views show the same corrected chapter list.
         self._repair_empty_chapters()
