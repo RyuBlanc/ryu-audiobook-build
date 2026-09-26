@@ -23,6 +23,7 @@ required_modules = [
     "app.ui.voice_page",
     "app.ui.voice_cast_page",
     "app.ui.character_review",
+    "app.tts.cast_provider",
     "app.ui.workflow",
 ]
 
