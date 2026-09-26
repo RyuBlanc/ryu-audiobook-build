@@ -51,7 +51,18 @@ class ChatterboxInstallWorker(QThread):
 
     def run(self) -> None:
         try:
-            python_cmd = ["py", "-m", "pip"] if getattr(sys, "frozen", False) else [sys.executable, "-m", "pip"]
+            if getattr(sys, "frozen", False):
+                python_cmd = ["py", "-m", "pip"]
+                if subprocess.run(
+                    ["py", "--version"], capture_output=True, text=True
+                ).returncode != 0:
+                    raise RuntimeError(
+                        "The Windows Python launcher (py.exe) is required to install the "
+                        "optional custom voice engine from the packaged app. "
+                        "Install Python 3.11/3.12 with the launcher, then retry."
+                    )
+            else:
+                python_cmd = [sys.executable, "-m", "pip"]
             result = subprocess.run(
                 python_cmd + ["install", "-r", "requirements-voice-cloning.txt"],
                 capture_output=True,
