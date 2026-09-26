@@ -285,16 +285,6 @@ def _speaker_near_quote(
             if resolved:
                 return resolved, 0.98
 
-    for identity_pattern in (
-        rf"\bmy name is\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})",
-        rf"\b(?:I['’]m|I am|this is)\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})",
-    ):
-        identity = re.search(identity_pattern, dialogue, re.I)
-        if identity:
-            resolved = _resolve_candidate(_clean_name(identity.group(1)), candidates)
-            if resolved:
-                return resolved, 0.99
-
     if narrator_name and re.search(rf"\bI\s+(?:{SPEAKER_VERBS})\b", before[-220:], re.I):
         return narrator_name, 0.96
 
