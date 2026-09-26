@@ -11,9 +11,10 @@ class LibraryPage(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("My Audiobooks"))
         self.list = QListWidget()
+        self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         actions = QHBoxLayout()
         self.open_button = QPushButton("Open Selected Project")
-        self.delete_button = QPushButton("Delete Selected Book")
+        self.delete_button = QPushButton("Delete Selected Book(s)")
         self.delete_button.setObjectName("danger")
         actions.addWidget(self.open_button)
         actions.addWidget(self.delete_button)
@@ -37,16 +38,23 @@ class LibraryPage(QWidget):
 
 
     def delete_selected(self) -> None:
-        row = self.list.currentRow()
+        rows = sorted({index.row() for index in self.list.selectedIndexes()})
+        if not rows:
+            row = self.list.currentRow()
+            if row >= 0:
+                rows = [row]
         projects = list_projects()
-        if not (0 <= row < len(projects)):
+        selected = [projects[row] for row in rows if 0 <= row < len(projects)]
+        if not selected:
             return
-        project = projects[row]
+        names = "\n".join(f"• {project.title}" for project in selected[:8])
+        if len(selected) > 8:
+            names += f"\n• … and {len(selected) - 8} more"
         answer = QMessageBox.question(
             self,
-            "Delete Book",
-            f"Delete '{project.title}' from Ryu's Audiobook?\n\n"
-            "This removes its imported source, chapters, generated audio, cover, "
+            "Delete Books",
+            f"Delete {len(selected)} selected book(s)?\n\n{names}\n\n"
+            "This removes each imported source, chapters, generated audio, cover, "
             "settings and project data from the local Ryu's Audiobook library.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
@@ -54,7 +62,8 @@ class LibraryPage(QWidget):
         if answer != QMessageBox.StandardButton.Yes:
             return
         try:
-            delete_project(project)
+            for project in selected:
+                delete_project(project)
             self.refresh()
         except Exception as exc:
-            QMessageBox.critical(self, "Delete Book Failed", str(exc))
+            QMessageBox.critical(self, "Delete Books Failed", str(exc))
