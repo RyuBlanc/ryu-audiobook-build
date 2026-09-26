@@ -201,6 +201,18 @@ class VoicePage(QWidget):
         saved_row.addWidget(self.load_button)
         saved_row.addWidget(self.delete_button)
         profile_layout.addLayout(saved_row)
+
+        profile_actions = QHBoxLayout()
+        self.save_profile_button = QPushButton("Save / Update This Profile")
+        self.save_profile_button.setObjectName("primary")
+        self.save_profile_button.clicked.connect(self.save_profile)
+        self.test_profile_button = QPushButton("Test Current Voice")
+        self.test_profile_button.clicked.connect(self.preview)
+        profile_actions.addWidget(self.save_profile_button)
+        profile_actions.addWidget(self.test_profile_button)
+        profile_actions.addStretch(1)
+        profile_layout.addLayout(profile_actions)
+
         root.addWidget(profile_box)
 
         preview_box = QGroupBox("4  •  Preview")
@@ -454,8 +466,12 @@ class VoicePage(QWidget):
         self.saved_profiles.blockSignals(False)
 
     def _saved_profile_changed(self) -> None:
-        if self.saved_profiles.currentData():
-            self.profile_badge.setText(str(self.saved_profiles.currentData()))
+        name = self.saved_profiles.currentData()
+        if name:
+            self.profile_badge.setText(str(name))
+            # Selection itself is enough to identify the intended profile.
+            # Loading is explicit so changing a dropdown cannot unexpectedly
+            # overwrite a reference sample or current edits.
 
     def load_selected_profile(self) -> None:
         name = self.saved_profiles.currentData()
@@ -532,6 +548,9 @@ class VoicePage(QWidget):
 
         self.neural_box.setVisible(is_edge)
         self.custom_box.setVisible(custom)
+        if custom:
+            self.sample_button.setToolTip("Select an MP3, WAV, M4A, FLAC, AAC, OGG, OPUS or WMA reference.")
+            self.authorized.setToolTip("Required before a custom voice profile can be saved or tested.")
         self.sapi_voice.setVisible(provider == "windows-sapi")
         self.sapi_voice.parentWidget().setVisible(provider == "windows-sapi")
         self.neural_voice.setVisible(is_edge)
@@ -653,8 +672,14 @@ class VoicePage(QWidget):
             else:
                 from app.tts.providers.chatterbox import ChatterboxProvider
 
+                reference = Path(profile.sample_path or "")
+                if not reference.exists():
+                    raise RuntimeError(
+                        "The saved custom voice reference is missing. "
+                        "Load the profile again or choose the MP3/audio reference."
+                    )
                 provider = ChatterboxProvider(
-                    reference_audio=Path(profile.sample_path),
+                    reference_audio=reference,
                     backend="automatic",
                     language=profile.language,
                     multilingual=True,
