@@ -260,12 +260,12 @@ def _speaker_near_quote(
         match = re.search(pattern, after, re.I | re.S)
         if match:
             tagged = match.group(0)
-            if re.search(r"\bI\s+(?:{SPEAKER_VERBS})\b", tagged, re.I):
+            if re.search(rf"\bI\s+(?:{SPEAKER_VERBS})\b", tagged, re.I):
                 if narrator_name:
                     return narrator_name, 0.97
                 if last_speaker:
                     return last_speaker, 0.72
-            if re.search(r"\b(?:he|she|they)\s+(?:{SPEAKER_VERBS})\b", tagged, re.I):
+            if re.search(rf"\b(?:he|she|they)\s+(?:{SPEAKER_VERBS})\b", tagged, re.I):
                 if last_speaker:
                     return last_speaker, 0.62
             name = _clean_name(match.group(1)) if match.lastindex else ""
