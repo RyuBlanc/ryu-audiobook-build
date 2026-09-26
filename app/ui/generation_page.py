@@ -83,6 +83,13 @@ class GenerationPage(QWidget):
         root.addWidget(overview)
         self._update_overview()
 
+        cast_box = QGroupBox("Voice Cast")
+        cast_layout = QVBoxLayout(cast_box)
+        self.cast_summary = QLabel("No character-specific voice assignments saved. Narrator voice will be used.")
+        self.cast_summary.setWordWrap(True)
+        cast_layout.addWidget(self.cast_summary)
+        root.addWidget(cast_box)
+
         settings = QGroupBox("Audio settings")
         settings_form = QFormLayout(settings)
 
@@ -193,7 +200,22 @@ class GenerationPage(QWidget):
         self.timer.timeout.connect(self._update_live_stats)
 
         self._restore_state()
+        self._load_voice_cast_summary()
         self._set_default_output()
+
+    def _load_voice_cast_summary(self):
+        if not self.project_folder:
+            return
+        state = load_state(self.project_folder)
+        cast = state.get("voice_cast", {})
+        if not cast:
+            self.cast_summary.setText("No character-specific voice assignments saved. Narrator voice will be used.")
+            return
+        lines = [f"{name} → {voice}" for name, voice in cast.items()]
+        self.cast_summary.setText(
+            "Saved voice cast assignments:\n" + "\n".join(lines) +
+            "\n\nThese assignments are stored with this book and are ready for the cast-aware narration engine."
+        )
 
     def _load_profiles(self, keep_name: str | None = None) -> None:
         self.voice_profile.clear()
