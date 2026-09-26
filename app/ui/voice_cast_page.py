@@ -136,8 +136,8 @@ class VoiceCastPage(QWidget):
         }]
 
         for character in analysis.characters:
-            if character.dialogue_count <= 0 and character.role != "Narrating Character":
-                continue
+            # Keep plausible candidates visible even when attribution is weak so
+            # the user can review and assign a voice instead of losing the character.
             rows.append({
                 "name": character.name,
                 "role": character.role,
@@ -154,7 +154,7 @@ class VoiceCastPage(QWidget):
 
         source_note = " from the original source" if source_used else " from the current chapters"
         self.summary.setText(
-            f"Detected {len(rows)-1} story cast members + audiobook narrator{source_note}. "
+            f"Detected {len(rows)-1} story cast candidates + audiobook narrator{source_note}. "
             f"Dialogue cues: {analysis.dialogue_total}; "
             f"unassigned/ambiguous: {analysis.unassigned_dialogue}. Review before generation."
         )
