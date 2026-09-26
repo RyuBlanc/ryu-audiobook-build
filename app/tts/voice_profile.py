@@ -37,9 +37,9 @@ def builtin_voice_profiles() -> list[VoiceProfile]:
         return []
 
     metadata = {
-        "en_US-amy-medium": ("English", "Female", "Amy", "Recommended offline narrator voice"),
-        "en_US-lessac-medium": ("English", "Male", "Lessac", "Recommended offline narrator voice"),
-        "en_US-ryan-high": ("English", "Male", "Ryan", "High-quality offline narrator voice"),
+        "en_US-amy-medium": ("en-US", "Female", "Amy", "Recommended offline narrator voice"),
+        "en_US-lessac-medium": ("en-US", "Male", "Lessac", "Recommended offline narrator voice"),
+        "en_US-ryan-high": ("en-US", "Male", "Ryan", "High-quality offline narrator voice"),
     }
     result: list[VoiceProfile] = []
     for path in paths:

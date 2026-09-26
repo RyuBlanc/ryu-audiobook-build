@@ -98,7 +98,7 @@ jobs:
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
-          name: Ryu-Audiobook-Setup-\${{ github.sha }}
+          name: Ryu-Audiobook-Setup-${{ github.sha }}
           path: "installer/installer-output/Ryu's Audiobook Setup.exe"
           if-no-files-found: error
           retention-days: 1
