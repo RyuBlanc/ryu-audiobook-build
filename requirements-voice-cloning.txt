@@ -1,4 +1,4 @@
 # Optional custom voice runtime.
 # Kept separate from the base installer because this stack is substantially
 # larger than the application itself.
-chatterbox-tts>=0.1,<1
+chatterbox-tts>=0.1.7,<0.2
