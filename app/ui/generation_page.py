@@ -105,9 +105,9 @@ class GenerationPage(QWidget):
         self.cover: Path | None = None
         cover_row = QHBoxLayout()
         self.cover_label = QLabel("No cover selected")
-        cover_button = QPushButton("Choose Cover")
-        cover_button.clicked.connect(self.choose_cover)
-        cover_row.addWidget(cover_button)
+        self.cover_button = QPushButton("Choose Cover")
+        self.cover_button.clicked.connect(self.choose_cover)
+        cover_row.addWidget(self.cover_button)
         cover_row.addWidget(self.cover_label, 1)
         settings_form.addRow("Cover", cover_row)
         root.addWidget(settings)
@@ -306,6 +306,15 @@ class GenerationPage(QWidget):
         except Exception as exc:
             self.status.setText(f"Preview failed: {exc}")
 
+    def _set_generation_locked(self, locked: bool) -> None:
+        controls = [
+            self.title, self.author, self.voice_profile, self.refresh_voice_profiles,
+            self.backend, self.cover_button, self.change_output, self.preview_button,
+            self.start_button,
+        ]
+        for control in controls:
+            control.setEnabled(not locked)
+
     def start(self) -> None:
         if not self.chapters:
             self.status.setText("No chapters available.")
@@ -336,7 +345,7 @@ class GenerationPage(QWidget):
         self.last_progress_value = 0
         self.started_at = time.monotonic()
         self.timer.start(1000)
-        self.start_button.setEnabled(False)
+        self._set_generation_locked(True)
         self.cancel_button.setEnabled(True)
         self.play_button.setEnabled(False)
         self.open_button.setEnabled(False)
@@ -356,12 +365,35 @@ class GenerationPage(QWidget):
             self.status.setText("Cancelling after the current chunk…")
 
     def update_progress(self, chapter: int, total: int, done: int, message: str) -> None:
+        if message.startswith("plan:"):
+            try:
+                planned = max(1, int(message.split(":", 1)[1]))
+            except ValueError:
+                planned = max(1, total)
+            self.progress.setRange(0, planned)
+            self.progress.setValue(0)
+            self.last_progress_value = 0
+            self.stage.setText(f"Preparing {planned:,} audio chunks…")
+            return
+
         if message.startswith("m4b-complete"):
-            self.progress.setValue(total)
+            self.progress.setValue(self.progress.maximum())
             self.stage.setText("M4B packaging complete")
         elif message.startswith("m4b-failed"):
             self.stage.setText("M4B packaging failed")
             self.status.setText(message)
+        elif message.startswith("chunk:"):
+            try:
+                current, planned = message.split(":", 1)[1].split("/", 1)
+                current_n, planned_n = int(current), int(planned)
+                self.progress.setRange(0, max(1, planned_n))
+                self.progress.setValue(current_n)
+                self.last_progress_value = current_n
+                self.stage.setText(
+                    f"Generating audio • chunk {current_n:,}/{planned_n:,} • chapter {chapter}/{total}"
+                )
+            except (ValueError, IndexError):
+                self.stage.setText(f"Chapter {chapter}/{total}")
         else:
             value = chapter if message == "chapter-complete" else max(0, chapter - 1)
             self.progress.setValue(value)
@@ -385,11 +417,14 @@ class GenerationPage(QWidget):
             remaining = max(0, int(estimated_total - elapsed))
             self.remaining.setText(f"Remaining: {remaining // 60}:{remaining % 60:02d}")
             speed = current / elapsed * 60
-            self.speed.setText(f"Speed: {speed:.2f} ch/min")
+            self.speed.setText(f"Speed: {speed:.2f} chunks/min")
+        else:
+            self.remaining.setText("Remaining: calculating…")
+            self.speed.setText("Speed: calculating…")
 
     def finished(self, summary: GenerationSummary) -> None:
         self.timer.stop()
-        self.start_button.setEnabled(True)
+        self._set_generation_locked(False)
         self.cancel_button.setEnabled(False)
         if self.project_folder:
             state = load_state(self.project_folder)
