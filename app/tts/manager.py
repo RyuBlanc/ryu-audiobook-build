@@ -19,6 +19,7 @@ class GenerationSummary:
     chapters_total: int
     chapters_completed: int
     chapters_failed: list[int]
+    failure_details: dict[int, str] | None = None
     output_path: Path | None = None
     cancelled: bool = False
     packaging_failed: bool = False
@@ -44,6 +45,7 @@ class GenerationManager:
         self.cancel_event = Event()
         self._thread: Thread | None = None
         self.failed: list[int] = []
+        self.failure_details: dict[int, str] = {}
         self._chunk_offsets: list[int] = []
         self._total_chunks = 0
 
@@ -73,6 +75,7 @@ class GenerationManager:
         self.audio_root.mkdir(parents=True, exist_ok=True)
         completed = 0
         self.failed = []
+        self.failure_details = {}
         self._chunk_offsets = []
         offset = 0
         for chapter in self.chapters:
@@ -106,6 +109,7 @@ class GenerationManager:
                 self._emit(index + 1, len(self.chapters), 1, "chapter-complete")
             except Exception as exc:
                 self.failed.append(chapter.number)
+                self.failure_details[chapter.number] = str(exc)
                 self._emit(index + 1, len(self.chapters), 0, f"chapter-failed: {exc}")
 
         final_output = None
@@ -138,6 +142,7 @@ class GenerationManager:
             len(self.chapters),
             completed,
             list(self.failed),
+            self.failure_details,
             final_output,
             cancelled,
             packaging_failed,
