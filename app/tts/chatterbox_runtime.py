@@ -147,7 +147,7 @@ def install_runtime(progress: Callable[[str], None] | None = None) -> None:
             "import chatterbox, torch, torchaudio; "
             "print(f'torch={torch.__version__}'); "
             "print(f'cuda={torch.cuda.is_available()}'); "
-            "print(f'gpu={torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"}')",
+            "print('gpu=' + (torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'))",
         ],
         capture_output=True, text=True, timeout=180,
     )
