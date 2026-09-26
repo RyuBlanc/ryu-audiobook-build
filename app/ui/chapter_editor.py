@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 from app.chapters.detector import Chapter
 from app.chapters.editor import ChapterEditor
 from app.documents.parser import remove_page_noise
+from app.ui.character_review import CharacterReviewDialog
 
 
 class ChapterEditorPage(QWidget):
@@ -34,6 +35,7 @@ class ChapterEditorPage(QWidget):
             ("Rename", self.rename),
             ("Split", self.split),
             ("Mark Selection as Chapter", self.mark_selection_as_chapter),
+            ("View Characters & Dialogue", self.view_characters),
             ("Merge Next", self.merge),
             ("Move Up", lambda: self.move(-1)),
             ("Move Down", lambda: self.move(1)),
@@ -128,6 +130,14 @@ class ChapterEditorPage(QWidget):
             self.refresh(index if index == 0 and len(self.editor.chapters) == 1 else index + 1)
         except ValueError as exc:
             QMessageBox.information(self, "Mark as Chapter", str(exc))
+
+    def view_characters(self) -> None:
+        self.commit_current()
+        index = self.list.currentRow()
+        if index < 0:
+            return
+        dialog = CharacterReviewDialog(self.editor.chapters[index], self)
+        dialog.exec()
 
     def split(self) -> None:
         self.commit_current()
