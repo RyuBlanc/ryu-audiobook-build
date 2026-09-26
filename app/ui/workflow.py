@@ -215,9 +215,29 @@ class ProjectWorkflow(QMainWindow):
         self.library.refresh()
         self.ensure_generation_page()
 
+    def _repair_empty_chapters(self) -> None:
+        """Repair projects created by older chapter-detector versions."""
+        if not self.project or not self.project.source_path:
+            return
+        if not any(not c.text or not c.text.strip() for c in self.project.chapters):
+            return
+        try:
+            source = Path(self.project.source_path)
+            if not source.exists():
+                return
+            detected = detect_chapters(extract_text(source).text)
+            if detected and all(c.text.strip() for c in detected):
+                self.project.chapters = detected
+                self.project.save()
+                self.library.refresh()
+        except Exception:
+            # Keep the existing project intact if automatic repair cannot run.
+            return
+
     def ensure_generation_page(self) -> None:
         if not self.project:
             return
+        self._repair_empty_chapters()
         if self.generation:
             self.stack.removeWidget(self.generation)
             self.generation.deleteLater()
