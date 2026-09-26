@@ -94,6 +94,17 @@ class CastAwareProvider(TTSProvider):
             parts.append((text[cursor:], fallback_voice))
         return [(t, v) for t, v in parts if t.strip()]
 
+    def close(self) -> None:
+        providers = [self.narrator_provider, *[item[0] for item in self._providers.values()]]
+        seen = set()
+        for provider in providers:
+            if id(provider) in seen:
+                continue
+            seen.add(id(provider))
+            close = getattr(provider, "close", None)
+            if callable(close):
+                close()
+
     def synthesize(self, text: str, output_path: Path, voice: str | None = None) -> Path:
         profile_name = voice.casefold() if voice else ""
         profile = self.profiles.get(profile_name)
