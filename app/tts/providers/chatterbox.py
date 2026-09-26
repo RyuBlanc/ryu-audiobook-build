@@ -32,6 +32,8 @@ class ChatterboxProvider(TTSProvider):
         self.cfg_weight = cfg_weight
         self._model = None
         self._device = None
+        self._conditioned_reference: str | None = None
+        self._conditioned_exaggeration: float | None = None
 
     def voices(self) -> list[str]:
         return [self.reference_audio.stem] if self.reference_audio and self.reference_audio.exists() else []
@@ -71,18 +73,36 @@ class ChatterboxProvider(TTSProvider):
         self._load()
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
+        reference = str(self.reference_audio.resolve())
+        # Chatterbox re-encodes the reference speaker when audio_prompt_path is
+        # passed to every generate() call. Cache those conditionals once per
+        # profile/reference so long books do not repeatedly pay the same cost.
+        if (
+            self._conditioned_reference != reference
+            or self._conditioned_exaggeration != self.exaggeration
+            or getattr(self._model, "conds", None) is None
+        ):
+            if not hasattr(self._model, "prepare_conditionals"):
+                raise RuntimeError("This Chatterbox runtime does not expose reference-voice conditioning.")
+            self._model.prepare_conditionals(
+                reference,
+                exaggeration=self.exaggeration,
+            )
+            self._conditioned_reference = reference
+            self._conditioned_exaggeration = self.exaggeration
+
         if self.multilingual:
             wav = self._model.generate(
                 text,
                 language_id=self.language,
-                audio_prompt_path=str(self.reference_audio),
+                audio_prompt_path=None,
                 exaggeration=self.exaggeration,
                 cfg_weight=self.cfg_weight,
             )
         else:
             wav = self._model.generate(
                 text,
-                audio_prompt_path=str(self.reference_audio),
+                audio_prompt_path=None,
                 exaggeration=self.exaggeration,
                 cfg_weight=self.cfg_weight,
             )
