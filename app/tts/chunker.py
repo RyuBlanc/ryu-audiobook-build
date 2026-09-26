@@ -16,13 +16,14 @@ def normalize_narration_text(text: str) -> str:
     text = re.sub(r"[ \t]{2,}", " ", text)
     text = re.sub(r"\.{3,}", "…", text)
     text = re.sub(r"\s+([,!?;:])", r"\1", text)
+    text = re.sub(r"([.!?])([A-Za-zÀ-ÖØ-öø-ÿ])", r"\1 \2", text)
 
     # Preserve ALL CAPS. The narration layer will use caps as an
     # explicit emphasis cue rather than normalizing them away.
     return text.strip()
 
 
-def split_text(text: str, max_chars: int = 1800) -> list[str]:
+def split_text(text: str, max_chars: int = 2200) -> list[str]:
     text = normalize_narration_text(text)
     if not text:
         return []
@@ -51,8 +52,15 @@ def split_text(text: str, max_chars: int = 1800) -> list[str]:
             if not sentence:
                 continue
             if len(sentence) > max_chars:
-                for start in range(0, len(sentence), max_chars):
-                    chunks.append(sentence[start:start + max_chars].strip())
+                remaining = sentence.strip()
+                while len(remaining) > max_chars:
+                    cut = remaining.rfind(" ", 0, max_chars + 1)
+                    if cut < max_chars // 2:
+                        cut = max_chars
+                    chunks.append(remaining[:cut].strip())
+                    remaining = remaining[cut:].strip()
+                if remaining:
+                    chunks.append(remaining)
             elif not chunks or len(chunks[-1]) + len(sentence) + 1 > max_chars:
                 chunks.append(sentence.strip())
             else:
