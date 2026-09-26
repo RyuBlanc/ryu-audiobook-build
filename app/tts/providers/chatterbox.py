@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import wave
 
 from ..base import TTSProvider
@@ -42,6 +43,9 @@ class ChatterboxProvider(TTSProvider):
         if self._model is not None:
             return
 
+        # Chatterbox currently has transformer attention paths that may require
+        # eager attention when reference conditioning is used.
+        os.environ.setdefault("TRANSFORMERS_ATTN_IMPLEMENTATION", "eager")
         try:
             from chatterbox.tts import ChatterboxTTS
             from chatterbox.mtl_tts import ChatterboxMultilingualTTS
