@@ -78,43 +78,36 @@ class ChatterboxProvider(TTSProvider):
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         reference = str(self.reference_audio.resolve())
-        # Chatterbox re-encodes the reference speaker when audio_prompt_path is
-        # passed to every generate() call. Cache those conditionals once per
-        # profile/reference so long books do not repeatedly pay the same cost.
-        if (
-            self._conditioned_reference != reference
-            or self._conditioned_exaggeration != self.exaggeration
-            or getattr(self._model, "conds", None) is None
-        ):
-            if not hasattr(self._model, "prepare_conditionals"):
-                raise RuntimeError("This Chatterbox runtime does not expose reference-voice conditioning.")
-            self._model.prepare_conditionals(
-                reference,
-                exaggeration=self.exaggeration,
-            )
-            self._conditioned_reference = reference
-            self._conditioned_exaggeration = self.exaggeration
+        if not self.reference_audio.is_file():
+            raise RuntimeError(f"Reference voice file is missing: {self.reference_audio}")
 
+        # Chatterbox officially accepts the reference directly through
+        # audio_prompt_path. This is more robust across Chatterbox releases
+        # than relying on an internal cached-conditionals API.
+        kwargs = {
+            "audio_prompt_path": reference,
+            "exaggeration": self.exaggeration,
+            "cfg_weight": self.cfg_weight,
+        }
         if self.multilingual:
-            wav = self._model.generate(
-                text,
-                language_id=self.language,
-                audio_prompt_path=None,
-                exaggeration=self.exaggeration,
-                cfg_weight=self.cfg_weight,
-            )
-        else:
-            wav = self._model.generate(
-                text,
-                audio_prompt_path=None,
-                exaggeration=self.exaggeration,
-                cfg_weight=self.cfg_weight,
-            )
+            kwargs["language_id"] = self.language or "en"
+
+        wav = self._model.generate(text, **kwargs)
 
         try:
             import torchaudio as ta
             ta.save(str(output_path), wav, self._model.sr)
-        except ImportError as exc:
-            raise RuntimeError("torchaudio is required by the Chatterbox provider.") from exc
+        except Exception as ta_exc:
+            try:
+                import soundfile as sf
+                data = wav.detach().cpu().squeeze().numpy() if hasattr(wav, "detach") else wav
+                sf.write(str(output_path), data, self._model.sr)
+            except Exception as sf_exc:
+                raise RuntimeError(
+                    "Chatterbox generated audio, but it could not be saved as WAV. "
+                    f"torchaudio: {ta_exc}; soundfile: {sf_exc}"
+                ) from sf_exc
 
+        if not output_path.exists() or output_path.stat().st_size < 1024:
+            raise RuntimeError("Chatterbox did not produce a valid WAV output.")
         return output_path
