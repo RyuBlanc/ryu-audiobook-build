@@ -47,14 +47,33 @@ def detect_chapters(text: str) -> list[Chapter]:
     if not markers:
         return [Chapter(1, "Full Book", text.strip())] if text.strip() else []
 
-    chapters: list[Chapter] = []
-    preamble = "\n".join(lines[: markers[0][0]]).strip()
-
+    # A heading with no body before the next heading is almost always a
+    # false-positive extracted line (or a duplicate heading). Never create an
+    # empty chapter; generation must never be blocked by a detector artifact.
+    valid_markers: list[tuple[int, str]] = []
     for position, (start, title) in enumerate(markers):
         end = markers[position + 1][0] if position + 1 < len(markers) else len(lines)
         body = "\n".join(lines[start + 1:end]).strip()
+        if position == 0:
+            preamble = "\n".join(lines[:start]).strip()
+            if preamble:
+                body = f"{preamble}\n\n{body}".strip()
+        if body:
+            valid_markers.append((start, title))
+
+    if not valid_markers:
+        return [Chapter(1, "Full Book", text.strip())] if text.strip() else []
+
+    chapters: list[Chapter] = []
+    preamble = "\n".join(lines[: valid_markers[0][0]]).strip()
+
+    for position, (start, title) in enumerate(valid_markers):
+        end = valid_markers[position + 1][0] if position + 1 < len(valid_markers) else len(lines)
+        body = "\n".join(lines[start + 1:end]).strip()
         if position == 0 and preamble:
             body = f"{preamble}\n\n{body}".strip()
+        if not body:
+            continue
         chapters.append(Chapter(len(chapters) + 1, title, body))
 
     return chapters
