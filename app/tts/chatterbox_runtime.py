@@ -6,12 +6,15 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from typing import Callable
 
 from app.core.paths import models_root
 
 RUNTIME_DIR = models_root() / "chatterbox-runtime"
 MARKER = RUNTIME_DIR / "runtime.json"
+PYTHON_311_URL = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
 
 
 def _venv_python() -> Path:
@@ -88,6 +91,55 @@ def _system_python() -> list[str] | None:
                 return [manager, "-3.11"]
         except (OSError, subprocess.SubprocessError):
             pass
+
+    # Last resort: install the official per-user CPython 3.11.9 Windows
+    # installer. This keeps custom voice setup one-click even on machines
+    # that only have a newer Python release and no Python install manager.
+    local_app_data = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
+    install_dir = local_app_data / "Programs" / "Python" / "Python311"
+    direct_candidates = (
+        install_dir / "python.exe",
+        Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Python311" / "python.exe",
+        Path("C:/Python311/python.exe"),
+    )
+    for candidate in direct_candidates:
+        if _python_311([str(candidate)]):
+            return [str(candidate)]
+
+    installer = local_app_data / "Temp" / "ryu-python-3.11.9-amd64.exe"
+    try:
+        installer.parent.mkdir(parents=True, exist_ok=True)
+        if not installer.exists() or installer.stat().st_size < 5_000_000:
+            urllib.request.urlretrieve(PYTHON_311_URL, installer)
+        result = subprocess.run(
+            [
+                str(installer),
+                "/quiet",
+                "InstallAllUsers=0",
+                "PrependPath=0",
+                "Include_launcher=1",
+                "Include_pip=1",
+                "Include_test=0",
+                f"TargetDir={install_dir}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        if result.returncode == 0:
+            for candidate in direct_candidates:
+                if _python_311([str(candidate)]):
+                    return [str(candidate)]
+            launcher = shutil.which("py") or shutil.which("pymanager")
+            if launcher and _python_311([launcher, "-3.11"]):
+                return [launcher, "-3.11"]
+    except (OSError, subprocess.SubprocessError, urllib.error.URLError):
+        pass
+    finally:
+        try:
+            installer.unlink(missing_ok=True)
+        except OSError:
+            pass
     return None
 
 
@@ -107,8 +159,9 @@ def install_runtime(progress: Callable[[str], None] | None = None) -> None:
     system_python = _system_python()
     if not system_python:
         raise RuntimeError(
-            "Python 3.11 (64-bit) is required for the optional custom voice engine. "
-            "Install Python 3.11 from python.org, then retry the installation."
+            "Automatic Python 3.11 setup could not be completed. "
+            "The custom voice engine needs Python 3.11 (64-bit). "
+            "Check your internet connection and retry the installation."
         )
 
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
