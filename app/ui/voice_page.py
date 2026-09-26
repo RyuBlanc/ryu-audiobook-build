@@ -523,6 +523,12 @@ class VoicePage(QWidget):
         ):
             name = source.stem
         try:
+            # Importing a reference is an explicit switch to the custom voice
+            # workflow. This prevents the previous Piper/Edge selection from
+            # remaining the active provider while a custom sample is displayed.
+            custom_index = self.mode.findData("chatterbox")
+            if custom_index >= 0:
+                self.mode.setCurrentIndex(custom_index)
             self.sample_path = import_reference_audio(source, name)
             self.sample_label.setText(
                 f"✓ {source.name} → {self.sample_path.name}"
@@ -660,6 +666,9 @@ class VoicePage(QWidget):
         profiles.append(profile)
         save_profiles(profiles)
         self.refresh_profiles()
+        # Make the saved profile the active profile immediately. This keeps
+        # the UI, preview, Voice Cast and later generation on the same provider.
+        self.load_selected_profile()
         self.profile_badge.setText(profile.name)
         self.status.setText(f"Saved voice profile '{profile.name}'.")
 
