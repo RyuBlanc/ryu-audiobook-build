@@ -21,6 +21,8 @@ required_modules = [
     "app.ui.library",
     "app.ui.models_page",
     "app.ui.voice_page",
+    "app.ui.voice_cast_page",
+    "app.ui.character_review",
     "app.ui.workflow",
 ]
 
