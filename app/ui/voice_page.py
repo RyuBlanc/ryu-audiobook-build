@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.tts.profile_provider import provider_from_profile
+from app.tts.chatterbox_runtime import runtime_ready, runtime_status
 from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.voice_profile import (
     VoiceProfile, builtin_voice_profiles, import_reference_audio,
@@ -497,7 +498,8 @@ class VoicePage(QWidget):
             self.source_hint.setText("Uses voices already installed in Windows. Fully offline.")
         else:
             self.source_hint.setText(
-                "Use only a reference recording you are authorized to use. The reference remains local."
+                "Use only a reference recording you are authorized to use. The reference remains local. "
+                f"Custom voice engine: {runtime_status()}. Install or repair it from Models before preview/generation."
             )
 
     def select_sample(self) -> None:
@@ -621,6 +623,11 @@ class VoicePage(QWidget):
 
         output = Path(tempfile.gettempdir()) / "ryu_audiobook_voice_preview.wav"
         try:
+            if profile.provider == "chatterbox" and not runtime_ready():
+                raise RuntimeError(
+                    "The custom voice engine is not installed. Open Models → Install / Repair Custom Voice Engine, "
+                    "then return here and try the preview again."
+                )
             self.preview_button.setEnabled(False)
             self.status.setText("Generating preview…")
             provider, voice = provider_from_profile(profile)
