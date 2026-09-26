@@ -51,8 +51,9 @@ class ChatterboxInstallWorker(QThread):
 
     def run(self) -> None:
         try:
+            python_cmd = ["py", "-m", "pip"] if getattr(sys, "frozen", False) else [sys.executable, "-m", "pip"]
             result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "-r", "requirements-voice-cloning.txt"],
+                python_cmd + ["install", "-r", "requirements-voice-cloning.txt"],
                 capture_output=True,
                 text=True,
                 timeout=3600,
