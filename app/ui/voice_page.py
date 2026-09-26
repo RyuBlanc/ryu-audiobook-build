@@ -151,6 +151,9 @@ class VoicePage(QWidget):
         info.setObjectName("muted")
         info.setWordWrap(True)
         custom.addWidget(info)
+        self.install_custom_button = QPushButton("Install / Repair Custom Voice Engine")
+        self.install_custom_button.clicked.connect(self.open_custom_engine_installer)
+        custom.addWidget(self.install_custom_button)
         root.addWidget(self.custom_box)
 
         profile_box = QGroupBox("3  •  Voice Profile")
@@ -475,6 +478,18 @@ class VoicePage(QWidget):
         save_profiles(self.profiles)
         self.refresh_profiles()
         self.status.setText(f"Deleted voice profile: {name}")
+
+    def open_custom_engine_installer(self) -> None:
+        window = self.window()
+        if hasattr(window, "select_section"):
+            window.select_section("Models")
+            self.status.setText(
+                "Models opened. Click Install / Repair Custom Voice Engine to install the local cloning runtime."
+            )
+        else:
+            self.status.setText(
+                "Open Models → Install / Repair Custom Voice Engine to install the local cloning runtime."
+            )
 
     def update_mode(self) -> None:
         mode = self.mode.currentData()
