@@ -48,6 +48,8 @@ args = [
     "--collect-submodules=app",
     "--paths=.",
     f"--additional-hooks-dir={HOOKS}",
+    f"--add-data={ROOT / "requirements-voice-cloning.txt"};.",
+    f"--add-data={ROOT / "app" / "tts" / "chatterbox_worker.py"};app/tts",
     *[
         f"--add-data={ROOT / (module.replace('.', '/') + '.py')};{module.rsplit('.', 1)[0].replace('.', '/')}"
         for module in required_modules
