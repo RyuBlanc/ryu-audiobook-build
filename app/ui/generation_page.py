@@ -357,6 +357,16 @@ class GenerationPage(QWidget):
         if not self.chapters:
             self.status.setText("No chapters available.")
             return
+
+        empty = [c for c in self.chapters if not c.text or not c.text.strip()]
+        if empty:
+            numbers = ", ".join(str(c.number) for c in empty)
+            self.status.setText(
+                f"Generation stopped: chapter(s) {numbers} contain no body text. "
+                "Go to Chapters → Re-detect Chapters, review the split, then Save before generating."
+            )
+            return
+
         output = Path(self.output.text().strip()) if self.output.text().strip() else self._default_output()
         if not output:
             self.status.setText("Choose an M4B output.")
