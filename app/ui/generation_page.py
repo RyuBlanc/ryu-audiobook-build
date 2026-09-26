@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import time
 
 from PySide6.QtCore import QObject, Signal, QUrl, QTimer
@@ -11,7 +12,8 @@ from PySide6.QtWidgets import (
     QProgressBar, QPushButton, QVBoxLayout, QWidget, QComboBox, QScrollArea,
 )
 
-from app.chapters.detector import Chapter
+from app.chapters.detector import Chapter, detect_chapters
+from app.documents.parser import extract_text
 from app.core.state import load_state, save_state
 from app.tts.manager import GenerationManager, GenerationSummary
 from app.tts.profile_provider import provider_from_profile
@@ -356,6 +358,40 @@ class GenerationPage(QWidget):
         for control in controls:
             control.setEnabled(not locked)
 
+    def _repair_empty_chapters_from_source(self) -> bool:
+        if not self.project_folder:
+            return False
+        try:
+            project_file = self.project_folder / "project.json"
+            metadata = json.loads(project_file.read_text(encoding="utf-8"))
+            source_name = metadata.get("source_file")
+            if not source_name:
+                return False
+            source = self.project_folder / "source" / source_name
+            if not source.exists():
+                return False
+            detected = detect_chapters(extract_text(source).text)
+            if not detected or any(not c.text.strip() for c in detected):
+                return False
+            chapters_file = self.project_folder / "chapters.json"
+            chapters_file.write_text(
+                json.dumps(
+                    [
+                        {"number": c.number, "title": c.title, "text": c.text}
+                        for c in detected
+                    ],
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            self.chapters = detected
+            self._update_overview()
+            self.status.setText("Chapter list was automatically repaired from the original source.")
+            return True
+        except Exception:
+            return False
+
     def start(self) -> None:
         if not self.chapters:
             self.status.setText("No chapters available.")
@@ -363,10 +399,13 @@ class GenerationPage(QWidget):
 
         empty = [c for c in self.chapters if not c.text or not c.text.strip()]
         if empty:
+            self._repair_empty_chapters_from_source()
+            empty = [c for c in self.chapters if not c.text or not c.text.strip()]
+        if empty:
             numbers = ", ".join(str(c.number) for c in empty)
             self.status.setText(
                 f"Generation stopped: chapter(s) {numbers} contain no body text. "
-                "Go to Chapters → Re-detect Chapters, review the split, then Save before generating."
+                "The original source could not be used to repair the chapter split; review Chapters before generating."
             )
             return
 
