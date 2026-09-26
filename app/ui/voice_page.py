@@ -426,8 +426,11 @@ class VoicePage(QWidget):
         self.saved_profiles.blockSignals(False)
 
     def _saved_profile_changed(self) -> None:
+        # Selecting a saved profile must make it the active profile, not just
+        # change the badge. This is especially important for custom Chatterbox
+        # profiles because the provider and reference audio live in the profile.
         if self.saved_profiles.currentData():
-            self.profile_badge.setText(str(self.saved_profiles.currentData()))
+            self.load_selected_profile()
 
     def load_selected_profile(self) -> None:
         name = self.saved_profiles.currentData()
