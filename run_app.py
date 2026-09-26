@@ -3,15 +3,13 @@ from __future__ import annotations
 import os
 import sys
 
-# CI/frozen-build self-test. Keep this deliberately minimal: importing the
-# provider package also imports every TTS backend and can initialize native
-# libraries/Qt that keep a windowed process alive. The original frozen crash
-# was a missing chatterbox_runtime module, so verify that module directly.
+# CI/frozen-build self-test: import the modules that previously caused the
+# installed EXE to fail at startup, then terminate the process immediately.
+# Avoid importing Qt/UI modules here because Qt can keep native worker threads
+# alive even after SystemExit in a windowed frozen process.
 if "--self-test" in sys.argv:
-    import app.tts.chatterbox_runtime as _runtime
-
-    if not hasattr(_runtime, "runtime_ready") or not hasattr(_runtime, "worker_script"):
-        os._exit(2)
+    import app.tts.chatterbox_runtime  # noqa: F401
+    import app.tts.providers.chatterbox  # noqa: F401
     os._exit(0)
 
 # Explicit module imports are intentional: PyInstaller must see every UI
