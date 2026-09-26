@@ -22,6 +22,8 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
+CloseApplications=yes
+CloseApplicationsFilter=Ryu's Audiobook.exe
 UninstallDisplayName={#MyAppName}
 
 [Files]
