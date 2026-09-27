@@ -69,6 +69,23 @@ Page 12
         self.assertIn("she said.", result.narration_text)
         self.assertNotIn("Page 12", result.narration_text)
 
+    def test_pronunciation_dictionary_is_case_insensitive_and_phrase_aware(self):
+        source = "Hyoudou Issei met Ise. HYoudou Issei smiled."
+        result = prepare_for_narration(source, [
+            {"written": "Hyoudou Issei", "spoken": "Hee-doh Is-say", "enabled": True},
+            {"written": "Ise", "spoken": "Ee-say", "enabled": True},
+        ])
+        self.assertEqual(
+            result.narration_text,
+            "Hee-doh Is-say met Ee-say. Hee-doh Is-say smiled.",
+        )
+
+    def test_disabled_pronunciation_entry_is_ignored(self):
+        source = "Rias Gremory."
+        result = prepare_for_narration(source, [
+            {"written": "Rias", "spoken": "Ree-ahs", "enabled": False},
+        ])
+        self.assertEqual(result.narration_text, source)
     def test_narration_preprocessing_does_not_grammar_correct(self):
         source = "I am a second year high school student."
         result = prepare_for_narration(source)
