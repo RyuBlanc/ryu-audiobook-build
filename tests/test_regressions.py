@@ -17,7 +17,7 @@ from app.chapters.characters import analyze_book, _all_dialogue_spans
 from app.chapters.detector import Chapter, detect_chapters
 from app.tts.voice_profile import VoiceProfile, save_profiles, load_profiles
 from app.tts.narration import prepare_for_narration
-from app.tts.pronunciation_suggester import suggest_pronunciation, suggest_names_from_text
+from app.tts.pronunciation_suggester import suggest_pronunciation, suggest_names_from_text, COMMON_ENGLISH_WORDS
 
 
 def _write_wav(path: Path, seconds: float = 0.05) -> None:
@@ -126,6 +126,17 @@ Page 12
         self.assertEqual(suggest_pronunciation("Hyoudou Issei"), "Hee-doh Is-say")
         self.assertEqual(suggest_pronunciation("Ise"), "Ee-say")
         self.assertEqual(suggest_pronunciation("Rias"), "Ree-ahs")
+
+    def test_pronunciation_suggester_ignores_common_english_words(self):
+        text = """But she looked at Her friend.
+Hyoudou Issei spoke to Rias Gremory.
+"""
+        candidates = {value.casefold() for value in suggest_names_from_text(text)}
+        self.assertNotIn("but", candidates)
+        self.assertNotIn("she", candidates)
+        self.assertNotIn("her", candidates)
+        self.assertNotIn("what", COMMON_ENGLISH_WORDS)
+        self.assertIn("hyoudou issei", candidates)
 
     def test_pronunciation_suggester_finds_capitalized_name_candidates(self):
         text = "Hyoudou Issei met Rias Gremory at Kuoh Academy."
