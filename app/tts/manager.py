@@ -83,10 +83,14 @@ class GenerationManager:
         offset = 0
         for chapter in self.chapters:
             self._chunk_offsets.append(offset)
+            narration_text = prepare_for_narration(
+                chapter.text,
+                self.pronunciation_dictionary,
+            ).narration_text
             if hasattr(self.provider, "split_for_cast"):
-                offset += len(self.provider.split_for_cast(chapter.text, self.voice))
+                offset += len(self.provider.split_for_cast(narration_text, self.voice))
             else:
-                offset += len(split_text(prepare_for_narration(chapter.text, self.pronunciation_dictionary).narration_text))
+                offset += len(split_text(narration_text))
         self._total_chunks = offset
         generated_chapter_dirs: list[Path] = []
         self._emit(0, len(self.chapters), 0, f"plan:{self._total_chunks}")
