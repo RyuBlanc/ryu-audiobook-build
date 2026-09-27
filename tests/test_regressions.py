@@ -8,6 +8,7 @@ from app.audio.assembler import assemble_m4b
 from app.chapters.characters import analyze_book
 from app.chapters.detector import Chapter, detect_chapters
 from app.tts.voice_profile import VoiceProfile, save_profiles, load_profiles
+from app.tts.narration import prepare_for_narration
 
 
 def _write_wav(path: Path, seconds: float = 0.05) -> None:
@@ -52,6 +53,26 @@ More story text here.
         self.assertTrue(all(c.text.strip() for c in chapters))
         self.assertEqual([c.number for c in chapters], list(range(1, len(chapters) + 1)))
 
+    def test_narration_preprocessing_preserves_source_and_repairs_wrapping(self):
+        source = """This is a sentence that was split
+across two extracted PDF lines.
+
+“He looked at me,”
+she said.
+Page 12
+"""
+        result = prepare_for_narration(source)
+
+        self.assertEqual(result.source_text, source)
+        self.assertIn("sentence that was split across two extracted PDF lines.", result.narration_text)
+        self.assertIn("“He looked at me,”", result.narration_text)
+        self.assertIn("she said.", result.narration_text)
+        self.assertNotIn("Page 12", result.narration_text)
+
+    def test_narration_preprocessing_does_not_grammar_correct(self):
+        source = "I am a second year high school student."
+        result = prepare_for_narration(source)
+        self.assertEqual(result.narration_text, source)
     def test_custom_profile_round_trip(self):
         import app.tts.voice_profile as vp
 
