@@ -802,8 +802,6 @@ def _is_plausible_name(value: str) -> bool:
     if not all(re.match(r"^[A-ZÀ-ÖØ-Þ]", word) for word in words):
         return False
     return any(len(word.strip(".,!?;:")) >= 3 for word in words)
-),
-)
 
 SPEAKER_VERBS = (
     "said|asked|replied|answered|shouted|yelled|whispered|muttered|called|"
