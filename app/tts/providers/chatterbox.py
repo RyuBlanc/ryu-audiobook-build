@@ -22,7 +22,7 @@ class ChatterboxProvider(TTSProvider):
         language: str | None = None,
         multilingual: bool = False,
         exaggeration: float = 0.5,
-        cfg_weight: float = 0.5,
+        cfg_weight: float = 0.35,
     ):
         self.model_path = model_path
         self.reference_audio = reference_audio
@@ -89,7 +89,7 @@ class ChatterboxProvider(TTSProvider):
             command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
             env=runtime_environment(),
@@ -103,9 +103,17 @@ class ChatterboxProvider(TTSProvider):
             ready = json.loads(ready_line)
             if not ready.get("ready"):
                 raise RuntimeError("The custom voice worker did not report ready.")
-        except Exception:
+        except Exception as exc:
+            detail = ""
+            try:
+                if self._worker and self._worker.stderr:
+                    detail = self._worker.stderr.read().strip()[-3000:]
+            except Exception:
+                pass
             self.close()
-            raise
+            if detail:
+                raise RuntimeError(f"The custom voice worker could not start. {detail}") from exc
+            raise RuntimeError(f"The custom voice worker could not start: {exc}") from exc
 
     def _synthesize_external(self, text: str, output_path: Path) -> Path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
