@@ -11,6 +11,7 @@ from typing import Callable
 from app.chapters.detector import Chapter
 from app.tts.base import TTSProvider
 from app.tts.chunker import split_text
+from app.tts.narration import prepare_for_narration
 
 
 @dataclass
@@ -67,10 +68,26 @@ def generate_chapter(
     chunks_dir = chapter_dir / "chunks"
     chunks_dir.mkdir(parents=True, exist_ok=True)
 
+    narration = prepare_for_narration(chapter.text)
+    (chapter_dir / "narration.json").write_text(
+        json.dumps(
+            {
+                "chapter": chapter.number,
+                "title": chapter.title,
+                "source_characters": len(chapter.text),
+                "narration_characters": len(narration.narration_text),
+                "narration_text": narration.narration_text,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
     if hasattr(provider, "split_for_cast"):
-        chunks_with_voices = provider.split_for_cast(chapter.text, voice)
+        chunks_with_voices = provider.split_for_cast(narration.narration_text, voice)
     else:
-        chunks_with_voices = [(chunk, voice) for chunk in split_text(chapter.text)]
+        chunks_with_voices = [(chunk, voice) for chunk in split_text(narration.narration_text)]
     chunks = [item[0] for item in chunks_with_voices]
     if not chunks:
         raise ValueError(
