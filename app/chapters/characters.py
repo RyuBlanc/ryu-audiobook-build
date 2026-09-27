@@ -30,11 +30,7 @@ DIALOGUE_PATTERNS = (
     re.compile(r'"([^"]{2,1800})"'),
     re.compile(r'[\u300c]([^\u300d]{2,1800})[\u300d]'),
     re.compile(r'[\u300e]([^\u300f]{2,1800})[\u300f]'),
-    # Some light-novel/PDF extractions use a leading em/en dash for spoken
-    # dialogue without quotation marks. Keep these line-based.
-    re.compile(r'(?m)^\s*[\u2014\u2013-]\s*([^\n]{2,1200})
 )
-
 SPEAKER_VERBS = (
     "said|asked|replied|answered|shouted|yelled|whispered|muttered|called|"
     "cried|exclaimed|continued|added|insisted|wondered|demanded|begged|"
@@ -376,6 +372,17 @@ def _all_dialogue_spans(text: str) -> list[tuple[int, int, str]]:
     for pattern in DIALOGUE_PATTERNS:
         for match in pattern.finditer(text):
             spans.append((match.start(), match.end(), match.group(1)))
+
+    # Some light-novel/PDF extractions use a leading em/en dash instead of
+    # quotation marks. Build the dash character class without embedded escape
+    # sequences so the source remains robust across generated builds.
+    dash_chars = chr(0x2014) + chr(0x2013) + "-"
+    dash_pattern = re.compile(r"(?m)^[ 	]*[" + dash_chars + r"][ 	]*(.+?)$")
+    for match in dash_pattern.finditer(text):
+        dialogue = match.group(1).strip()
+        if len(dialogue) >= 2:
+            spans.append((match.start(), match.end(), dialogue))
+
     spans.sort(key=lambda x: (x[0], -(x[1] - x[0])))
     result: list[tuple[int, int, str]] = []
     for span in spans:
