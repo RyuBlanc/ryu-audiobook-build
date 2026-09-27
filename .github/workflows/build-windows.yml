@@ -29,7 +29,10 @@ jobs:
 
       - name: Run regression tests
         shell: pwsh
-        run: python -m unittest discover -s tests -v
+        run: |
+          $env:PYTHONPATH = (Get-Location).Path
+          python -c "import sys, app.chapters.characters as m; print('TEST CWD=' + (Get-Location).Path); print('PYTHONPATH=' + $env:PYTHONPATH); print('CHARACTERS MODULE=' + m.__file__); print('DASH PARSER=' + ('dash-only line' -in (Get-Content app\chapters\characters.py -Raw)))"
+          python -m unittest discover -s tests -v
 
       - name: Download built-in offline neural voices
         shell: pwsh
