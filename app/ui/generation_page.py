@@ -156,7 +156,13 @@ class GenerationPage(QWidget):
         self.backend.addItem("NVIDIA CUDA", "cuda")
         self.backend.addItem("DirectML", "directml")
         settings_form.addRow("Backend", self.backend)
-
+        self.narration_speed = QComboBox()
+        self.narration_speed.addItem("0.85×  Very relaxed", 0.85)
+        self.narration_speed.addItem("0.90×  Natural story", 0.90)
+        self.narration_speed.addItem("0.95×  Slightly slower", 0.95)
+        self.narration_speed.addItem("1.00×  Original speed", 1.00)
+        self.narration_speed.setCurrentIndex(1)
+        settings_form.addRow("Narration speed", self.narration_speed)
         self.cover: Path | None = None
         cover_row = QHBoxLayout()
         self.cover_label = QLabel("No cover selected")
@@ -675,6 +681,7 @@ class GenerationPage(QWidget):
             on_progress=lambda *args: self.signals.progress.emit(*args),
             on_finished=lambda summary: self.signals.finished.emit(summary),
             pronunciation_dictionary=self._pronunciation_entries(),
+            narration_speed=float(self.narration_speed.currentData() or 0.90),
         )
         self.manager.start(output, self.title.text().strip(), self.author.text().strip(), self.cover)
 
