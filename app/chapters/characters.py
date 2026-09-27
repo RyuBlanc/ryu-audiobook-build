@@ -171,6 +171,8 @@ def _discover_candidates(text: str) -> set[str]:
         rf"[”\"」』]\s*,?\s*(?:{SPEAKER_VERBS})\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\b",
         rf"[”\"」』]\s*,?\s*({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\s+(?:{SPEAKER_VERBS})\b",
         rf"\b({NAME_TOKEN})\s*[「『]",
+        # Speaker label on its own line immediately before em-dash dialogue.
+        rf"(?m)^\s*({NAME_TOKEN}(?:\s+{NAME_TOKEN}){0,2})\s*$(?=\\n\\s*[—–-]\\s+)",
     )
     for pattern in patterns:
         for match in re.finditer(pattern, text):
