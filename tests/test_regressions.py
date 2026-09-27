@@ -3,7 +3,14 @@ import unittest
 from pathlib import Path
 import subprocess
 import inspect
+import sys
 import wave
+
+# Always import the application package from this checkout, not an identically
+# named package that may be present in the CI Python environment.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from app.audio.assembler import assemble_m4b
 from app.chapters.characters import analyze_book, _all_dialogue_spans
@@ -60,7 +67,14 @@ Rias Gremory
             if line.lstrip(" \\t") and ord(line.lstrip(" \\t")[0]) in (0x2014, 0x2013, 0x2D)
         ]
         self.assertEqual(len(dash_lines), 2, repr(dash_lines))
-        self.assertIn("dash-only line", inspect.getsource(characters_module._all_dialogue_spans))
+        parser_source = inspect.getsource(characters_module._all_dialogue_spans)
+        self.assertIn(
+            "dash-only line",
+            parser_source,
+            f"Unexpected character parser import: {characters_module.__file__}\n"
+            f"sys.path={sys.path}\n"
+            f"parser={parser_source}",
+        )
         spans = _all_dialogue_spans(text)
         self.assertGreaterEqual(
             len(spans), 2,
