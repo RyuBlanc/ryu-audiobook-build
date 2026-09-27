@@ -26,14 +26,14 @@ class CharacterAnalysis:
 
 
 DIALOGUE_PATTERNS = (
-    re.compile(r'“([^”]{2,1800})”'),
+    re.compile(r'[\u201c]([^\u201d]{2,1800})[\u201d]'),
     re.compile(r'"([^"]{2,1800})"'),
-    re.compile(r'「([^」]{2,1800})」'),
-    re.compile(r'『([^』]{2,1800})』'),
-    # Some light-novel/PDF extractions use a leading em dash for spoken
-    # dialogue without quotation marks. Keep these line-based so ordinary
-    # prose is not classified as dialogue.
-    re.compile(r'(?m)^\s*[—–-]\s+([^\n]{2,1200})
+    re.compile(r'[\u300c]([^\u300d]{2,1800})[\u300d]'),
+    re.compile(r'[\u300e]([^\u300f]{2,1800})[\u300f]'),
+    # Some light-novel/PDF extractions use a leading em/en dash for spoken
+    # dialogue without quotation marks. Keep these line-based.
+    re.compile(r'(?m)^\s*[\u2014\u2013-]\s+([^\n]{2,1200})$'),
+)
 
 SPEAKER_VERBS = (
     "said|asked|replied|answered|shouted|yelled|whispered|muttered|called|"
