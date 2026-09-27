@@ -37,7 +37,7 @@ jobs:
           $env:PYTHONPATH = (Get-Location).Path
 
           $workingHash = (git hash-object "app/chapters/characters.py").Trim()
-          $gitHash = ((git show "HEAD:app/chapters/characters.py") | Out-String | git hash-object --stdin).Trim()
+          $gitHash = (git rev-parse "HEAD:app/chapters/characters.py").Trim()
           Write-Host "HEAD=$(git rev-parse HEAD)"
           Write-Host "WORKTREE CHARACTERS HASH=$workingHash"
           Write-Host "GIT OBJECT CHARACTERS HASH=$gitHash"
