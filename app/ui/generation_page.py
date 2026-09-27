@@ -381,11 +381,27 @@ class GenerationPage(QWidget):
         self.pronunciation_table.setRowCount(0)
         if not self.project_folder:
             return
-        entries = load_state(self.project_folder).get("pronunciation_dictionary", [])
+        state = load_state(self.project_folder)
+        entries = state.get("pronunciation_dictionary", [])
+        cleaned = []
+        removed_obvious = 0
         if isinstance(entries, list):
             for item in entries:
-                if isinstance(item, dict):
-                    self._add_pronunciation_row(str(item.get("written", "")), str(item.get("spoken", "")), item.get("enabled", True) is not False)
+                if not isinstance(item, dict):
+                    continue
+                written = str(item.get("written", "")).strip()
+                if written.casefold() in COMMON_ENGLISH_WORDS:
+                    removed_obvious += 1
+                    continue
+                cleaned.append(item)
+                self._add_pronunciation_row(
+                    written,
+                    str(item.get("spoken", "")),
+                    item.get("enabled", True) is not False,
+                )
+        if removed_obvious and cleaned != entries:
+            state["pronunciation_dictionary"] = cleaned
+            save_state(self.project_folder, state)
         count = len(self._pronunciation_entries())
         self.pronunciation_status.setText(f"{count} pronunciation override{'s' if count != 1 else ''} saved for this book." if count else "No pronunciation overrides saved for this book.")
 
