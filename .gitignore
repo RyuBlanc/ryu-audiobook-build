@@ -12,6 +12,7 @@ env/
 # Build output
 build/
 dist/
+installer/installer-output/
 *.spec.bak
 
 # Local app data
