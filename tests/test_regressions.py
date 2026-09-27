@@ -135,7 +135,7 @@ Hyoudou Issei spoke to Rias Gremory.
         self.assertNotIn("but", candidates)
         self.assertNotIn("she", candidates)
         self.assertNotIn("her", candidates)
-        self.assertNotIn("what", COMMON_ENGLISH_WORDS)
+        self.assertIn("what", COMMON_ENGLISH_WORDS)
         self.assertIn("hyoudou issei", candidates)
 
     def test_pronunciation_suggester_finds_capitalized_name_candidates(self):
