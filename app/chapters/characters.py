@@ -380,14 +380,21 @@ def _all_dialogue_spans(text: str) -> list[tuple[int, int, str]]:
             spans.append((match.start(), match.end(), match.group(1)))
 
     # Some light-novel/PDF extractions use a leading em/en dash instead of
-    # quotation marks. Build the dash character class without embedded escape
-    # sequences so the source remains robust across generated builds.
-    dash_chars = chr(0x2014) + chr(0x2013) + "-"
-    dash_pattern = re.compile(r"(?m)^[ 	]*[" + dash_chars + r"][ 	]*(.+?)$")
-    for match in dash_pattern.finditer(text):
-        dialogue = match.group(1).strip()
-        if len(dialogue) >= 2:
-            spans.append((match.start(), match.end(), dialogue))
+    # quotation marks. Parse these line-by-line so PDF whitespace/newline
+    # variations cannot break the dialogue detector.
+    dash_chars = {"—", "–", "-"}
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        stripped = line.lstrip(" \t")
+        if stripped and stripped[0] in dash_chars:
+            dialogue = stripped[1:].strip()
+            if len(dialogue) >= 2:
+                leading = len(line) - len(stripped)
+                start = offset + leading
+                end = offset + len(line.rstrip("\r\n"))
+                spans.append((start, end, dialogue))
+        offset += len(line)
+
 
     spans.sort(key=lambda x: (x[0], -(x[1] - x[0])))
     result: list[tuple[int, int, str]] = []
