@@ -131,3 +131,29 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           overwrite: true
+
+      - name: Clean old workflow runs
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = "${{ github.repository }}"
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+
+          $response = Invoke-RestMethod -Method Get -Uri "https://api.github.com/repos/$repo/actions/runs?branch=main&per_page=100" -Headers $headers
+          $runsToKeep = 15
+          $completedRuns = @($response.workflow_runs | Where-Object { $_.status -eq "completed" })
+
+          if ($completedRuns.Count -gt $runsToKeep) {
+            $completedRuns | Select-Object -Skip $runsToKeep | ForEach-Object {
+              Write-Host "Deleting old workflow run #$($_.run_number) ($($_.id))"
+              Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$repo/actions/runs/$($_.id)" -Headers $headers
+            }
+          }
+
+          Write-Host "Kept the newest $runsToKeep completed workflow runs."
