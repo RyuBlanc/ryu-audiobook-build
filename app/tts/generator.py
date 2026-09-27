@@ -63,12 +63,13 @@ def generate_chapter(
     voice: str,
     output_root: Path,
     progress: Callable[[int, int], None] | None = None,
+    pronunciation_dictionary: list[dict] | None = None,
 ) -> GenerationResult:
     chapter_dir = output_root / f"{chapter.number:03d}_{safe_name(chapter.title)}"
     chunks_dir = chapter_dir / "chunks"
     chunks_dir.mkdir(parents=True, exist_ok=True)
 
-    narration = prepare_for_narration(chapter.text)
+    narration = prepare_for_narration(chapter.text, pronunciation_dictionary=pronunciation_dictionary)
     (chapter_dir / "narration.json").write_text(
         json.dumps(
             {
