@@ -68,7 +68,7 @@ class ChatterboxProvider(TTSProvider):
             self._model = ChatterboxTTS.from_pretrained(device=device)
         self._device = device
 
-    def _start_external_worker(self) -> None:
+    def _start_external_worker(self, variant: str | None = None) -> None:
         if self._worker is not None and self._worker.poll() is None:
             return
         python = runtime_python()
@@ -77,43 +77,77 @@ class ChatterboxProvider(TTSProvider):
                 "Custom voice engine is not installed. Open Models → Install / Repair Custom Voice Engine "
                 "and complete the one-time runtime installation."
             )
-        command = [
-            str(python), str(worker_script()),
-            "--server",
-            "--backend", self.backend,
-            "--language", self.language or "en",
-        ]
-        if self.multilingual:
-            command.append("--multilingual")
-        self._worker = subprocess.Popen(
-            command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            env=runtime_environment(),
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            if sys.platform == "win32" else 0,
-        )
-        try:
-            ready_line = self._worker.stdout.readline() if self._worker.stdout else ""
-            if not ready_line:
-                raise RuntimeError("The custom voice worker stopped before becoming ready.")
-            ready = json.loads(ready_line)
-            if not ready.get("ready"):
-                raise RuntimeError("The custom voice worker did not report ready.")
-        except Exception as exc:
-            detail = ""
+
+        requested_variant = (variant or "auto").lower()
+
+        def spawn(selected_variant: str):
+            command = [
+                str(python), str(worker_script()),
+                "--server",
+                "--backend", self.backend,
+                "--language", self.language or "en",
+                "--variant", selected_variant,
+            ]
+            if self.multilingual:
+                command.append("--multilingual")
+            self._worker = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                env=runtime_environment(),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                if sys.platform == "win32" else 0,
+            )
+
+        def read_ready() -> tuple[dict, str]:
             try:
-                if self._worker and self._worker.stderr:
-                    detail = self._worker.stderr.read().strip()[-3000:]
-            except Exception:
-                pass
+                ready_line = self._worker.stdout.readline() if self._worker and self._worker.stdout else ""
+                if not ready_line:
+                    raise RuntimeError("The custom voice worker stopped before becoming ready.")
+                ready = json.loads(ready_line)
+                if not ready.get("ready"):
+                    raise RuntimeError("The custom voice worker did not report ready.")
+                return ready, ""
+            except Exception as exc:
+                detail = ""
+                try:
+                    if self._worker and self._worker.stderr:
+                        detail = self._worker.stderr.read().strip()[-3000:]
+                except Exception:
+                    pass
+                return {}, detail or str(exc)
+
+        spawn(requested_variant)
+        ready, detail = read_ready()
+        if ready:
+            return
+
+        self.close()
+        paging_error = (
+            "1455" in detail
+            or "paging file is too small" in detail.lower()
+            or "os error 1455" in detail.lower()
+            or "winerror 1455" in detail.lower()
+        )
+        if paging_error and not self.multilingual and requested_variant != "nano":
+            # The base model can exceed the Windows commit limit on small
+            # RAM/pagefile systems. Relaunch from a clean process with the
+            # official Chatterbox Nano voice-cloning model.
+            spawn("nano")
+            ready, nano_detail = read_ready()
+            if ready:
+                return
             self.close()
-            if detail:
-                raise RuntimeError(f"The custom voice worker could not start. {detail}") from exc
-            raise RuntimeError(f"The custom voice worker could not start: {exc}") from exc
+            detail = nano_detail or detail
+            raise RuntimeError(
+                "The custom voice worker could not start even in low-memory mode. "
+                + detail
+            )
+
+        raise RuntimeError(f"The custom voice worker could not start. {detail}")
 
     def _synthesize_external(self, text: str, output_path: Path) -> Path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
