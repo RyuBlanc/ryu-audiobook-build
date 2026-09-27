@@ -30,8 +30,22 @@ jobs:
       - name: Run regression tests
         shell: pwsh
         run: |
+          # Ensure dependency installation/caches cannot leave a stale working-tree
+          # copy or Python bytecode in the checkout.
+          git reset --hard HEAD
+          git clean -ffdx
           $env:PYTHONPATH = (Get-Location).Path
-          python -c "import sys, app.chapters.characters as m; print('TEST CWD=' + (Get-Location).Path); print('PYTHONPATH=' + $env:PYTHONPATH); print('CHARACTERS MODULE=' + m.__file__); print('DASH PARSER=' + ('dash-only line' -in (Get-Content app\chapters\characters.py -Raw)))"
+
+          $workingHash = (git hash-object "app/chapters/characters.py").Trim()
+          $gitHash = ((git show "HEAD:app/chapters/characters.py") | Out-String | git hash-object --stdin).Trim()
+          Write-Host "HEAD=$(git rev-parse HEAD)"
+          Write-Host "WORKTREE CHARACTERS HASH=$workingHash"
+          Write-Host "GIT OBJECT CHARACTERS HASH=$gitHash"
+          if ($workingHash -ne $gitHash) {
+            throw "Working-tree app/chapters/characters.py differs from the checked-out Git object."
+          }
+
+          python -c "import os, sys, inspect, app.chapters.characters as m; print('TEST CWD=' + os.getcwd()); print('PYTHONPATH=' + os.environ.get('PYTHONPATH','')); print('CHARACTERS MODULE=' + m.__file__); print('CHARACTERS CACHED=' + str(getattr(m,'__cached__',None))); print('DASH PARSER=' + str('dash-only line' in inspect.getsource(m._all_dialogue_spans)))"
           python -m unittest discover -s tests -v
 
       - name: Download built-in offline neural voices
