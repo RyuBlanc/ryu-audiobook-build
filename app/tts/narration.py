@@ -85,7 +85,37 @@ def _join_wrapped_lines(text: str) -> str:
     return "\n".join(output)
 
 
-def prepare_for_narration(text: str) -> NarrationResult:
+def apply_pronunciation_dictionary(text: str, dictionary: list[dict] | None = None) -> str:
+    """Apply explicit written -> spoken pronunciation overrides.
+
+    Matching is case-insensitive and phrase-aware. Only entries marked
+    enabled are applied. The source text is never modified; this operates
+    only on the narration copy.
+    """
+    if not dictionary:
+        return text
+
+    result = text
+    entries = []
+    for item in dictionary:
+        if not isinstance(item, dict) or item.get("enabled", True) is False:
+            continue
+        written = str(item.get("written", "")).strip()
+        spoken = str(item.get("spoken", "")).strip()
+        if written and spoken:
+            entries.append((written, spoken))
+
+    entries.sort(key=lambda pair: len(pair[0]), reverse=True)
+    for written, spoken in entries:
+        pattern = re.compile(r"(?<!\\w)" + re.escape(written) + r"(?!\\w)", re.IGNORECASE)
+        result = pattern.sub(lambda match: spoken, result)
+    return result
+
+
+def prepare_for_narration(
+    text: str,
+    pronunciation_dictionary: list[dict] | None = None,
+) -> NarrationResult:
     """Prepare extracted book text for TTS without rewriting its meaning.
 
     This is intentionally a conservative narration layer: it fixes extraction
@@ -105,5 +135,6 @@ def prepare_for_narration(text: str) -> NarrationResult:
     # Keep common PDF/extraction spacing from becoming awkward TTS input.
     narration = re.sub(r"\s+([,.;:!?])", r"\1", narration)
     narration = re.sub(r"([—–])\s+", r"\1 ", narration)
+    narration = apply_pronunciation_dictionary(narration, pronunciation_dictionary)
 
     return NarrationResult(source_text=source, narration_text=narration)
