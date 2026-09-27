@@ -167,12 +167,18 @@ def _discover_candidates(text: str) -> set[str]:
         rf"[”\"」』]\s*,?\s*(?:{SPEAKER_VERBS})\s+({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\b",
         rf"[”\"」』]\s*,?\s*({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\s+(?:{SPEAKER_VERBS})\b",
         rf"\b({NAME_TOKEN})\s*[「『]",
-        # Speaker label on its own line immediately before em-dash dialogue.
-        rf"(?m)^\s*({NAME_TOKEN}(?:\s+{NAME_TOKEN}){0,2})\s*$(?=\\n\\s*[—–-]\\s+)",
+        # Speaker label on its own line; the next line is checked below
+        # for em/en-dash dialogue.
+        rf"(?m)^\s*({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})\s*$",
     )
-    for pattern in patterns:
+    for index, pattern in enumerate(patterns):
         for match in re.finditer(pattern, text):
             name = _clean_name(match.group(1))
+            if index == len(patterns) - 1:
+                following = text[match.end():match.end() + 20]
+                dash_chars = chr(0x2014) + chr(0x2013) + "-"
+                if not re.match(r"[ \t]*[" + dash_chars + r"]", following):
+                    continue
             if _is_plausible_name(name):
                 candidates.add(name)
 
