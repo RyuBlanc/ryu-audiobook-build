@@ -10,6 +10,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QProgressBar, QPushButton, QVBoxLayout, QWidget, QComboBox, QScrollArea,
+    QTableWidget, QTableWidgetItem, QHeaderView,
 )
 
 from app.chapters.detector import Chapter, detect_chapters
@@ -100,6 +101,38 @@ class GenerationPage(QWidget):
         self.cast_summary.setWordWrap(True)
         cast_layout.addWidget(self.cast_summary)
         root.addWidget(cast_box)
+
+        pronunciation_box = QGroupBox("Pronunciation Dictionary")
+        pronunciation_layout = QVBoxLayout(pronunciation_box)
+        pronunciation_hint = QLabel(
+            "Add words or names the voice should pronounce differently. "
+            "This changes only narration text; the original book remains untouched."
+        )
+        pronunciation_hint.setWordWrap(True)
+        pronunciation_layout.addWidget(pronunciation_hint)
+
+        self.pronunciation_table = QTableWidget(0, 3)
+        self.pronunciation_table.setHorizontalHeaderLabels(["Written", "Pronounce as", "Enabled"])
+        pronunciation_layout.addWidget(self.pronunciation_table)
+
+        pronunciation_actions = QHBoxLayout()
+        self.add_pronunciation = QPushButton("+ Add Pronunciation")
+        self.add_pronunciation.clicked.connect(self._add_pronunciation_row)
+        self.remove_pronunciation = QPushButton("Remove Selected")
+        self.remove_pronunciation.clicked.connect(self._remove_pronunciation_row)
+        self.save_pronunciation = QPushButton("Save Pronunciations")
+        self.save_pronunciation.setObjectName("primary")
+        self.save_pronunciation.clicked.connect(self._save_pronunciations)
+        pronunciation_actions.addWidget(self.add_pronunciation)
+        pronunciation_actions.addWidget(self.remove_pronunciation)
+        pronunciation_actions.addStretch(1)
+        pronunciation_actions.addWidget(self.save_pronunciation)
+        pronunciation_layout.addLayout(pronunciation_actions)
+
+        self.pronunciation_status = QLabel("No pronunciation overrides saved for this book.")
+        self.pronunciation_status.setWordWrap(True)
+        pronunciation_layout.addWidget(self.pronunciation_status)
+        root.addWidget(pronunciation_box)
 
         settings = QGroupBox("Audio settings")
         settings_form = QFormLayout(settings)
@@ -232,9 +265,59 @@ class GenerationPage(QWidget):
         self.timer.timeout.connect(self._update_live_stats)
 
         self._restore_state()
+        self._load_pronunciations()
         self._load_voice_cast_summary()
         self._set_default_output()
 
+    def _add_pronunciation_row(self, written="", spoken="", enabled=True):
+        from PySide6.QtCore import Qt
+        row = self.pronunciation_table.rowCount()
+        self.pronunciation_table.insertRow(row)
+        self.pronunciation_table.setItem(row, 0, QTableWidgetItem(written))
+        self.pronunciation_table.setItem(row, 1, QTableWidgetItem(spoken))
+        item = QTableWidgetItem()
+        item.setCheckState(Qt.CheckState.Checked if enabled else Qt.CheckState.Unchecked)
+        self.pronunciation_table.setItem(row, 2, item)
+
+    def _remove_pronunciation_row(self):
+        row = self.pronunciation_table.currentRow()
+        if row >= 0:
+            self.pronunciation_table.removeRow(row)
+            self._save_pronunciations()
+
+    def _pronunciation_entries(self):
+        from PySide6.QtCore import Qt
+        entries = []
+        for row in range(self.pronunciation_table.rowCount()):
+            a = self.pronunciation_table.item(row, 0)
+            b = self.pronunciation_table.item(row, 1)
+            c = self.pronunciation_table.item(row, 2)
+            written = a.text().strip() if a else ""
+            spoken = b.text().strip() if b else ""
+            if written and spoken:
+                entries.append({"written": written, "spoken": spoken, "enabled": c is not None and c.checkState() == Qt.CheckState.Checked})
+        return entries
+
+    def _load_pronunciations(self):
+        self.pronunciation_table.setRowCount(0)
+        if not self.project_folder:
+            return
+        entries = load_state(self.project_folder).get("pronunciation_dictionary", [])
+        if isinstance(entries, list):
+            for item in entries:
+                if isinstance(item, dict):
+                    self._add_pronunciation_row(str(item.get("written", "")), str(item.get("spoken", "")), item.get("enabled", True) is not False)
+        count = len(self._pronunciation_entries())
+        self.pronunciation_status.setText(f"{count} pronunciation override{'s' if count != 1 else ''} saved for this book." if count else "No pronunciation overrides saved for this book.")
+
+    def _save_pronunciations(self):
+        if not self.project_folder:
+            return
+        state = load_state(self.project_folder)
+        entries = self._pronunciation_entries()
+        state["pronunciation_dictionary"] = entries
+        save_state(self.project_folder, state)
+        self.pronunciation_status.setText(f"{len(entries)} pronunciation override{'s' if len(entries) != 1 else ''} saved for this book." if entries else "No pronunciation overrides saved for this book.")
     def _load_voice_cast_summary(self):
         if not self.project_folder:
             return
@@ -508,6 +591,7 @@ class GenerationPage(QWidget):
         if not output:
             self.status.setText("Choose an M4B output.")
             return
+        self._save_pronunciations()
         profile = self._selected_profile()
         if profile and profile.provider == "chatterbox" and not runtime_ready():
             self.status.setText(
@@ -550,6 +634,7 @@ class GenerationPage(QWidget):
             provider, voice, self.chapters, self.audio_root,
             on_progress=lambda *args: self.signals.progress.emit(*args),
             on_finished=lambda summary: self.signals.finished.emit(summary),
+            pronunciation_dictionary=self._pronunciation_entries(),
         )
         self.manager.start(output, self.title.text().strip(), self.author.text().strip(), self.cover)
 
