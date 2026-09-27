@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from app.chapters.detector import Chapter, detect_chapters
 from app.chapters.characters import analyze_book
+from app.tts.pronunciation_suggester import suggest_pronunciation, suggest_names_from_text
 from app.documents.parser import extract_text
 from app.core.state import load_state, save_state
 from app.tts.manager import GenerationManager, GenerationSummary
@@ -119,7 +120,7 @@ class GenerationPage(QWidget):
         pronunciation_actions = QHBoxLayout()
         self.add_pronunciation = QPushButton("+ Add Pronunciation")
         self.add_pronunciation.clicked.connect(self._add_pronunciation_row)
-        self.suggest_pronunciation = QPushButton("Suggest from Voice Cast")
+        self.suggest_pronunciation = QPushButton("Suggest Names + Pronunciation")
         self.suggest_pronunciation.clicked.connect(self._suggest_pronunciations)
         self.remove_pronunciation = QPushButton("Remove Selected")
         self.remove_pronunciation.clicked.connect(self._remove_pronunciation_row)
@@ -302,28 +303,30 @@ class GenerationPage(QWidget):
         except Exception:
             pass
 
-        if self.project_folder:
-            saved = load_state(self.project_folder).get("voice_cast", {})
-            if isinstance(saved, dict):
-                suggestions.extend(str(name) for name in saved if name)
+        full_text = "\n".join(c.text for c in self.chapters if c.text)
+        suggestions.extend(suggest_names_from_text(full_text))
 
         added = 0
         for name in suggestions:
             clean = name.strip()
-            if not clean or clean.casefold() in existing:
+            key = clean.casefold()
+            if not clean or key in existing or len(clean) < 3:
                 continue
-            self._add_pronunciation_row(clean, "", True)
-            existing.add(clean.casefold())
+            spoken = suggest_pronunciation(clean)
+            self._add_pronunciation_row(clean, spoken, True)
+            existing.add(key)
             added += 1
+            if added >= 40:
+                break
 
         if added:
             self.pronunciation_status.setText(
-                f"Added {added} name{'s' if added != 1 else ''} as pronunciation suggestions. "
-                "Enter how each should sound, then save."
+                f"Added {added} name{'s' if added != 1 else ''} with draft pronunciation suggestions. "
+                "Review the spoken form before saving; these are editable suggestions."
             )
         else:
             self.pronunciation_status.setText(
-                "No new character names found. Use + Add Pronunciation for custom terms."
+                "No new name candidates found. Use + Add Pronunciation for custom terms."
             )
     def _remove_pronunciation_row(self):
         row = self.pronunciation_table.currentRow()
