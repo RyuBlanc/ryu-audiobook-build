@@ -9,6 +9,7 @@ from app.chapters.characters import analyze_book
 from app.chapters.detector import Chapter, detect_chapters
 from app.tts.voice_profile import VoiceProfile, save_profiles, load_profiles
 from app.tts.narration import prepare_for_narration
+from app.tts.pronunciation_suggester import suggest_pronunciation, suggest_names_from_text
 
 
 def _write_wav(path: Path, seconds: float = 0.05) -> None:
@@ -69,6 +70,16 @@ Page 12
         self.assertIn("she said.", result.narration_text)
         self.assertNotIn("Page 12", result.narration_text)
 
+    def test_pronunciation_suggester_has_known_name_readings(self):
+        self.assertEqual(suggest_pronunciation("Hyoudou Issei"), "Hee-doh Is-say")
+        self.assertEqual(suggest_pronunciation("Ise"), "Ee-say")
+        self.assertEqual(suggest_pronunciation("Rias"), "Ree-ahs")
+
+    def test_pronunciation_suggester_finds_capitalized_name_candidates(self):
+        text = "Hyoudou Issei met Rias Gremory at Kuoh Academy."
+        names = suggest_names_from_text(text)
+        self.assertIn("Hyoudou Issei", names)
+        self.assertIn("Rias Gremory", names)
     def test_pronunciation_dictionary_is_case_insensitive_and_phrase_aware(self):
         source = "Hyoudou Issei met Ise. HYoudou Issei smiled."
         result = prepare_for_narration(source, [
