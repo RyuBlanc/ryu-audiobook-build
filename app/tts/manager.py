@@ -12,6 +12,7 @@ from app.chapters.detector import Chapter
 from app.tts.base import TTSProvider
 from app.tts.generator import generate_chapter
 from app.tts.chunker import split_text
+from app.tts.narration import prepare_for_narration
 
 
 @dataclass
@@ -35,6 +36,7 @@ class GenerationManager:
         project_audio_root: Path,
         on_progress: Callable[[int, int, int, str], None] | None = None,
         on_finished: Callable[[GenerationSummary], None] | None = None,
+        pronunciation_dictionary: list[dict] | None = None,
     ) -> None:
         self.provider = provider
         self.voice = voice
@@ -42,6 +44,7 @@ class GenerationManager:
         self.audio_root = project_audio_root
         self.on_progress = on_progress
         self.on_finished = on_finished
+        self.pronunciation_dictionary = pronunciation_dictionary or []
         self.cancel_event = Event()
         self._thread: Thread | None = None
         self.failed: list[int] = []
@@ -83,7 +86,7 @@ class GenerationManager:
             if hasattr(self.provider, "split_for_cast"):
                 offset += len(self.provider.split_for_cast(chapter.text, self.voice))
             else:
-                offset += len(split_text(chapter.text))
+                offset += len(split_text(prepare_for_narration(chapter.text, self.pronunciation_dictionary).narration_text))
         self._total_chunks = offset
         generated_chapter_dirs: list[Path] = []
         self._emit(0, len(self.chapters), 0, f"plan:{self._total_chunks}")
@@ -104,6 +107,7 @@ class GenerationManager:
                     lambda done, total, i=index: self._progress(
                         i, len(self.chapters), done, total
                     ),
+                    pronunciation_dictionary=self.pronunciation_dictionary,
                 )
                 if result.chunks_completed != result.chunks_total:
                     raise RuntimeError("Chapter generation is incomplete.")
