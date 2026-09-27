@@ -5,7 +5,7 @@ import subprocess
 import wave
 
 from app.audio.assembler import assemble_m4b
-from app.chapters.characters import analyze_book
+from app.chapters.characters import analyze_book, _all_dialogue_spans
 from app.chapters.detector import Chapter, detect_chapters
 from app.tts.voice_profile import VoiceProfile, save_profiles, load_profiles
 from app.tts.narration import prepare_for_narration
@@ -51,6 +51,8 @@ Rias Gremory
 \u2014We should get going.
 """
         self.assertEqual([ord(ch) for ch in text if ch in "—–-"], [0x2014, 0x2014, 0x2014])
+        spans = _all_dialogue_spans(text)
+        self.assertGreaterEqual(len(spans), 2, repr([(s[2], [hex(ord(ch)) for ch in s[2][:3]]) for s in spans]))
         analysis = analyze_book([Chapter(1, "Chapter 1", text)])
         names = {c.name.casefold() for c in analysis.characters}
         self.assertIn("issei hyoudou", names)
