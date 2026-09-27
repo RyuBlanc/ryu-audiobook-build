@@ -42,14 +42,15 @@ Issei Hyoudou—that’s my name, but my friends and family just call me Issei.
 
     def test_light_novel_em_dash_dialogue_is_detected(self):
         text = """Chapter 1
-Issei Hyoudou—That's my name.
+Issei Hyoudou\u2014That's my name.
 
 Akeno Himejima
-—Hello there, Issei.
+\u2014Hello there, Issei.
 
 Rias Gremory
-—We should get going.
+\u2014We should get going.
 """
+        self.assertEqual([ord(ch) for ch in text if ch in "—–-"], [0x2014, 0x2014, 0x2014])
         analysis = analyze_book([Chapter(1, "Chapter 1", text)])
         names = {c.name.casefold() for c in analysis.characters}
         self.assertIn("issei hyoudou", names)
