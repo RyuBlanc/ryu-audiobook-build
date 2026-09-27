@@ -6,6 +6,8 @@ import hashlib
 import json
 import re
 import wave
+import subprocess
+import imageio_ffmpeg
 from typing import Callable
 
 from app.chapters.detector import Chapter
@@ -57,6 +59,23 @@ def _provider_signature(provider: TTSProvider, voice: str | None, chunks: list[t
     ).hexdigest()
 
 
+def _apply_narration_speed(path: Path, speed: float) -> None:
+    """Change playback tempo without changing pitch."""
+    speed = max(0.5, min(2.0, float(speed)))
+    if abs(speed - 1.0) < 0.001:
+        return
+    temp_path = path.with_suffix(".tempo.wav")
+    result = subprocess.run(
+        [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-i", str(path),
+         "-filter:a", f"atempo={speed:.3f}", "-c:a", "pcm_s16le", str(temp_path)],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0 or not temp_path.exists() or temp_path.stat().st_size < 1024:
+        detail = (result.stderr or result.stdout or "").strip()[-2000:]
+        temp_path.unlink(missing_ok=True)
+        raise RuntimeError(f"Could not apply narration speed {speed:.2f}x. {detail}")
+    temp_path.replace(path)
+
 def generate_chapter(
     chapter: Chapter,
     provider: TTSProvider,
@@ -64,6 +83,7 @@ def generate_chapter(
     output_root: Path,
     progress: Callable[[int, int], None] | None = None,
     pronunciation_dictionary: list[dict] | None = None,
+    narration_speed: float = 0.90,
 ) -> GenerationResult:
     chapter_dir = output_root / f"{chapter.number:03d}_{safe_name(chapter.title)}"
     chunks_dir = chapter_dir / "chunks"
@@ -96,6 +116,7 @@ def generate_chapter(
         )
 
     signature = _provider_signature(provider, voice, chunks_with_voices)
+    signature = hashlib.sha256(json.dumps({"base": signature, "narration_speed": narration_speed}, sort_keys=True).encode("utf-8")).hexdigest()
     state = load_state(chapter_dir)
     if state.get("chunks_total") != len(chunks) or state.get("generation_signature") != signature:
         state = {
@@ -113,6 +134,8 @@ def generate_chapter(
         output = chunks_dir / filename
         if index not in completed or not output.exists():
             provider.synthesize(chunk, output, chunks_with_voices[index][1])
+            if abs(narration_speed - 1.0) > 0.001:
+                _apply_narration_speed(output, narration_speed)
 
         if not output.exists() or output.stat().st_size < 1024:
             raise RuntimeError(f"Audio chunk {index + 1}/{len(chunks)} was not created: {output.name}")
