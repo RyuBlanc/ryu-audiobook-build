@@ -61,7 +61,7 @@ def suggest_names_from_text(text: str) -> list[str]:
     for pattern in patterns:
         for match in re.finditer(pattern, text):
             value = match.group(1).strip()
-            if len(value) > 2 and value.casefold() not in _STOPWORDS:
+            if len(value) > 2 and value.casefold() not in COMMON_ENGLISH_WORDS:
                 candidates.add(value)
     return sorted(
         candidates,
