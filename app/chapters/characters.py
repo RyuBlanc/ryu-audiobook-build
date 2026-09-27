@@ -379,14 +379,21 @@ def _all_dialogue_spans(text: str) -> list[tuple[int, int, str]]:
         for match in pattern.finditer(text):
             spans.append((match.start(), match.end(), match.group(1)))
 
-    # Some light-novel/PDF extractions use an em/en dash as the
-    # dialogue marker. Use an explicit line regex with the actual Unicode
-    # characters so extraction is independent of whitespace conventions.
-    dash_pattern = re.compile(r'(?m)^[ \t]*[—–-][ \t]*([^\r\n]+)')
-    for match in dash_pattern.finditer(text):
-        dialogue = match.group(1).strip()
-        if len(dialogue) >= 2:
-            spans.append((match.start(), match.end(), dialogue))
+    # Light-novel dialogue may be represented by a dash-only line.
+    # Detect the Unicode code points directly rather than relying on regex
+    # character-class encoding.
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        stripped = line.lstrip(" \t")
+        if stripped:
+            first = ord(stripped[0])
+            if first in (0x2014, 0x2013, 0x2D):
+                dialogue = stripped[1:].strip()
+                if len(dialogue) >= 2:
+                    start = offset + (len(line) - len(stripped))
+                    end = offset + len(line.rstrip("\r\n"))
+                    spans.append((start, end, dialogue))
+        offset += len(line)
 
 
     spans.sort(key=lambda x: (x[0], -(x[1] - x[0])))
