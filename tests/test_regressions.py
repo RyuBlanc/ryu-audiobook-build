@@ -40,6 +40,23 @@ Issei Hyoudou—that’s my name, but my friends and family just call me Issei.
         self.assertGreaterEqual(analysis.dialogue_total, 4)
         self.assertLess(analysis.unassigned_dialogue, analysis.dialogue_total)
 
+    def test_light_novel_em_dash_dialogue_is_detected(self):
+        text = """Chapter 1
+Issei Hyoudou—That's my name.
+
+Akeno Himejima
+—Hello there, Issei.
+
+Rias Gremory
+—We should get going.
+"""
+        analysis = analyze_book([Chapter(1, "Chapter 1", text)])
+        names = {c.name.casefold() for c in analysis.characters}
+        self.assertIn("issei hyoudou", names)
+        self.assertIn("akeno himejima", names)
+        self.assertIn("rias gremory", names)
+        self.assertGreaterEqual(analysis.dialogue_total, 2)
+
     def test_detector_never_returns_empty_chapter(self):
         text = """Life.0
 Story text here.
