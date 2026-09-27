@@ -37,6 +37,7 @@ class GenerationManager:
         on_progress: Callable[[int, int, int, str], None] | None = None,
         on_finished: Callable[[GenerationSummary], None] | None = None,
         pronunciation_dictionary: list[dict] | None = None,
+        narration_speed: float = 0.90,
     ) -> None:
         self.provider = provider
         self.voice = voice
@@ -45,6 +46,7 @@ class GenerationManager:
         self.on_progress = on_progress
         self.on_finished = on_finished
         self.pronunciation_dictionary = pronunciation_dictionary or []
+        self.narration_speed = narration_speed
         self.cancel_event = Event()
         self._thread: Thread | None = None
         self.failed: list[int] = []
@@ -112,6 +114,7 @@ class GenerationManager:
                         i, len(self.chapters), done, total
                     ),
                     pronunciation_dictionary=self.pronunciation_dictionary,
+                    narration_speed=self.narration_speed,
                 )
                 if result.chunks_completed != result.chunks_total:
                     raise RuntimeError("Chapter generation is incomplete.")
