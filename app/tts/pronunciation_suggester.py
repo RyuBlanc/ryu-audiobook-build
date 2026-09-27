@@ -2,6 +2,17 @@ from __future__ import annotations
 
 import re
 
+COMMON_ENGLISH_WORDS = {
+    "a","an","and","are","as","at","be","been","being","but","by","can","could",
+    "did","do","does","for","from","had","has","have","he","her","here","hers",
+    "him","his","how","i","if","in","into","is","it","its","just","may","me",
+    "more","most","my","no","not","of","on","one","or","our","ours","she","so",
+    "some","such","than","that","the","their","theirs","them","then","there",
+    "these","they","this","those","to","too","under","up","us","very","was",
+    "we","were","what","when","where","which","who","whom","why","will","with",
+    "would","you","your","yours",
+}
+
 _KNOWN = {
     "hyoudou issei": "Hee-doh Is-say",
     "issei hyoudou": "Is-say Hee-doh",
@@ -10,7 +21,7 @@ _KNOWN = {
     "rias gremory": "Ree-ahs Grem-or-ee",
 }
 
-_STOPWORDS = {"the", "this", "that", "chapter", "volume", "school", "academy"}
+_STOPWORDS = COMMON_ENGLISH_WORDS | {"chapter", "volume", "school", "academy"}
 
 def suggest_pronunciation(name: str) -> str:
     key = re.sub(r"\s+", " ", name.strip()).casefold()
