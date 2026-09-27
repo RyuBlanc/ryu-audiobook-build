@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 
 from app.chapters.detector import Chapter, detect_chapters
 from app.chapters.characters import analyze_book
-from app.tts.pronunciation_suggester import suggest_pronunciation, suggest_names_from_text
+from app.tts.pronunciation_suggester import suggest_pronunciation, COMMON_ENGLISH_WORDS
 from app.documents.parser import extract_text
 from app.core.state import load_state, save_state
 from app.tts.manager import GenerationManager, GenerationSummary
@@ -120,16 +120,19 @@ class GenerationPage(QWidget):
         pronunciation_actions = QHBoxLayout()
         self.add_pronunciation = QPushButton("+ Add Pronunciation")
         self.add_pronunciation.clicked.connect(self._add_pronunciation_row)
-        self.suggest_pronunciation = QPushButton("Suggest Names + Pronunciation")
+        self.suggest_pronunciation = QPushButton("Suggest Character Pronunciations")
         self.suggest_pronunciation.clicked.connect(self._suggest_pronunciations)
         self.remove_pronunciation = QPushButton("Remove Selected")
         self.remove_pronunciation.clicked.connect(self._remove_pronunciation_row)
+        self.clean_english_pronunciations = QPushButton("Clean Obvious English")
+        self.clean_english_pronunciations.clicked.connect(self._clean_obvious_english_pronunciations)
         self.save_pronunciation = QPushButton("Save Pronunciations")
         self.save_pronunciation.setObjectName("primary")
         self.save_pronunciation.clicked.connect(self._save_pronunciations)
         pronunciation_actions.addWidget(self.add_pronunciation)
         pronunciation_actions.addWidget(self.suggest_pronunciation)
         pronunciation_actions.addWidget(self.remove_pronunciation)
+        pronunciation_actions.addWidget(self.clean_english_pronunciations)
         pronunciation_actions.addStretch(1)
         pronunciation_actions.addWidget(self.save_pronunciation)
         pronunciation_layout.addLayout(pronunciation_actions)
@@ -299,18 +302,26 @@ class GenerationPage(QWidget):
         suggestions = []
         try:
             analysis = analyze_book(self.chapters)
-            suggestions.extend(c.name for c in analysis.characters if c.name)
+            for character in analysis.characters:
+                if character.name:
+                    suggestions.append(character.name)
+                suggestions.extend(character.aliases or [])
         except Exception:
             pass
 
-        full_text = "\n".join(c.text for c in self.chapters if c.text)
-        suggestions.extend(suggest_names_from_text(full_text))
-
+        # Automatic suggestions come only from detected characters/aliases.
+        # Do not scan every capitalized word because ordinary English words
+        # such as "But", "She", "Her", and "What" are not names.
         added = 0
         for name in suggestions:
             clean = name.strip()
             key = clean.casefold()
-            if not clean or key in existing or len(clean) < 3:
+            if (
+                not clean
+                or key in existing
+                or len(clean) < 3
+                or key in COMMON_ENGLISH_WORDS
+            ):
                 continue
             spoken = suggest_pronunciation(clean)
             self._add_pronunciation_row(clean, spoken, True)
@@ -321,13 +332,32 @@ class GenerationPage(QWidget):
 
         if added:
             self.pronunciation_status.setText(
-                f"Added {added} name{'s' if added != 1 else ''} with draft pronunciation suggestions. "
-                "Review the spoken form before saving; these are editable suggestions."
+                f"Added {added} character name{'s' if added != 1 else ''} with draft pronunciation suggestions. "
+                "Only detected characters/aliases are suggested automatically; review the spoken form before saving."
             )
         else:
             self.pronunciation_status.setText(
-                "No new name candidates found. Use + Add Pronunciation for custom terms."
+                "No new character names found. Use + Add Pronunciation for custom terms."
             )
+
+    def _clean_obvious_english_pronunciations(self):
+        removed = 0
+        row = 0
+        while row < self.pronunciation_table.rowCount():
+            item = self.pronunciation_table.item(row, 0)
+            written = item.text().strip().casefold() if item else ""
+            if written in COMMON_ENGLISH_WORDS:
+                self.pronunciation_table.removeRow(row)
+                removed += 1
+                continue
+            row += 1
+        self._save_pronunciations()
+        self.pronunciation_status.setText(
+            f"Removed {removed} obvious English-word override{'s' if removed != 1 else ''}."
+            if removed
+            else "No obvious English-word overrides found."
+        )
+
     def _remove_pronunciation_row(self):
         row = self.pronunciation_table.currentRow()
         if row >= 0:
