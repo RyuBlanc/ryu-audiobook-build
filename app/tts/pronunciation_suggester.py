@@ -10,11 +10,13 @@ _KNOWN = {
     "rias gremory": "Ree-ahs Grem-or-ee",
 }
 
+_STOPWORDS = {"the", "this", "that", "chapter", "volume", "school", "academy"}
+
 def suggest_pronunciation(name: str) -> str:
-    key = re.sub(r"\\s+", " ", name.strip()).casefold()
+    key = re.sub(r"\s+", " ", name.strip()).casefold()
     if key in _KNOWN:
         return _KNOWN[key]
-    words = [w for w in key.split(" ") if w]
+    words = [w for w in key.split() if w]
     return " ".join(_suggest_word(word) for word in words)
 
 def _suggest_word(word: str) -> str:
@@ -33,8 +35,8 @@ def _suggest_word(word: str) -> str:
     value = re.sub(r"oo$", "oh", value)
     value = re.sub(r"ei$", "ay", value)
     value = re.sub(r"ei", "ay", value)
-    value = re.sub(r"([aeiou])([bcdfghjklmnpqrstvwxyz])([aeiou])", r"\\1-\\2\\3", value)
-    value = re.sub(r"([aeiou])([bcdfghjklmnpqrstvwxyz])", r"\\1-\\2", value)
+    value = re.sub(r"([aeiou])([bcdfghjklmnpqrstvwxyz])([aeiou])", r"\1-\2\3", value)
+    value = re.sub(r"([aeiou])([bcdfghjklmnpqrstvwxyz])", r"\1-\2", value)
     value = value.replace("aa", "ah").replace("ee", "ee").replace("ii", "ee")
     value = value.replace("uu", "oo")
     return value.title()
@@ -42,12 +44,15 @@ def _suggest_word(word: str) -> str:
 def suggest_names_from_text(text: str) -> list[str]:
     candidates: set[str] = set()
     patterns = [
-        r"\\b([A-Z][a-z]+(?:[-'][A-Z][a-z]+)?(?:\\s+[A-Z][a-z]+(?:[-'][A-Z][a-z]+)?){1,2})\\b",
-        r"\\b([A-Z][a-z]{2,})\\b",
+        r"\b([A-Z][a-z]+(?:[-'][A-Z][a-z]+)?(?:\s+[A-Z][a-z]+(?:[-'][A-Z][a-z]+)?){1,2})\b",
+        r"\b([A-Z][a-z]{2,})\b",
     ]
     for pattern in patterns:
         for match in re.finditer(pattern, text):
             value = match.group(1).strip()
-            if len(value) > 2 and not value.lower() in {"The", "This", "That", "Chapter", "Volume", "School"}:
+            if len(value) > 2 and value.casefold() not in _STOPWORDS:
                 candidates.add(value)
-    return sorted(candidates, key=lambda x: (-len(re.findall(r"\\b" + re.escape(x) + r"\\b", text)), x.casefold()))
+    return sorted(
+        candidates,
+        key=lambda x: (-len(re.findall(r"\b" + re.escape(x) + r"\b", text)), x.casefold()),
+    )
