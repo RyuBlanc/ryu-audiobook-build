@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 import subprocess
+import inspect
 import wave
 
 from app.audio.assembler import assemble_m4b
@@ -51,8 +52,25 @@ Rias Gremory
 \u2014We should get going.
 """
         self.assertEqual([ord(ch) for ch in text if ch in "—–-"], [0x2014, 0x2014, 0x2014])
+        import app.chapters.characters as characters_module
+        lines = text.splitlines(keepends=True)
+        dash_lines = [
+            (repr(line), hex(ord(line.lstrip(" \\t")[0])))
+            for line in lines
+            if line.lstrip(" \\t") and ord(line.lstrip(" \\t")[0]) in (0x2014, 0x2013, 0x2D)
+        ]
+        self.assertEqual(len(dash_lines), 2, repr(dash_lines))
+        self.assertIn("dash-only line", inspect.getsource(characters_module._all_dialogue_spans))
         spans = _all_dialogue_spans(text)
-        self.assertGreaterEqual(len(spans), 2, repr([(s[2], [hex(ord(ch)) for ch in s[2][:3]]) for s in spans]))
+        self.assertGreaterEqual(
+            len(spans), 2,
+            repr({
+                "module": characters_module.__file__,
+                "dash_lines": dash_lines,
+                "spans": spans,
+                "source_has_dash_parser": "dash-only line" in inspect.getsource(characters_module._all_dialogue_spans),
+            }),
+        )
         analysis = analyze_book([Chapter(1, "Chapter 1", text)])
         names = {c.name.casefold() for c in analysis.characters}
         self.assertIn("issei hyoudou", names)
