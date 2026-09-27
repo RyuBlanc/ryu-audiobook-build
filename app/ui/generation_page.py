@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.chapters.detector import Chapter, detect_chapters
+from app.chapters.characters import analyze_book
 from app.documents.parser import extract_text
 from app.core.state import load_state, save_state
 from app.tts.manager import GenerationManager, GenerationSummary
@@ -118,12 +119,15 @@ class GenerationPage(QWidget):
         pronunciation_actions = QHBoxLayout()
         self.add_pronunciation = QPushButton("+ Add Pronunciation")
         self.add_pronunciation.clicked.connect(self._add_pronunciation_row)
+        self.suggest_pronunciation = QPushButton("Suggest from Voice Cast")
+        self.suggest_pronunciation.clicked.connect(self._suggest_pronunciations)
         self.remove_pronunciation = QPushButton("Remove Selected")
         self.remove_pronunciation.clicked.connect(self._remove_pronunciation_row)
         self.save_pronunciation = QPushButton("Save Pronunciations")
         self.save_pronunciation.setObjectName("primary")
         self.save_pronunciation.clicked.connect(self._save_pronunciations)
         pronunciation_actions.addWidget(self.add_pronunciation)
+        pronunciation_actions.addWidget(self.suggest_pronunciation)
         pronunciation_actions.addWidget(self.remove_pronunciation)
         pronunciation_actions.addStretch(1)
         pronunciation_actions.addWidget(self.save_pronunciation)
@@ -279,6 +283,42 @@ class GenerationPage(QWidget):
         item.setCheckState(Qt.CheckState.Checked if enabled else Qt.CheckState.Unchecked)
         self.pronunciation_table.setItem(row, 2, item)
 
+    def _suggest_pronunciations(self):
+        existing = {
+            str(self.pronunciation_table.item(row, 0).text()).casefold()
+            for row in range(self.pronunciation_table.rowCount())
+            if self.pronunciation_table.item(row, 0)
+        }
+        suggestions = []
+        try:
+            analysis = analyze_book(self.chapters)
+            suggestions.extend(c.name for c in analysis.characters if c.name)
+        except Exception:
+            pass
+
+        if self.project_folder:
+            saved = load_state(self.project_folder).get("voice_cast", {})
+            if isinstance(saved, dict):
+                suggestions.extend(str(name) for name in saved if name)
+
+        added = 0
+        for name in suggestions:
+            clean = name.strip()
+            if not clean or clean.casefold() in existing:
+                continue
+            self._add_pronunciation_row(clean, "", True)
+            existing.add(clean.casefold())
+            added += 1
+
+        if added:
+            self.pronunciation_status.setText(
+                f"Added {added} name{'s' if added != 1 else ''} as pronunciation suggestions. "
+                "Enter how each should sound, then save."
+            )
+        else:
+            self.pronunciation_status.setText(
+                "No new character names found. Use + Add Pronunciation for custom terms."
+            )
     def _remove_pronunciation_row(self):
         row = self.pronunciation_table.currentRow()
         if row >= 0:
