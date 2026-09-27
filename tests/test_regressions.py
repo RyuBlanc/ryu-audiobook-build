@@ -65,7 +65,7 @@ Page 12
 
         self.assertEqual(result.source_text, source)
         self.assertIn("sentence that was split across two extracted PDF lines.", result.narration_text)
-        self.assertIn("“He looked at me,”", result.narration_text)
+        self.assertIn('"He looked at me,"', result.narration_text)
         self.assertIn("she said.", result.narration_text)
         self.assertNotIn("Page 12", result.narration_text)
 
