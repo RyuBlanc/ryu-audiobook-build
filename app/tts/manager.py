@@ -75,7 +75,7 @@ class GenerationManager:
             effective_metadata.update(metadata)
         self._thread = Thread(
             target=self._run,
-            args=(output_path, title, author, cover, metadata or {}),
+            args=(output_path, title, author, cover, effective_metadata),
             daemon=True,
         )
         self._thread.start()
