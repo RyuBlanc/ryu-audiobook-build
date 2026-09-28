@@ -40,6 +40,7 @@ class GenerationManager:
         pronunciation_dictionary: list[dict] | None = None,
         narration_speed: float = 0.90,
         pacing_profile: str = "natural",
+        metadata: dict[str, str] | None = None,
     ) -> None:
         self.provider = provider
         self.voice = voice
@@ -50,6 +51,7 @@ class GenerationManager:
         self.pronunciation_dictionary = pronunciation_dictionary or []
         self.narration_speed = narration_speed
         self.pacing_profile = pacing_profile
+        self.metadata = metadata or {}
         self.cancel_event = Event()
         self._thread: Thread | None = None
         self.failed: list[int] = []
@@ -68,6 +70,9 @@ class GenerationManager:
         if self._thread and self._thread.is_alive():
             raise RuntimeError("Generation is already running.")
         self.cancel_event.clear()
+        effective_metadata = dict(self.metadata)
+        if metadata:
+            effective_metadata.update(metadata)
         self._thread = Thread(
             target=self._run,
             args=(output_path, title, author, cover, metadata or {}),
@@ -113,6 +118,12 @@ class GenerationManager:
                 cancelled = True
                 break
             try:
+                self._emit(
+                    index + 1,
+                    len(self.chapters),
+                    offset,
+                    f"chunk-start:{offset + 1}/{max(1, self._total_chunks)}",
+                )
                 result = generate_chapter(
                     chapter,
                     self.provider,

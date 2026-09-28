@@ -987,7 +987,13 @@ class GenerationPage(QWidget):
             pacing_profile=self.pacing_profile.currentData() or "natural",
             metadata=metadata,
         )
-        self.manager.start(output, self.title.text().strip(), self.author.text().strip(), self.cover)
+        self.manager.start(
+            output,
+            self.title.text().strip(),
+            self.author.text().strip(),
+            self.cover,
+            metadata=metadata,
+        )
 
     def cancel(self) -> None:
         if self.manager:
@@ -1012,6 +1018,14 @@ class GenerationPage(QWidget):
         elif message.startswith("m4b-failed"):
             self.stage.setText("M4B packaging failed")
             self.status.setText(message)
+        elif message.startswith("chunk-start:"):
+            self.stage.setText(
+                f"Synthesizing audio • {message.split(':', 1)[1]} • chapter {chapter}/{total}"
+            )
+            self.status.setText(
+                "Voice engine is generating the current chunk. "
+                "ETA will appear after the first chunk completes."
+            )
         elif message.startswith("chunk:"):
             try:
                 current, planned = message.split(":", 1)[1].split("/", 1)

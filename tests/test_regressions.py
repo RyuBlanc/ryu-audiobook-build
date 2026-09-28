@@ -461,6 +461,19 @@ Rias Gremory
             ["One sentence.", "Second sentence?", "Third sentence!"],
         )
 
+
+    def test_generation_manager_accepts_and_preserves_metadata(self):
+        from app.tts.manager import GenerationManager
+
+        manager = GenerationManager(
+            provider=object(),
+            voice="voice",
+            chapters=[],
+            project_audio_root=Path(tempfile.mkdtemp()),
+            metadata={"narrator": "Test Narrator"},
+        )
+        self.assertEqual(manager.metadata["narrator"], "Test Narrator")
+
     def test_piper_speed_maps_to_native_length_scale(self):
         from app.tts.providers.piper import PiperProvider
 

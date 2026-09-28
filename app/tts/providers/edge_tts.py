@@ -98,7 +98,13 @@ class EdgeTTSProvider(TTSProvider):
                 communicate = edge_tts.Communicate(text, voice)
                 await communicate.save(str(mp3_path))
 
-            _run(generate())
+            try:
+                _run(asyncio.wait_for(generate(), timeout=120))
+            except asyncio.TimeoutError as exc:
+                raise RuntimeError(
+                    "Online voice synthesis timed out after 120 seconds. "
+                    "Check the internet connection or switch to an offline neural voice."
+                ) from exc
 
             if not mp3_path.exists() or mp3_path.stat().st_size < 1024:
                 raise RuntimeError("Edge TTS did not produce valid audio.")
