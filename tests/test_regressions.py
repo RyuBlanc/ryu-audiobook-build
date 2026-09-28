@@ -285,6 +285,24 @@ Rias Gremory
             finally:
                 vp.voices_root = original_root
 
+    def test_voice_cast_filter_and_confidence_helpers(self):
+        from app.ui.voice_cast_page import cast_row_matches, confidence_band
+
+        row = {
+            "name": "Akeno Himejima",
+            "role": "Character",
+            "aliases": ["Akeno"],
+            "voice": "Akeno Voice",
+            "confidence": 0.91,
+        }
+        self.assertEqual(confidence_band(0.91), "High confidence")
+        self.assertEqual(confidence_band(0.70), "Medium confidence")
+        self.assertEqual(confidence_band(0.40), "Needs review")
+        self.assertTrue(cast_row_matches(row, "Assigned", "akeno"))
+        self.assertFalse(cast_row_matches(row, "Needs Voice", "akeno"))
+        self.assertTrue(cast_row_matches(row, "All", "himejima"))
+        self.assertFalse(cast_row_matches(row, "All", "rias"))
+
     def test_custom_profile_round_trip(self):
         import app.tts.voice_profile as vp
 
