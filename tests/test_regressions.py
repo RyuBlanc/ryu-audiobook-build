@@ -451,6 +451,23 @@ Rias Gremory
             finally:
                 vp.voices_root = original
 
+
+    def test_pacing_sentence_units_preserve_individual_sentences(self):
+        from app.tts.pacing import sentence_units
+
+        units = sentence_units("One sentence. Second sentence? Third sentence!")
+        self.assertEqual(
+            units,
+            ["One sentence.", "Second sentence?", "Third sentence!"],
+        )
+
+    def test_piper_speed_maps_to_native_length_scale(self):
+        from app.tts.providers.piper import PiperProvider
+
+        self.assertAlmostEqual(PiperProvider._length_scale_for_speed(1.0), 1.0)
+        self.assertAlmostEqual(PiperProvider._length_scale_for_speed(0.9), 1.111111, places=5)
+        self.assertAlmostEqual(PiperProvider._length_scale_for_speed(0.8), 1.25, places=5)
+
     def test_m4b_packaging_with_explicit_concat_durations(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -130,6 +130,10 @@ def build_voice_preview(
         raise ValueError("The selected chapter does not contain enough readable text for a preview.")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    configure_narration = getattr(provider, "configure_narration", None)
+    if callable(configure_narration):
+        configure_narration(narration_speed, pacing_profile)
+    provider_handles_controls = bool(getattr(provider, "handles_narration_controls", False))
     voices_used: list[str] = []
 
     with tempfile.TemporaryDirectory(prefix="ryu-preview-") as temp_dir:
@@ -140,10 +144,11 @@ def build_voice_preview(
             raw_path = root / f"{index:03d}.wav"
             normalized_path = root / f"{index:03d}-normalized.wav"
             provider.synthesize(unit, raw_path, unit_voice)
-            _apply_speed(raw_path, narration_speed)
-            pause_ms = pause_after_ms(unit, pacing_profile)
-            if pause_ms:
-                append_silence(raw_path, pause_ms)
+            if not provider_handles_controls:
+                _apply_speed(raw_path, narration_speed)
+                pause_ms = pause_after_ms(unit, pacing_profile)
+                if pause_ms:
+                    append_silence(raw_path, pause_ms)
             _normalize(raw_path, normalized_path)
             normalized.append(normalized_path)
             if unit_voice:

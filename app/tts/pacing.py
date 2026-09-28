@@ -13,7 +13,7 @@ _PROFILE_EXTRA_PAUSE_MS = {
 }
 
 
-def _sentence_units(text: str) -> list[str]:
+def sentence_units(text: str) -> list[str]:
     units: list[str] = []
     current: list[str] = []
 
@@ -63,7 +63,7 @@ def split_for_pacing(
     if not text:
         return []
 
-    sentences = _sentence_units(text)
+    sentences = sentence_units(text)
     if not sentences:
         return [text]
 

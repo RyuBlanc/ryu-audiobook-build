@@ -124,6 +124,10 @@ def generate_chapter(
             f"Chapter {chapter.number} \"{chapter.title}\" contains no readable text to synthesize."
         )
 
+    configure_narration = getattr(provider, "configure_narration", None)
+    if callable(configure_narration):
+        configure_narration(narration_speed, pacing_profile)
+
     signature = _provider_signature(provider, voice, chunks_with_voices)
     signature = hashlib.sha256(
         json.dumps(
@@ -152,11 +156,12 @@ def generate_chapter(
         output = chunks_dir / filename
         if index not in completed or not output.exists():
             provider.synthesize(chunk, output, chunks_with_voices[index][1])
-            if abs(narration_speed - 1.0) > 0.001:
-                _apply_narration_speed(output, narration_speed)
-            pause_ms = pause_after_ms(chunk, pacing_profile)
-            if pause_ms:
-                append_silence(output, pause_ms)
+            if not getattr(provider, "handles_narration_controls", False):
+                if abs(narration_speed - 1.0) > 0.001:
+                    _apply_narration_speed(output, narration_speed)
+                pause_ms = pause_after_ms(chunk, pacing_profile)
+                if pause_ms:
+                    append_silence(output, pause_ms)
 
         if not output.exists() or output.stat().st_size < 1024:
             raise RuntimeError(f"Audio chunk {index + 1}/{len(chunks)} was not created: {output.name}")
