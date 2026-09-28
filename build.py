@@ -36,8 +36,7 @@ def build_logo_assets() -> None:
         image.fill(Qt.transparent)
         painter = QPainter(image)
         try:
-            if not renderer.render(painter):
-                raise RuntimeError(f"Qt failed to render application logo SVG: {LOGO_SVG}")
+            renderer.render(painter)
         finally:
             painter.end()
 
