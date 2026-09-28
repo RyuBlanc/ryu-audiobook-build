@@ -190,7 +190,7 @@ def assemble_m4b(
             "-map_metadata", "1",
             "-map_chapters", "1",
             "-c:a", "copy",
-            "-movflags", "+faststart",
+            "-movflags", "+faststart+use_metadata_tags",
             "-metadata", f"title={_metadata_value(clean_title)}",
             "-metadata", f"album={_metadata_value(clean_title)}",
         ]
