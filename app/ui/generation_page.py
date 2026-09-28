@@ -167,6 +167,20 @@ class GenerationPage(QWidget):
         self.narration_speed.addItem("1.00×  Original speed", 1.00)
         self.narration_speed.setCurrentIndex(1)
         settings_form.addRow("Narration speed", self.narration_speed)
+
+        self.pacing_profile = QComboBox()
+        self.pacing_profile.addItem("Natural Story • balanced pauses", "natural")
+        self.pacing_profile.addItem("Relaxed Story • longer pauses", "relaxed")
+        self.pacing_profile.addItem("Minimal Pauses • lighter pacing", "minimal")
+        self.pacing_profile.addItem("Off • provider timing only", "off")
+        self.pacing_profile.setCurrentIndex(0)
+        settings_form.addRow("Story pacing", self.pacing_profile)
+        self.pacing_hint = QLabel(
+            "Adds small, sentence-aware pauses after generated narration units. "
+            "The original wording is not changed."
+        )
+        self.pacing_hint.setWordWrap(True)
+        settings_form.addRow("", self.pacing_hint)
         self.cover: Path | None = None
         cover_row = QHBoxLayout()
         self.cover_label = QLabel("No cover selected")
@@ -481,6 +495,17 @@ class GenerationPage(QWidget):
             index = self.voice_profile.findText(profile_name)
             if index >= 0:
                 self.voice_profile.setCurrentIndex(index)
+        speed = state.get("narration_speed")
+        if speed is not None:
+            index = self.narration_speed.findData(float(speed))
+            if index >= 0:
+                self.narration_speed.setCurrentIndex(index)
+        pacing = state.get("pacing_profile")
+        if pacing:
+            index = self.pacing_profile.findData(pacing)
+            if index >= 0:
+                self.pacing_profile.setCurrentIndex(index)
+
         cover = state.get("cover_path")
         if cover and Path(cover).exists():
             self.cover = Path(cover)
@@ -709,6 +734,8 @@ class GenerationPage(QWidget):
                 "voice_profile": profile.name if profile else None,
                 "output_path": str(output),
                 "cover_path": str(self.cover) if self.cover else None,
+                "narration_speed": float(self.narration_speed.currentData() or 0.90),
+                "pacing_profile": self.pacing_profile.currentData() or "natural",
                 "status": "generating",
             })
             save_state(self.project_folder, state)
@@ -731,6 +758,7 @@ class GenerationPage(QWidget):
             on_finished=lambda summary: self.signals.finished.emit(summary),
             pronunciation_dictionary=self._pronunciation_entries(),
             narration_speed=float(self.narration_speed.currentData() or 0.90),
+            pacing_profile=self.pacing_profile.currentData() or "natural",
         )
         self.manager.start(output, self.title.text().strip(), self.author.text().strip(), self.cover)
 
