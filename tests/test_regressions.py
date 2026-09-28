@@ -505,7 +505,7 @@ Rias Gremory
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             chapter = root / "001_Chapter" / "chunks"
-            _write_wav(chapter / "00001.wav", 0.25)
+            _write_wav(chapter / "00001.wav", 2.0)
             output = root / "missing-metadata.m4b"
             result = assemble_m4b(
                 [chapter.parent],
