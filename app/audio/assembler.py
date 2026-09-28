@@ -225,8 +225,11 @@ def assemble_m4b(
 
         if not base_m4b.exists() or base_m4b.stat().st_size == 0:
             raise RuntimeError("FFmpeg created no base M4B before cover embedding.")
-        if _duration_ms(base_m4b) <= 0:
-            raise RuntimeError("FFmpeg created a base M4B with no audio duration.")
+
+        # Do not probe container-level duration here. Some valid MP4/M4B
+        # containers expose an unreliable or N/A format duration after the
+        # metadata/chapter mux even though their audio stream is valid.
+        # Final validation below decodes the actual audio stream instead.
 
         if cover:
             # FFmpeg's MOV documentation recommends mapping the existing
