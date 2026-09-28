@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#140207"/>
+      <stop offset="0.55" stop-color="#5d0c1d"/>
+      <stop offset="1" stop-color="#170308"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff2c2"/>
+      <stop offset="0.35" stop-color="#e9bd65"/>
+      <stop offset="1" stop-color="#9a5b16"/>
+    </linearGradient>
+    <linearGradient id="book" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8b1630"/>
+      <stop offset="1" stop-color="#30030e"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="8" y="8" width="496" height="496" rx="92" fill="url(#bg)" stroke="#8d1730" stroke-width="5"/>
+  <circle cx="256" cy="256" r="213" fill="none" stroke="url(#gold)" stroke-width="5"/>
+  <circle cx="256" cy="256" r="198" fill="#09080a" opacity=".35"/>
+  <path d="M118 223 A138 138 0 0 1 394 223" fill="none" stroke="#d79a3c" stroke-width="22" stroke-linecap="round"/>
+  <path d="M126 220 A130 130 0 0 1 386 220" fill="none" stroke="#171419" stroke-width="15" stroke-linecap="round"/>
+  <path d="M160 143 C184 116 218 101 256 101 C294 101 328 116 352 143" fill="none" stroke="#a71936" stroke-width="24" stroke-linecap="round"/>
+  <rect x="98" y="194" width="67" height="106" rx="30" fill="#b11f3c" stroke="url(#gold)" stroke-width="6"/>
+  <rect x="347" y="194" width="67" height="106" rx="30" fill="#b11f3c" stroke="url(#gold)" stroke-width="6"/>
+  <rect x="111" y="208" width="41" height="76" rx="18" fill="#220912"/>
+  <rect x="360" y="208" width="41" height="76" rx="18" fill="#220912"/>
+  <g filter="url(#glow)" fill="url(#gold)">
+    <rect x="205" y="151" width="9" height="40" rx="4"/>
+    <rect x="221" y="137" width="9" height="67" rx="4"/>
+    <rect x="237" y="119" width="9" height="104" rx="4"/>
+    <rect x="253" y="100" width="9" height="143" rx="4"/>
+    <rect x="269" y="119" width="9" height="104" rx="4"/>
+    <rect x="285" y="137" width="9" height="67" rx="4"/>
+    <rect x="301" y="151" width="9" height="40" rx="4"/>
+  </g>
+  <path d="M256 337 C221 311 183 300 137 302 L137 397 C184 394 222 405 256 433 Z" fill="url(#book)" stroke="url(#gold)" stroke-width="6"/>
+  <path d="M256 337 C291 311 329 300 375 302 L375 397 C328 394 290 405 256 433 Z" fill="url(#book)" stroke="url(#gold)" stroke-width="6"/>
+  <path d="M256 337 L256 433" stroke="#f2c56c" stroke-width="5"/>
+  <path d="M151 321 C186 320 216 328 244 345" fill="none" stroke="#f4d993" stroke-width="3" opacity=".75"/>
+  <path d="M361 321 C326 320 296 328 268 345" fill="none" stroke="#f4d993" stroke-width="3" opacity=".75"/>
+  <path d="M153 350 C184 348 215 355 241 369" fill="none" stroke="#a86222" stroke-width="3"/>
+  <path d="M359 350 C328 348 297 355 271 369" fill="none" stroke="#a86222" stroke-width="3"/>
+  <text x="256" y="466" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="39" font-weight="700" letter-spacing="5" fill="url(#gold)">RYU'S</text>
+  <text x="256" y="490" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="16" font-weight="700" letter-spacing="3" fill="#f4e5ba">AUDIOBOOK</text>
+  <path d="M165 496 H224 M288 496 H347" stroke="#c88a30" stroke-width="2"/>
+</svg>

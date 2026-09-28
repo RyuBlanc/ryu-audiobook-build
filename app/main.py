@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from pathlib import Path
 import sys
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from app.core.paths import ensure_roots
 from app.ui.workflow import ProjectWorkflow
+
+
+def asset_path(name: str) -> Path:
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1]))
+    return base / "assets" / name
 
 
 APP_STYLE = """
@@ -170,8 +177,13 @@ QScrollBar::handle:vertical:hover {
 def main() -> int:
     ensure_roots()
     app = QApplication(sys.argv)
+    app.setApplicationName("Ryu's Audiobook")
     app.setStyleSheet(APP_STYLE)
+    icon_path = asset_path("ryu_audiobook_logo.png")
+    app_icon = QIcon(str(icon_path)) if icon_path.exists() else QIcon()
+    app.setWindowIcon(app_icon)
     window = ProjectWorkflow()
+    window.setWindowIcon(app_icon)
     window.show()
     return app.exec()
 

@@ -20,11 +20,13 @@ OutputBaseFilename=Ryu's Audiobook Setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\assets\ryu_audiobook_logo.ico
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 CloseApplications=yes
 CloseApplicationsFilter=Ryu's Audiobook.exe
 UninstallDisplayName={#MyAppName}
+UninstallDisplayIcon={app}\Ryu's Audiobook.exe
 
 [Files]
 Source: "..\dist\Ryu's Audiobook\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
