@@ -116,18 +116,18 @@ def assemble_m4b(
             concat_lines.append(f"duration {duration / 1000.0:.6f}")
         concat.write_text("\n".join(concat_lines) + "\n", encoding="utf-8")
 
-        metadata = temp_dir / "metadata.txt"
-        metadata = metadata or {}
-        clean_title = _safe_title(metadata.get("title") or title)
-        clean_artist = sanitize_metadata(metadata.get("author") or author)
-        narrator = sanitize_metadata(metadata.get("narrator"))
-        publisher = sanitize_metadata(metadata.get("publisher"))
-        series = sanitize_metadata(metadata.get("series"))
-        series_number = sanitize_metadata(metadata.get("series_number"))
-        language = sanitize_metadata(metadata.get("language"))
-        year = sanitize_metadata(metadata.get("year"))
-        genre = sanitize_metadata(metadata.get("genre"), "Audiobook")
-        description = sanitize_metadata(metadata.get("description"))
+        metadata_values = metadata or {}
+        metadata_path = temp_dir / "metadata.txt"
+        clean_title = _safe_title(metadata_values.get("title") or title)
+        clean_artist = sanitize_metadata(metadata_values.get("author") or author)
+        narrator = sanitize_metadata(metadata_values.get("narrator"))
+        publisher = sanitize_metadata(metadata_values.get("publisher"))
+        series = sanitize_metadata(metadata_values.get("series"))
+        series_number = sanitize_metadata(metadata_values.get("series_number"))
+        language = sanitize_metadata(metadata_values.get("language"))
+        year = sanitize_metadata(metadata_values.get("year"))
+        genre = sanitize_metadata(metadata_values.get("genre"), "Audiobook")
+        description = sanitize_metadata(metadata_values.get("description"))
 
         lines = [
             ";FFMETADATA1",
@@ -162,7 +162,7 @@ def assemble_m4b(
                 f"title={_metadata_value(chapter_title)}",
             ])
             start = end
-        metadata.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        metadata_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         # First make one stable AAC audio stream. Then mux metadata/chapters
         # and cover in a separate pass. Keeping concat and MP4 chapter/cover
@@ -185,7 +185,7 @@ def assemble_m4b(
         base_m4b = temp_dir / "audiobook-base.m4b"
         args = [
             "-i", str(audio_only),
-            "-f", "ffmetadata", "-i", str(metadata),
+            "-f", "ffmetadata", "-i", str(metadata_path),
             "-map", "0:a:0",
             "-map_metadata", "1",
             "-map_chapters", "1",
