@@ -271,8 +271,16 @@ Rias Gremory
                 save_profiles([custom, builtin])
                 loaded = load_profiles()
                 custom_loaded = [p for p in loaded if p.provider == "chatterbox"]
+                builtin_loaded = [p for p in loaded if p.provider == "piper"]
                 self.assertEqual(len(custom_loaded), 1)
-                self.assertTrue(custom_loaded[0].name.casefold().endswith("custom"))
+                self.assertEqual(len(builtin_loaded), 1)
+                self.assertNotEqual(
+                    custom_loaded[0].name.casefold(),
+                    builtin_loaded[0].name.casefold(),
+                )
+                self.assertTrue(
+                    custom_loaded[0].name.casefold().startswith("offline neural • amy")
+                )
                 self.assertEqual(custom_loaded[0].sample_path, str(root / "custom" / "reference.wav"))
             finally:
                 vp.voices_root = original_root
