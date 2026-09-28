@@ -285,6 +285,51 @@ Rias Gremory
             finally:
                 vp.voices_root = original_root
 
+    def test_generation_resume_state_detects_completed_and_partial_chapters(self):
+        from app.tts.resume import inspect_generation_state
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            completed_dir = root / "001_Chapter_1"
+            completed_dir.mkdir(parents=True)
+            (completed_dir / "generation.json").write_text(
+                '{"chunks_total": 2, "completed": [0, 1]}',
+                encoding="utf-8",
+            )
+
+            partial_dir = root / "002_Chapter_2"
+            (partial_dir / "chunks").mkdir(parents=True)
+            (partial_dir / "generation.json").write_text(
+                '{"chunks_total": 3, "completed": [0]}',
+                encoding="utf-8",
+            )
+
+            chapters = [
+                Chapter(1, "Chapter 1", "one"),
+                Chapter(2, "Chapter 2", "two"),
+                Chapter(3, "Chapter 3", "three"),
+            ]
+            state = inspect_generation_state(root, chapters)
+            self.assertEqual(state.completed_chapters, (1,))
+            self.assertEqual(state.partial_chapters, (2,))
+            self.assertTrue(state.resume_available)
+
+    def test_library_status_marks_failed_latest_generation_as_needs_attention_even_with_old_output(self):
+        from app.ui.library import project_status
+        from app.core.project import Project
+
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp) / "Book"
+            folder.mkdir()
+            output = folder / "book.m4b"
+            output.write_bytes(b"old-valid-output")
+            project = Project("Retry Book", folder, None, [Chapter(1, "Chapter 1", "Story")])
+            (folder / "state.json").write_text(
+                '{"status": "failed", "output_path": "' + str(output).replace('\\', '/') + '", "failed_chapters": [2]}',
+                encoding="utf-8",
+            )
+            self.assertEqual(project_status(project)[0], "Needs Attention")
+
     def test_library_project_status_prefers_finished_m4b(self):
         from app.ui.library import project_status, project_matches
         from app.core.project import Project
