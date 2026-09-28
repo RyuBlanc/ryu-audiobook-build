@@ -285,6 +285,45 @@ Rias Gremory
             finally:
                 vp.voices_root = original_root
 
+    def test_library_project_status_prefers_finished_m4b(self):
+        from app.ui.library import project_status, project_matches
+        from app.core.project import Project
+
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp) / "Book"
+            folder.mkdir()
+            chapters = [Chapter(1, "Chapter 1", "Story text.")]
+            project = Project("Test Book", folder, folder / "source.txt", chapters)
+            state = {
+                "status": "completed",
+                "output_path": str(folder / "book.m4b"),
+                "completed_chapters": [1],
+                "failed_chapters": [],
+            }
+            (folder / "state.json").write_text(
+                __import__("json").dumps(state),
+                encoding="utf-8",
+            )
+            output = folder / "book.m4b"
+            output.write_bytes(b"m4b")
+            self.assertEqual(project_status(project)[0], "Completed")
+            self.assertTrue(project_matches(project, "test", "Completed"))
+            self.assertFalse(project_matches(project, "other", "Completed"))
+
+    def test_library_project_status_detects_needs_attention(self):
+        from app.ui.library import project_status
+        from app.core.project import Project
+
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp) / "Book"
+            folder.mkdir()
+            project = Project("Broken Book", folder, None, [Chapter(1, "Chapter 1", "Story")])
+            (folder / "state.json").write_text(
+                '{"status": "failed", "failed_chapters": [1]}',
+                encoding="utf-8",
+            )
+            self.assertEqual(project_status(project)[0], "Needs Attention")
+
     def test_generation_readiness_blocks_missing_required_items(self):
         from app.tts.readiness import build_generation_readiness
 
