@@ -17,6 +17,7 @@ from app.chapters.characters import analyze_book, _all_dialogue_spans
 from app.chapters.detector import Chapter, detect_chapters
 from app.tts.voice_profile import VoiceProfile, save_profiles, load_profiles
 from app.tts.narration import prepare_for_narration
+from app.tts.pacing import append_silence, pause_after_ms, split_for_pacing
 from app.tts.pronunciation_suggester import suggest_pronunciation, suggest_names_from_text, COMMON_ENGLISH_WORDS
 
 
@@ -121,6 +122,27 @@ Page 12
         self.assertIn('"He looked at me,"', result.narration_text)
         self.assertIn("she said.", result.narration_text)
         self.assertNotIn("Page 12", result.narration_text)
+
+    def test_natural_pacing_splits_story_into_sentence_units(self):
+        text = "The door opened. Issei looked inside. Rias smiled."
+        chunks = split_for_pacing(text, max_chars=200, max_sentences=2)
+        self.assertEqual(chunks, ["The door opened. Issei looked inside.", "Rias smiled."])
+        self.assertGreater(pause_after_ms("Rias smiled.", "natural"), 0)
+        self.assertGreater(pause_after_ms("Rias smiled!", "natural"), pause_after_ms("Rias smiled.", "natural"))
+        self.assertEqual(pause_after_ms("Rias smiled.", "off"), 0)
+
+    def test_natural_pacing_appends_silence_without_changing_existing_audio(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "chunk.wav"
+            _write_wav(path, 1.0)
+            with wave.open(str(path), "rb") as before:
+                original_frames = before.getnframes()
+                rate = before.getframerate()
+            append_silence(path, 250)
+            with wave.open(str(path), "rb") as after:
+                self.assertEqual(after.getframerate(), rate)
+                self.assertGreater(after.getnframes(), original_frames)
+                self.assertEqual(after.getnframes(), original_frames + round(rate * 0.25))
 
     def test_pronunciation_suggester_has_known_name_readings(self):
         self.assertEqual(suggest_pronunciation("Hyoudou Issei"), "Hee-doh Is-say")
