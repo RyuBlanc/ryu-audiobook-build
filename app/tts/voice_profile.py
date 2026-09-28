@@ -84,7 +84,14 @@ def load_profiles() -> list[VoiceProfile]:
         for p in builtins
     }
     seen_names: set[str] = {p.name.casefold() for p in combined}
-    for profile in saved:
+    # Process saved built-in Piper identities first so a custom profile that
+    # reuses a bundled display name is still kept distinct even when the
+    # bundled model files are not installed yet.
+    ordered_saved = sorted(
+        saved,
+        key=lambda p: (0 if p.provider == "piper" else 1, p.name.casefold()),
+    )
+    for profile in ordered_saved:
         sample_key = str(profile.sample_path or "").casefold()
         identity = (profile.provider, profile.voice_id.casefold(), sample_key)
 
