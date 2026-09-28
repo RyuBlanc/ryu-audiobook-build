@@ -18,6 +18,7 @@ from app.chapters.detector import Chapter, detect_chapters
 from app.tts.voice_profile import VoiceProfile, save_profiles, load_profiles
 from app.tts.narration import prepare_for_narration
 from app.tts.pacing import append_silence, pause_after_ms, split_for_pacing
+from app.tts.preview import build_voice_preview
 from app.tts.pronunciation_suggester import suggest_pronunciation, suggest_names_from_text, COMMON_ENGLISH_WORDS
 
 
@@ -213,6 +214,33 @@ Rias Gremory
         self.assertEqual(assigned[0][0], "Hello there, Issei.")
 
         provider.close()
+
+    def test_voice_preview_uses_pronunciation_and_creates_audio(self):
+        class DummyProvider:
+            def synthesize(self, text, output_path, voice=None):
+                _write_wav(output_path, 0.20)
+                self.last_text = text
+                self.last_voice = voice
+
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "preview.wav"
+            provider = DummyProvider()
+            result = build_voice_preview(
+                "Hyoudou Issei looked at the door.",
+                provider,
+                "Narrator",
+                output,
+                pronunciation_dictionary=[
+                    {"written": "Hyoudou Issei", "spoken": "Hee-doh Is-say", "enabled": True}
+                ],
+                narration_speed=1.0,
+                pacing_profile="natural",
+                max_chars=500,
+            )
+            self.assertTrue(result.output_path.exists())
+            self.assertGreater(result.segments, 0)
+            self.assertIn("Hee-doh Is-say", provider.last_text)
+            self.assertEqual(provider.last_voice, "Narrator")
 
     def test_custom_profile_round_trip(self):
         import app.tts.voice_profile as vp

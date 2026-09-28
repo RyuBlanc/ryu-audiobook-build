@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import time
+import tempfile
 
 from PySide6.QtCore import QObject, Signal, QUrl, QTimer
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
@@ -23,7 +24,7 @@ from app.tts.profile_provider import provider_from_profile
 from app.tts.voice_profile import load_profiles, VoiceProfile
 from app.tts.providers.piper import PiperProvider
 from app.tts.system_sapi import SystemSAPIProvider
-from app.tts.benchmark import benchmark_provider
+from app.tts.preview import build_voice_preview
 
 
 class GenerationSignals(QObject):
@@ -207,6 +208,18 @@ class GenerationPage(QWidget):
 
         preview_box = QGroupBox("Voice Preview")
         preview_layout = QVBoxLayout(preview_box)
+
+        preview_source_row = QHBoxLayout()
+        preview_source_row.addWidget(QLabel("Source"))
+        self.preview_chapter = QComboBox()
+        for chapter in self.chapters:
+            self.preview_chapter.addItem(
+                f"Chapter {chapter.number}: {chapter.title}",
+                chapter.number,
+            )
+        self.preview_chapter.setEnabled(bool(self.chapters))
+        preview_source_row.addWidget(self.preview_chapter, 1)
+        preview_layout.addLayout(preview_source_row)
 
         preview_actions = QHBoxLayout()
         self.preview_button = QPushButton("▶  Generate Voice Preview")
@@ -569,31 +582,60 @@ class GenerationPage(QWidget):
         if not provider:
             self.status.setText("Create or select a Voice Profile first.")
             return
-        text = "Welcome to Ryu's Audiobook. This is a short narration preview."
+
+        index = self.preview_chapter.currentIndex()
+        if index < 0 or index >= len(self.chapters):
+            self.status.setText("Select a chapter for the preview.")
+            return
+
+        chapter = self.chapters[index]
+        self._save_pronunciations()
+        pronunciation_dictionary = self._pronunciation_entries()
+        provider = self._cast_provider(provider, voice)[0]
+
+        text = chapter.text
+        output = Path(tempfile.gettempdir()) / "ryu_audiobook_voice_preview.wav"
+
         try:
-            import tempfile
-            output = Path(tempfile.gettempdir()) / "ryu_audiobook_voice_preview.wav"
+            result = build_voice_preview(
+                text,
+                provider,
+                voice,
+                output,
+                pronunciation_dictionary=pronunciation_dictionary,
+                narration_speed=float(self.narration_speed.currentData() or 0.90),
+                pacing_profile=self.pacing_profile.currentData() or "natural",
+            )
+            self.preview_path = result.output_path
             self.preview_player.stop()
-            provider.synthesize(text, output, voice)
-            result = benchmark_provider(provider, voice, self.backend.currentData() or "automatic")
-            self.preview_path = output
-            self.preview_player.setSource(QUrl.fromLocalFile(str(output)))
+            self.preview_player.setSource(QUrl.fromLocalFile(str(result.output_path)))
             self.preview_play_button.setEnabled(True)
             self.preview_stop_button.setEnabled(True)
             self.preview_play_button.setText("▶  Play Preview")
+
+            voice_summary = ", ".join(result.voices_used) if result.voices_used else "Narrator"
             message = (
-                f"Preview ready • {result.seconds:.2f}s generation for "
-                f"{result.audio_seconds:.2f}s audio"
-                if result.success else "Preview ready."
+                f"Preview ready • {result.segments} narration segment(s) • "
+                f"Voices: {voice_summary}"
             )
             self.preview_status.setText(message)
-            self.status.setText(message)
+            self.status.setText(
+                f"Preview generated from Chapter {chapter.number} using the current "
+                "pronunciation, voice cast, speed and pacing settings."
+            )
         except Exception as exc:
             self.preview_path = None
             self.preview_play_button.setEnabled(False)
             self.preview_stop_button.setEnabled(False)
             self.preview_status.setText("Preview generation failed.")
             self.status.setText(f"Preview failed: {exc}")
+        finally:
+            close = getattr(provider, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
 
     def play_preview(self) -> None:
         if not self.preview_path or not self.preview_path.exists():
