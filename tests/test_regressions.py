@@ -500,6 +500,35 @@ Rias Gremory
             self.assertTrue(result.exists())
             self.assertGreater(result.stat().st_size, 4096)
 
+
+    def test_m4b_packaging_tolerates_missing_metadata_values(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapter = root / "001_Chapter" / "chunks"
+            _write_wav(chapter / "00001.wav", 0.25)
+            output = root / "missing-metadata.m4b"
+            result = assemble_m4b(
+                [chapter.parent],
+                output,
+                None,
+                author=None,
+                chapter_titles=[None],
+                metadata={
+                    "title": None,
+                    "author": None,
+                    "narrator": None,
+                    "publisher": None,
+                    "series": None,
+                    "series_number": None,
+                    "language": None,
+                    "year": None,
+                    "genre": None,
+                    "description": None,
+                },
+            )
+            self.assertTrue(result.exists())
+            self.assertGreater(result.stat().st_size, 4096)
+
     def test_m4b_metadata_fields_are_embedded(self):
         import imageio_ffmpeg
 
