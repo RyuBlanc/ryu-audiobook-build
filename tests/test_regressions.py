@@ -33,7 +33,7 @@ def _write_wav(path: Path, seconds: float = 0.05) -> None:
         wav.writeframes(b"\x00\x00" * frames)
 
 
-class RegressionTests(unittest.TestCase):
+class RegressionTests(unittest.TestCase):\n    def test_generation_page_exposes_custom_runtime_check(self):\n        import app.ui.generation_page as generation_page\n\n        self.assertTrue(callable(generation_page.runtime_ready))\n
     def test_light_novel_dialogue_discovers_characters(self):
         text = """Life.0
 Issei Hyoudou—that’s my name, but my friends and family just call me Issei.
