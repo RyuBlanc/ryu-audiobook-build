@@ -242,6 +242,41 @@ Rias Gremory
             self.assertIn("Hee-doh Is-say", provider.last_text)
             self.assertEqual(provider.last_voice, "Narrator")
 
+    def test_voice_profile_library_preserves_custom_voice_and_labels(self):
+        with tempfile.TemporaryDirectory() as temp:
+            import app.tts.voice_profile as vp
+
+            original_root = vp.voices_root
+            root = Path(temp) / "Voices"
+            vp.voices_root = lambda: root
+            try:
+                custom = VoiceProfile(
+                    name="Offline Neural • Amy",
+                    provider="chatterbox",
+                    voice_id="reference",
+                    sample_path=str(root / "custom" / "reference.wav"),
+                    model_id="chatterbox-multilingual",
+                    backend="automatic",
+                    language="en",
+                    authorized=True,
+                )
+                builtin = VoiceProfile(
+                    name="Offline Neural • Amy",
+                    provider="piper",
+                    voice_id="en_US-amy-medium",
+                    backend="automatic",
+                    language="en-US",
+                    authorized=True,
+                )
+                save_profiles([custom, builtin])
+                loaded = load_profiles()
+                custom_loaded = [p for p in loaded if p.provider == "chatterbox"]
+                self.assertEqual(len(custom_loaded), 1)
+                self.assertTrue(custom_loaded[0].name.casefold().endswith("custom"))
+                self.assertEqual(custom_loaded[0].sample_path, str(root / "custom" / "reference.wav"))
+            finally:
+                vp.voices_root = original_root
+
     def test_custom_profile_round_trip(self):
         import app.tts.voice_profile as vp
 

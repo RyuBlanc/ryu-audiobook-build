@@ -164,8 +164,24 @@ class VoicePage(QWidget):
         form.addRow("Profile name", self.name)
         profile.addLayout(form)
 
+        library_filters = QHBoxLayout()
+        self.library_filter = QComboBox()
+        self.library_filter.addItem("All voices", "all")
+        self.library_filter.addItem("Built-in offline", "builtin")
+        self.library_filter.addItem("Saved custom", "custom")
+        self.library_filter.addItem("Windows", "windows-sapi")
+        self.library_filter.addItem("Online", "edge-tts")
+        self.library_filter.currentIndexChanged.connect(self.refresh_profiles)
+        library_filters.addWidget(QLabel("Library"))
+        library_filters.addWidget(self.library_filter)
+        self.library_search = QLineEdit()
+        self.library_search.setPlaceholderText("Search saved voices…")
+        self.library_search.textChanged.connect(self.refresh_profiles)
+        library_filters.addWidget(self.library_search, 1)
+        profile.addLayout(library_filters)
+
         saved_row = QHBoxLayout()
-        saved_row.addWidget(QLabel("Saved profiles"))
+        saved_row.addWidget(QLabel("Voice profiles"))
         self.saved_profiles = QComboBox()
         self.saved_profiles.currentIndexChanged.connect(self._saved_profile_changed)
         saved_row.addWidget(self.saved_profiles, 1)
@@ -176,6 +192,26 @@ class VoicePage(QWidget):
         self.delete_button.clicked.connect(self.delete_selected_profile)
         saved_row.addWidget(self.delete_button)
         profile.addLayout(saved_row)
+
+        details_box = QGroupBox("Selected Voice Details")
+        details = QFormLayout(details_box)
+        self.detail_provider = QLabel("—")
+        self.detail_language = QLabel("—")
+        self.detail_voice_id = QLabel("—")
+        self.detail_reference = QLabel("—")
+        self.detail_backend = QLabel("—")
+        self.detail_authorization = QLabel("—")
+        for label, widget in (
+            ("Provider", self.detail_provider),
+            ("Language", self.detail_language),
+            ("Voice ID", self.detail_voice_id),
+            ("Reference", self.detail_reference),
+            ("Backend", self.detail_backend),
+            ("Authorization", self.detail_authorization),
+        ):
+            widget.setWordWrap(True)
+            details.addRow(label, widget)
+        profile.addWidget(details_box)
 
         actions = QHBoxLayout()
         self.save_profile_button = QPushButton("Save / Update Profile")
@@ -236,6 +272,7 @@ class VoicePage(QWidget):
         outer.addWidget(scroll, 1)
 
         self._populate_sapi_voices()
+        self._update_profile_details(None)
         self.refresh_profiles()
         self._refresh_offline_catalog()
         self.update_mode()
@@ -415,18 +452,92 @@ class VoicePage(QWidget):
             self.name.setText(self.sapi_voice.currentText())
             self.profile_badge.setText(self.sapi_voice.currentText())
 
+    @staticmethod
+    def _provider_label(profile: VoiceProfile) -> str:
+        labels = {
+            "piper": "Built-in Offline Neural",
+            "windows-sapi": "Windows SAPI",
+            "edge-tts": "Online Neural • Edge TTS",
+            "chatterbox": "Custom Voice • Chatterbox",
+        }
+        return labels.get(profile.provider, profile.provider)
+
+    @staticmethod
+    def _profile_category(profile: VoiceProfile) -> str:
+        if profile.provider == "piper":
+            return "builtin"
+        return profile.provider
+
+    @staticmethod
+    def _reference_label(profile: VoiceProfile) -> str:
+        if profile.provider != "chatterbox":
+            return "Not required"
+        if not profile.sample_path:
+            return "Missing • no reference recorded"
+        path = Path(profile.sample_path)
+        if not path.exists():
+            return f"Missing • {path.name}"
+        return f"✓ Local reference • {path.name}"
+
+    def _update_profile_details(self, profile: VoiceProfile | None) -> None:
+        if profile is None:
+            self.detail_provider.setText("—")
+            self.detail_language.setText("—")
+            self.detail_voice_id.setText("—")
+            self.detail_reference.setText("—")
+            self.detail_backend.setText("—")
+            self.detail_authorization.setText("—")
+            return
+        language = profile.language or "Not specified"
+        self.detail_provider.setText(self._provider_label(profile))
+        self.detail_language.setText(self._language_name(language) if language else "Not specified")
+        self.detail_voice_id.setText(profile.voice_id or "—")
+        self.detail_reference.setText(self._reference_label(profile))
+        self.detail_backend.setText(profile.backend or "automatic")
+        self.detail_authorization.setText(
+            "✓ Authorized" if profile.authorized else "⚠ Permission not confirmed"
+        )
+
     def refresh_profiles(self) -> None:
         self.profiles = load_profiles()
         current = self.saved_profiles.currentData() if hasattr(self, "saved_profiles") else None
+        category = self.library_filter.currentData() if hasattr(self, "library_filter") else "all"
+        query = self.library_search.text().strip().casefold() if hasattr(self, "library_search") else ""
         self.saved_profiles.blockSignals(True)
         self.saved_profiles.clear()
+
+        matches = []
         for profile in self.profiles:
-            self.saved_profiles.addItem(profile.name, profile.name)
+            profile_category = self._profile_category(profile)
+            if category not in {"all", profile_category}:
+                continue
+            searchable = " ".join(
+                (
+                    profile.name,
+                    profile.voice_id,
+                    profile.provider,
+                    profile.language or "",
+                    profile.notes or "",
+                )
+            ).casefold()
+            if query and query not in searchable:
+                continue
+            matches.append(profile)
+
+        for profile in matches:
+            label = f"{profile.name}  ·  {self._provider_label(profile)}"
+            self.saved_profiles.addItem(label, profile.name)
+
+        selected_index = -1
         if current:
-            i = self.saved_profiles.findData(current)
-            if i >= 0:
-                self.saved_profiles.setCurrentIndex(i)
+            selected_index = self.saved_profiles.findData(current)
+        if selected_index >= 0:
+            self.saved_profiles.setCurrentIndex(selected_index)
+        elif self.saved_profiles.count():
+            self.saved_profiles.setCurrentIndex(0)
+
         self.saved_profiles.blockSignals(False)
+        self._saved_profile_changed()
 
     def _saved_profile_changed(self) -> None:
         # Selecting a saved profile must make it the active profile, not just
@@ -464,11 +575,17 @@ class VoicePage(QWidget):
                 self.neural_voice.setCurrentIndex(i)
 
         self.profile_badge.setText(profile.name)
-        self.status.setText(f"Loaded voice profile: {profile.name}")
+        self._update_profile_details(profile)
+        provider_label = self._provider_label(profile)
+        reference = self._reference_label(profile)
+        self.status.setText(
+            f"Loaded voice profile: {profile.name} • {provider_label} • {reference}"
+        )
 
     def delete_selected_profile(self) -> None:
         name = self.saved_profiles.currentData()
-        if not name or name.startswith("Offline Neural •"):
+        profile = next((p for p in self.profiles if p.name == name), None)
+        if not profile or profile.provider == "piper":
             return
         if QMessageBox.question(
             self, "Delete Voice Profile", f"Delete '{name}'?"
@@ -683,9 +800,14 @@ class VoicePage(QWidget):
         self.refresh_profiles()
         # Make the saved profile the active profile immediately. This keeps
         # the UI, preview, Voice Cast and later generation on the same provider.
+        self.library_filter.setCurrentIndex(0)
+        self.library_search.clear()
+        self.refresh_profiles()
+        self.saved_profiles.setCurrentIndex(self.saved_profiles.findData(profile.name))
         self.load_selected_profile()
         self.profile_badge.setText(profile.name)
-        self.status.setText(f"Saved voice profile '{profile.name}'.")
+        self._update_profile_details(profile)
+        self.status.setText(f"Saved voice profile '{profile.name}' • {self._provider_label(profile)}.")
 
     def play_last_preview(self) -> None:
         if not self.last_preview or not self.last_preview.exists():
