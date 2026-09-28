@@ -26,6 +26,7 @@ from app.tts.providers.piper import PiperProvider
 from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.preview import build_voice_preview
 from app.tts.readiness import build_generation_readiness
+from app.tts.resume import inspect_generation_state
 
 
 class GenerationSignals(QObject):
@@ -299,11 +300,21 @@ class GenerationPage(QWidget):
         readiness_layout.addLayout(readiness_actions)
         root.addWidget(readiness_box)
 
+        self.actions_note = QLabel()
+        self.actions_note.setObjectName("muted")
+        self.actions_note.setWordWrap(True)
+        root.addWidget(self.actions_note)
+
         actions = QHBoxLayout()
         self.start_button = QPushButton("Generate Audiobook")
+        self.start_button.setObjectName("primary")
+        self.resume_button = QPushButton("Resume / Retry")
+        self.resume_button.setVisible(False)
+        self.resume_button.clicked.connect(self.start)
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setEnabled(False)
         actions.addWidget(self.start_button)
+        actions.addWidget(self.resume_button)
         actions.addWidget(self.cancel_button)
         root.addLayout(actions)
 
@@ -331,6 +342,7 @@ class GenerationPage(QWidget):
         self._load_pronunciations()
         self._load_voice_cast_summary()
         self._set_default_output()
+        self._refresh_resume_state()
         self._refresh_readiness()
 
     def _add_pronunciation_row(self, written="", spoken="", enabled=True):
@@ -696,7 +708,7 @@ class GenerationPage(QWidget):
         controls = [
             self.title, self.author, self.voice_profile, self.refresh_voice_profiles,
             self.backend, self.cover_button, self.change_output, self.preview_button,
-            self.start_button,
+            self.start_button, self.resume_button,
         ]
         for control in controls:
             control.setEnabled(not locked)
@@ -735,6 +747,53 @@ class GenerationPage(QWidget):
         except Exception:
             return False
 
+    def _refresh_resume_state(self) -> None:
+        if not self.project_folder:
+            self.resume_button.setVisible(False)
+            self.actions_note.setText("")
+            return
+
+        info = inspect_generation_state(self.audio_root, self.chapters)
+        state = load_state(self.project_folder)
+        status = str(state.get("status") or "new").lower()
+        output_value = state.get("output_path")
+        output_exists = bool(output_value and Path(str(output_value)).exists())
+        resumable = (
+            info.resume_available
+            or bool(state.get("failed_chapters"))
+            or status in {"failed", "cancelled", "generating"}
+        )
+
+        # A fully completed book should not advertise a resume action unless
+        # the user has explicitly started a new generation.
+        if status == "completed" and not info.resume_available:
+            resumable = False
+
+        self.resume_button.setVisible(resumable)
+        if resumable:
+            completed = len(info.completed_chapters)
+            partial = len(info.partial_chapters)
+            details = []
+            if completed:
+                details.append(f"{completed}/{len(self.chapters)} chapter(s) already complete")
+            if partial:
+                details.append(f"{partial} chapter(s) have partial work")
+            if state.get("failed_chapters"):
+                details.append(
+                    "failed: " + ", ".join(map(str, state.get("failed_chapters") or []))
+                )
+            if output_exists and status != "completed":
+                details.append("an earlier M4B remains on disk")
+            suffix = " • ".join(details) if details else "saved working audio is available"
+            self.resume_button.setText("Resume / Retry")
+            self.actions_note.setText(
+                f"Resume available • {suffix}. Existing compatible chunks will be reused."
+            )
+        else:
+            self.actions_note.setText(
+                "A new generation will create fresh audio and retain the project for later resume if interrupted."
+            )
+
     def _refresh_readiness(self) -> None:
         profile = self._selected_profile()
         provider_name = profile.provider if profile else None
@@ -750,10 +809,13 @@ class GenerationPage(QWidget):
             cover_selected=bool(self.cover),
         )
 
+        self._refresh_resume_state()
+
         if readiness.ready:
             self.readiness_status.setText("✓ Ready to generate")
             self.readiness_status.setObjectName("ready")
             self.start_button.setEnabled(True)
+            self.resume_button.setEnabled(True)
         else:
             failures = readiness.blocking_failures
             self.readiness_status.setText(
@@ -761,6 +823,7 @@ class GenerationPage(QWidget):
             )
             self.readiness_status.setObjectName("warning")
             self.start_button.setEnabled(False)
+            self.resume_button.setEnabled(False)
 
         lines = []
         for item in readiness.items:
@@ -819,6 +882,13 @@ class GenerationPage(QWidget):
             self.status.setText("Choose an M4B output.")
             return
         self._save_pronunciations()
+        resume_info = inspect_generation_state(self.audio_root, self.chapters)
+        state_before_start = load_state(self.project_folder) if self.project_folder else {}
+        is_resume = (
+            resume_info.resume_available
+            or bool(state_before_start.get("failed_chapters"))
+            or str(state_before_start.get("status") or "").lower() in {"failed", "cancelled", "generating"}
+        )
         profile = self._selected_profile()
         if profile and profile.provider == "chatterbox" and not runtime_ready():
             self.status.setText(
@@ -857,7 +927,10 @@ class GenerationPage(QWidget):
         self.play_button.setEnabled(False)
         self.open_button.setEnabled(False)
         self.result_label.setText("Generating chapters and packaging the final M4B…")
-        self.status.setText("Starting generation…")
+        self.status.setText(
+            "Resuming generation and reusing compatible completed chunks…"
+            if is_resume else "Starting generation…"
+        )
 
         self.manager = GenerationManager(
             provider, voice, self.chapters, self.audio_root,
@@ -939,7 +1012,7 @@ class GenerationPage(QWidget):
         if self.project_folder:
             state = load_state(self.project_folder)
             state["status"] = "completed" if summary.output_path else ("failed" if (summary.chapters_failed or summary.packaging_failed) else "cancelled")
-            state["completed_chapters"] = [c.number for c in self.chapters[:summary.chapters_completed]]
+            state["completed_chapters"] = list(summary.chapters_completed_numbers or [])
             state["failed_chapters"] = summary.chapters_failed
             save_state(self.project_folder, state)
 
@@ -973,6 +1046,7 @@ class GenerationPage(QWidget):
             self.stage.setText("Generation cancelled")
             self.result_label.setText("Generation cancelled. Temporary files were kept for resume.")
             self.status.setText("No final M4B was created.")
+        self._refresh_resume_state()
         self._refresh_readiness()
 
     def play_result(self) -> None:

@@ -20,6 +20,7 @@ class GenerationSummary:
     chapters_total: int
     chapters_completed: int
     chapters_failed: list[int]
+    chapters_completed_numbers: list[int] | None = None
     failure_details: dict[int, str] | None = None
     output_path: Path | None = None
     cancelled: bool = False
@@ -100,6 +101,7 @@ class GenerationManager:
                 offset += len(split_for_pacing(part))
         self._total_chunks = offset
         generated_chapter_dirs: list[Path] = []
+        completed_numbers: list[int] = []
         self._emit(0, len(self.chapters), 0, f"plan:{self._total_chunks}")
         cancelled = False
         packaging_failed = False
@@ -125,6 +127,7 @@ class GenerationManager:
                 if result.chunks_completed != result.chunks_total:
                     raise RuntimeError("Chapter generation is incomplete.")
                 completed += 1
+                completed_numbers.append(chapter.number)
                 generated_chapter_dirs.append(result.output_path)
                 self._emit(index + 1, len(self.chapters), 1, "chapter-complete")
             except Exception as exc:
@@ -162,6 +165,7 @@ class GenerationManager:
             len(self.chapters),
             completed,
             list(self.failed),
+            completed_numbers,
             self.failure_details,
             final_output,
             cancelled,

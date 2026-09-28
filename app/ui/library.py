@@ -17,15 +17,19 @@ def project_status(project) -> tuple[str, str]:
     state = load_state(project.folder)
     output_value = state.get("output_path")
     output = Path(output_value) if output_value else None
-
-    if output and output.exists() and output.stat().st_size > 0:
-        return "Completed", str(output)
-
     status = str(state.get("status") or "new").lower()
-    if status == "generating":
-        return "In Progress", ""
+
     if status in {"failed", "cancelled"} or state.get("failed_chapters"):
-        return "Needs Attention", ""
+        return "Needs Attention", str(output) if output and output.exists() else ""
+    if status == "generating":
+        return "In Progress", str(output) if output and output.exists() else ""
+    if (
+        status == "completed"
+        and output
+        and output.exists()
+        and output.stat().st_size > 0
+    ):
+        return "Completed", str(output)
     if project.chapters:
         return "Ready", ""
     return "Imported", ""
