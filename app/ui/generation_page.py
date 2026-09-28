@@ -26,6 +26,7 @@ from app.tts.providers.piper import PiperProvider
 from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.preview import build_voice_preview
 from app.tts.readiness import build_generation_readiness
+from app.tts.chatterbox_runtime import runtime_ready
 from app.tts.resume import inspect_generation_state
 
 
