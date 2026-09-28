@@ -25,6 +25,7 @@ from app.tts.voice_profile import load_profiles, VoiceProfile
 from app.tts.providers.piper import PiperProvider
 from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.preview import build_voice_preview
+from app.tts.readiness import build_generation_readiness
 
 
 class GenerationSignals(QObject):
@@ -282,6 +283,22 @@ class GenerationPage(QWidget):
         result_layout.addWidget(self.result_time)
         root.addWidget(result_box)
 
+        readiness_box = QGroupBox("Generation Readiness")
+        readiness_layout = QVBoxLayout(readiness_box)
+        self.readiness_status = QLabel("Checking generation requirements…")
+        self.readiness_status.setWordWrap(True)
+        readiness_layout.addWidget(self.readiness_status)
+        self.readiness_details = QLabel()
+        self.readiness_details.setWordWrap(True)
+        readiness_layout.addWidget(self.readiness_details)
+        readiness_actions = QHBoxLayout()
+        self.refresh_readiness_button = QPushButton("Refresh Checks")
+        self.refresh_readiness_button.clicked.connect(self._refresh_readiness)
+        readiness_actions.addWidget(self.refresh_readiness_button)
+        readiness_actions.addStretch(1)
+        readiness_layout.addLayout(readiness_actions)
+        root.addWidget(readiness_box)
+
         actions = QHBoxLayout()
         self.start_button = QPushButton("Generate Audiobook")
         self.cancel_button = QPushButton("Cancel")
@@ -305,10 +322,16 @@ class GenerationPage(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._update_live_stats)
 
+        self.voice_profile.currentIndexChanged.connect(lambda _index: self._refresh_readiness())
+        self.backend.currentIndexChanged.connect(lambda _index: self._refresh_readiness())
+        self.narration_speed.currentIndexChanged.connect(lambda _index: self._refresh_readiness())
+        self.pacing_profile.currentIndexChanged.connect(lambda _index: self._refresh_readiness())
+
         self._restore_state()
         self._load_pronunciations()
         self._load_voice_cast_summary()
         self._set_default_output()
+        self._refresh_readiness()
 
     def _add_pronunciation_row(self, written="", spoken="", enabled=True):
         from PySide6.QtCore import Qt
@@ -535,12 +558,14 @@ class GenerationPage(QWidget):
         )
         if path:
             self.output.setText(str(Path(path).with_suffix(".m4b")))
+            self._refresh_readiness()
 
     def choose_cover(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Select Cover", "", "Images (*.jpg *.jpeg *.png)")
         if path:
             self.cover = Path(path)
             self.cover_label.setText(self.cover.name)
+            self._refresh_readiness()
 
     def _cast_provider(self, narrator_provider, narrator_voice):
         if not self.project_folder:
@@ -710,9 +735,49 @@ class GenerationPage(QWidget):
         except Exception:
             return False
 
+    def _refresh_readiness(self) -> None:
+        profile = self._selected_profile()
+        provider_name = profile.provider if profile else None
+        state = load_state(self.project_folder) if self.project_folder else {}
+        assignments = state.get("voice_cast", {}) if isinstance(state, dict) else {}
+        readiness = build_generation_readiness(
+            self.chapters,
+            profile.name if profile else None,
+            provider_name,
+            self.output.text().strip() if hasattr(self, "output") else "",
+            custom_runtime_ready=runtime_ready(),
+            assignments=assignments,
+            cover_selected=bool(self.cover),
+        )
+
+        if readiness.ready:
+            self.readiness_status.setText("✓ Ready to generate")
+            self.readiness_status.setObjectName("ready")
+            self.start_button.setEnabled(True)
+        else:
+            failures = readiness.blocking_failures
+            self.readiness_status.setText(
+                f"⚠ {len(failures)} item(s) need attention before generation."
+            )
+            self.readiness_status.setObjectName("warning")
+            self.start_button.setEnabled(False)
+
+        lines = []
+        for item in readiness.items:
+            icon = "✓" if item.ok else ("⚠" if not item.blocking else "✕")
+            lines.append(f"{icon} <b>{item.label}</b>: {item.detail}")
+        self.readiness_details.setText("<br>".join(lines))
+        self.readiness_status.style().unpolish(self.readiness_status)
+        self.readiness_status.style().polish(self.readiness_status)
+
     def start(self) -> None:
         if not self.chapters:
             self.status.setText("No chapters available.")
+            return
+
+        self._refresh_readiness()
+        if not self.start_button.isEnabled():
+            self.status.setText("Generation is blocked by the readiness checks above.")
             return
 
         empty = [c for c in self.chapters if not c.text or not c.text.strip()]
@@ -908,6 +973,7 @@ class GenerationPage(QWidget):
             self.stage.setText("Generation cancelled")
             self.result_label.setText("Generation cancelled. Temporary files were kept for resume.")
             self.status.setText("No final M4B was created.")
+        self._refresh_readiness()
 
     def play_result(self) -> None:
         path = Path(self.output.text().strip())

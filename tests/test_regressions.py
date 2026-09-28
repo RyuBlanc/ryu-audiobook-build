@@ -285,6 +285,35 @@ Rias Gremory
             finally:
                 vp.voices_root = original_root
 
+    def test_generation_readiness_blocks_missing_required_items(self):
+        from app.tts.readiness import build_generation_readiness
+
+        chapters = [Chapter(1, "Chapter 1", "Story text.")]
+        result = build_generation_readiness(
+            chapters,
+            voice_name=None,
+            voice_provider=None,
+            output_path="book.m4b",
+        )
+        self.assertFalse(result.ready)
+        self.assertEqual(len(result.blocking_failures), 1)
+        self.assertIn("Narrator voice", result.blocking_failures[0].label)
+
+    def test_generation_readiness_allows_optional_items_to_be_missing(self):
+        from app.tts.readiness import build_generation_readiness
+
+        chapters = [Chapter(1, "Chapter 1", "Story text.")]
+        result = build_generation_readiness(
+            chapters,
+            voice_name="Narrator",
+            voice_provider="piper",
+            output_path="book.m4b",
+            assignments={},
+            cover_selected=False,
+        )
+        self.assertTrue(result.ready)
+        self.assertEqual(result.attention_count, 0)
+
     def test_voice_cast_filter_and_confidence_helpers(self):
         from app.ui.voice_cast_page import cast_row_matches, confidence_band
 
