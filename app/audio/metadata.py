@@ -13,6 +13,8 @@ def validate_cover(path: Path | None) -> Path | None:
         raise ValueError("Cover must be JPG or PNG.")
     return path
 
-def sanitize_metadata(value: str, fallback: str = "") -> str:
+def sanitize_metadata(value: str | None, fallback: str = "") -> str:
+    if value is None:
+        return fallback
     value = " ".join(value.replace("\x00", "").split())
     return value[:500] if value else fallback
