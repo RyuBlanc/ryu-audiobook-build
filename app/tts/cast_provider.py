@@ -5,7 +5,7 @@ import json
 import re
 from pathlib import Path
 
-from app.chapters.characters import infer_speaker_for_quote
+from app.chapters.characters import infer_speaker_for_quote, _all_dialogue_spans
 from app.tts.base import TTSProvider
 from app.tts.profile_provider import provider_from_profile
 from app.tts.voice_profile import VoiceProfile
@@ -67,10 +67,9 @@ class CastAwareProvider(TTSProvider):
         )
 
     def split_for_cast(self, text: str, fallback_voice: str | None):
-        spans = []
-        for pattern in QUOTE_PATTERNS:
-            spans.extend((m.start(), m.end(), m.group(1)) for m in pattern.finditer(text))
-        spans.sort(key=lambda x: (x[0], -(x[1] - x[0])))
+        # Use the same dialogue span detector as Voice Cast analysis so
+        # generation and review cannot disagree about what counts as dialogue.
+        spans = _all_dialogue_spans(text)
 
         if not spans:
             return [(text, fallback_voice)]
@@ -81,15 +80,28 @@ class CastAwareProvider(TTSProvider):
         for start, end, _dialogue in spans:
             if start > cursor:
                 parts.append((text[cursor:start], fallback_voice))
+
             speaker = self._speaker_for(text, start, end, last_speaker)
             voice = self.assignments.get(speaker.casefold()) if speaker else fallback_voice
             if speaker:
                 last_speaker = speaker.casefold()
-            dialogue = text[start:end].strip()
+
+            raw = text[start:end].strip()
+            dialogue = raw
+
+            # Normalize only the dialogue marker for synthesis. The source
+            # text stays untouched in narration.json and the project.
             if len(dialogue) >= 2 and dialogue[0] in '“"「『' and dialogue[-1] in '”"」』':
                 dialogue = dialogue[1:-1].strip()
-            parts.append((dialogue, voice))
+            else:
+                stripped = dialogue.lstrip(" \t")
+                if stripped and stripped[0] in "—–-":
+                    dialogue = stripped[1:].strip()
+
+            if dialogue:
+                parts.append((dialogue, voice))
             cursor = end
+
         if cursor < len(text):
             parts.append((text[cursor:], fallback_voice))
         return [(t, v) for t, v in parts if t.strip()]
