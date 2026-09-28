@@ -186,6 +186,34 @@ Hyoudou Issei spoke to Rias Gremory.
         source = "I am a second year high school student."
         result = prepare_for_narration(source)
         self.assertEqual(result.narration_text, source)
+    def test_cast_provider_routes_em_dash_dialogue_to_assigned_character(self):
+        from app.tts.cast_provider import CastAwareProvider
+
+        class DummyNarrator:
+            def synthesize(self, text, output_path, voice=None):
+                return output_path
+
+        provider = CastAwareProvider(
+            DummyNarrator(),
+            "Narrator",
+            profiles={},
+            assignments={"Akeno Himejima": "Akeno Voice"},
+        )
+        text = """Akeno Himejima
+—Hello there, Issei.
+
+The hallway was quiet.
+
+Rias Gremory
+—We should get going.
+"""
+        parts = provider.split_for_cast(text, "Narrator")
+        assigned = [(value, voice) for value, voice in parts if voice == "Akeno Voice"]
+        self.assertTrue(assigned)
+        self.assertEqual(assigned[0][0], "Hello there, Issei.")
+
+        provider.close()
+
     def test_custom_profile_round_trip(self):
         import app.tts.voice_profile as vp
 
