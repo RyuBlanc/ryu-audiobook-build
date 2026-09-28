@@ -320,6 +320,41 @@ Rias Gremory
             self.assertEqual(state.partial_chapters, (2,))
             self.assertTrue(state.resume_available)
 
+
+    def test_project_save_round_trip_preserves_manual_chapter_edits(self):
+        from app.core.project import Project
+
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp) / "Book"
+            project = Project(
+                "Book",
+                folder,
+                None,
+                [
+                    Chapter(1, "Chapter One", "Edited body text."),
+                    Chapter(2, "Chapter Two", "Second edited body."),
+                ],
+            )
+            project.save()
+
+            loaded = Project.load(folder)
+            self.assertEqual(
+                [(c.number, c.title, c.text) for c in loaded.chapters],
+                [
+                    (1, "Chapter One", "Edited body text."),
+                    (2, "Chapter Two", "Second edited body."),
+                ],
+            )
+
+            loaded.chapters[0].title = "Changed Again"
+            loaded.chapters[0].text = "Persist this exact text."
+            loaded.save()
+
+            reopened = Project.load(folder)
+            self.assertEqual(reopened.chapters[0].number, 1)
+            self.assertEqual(reopened.chapters[0].title, "Changed Again")
+            self.assertEqual(reopened.chapters[0].text, "Persist this exact text.")
+
     def test_library_status_marks_failed_latest_generation_as_needs_attention_even_with_old_output(self):
         from app.ui.library import project_status
         from app.core.project import Project

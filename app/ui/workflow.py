@@ -229,16 +229,32 @@ class ProjectWorkflow(QMainWindow):
         self.library.refresh()
         self.ensure_generation_page()
 
-    def save_project(self, chapters: list[Chapter]) -> None:
+    def save_project(self, chapters: list[Chapter]) -> bool:
         if not self.project:
-            return
-        self.project.chapters = chapters
-        self.project.save()
-        state = load_state(self.project.folder)
-        state["status"] = "ready"
-        save_state(self.project.folder, state)
-        self.library.refresh()
-        self.ensure_generation_page()
+            return False
+        try:
+            # Save the exact manual editor state first. Do not re-run chapter
+            # detection or repair during a normal Save operation.
+            self.project.chapters = list(chapters)
+            self.project.save()
+            persisted = Project.load(self.project.folder)
+            self.project.chapters = persisted.chapters
+
+            state = load_state(self.project.folder)
+            state["status"] = "ready"
+            state["failed_chapters"] = []
+            save_state(self.project.folder, state)
+
+            self.library.refresh()
+            self.ensure_generation_page()
+            return True
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Save Failed",
+                f"Chapter edits could not be saved.\n\n{exc}",
+            )
+            return False
 
     def _repair_empty_chapters(self) -> None:
         """Repair projects created by older chapter-detector versions."""
@@ -262,7 +278,6 @@ class ProjectWorkflow(QMainWindow):
     def ensure_generation_page(self) -> None:
         if not self.project:
             return
-        self._repair_empty_chapters()
         if self.generation:
             self.stack.removeWidget(self.generation)
             self.generation.deleteLater()

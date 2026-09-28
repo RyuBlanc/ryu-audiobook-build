@@ -4,6 +4,8 @@ from dataclasses import asdict
 from pathlib import Path
 import json
 import shutil
+import os
+import tempfile
 
 from app.chapters.detector import Chapter
 from app.core.paths import library_root
@@ -23,15 +25,56 @@ class Project:
     def text_file(self) -> Path:
         return self.folder / "chapters.json"
 
+    @staticmethod
+    def _atomic_write_text(path: Path, content: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp_name = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=str(path.parent),
+            text=True,
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            Path(temp_name).replace(path)
+        except Exception:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            Path(temp_name).unlink(missing_ok=True)
+            raise
+
     def save(self) -> None:
         self.folder.mkdir(parents=True, exist_ok=True)
+
+        # Normalize chapter numbering to the current editor order before writing.
+        for number, chapter in enumerate(self.chapters, start=1):
+            chapter.number = number
+
         source = self.source_path.name if self.source_path else None
-        self.project_file.write_text(
-            json.dumps({"title": self.title, "source_file": source}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+        project_payload = json.dumps(
+            {"title": self.title, "source_file": source},
+            ensure_ascii=False,
+            indent=2,
         )
-        chapter_data = [asdict(chapter) for chapter in self.chapters]
-        self.text_file.write_text(json.dumps(chapter_data, ensure_ascii=False, indent=2), encoding="utf-8")
+        chapters_payload = json.dumps(
+            [asdict(chapter) for chapter in self.chapters],
+            ensure_ascii=False,
+            indent=2,
+        )
+
+        # Write atomically so a Save cannot leave a partially-written chapters.json.
+        self._atomic_write_text(self.project_file, project_payload)
+        self._atomic_write_text(self.text_file, chapters_payload)
+
+        # Verify the exact chapter data we intended to persist.
+        persisted = json.loads(self.text_file.read_text(encoding="utf-8"))
+        if persisted != json.loads(chapters_payload):
+            raise IOError("Saved chapter data could not be verified.")
 
     @classmethod
     def load(cls, folder: Path) -> "Project":

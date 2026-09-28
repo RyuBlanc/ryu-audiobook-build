@@ -289,7 +289,9 @@ class ChapterEditorPage(QWidget):
     def save(self) -> None:
         self.commit_current()
         if self.on_save:
-            self.on_save(self.editor.chapters)
+            result = self.on_save(self.editor.chapters)
+            if result is False:
+                return
         QMessageBox.information(self, "Saved", "Project changes have been saved.")
 
     def redetect(self) -> None:
