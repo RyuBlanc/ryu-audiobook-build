@@ -38,6 +38,7 @@ class GenerationManager:
         on_finished: Callable[[GenerationSummary], None] | None = None,
         pronunciation_dictionary: list[dict] | None = None,
         narration_speed: float = 0.90,
+        pacing_profile: str = "natural",
     ) -> None:
         self.provider = provider
         self.voice = voice
@@ -47,6 +48,7 @@ class GenerationManager:
         self.on_finished = on_finished
         self.pronunciation_dictionary = pronunciation_dictionary or []
         self.narration_speed = narration_speed
+        self.pacing_profile = pacing_profile
         self.cancel_event = Event()
         self._thread: Thread | None = None
         self.failed: list[int] = []
@@ -90,9 +92,12 @@ class GenerationManager:
                 self.pronunciation_dictionary,
             ).narration_text
             if hasattr(self.provider, "split_for_cast"):
-                offset += len(self.provider.split_for_cast(narration_text, self.voice))
+                raw_parts = self.provider.split_for_cast(narration_text, self.voice)
             else:
-                offset += len(split_text(narration_text))
+                raw_parts = [(chunk, self.voice) for chunk in split_text(narration_text)]
+            from app.tts.pacing import split_for_pacing
+            for part, _part_voice in raw_parts:
+                offset += len(split_for_pacing(part))
         self._total_chunks = offset
         generated_chapter_dirs: list[Path] = []
         self._emit(0, len(self.chapters), 0, f"plan:{self._total_chunks}")
@@ -115,6 +120,7 @@ class GenerationManager:
                     ),
                     pronunciation_dictionary=self.pronunciation_dictionary,
                     narration_speed=self.narration_speed,
+                    pacing_profile=self.pacing_profile,
                 )
                 if result.chunks_completed != result.chunks_total:
                     raise RuntimeError("Chapter generation is incomplete.")
