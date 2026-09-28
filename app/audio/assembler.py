@@ -56,7 +56,9 @@ def assemble_chapter(chapter_dir: Path) -> Path:
     return output
 
 
-def _metadata_value(value: str) -> str:
+def _metadata_value(value: str | None) -> str:
+    if value is None:
+        return ""
     return (
         str(value).replace("\\", "\\\\").replace(";", "\\;")
         .replace("#", "\\#").replace("=", "\\=")
@@ -64,13 +66,15 @@ def _metadata_value(value: str) -> str:
     )
 
 
-def _safe_title(value: str) -> str:
+def _safe_title(value: str | None) -> str:
+    value = str(value or "")
     return re.sub(r'[<>:"/\\|?*]+', "_", value).strip() or "Audiobook"
 
 
 def _duration_ms(path: Path) -> int:
     probe = subprocess.run([ffmpeg_path(), "-i", str(path)], capture_output=True, text=True)
-    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", probe.stderr)
+    probe_output = str(probe.stderr or probe.stdout or "")
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", probe_output)
     if not match:
         raise RuntimeError(f"Could not determine duration of {path.name}")
     hours, minutes, seconds = match.groups()
@@ -97,6 +101,10 @@ def assemble_m4b(
     ]
     if len(names) != len(chapters):
         raise ValueError("Chapter title count does not match chapter audio count.")
+    names = [
+        sanitize_metadata(name, f"Chapter {index + 1}")
+        for index, name in enumerate(names)
+    ]
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path = output_path.with_suffix(".m4b")
