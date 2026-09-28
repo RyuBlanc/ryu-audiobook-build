@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import re
 import wave
 
 
@@ -29,10 +28,11 @@ def _sentence_units(text: str) -> list[str]:
         char = text[i]
         current.append(char)
 
-        if char == "
-":
-            if i + 1 < len(text) and text[i + 1] == "
-":
+        if char == "\n":
+            # A blank line marks a paragraph boundary. Keep the paragraph
+            # break out of the TTS unit so the pacing layer can add a longer
+            # breath between paragraphs.
+            if i + 1 < len(text) and text[i + 1] == "\n":
                 current.pop()
                 flush()
                 i += 1
@@ -76,7 +76,7 @@ def split_for_pacing(
         if not sentence:
             continue
 
-        would_exceed = current and (
+        would_exceed = bool(current) and (
             current_chars + len(sentence) + 1 > max_chars
             or len(current) >= max_sentences
         )
@@ -138,9 +138,7 @@ def pause_after_ms(text: str, profile: str = "natural") -> int:
         elif without_closer.endswith("."):
             base = 290
 
-    if "
-
-" in stripped:
+    if "\n\n" in stripped:
         base += 140
 
     base += _PROFILE_EXTRA_PAUSE_MS.get(profile, 0)
