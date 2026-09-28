@@ -83,9 +83,25 @@ class GenerationPage(QWidget):
         book_name = self.project_folder.name if self.project_folder else "Audiobook"
         self.title = QLineEdit(book_name)
         self.author = QLineEdit()
+        self.narrator = QLineEdit()
+        self.publisher = QLineEdit()
+        self.series = QLineEdit()
+        self.series_number = QLineEdit()
+        self.language = QLineEdit("en")
+        self.year = QLineEdit()
+        self.genre = QLineEdit("Audiobook")
+        self.description = QLineEdit()
         form = QFormLayout()
         form.addRow("Book title", self.title)
-        form.addRow("Author / narrator", self.author)
+        form.addRow("Author", self.author)
+        form.addRow("Narrator", self.narrator)
+        form.addRow("Publisher", self.publisher)
+        form.addRow("Series", self.series)
+        form.addRow("Series number", self.series_number)
+        form.addRow("Language", self.language)
+        form.addRow("Release year", self.year)
+        form.addRow("Genre", self.genre)
+        form.addRow("Description", self.description)
         root.addLayout(form)
 
         overview = QGroupBox("Audiobook")
@@ -554,6 +570,15 @@ class GenerationPage(QWidget):
             if index >= 0:
                 self.pacing_profile.setCurrentIndex(index)
 
+        self.narrator.setText(str(state.get("narrator") or ""))
+        self.publisher.setText(str(state.get("publisher") or ""))
+        self.series.setText(str(state.get("series") or ""))
+        self.series_number.setText(str(state.get("series_number") or ""))
+        self.language.setText(str(state.get("language") or "en"))
+        self.year.setText(str(state.get("year") or ""))
+        self.genre.setText(str(state.get("genre") or "Audiobook"))
+        self.description.setText(str(state.get("description") or ""))
+
         cover = state.get("cover_path")
         if cover and Path(cover).exists():
             self.cover = Path(cover)
@@ -911,6 +936,14 @@ class GenerationPage(QWidget):
                 "voice_profile": profile.name if profile else None,
                 "output_path": str(output),
                 "cover_path": str(self.cover) if self.cover else None,
+                "narrator": self.narrator.text().strip(),
+                "publisher": self.publisher.text().strip(),
+                "series": self.series.text().strip(),
+                "series_number": self.series_number.text().strip(),
+                "language": self.language.text().strip(),
+                "year": self.year.text().strip(),
+                "genre": self.genre.text().strip(),
+                "description": self.description.text().strip(),
                 "narration_speed": float(self.narration_speed.currentData() or 0.90),
                 "pacing_profile": self.pacing_profile.currentData() or "natural",
                 "status": "generating",
@@ -932,6 +965,18 @@ class GenerationPage(QWidget):
             if is_resume else "Starting generation…"
         )
 
+        metadata = {
+            "title": self.title.text().strip(),
+            "author": self.author.text().strip(),
+            "narrator": self.narrator.text().strip(),
+            "publisher": self.publisher.text().strip(),
+            "series": self.series.text().strip(),
+            "series_number": self.series_number.text().strip(),
+            "language": self.language.text().strip(),
+            "year": self.year.text().strip(),
+            "genre": self.genre.text().strip(),
+            "description": self.description.text().strip(),
+        }
         self.manager = GenerationManager(
             provider, voice, self.chapters, self.audio_root,
             on_progress=lambda *args: self.signals.progress.emit(*args),
@@ -939,6 +984,7 @@ class GenerationPage(QWidget):
             pronunciation_dictionary=self._pronunciation_entries(),
             narration_speed=float(self.narration_speed.currentData() or 0.90),
             pacing_profile=self.pacing_profile.currentData() or "natural",
+            metadata=metadata,
         )
         self.manager.start(output, self.title.text().strip(), self.author.text().strip(), self.cover)
 

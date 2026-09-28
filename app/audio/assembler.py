@@ -7,6 +7,8 @@ import tempfile
 
 import imageio_ffmpeg
 
+from app.audio.metadata import sanitize_metadata
+
 
 def ffmpeg_path() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
@@ -82,6 +84,7 @@ def assemble_m4b(
     author: str = "",
     cover: Path | None = None,
     chapter_titles: list[str] | None = None,
+    metadata: dict[str, str] | None = None,
 ) -> Path:
     """Create one M4B containing all chapters, navigation markers, metadata and cover."""
     if not chapter_dirs:
@@ -114,15 +117,41 @@ def assemble_m4b(
         concat.write_text("\n".join(concat_lines) + "\n", encoding="utf-8")
 
         metadata = temp_dir / "metadata.txt"
+        metadata = metadata or {}
+        clean_title = _safe_title(metadata.get("title") or title)
+        clean_artist = sanitize_metadata(metadata.get("author") or author)
+        narrator = sanitize_metadata(metadata.get("narrator"))
+        publisher = sanitize_metadata(metadata.get("publisher"))
+        series = sanitize_metadata(metadata.get("series"))
+        series_number = sanitize_metadata(metadata.get("series_number"))
+        language = sanitize_metadata(metadata.get("language"))
+        year = sanitize_metadata(metadata.get("year"))
+        genre = sanitize_metadata(metadata.get("genre"), "Audiobook")
+        description = sanitize_metadata(metadata.get("description"))
+
         lines = [
             ";FFMETADATA1",
-            f"title={_metadata_value(_safe_title(title))}",
-            f"album={_metadata_value(_safe_title(title))}",
-            "genre=Audiobook",
+            f"title={_metadata_value(clean_title)}",
+            f"album={_metadata_value(clean_title)}",
+            f"genre={_metadata_value(genre)}",
             "comment=Created by Ryu's Audiobook",
         ]
-        if author:
-            lines.append(f"artist={_metadata_value(author)}")
+        if clean_artist:
+            lines.append(f"artist={_metadata_value(clean_artist)}")
+        if narrator:
+            lines.append(f"narrator={_metadata_value(narrator)}")
+        if publisher:
+            lines.append(f"publisher={_metadata_value(publisher)}")
+        if series:
+            lines.append(f"series={_metadata_value(series)}")
+        if series_number:
+            lines.append(f"series_number={_metadata_value(series_number)}")
+        if language:
+            lines.append(f"language={_metadata_value(language)}")
+        if year:
+            lines.append(f"date={_metadata_value(year)}")
+        if description:
+            lines.append(f"description={_metadata_value(description)}")
 
         start = 0
         for duration, chapter_title in zip(durations, names):
@@ -162,11 +191,27 @@ def assemble_m4b(
             "-map_chapters", "1",
             "-c:a", "copy",
             "-movflags", "+faststart",
-            "-metadata", f"title={_safe_title(title)}",
-            "-metadata", f"album={_safe_title(title)}",
+            "-metadata", f"title={_metadata_value(clean_title)}",
+            "-metadata", f"album={_metadata_value(clean_title)}",
         ]
-        if author:
-            args += ["-metadata", f"artist={author}"]
+        if clean_artist:
+            args += ["-metadata", f"artist={clean_artist}"]
+        if narrator:
+            args += ["-metadata", f"narrator={narrator}"]
+        if publisher:
+            args += ["-metadata", f"publisher={publisher}"]
+        if series:
+            args += ["-metadata", f"series={series}"]
+        if series_number:
+            args += ["-metadata", f"series_number={series_number}"]
+        if language:
+            args += ["-metadata", f"language={language}"]
+        if year:
+            args += ["-metadata", f"date={year}"]
+        if genre:
+            args += ["-metadata", f"genre={genre}"]
+        if description:
+            args += ["-metadata", f"description={description}"]
         args.append(str(base_m4b))
         _run(args)
 

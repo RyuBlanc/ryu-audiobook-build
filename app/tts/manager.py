@@ -63,13 +63,14 @@ class GenerationManager:
         title: str = "Audiobook",
         author: str = "",
         cover: Path | None = None,
+        metadata: dict[str, str] | None = None,
     ) -> None:
         if self._thread and self._thread.is_alive():
             raise RuntimeError("Generation is already running.")
         self.cancel_event.clear()
         self._thread = Thread(
             target=self._run,
-            args=(output_path, title, author, cover),
+            args=(output_path, title, author, cover, metadata or {}),
             daemon=True,
         )
         self._thread.start()
@@ -77,7 +78,7 @@ class GenerationManager:
     def cancel(self) -> None:
         self.cancel_event.set()
 
-    def _run(self, output_path: Path | None, title: str, author: str, cover: Path | None) -> None:
+    def _run(self, output_path: Path | None, title: str, author: str, cover: Path | None, metadata: dict[str, str]) -> None:
         # This directory is deliberately called working: it is not the user's
         # audiobook library and can be removed after a successful package build.
         self.audio_root.mkdir(parents=True, exist_ok=True)
@@ -151,6 +152,7 @@ class GenerationManager:
                     sanitize_metadata(author),
                     cover,
                     [c.title for c in self.chapters],
+                    metadata=metadata,
                 )
                 self._emit(len(self.chapters), len(self.chapters), 1, "m4b-complete")
                 # Only delete intermediate files after the final M4B has been

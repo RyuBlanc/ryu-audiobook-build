@@ -464,6 +464,48 @@ Rias Gremory
             self.assertTrue(result.exists())
             self.assertGreater(result.stat().st_size, 4096)
 
+    def test_m4b_metadata_fields_are_embedded(self):
+        import imageio_ffmpeg
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapter = root / "001_Chapter" / "chunks"
+            _write_wav(chapter / "00001.wav", 2.0)
+            output = root / "metadata.m4b"
+            result = assemble_m4b(
+                [chapter.parent],
+                output,
+                "Fallback Title",
+                author="Fallback Author",
+                chapter_titles=["Chapter 1"],
+                metadata={
+                    "title": "My Book",
+                    "author": "Book Author",
+                    "narrator": "Narrator Name",
+                    "publisher": "Publisher",
+                    "series": "Series Name",
+                    "series_number": "1",
+                    "language": "en",
+                    "year": "2026",
+                    "genre": "Light Novel",
+                    "description": "A test audiobook.",
+                },
+            )
+            probe = subprocess.run(
+                [imageio_ffmpeg.get_ffmpeg_exe(), "-i", str(result)],
+                capture_output=True,
+                text=True,
+            )
+            output_text = probe.stderr
+            for expected in [
+                "My Book",
+                "Book Author",
+                "Narrator Name",
+                "Publisher",
+                "Series Name",
+                "Light Novel",
+            ]:
+                self.assertIn(expected, output_text)
     def test_m4b_packaging_with_cover(self):
         # Generate a tiny valid JPEG through the same FFmpeg toolchain used by
         # the application instead of relying on a fragile hand-written fixture.
