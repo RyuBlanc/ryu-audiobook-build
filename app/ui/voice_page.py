@@ -3,13 +3,23 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QEvent, QUrl
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
     QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QTextEdit,
     QVBoxLayout, QWidget,
 )
+
+
+class PassiveScrollComboBox(QComboBox):
+    """Prevent mouse-wheel changes until the user explicitly opens the combo."""
+    
+    def wheelEvent(self, event) -> None:
+        if self.view().isVisible():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
 
 from app.tts.profile_provider import provider_from_profile
 from app.tts.chatterbox_runtime import runtime_ready, runtime_status
@@ -75,7 +85,7 @@ class VoicePage(QWidget):
         source_layout.addWidget(QLabel(
             "Choose where the voice comes from. Local neural voices are the default."
         ))
-        self.mode = QComboBox()
+        self.mode = PassiveScrollComboBox()
         self.mode.addItem("Offline Neural Voices  ·  built into this app", "piper")
         self.mode.addItem("Windows SAPI  ·  installed offline voices", "windows-sapi")
         self.mode.addItem("Online Neural Voices  ·  Edge TTS", "edge-tts")
