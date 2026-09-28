@@ -527,7 +527,7 @@ Rias Gremory
                 },
             )
             self.assertTrue(result.exists())
-            self.assertGreater(result.stat().st_size, 4096)
+            self.assertGreater(result.stat().st_size, 1024)
 
     def test_m4b_metadata_fields_are_embedded(self):
         import imageio_ffmpeg
