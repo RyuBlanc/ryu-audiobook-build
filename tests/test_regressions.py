@@ -321,6 +321,11 @@ Rias Gremory
             self.assertTrue(state.resume_available)
 
 
+    def test_online_tts_network_error_is_classifiable(self):
+        from app.tts.providers.edge_tts import EdgeTTSProvider, OnlineTTSNetworkError
+
+        self.assertTrue(issubclass(OnlineTTSNetworkError, RuntimeError))
+        self.assertTrue(getattr(EdgeTTSProvider, "is_online_provider", False))
     def test_project_save_round_trip_preserves_manual_chapter_edits(self):
         from app.core.project import Project
 
