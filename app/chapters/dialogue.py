@@ -47,6 +47,7 @@ def _suggest_speaker(
     names = sorted(candidates, key=len, reverse=True)
     if names:
         name_re = "|".join(re.escape(n) for n in names)
+        # Handle tags immediately before a quote, e.g. `Michael asked:`.
         for pattern, score in (
             (rf"(?:{name_re})\s+(?:{verbs})\s*$", 0.99),
             (rf"(?:{verbs})\s+(?:{name_re})\s*$", 0.98),
@@ -58,6 +59,30 @@ def _suggest_speaker(
                 found = _find_name(match.group(0), candidates, aliases)
                 if found:
                     return found, score
+
+        # Handle the common post-dialogue tag: `"Hello," Michael asked.`
+        # The previous implementation only handled `asked Michael`, which
+        # caused the primary named-speaker suggestion regression.
+        post_tag = re.search(
+            rf"^\s*[,;:—–-]?\s*(?:{name_re})\s+(?:{verbs})\b",
+            after,
+            re.I,
+        )
+        if post_tag:
+            found = _find_name(post_tag.group(0), candidates, aliases)
+            if found:
+                return found, 0.98
+
+        # Also support `asked Michael` after the dialogue.
+        post_verb_tag = re.search(
+            rf"^\s*[,;:—–-]?\s*(?:{verbs})\s+(?:{name_re})\b",
+            after,
+            re.I,
+        )
+        if post_verb_tag:
+            found = _find_name(post_verb_tag.group(0), candidates, aliases)
+            if found:
+                return found, 0.97
 
     tag = re.search(rf"[,;:—–-]?\s*(?:{verbs})\b\s+(.{{0,80}})$", after, re.I | re.S)
     if tag:
