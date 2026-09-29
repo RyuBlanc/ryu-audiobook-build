@@ -75,6 +75,7 @@ required_modules = [
     "app.ui.character_review",
     "app.tts.cast_provider",
     "app.tts.chatterbox_runtime",
+    "app.tts.providers.kokoro",
     "app.ui.workflow",
 ]
 
@@ -94,12 +95,14 @@ args = [
     "--collect-data=imageio_ffmpeg",
     "--collect-all=piper",
     "--collect-all=onnxruntime",
+    "--collect-all=kokoro_onnx",
     "--hidden-import=PySide6.QtCore",
     "--hidden-import=PySide6.QtGui",
     "--hidden-import=PySide6.QtWidgets",
     "--hidden-import=PySide6.QtMultimedia",
     "--hidden-import=piper",
     "--hidden-import=onnxruntime",
+    "--hidden-import=kokoro_onnx",
     *[f"--hidden-import={module}" for module in required_modules],
     "--collect-submodules=app",
     "--paths=.",

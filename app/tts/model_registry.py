@@ -32,8 +32,8 @@ BUILTIN_CATALOG = (
         "kokoro",
         False,
         True,
-        ("cpu", "directml", "cuda"),
-        "Open-weight TTS model. Runtime/backend compatibility is detected separately."
+        ("cuda", "directml", "cpu"),
+        "Natural offline TTS with a broad voice catalogue. Model and voice pack are downloaded separately."
     ),
     ModelSpec(
         "chatterbox",
@@ -71,12 +71,21 @@ def installed_model_ids() -> set[str]:
         return set()
 
 
+def _has_kokoro_assets() -> bool:
+    root = models_root() / "kokoro"
+    model = any((root / name).exists() for name in ("kokoro-v1.0.onnx", "model.onnx", "model_q8f16.onnx", "model_quantized.onnx"))
+    voices = any((root / name).exists() for name in ("voices-v1.0.bin", "voices.bin"))
+    return model and voices
+
+
 def installed_models() -> list[ModelSpec]:
     ids = installed_model_ids()
     result = [m for m in BUILTIN_CATALOG if m.model_id in ids]
     if (models_root() / "piper").exists() and any((models_root() / "piper").rglob("*.onnx")):
         if not any(m.model_id == "piper" for m in result):
             result.append(get_model("piper"))
+    if _has_kokoro_assets() and not any(m.model_id == "kokoro" for m in result):
+        result.append(get_model("kokoro"))
     return [m for m in result if m is not None]
 
 
