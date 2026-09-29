@@ -147,6 +147,17 @@ class GenerationManager:
                 self.failure_details[chapter.number] = str(exc)
                 self._emit(index + 1, len(self.chapters), 0, f"chapter-failed: {exc}")
 
+                # A network-wide online TTS outage will fail every remaining
+                # chapter too. Stop here instead of repeating the same DNS/
+                # connection failure for the rest of the book.
+                if exc.__class__.__name__ == "OnlineTTSNetworkError":
+                    for remaining in self.chapters[index + 1:]:
+                        self.failed.append(remaining.number)
+                        self.failure_details[remaining.number] = (
+                            "Skipped because the online voice service is unreachable."
+                        )
+                    break
+
         final_output = None
         if not cancelled and not self.failed and completed == len(self.chapters) and output_path:
             try:
