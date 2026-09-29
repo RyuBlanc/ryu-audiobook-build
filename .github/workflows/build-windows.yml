@@ -30,8 +30,6 @@ jobs:
       - name: Run regression tests
         shell: pwsh
         run: |
-          # Ensure dependency installation/caches cannot leave a stale working-tree
-          # copy or Python bytecode in the checkout.
           git reset --hard HEAD
           git clean -ffdx
           $env:PYTHONPATH = (Get-Location).Path
@@ -47,7 +45,7 @@ jobs:
 
           Remove-Item -Recurse -Force -ErrorAction SilentlyContinue app\__pycache__, app\chapters\__pycache__, tests\__pycache__
           $env:PYTHONDONTWRITEBYTECODE = "1"
-          python -c "from pathlib import Path; import os, sys, inspect, importlib.util, app; p=Path('app/chapters/characters.py'); raw=p.read_text(encoding='utf-8'); print('FILE HAS DASH COMMENT=' + str('dash-only line' in raw)); import app.chapters.characters as m; print('TEST CWD=' + os.getcwd()); print('PYTHONPATH=' + os.environ.get('PYTHONPATH','')); print('APP MODULE=' + str(getattr(app,'__file__',None))); print('APP SPEC=' + str(app.__spec__)); print('CHARACTERS MODULE=' + m.__file__); print('CHARACTERS LOADER=' + str(m.__loader__)); print('CHARACTERS CACHED=' + str(getattr(m,'__cached__',None))); print('DASH PARSER=' + str('dash-only line' in inspect.getsource(m._all_dialogue_spans))); print('DIRECT FILE FUNCTION=' + str('dash-only line' in raw[raw.find('def _all_dialogue_spans'):raw.find('def _clean_name')]))"
+          python -c "from pathlib import Path; import os, inspect, app; p=Path('app/chapters/characters.py'); raw=p.read_text(encoding='utf-8'); print('FILE HAS DASH COMMENT=' + str('dash-only line' in raw)); import app.chapters.characters as m; print('TEST CWD=' + os.getcwd()); print('PYTHONPATH=' + os.environ.get('PYTHONPATH','')); print('APP MODULE=' + str(getattr(app,'__file__',None))); print('APP SPEC=' + str(app.__spec__)); print('CHARACTERS MODULE=' + m.__file__); print('CHARACTERS LOADER=' + str(m.__loader__)); print('CHARACTERS CACHED=' + str(getattr(m,'__cached__',None))); print('DASH PARSER=' + str('dash-only line' in inspect.getsource(m._all_dialogue_spans))); print('DIRECT FILE FUNCTION=' + str('dash-only line' in raw[raw.find('def _all_dialogue_spans'):raw.find('def _clean_name')]))"
           python -B -m unittest discover -s tests -v
 
       - name: Download built-in offline neural voices
@@ -166,13 +164,12 @@ jobs:
 
       - name: Upload Windows installer
         id: upload-installer
-        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Setup-${{ github.sha }}
           path: "installer/installer-output/Ryu's Audiobook Setup.exe"
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
           overwrite: true
 
       - name: Report installer artifact status
@@ -180,8 +177,9 @@ jobs:
         shell: pwsh
         run: |
           if ('${{ steps.upload-installer.outcome }}' -ne 'success') {
-            Write-Warning "Windows installer was built successfully, but GitHub artifact upload was unavailable. The build remains valid; artifact storage/quota must be available before the installer can be downloaded from Actions."
+            throw "Windows installer was built, but GitHub artifact upload failed. Check Actions artifact storage/quota."
           }
+          Write-Host "Windows installer artifact uploaded successfully."
 
       - name: Clean old workflow runs
         if: always()
