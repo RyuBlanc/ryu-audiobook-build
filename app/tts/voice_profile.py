@@ -29,19 +29,20 @@ def profiles_file() -> Path:
 
 
 def builtin_voice_profiles() -> list[VoiceProfile]:
-    """Return neural voices shipped with the application, when present."""
+    """Return local neural voices available on this installation."""
+    result: list[VoiceProfile] = []
+
     try:
         from app.tts.providers.piper import PiperProvider
         paths = PiperProvider.model_paths()
     except Exception:
-        return []
+        paths = []
 
     metadata = {
-        "en_US-amy-medium": ("en-US", "Female", "Amy", "Recommended offline narrator voice"),
-        "en_US-lessac-medium": ("en-US", "Male", "Lessac", "Recommended offline narrator voice"),
-        "en_US-ryan-high": ("en-US", "Male", "Ryan", "High-quality offline narrator voice"),
+        "en_US-amy-medium": ("en-US", "Female", "Amy", "Recommended offline fallback voice"),
+        "en_US-lessac-medium": ("en-US", "Male", "Lessac", "Recommended offline fallback voice"),
+        "en_US-ryan-high": ("en-US", "Male", "Ryan", "High-quality offline fallback voice"),
     }
-    result: list[VoiceProfile] = []
     for path in paths:
         language, gender, friendly, note = metadata.get(
             path.stem,
@@ -59,6 +60,40 @@ def builtin_voice_profiles() -> list[VoiceProfile]:
                 authorized=True,
             )
         )
+
+    # Kokoro profiles are exposed only when its local model + voice pack are
+    # actually present. This keeps the voice picker honest and avoids saving
+    # profiles that cannot be previewed or generated on the current PC.
+    try:
+        from app.tts.providers.kokoro import KokoroProvider
+        if KokoroProvider.assets_available():
+            catalog = KokoroProvider().voices()
+            for voice_id in catalog:
+                language = KokoroProvider._language_for_voice(voice_id)
+                region = {
+                    "en-us": "English (US)",
+                    "en-gb": "English (UK)",
+                    "ja": "Japanese",
+                    "cmn": "Chinese",
+                    "es": "Spanish",
+                    "fr-fr": "French",
+                    "hi": "Hindi",
+                }.get(language, language)
+                result.append(
+                    VoiceProfile(
+                        name=f"Kokoro Natural • {voice_id}",
+                        provider="kokoro",
+                        voice_id=voice_id,
+                        model_id="kokoro",
+                        backend="automatic",
+                        language=language,
+                        notes=f"Offline natural voice • {region} • Kokoro voice catalogue",
+                        authorized=True,
+                    )
+                )
+    except Exception:
+        pass
+
     return result
 
 
@@ -75,21 +110,14 @@ def load_profiles() -> list[VoiceProfile]:
     builtins = list(builtin_voice_profiles())
     combined = list(builtins)
 
-    # A custom voice must never disappear merely because its display name
-    # happens to match a bundled Piper voice. Keep saved profiles distinct
-    # by provider/voice identity and prefer the saved custom profile when
-    # the identity is genuinely the same.
     builtin_keys = {
-        ("piper", p.voice_id.casefold(), "")
+        (p.provider, p.voice_id.casefold(), "")
         for p in builtins
     }
     seen_names: set[str] = {p.name.casefold() for p in combined}
-    # Process saved built-in Piper identities first so a custom profile that
-    # reuses a bundled display name is still kept distinct even when the
-    # bundled model files are not installed yet.
     ordered_saved = sorted(
         saved,
-        key=lambda p: (0 if p.provider == "piper" else 1, p.name.casefold()),
+        key=lambda p: (0 if p.provider in {"piper", "kokoro"} else 1, p.name.casefold()),
     )
     for profile in ordered_saved:
         sample_key = str(profile.sample_path or "").casefold()
@@ -98,10 +126,8 @@ def load_profiles() -> list[VoiceProfile]:
         if identity in builtin_keys and not sample_key:
             continue
 
-        # Preserve a custom profile even if it shares a display name with a
-        # bundled voice. The UI will make the provider visible where needed.
         if profile.name.casefold() in seen_names:
-            if profile.provider != "piper":
+            if profile.provider not in {"piper", "kokoro"}:
                 suffix = " • Custom"
                 base = profile.name
                 candidate = base + suffix
@@ -125,7 +151,7 @@ def save_profiles(profiles: list[VoiceProfile]) -> None:
         p for p in profiles
         if (p.provider, p.voice_id.casefold()) not in builtins
         or p.sample_path
-        or p.provider != "piper"
+        or p.provider not in {"piper", "kokoro"}
     ]
     profiles_file().write_text(
         json.dumps([asdict(profile) for profile in persistent], ensure_ascii=False, indent=2),

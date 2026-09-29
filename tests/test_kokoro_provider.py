@@ -4,6 +4,8 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from app.tts.providers.kokoro import KOKORO_VOICES, KokoroProvider
+from app.tts.profile_provider import provider_from_profile
+from app.tts.voice_profile import VoiceProfile, builtin_voice_profiles
 
 
 class KokoroProviderTests(unittest.TestCase):
@@ -32,6 +34,25 @@ class KokoroProviderTests(unittest.TestCase):
         provider = KokoroProvider(model_path=Path("model.onnx"), voices_path=Path("voices.bin"))
         with self.assertRaisesRegex(ValueError, "Unknown Kokoro voice"):
             provider.synthesize("Hello world.", Path("out.wav"), voice="not-a-voice")
+
+    def test_profile_provider_can_create_kokoro_provider(self):
+        profile = VoiceProfile(
+            name="Natural Narrator",
+            provider="kokoro",
+            voice_id="af_heart",
+            model_id="kokoro",
+            backend="cpu",
+            language="en-us",
+            authorized=True,
+        )
+        provider, voice = provider_from_profile(profile)
+        self.assertIsInstance(provider, KokoroProvider)
+        self.assertEqual(voice, "af_heart")
+
+    def test_builtin_catalog_does_not_advertise_kokoro_without_assets(self):
+        with patch.object(KokoroProvider, "assets_available", return_value=False):
+            profiles = builtin_voice_profiles()
+        self.assertFalse(any(p.provider == "kokoro" for p in profiles))
 
 
 if __name__ == "__main__":
