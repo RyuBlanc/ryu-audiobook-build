@@ -326,6 +326,44 @@ Rias Gremory
 
         self.assertTrue(issubclass(OnlineTTSNetworkError, RuntimeError))
         self.assertTrue(getattr(EdgeTTSProvider, "is_online_provider", False))
+
+    def test_online_tts_provider_stops_generation_after_service_failure(self):
+        from app.tts.providers.edge_tts import EdgeTTSProvider, OnlineTTSNetworkError
+
+        self.assertTrue(EdgeTTSProvider.stop_on_failure)
+        self.assertEqual(EdgeTTSProvider.request_timeout_seconds, 60)
+        self.assertTrue(issubclass(OnlineTTSNetworkError, RuntimeError))
+
+    def test_manager_stops_after_online_provider_failure(self):
+        from app.tts.manager import GenerationManager
+
+        class StopProvider:
+            stop_on_failure = True
+
+            def synthesize(self, text, output_path, voice=None):
+                raise RuntimeError("online voice service unavailable")
+
+            def close(self):
+                pass
+
+        summaries = []
+        manager = GenerationManager(
+            StopProvider(),
+            "voice",
+            [
+                Chapter(1, "One", "One"),
+                Chapter(2, "Two", "Two"),
+                Chapter(3, "Three", "Three"),
+            ],
+            Path(tempfile.mkdtemp()),
+            on_finished=summaries.append,
+        )
+        manager.start()
+        manager._thread.join(timeout=10)
+
+        self.assertEqual(len(summaries), 1)
+        self.assertEqual(summaries[0].chapters_failed, [1])
+
     def test_project_save_round_trip_preserves_manual_chapter_edits(self):
         from app.core.project import Project
 

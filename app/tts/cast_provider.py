@@ -38,6 +38,10 @@ class CastAwareProvider(TTSProvider):
         self.backend_override = backend_override or "automatic"
         self._providers: dict[str, tuple[TTSProvider, str]] = {}
 
+    @property
+    def stop_on_failure(self) -> bool:
+        return bool(getattr(self.narrator_provider, "stop_on_failure", False))
+
     def voices(self) -> list[str]:
         return [self.narrator_voice] if self.narrator_voice else []
 

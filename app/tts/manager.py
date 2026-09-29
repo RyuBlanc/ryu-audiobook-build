@@ -146,6 +146,9 @@ class GenerationManager:
                 self.failed.append(chapter.number)
                 self.failure_details[chapter.number] = str(exc)
                 self._emit(index + 1, len(self.chapters), 0, f"chapter-failed: {exc}")
+                if getattr(self.provider, "stop_on_failure", False):
+                    self._emit(index + 1, len(self.chapters), 0, "provider-unavailable")
+                    break
 
                 # A network-wide online TTS outage will fail every remaining
                 # chapter too. Stop here instead of repeating the same DNS/

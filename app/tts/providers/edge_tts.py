@@ -36,6 +36,8 @@ class EdgeTTSProvider(TTSProvider):
 
     provider_id = "edge-tts"
     is_online_provider = True
+    stop_on_failure = True
+    request_timeout_seconds = 60
 
     def __init__(self) -> None:
         if edge_tts is None:
@@ -106,7 +108,7 @@ class EdgeTTSProvider(TTSProvider):
             last_error: Exception | None = None
             for attempt in range(3):
                 try:
-                    _run(asyncio.wait_for(generate(), timeout=120))
+                    _run(asyncio.wait_for(generate(), timeout=self.request_timeout_seconds))
                     last_error = None
                     break
                 except Exception as exc:
