@@ -4,6 +4,7 @@ import asyncio
 import json
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from app.core.paths import settings_root
@@ -22,6 +23,7 @@ class OnlineTTSNetworkError(RuntimeError):
     """The online neural provider cannot currently reach its synthesis service."""
 
 
+
 def _run(coro):
     return asyncio.run(coro)
 
@@ -38,6 +40,7 @@ class EdgeTTSProvider(TTSProvider):
     is_online_provider = True
     stop_on_failure = True
     request_timeout_seconds = 60
+    transient_retry_attempts = 5
 
     def __init__(self) -> None:
         if edge_tts is None:
@@ -87,6 +90,24 @@ class EdgeTTSProvider(TTSProvider):
     def voices(self) -> list[str]:
         return [item["name"] for item in self.fetch_voice_metadata() if item.get("name")]
 
+    @classmethod
+    def _is_transient_service_error(cls, detail: str) -> bool:
+        lowered = detail.casefold()
+        markers = (
+            "getaddrinfo failed",
+            "cannot connect to host",
+            "temporary failure in name resolution",
+            "name or service not known",
+            "connection refused",
+            "connection reset",
+            "timed out",
+            "no audio was received",
+            "noaudioreceived",
+            "websocket",
+            "server disconnected",
+        )
+        return any(marker in lowered for marker in markers)
+
     def synthesize(
         self,
         text: str,
@@ -106,35 +127,37 @@ class EdgeTTSProvider(TTSProvider):
                 await communicate.save(str(mp3_path))
 
             last_error: Exception | None = None
-            for attempt in range(3):
+            attempts = self.transient_retry_attempts
+            for attempt in range(attempts):
+                mp3_path.unlink(missing_ok=True)
                 try:
                     _run(asyncio.wait_for(generate(), timeout=self.request_timeout_seconds))
                     last_error = None
                     break
                 except Exception as exc:
                     last_error = exc
-                    if attempt < 2:
-                        import time
+                    detail = str(exc)
+                    transient = self._is_transient_service_error(detail)
+                    if attempt < attempts - 1 and transient:
+                        # Give transient Microsoft/WebSocket failures time to
+                        # recover. Each attempt creates a fresh Communicate
+                        # object and therefore a fresh WebSocket session.
+                        time.sleep(min(10.0, 1.5 * (attempt + 1)))
+                    elif attempt < 2 and not transient:
                         time.sleep(1.5 * (attempt + 1))
+                    else:
+                        break
 
             if last_error is not None:
                 detail = str(last_error)
-                lowered = detail.casefold()
-                network_markers = (
-                    "getaddrinfo failed",
-                    "cannot connect to host",
-                    "temporary failure in name resolution",
-                    "name or service not known",
-                    "connection refused",
-                    "connection reset",
-                    "timed out",
-                )
-                if any(marker in lowered for marker in network_markers):
+                if self._is_transient_service_error(detail):
                     raise OnlineTTSNetworkError(
-                        "Online voice service is unreachable after 3 attempts. "
-                        "The current voice requires an internet connection. "
-                        "Check your DNS/internet connection or select a built-in "
-                        "Offline Neural voice.\n"
+                        "Microsoft's online voice service returned no usable audio "
+                        f"after {attempts} attempts. This can happen even with a "
+                        "working internet connection when the Edge TTS service or "
+                        "WebSocket session is temporarily refusing/closing synthesis. "
+                        "No M4B packaging was attempted, and completed offline/online "
+                        "chunks remain available for resume.\n"
                         f"Details: {detail}"
                     ) from last_error
                 raise RuntimeError(
@@ -143,7 +166,10 @@ class EdgeTTSProvider(TTSProvider):
                 ) from last_error
 
             if not mp3_path.exists() or mp3_path.stat().st_size < 1024:
-                raise RuntimeError("Edge TTS did not produce valid audio.")
+                raise OnlineTTSNetworkError(
+                    "Microsoft's online voice service returned no usable audio "
+                    f"after {attempts} attempts."
+                )
 
             if output_path.suffix.lower() == ".mp3":
                 mp3_path.replace(output_path)
