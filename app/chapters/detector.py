@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
 
 from app.documents.parser import remove_page_noise
@@ -11,6 +11,9 @@ class Chapter:
     number: int
     title: str
     text: str
+    # Stable character/dialogue assignments are kept with the chapter so manual
+    # corrections survive reloads and can later feed the narration director.
+    dialogue_assignments: list[dict] = field(default_factory=list)
 
 
 EXPLICIT_PATTERNS = [
@@ -22,8 +25,6 @@ EXPLICIT_PATTERNS = [
     ),
 ]
 
-# Many light novels use headings such as Life.0 / Life.1. This is deliberately
-# narrow so ordinary prose is never promoted to a chapter.
 TITLE_WITH_NUMBER_PATTERN = re.compile(
     r"^\s*[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ _'’&/-]{0,35}\.(\d{1,4})\s*(.*)$"
 )
@@ -51,9 +52,6 @@ def detect_chapters(text: str) -> list[Chapter]:
     if not markers:
         return [Chapter(1, "Full Book", text.strip())] if text.strip() else []
 
-    # A heading with no body before the next heading is almost always a
-    # false-positive extracted line (or a duplicate heading). Never create an
-    # empty chapter; generation must never be blocked by a detector artifact.
     valid_markers: list[tuple[int, str]] = []
     for position, (start, title) in enumerate(markers):
         end = markers[position + 1][0] if position + 1 < len(markers) else len(lines)
@@ -114,7 +112,6 @@ def _heading_title(line: str) -> str | None:
 
 
 def _looks_like_body_sentence(line: str, suffix: str) -> bool:
-    """Reject extracted prose that happens to begin with Chapter/Part."""
     suffix = suffix.strip()
     if len(line) > 90:
         return True
