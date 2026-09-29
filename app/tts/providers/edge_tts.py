@@ -103,13 +103,42 @@ class EdgeTTSProvider(TTSProvider):
                 communicate = edge_tts.Communicate(text, voice)
                 await communicate.save(str(mp3_path))
 
-            try:
-                _run(asyncio.wait_for(generate(), timeout=120))
-            except asyncio.TimeoutError as exc:
+            last_error: Exception | None = None
+            for attempt in range(3):
+                try:
+                    _run(asyncio.wait_for(generate(), timeout=120))
+                    last_error = None
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    if attempt < 2:
+                        import time
+                        time.sleep(1.5 * (attempt + 1))
+
+            if last_error is not None:
+                detail = str(last_error)
+                lowered = detail.casefold()
+                network_markers = (
+                    "getaddrinfo failed",
+                    "cannot connect to host",
+                    "temporary failure in name resolution",
+                    "name or service not known",
+                    "connection refused",
+                    "connection reset",
+                    "timed out",
+                )
+                if any(marker in lowered for marker in network_markers):
+                    raise OnlineTTSNetworkError(
+                        "Online voice service is unreachable after 3 attempts. "
+                        "The current voice requires an internet connection. "
+                        "Check your DNS/internet connection or select a built-in "
+                        "Offline Neural voice.\n"
+                        f"Details: {detail}"
+                    ) from last_error
                 raise RuntimeError(
-                    "Online voice synthesis timed out after 120 seconds. "
-                    "Check the internet connection or switch to an offline neural voice."
-                ) from exc
+                    "Online voice synthesis failed after 3 attempts. "
+                    f"Details: {detail}"
+                ) from last_error
 
             if not mp3_path.exists() or mp3_path.stat().st_size < 1024:
                 raise RuntimeError("Edge TTS did not produce valid audio.")
