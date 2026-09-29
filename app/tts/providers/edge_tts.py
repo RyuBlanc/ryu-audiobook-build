@@ -18,6 +18,10 @@ except ImportError:  # Optional at import time for developer environments.
 VOICE_CACHE = settings_root() / "edge_tts_voices.json"
 
 
+class OnlineTTSNetworkError(RuntimeError):
+    """The online neural provider cannot currently reach its synthesis service."""
+
+
 def _run(coro):
     return asyncio.run(coro)
 
@@ -31,6 +35,7 @@ class EdgeTTSProvider(TTSProvider):
     """
 
     provider_id = "edge-tts"
+    is_online_provider = True
 
     def __init__(self) -> None:
         if edge_tts is None:
