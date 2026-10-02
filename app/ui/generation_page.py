@@ -12,7 +12,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QProgressBar, QPushButton, QVBoxLayout, QWidget, QComboBox, QScrollArea,
-    QTableWidget, QTableWidgetItem, QHeaderView,
+    QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy,
 )
 
 from app.chapters.detector import Chapter, detect_chapters
@@ -204,6 +204,10 @@ class GenerationPage(QWidget):
         self.pronunciation_table = QTableWidget(0, 3)
         self.pronunciation_table.setHorizontalHeaderLabels(["Written", "Pronounce as", "Enabled"])
         self.pronunciation_table.setWordWrap(False)
+        self.pronunciation_table.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.MinimumExpanding,
+        )
         self.pronunciation_table.setMinimumHeight(150)
         self.pronunciation_table.verticalHeader().setDefaultSectionSize(34)
         self.pronunciation_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -767,6 +771,7 @@ class GenerationPage(QWidget):
         state = load_state(self.project_folder)
         entries = self._pronunciation_entries()
         state["pronunciation_dictionary"] = entries
+        state["pronunciation_dictionary_version"] = 2
         save_state(self.project_folder, state)
         self.pronunciation_status.setText(f"{len(entries)} pronunciation override{'s' if len(entries) != 1 else ''} saved for this book." if entries else "No pronunciation overrides saved for this book.")
     def _load_voice_cast_summary(self):
