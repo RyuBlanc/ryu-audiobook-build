@@ -109,7 +109,7 @@ jobs:
             $body = @{
               messages = @(
                 @{ role = "system"; content = "You are the Ryu's Audiobook AI self-test. Return only one valid JSON object. Do not think. Do not use markdown." },
-                @{ role = "user"; content = "/no_think Return {\"ok\":true,\"message\":\"ready\"}. Do not add any other text." }
+                @{ role = "user"; content = '/no_think Return {"ok":true,"message":"ready"}. Do not add any other text.' }
               )
               temperature = 0.2
               top_p = 0.8
