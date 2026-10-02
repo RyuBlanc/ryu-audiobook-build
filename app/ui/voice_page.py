@@ -187,7 +187,9 @@ class VoicePage(QWidget):
         custom.addWidget(self.authorized)
         info = QLabel(
             "The source recording stays local. It is normalized to a local WAV reference "
-            "for the voice engine."
+            "for the voice engine. English custom voices use the faster, expressive "
+            "Chatterbox Turbo path automatically on suitable GPUs; low-memory systems "
+            "use Nano."
         )
         info.setObjectName("muted")
         info.setWordWrap(True)
@@ -788,7 +790,7 @@ class VoicePage(QWidget):
             provider="chatterbox",
             voice_id=self.sample_path.stem,
             sample_path=str(self.sample_path),
-            model_id="chatterbox-multilingual",
+            model_id="chatterbox-turbo",
             backend="automatic",
             language="en",
             authorized=True,
