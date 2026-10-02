@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QItemSelectionModel, QTimer
+from PySide6.QtCore import QItemSelectionModel, QTimer, QThread, Signal
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -20,10 +20,35 @@ from app.chapters.editor import ChapterEditor
 from app.documents.parser import remove_page_noise
 from app.ui.character_review import CharacterReviewDialog
 from app.ui.dialogue_assignment import DialogueAssignmentDialog
+from app.ai.brain import AudiobookBrain
 
+
+
+class AudiobookAIWorker(QThread):
+    finished_ok = Signal(object)
+    failed = Signal(str)
+    progress = Signal(str)
+
+    def __init__(self, project_folder, chapters):
+        super().__init__()
+        self.project_folder = project_folder
+        self.chapters = chapters
+
+    def run(self):
+        brain = None
+        try:
+            brain = AudiobookBrain(self.project_folder)
+            def update(done, total, title):
+                self.progress.emit(f"AI analyzing chapter {done}/{total} • {title}")
+            self.finished_ok.emit(brain.analyze_book(self.chapters, progress=update))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+        finally:
+            if brain is not None:
+                brain.close()
 
 class ChapterEditorPage(QWidget):
-    def __init__(self, chapters: list[Chapter], on_save=None, on_rename_book=None, on_redetect=None) -> None:
+    def __init__(self, chapters: list[Chapter], on_save=None, on_rename_book=None, on_redetect=None, project_folder=None) -> None:
         super().__init__()
         cleaned = [
             Chapter(ch.number, ch.title, remove_page_noise(ch.text), list(getattr(ch, "dialogue_assignments", [])))
@@ -33,6 +58,8 @@ class ChapterEditorPage(QWidget):
         self.on_save = on_save
         self.on_rename_book = on_rename_book
         self.on_redetect = on_redetect
+        self.project_folder = project_folder
+        self.ai_worker: AudiobookAIWorker | None = None
         self.list = QListWidget()
         self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.title = QTextEdit()
@@ -69,6 +96,7 @@ class ChapterEditorPage(QWidget):
             ("Split", self.split),
             ("Mark Selection as Chapter", self.mark_selection_as_chapter),
             ("Assign Selected Dialogue", self.assign_selected_dialogue),
+            ("Analyze Book with AI", self.analyze_with_ai),
             ("View Characters & Dialogue", self.view_characters),
             ("Merge Next", self.merge),
             ("Move Up", lambda: self.move(-1)),
@@ -191,6 +219,95 @@ class ChapterEditorPage(QWidget):
             self.refresh(index if index == 0 and len(self.editor.chapters) == 1 else index + 1)
         except ValueError as exc:
             QMessageBox.information(self, "Mark as Chapter", str(exc))
+
+
+    def analyze_with_ai(self) -> None:
+        if not self.project_folder:
+            QMessageBox.information(self, "Audiobook AI", "Open the book through the Library first.")
+            return
+        if self.ai_worker and self.ai_worker.isRunning():
+            return
+        self.commit_current()
+        answer = QMessageBox.question(
+            self,
+            "Analyze Book with Audiobook AI",
+            "Ryu will analyze characters, dialogue speakers, scene mood, pacing, pronunciation, ambience, music and SFX locally. Your chapter text is not changed. Continue?",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._set_editor_busy(True)
+        self.ai_worker = AudiobookAIWorker(self.project_folder, self.editor.chapters)
+        self.ai_worker.progress.connect(self._ai_progress)
+        self.ai_worker.finished_ok.connect(self._ai_finished)
+        self.ai_worker.failed.connect(self._ai_failed)
+        self.ai_worker.finished.connect(self._ai_worker_finished)
+        self.ai_worker.start()
+
+    def _set_editor_busy(self, busy: bool) -> None:
+        self.text.setEnabled(not busy)
+        self.title.setEnabled(not busy)
+        self.list.setEnabled(not busy)
+
+    def _ai_progress(self, message: str) -> None:
+        self.save_status.setText(message)
+
+    def _ai_failed(self, message: str) -> None:
+        self._set_editor_busy(False)
+        QMessageBox.warning(self, "Audiobook AI Failed", message)
+        self.save_status.setText("AI analysis failed — your chapter text is unchanged.")
+
+    def _ai_finished(self, result) -> None:
+        assignments_added = 0
+        for chapter_result in result.get("chapters", []):
+            number = int(chapter_result.get("chapter", 0) or 0)
+            if not 1 <= number <= len(self.editor.chapters):
+                continue
+            chapter = self.editor.chapters[number - 1]
+            text = chapter.text or ""
+            for item in chapter_result.get("dialogue", []) or []:
+                speaker = str(item.get("speaker") or "").strip()
+                quote = str(item.get("quote") or "").strip()
+                confidence = float(item.get("confidence", 0.0) or 0.0)
+                if not speaker or not quote or confidence < 0.88:
+                    continue
+                start = text.find(quote)
+                if start < 0:
+                    continue
+                end = start + len(quote)
+                overlaps_manual = any(
+                    str(existing.get("source", "")).casefold() == "manual"
+                    and int(existing.get("start", -1)) < end
+                    and start < int(existing.get("end", -1))
+                    for existing in getattr(chapter, "dialogue_assignments", [])
+                )
+                if overlaps_manual:
+                    continue
+                chapter.dialogue_assignments = [
+                    existing for existing in getattr(chapter, "dialogue_assignments", [])
+                    if not (
+                        int(existing.get("start", -1)) == start
+                        and int(existing.get("end", -1)) == end
+                    )
+                ]
+                chapter.dialogue_assignments.append({
+                    "start": start,
+                    "end": end,
+                    "text": quote,
+                    "speaker": speaker,
+                    "source": "ai",
+                    "confidence": confidence,
+                    "evidence": str(item.get("evidence", "")),
+                })
+                assignments_added += 1
+        self._set_editor_busy(False)
+        self.refresh(self.list.currentRow())
+        self._save_silently()
+        self.save_status.setText(
+            f"✓ Audiobook AI analysis saved • {assignments_added} high-confidence dialogue assignments"
+        )
+
+    def _ai_worker_finished(self) -> None:
+        self.ai_worker = None
 
     def assign_selected_dialogue(self) -> None:
         self.commit_current()
