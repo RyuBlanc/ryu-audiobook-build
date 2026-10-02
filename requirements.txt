@@ -12,3 +12,4 @@ kokoro-onnx[gpu]>=0.6.1,<0.7
 soundfile>=0.13,<0.14
 PyInstaller>=6.10,<7
 Pillow>=11,<13
+certifi>=2024.8.30,<2027
