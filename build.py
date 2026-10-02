@@ -73,6 +73,8 @@ required_modules = [
     "app.ui.voice_page",
     "app.ui.voice_cast_page",
     "app.ui.character_review",
+    "app.ai.brain",
+    "app.ai.model_runtime",
     "app.tts.cast_provider",
     "app.tts.chatterbox_runtime",
     "app.tts.providers.kokoro",
