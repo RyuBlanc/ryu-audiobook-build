@@ -61,7 +61,7 @@ def _choose_variant(requested: str, multilingual: bool, device: str) -> str:
             pass
     if device == "cpu":
         return "nano"
-    return "base"
+    return "turbo"
 
 
 def _is_paging_file_error(exc: BaseException) -> bool:
