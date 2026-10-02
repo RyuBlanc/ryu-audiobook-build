@@ -39,6 +39,17 @@ class CastAwareProvider(TTSProvider):
         self._providers: dict[str, tuple[TTSProvider, str]] = {}
 
     @property
+    def recommended_chunk_chars(self) -> int:
+        limits = [300 if profile.provider == "chatterbox" else 1400 for profile in self.profiles.values()]
+        return min(limits) if limits else getattr(self.narrator_provider, "recommended_chunk_chars", 1400)
+
+    @property
+    def recommended_chunk_sentences(self) -> int:
+        if any(profile.provider == "chatterbox" for profile in self.profiles.values()):
+            return 1
+        return getattr(self.narrator_provider, "recommended_chunk_sentences", 2)
+
+    @property
     def stop_on_failure(self) -> bool:
         if getattr(self.narrator_provider, "stop_on_failure", False):
             return True
