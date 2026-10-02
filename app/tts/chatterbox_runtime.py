@@ -8,6 +8,12 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+import ssl
+
+try:
+    import certifi
+except ImportError:
+    certifi = None
 from typing import Callable
 
 from app.core.paths import models_root
@@ -110,7 +116,21 @@ def _system_python() -> list[str] | None:
     try:
         installer.parent.mkdir(parents=True, exist_ok=True)
         if not installer.exists() or installer.stat().st_size < 5_000_000:
-            urllib.request.urlretrieve(PYTHON_311_URL, installer)
+            context = (
+                ssl.create_default_context(cafile=certifi.where())
+                if certifi is not None
+                else ssl.create_default_context()
+            )
+            request = urllib.request.Request(
+                PYTHON_311_URL,
+                headers={"User-Agent": "Ryu-Audiobook/1.1"},
+            )
+            with urllib.request.urlopen(request, timeout=90, context=context) as response, installer.open("wb") as handle:
+                while True:
+                    block = response.read(1024 * 1024)
+                    if not block:
+                        break
+                    handle.write(block)
         result = subprocess.run(
             [
                 str(installer),
