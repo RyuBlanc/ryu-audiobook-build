@@ -468,7 +468,7 @@ class AudiobookBrain:
                     'intensity': self._numeric_intensity(raw.get('music_intensity', 0.0)),
                 },
                 'sfx': list(raw.get('sfx', []) or [])[:4],
-                'confidence': float(raw.get('confidence', 0.0) or 0.0),
+                'confidence': _numeric_score(raw.get('confidence', 0.0)),
             })
         for note in data.get('continuity_notes', []) or []:
             note = str(note).strip()
