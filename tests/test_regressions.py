@@ -48,7 +48,7 @@ class RegressionTests(unittest.TestCase):
                 chapter_dir = root / f"{number:03d}_Chapter_{number}"
                 chunks = chapter_dir / "chunks"
                 wav = chunks / "00001.wav"
-                _write_wav(wav, 0.20)
+                _write_wav(wav, 1.0)
                 chapter_dirs.append(chapter_dir)
 
             progress = []
