@@ -133,7 +133,11 @@ def prepare_chapter_plan(
 
     chunks_with_voices: list[tuple[str, str | None]] = []
     for chunk_text, chunk_voice in raw_chunks_with_voices:
-        paced_chunks = split_for_pacing(chunk_text)
+        paced_chunks = split_for_pacing(
+            chunk_text,
+            max_chars=int(getattr(provider, "recommended_chunk_chars", 1400)),
+            max_sentences=int(getattr(provider, "recommended_chunk_sentences", 2)),
+        )
         if not paced_chunks:
             continue
         chunks_with_voices.extend((item, chunk_voice) for item in paced_chunks)
