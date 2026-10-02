@@ -58,7 +58,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           $root = Join-Path $env:RUNNER_TEMP "ryu-ai-smoke"
           $bin = Join-Path $root "llama"
-          $model = Join-Path $root "Qwen3-1.7B-Q5_K_M.gguf"
+          $model = Join-Path $root "Qwen3-0.6B-Q5_K_M.gguf"
           New-Item -ItemType Directory -Force -Path $root | Out-Null
 
           $llamaZip = Join-Path $root "llama.zip"
@@ -71,7 +71,7 @@ jobs:
           if (-not $server) { throw "llama-server.exe was not found in the smoke-test runtime." }
 
           if (-not (Test-Path $model)) {
-            curl.exe -L --fail --retry 3 -o "$model.part" "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/4102b64b54bf3f0ddb9408d83f42d5091e0a7b64/Qwen3-1.7B-Q5_K_M.gguf?download=true"
+            curl.exe -L --fail --retry 3 -o "$model.part" "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/ef4088322893040952513f532f736ddeab518403/Qwen3-0.6B-Q5_K_M.gguf?download=true"
             Move-Item -Force "$model.part" $model
           }
 
