@@ -310,8 +310,9 @@ class AudiobookBrain:
                 try:
                     repair = self.llm.complete(
                         'Return only compact valid JSON for audiobook scene direction. Keys: scenes, continuity_notes. '
-                        scene_user + '\nPrevious output was malformed. Produce valid JSON only.',
-                        max_tokens=450, temperature=0.0
+                        + scene_user + '\nPrevious output was malformed. Produce valid JSON only.',
+                        max_tokens=450,
+                        temperature=0.0,
                     )
                     scene_data = _json(repair)
                     self._merge_scenes(result, scene_data)
@@ -323,7 +324,6 @@ class AudiobookBrain:
                         f'AI scene pass skipped for chapter {chapter.number}, excerpt {idx}: {second_error}'
                     )
             self._save_chapter(result)
-        self._save_chapter(result)
         return result
 
     def _fallback_core(self, chapter: Chapter) -> dict[str, Any]:
