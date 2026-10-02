@@ -68,6 +68,11 @@ class RegressionTests(unittest.TestCase):
             self.assertTrue(any(message == "joined-audio" for _, _, message in progress))
 
 
+    def test_generation_page_preview_uses_background_worker(self):
+        from PySide6.QtCore import QThread
+        from app.ui.generation_page import VoicePreviewWorker
+        self.assertTrue(issubclass(VoicePreviewWorker, QThread))
+
     def test_generation_page_exposes_custom_runtime_check(self):
         import app.ui.generation_page as generation_page
 
