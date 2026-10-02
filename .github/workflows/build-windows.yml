@@ -84,8 +84,8 @@ jobs:
             "--ctx-size", "4096",
             "--threads", "4",
             "--no-webui",
-            "--reasoning", "auto",
-            "--reasoning-format", "none",
+            "--reasoning", "off",
+            "--reasoning-format", "none"
           ) -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru -WindowStyle Hidden
 
           try {
