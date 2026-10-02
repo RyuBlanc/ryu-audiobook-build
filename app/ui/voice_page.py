@@ -138,7 +138,7 @@ class VoicePage(QWidget):
             "Choose where the voice comes from. Local neural voices are the default."
         ))
         self.mode = PassiveScrollComboBox()
-        self.mode.addItem("Offline Neural Voices  ·  built into this app", "piper")
+        self.mode.addItem("Offline Neural Voices  ·  built into this app", "offline-neural")
         self.mode.addItem("Windows SAPI  ·  installed offline voices", "windows-sapi")
         self.mode.addItem("Online Neural Voices  ·  Edge TTS", "edge-tts")
         self.mode.addItem("Custom Voice  ·  authorized reference audio", "chatterbox")
@@ -437,7 +437,7 @@ class VoicePage(QWidget):
         region = self.accent_filter.currentData() or ""
         matches = []
 
-        if self.mode.currentData() == "piper":
+        if self.mode.currentData() == "offline-neural":
             for profile in self.offline_voices:
                 lower = profile.voice_id.lower()
                 voice_gender = (
@@ -495,13 +495,15 @@ class VoicePage(QWidget):
         voice_id = self.neural_voice.currentData()
         if not voice_id:
             return
-        if self.mode.currentData() == "piper":
+        if self.mode.currentData() == "offline-neural":
             profile = next(
                 (x for x in self.offline_voices if x.voice_id == voice_id), None
             )
             if profile:
                 self.name.setText(profile.name)
                 self.profile_badge.setText(profile.name)
+                self._update_profile_details(profile)
+                self._clear_saved_profile_selection()
         else:
             voice = next(
                 (x for x in self.edge_voices if x.get("name") == voice_id), None
@@ -519,7 +521,8 @@ class VoicePage(QWidget):
     @staticmethod
     def _provider_label(profile: VoiceProfile) -> str:
         labels = {
-            "piper": "Built-in Offline Neural",
+            "piper": "Built-in Offline Neural • Piper",
+            "kokoro": "Built-in Offline Natural • Kokoro",
             "windows-sapi": "Windows SAPI",
             "edge-tts": "Online Neural • Edge TTS",
             "chatterbox": "Custom Voice • Chatterbox",
@@ -528,7 +531,7 @@ class VoicePage(QWidget):
 
     @staticmethod
     def _profile_category(profile: VoiceProfile) -> str:
-        if profile.provider == "piper":
+        if profile.provider in {"piper", "kokoro"}:
             return "builtin"
         return profile.provider
 
@@ -561,6 +564,13 @@ class VoicePage(QWidget):
         self.detail_authorization.setText(
             "✓ Authorized" if profile.authorized else "⚠ Permission not confirmed"
         )
+
+    def _clear_saved_profile_selection(self) -> None:
+        if not hasattr(self, "saved_profiles"):
+            return
+        self.saved_profiles.blockSignals(True)
+        self.saved_profiles.setCurrentIndex(-1)
+        self.saved_profiles.blockSignals(False)
 
     def refresh_profiles(self) -> None:
         self.profiles = load_profiles()
@@ -617,7 +627,8 @@ class VoicePage(QWidget):
             self.status.setText("Select a saved profile first.")
             return
 
-        index = self.mode.findData(profile.provider)
+        source_provider = "offline-neural" if profile.provider in {"piper", "kokoro"} else profile.provider
+        index = self.mode.findData(source_provider)
         if index >= 0:
             self.mode.setCurrentIndex(index)
         self.name.setText(profile.name)
@@ -632,7 +643,7 @@ class VoicePage(QWidget):
             i = self.sapi_voice.findData(profile.voice_id)
             if i >= 0:
                 self.sapi_voice.setCurrentIndex(i)
-        elif profile.provider in {"piper", "edge-tts"}:
+        elif profile.provider in {"piper", "kokoro", "edge-tts"}:
             self._refresh_voice_list()
             i = self.neural_voice.findData(profile.voice_id)
             if i >= 0:
@@ -735,6 +746,18 @@ class VoicePage(QWidget):
             # with the bundled profile and made the custom voice appear missing.
             self.name.setText(name)
             self.authorized.setChecked(False)
+            draft = VoiceProfile(
+                name=name,
+                provider="chatterbox",
+                voice_id=self.sample_path.stem,
+                sample_path=str(self.sample_path),
+                model_id="chatterbox-turbo",
+                backend="automatic",
+                language="en",
+                authorized=False,
+            )
+            self._update_profile_details(draft)
+            self._clear_saved_profile_selection()
             self.status.setText(
                 "Reference imported locally. Confirm permission before saving. "
                 f"Custom voice profile name: {self.name.text().strip()}"
@@ -746,7 +769,7 @@ class VoicePage(QWidget):
         provider = self.mode.currentData()
         name = self.name.text().strip()
 
-        if provider == "piper":
+        if provider == "offline-neural":
             voice_id = self.neural_voice.currentData()
             profile = next(
                 (x for x in self.offline_voices if x.voice_id == voice_id), None
@@ -754,15 +777,19 @@ class VoicePage(QWidget):
             if not profile:
                 self.status.setText("Select an offline neural voice first.")
                 return None
+            # IMPORTANT: keep the actual provider from the selected catalogue
+            # entry. Kokoro voices used to be reconstructed as Piper voices,
+            # causing Piper to fall back to Amy when it could not find ef_dora
+            # (or another Kokoro voice id).
             return VoiceProfile(
                 name=name or profile.name,
-                provider="piper",
+                provider=profile.provider,
                 voice_id=profile.voice_id,
-                model_id="piper",
-                backend="automatic",
+                model_id=profile.model_id,
+                backend=profile.backend,
                 language=profile.language,
                 notes=profile.notes,
-                authorized=True,
+                authorized=profile.authorized,
             )
 
         if provider == "windows-sapi":
