@@ -13,6 +13,7 @@ import urllib.request
 import zipfile
 
 from app.core.paths import models_root
+from app.tts.chatterbox_runtime import runtime_environment
 
 try:
     import certifi
