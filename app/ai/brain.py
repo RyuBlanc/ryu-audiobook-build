@@ -197,6 +197,33 @@ def _json(text: str) -> dict[str, Any]:
     return value
 
 
+def _numeric_score(value: Any) -> float:
+    if isinstance(value, (int, float)):
+        return max(0.0, min(1.0, float(value)))
+    text = str(value or "").strip().casefold()
+    mapping = {
+        "none": 0.0,
+        "very low": 0.15,
+        "low": 0.25,
+        "moderate": 0.5,
+        "medium": 0.5,
+        "high": 0.75,
+        "very high": 0.9,
+        "certain": 1.0,
+        "very confident": 0.9,
+        "confident": 0.8,
+        "likely": 0.75,
+        "possible": 0.5,
+        "uncertain": 0.35,
+    }
+    if text in mapping:
+        return mapping[text]
+    try:
+        return max(0.0, min(1.0, float(text)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _normalise_pronunciation(item: dict[str, Any], source_text: str) -> dict[str, Any] | None:
     written = str(item.get('written') or item.get('text') or '').strip()
     spoken = str(item.get('spoken') or item.get('pronunciation') or '').strip()
@@ -205,7 +232,7 @@ def _normalise_pronunciation(item: dict[str, Any], source_text: str) -> dict[str
     if written.casefold() not in source_text.casefold():
         return None
     source_language = str(item.get('source_language') or '').strip().casefold()
-    confidence = max(0.0, min(1.0, float(item.get('confidence', 0.0) or 0.0)))
+    confidence = _numeric_score(item.get('confidence', 0.0))
     if spoken.casefold() == written.casefold() and not item.get('ipa'):
         return None
     english_phrase = all(
@@ -448,8 +475,15 @@ class AudiobookBrain:
             if note and note not in out['continuity_notes']:
                 out['continuity_notes'].append(note)
     def _merge(self, out: dict[str, Any], data: dict[str, Any], seen: set[str], source_text: str = '') -> None:
-        for key in ('characters', 'scenes'):
-            out[key].extend(data.get(key, []) or [])
+        for character in data.get('characters', []) or []:
+            item = dict(character)
+            item['confidence'] = _numeric_score(item.get('confidence', 0.0))
+            out['characters'].append(item)
+
+        for scene in data.get('scenes', []) or []:
+            item = dict(scene)
+            item['confidence'] = _numeric_score(item.get('confidence', 0.0))
+            out['scenes'].append(item)
 
         existing_pronunciations = {
             str(item.get('written', '')).casefold(): item
@@ -468,7 +502,10 @@ class AudiobookBrain:
         for item in data.get('dialogue', []) or []:
             quote = str(item.get('quote', '')).strip()
             if quote and quote.casefold() not in seen:
-                out['dialogue'].append(item); seen.add(quote.casefold())
+                normalized_dialogue = dict(item)
+                normalized_dialogue['confidence'] = _numeric_score(item.get('confidence', 0.0))
+                out['dialogue'].append(normalized_dialogue)
+                seen.add(quote.casefold())
         for note in data.get('continuity_notes', []) or []:
             if note not in out['continuity_notes']:
                 out['continuity_notes'].append(note)
