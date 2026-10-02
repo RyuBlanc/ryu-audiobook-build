@@ -21,7 +21,7 @@ from app.chapters.editor import ChapterEditor
 from app.documents.parser import remove_page_noise
 from app.ui.character_review import CharacterReviewDialog
 from app.ui.dialogue_assignment import DialogueAssignmentDialog
-from app.ai.brain import AudiobookBrain
+from app.ai.brain import AudiobookBrain, _numeric_score
 
 
 
@@ -320,7 +320,7 @@ class ChapterEditorPage(QWidget):
             for item in chapter_result.get("dialogue", []) or []:
                 speaker = str(item.get("speaker") or "").strip()
                 quote = str(item.get("quote") or "").strip()
-                confidence = float(item.get("confidence", 0.0) or 0.0)
+                confidence = _numeric_score(item.get("confidence", 0.0))
                 if not speaker or not quote or confidence < 0.88:
                     continue
                 start = text.find(quote)
