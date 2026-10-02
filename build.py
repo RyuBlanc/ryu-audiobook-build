@@ -98,6 +98,7 @@ args = [
     "--collect-all=piper",
     "--collect-all=onnxruntime",
     "--collect-all=kokoro_onnx",
+    "--collect-all=espeakng_loader",
     "--hidden-import=PySide6.QtCore",
     "--hidden-import=PySide6.QtGui",
     "--hidden-import=PySide6.QtWidgets",
