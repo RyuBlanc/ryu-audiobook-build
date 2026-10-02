@@ -32,3 +32,7 @@ models/
 # OS
 Thumbs.db
 .DS_Store
+
+# Generated Windows version metadata
+installer/version.generated.iss
+installer/version_info.generated.txt
