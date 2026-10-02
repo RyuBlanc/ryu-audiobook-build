@@ -1074,13 +1074,12 @@ class GenerationPage(QWidget):
                     f"Chapter {chapter}/{total} complete • "
                     f"{value:,}/{self.progress.maximum():,} chunks"
                 )
+            elif message.startswith("chapter-failed"):
+                self.stage.setText(f"Chapter {chapter}/{total} failed")
             else:
                 value = max(0, min(self.progress.maximum(), chapter - 1))
                 self.progress.setValue(value)
                 self.last_progress_value = value
-            elif message.startswith("chapter-failed"):
-                self.stage.setText(f"Chapter {chapter}/{total} failed")
-            else:
                 self.stage.setText(f"Chapter {chapter}/{total}")
 
     def _update_live_stats(self) -> None:
