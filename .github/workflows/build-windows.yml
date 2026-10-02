@@ -75,7 +75,6 @@ jobs:
             Move-Item -Force "$model.part" $model
           }
 
-          $env:LLAMA_ARG_CHAT_TEMPLATE_KWARGS = '{"enable_thinking":false}'
           $stdoutLog = Join-Path $root "llama.stdout.log"
           $stderrLog = Join-Path $root "llama.stderr.log"
           $proc = Start-Process -FilePath $server.FullName -ArgumentList @(
