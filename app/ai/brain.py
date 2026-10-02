@@ -19,11 +19,28 @@ class BrainConfig:
 
 PROMPT = '''You are Ryu's Audiobook Director. Analyze the supplied novel excerpt only.
 Return JSON. Do not invent facts. Identify canonical characters and aliases, exact dialogue and likely speaker with confidence and evidence, scene boundaries, location, time, mood, narrator delivery, character delivery, pacing, pronunciation hints, ambience, music, SFX, and continuity notes.
+
+Pronunciation is critical. Detect unusual names, fictional names, place names, honorifics, food, cultural terms, spells, titles, organizations and borrowed words from Japanese, Korean, Hindi, Tamil, Telugu, Malayalam, Kannada, Bengali, Marathi, Chinese, Spanish, French and other languages when the evidence supports it. Also detect romanized/transliterated words such as Japanese or Korean names written with Latin letters.
+
+Do NOT create pronunciation overrides for ordinary English words just because they are capitalized. Do not guess a pronunciation when the evidence is weak.
+
+For every pronunciation candidate return:
+- written: exact text as it appears in the book
+- spoken: an English-readable spoken form for the selected narrator voice
+- ipa: IPA when you are confident; otherwise null
+- source_language: likely source language or language family, or null
+- script: Latin, Hiragana/Katakana, Kanji, Hangul, Devanagari, Tamil, etc.
+- confidence: 0.0 to 1.0
+- reason: concise evidence for the pronunciation
+- alternatives: up to 2 plausible alternatives if ambiguity exists
+
+When the same name appears with different spellings, treat them as aliases and keep one canonical pronunciation entry.
+
 JSON keys: characters, dialogue, scenes, pronunciation, continuity_notes.
 Dialogue items: quote, speaker, confidence, evidence.
 Characters: name, aliases, role, traits, voice_direction, confidence.
 Scenes: summary, location, time, mood, narrator_direction, ambience, music, sfx, confidence.
-Pronunciation: text, pronunciation, reason, confidence.'''
+Pronunciation: written, spoken, ipa, source_language, script, reason, confidence, alternatives.'''
 
 def _json(text: str) -> dict[str, Any]:
     text = text.strip()
@@ -93,8 +110,31 @@ class AudiobookBrain:
         return out
 
     def _merge(self, out: dict[str, Any], data: dict[str, Any], seen: set[str]) -> None:
-        for key in ('characters', 'scenes', 'pronunciation'):
+        for key in ('characters', 'scenes'):
             out[key].extend(data.get(key, []) or [])
+
+        existing_pronunciations = {
+            str(item.get("written", "")).casefold(): item
+            for item in out.get("pronunciation", [])
+            if str(item.get("written", "")).strip()
+        }
+        for item in data.get("pronunciation", []) or []:
+            written = str(item.get("written") or item.get("text") or "").strip()
+            spoken = str(item.get("spoken") or item.get("pronunciation") or "").strip()
+            if not written or not spoken:
+                continue
+            key = written.casefold()
+            previous = existing_pronunciations.get(key)
+            if previous is None or float(item.get("confidence", 0.0) or 0.0) > float(previous.get("confidence", 0.0) or 0.0):
+                normalized = dict(item)
+                normalized["written"] = written
+                normalized["spoken"] = spoken
+                normalized.setdefault("ipa", None)
+                normalized.setdefault("source_language", None)
+                normalized.setdefault("script", "Latin")
+                normalized.setdefault("alternatives", [])
+                existing_pronunciations[key] = normalized
+        out["pronunciation"] = list(existing_pronunciations.values())
         for item in data.get('dialogue', []) or []:
             quote = str(item.get('quote', '')).strip()
             if quote and quote.casefold() not in seen:
