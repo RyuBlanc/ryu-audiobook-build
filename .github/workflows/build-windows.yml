@@ -65,6 +65,8 @@ jobs:
 
       - name: Build application
         shell: pwsh
+        env:
+          RYU_BUILD_NUMBER: ${{ github.run_number }}
         run: python build.py
 
       - name: Verify bundled offline voices
