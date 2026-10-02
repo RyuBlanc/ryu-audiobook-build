@@ -31,6 +31,7 @@ def profiles_file() -> Path:
 def builtin_voice_profiles() -> list[VoiceProfile]:
     """Return local neural voices available on this installation."""
     result: list[VoiceProfile] = []
+    offline_fallbacks: list[VoiceProfile] = []
 
     try:
         from app.tts.providers.piper import PiperProvider
@@ -48,7 +49,7 @@ def builtin_voice_profiles() -> list[VoiceProfile]:
             path.stem,
             (path.stem.split("-", 1)[0], "Neutral", path.stem, "Built-in offline neural voice"),
         )
-        result.append(
+        offline_fallbacks.append(
             VoiceProfile(
                 name=f"Offline Neural • {friendly}",
                 provider="piper",
@@ -94,7 +95,9 @@ def builtin_voice_profiles() -> list[VoiceProfile]:
     except Exception:
         pass
 
-    return result
+    # Prefer Kokoro natural voices in the picker when installed; keep Piper
+    # available as the lightweight fallback.
+    return result + offline_fallbacks
 
 
 def load_profiles() -> list[VoiceProfile]:
