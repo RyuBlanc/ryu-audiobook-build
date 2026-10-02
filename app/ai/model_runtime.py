@@ -200,9 +200,16 @@ class LocalLLM:
                 time.sleep(0.5)
         raise BrainRuntimeError("Local Audiobook AI server did not become ready in 90 seconds.")
 
-    def complete(self, system: str, user: str, max_tokens: int = 1200, temperature: float = 0.15) -> str:
+    def complete(
+        self,
+        system: str,
+        user: str,
+        max_tokens: int = 1200,
+        temperature: float = 0.15,
+        response_schema: dict | None = None,
+    ) -> str:
         self.start()
-        payload = json.dumps({
+        body = {
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -211,7 +218,13 @@ class LocalLLM:
             "top_p": 0.9,
             "max_tokens": max_tokens,
             "stream": False,
-        }).encode("utf-8")
+        }
+        if response_schema:
+            body["response_format"] = {
+                "type": "json_object",
+                "schema": response_schema,
+            }
+        payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
             f"http://127.0.0.1:{self.port}/v1/chat/completions",
             data=payload,
