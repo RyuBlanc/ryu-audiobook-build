@@ -84,8 +84,9 @@ jobs:
             "--ctx-size", "4096",
             "--threads", "4",
             "--no-webui",
-            "--reasoning", "off",
-            "--reasoning-format", "none"
+            "--reasoning", "auto",
+            "--reasoning-format", "none",
+            "--chat-template-kwargs", "{\"enable_thinking\":false}"
           ) -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru -WindowStyle Hidden
 
           try {
