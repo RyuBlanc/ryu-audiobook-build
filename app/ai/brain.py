@@ -179,6 +179,7 @@ Pronunciation: written, spoken, ipa, source_language, script, reason, confidence
 
 def _json(text: str) -> dict[str, Any]:
     text = str(text or '').strip()
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.I | re.S).strip()
     if text.startswith('```'):
         text = re.sub(r'^\s*```(?:json)?\s*|\s*```\s*$', '', text, flags=re.I | re.S).strip()
     decoder = json.JSONDecoder()
@@ -276,9 +277,11 @@ class AudiobookBrain:
             try:
                 core_raw = self.llm.complete(
                     PROMPT + '\nFocus ONLY on characters, dialogue ownership and pronunciation. Return JSON only.',
-                    common_context + '\nDo not guess a speaker. Keep dialogue.quote exact. Only include pronunciation terms that truly occur in this excerpt.',
+                    '/no_think ' + common_context,
+                    'Do not guess a speaker. Keep dialogue.quote exact. Only include pronunciation terms that truly occur in this excerpt.',
                     max_tokens=1100,
                     temperature=0.05,
+                    response_schema=CORE_SCHEMA,
                 )
                 core_data = _json(core_raw)
             except (BrainRuntimeError, BrainUnavailableError) as exc:
@@ -302,7 +305,11 @@ class AudiobookBrain:
             )
             try:
                 scene_raw = self.llm.complete(
-                    scene_prompt, scene_user, max_tokens=500, temperature=0.0
+                    scene_prompt,
+                    '/no_think ' + scene_user,
+                    max_tokens=500,
+                    temperature=0.0,
+                    response_schema=SCENE_SCHEMA,
                 )
                 scene_data = _json(scene_raw)
                 self._merge_scenes(result, scene_data)
@@ -312,6 +319,7 @@ class AudiobookBrain:
                         'Return only compact valid JSON for audiobook scene direction. Keys: scenes, continuity_notes. '
                         + scene_user + '\nPrevious output was malformed. Produce valid JSON only.',
                         max_tokens=450,
+                        response_schema=SCENE_SCHEMA,
                         temperature=0.0,
                     )
                     scene_data = _json(repair)
