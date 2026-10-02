@@ -78,6 +78,23 @@ class RegressionTests(unittest.TestCase):
 
         self.assertTrue(callable(generation_page.runtime_ready))
 
+    def test_generation_page_has_pronunciation_validation_dependencies(self):
+        import inspect
+        import app.ui.generation_page as generation_page
+
+        self.assertTrue(hasattr(generation_page, "re"))
+        self.assertTrue(callable(generation_page._numeric_score))
+        self.assertIn("QHeaderView.ResizeMode.Stretch", inspect.getsource(generation_page.GenerationPage))
+        self.assertIn("pronunciation_dictionary_version", inspect.getsource(generation_page.GenerationPage))
+
+    def test_voice_page_refreshes_selected_provider_details(self):
+        import inspect
+        from app.ui.voice_page import VoicePage
+
+        source = inspect.getsource(VoicePage._neural_voice_changed)
+        self.assertIn("_update_profile_details(profile)", source)
+        self.assertIn("_clear_saved_profile_selection()", source)
+
 
     def test_light_novel_dialogue_discovers_characters(self):
         text = """Life.0
