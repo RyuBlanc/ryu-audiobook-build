@@ -375,23 +375,30 @@ class GenerationPage(QWidget):
         self.pronunciation_table.setItem(row, 2, item)
 
     def _suggest_pronunciations(self):
-        """Import high-confidence multilingual pronunciation suggestions from the local AI analysis."""
+        """Import only grounded, genuinely useful AI pronunciation candidates."""
         if not self.project_folder:
-            self.pronunciation_status.setText("Open a saved book before importing AI pronunciation suggestions.")
+            self.pronunciation_status.setText('Open a saved book before importing AI pronunciation suggestions.')
             return
 
-        analysis_path = self.project_folder / "analysis" / "audiobook_brain.json"
+        analysis_path = self.project_folder / 'analysis' / 'audiobook_brain.json'
         if not analysis_path.exists():
-            self.pronunciation_status.setText(
-                "No Audiobook AI analysis found. Open Chapters → Analyze Book with AI first."
-            )
+            self.pronunciation_status.setText('No Audiobook AI analysis found. Open Chapters → Analyze Book with AI first.')
+            return
+        try:
+            data = json.loads(analysis_path.read_text(encoding='utf-8'))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            self.pronunciation_status.setText(f'Could not read Audiobook AI analysis: {exc}')
             return
 
-        try:
-            data = json.loads(analysis_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
-            self.pronunciation_status.setText(f"Could not read Audiobook AI analysis: {exc}")
-            return
+        book_text = '\n'.join(ch.text or '' for ch in self.chapters)
+        character_names = set()
+        bible = data.get('book_bible', {}) or {}
+        for name, value in bible.items():
+            if str(name).strip():
+                character_names.add(str(name).strip().casefold())
+            for alias in (value or {}).get('aliases', []) if isinstance(value, dict) else []:
+                if str(alias).strip():
+                    character_names.add(str(alias).strip().casefold())
 
         existing = {
             str(self.pronunciation_table.item(row, 0).text()).casefold()
@@ -399,67 +406,76 @@ class GenerationPage(QWidget):
             if self.pronunciation_table.item(row, 0)
         }
 
+        def grounded(written: str, spoken: str, confidence: float, language: str) -> bool:
+            folded = written.casefold()
+            if not written or not spoken or confidence < 0.85:
+                return False
+            if folded in existing:
+                return False
+            # The source phrase must actually occur in the book. This stops
+            # the local model from inventing names such as 'Hinata Kakashi'.
+            if folded not in book_text.casefold():
+                return False
+            # A pronunciation override that is identical to the written text
+            # is not useful for narration.
+            if spoken.casefold() == folded:
+                return False
+            words = [w.strip('.,!?;:()[]{}') for w in written.split()]
+            ordinary_english = bool(words) and all(
+                re.fullmatch(r"[A-Za-z][A-Za-z'’-]*", w or '')
+                and w.casefold() in COMMON_ENGLISH_WORDS
+                for w in words
+            )
+            # Allow a character name even when it is ASCII/Latin, but do not
+            # create dictionary rows for phrases such as 'Unique Skill' or
+            # 'Measurer' unless AI provides non-English evidence.
+            language_key = language.casefold()
+            if ordinary_english and folded not in character_names:
+                return language_key not in {'', 'english', 'en', 'unknown'}
+            return True
+
         added = 0
         skipped = 0
-        for item in data.get("chapters", []):
-            for suggestion in item.get("pronunciation", []) or []:
-                written = str(
-                    suggestion.get("written")
-                    or suggestion.get("text")
-                    or ""
-                ).strip()
-                spoken = str(
-                    suggestion.get("spoken")
-                    or suggestion.get("pronunciation")
-                    or ""
-                ).strip()
-                confidence = float(suggestion.get("confidence", 0.0) or 0.0)
-                language = str(suggestion.get("source_language") or "unknown").strip()
-                script = str(suggestion.get("script") or "unknown").strip()
-                ipa = str(suggestion.get("ipa") or "").strip()
-                reason = str(suggestion.get("reason") or "").strip()
-
-                if (
-                    not written
-                    or not spoken
-                    or written.casefold() in existing
-                    or written.casefold() in COMMON_ENGLISH_WORDS
-                    or confidence < 0.80
-                ):
+        for chapter_data in data.get('chapters', []):
+            for suggestion in chapter_data.get('pronunciation', []) or []:
+                written = str(suggestion.get('written') or suggestion.get('text') or '').strip()
+                spoken = str(suggestion.get('spoken') or suggestion.get('pronunciation') or '').strip()
+                confidence = float(suggestion.get('confidence', 0.0) or 0.0)
+                language = str(suggestion.get('source_language') or 'unknown').strip()
+                script = str(suggestion.get('script') or 'unknown').strip()
+                ipa = str(suggestion.get('ipa') or '').strip()
+                reason = str(suggestion.get('reason') or '').strip()
+                if not grounded(written, spoken, confidence, language):
                     skipped += 1
                     continue
 
                 self._add_pronunciation_row(written, spoken, True)
                 row = self.pronunciation_table.rowCount() - 1
-                written_item = self.pronunciation_table.item(row, 0)
-                spoken_item = self.pronunciation_table.item(row, 1)
                 tip = (
-                    f"AI confidence: {confidence:.0%}\n"
-                    f"Source language: {language}\n"
-                    f"Script: {script}"
+                    f'AI confidence: {confidence:.0%}\n'
+                    f'Source language: {language}\n'
+                    f'Script: {script}'
                 )
                 if ipa:
-                    tip += f"\nIPA: {ipa}"
+                    tip += f'\nIPA: {ipa}'
                 if reason:
-                    tip += f"\nEvidence: {reason}"
-                if written_item:
-                    written_item.setToolTip(tip)
-                if spoken_item:
-                    spoken_item.setToolTip(tip)
-
+                    tip += f'\nEvidence: {reason}'
+                for col in (0, 1):
+                    item = self.pronunciation_table.item(row, col)
+                    if item:
+                        item.setToolTip(tip)
                 existing.add(written.casefold())
                 added += 1
 
         if added:
+            self._save_pronunciations()
             self.pronunciation_status.setText(
-                f"Imported {added} high-confidence AI pronunciation{'s' if added != 1 else ''}. "
-                f"{skipped} lower-confidence/duplicate entries were left out. "
-                "Review the spoken form before saving."
+                f'Imported {added} grounded AI pronunciation suggestion(s). {skipped} candidates were filtered. '
+                'Review them before generation.'
             )
         else:
             self.pronunciation_status.setText(
-                "No new high-confidence AI pronunciation suggestions were found. "
-                "Use Chapters → Analyze Book with AI or + Add Pronunciation."
+                f'No new grounded pronunciation suggestions found. {skipped} AI candidates were filtered.'
             )
 
     def _clean_obvious_english_pronunciations(self):
@@ -467,17 +483,24 @@ class GenerationPage(QWidget):
         row = 0
         while row < self.pronunciation_table.rowCount():
             item = self.pronunciation_table.item(row, 0)
-            written = item.text().strip().casefold() if item else ""
-            if written in COMMON_ENGLISH_WORDS:
+            spoken_item = self.pronunciation_table.item(row, 1)
+            written = item.text().strip() if item else ''
+            spoken = spoken_item.text().strip() if spoken_item else ''
+            words = [w.strip('.,!?;:()[]{}') for w in written.split()]
+            ordinary_english = bool(words) and all(
+                re.fullmatch(r"[A-Za-z][A-Za-z'’-]*", w or '')
+                and w.casefold() in COMMON_ENGLISH_WORDS
+                for w in words
+            )
+            if ordinary_english or not spoken or spoken.casefold() == written.casefold():
                 self.pronunciation_table.removeRow(row)
                 removed += 1
                 continue
             row += 1
         self._save_pronunciations()
         self.pronunciation_status.setText(
-            f"Removed {removed} obvious English-word override{'s' if removed != 1 else ''}."
-            if removed
-            else "No obvious English-word overrides found."
+            f'Removed {removed} obvious/non-useful pronunciation override(s).' if removed
+            else 'No obvious/non-useful pronunciation overrides found.'
         )
 
     def _remove_pronunciation_row(self):
