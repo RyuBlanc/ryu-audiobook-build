@@ -17,6 +17,12 @@ class AudiobookBrainTests(unittest.TestCase):
         with self.assertRaises(BrainUnavailableError):
             _json('[1, 2, 3]')
 
+    def test_natural_language_scores_are_normalized(self):
+        from app.ai.brain import _numeric_score
+        self.assertEqual(_numeric_score("Moderate"), 0.5)
+        self.assertEqual(_numeric_score("High"), 0.75)
+        self.assertEqual(_numeric_score("Very High"), 0.9)
+
     def test_model_path_has_local_models_root(self):
         self.assertIn("audiobook-ai", str(model_path()))
 
