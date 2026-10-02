@@ -21,7 +21,8 @@ from app.core.paths import models_root
 RUNTIME_DIR = models_root() / "chatterbox-runtime"
 MARKER = RUNTIME_DIR / "runtime.json"
 PYTHON_311_URL = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
-CHATTERBOX_SOURCE_URL = "https://github.com/resemble-ai/chatterbox/archive/5de7a54aa4e5e2baadb0182dde554908b48b85c2.zip"
+CHATTERBOX_SOURCE_REVISION = "5de7a54aa4e5e2baadb0182dde554908b48b85c2"
+CHATTERBOX_SOURCE_URL = f"https://github.com/resemble-ai/chatterbox/archive/{CHATTERBOX_SOURCE_REVISION}.zip"
 
 
 def _venv_python() -> Path:
@@ -39,7 +40,12 @@ def runtime_ready() -> bool:
         return False
     try:
         data = json.loads(MARKER.read_text(encoding="utf-8"))
-        return bool(data.get("provider") == "chatterbox" and data.get("ready"))
+        return bool(
+            data.get("provider") == "chatterbox"
+            and data.get("ready")
+            and data.get("source_revision") == CHATTERBOX_SOURCE_REVISION
+            and data.get("nano_supported") is True
+        )
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return False
 
@@ -207,18 +213,40 @@ def install_runtime(progress: Callable[[str], None] | None = None) -> None:
         raise RuntimeError(f"Voice-cloning requirements are missing from this build: {requirements}")
 
     # Repair in-place, even when an older Chatterbox runtime already exists.
-    # The Turbo/Nano API changed over time; a stale 0.1.7 environment can expose
-    # ChatterboxTurboTTS.from_pretrained() without the nano= argument.
+    # The Turbo/Nano API changed over time; install the exact source revision
+    # after all wheel dependencies so pip cannot overwrite the nano-capable source.
     source_archive = RUNTIME_DIR / "chatterbox-source.zip"
     commands = [
         [str(python), "-m", "pip", "install", "--upgrade", "pip"],
         [str(python), "-m", "pip", "uninstall", "-y", "chatterbox-tts", "chatterbox"],
         [str(python), "-m", "pip", "install", "--no-cache-dir", "--upgrade", "--force-reinstall", "-r", str(requirements)],
     ]
-    # Install the official Chatterbox source without dependency resolution.
-    # This is deliberate: the upstream pyproject currently declares Perth as
-    # a git+https dependency, but PyPI publishes a normal wheel for the same
-    # package. End users should never need Git installed.
+
+    if _has_nvidia():
+        # Chatterbox 0.1.7 pins torch 2.6.0. Replace the default CPU wheel
+        # with the official CUDA 12.4 wheels used by RTX 20/30/40-class GPUs.
+        commands.append([
+            str(python), "-m", "pip", "install", "--upgrade", "--force-reinstall",
+            "torch==2.6.0", "torchaudio==2.6.0",
+            "--index-url", "https://download.pytorch.org/whl/cu124",
+        ])
+
+    for command in commands:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=3600,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                "Custom voice runtime installation failed. "
+                + (result.stderr or result.stdout).strip()[-5000:]
+            )
+
+    # Install the pinned Chatterbox source LAST and without dependency resolution.
+    # The upstream pyproject declares Perth via git+https, but PyPI publishes the
+    # same package as a normal wheel. End users therefore do not need Git.
     try:
         if progress:
             progress("Installing the offline Chatterbox voice engine…")
@@ -245,29 +273,6 @@ def install_runtime(progress: Callable[[str], None] | None = None) -> None:
             raise RuntimeError((result.stderr or result.stdout).strip()[-5000:])
     finally:
         source_archive.unlink(missing_ok=True)
-
-    if _has_nvidia():
-        # Chatterbox 0.1.7 pins torch 2.6.0. Replace the default CPU wheel
-        # with the official CUDA 12.4 wheels used by RTX 20/30/40-class GPUs.
-        # Automatic mode still falls back to CPU if CUDA cannot be used.
-        commands.append([
-            str(python), "-m", "pip", "install", "--upgrade", "--force-reinstall",
-            "torch==2.6.0", "torchaudio==2.6.0",
-            "--index-url", "https://download.pytorch.org/whl/cu124",
-        ])
-
-    for command in commands:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=3600,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                "Custom voice runtime installation failed. "
-                + (result.stderr or result.stdout).strip()[-5000:]
-            )
 
     verify = subprocess.run(
         [
@@ -296,6 +301,8 @@ def install_runtime(progress: Callable[[str], None] | None = None) -> None:
         "python": str(python),
         "runtime": (verify.stdout or "").strip(),
         "gpu_acceleration": _has_nvidia(),
+        "source_revision": CHATTERBOX_SOURCE_REVISION,
+        "nano_supported": True,
     }, indent=2), encoding="utf-8")
     if progress:
         progress("Custom voice engine is ready.")
