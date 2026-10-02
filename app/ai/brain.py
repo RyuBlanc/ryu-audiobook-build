@@ -3,9 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import re
 from typing import Any, Callable
 
 from app.chapters.detector import Chapter
+from app.tts.pronunciation_suggester import COMMON_ENGLISH_WORDS
 from .model_runtime import LocalLLM, BrainRuntimeError
 
 class BrainUnavailableError(BrainRuntimeError):
@@ -43,16 +45,53 @@ Scenes: summary, location, time, mood, narrator_direction, ambience, music, sfx,
 Pronunciation: written, spoken, ipa, source_language, script, reason, confidence, alternatives.'''
 
 def _json(text: str) -> dict[str, Any]:
-    text = text.strip()
+    text = str(text or '').strip()
     if text.startswith('```'):
-        text = text.strip('`').removeprefix('json').strip()
-    start, end = text.find('{'), text.rfind('}')
-    if start < 0 or end <= start:
-        raise BrainUnavailableError('Audiobook AI did not return JSON.')
-    value = json.loads(text[start:end + 1])
+        text = re.sub(r'^\s*```(?:json)?\s*|\s*```\s*$', '', text, flags=re.I | re.S).strip()
+    decoder = json.JSONDecoder()
+    start = text.find('{')
+    if start < 0:
+        raise BrainUnavailableError('Audiobook AI did not return a JSON object.')
+    try:
+        value, _end = decoder.raw_decode(text[start:])
+    except json.JSONDecodeError as exc:
+        raise BrainUnavailableError(
+            f'Audiobook AI returned malformed JSON: {exc.msg} at line {exc.lineno}, column {exc.colno}.'
+        ) from exc
     if not isinstance(value, dict):
         raise BrainUnavailableError('Audiobook AI returned a non-object result.')
     return value
+
+
+def _normalise_pronunciation(item: dict[str, Any], source_text: str) -> dict[str, Any] | None:
+    written = str(item.get('written') or item.get('text') or '').strip()
+    spoken = str(item.get('spoken') or item.get('pronunciation') or '').strip()
+    if not written or not spoken:
+        return None
+    if written.casefold() not in source_text.casefold():
+        return None
+    source_language = str(item.get('source_language') or '').strip().casefold()
+    confidence = max(0.0, min(1.0, float(item.get('confidence', 0.0) or 0.0)))
+    if spoken.casefold() == written.casefold() and not item.get('ipa'):
+        return None
+    english_phrase = all(
+        re.fullmatch(r"[A-Za-z][A-Za-z'’-]*", part or '')
+        and part.casefold() in COMMON_ENGLISH_WORDS
+        for part in written.split()
+    )
+    if english_phrase and source_language in {'', 'english', 'en', 'unknown'}:
+        return None
+    if confidence < 0.80:
+        return None
+    normalized = dict(item)
+    normalized['written'] = written
+    normalized['spoken'] = spoken
+    normalized['confidence'] = confidence
+    normalized.setdefault('ipa', None)
+    normalized.setdefault('source_language', None)
+    normalized.setdefault('script', 'Latin')
+    normalized.setdefault('alternatives', [])
+    return normalized
 
 class AudiobookBrain:
     def __init__(self, project_folder: Path, config: BrainConfig | None = None):
@@ -75,11 +114,45 @@ class AudiobookBrain:
         result = {'chapter': chapter.number, 'title': chapter.title, 'characters': [], 'dialogue': [], 'scenes': [], 'pronunciation': [], 'continuity_notes': []}
         seen = set()
         for idx, chunk in enumerate(chunks, 1):
-            user = ('Book context: ' + json.dumps(book_context or {}, ensure_ascii=False) +
-                    '\nChapter: ' + chapter.title + f'\nExcerpt {idx}/{len(chunks)}:\n' + chunk +
-                    '\nKeep dialogue quotes exact and do not guess a speaker without evidence.')
-            data = _json(self.llm.complete(PROMPT, user, max_tokens=self.config.max_tokens, temperature=0.12))
-            self._merge(result, data, seen)
+            known_characters = [
+                str(item.get('name', '')).strip()
+                for item in (book_context or {}).get('characters', [])
+                if str(item.get('name', '')).strip()
+            ]
+            user = (
+                'Known characters from earlier chapters (use only when the excerpt supports them): '
+                + json.dumps(known_characters, ensure_ascii=False)
+                + '\nBook context: ' + json.dumps(book_context or {}, ensure_ascii=False)
+                + '\nChapter: ' + chapter.title
+                + f'\nExcerpt {idx}/{len(chunks)}:\n{chunk}'
+                + '\nKeep dialogue.quote exact. Never invent a speaker.'
+                + '\nPronunciation entries must be rare and useful: only names, foreign terms or fictional terms that truly occur in this excerpt and genuinely need a pronunciation change.'
+                + '\nReturn at most 20 dialogue items, 8 scenes, 12 pronunciation items and 20 characters.'
+            )
+            raw = self.llm.complete(
+                PROMPT + '\nBe concise. Never output markdown.',
+                user,
+                max_tokens=max(self.config.max_tokens, 3000),
+                temperature=0.08,
+            )
+            try:
+                data = _json(raw)
+            except BrainUnavailableError:
+                repaired = self.llm.complete(
+                    'Repair the following malformed JSON to valid JSON for the audiobook schema. Return JSON only. Do not invent information.',
+                    raw[:18000],
+                    max_tokens=max(self.config.max_tokens, 3000),
+                    temperature=0.02,
+                )
+                try:
+                    data = _json(repaired)
+                except BrainUnavailableError as second_error:
+                    raw_path = self.analysis_dir / f'chapter_{int(chapter.number):04d}_excerpt_{idx}.raw.txt'
+                    raw_path.write_text(str(raw), encoding='utf-8', errors='replace')
+                    raise BrainUnavailableError(
+                        f'Chapter {chapter.number}, excerpt {idx}: {second_error}. Raw model output was saved to {raw_path.name}.'
+                    ) from second_error
+            self._merge(result, data, seen, source_text=chunk)
         self._save_chapter(result)
         return result
 
@@ -109,32 +182,24 @@ class AudiobookBrain:
             start = max(end - self.config.overlap_chars, end)
         return out
 
-    def _merge(self, out: dict[str, Any], data: dict[str, Any], seen: set[str]) -> None:
+    def _merge(self, out: dict[str, Any], data: dict[str, Any], seen: set[str], source_text: str = '') -> None:
         for key in ('characters', 'scenes'):
             out[key].extend(data.get(key, []) or [])
 
         existing_pronunciations = {
-            str(item.get("written", "")).casefold(): item
-            for item in out.get("pronunciation", [])
-            if str(item.get("written", "")).strip()
+            str(item.get('written', '')).casefold(): item
+            for item in out.get('pronunciation', [])
+            if str(item.get('written', '')).strip()
         }
-        for item in data.get("pronunciation", []) or []:
-            written = str(item.get("written") or item.get("text") or "").strip()
-            spoken = str(item.get("spoken") or item.get("pronunciation") or "").strip()
-            if not written or not spoken:
+        for item in data.get('pronunciation', []) or []:
+            normalized = _normalise_pronunciation(item, source_text)
+            if normalized is None:
                 continue
-            key = written.casefold()
+            key = normalized['written'].casefold()
             previous = existing_pronunciations.get(key)
-            if previous is None or float(item.get("confidence", 0.0) or 0.0) > float(previous.get("confidence", 0.0) or 0.0):
-                normalized = dict(item)
-                normalized["written"] = written
-                normalized["spoken"] = spoken
-                normalized.setdefault("ipa", None)
-                normalized.setdefault("source_language", None)
-                normalized.setdefault("script", "Latin")
-                normalized.setdefault("alternatives", [])
+            if previous is None or normalized['confidence'] > float(previous.get('confidence', 0.0) or 0.0):
                 existing_pronunciations[key] = normalized
-        out["pronunciation"] = list(existing_pronunciations.values())
+        out['pronunciation'] = list(existing_pronunciations.values())
         for item in data.get('dialogue', []) or []:
             quote = str(item.get('quote', '')).strip()
             if quote and quote.casefold() not in seen:
