@@ -277,12 +277,12 @@ class AudiobookBrain:
             try:
                 core_raw = self.llm.complete(
                     PROMPT + '\nFocus ONLY on characters, dialogue ownership and pronunciation. Return JSON only.',
-                    '/no_think ' + common_context,
-                    'Do not guess a speaker. Keep dialogue.quote exact. Only include pronunciation terms that truly occur in this excerpt.',
+                    '/no_think ' + common_context + '\nDo not guess a speaker. Keep dialogue.quote exact. Only include pronunciation terms that truly occur in this excerpt.',
                     max_tokens=1100,
                     temperature=0.05,
                     response_schema=CORE_SCHEMA,
                 )
+                core_data = _json(core_raw)
                 core_data = _json(core_raw)
             except (BrainRuntimeError, BrainUnavailableError) as exc:
                 core_data = self._fallback_core(chapter)
@@ -316,12 +316,13 @@ class AudiobookBrain:
             except (BrainRuntimeError, BrainUnavailableError) as first_error:
                 try:
                     repair = self.llm.complete(
-                        'Return only compact valid JSON for audiobook scene direction. Keys: scenes, continuity_notes. '
-                        + scene_user + '\nPrevious output was malformed. Produce valid JSON only.',
+                        'Return only compact valid JSON for audiobook scene direction. Keys: scenes, continuity_notes.',
+                        '/no_think ' + scene_user + '\nPrevious output was malformed. Produce valid JSON only.',
                         max_tokens=450,
-                        response_schema=SCENE_SCHEMA,
                         temperature=0.0,
+                        response_schema=SCENE_SCHEMA,
                     )
+                    scene_data = _json(repair)
                     scene_data = _json(repair)
                     self._merge_scenes(result, scene_data)
                 except (BrainRuntimeError, BrainUnavailableError) as second_error:
