@@ -101,7 +101,6 @@ def _rank_suggestions(
         if current is None or score > current[0]:
             scores[name] = (score, evidence)
 
-    # Explicit manual assignments are the strongest local evidence.
     for item in getattr(chapter, "dialogue_assignments", []):
         try:
             a_start = int(item.get("start", -1))
@@ -118,40 +117,45 @@ def _rank_suggestions(
                 add(name, 0.94, "Overlapping saved manual assignment.")
 
     verbs = r"said|asked|replied|answered|shouted|yelled|whispered|muttered|called|cried|exclaimed|added|insisted|wondered|demanded|begged|sighed|snapped|murmured|screamed|explained|remarked|responded|mumbled|stammered|laughed|groaned"
+
     for name in candidates:
         escaped = re.escape(name)
-        alias_variants = [re.escape(alias) for alias, canonical in aliases.items() if canonical.casefold() == name.casefold()]
+        alias_variants = [
+            re.escape(alias)
+            for alias, canonical in aliases.items()
+            if canonical.casefold() == name.casefold()
+        ]
         name_pattern = "(?:" + "|".join([escaped] + alias_variants) + ")"
 
-        if re.search(rf"{name_pattern}s+(?:{verbs})", after, re.I):
+        if re.search(rf"{name_pattern}\s+(?:{verbs})\b", after, re.I):
             add(name, 0.99, "Matched a speaker name + speech verb after the dialogue.")
-        if re.search(rf"(?:{verbs})s+{name_pattern}", after, re.I):
+        if re.search(rf"(?:{verbs})\s+{name_pattern}\b", after, re.I):
             add(name, 0.98, "Matched a speech verb + speaker name after the dialogue.")
-        if re.search(rf"{name_pattern}s+(?:{verbs})s*$", before, re.I | re.S):
+        if re.search(rf"{name_pattern}\s+(?:{verbs})\b\s*$", before, re.I | re.S):
             add(name, 0.99, "Matched a speaker name + speech verb before the dialogue.")
-        if re.search(rf"(?:{verbs})s+{name_pattern}s*$", before, re.I | re.S):
+        if re.search(rf"(?:{verbs})\s+{name_pattern}\s*$", before, re.I | re.S):
             add(name, 0.98, "Matched a speech verb + speaker name before the dialogue.")
-        if re.search(rf"{name_pattern}s*[:—–-]s*$", before, re.I | re.S):
+        if re.search(rf"{name_pattern}\s*[:—–-]\s*$", before, re.I | re.S):
             add(name, 0.95, "Matched a speaker label immediately before the dialogue.")
-        if re.search(rf"(?m)^s*{name_pattern}s*[:—–-]?s*$", before[-260:], re.I):
+        if re.search(rf"(?m)^\s*{name_pattern}\s*[:—–-]?\s*$", before[-260:], re.I):
             add(name, 0.94, "Matched a speaker label on the preceding line.")
-        if re.search(rf"[”\"」』]s*,?s*{name_pattern}s+(?:{verbs})", after, re.I):
+        if re.search(rf"[”\"」』]\s*,?\s*{name_pattern}\s+(?:{verbs})\b", after, re.I):
             add(name, 0.97, "Matched a post-dialogue speaker tag.")
 
     if last_speaker and re.search(
-        rf"^s*[,;:—–-]?s*(?:he|she|they|I)s+(?:{verbs})", after, re.I
+        rf"^\s*[,;:—–-]?\s*(?:he|she|they|I)\s+(?:{verbs})\b", after, re.I
     ):
         add(last_speaker, 0.66, "Pronoun speech tag continues the previous speaker.")
 
-    # Nearby repeated names are only a weak suggestion. This makes the
-    # assistant useful on novels with unusual formatting without pretending
-    # that proximity alone proves who spoke.
-    nearby_text = before[-280:] + "
-" + after[:280]
+    nearby_text = before[-280:] + "\n" + after[:280]
     for name in candidates:
-        count = len(re.findall(rf"{re.escape(name)}", nearby_text, re.I))
+        count = len(re.findall(rf"\b{re.escape(name)}\b", nearby_text, re.I))
         if count and name not in scores:
-            add(name, min(0.54, 0.32 + 0.08 * count), "Character name appears near the dialogue.")
+            add(
+                name,
+                min(0.54, 0.32 + 0.08 * count),
+                "Character name appears near the dialogue.",
+            )
 
     ranked = sorted(
         ((name, score, evidence) for name, (score, evidence) in scores.items()),
@@ -179,7 +183,9 @@ def _find_name(text: str, candidates: list[str], aliases: dict[str, str]) -> str
     for candidate in sorted(candidates, key=len, reverse=True):
         if candidate.casefold() in folded:
             return candidate
-    for alias, canonical in sorted(aliases.items(), key=lambda item: len(item[0]), reverse=True):
+    for alias, canonical in sorted(
+        aliases.items(), key=lambda item: len(item[0]), reverse=True
+    ):
         if alias in folded:
             return canonical
     return None
