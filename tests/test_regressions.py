@@ -34,6 +34,40 @@ def _write_wav(path: Path, seconds: float = 0.05) -> None:
 
 
 class RegressionTests(unittest.TestCase):
+    def test_voice_preview_runs_in_a_worker_thread(self):
+        from app.ui.voice_page import VoicePreviewWorker
+        from PySide6.QtCore import QThread
+
+        self.assertTrue(issubclass(VoicePreviewWorker, QThread))
+
+    def test_m4b_packaging_joins_preencoded_chapters_and_reports_progress(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapter_dirs = []
+            for number in (1, 2):
+                chapter_dir = root / f"{number:03d}_Chapter_{number}"
+                chunks = chapter_dir / "chunks"
+                wav = chunks / "00001.wav"
+                _write_wav(wav, 0.20)
+                chapter_dirs.append(chapter_dir)
+
+            progress = []
+            output = root / "book.m4b"
+            result = assemble_m4b(
+                chapter_dirs,
+                output,
+                "Test Book",
+                chapter_titles=["Chapter 1", "Chapter 2"],
+                progress=lambda done, total, message: progress.append((done, total, message)),
+            )
+
+            self.assertEqual(result, output)
+            self.assertTrue(output.exists())
+            self.assertGreater(output.stat().st_size, 1024)
+            self.assertTrue(any(message == "chapter-audio" for _, _, message in progress))
+            self.assertTrue(any(message == "joined-audio" for _, _, message in progress))
+
+
     def test_generation_page_exposes_custom_runtime_check(self):
         import app.ui.generation_page as generation_page
 
