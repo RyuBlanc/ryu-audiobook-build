@@ -1026,6 +1026,23 @@ class GenerationPage(QWidget):
             )
             return
 
+        if message.startswith("m4b-package:"):
+            self.generation_phase = "packaging"
+            parts = message.split(":")
+            if len(parts) >= 3:
+                try:
+                    current_pkg, total_pkg = parts[1].split("/", 1)
+                    current_pkg = int(current_pkg)
+                    total_pkg = max(1, int(total_pkg))
+                    self.stage.setText(
+                        f"Packaging M4B • chapter {current_pkg}/{total_pkg}"
+                    )
+                except (ValueError, IndexError):
+                    self.stage.setText("Packaging final M4B…")
+            else:
+                self.stage.setText("Packaging final M4B…")
+            self.remaining.setText("Remaining: packaging…")
+            self.speed.setText("Speed: —")
         if message.startswith("m4b-complete"):
             self.generation_phase = "complete"
             self.progress.setValue(self.progress.maximum())
