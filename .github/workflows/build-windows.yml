@@ -92,7 +92,13 @@ jobs:
           try {
             $ready = $false
             for ($i = 0; $i -lt 120; $i++) {
-              if ($proc.HasExited) { throw "llama-server exited before becoming ready. Logs: $stdoutLog / $stderrLog" }
+              if ($proc.HasExited) {
+                Write-Host "===== llama stdout ====="
+                if (Test-Path $stdoutLog) { Get-Content $stdoutLog -Tail 200 }
+                Write-Host "===== llama stderr ====="
+                if (Test-Path $stderrLog) { Get-Content $stderrLog -Tail 200 }
+                throw "llama-server exited before becoming ready. Logs: $stdoutLog / $stderrLog"
+              }
               try {
                 $health = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:18765/health" -TimeoutSec 2
                 if ($health.StatusCode -eq 200) { $ready = $true; break }
