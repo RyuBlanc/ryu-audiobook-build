@@ -20,9 +20,9 @@ except ImportError:
     certifi = None
 
 
-LLAMA_RELEASE = "b11345"
-LLAMA_CUDA12_URL = f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_RELEASE}/llama-b11345-bin-win-cuda-12.4-x64.zip"
-LLAMA_CPU_URL = f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_RELEASE}/llama-b11345-bin-win-cpu-x64.zip"
+LLAMA_RELEASE = "b11193"
+LLAMA_CUDA12_URL = f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_RELEASE}/llama-b11193-bin-win-cuda-12.4-x64.zip"
+LLAMA_CPU_URL = f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_RELEASE}/llama-b11193-bin-win-cpu-x64.zip"
 
 MODEL_1_7B_URL = "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/4102b64b54bf3f0ddb9408d83f42d5091e0a7b64/Qwen3-1.7B-Q5_K_M.gguf"
 MODEL_4B_URL = "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf"
@@ -176,6 +176,7 @@ class LocalLLM:
             "--host", "127.0.0.1", "--port", str(self.port),
             "--ctx-size", "16384", "--batch-size", "512",
             "--ubatch-size", "256", "--no-webui",
+            "--reasoning", "off", "--reasoning-format", "none",
         ]
         if vram >= 4.0:
             args += ["--n-gpu-layers", "99"]
@@ -224,6 +225,10 @@ class LocalLLM:
                 "type": "json_object",
                 "schema": response_schema,
             }
+        # Qwen3 supports a per-request non-thinking switch; keep the server
+        # itself in reasoning-off mode as the primary guard, and also pass the
+        # template hint for older compatible llama.cpp builds.
+        body["chat_template_kwargs"] = {"enable_thinking": False}
         payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
             f"http://127.0.0.1:{self.port}/v1/chat/completions",
@@ -231,8 +236,20 @@ class LocalLLM:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=300) as response:
-            data = json.loads(response.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(request, timeout=300) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            log_tail = ""
+            try:
+                if self.log_path.exists():
+                    log_tail = self.log_path.read_text(encoding="utf-8", errors="replace")[-6000:]
+            except OSError:
+                pass
+            raise BrainRuntimeError(
+                f"Local Audiobook AI request failed: {exc}"
+                + (f"\n\nllama-server log:\n{log_tail}" if log_tail else "")
+            ) from exc
         try:
             return str(data["choices"][0]["message"]["content"])
         except (KeyError, TypeError, IndexError) as exc:
@@ -251,3 +268,35 @@ class LocalLLM:
                     process.kill()
                 except Exception:
                     pass
+
+
+def self_test() -> str:
+    """Run a real local inference and return a short JSON response."""
+    from json import JSONDecoder
+    llm = LocalLLM()
+    try:
+        schema = {
+            "type": "object",
+            "properties": {
+                "ok": {"type": "boolean"},
+                "message": {"type": "string"},
+            },
+            "required": ["ok", "message"],
+            "additionalProperties": False,
+        }
+        raw = llm.complete(
+            "You are the Ryu's Audiobook AI self-test. Return only JSON.",
+            "Return {"ok":true,"message":"ready"}. Do not add any other text.",
+            max_tokens=80,
+            temperature=0.0,
+            response_schema=schema,
+        )
+        start = raw.find("{")
+        if start < 0:
+            raise BrainRuntimeError("Audiobook AI self-test returned no JSON object.")
+        value, _ = JSONDecoder().raw_decode(raw[start:])
+        if value.get("ok") is not True:
+            raise BrainRuntimeError(f"Audiobook AI self-test returned: {value}")
+        return str(value.get("message") or "ready")
+    finally:
+        llm.close()
