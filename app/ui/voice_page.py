@@ -342,6 +342,22 @@ class VoicePage(QWidget):
         self.update_mode()
 
     @staticmethod
+    def _voice_gender(profile: VoiceProfile) -> str:
+        voice_id = (profile.voice_id or "").lower()
+        if profile.provider == "kokoro":
+            prefix = voice_id.split("_", 1)[0]
+            if len(prefix) >= 2 and prefix[1] == "f":
+                return "Female"
+            if len(prefix) >= 2 and prefix[1] == "m":
+                return "Male"
+            return "Neutral"
+        if "amy" in voice_id:
+            return "Female"
+        if any(name in voice_id for name in ("lessac", "ryan")):
+            return "Male"
+        return "Neutral"
+
+    @staticmethod
     def _language_name(value: str) -> str:
         names = {
             "en": "English", "en-US": "English (US)", "en-GB": "English (UK)",
@@ -439,12 +455,7 @@ class VoicePage(QWidget):
 
         if self.mode.currentData() == "offline-neural":
             for profile in self.offline_voices:
-                lower = profile.voice_id.lower()
-                voice_gender = (
-                    "Female" if "amy" in lower
-                    else "Male" if any(x in lower for x in ("lessac", "ryan"))
-                    else "Neutral"
-                )
+                voice_gender = self._voice_gender(profile)
                 lang = (profile.language or "en").split("-")[0]
                 reg = profile.voice_id.split("-", 1)[0] if "-" in profile.voice_id else ""
                 if language and lang != language:
@@ -510,13 +521,32 @@ class VoicePage(QWidget):
             )
             if voice:
                 label = voice.get("friendly_name") or voice_id
+                profile = VoiceProfile(
+                    name=label,
+                    provider="edge-tts",
+                    voice_id=voice_id,
+                    language=voice.get("locale"),
+                    authorized=True,
+                )
                 self.name.setText(label)
                 self.profile_badge.setText(label)
+                self._update_profile_details(profile)
+                self._clear_saved_profile_selection()
 
     def _sapi_voice_changed(self) -> None:
         if self.mode.currentData() == "windows-sapi" and self.sapi_voice.currentText():
-            self.name.setText(self.sapi_voice.currentText())
-            self.profile_badge.setText(self.sapi_voice.currentText())
+            voice_id = self.sapi_voice.currentData() or self.sapi_voice.currentText()
+            label = self.sapi_voice.currentText()
+            profile = VoiceProfile(
+                name=label,
+                provider="windows-sapi",
+                voice_id=voice_id,
+                authorized=True,
+            )
+            self.name.setText(label)
+            self.profile_badge.setText(label)
+            self._update_profile_details(profile)
+            self._clear_saved_profile_selection()
 
     @staticmethod
     def _provider_label(profile: VoiceProfile) -> str:
