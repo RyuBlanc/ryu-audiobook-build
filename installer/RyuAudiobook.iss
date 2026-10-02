@@ -27,6 +27,11 @@ CloseApplications=yes
 CloseApplicationsFilter=Ryu's Audiobook.exe
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\Ryu's Audiobook.exe
+VersionInfoVersion={#MyAppVersion}
+VersionInfoProductVersion={#MyAppVersion}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription={#MyAppName}
+VersionInfoProductName={#MyAppName}
 
 [Files]
 Source: "..\dist\Ryu's Audiobook\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
