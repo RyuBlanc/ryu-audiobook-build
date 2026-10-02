@@ -273,21 +273,11 @@ def self_test() -> str:
     from json import JSONDecoder
     llm = LocalLLM()
     try:
-        schema = {
-            "type": "object",
-            "properties": {
-                "ok": {"type": "boolean"},
-                "message": {"type": "string"},
-            },
-            "required": ["ok", "message"],
-            "additionalProperties": False,
-        }
         raw = llm.complete(
-            "You are the Ryu's Audiobook AI self-test. Return only JSON.",
-            'Return {"ok":true,"message":"ready"}. Do not add any other text.',
+            "You are the Ryu's Audiobook AI self-test. Return only one valid JSON object. Do not think. Do not use markdown.",
+            '/no_think Return {"ok":true,"message":"ready"}. Do not add any other text.',
             max_tokens=80,
-            temperature=0.0,
-            response_schema=schema,
+            temperature=0.2,
         )
         start = raw.find("{")
         if start < 0:
