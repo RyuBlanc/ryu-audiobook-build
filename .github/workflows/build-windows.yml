@@ -160,6 +160,22 @@ jobs:
             throw "Expected at least two bundled Piper voice models, found $($models.Count)."
           }
           Get-ChildItem "bundled_models\piper" | Select-Object Name,Length
+      
+      - name: Download built-in offline natural voices
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "bundled_models\kokoro" | Out-Null
+          $modelUrl = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.fp16.onnx"
+          $voicesUrl = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin"
+          curl.exe -L --fail --retry 3 -o "bundled_models\kokoro\kokoro-v1.0.fp16.onnx" $modelUrl
+          curl.exe -L --fail --retry 3 -o "bundled_models\kokoro\voices-v1.0.bin" $voicesUrl
+          $model = Get-Item "bundled_models\kokoro\kokoro-v1.0.fp16.onnx"
+          $voices = Get-Item "bundled_models\kokoro\voices-v1.0.bin"
+          if ($model.Length -lt 100MB) { throw "Kokoro Natural FP16 model download is unexpectedly small: $($model.Length) bytes" }
+          if ($voices.Length -lt 10MB) { throw "Kokoro Natural voice pack download is unexpectedly small: $($voices.Length) bytes" }
+          Write-Host "Kokoro model: $($model.Name) $($model.Length) bytes"
+          Write-Host "Kokoro voices: $($voices.Name) $($voices.Length) bytes"
+
 
       - name: Verify application version
         shell: pwsh
@@ -169,7 +185,7 @@ jobs:
           $env:PYTHONPATH = (Get-Location).Path
           $version = python -c "from app.version import full_version; print(full_version())"
           Write-Host "Application version: $version"
-          $expected = "v0.3.0"
+          $expected = "v0.3.1"
           if (-not $version.StartsWith($expected) -or -not $version.EndsWith("Build $env:RYU_BUILD_NUMBER")) {
             throw "Unexpected application version: $version"
           }
@@ -190,6 +206,11 @@ jobs:
           $models = Get-ChildItem "dist\Ryu's Audiobook\_internal\bundled_models\piper\*.onnx"
           if ($models.Count -lt 2) {
             throw "The frozen application does not contain the offline neural voice pack."
+          }
+          $kokoroModels = Get-ChildItem "dist\Ryu's Audiobook\_internal\bundled_models\kokoro\*.onnx"
+          $kokoroVoices = "dist\Ryu's Audiobook\_internal\bundled_models\kokoro\voices-v1.0.bin"
+          if ($kokoroModels.Count -lt 1 -or -not (Test-Path $kokoroVoices)) {
+            throw "The frozen application does not contain the offline natural Kokoro voice pack."
           }
 
       - name: Verify bundled UI modules
@@ -213,6 +234,23 @@ jobs:
             if (-not (Test-Path $path)) {
               throw "Required bundled source is missing: $path"
             }
+          }
+
+      - name: Verify application executable file version
+        shell: pwsh
+        env:
+          RYU_BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          $exe = "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
+          $expected = "0.3.1.$env:RYU_BUILD_NUMBER"
+          $info = (Get-Item $exe).VersionInfo
+          Write-Host "EXE FileVersion: $($info.FileVersion)"
+          Write-Host "EXE ProductVersion: $($info.ProductVersion)"
+          if ($info.FileVersion -ne $expected) {
+            throw "EXE FileVersion is '$($info.FileVersion)', expected '$expected'"
+          }
+          if ($info.ProductVersion -ne $expected) {
+            throw "EXE ProductVersion is '$($info.ProductVersion)', expected '$expected'"
           }
 
       - name: Verify frozen Python archive contains critical modules
@@ -264,6 +302,16 @@ jobs:
           $hash = (Get-FileHash $installer -Algorithm SHA256).Hash
           Write-Host "Installer size: $size bytes"
           Write-Host "Installer SHA256: $hash"
+          $expectedVersion = "0.3.1.${{ github.run_number }}"
+          $info = (Get-Item $installer).VersionInfo
+          Write-Host "Installer FileVersion: $($info.FileVersion)"
+          Write-Host "Installer ProductVersion: $($info.ProductVersion)"
+          if ($info.FileVersion -ne $expectedVersion) {
+            throw "Installer FileVersion is '$($info.FileVersion)', expected '$expectedVersion'"
+          }
+          if ($info.ProductVersion -ne $expectedVersion) {
+            throw "Installer ProductVersion is '$($info.ProductVersion)', expected '$expectedVersion'"
+          }
 
       - name: Publish Windows installer as GitHub Release
         shell: pwsh
@@ -279,7 +327,7 @@ jobs:
 
           Commit: ${{ github.sha }}
           Build: #${{ github.run_number }}
-          Version: v0.3.0
+          Version: v0.3.1
           This is a prerelease build for testing.
           "@
 
