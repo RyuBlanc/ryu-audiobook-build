@@ -46,6 +46,8 @@ class GenerationPage(QWidget):
         self.manager: GenerationManager | None = None
         self.started_at: float | None = None
         self.last_progress_value = 0
+        self.initial_progress_value = 0
+        self.generation_phase = "idle"
 
         self.player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
@@ -954,6 +956,8 @@ class GenerationPage(QWidget):
         self.progress.setRange(0, len(self.chapters))
         self.progress.setValue(0)
         self.last_progress_value = 0
+        self.initial_progress_value = 0
+        self.generation_phase = "synthesis"
         self.started_at = time.monotonic()
         self.timer.start(1000)
         self._set_generation_locked(True)
@@ -1003,22 +1007,44 @@ class GenerationPage(QWidget):
     def update_progress(self, chapter: int, total: int, done: int, message: str) -> None:
         if message.startswith("plan:"):
             try:
-                planned = max(1, int(message.split(":", 1)[1]))
-            except ValueError:
+                parts = message.split(":")
+                planned = max(1, int(parts[1]))
+                completed_at_start = max(0, min(planned, int(parts[2]))) if len(parts) >= 3 else 0
+            except (ValueError, IndexError):
                 planned = max(1, total)
+                completed_at_start = 0
             self.progress.setRange(0, planned)
-            self.progress.setValue(0)
-            self.last_progress_value = 0
-            self.stage.setText(f"Preparing {planned:,} audio chunks…")
+            self.progress.setValue(completed_at_start)
+            self.last_progress_value = completed_at_start
+            self.initial_progress_value = completed_at_start
+            self.generation_phase = "synthesis"
+            self.stage.setText(
+                f"Preparing {planned:,} audio chunks… "
+                f"{completed_at_start:,} already reusable"
+                if completed_at_start
+                else f"Preparing {planned:,} audio chunks…"
+            )
             return
 
         if message.startswith("m4b-complete"):
+            self.generation_phase = "complete"
             self.progress.setValue(self.progress.maximum())
+            self.last_progress_value = self.progress.maximum()
+            self.remaining.setText("Remaining: 0:00")
+            self.speed.setText("Speed: complete")
             self.stage.setText("M4B packaging complete")
+        elif message.startswith("m4b-packaging"):
+            self.generation_phase = "packaging"
+            self.progress.setValue(self.progress.maximum())
+            self.last_progress_value = self.progress.maximum()
+            self.remaining.setText("Remaining: packaging…")
+            self.speed.setText("Speed: —")
+            self.stage.setText("Packaging final M4B • this may take a few minutes for a large audiobook")
         elif message.startswith("m4b-failed"):
             self.stage.setText("M4B packaging failed")
             self.status.setText(message)
         elif message.startswith("chunk-start:"):
+            self.generation_phase = "synthesis"
             self.stage.setText(
                 f"Synthesizing audio • {message.split(':', 1)[1]} • chapter {chapter}/{total}"
             )
@@ -1039,11 +1065,19 @@ class GenerationPage(QWidget):
             except (ValueError, IndexError):
                 self.stage.setText(f"Chapter {chapter}/{total}")
         else:
-            value = chapter if message == "chapter-complete" else max(0, chapter - 1)
-            self.progress.setValue(value)
-            self.last_progress_value = value
             if message == "chapter-complete":
-                self.stage.setText(f"Chapter {chapter}/{total} complete")
+                self.generation_phase = "synthesis"
+                value = max(0, min(self.progress.maximum(), done))
+                self.progress.setValue(value)
+                self.last_progress_value = value
+                self.stage.setText(
+                    f"Chapter {chapter}/{total} complete • "
+                    f"{value:,}/{self.progress.maximum():,} chunks"
+                )
+            else:
+                value = max(0, min(self.progress.maximum(), chapter - 1))
+                self.progress.setValue(value)
+                self.last_progress_value = value
             elif message.startswith("chapter-failed"):
                 self.stage.setText(f"Chapter {chapter}/{total} failed")
             else:
@@ -1054,13 +1088,31 @@ class GenerationPage(QWidget):
             return
         elapsed = int(time.monotonic() - self.started_at)
         self.elapsed.setText(f"Elapsed: {elapsed // 60}:{elapsed % 60:02d}")
+
+        if self.generation_phase == "packaging":
+            self.remaining.setText("Remaining: packaging…")
+            self.speed.setText("Speed: —")
+            return
+
+        if self.generation_phase == "complete":
+            self.remaining.setText("Remaining: 0:00")
+            self.speed.setText("Speed: complete")
+            return
+
         current = self.progress.value()
         total = max(1, self.progress.maximum())
-        if current > 0 and elapsed > 2:
-            estimated_total = elapsed * total / current
-            remaining = max(0, int(estimated_total - elapsed))
-            self.remaining.setText(f"Remaining: {remaining // 60}:{remaining % 60:02d}")
-            speed = current / elapsed * 60
+        work_done = max(0, current - self.initial_progress_value)
+        work_remaining = max(0, total - current)
+
+        if work_done > 0 and elapsed > 2:
+            speed = work_done / elapsed * 60
+            if speed > 0 and work_remaining > 0:
+                remaining = int(work_remaining / (work_done / elapsed))
+                self.remaining.setText(
+                    f"Remaining: {remaining // 60}:{remaining % 60:02d}"
+                )
+            else:
+                self.remaining.setText("Remaining: almost done…")
             self.speed.setText(f"Speed: {speed:.2f} chunks/min")
         else:
             self.remaining.setText("Remaining: calculating…")
@@ -1068,6 +1120,7 @@ class GenerationPage(QWidget):
 
     def finished(self, summary: GenerationSummary) -> None:
         self.timer.stop()
+        self.generation_phase = "idle"
         self._set_generation_locked(False)
         self.cancel_button.setEnabled(False)
         if self.project_folder:
