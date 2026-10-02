@@ -7,6 +7,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from app.core.paths import ensure_roots
+from app.version import APP_NAME, full_version
 from app.ui.workflow import ProjectWorkflow
 
 
@@ -177,12 +178,13 @@ QScrollBar::handle:vertical:hover {
 def main() -> int:
     ensure_roots()
     app = QApplication(sys.argv)
-    app.setApplicationName("Ryu's Audiobook")
+    app.setApplicationName(APP_NAME)
     app.setStyleSheet(APP_STYLE)
     icon_path = asset_path("ryu_audiobook_logo.png")
     app_icon = QIcon(str(icon_path)) if icon_path.exists() else QIcon()
     app.setWindowIcon(app_icon)
     window = ProjectWorkflow()
+    window.setWindowTitle(f"{APP_NAME} • {full_version()}")
     window.setWindowIcon(app_icon)
     window.show()
     return app.exec()
