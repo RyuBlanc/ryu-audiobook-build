@@ -1,7 +1,7 @@
 import unittest
 
 from app.ai.brain import _json, BrainUnavailableError
-from app.ai.model_runtime import model_path
+from app.ai.model_runtime import model_path, runtime_environment
 
 
 class AudiobookBrainTests(unittest.TestCase):
@@ -25,6 +25,28 @@ class AudiobookBrainTests(unittest.TestCase):
 
     def test_model_path_has_local_models_root(self):
         self.assertIn("audiobook-ai", str(model_path()))
+
+    def test_model_runtime_exposes_shared_environment(self):
+        env = runtime_environment()
+        self.assertIsInstance(env, dict)
+        self.assertIn("HF_HOME", env)
+
+    def test_chatterbox_pinned_source_is_installed_after_dependency_wheels(self):
+        from pathlib import Path
+        source = (Path(__file__).resolve().parents[1] / "app" / "tts" / "chatterbox_runtime.py").read_text(encoding="utf-8")
+        dependency_loop = source.index("for command in commands:")
+        source_install = source.index('"--no-deps", str(source_archive)')
+        verify = source.index("sig=inspect.signature(ChatterboxTurboTTS.from_pretrained)")
+        self.assertLess(dependency_loop, source_install)
+        self.assertLess(source_install, verify)
+        self.assertIn("CHATTERBOX_SOURCE_REVISION", source)
+        self.assertIn('"nano_supported": True', source)
+
+    def test_versioned_pyinstaller_resource_is_enabled(self):
+        from pathlib import Path
+        build_source = (Path(__file__).resolve().parents[1] / "build.py").read_text(encoding="utf-8")
+        self.assertIn("--version-file=", build_source)
+        self.assertIn("VersionInfo(", build_source)
 
 
 if __name__ == "__main__":
