@@ -205,9 +205,17 @@ def install_runtime(progress: Callable[[str], None] | None = None) -> None:
     if not requirements.exists():
         raise RuntimeError(f"Voice-cloning requirements are missing from this build: {requirements}")
 
+    # Repair in-place, even when an older Chatterbox runtime already exists.
+    # The Turbo/Nano API changed over time; a stale 0.1.7 environment can expose
+    # ChatterboxTurboTTS.from_pretrained() without the nano= argument.
     commands = [
         [str(python), "-m", "pip", "install", "--upgrade", "pip"],
-        [str(python), "-m", "pip", "install", "-r", str(requirements)],
+        [str(python), "-m", "pip", "uninstall", "-y", "chatterbox-tts", "chatterbox"],
+        [
+            str(python), "-m", "pip", "install",
+            "--no-cache-dir", "--upgrade", "--force-reinstall",
+            "-r", str(requirements),
+        ],
     ]
     if _has_nvidia():
         # Chatterbox 0.1.7 pins torch 2.6.0. Replace the default CPU wheel
@@ -235,9 +243,12 @@ def install_runtime(progress: Callable[[str], None] | None = None) -> None:
     verify = subprocess.run(
         [
             str(python), "-c",
-            "import chatterbox, torch, torchaudio; "
+            "import chatterbox, torch, torchaudio, inspect; "
             "from chatterbox.tts_turbo import ChatterboxTurboTTS; "
+            "sig=inspect.signature(ChatterboxTurboTTS.from_pretrained); "
+            "assert 'nano' in sig.parameters, 'Chatterbox Turbo/Nano API missing nano= parameter'; "
             "print(f'chatterbox_turbo={ChatterboxTurboTTS.__module__}'); "
+            "print(f'nano_api={sig}'); "
             "print(f'torch={torch.__version__}'); "
             "print(f'cuda={torch.cuda.is_available()}'); "
             "print('gpu=' + (torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'))",
