@@ -303,10 +303,9 @@ jobs:
           Write-Host "Installer size: $size bytes"
           Write-Host "Installer SHA256: $hash"
           $expectedVersion = "0.3.1.${{ github.run_number }}"
+          $info = (Get-Item $installer).VersionInfo
           $actualFileVersion = ([string]$info.FileVersion).Trim()
           $actualProductVersion = ([string]$info.ProductVersion).Trim()
-          $info = (Get-Item $installer).VersionInfo
-          Write-Host "Installer FileVersion: $($info.FileVersion)"
           Write-Host "Installer ProductVersion: $($info.ProductVersion)"
           if ($actualFileVersion -ne $expectedVersion) {
             throw "Installer FileVersion is '$actualFileVersion', expected '$expectedVersion'"
