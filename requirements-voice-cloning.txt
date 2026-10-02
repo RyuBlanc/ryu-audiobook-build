@@ -1,5 +1,17 @@
-# Optional custom voice runtime.
-# Pin to the official Chatterbox commit that contains Turbo/Nano voice cloning.
-# The PyPI release shares the same package version but older wheels may not
-# contain the current Turbo/Nano implementation used by Ryu's Audiobook.
-chatterbox-tts @ https://github.com/resemble-ai/chatterbox/archive/5de7a54aa4e5e2baadb0182dde554908b48b85c2.zip
+# Dependencies for the optional local Chatterbox voice engine.
+# The Chatterbox source itself is installed separately with --no-deps so that
+# pip never requires Git on the end user's Windows PC.
+numpy>=1.24,<2
+librosa==0.11.0
+s3tokenizer
+torch==2.6.0
+torchaudio==2.6.0
+transformers==5.2.0
+diffusers==0.29.0
+conformer==0.3.2
+safetensors==0.5.3
+spacy-pkuseg
+pykakasi==2.3.0
+pyloudnorm
+omegaconf
+resemble-perth==1.0.1
