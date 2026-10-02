@@ -22,6 +22,7 @@ from app.tts.chatterbox_runtime import install_runtime, runtime_status
 from app.tts.model_registry import BUILTIN_CATALOG, installed_models, mark_installed
 from app.tts.providers.piper import PiperProvider
 from app.tts.providers.kokoro import KokoroProvider
+from app.ai.model_runtime import brain_root, install_runtime as install_audiobook_ai, recommended_model, installed as audiobook_ai_installed
 
 
 KOKORO_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.onnx"
@@ -113,6 +114,22 @@ class KokoroDownloadWorker(QThread):
             self.failed.emit(str(exc))
 
 
+
+
+class AudiobookAIInstallWorker(QThread):
+    finished_ok = Signal(str)
+    failed = Signal(str)
+    progress = Signal(str)
+
+    def run(self) -> None:
+        try:
+            model_id, filename, size = recommended_model()
+            install_audiobook_ai(self.progress.emit)
+            self.finished_ok.emit(f"{model_id}|{filename}|{size}")
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class ChatterboxInstallWorker(QThread):
     finished_ok = Signal(str)
     failed = Signal(str)
@@ -134,6 +151,7 @@ class ModelsPage(QWidget):
         self.worker: PiperDownloadWorker | None = None
         self.kokoro_worker: KokoroDownloadWorker | None = None
         self.chatterbox_worker: ChatterboxInstallWorker | None = None
+        self.audiobook_ai_worker: AudiobookAIInstallWorker | None = None
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("<h2>Local TTS Models</h2>"))
@@ -148,10 +166,12 @@ class ModelsPage(QWidget):
         self.install_kokoro = QPushButton("Download Natural Voices")
         self.install_piper = QPushButton("Download Piper Voice")
         self.install_chatterbox = QPushButton("Install / Repair Custom Voice Engine")
+        self.install_audiobook_ai = QPushButton("Install Audiobook AI")
         self.refresh_button = QPushButton("Refresh")
         row.addWidget(self.install_kokoro)
         row.addWidget(self.install_piper)
         row.addWidget(self.install_chatterbox)
+        row.addWidget(self.install_audiobook_ai)
         row.addWidget(self.refresh_button)
         layout.addLayout(row)
 
@@ -161,6 +181,7 @@ class ModelsPage(QWidget):
         self.install_kokoro.clicked.connect(self.download_kokoro)
         self.install_piper.clicked.connect(self.download_piper)
         self.install_chatterbox.clicked.connect(self.install_chatterbox_runtime)
+        self.install_audiobook_ai.clicked.connect(self.install_audiobook_ai_runtime)
         self.refresh_button.clicked.connect(self.refresh)
         self.refresh()
 
@@ -177,6 +198,10 @@ class ModelsPage(QWidget):
             self.list.addItem(f"Kokoro voices available: {len(kokoro_voices)}")
 
         self.list.addItem(f"Custom voice runtime: {runtime_status()}")
+        model_id, filename, size = recommended_model()
+        ai_state = "Installed" if audiobook_ai_installed() else "Not installed"
+        size_gb = size / (1024 ** 3)
+        self.list.addItem(f"Audiobook AI: {ai_state} • {model_id} • ~{size_gb:.1f} GB model")
         voices = PiperProvider.model_paths()
         if voices:
             self.list.addItem("")
@@ -248,6 +273,36 @@ class ModelsPage(QWidget):
         self.install_piper.setEnabled(True)
         self.status.setText("Download failed")
         QMessageBox.warning(self, "Piper Download Failed", message)
+
+    def install_audiobook_ai_runtime(self) -> None:
+        model_id, filename, size = recommended_model()
+        size_gb = size / (1024 ** 3)
+        answer = QMessageBox.question(
+            self,
+            "Install Audiobook AI",
+            f"Ryu's Audiobook will install a local analysis engine using {model_id}. "
+            f"The model download is about {size_gb:.1f} GB. "
+            "After installation, book analysis works offline and the AI does not modify your source text. Continue?",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.install_audiobook_ai.setEnabled(False)
+        self.status.setText("Installing local Audiobook AI…")
+        self.audiobook_ai_worker = AudiobookAIInstallWorker()
+        self.audiobook_ai_worker.finished_ok.connect(self._audiobook_ai_ok)
+        self.audiobook_ai_worker.failed.connect(self._audiobook_ai_failed)
+        self.audiobook_ai_worker.progress.connect(self.status.setText)
+        self.audiobook_ai_worker.start()
+
+    def _audiobook_ai_ok(self, detail: str) -> None:
+        self.install_audiobook_ai.setEnabled(True)
+        self.status.setText("Audiobook AI installed. It is fully local after download.")
+        self.refresh()
+
+    def _audiobook_ai_failed(self, message: str) -> None:
+        self.install_audiobook_ai.setEnabled(True)
+        self.status.setText("Audiobook AI installation failed.")
+        QMessageBox.warning(self, "Audiobook AI Installation Failed", message)
 
     def install_chatterbox_runtime(self) -> None:
         answer = QMessageBox.question(
