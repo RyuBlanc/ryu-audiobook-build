@@ -146,7 +146,6 @@ jobs:
             }
             Write-Host "Full Audiobook AI brain smoke test PASSED."
           }
-          }
           finally {
             if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
           }
@@ -173,6 +172,7 @@ jobs:
           if ($version -ne "v0.3.0 • Build $env:RYU_BUILD_NUMBER") {
             throw "Unexpected application version: $version"
           }
+
       - name: Build application
         shell: pwsh
         env:
