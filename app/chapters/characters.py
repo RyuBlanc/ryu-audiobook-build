@@ -83,6 +83,17 @@ def analyze_book(chapters: list[Chapter]) -> CharacterAnalysis:
     last_speaker: str | None = None
     assigned_dialogue = 0
 
+    manual_speakers = {
+        str(item.get("speaker", "")).strip()
+        for chapter in chapters
+        for item in getattr(chapter, "dialogue_assignments", [])
+        if str(item.get("speaker", "")).strip()
+    }
+    for speaker in manual_speakers:
+        if _is_plausible_name(speaker):
+            canonical.append(speaker)
+    canonical = sorted(set(canonical), key=str.casefold)
+
     for start, end, dialogue in spans:
         speaker, confidence = _speaker_near_quote(
             text, start, end, canonical, narrator_name, last_speaker
@@ -182,18 +193,27 @@ def _discover_candidates(text: str) -> set[str]:
             if _is_plausible_name(name):
                 candidates.add(name)
 
-    counts = Counter()
-    mid_sentence = Counter()
+    # Discover repeated proper-name tokens outside quoted dialogue too.
+    # Many novels introduce a character in narration long before the first
+    # explicit "Name said" tag. The previous detector missed these characters,
+    # which made speaker deduction look as if it was not trying.
+    quote_spans = _all_dialogue_spans(text)
     for match in re.finditer(NAME_TOKEN, text):
         token = _clean_name(match.group(0))
         if not _is_plausible_name(token):
+            continue
+        if any(start <= match.start() < end for start, end, _ in quote_spans):
             continue
         counts[token] += 1
         prefix = text[max(0, match.start() - 2):match.start()]
         if prefix and not re.search(r"[.!?。！？\n\r][\s\"“”]*$", prefix):
             mid_sentence[token] += 1
+
     for token, count in counts.items():
-        if count >= 4 and mid_sentence[token] >= 2:
+        # Two or more appearances in narrative text are enough to make the
+        # name a candidate; speaker assignment still requires stronger local
+        # evidence before it is considered high confidence.
+        if count >= 2 and mid_sentence[token] >= 1:
             candidates.add(token)
 
     for match in re.finditer(rf"\b({NAME_TOKEN}\s+{NAME_TOKEN})\b", text):
