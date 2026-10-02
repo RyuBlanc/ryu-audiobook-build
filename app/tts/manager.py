@@ -141,7 +141,17 @@ class GenerationManager:
                 completed += 1
                 completed_numbers.append(chapter.number)
                 generated_chapter_dirs.append(result.output_path)
-                self._emit(index + 1, len(self.chapters), 1, "chapter-complete")
+                overall_done = (
+                    self._chunk_offsets[index] + result.chunks_completed
+                    if index < len(self._chunk_offsets)
+                    else result.chunks_completed
+                )
+                self._emit(
+                    index + 1,
+                    len(self.chapters),
+                    overall_done,
+                    "chapter-complete",
+                )
             except Exception as exc:
                 self.failed.append(chapter.number)
                 self.failure_details[chapter.number] = str(exc)
@@ -164,6 +174,7 @@ class GenerationManager:
         final_output = None
         if not cancelled and not self.failed and completed == len(self.chapters) and output_path:
             try:
+                self._emit(len(self.chapters), len(self.chapters), self._total_chunks, "m4b-packaging")
                 cover = validate_cover(cover)
                 # Use the exact directories returned by chapter generation.
                 # Reconstructing them from chapter titles can diverge from
