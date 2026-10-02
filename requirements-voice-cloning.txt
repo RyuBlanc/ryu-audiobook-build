@@ -1,4 +1,5 @@
 # Optional custom voice runtime.
-# Kept separate from the base installer because this stack is substantially
-# larger than the application itself.
-chatterbox-tts>=0.1.7,<0.2
+# Pin to the official Chatterbox commit that contains Turbo/Nano voice cloning.
+# The PyPI release shares the same package version but older wheels may not
+# contain the current Turbo/Nano implementation used by Ryu's Audiobook.
+chatterbox-tts @ https://github.com/resemble-ai/chatterbox/archive/5de7a54aa4e5e2baadb0182dde554908b48b85c2.zip
