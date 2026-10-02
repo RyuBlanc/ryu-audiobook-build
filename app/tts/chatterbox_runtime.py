@@ -21,6 +21,7 @@ from app.core.paths import models_root
 RUNTIME_DIR = models_root() / "chatterbox-runtime"
 MARKER = RUNTIME_DIR / "runtime.json"
 PYTHON_311_URL = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
+CHATTERBOX_SOURCE_URL = "https://github.com/resemble-ai/chatterbox/archive/5de7a54aa4e5e2baadb0182dde554908b48b85c2.zip"
 
 
 def _venv_python() -> Path:
@@ -208,15 +209,43 @@ def install_runtime(progress: Callable[[str], None] | None = None) -> None:
     # Repair in-place, even when an older Chatterbox runtime already exists.
     # The Turbo/Nano API changed over time; a stale 0.1.7 environment can expose
     # ChatterboxTurboTTS.from_pretrained() without the nano= argument.
+    source_archive = RUNTIME_DIR / "chatterbox-source.zip"
     commands = [
         [str(python), "-m", "pip", "install", "--upgrade", "pip"],
         [str(python), "-m", "pip", "uninstall", "-y", "chatterbox-tts", "chatterbox"],
-        [
-            str(python), "-m", "pip", "install",
-            "--no-cache-dir", "--upgrade", "--force-reinstall",
-            "-r", str(requirements),
-        ],
+        [str(python), "-m", "pip", "install", "--no-cache-dir", "--upgrade", "--force-reinstall", "-r", str(requirements)],
     ]
+    # Install the official Chatterbox source without dependency resolution.
+    # This is deliberate: the upstream pyproject currently declares Perth as
+    # a git+https dependency, but PyPI publishes a normal wheel for the same
+    # package. End users should never need Git installed.
+    try:
+        if progress:
+            progress("Installing the offline Chatterbox voice engine…")
+        request = urllib.request.Request(
+            CHATTERBOX_SOURCE_URL,
+            headers={"User-Agent": "Ryu-Audiobook/1.1", "Accept": "application/zip"},
+        )
+        context = (
+            ssl.create_default_context(cafile=certifi.where())
+            if certifi is not None
+            else ssl.create_default_context()
+        )
+        with urllib.request.urlopen(request, timeout=180, context=context) as response, source_archive.open("wb") as handle:
+            while True:
+                block = response.read(1024 * 1024)
+                if not block:
+                    break
+                handle.write(block)
+        result = subprocess.run(
+            [str(python), "-m", "pip", "install", "--no-cache-dir", "--no-deps", str(source_archive)],
+            capture_output=True, text=True, timeout=1800,
+        )
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout).strip()[-5000:])
+    finally:
+        source_archive.unlink(missing_ok=True)
+
     if _has_nvidia():
         # Chatterbox 0.1.7 pins torch 2.6.0. Replace the default CPU wheel
         # with the official CUDA 12.4 wheels used by RTX 20/30/40-class GPUs.
