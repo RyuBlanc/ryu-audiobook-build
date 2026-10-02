@@ -16,6 +16,10 @@ class ChatterboxProvider(TTSProvider):
     """Local Chatterbox adapter with reference-audio voice cloning."""
 
     provider_id = "chatterbox"
+    # Chatterbox Turbo becomes unstable on long utterances in practice.
+    # Keep voice-cloning requests short enough for clean narration.
+    recommended_chunk_chars = 300
+    recommended_chunk_sentences = 1
 
     def __init__(
         self,
