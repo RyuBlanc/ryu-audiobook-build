@@ -16,17 +16,60 @@ from app.version import APP_VERSION
 
 BUILD_NUMBER = os.environ.get("RYU_BUILD_NUMBER", "dev")
 INSTALLER_VERSION_FILE = ROOT / "installer" / "version.generated.iss"
+VERSION_INFO_FILE = ROOT / "installer" / "version_info.generated.txt"
+
+def _numeric_version() -> tuple[int, int, int]:
+    parts = [int(part) for part in APP_VERSION.split(".")]
+    if len(parts) != 3:
+        raise RuntimeError(f"APP_VERSION must use MAJOR.MINOR.PATCH, got {APP_VERSION!r}")
+    return parts[0], parts[1], parts[2]
 
 def write_installer_version() -> None:
+    major, minor, patch = _numeric_version()
     numeric_build = BUILD_NUMBER if str(BUILD_NUMBER).isdigit() else "0"
+    version_text = f"{major}.{minor}.{patch}.{numeric_build}"
     INSTALLER_VERSION_FILE.write_text(
-        f"#define MyAppVersion \"{APP_VERSION}.{numeric_build}\"\n",
+        f"#define MyAppVersion \"{version_text}\"\n",
+        encoding="utf-8",
+    )
+    VERSION_INFO_FILE.write_text(
+        f'''VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=({major}, {minor}, {patch}, {numeric_build}),
+    prodvers=({major}, {minor}, {patch}, {numeric_build}),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+    ),
+  kids=[
+    StringFileInfo([
+      StringTable(
+        '040904B0',
+        [
+          StringStruct('CompanyName', 'RyuBlanc'),
+          StringStruct('FileDescription', "Ryu's Audiobook"),
+          StringStruct('FileVersion', '{version_text}'),
+          StringStruct('InternalName', "Ryu's Audiobook"),
+          StringStruct('OriginalFilename', "Ryu's Audiobook.exe"),
+          StringStruct('ProductName', "Ryu's Audiobook"),
+          StringStruct('ProductVersion', '{version_text}')
+        ]
+      )
+    ]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
+)
+''',
         encoding="utf-8",
     )
 
 ENTRY = ROOT / "run_app.py"
 HOOKS = ROOT / "hooks"
 BUNDLED_PIPER = ROOT / "bundled_models" / "piper"
+BUNDLED_KOKORO = ROOT / "bundled_models" / "kokoro"
 ASSETS = ROOT / "assets"
 LOGO_SVG = ASSETS / "ryu_audiobook_logo.svg"
 LOGO_PNG = ASSETS / "ryu_audiobook_logo.png"
@@ -107,6 +150,7 @@ args = [
     "--onedir",
     "--clean",
     "--noconfirm",
+    f"--version-file={VERSION_INFO_FILE}",
     "--collect-binaries=imageio_ffmpeg",
     "--collect-data=imageio_ffmpeg",
     "--collect-all=piper",
@@ -139,6 +183,17 @@ else:
     raise RuntimeError(
         "Bundled offline Piper voices are missing. "
         "The Windows workflow must download them before build.py runs."
+    )
+
+if BUNDLED_KOKORO.exists() and any(
+    (BUNDLED_KOKORO / name).exists()
+    for name in ("kokoro-v1.0.onnx", "kokoro-v1.0.fp16.onnx", "kokoro-v1.0.int8.onnx")
+) and (BUNDLED_KOKORO / "voices-v1.0.bin").exists():
+    args.append(f"--add-data={BUNDLED_KOKORO};bundled_models/kokoro")
+else:
+    raise RuntimeError(
+        "Bundled offline Kokoro Natural voices are missing. "
+        "The Windows workflow must download the Kokoro model and voice pack before build.py runs."
     )
 
 PyInstaller.__main__.run(args)
