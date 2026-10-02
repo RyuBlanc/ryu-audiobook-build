@@ -271,7 +271,6 @@ class AudiobookBrain:
                     common_context + '\nDo not guess a speaker. Keep dialogue.quote exact. Only include pronunciation terms that truly occur in this excerpt.',
                     max_tokens=1100,
                     temperature=0.05,
-                    response_schema=CORE_SCHEMA,
                 )
                 core_data = _json(core_raw)
             except (BrainRuntimeError, BrainUnavailableError) as exc:
@@ -289,7 +288,6 @@ class AudiobookBrain:
                     common_context + '\nReturn concise production-direction data, not story rewriting.',
                     max_tokens=700,
                     temperature=0.05,
-                    response_schema=SCENE_SCHEMA,
                 )
                 scene_data = _json(scene_raw)
                 self._merge(result, scene_data, seen, source_text=chunk)
