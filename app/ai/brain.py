@@ -7,6 +7,8 @@ import re
 from typing import Any, Callable
 
 from app.chapters.detector import Chapter
+from app.chapters.characters import analyze_chapter as deterministic_character_analysis
+from app.chapters.dialogue import dialogue_segments
 from app.tts.pronunciation_suggester import COMMON_ENGLISH_WORDS
 from .model_runtime import LocalLLM, BrainRuntimeError
 
@@ -87,6 +89,69 @@ ANALYSIS_SCHEMA = {
     "required": ["characters", "dialogue", "scenes", "pronunciation", "continuity_notes"]
 }
 
+CORE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "characters": {"type": "array", "maxItems": 8, "items": {"type": "object", "additionalProperties": False, "properties": {
+            "name": {"type": "string"},
+            "aliases": {"type": "array", "maxItems": 3, "items": {"type": "string"}},
+            "role": {"type": "string"},
+            "traits": {"type": "array", "maxItems": 4, "items": {"type": "string"}},
+            "voice_direction": {"type": "object", "additionalProperties": False, "properties": {
+                "age_impression": {"type": "string"},
+                "gender": {"type": "string"},
+                "tone": {"type": "string"},
+                "energy": {"type": "string"}
+            }, "required": ["age_impression", "gender", "tone", "energy"]},
+            "confidence": {"type": "number"}
+        }, "required": ["name", "aliases", "role", "traits", "voice_direction", "confidence"]}},
+        "dialogue": {"type": "array", "maxItems": 10, "items": {"type": "object", "additionalProperties": False, "properties": {
+            "quote": {"type": "string"},
+            "speaker": {"type": "string"},
+            "confidence": {"type": "number"},
+            "evidence": {"type": "string"}
+        }, "required": ["quote", "speaker", "confidence", "evidence"]}},
+        "pronunciation": {"type": "array", "maxItems": 6, "items": {"type": "object", "additionalProperties": False, "properties": {
+            "written": {"type": "string"},
+            "spoken": {"type": "string"},
+            "ipa": {"type": "string"},
+            "source_language": {"type": "string"},
+            "script": {"type": "string"},
+            "reason": {"type": "string"},
+            "confidence": {"type": "number"},
+            "alternatives": {"type": "array", "maxItems": 2, "items": {"type": "string"}}
+        }, "required": ["written", "spoken", "ipa", "source_language", "script", "reason", "confidence", "alternatives"]}}
+    },
+    "required": ["characters", "dialogue", "pronunciation"]
+}
+
+SCENE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "scenes": {"type": "array", "maxItems": 3, "items": {"type": "object", "additionalProperties": False, "properties": {
+            "summary": {"type": "string"},
+            "location": {"type": "string"},
+            "time": {"type": "string"},
+            "mood": {"type": "string"},
+            "narrator_direction": {"type": "object", "additionalProperties": False, "properties": {
+                "pace": {"type": "string"},
+                "energy": {"type": "string"},
+                "delivery": {"type": "string"}
+            }, "required": ["pace", "energy", "delivery"]},
+            "ambience": {"type": "array", "maxItems": 3, "items": {"type": "string"}},
+            "music": {"type": "object", "additionalProperties": False, "properties": {
+                "style": {"type": "string"},
+                "intensity": {"type": "number"}
+            }, "required": ["style", "intensity"]},
+            "sfx": {"type": "array", "maxItems": 4, "items": {"type": "string"}},
+            "confidence": {"type": "number"}
+        }, "required": ["summary", "location", "time", "mood", "narrator_direction", "ambience", "music", "sfx", "confidence"]}},
+        "continuity_notes": {"type": "array", "maxItems": 6, "items": {"type": "string"}}
+    },
+    "required": ["scenes", "continuity_notes"]
+}
 PROMPT = '''You are Ryu's Audiobook Director. Analyze the supplied novel excerpt only.
 Return JSON. Do not invent facts. Identify canonical characters and aliases, exact dialogue and likely speaker with confidence and evidence, scene boundaries, location, time, mood, narrator delivery, character delivery, pacing, pronunciation hints, ambience, music, SFX, and continuity notes.
 
@@ -192,51 +257,76 @@ class AudiobookBrain:
                 for item in (book_context or {}).get('characters', [])
                 if str(item.get('name', '')).strip()
             ]
-            user = (
-                'Known characters from earlier chapters (use only when the excerpt supports them): '
+            common_context = (
+                'Known characters from earlier chapters: '
                 + json.dumps(known_characters, ensure_ascii=False)
-                + '\nBook context: ' + json.dumps(book_context or {}, ensure_ascii=False)
                 + '\nChapter: ' + chapter.title
                 + f'\nExcerpt {idx}/{len(chunks)}:\n{chunk}'
-                + '\nKeep dialogue.quote exact. Never invent a speaker.'
-                + '\nPronunciation entries must be rare and useful: only names, foreign terms or fictional terms that truly occur in this excerpt and genuinely need a pronunciation change.'
-                + '\nReturn at most 20 dialogue items, 8 scenes, 12 pronunciation items and 20 characters.'
             )
             if progress:
-                progress(f"Analyzing chapter {chapter.number} • excerpt {idx}/{len(chunks)}")
+                progress(f'Analyzing chapter {chapter.number} • excerpt {idx}/{len(chunks)} • character/dialogue pass')
             try:
-                raw = self.llm.complete(
-                    PROMPT + '\nBe concise. Return only JSON matching the supplied schema.',
-                    user,
-                    max_tokens=1800,
-                    temperature=0.06,
-                    response_schema=ANALYSIS_SCHEMA,
+                core_raw = self.llm.complete(
+                    PROMPT + '\nFocus ONLY on characters, dialogue ownership and pronunciation. Return JSON only.',
+                    common_context + '\nDo not guess a speaker. Keep dialogue.quote exact. Only include pronunciation terms that truly occur in this excerpt.',
+                    max_tokens=1100,
+                    temperature=0.05,
+                    response_schema=CORE_SCHEMA,
                 )
-                data = _json(raw)
-            except BrainUnavailableError as first_error:
-                # Retry once without asking the model to produce a gigantic
-                # response. Structured output is preferred; this retry is a
-                # safety net for older local llama.cpp runtimes.
-                repaired = self.llm.complete(
-                    'Return only a compact valid JSON object matching the same audiobook analysis schema. '
-                    'Never use markdown. Do not invent facts.',
-                    raw[:10000] if 'raw' in locals() else str(first_error),
-                    max_tokens=1800,
-                    temperature=0.01,
-                    response_schema=ANALYSIS_SCHEMA,
+                core_data = _json(core_raw)
+            except (BrainRuntimeError, BrainUnavailableError) as exc:
+                core_data = self._fallback_core(chapter)
+                result.setdefault('warnings', []).append(
+                    f'AI core pass fallback for chapter {chapter.number}, excerpt {idx}: {exc}'
                 )
-                try:
-                    data = _json(repaired)
-                except BrainUnavailableError as second_error:
-                    raw_path = self.analysis_dir / f'chapter_{int(chapter.number):04d}_excerpt_{idx}.raw.txt'
-                    raw_path.write_text(str(raw if 'raw' in locals() else first_error), encoding='utf-8', errors='replace')
-                    raise BrainUnavailableError(
-                        f'Chapter {chapter.number}, excerpt {idx}: {second_error}. Raw output saved to {raw_path.name}.'
-                    ) from second_error
-            self._merge(result, data, seen, source_text=chunk)
+            self._merge(result, core_data, seen, source_text=chunk)
+
+            if progress:
+                progress(f'Analyzing chapter {chapter.number} • excerpt {idx}/{len(chunks)} • scene pass')
+            try:
+                scene_raw = self.llm.complete(
+                    PROMPT + '\nFocus ONLY on scene mood, narration direction, ambience, music, SFX and continuity. Return JSON only.',
+                    common_context + '\nReturn concise production-direction data, not story rewriting.',
+                    max_tokens=700,
+                    temperature=0.05,
+                    response_schema=SCENE_SCHEMA,
+                )
+                scene_data = _json(scene_raw)
+                self._merge(result, scene_data, seen, source_text=chunk)
+            except (BrainRuntimeError, BrainUnavailableError) as exc:
+                result.setdefault('warnings', []).append(
+                    f'AI scene pass skipped for chapter {chapter.number}, excerpt {idx}: {exc}'
+                )
             self._save_chapter(result)
         self._save_chapter(result)
         return result
+
+    def _fallback_core(self, chapter: Chapter) -> dict[str, Any]:
+        analysis = deterministic_character_analysis(chapter)
+        characters = []
+        for item in analysis.characters[:12]:
+            characters.append({
+                'name': item.name,
+                'aliases': list(item.aliases),
+                'role': item.role,
+                'traits': [],
+                'voice_direction': {'age_impression': '', 'gender': '', 'tone': '', 'energy': ''},
+                'confidence': float(item.confidence),
+            })
+        dialogue = []
+        try:
+            segments = dialogue_segments(chapter)
+            for segment in segments:
+                if segment.suggested_speaker:
+                    dialogue.append({
+                        'quote': segment.text,
+                        'speaker': segment.suggested_speaker,
+                        'confidence': float(segment.confidence),
+                        'evidence': 'Deterministic speaker analysis fallback.',
+                    })
+        except Exception:
+            pass
+        return {'characters': characters, 'dialogue': dialogue, 'pronunciation': []}
 
     def analyze_book(self, chapters: list[Chapter], progress: Callable[[float, str], None] | None = None) -> dict[str, Any]:
         bible = {}
