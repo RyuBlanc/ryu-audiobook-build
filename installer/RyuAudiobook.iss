@@ -3,7 +3,7 @@
 ; intentionally NOT removed by this installer or its uninstaller.
 
 #define MyAppName "Ryu's Audiobook"
-#define MyAppVersion "0.1.0"
+#include "version.generated.iss"
 #define MyAppPublisher "RyuBlanc"
 #define MyAppExeName "Ryu's Audiobook.exe"
 
