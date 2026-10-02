@@ -40,7 +40,19 @@ class CastAwareProvider(TTSProvider):
 
     @property
     def stop_on_failure(self) -> bool:
-        return bool(getattr(self.narrator_provider, "stop_on_failure", False))
+        if getattr(self.narrator_provider, "stop_on_failure", False):
+            return True
+        # A character voice provider failing mid-book should stop the run
+        # cleanly rather than burning time failing the same voice on every
+        # later chapter. Completed chunks remain resumable.
+        for profile in self.profiles.values():
+            if profile.provider in {"edge-tts", "chatterbox"}:
+                if profile.name.casefold() in self.assignments or any(
+                    value.casefold() == profile.name.casefold()
+                    for value in self.assignments.values()
+                ):
+                    return True
+        return False
 
     def voices(self) -> list[str]:
         return [self.narrator_voice] if self.narrator_voice else []
