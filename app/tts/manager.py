@@ -189,6 +189,7 @@ class GenerationManager:
                     cover,
                     [c.title for c in self.chapters],
                     metadata=metadata,
+                    progress=lambda done, total, message: self._package_progress(done, total, message),
                 )
                 self._emit(len(self.chapters), len(self.chapters), 1, "m4b-complete")
                 # Only delete intermediate files after the final M4B has been
@@ -218,6 +219,14 @@ class GenerationManager:
                 pass
         if self.on_finished:
             self.on_finished(summary)
+
+    def _package_progress(self, done: int, total: int, message: str) -> None:
+        self._emit(
+            len(self.chapters),
+            len(self.chapters),
+            self._total_chunks,
+            f"m4b-package:{done}/{max(1, total)}:{message}",
+        )
 
     def _clean_working_audio(self) -> None:
         if self.audio_root.exists():
