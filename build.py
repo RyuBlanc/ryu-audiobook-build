@@ -12,6 +12,18 @@ from PySide6.QtGui import QGuiApplication, QImage, QPainter
 from PySide6.QtSvg import QSvgRenderer
 
 ROOT = Path(__file__).resolve().parent
+from app.version import APP_VERSION
+
+BUILD_NUMBER = os.environ.get("RYU_BUILD_NUMBER", "dev")
+INSTALLER_VERSION_FILE = ROOT / "installer" / "version.generated.iss"
+
+def write_installer_version() -> None:
+    numeric_build = BUILD_NUMBER if str(BUILD_NUMBER).isdigit() else "0"
+    INSTALLER_VERSION_FILE.write_text(
+        f"#define MyAppVersion \"{APP_VERSION}.{numeric_build}\"\n",
+        encoding="utf-8",
+    )
+
 ENTRY = ROOT / "run_app.py"
 HOOKS = ROOT / "hooks"
 BUNDLED_PIPER = ROOT / "bundled_models" / "piper"
@@ -62,6 +74,7 @@ def build_logo_assets() -> None:
 
 
 build_logo_assets()
+write_installer_version()
 
 required_modules = [
     "app.ui.assembly_page",
@@ -75,6 +88,7 @@ required_modules = [
     "app.ui.character_review",
     "app.ai.brain",
     "app.ai.model_runtime",
+    "app.version",
     "app.tts.cast_provider",
     "app.tts.chatterbox_runtime",
     "app.tts.providers.kokoro",
