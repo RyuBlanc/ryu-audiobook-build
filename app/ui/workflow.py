@@ -198,7 +198,13 @@ class ProjectWorkflow(QMainWindow):
         if self.editor:
             self.stack.removeWidget(self.editor)
             self.editor.deleteLater()
-        self.editor = ChapterEditorPage(self.project.chapters, self.save_project, self.rename_project, self.redetect_chapters)
+        self.editor = ChapterEditorPage(
+            self.project.chapters,
+            self.save_project,
+            self.rename_project,
+            self.redetect_chapters,
+            self.project.folder,
+        )
         self.stack.addWidget(self.editor)
         self._editor_index = self.stack.indexOf(self.editor)
         self.select_section("Chapters")
