@@ -290,19 +290,38 @@ class AudiobookBrain:
 
             if progress:
                 progress(f'Analyzing chapter {chapter.number} • excerpt {idx}/{len(chunks)} • scene pass')
+            scene_prompt = (
+                'Analyze ONLY scene direction for an audiobook. Return one compact JSON object with keys: '
+                'scenes and continuity_notes. Each scene must have summary, location, time, mood, pace, '
+                'energy, delivery, ambience, music_style, music_intensity, sfx, confidence. '
+                'Use short phrases. Never include quotes inside values unless necessary. JSON only.'
+            )
+            scene_user = (
+                f'Chapter: {chapter.title}\nExcerpt:\n{chunk}\n'
+                'Do not retell the story. Do not invent facts. Keep this under 450 output tokens.'
+            )
             try:
                 scene_raw = self.llm.complete(
-                    PROMPT + '\nFocus ONLY on scene mood, narration direction, ambience, music, SFX and continuity. Return JSON only.',
-                    common_context + '\nReturn concise production-direction data, not story rewriting.',
-                    max_tokens=700,
-                    temperature=0.05,
+                    scene_prompt, scene_user, max_tokens=500, temperature=0.0
                 )
                 scene_data = _json(scene_raw)
-                self._merge(result, scene_data, seen, source_text=chunk)
-            except (BrainRuntimeError, BrainUnavailableError) as exc:
-                result.setdefault('warnings', []).append(
-                    f'AI scene pass skipped for chapter {chapter.number}, excerpt {idx}: {exc}'
-                )
+                self._merge_scenes(result, scene_data)
+            except (BrainRuntimeError, BrainUnavailableError) as first_error:
+                try:
+                    repair = self.llm.complete(
+                        'Return only compact valid JSON for audiobook scene direction. Keys: scenes, continuity_notes. '
+                        scene_user + '\nPrevious output was malformed. Produce valid JSON only.',
+                        max_tokens=450, temperature=0.0
+                    )
+                    scene_data = _json(repair)
+                    self._merge_scenes(result, scene_data)
+                except (BrainRuntimeError, BrainUnavailableError) as second_error:
+                    # Scene direction is advisory; deterministic character/dialogue/
+                    # pronunciation analysis remains authoritative. Keep the book usable
+                    # and surface the issue in the saved diagnostic instead of aborting.
+                    result.setdefault('warnings', []).append(
+                        f'AI scene pass skipped for chapter {chapter.number}, excerpt {idx}: {second_error}'
+                    )
             self._save_chapter(result)
         self._save_chapter(result)
         return result
@@ -376,6 +395,30 @@ class AudiobookBrain:
             start = max(end - self.config.overlap_chars, end)
         return out
 
+    def _merge_scenes(self, out: dict[str, Any], data: dict[str, Any]) -> None:
+        for raw in data.get('scenes', []) or []:
+            out['scenes'].append({
+                'summary': str(raw.get('summary', '')).strip(),
+                'location': str(raw.get('location', '')).strip(),
+                'time': str(raw.get('time', '')).strip(),
+                'mood': str(raw.get('mood', 'neutral')).strip() or 'neutral',
+                'narrator_direction': {
+                    'pace': str(raw.get('pace', 'natural')).strip() or 'natural',
+                    'energy': str(raw.get('energy', 'medium')).strip() or 'medium',
+                    'delivery': str(raw.get('delivery', '')).strip(),
+                },
+                'ambience': list(raw.get('ambience', []) or [])[:3],
+                'music': {
+                    'style': str(raw.get('music_style', '')).strip() or None,
+                    'intensity': float(raw.get('music_intensity', 0.0) or 0.0),
+                },
+                'sfx': list(raw.get('sfx', []) or [])[:4],
+                'confidence': float(raw.get('confidence', 0.0) or 0.0),
+            })
+        for note in data.get('continuity_notes', []) or []:
+            note = str(note).strip()
+            if note and note not in out['continuity_notes']:
+                out['continuity_notes'].append(note)
     def _merge(self, out: dict[str, Any], data: dict[str, Any], seen: set[str], source_text: str = '') -> None:
         for key in ('characters', 'scenes'):
             out[key].extend(data.get(key, []) or [])
