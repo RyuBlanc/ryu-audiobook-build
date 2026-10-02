@@ -24,7 +24,7 @@ LLAMA_RELEASE = "b11345"
 LLAMA_CUDA12_URL = f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_RELEASE}/llama-b11345-bin-win-cuda-12.4-x64.zip"
 LLAMA_CPU_URL = f"https://github.com/ggml-org/llama.cpp/releases/download/{LLAMA_RELEASE}/llama-b11345-bin-win-cpu-x64.zip"
 
-MODEL_1_7B_URL = "https://huggingface.co/Qwen/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q5_K_M.gguf"
+MODEL_1_7B_URL = "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/4102b64b54bf3f0ddb9408d83f42d5091e0a7b64/Qwen3-1.7B-Q5_K_M.gguf"
 MODEL_4B_URL = "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf"
 
 
@@ -59,7 +59,7 @@ def recommended_model() -> tuple[str, str, int]:
     vram = detect_nvidia_vram_gb()
     if vram >= 7.0:
         return "qwen3-4b-q4", "Qwen3-4B-Q4_K_M.gguf", 2_500_000_000
-    return "qwen3-1.7b-q5", "Qwen3-1.7B-Q5_K_M.gguf", 1_500_000_000
+    return "qwen3-1.7b-q5", "Qwen3-1.7B-Q5_K_M.gguf", 1_260_000_000
 
 
 def model_path(model_id: str | None = None) -> Path:
