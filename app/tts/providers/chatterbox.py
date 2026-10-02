@@ -4,6 +4,9 @@ import os
 import subprocess
 import sys
 import tempfile
+import queue
+import threading
+import time
 
 from ..base import TTSProvider
 from ..chatterbox_runtime import runtime_ready, runtime_python, runtime_environment, worker_script
@@ -36,6 +39,9 @@ class ChatterboxProvider(TTSProvider):
         self._conditioned_reference: str | None = None
         self._conditioned_exaggeration: float | None = None
         self._worker: subprocess.Popen | None = None
+        self._worker_log = None
+        self._stdout_queue: queue.Queue[str | None] | None = None
+        self._stdout_thread: threading.Thread | None = None
 
     def voices(self) -> list[str]:
         return [self.reference_audio.stem] if self.reference_audio and self.reference_audio.exists() else []
@@ -79,75 +85,99 @@ class ChatterboxProvider(TTSProvider):
             )
 
         requested_variant = (variant or "auto").lower()
+        log_path = Path.home() / "Ryu's Audiobook" / "Settings" / "chatterbox_worker.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        def spawn(selected_variant: str):
-            command = [
-                str(python), str(worker_script()),
-                "--server",
-                "--backend", self.backend,
-                "--language", self.language or "en",
-                "--variant", selected_variant,
-            ]
-            if self.multilingual:
-                command.append("--multilingual")
-            self._worker = subprocess.Popen(
-                command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
-                env=runtime_environment(),
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
-                if sys.platform == "win32" else 0,
-            )
+        command = [
+            str(python), str(worker_script()),
+            "--server",
+            "--backend", self.backend,
+            "--language", self.language or "en",
+            "--variant", requested_variant,
+        ]
+        if self.multilingual:
+            command.append("--multilingual")
 
-        def read_ready() -> tuple[dict, str]:
-            try:
-                ready_line = self._worker.stdout.readline() if self._worker and self._worker.stdout else ""
-                if not ready_line:
-                    raise RuntimeError("The custom voice worker stopped before becoming ready.")
-                ready = json.loads(ready_line)
-                if not ready.get("ready"):
-                    raise RuntimeError("The custom voice worker did not report ready.")
-                return ready, ""
-            except Exception as exc:
-                detail = ""
-                try:
-                    if self._worker and self._worker.stderr:
-                        detail = self._worker.stderr.read().strip()[-3000:]
-                except Exception:
-                    pass
-                return {}, detail or str(exc)
+        # Never pipe stderr without draining it. Chatterbox writes model
+        # loading/progress diagnostics there; an undrained pipe can fill and
+        # deadlock the worker, which previously made the app appear frozen.
+        self._worker_log = log_path.open("a", encoding="utf-8", errors="replace")
+        self._worker = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=self._worker_log,
+            text=True,
+            bufsize=1,
+            env=runtime_environment(),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            if sys.platform == "win32" else 0,
+        )
+        self._stdout_queue = queue.Queue()
+        self._stdout_thread = threading.Thread(
+            target=self._drain_worker_stdout,
+            name="RyuChatterboxStdout",
+            daemon=True,
+        )
+        self._stdout_thread.start()
 
-        spawn(requested_variant)
-        ready, detail = read_ready()
+        ready, detail = self._read_worker_response(timeout=180.0)
         if ready:
             return
 
-        self.close()
         paging_error = (
             "1455" in detail
             or "paging file is too small" in detail.lower()
             or "os error 1455" in detail.lower()
             or "winerror 1455" in detail.lower()
         )
-        if paging_error and not self.multilingual and requested_variant != "nano":
-            # The base model can exceed the Windows commit limit on small
-            # RAM/pagefile systems. Relaunch from a clean process with the
-            # official Chatterbox Nano voice-cloning model.
-            spawn("nano")
-            ready, nano_detail = read_ready()
-            if ready:
-                return
-            self.close()
-            detail = nano_detail or detail
-            raise RuntimeError(
-                "The custom voice worker could not start even in low-memory mode. "
-                + detail
-            )
+        self.close()
 
-        raise RuntimeError(f"The custom voice worker could not start. {detail}")
+        if paging_error and not self.multilingual and requested_variant != "nano":
+            # Relaunch once in explicit low-memory mode. The worker chooses
+            # the Nano Chatterbox model without loading the larger base model.
+            self._start_external_worker("nano")
+            return
+
+        raise RuntimeError(
+            "The custom voice worker could not become ready within 3 minutes. "
+            + (detail or "Check the custom voice engine log for details.")
+        )
+
+    def _drain_worker_stdout(self) -> None:
+        stdout = self._worker.stdout if self._worker is not None else None
+        q = self._stdout_queue
+        if stdout is None or q is None:
+            return
+        try:
+            for line in iter(stdout.readline, ""):
+                q.put(line.rstrip("\r\n"))
+        finally:
+            q.put(None)
+
+    def _read_worker_response(self, timeout: float) -> tuple[dict, str]:
+        q = self._stdout_queue
+        worker = self._worker
+        if q is None:
+            return {}, "Custom voice worker output channel was not initialized."
+        try:
+            line = q.get(timeout=timeout)
+        except queue.Empty:
+            return {}, "Timed out waiting for the custom voice worker."
+        if line is None:
+            detail = ""
+            if worker is not None:
+                detail = f"Worker exited with code {worker.poll()}."
+            return {}, detail
+        try:
+            value = json.loads(line)
+            if isinstance(value, dict):
+                if value.get("ready") or value.get("ok"):
+                    return value, ""
+                return {}, str(value.get("error") or "The custom voice worker returned an error.")
+            return {}, "The custom voice worker returned an invalid response."
+        except json.JSONDecodeError:
+            return {}, f"Unexpected custom voice worker output: {line[-1000:]}"
 
     def _synthesize_external(self, text: str, output_path: Path) -> Path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -158,8 +188,9 @@ class ChatterboxProvider(TTSProvider):
             raise RuntimeError(f"Reference voice file is missing: {reference}")
 
         self._start_external_worker()
-        if not self._worker or not self._worker.stdin or not self._worker.stdout:
+        if not self._worker or not self._worker.stdin:
             raise RuntimeError("The custom voice worker is unavailable.")
+
         request = {
             "text": text,
             "output": str(output_path.resolve()),
@@ -173,16 +204,13 @@ class ChatterboxProvider(TTSProvider):
         try:
             self._worker.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
             self._worker.stdin.flush()
-            line = self._worker.stdout.readline()
-            if not line:
-                raise RuntimeError("The custom voice worker stopped during generation.")
-            response = json.loads(line)
+            response, detail = self._read_worker_response(timeout=300.0)
             if not response.get("ok"):
                 raise RuntimeError(
-                    "Custom voice generation failed. " +
-                    str(response.get("error") or "The Chatterbox runtime returned an unknown error.")
+                    "Custom voice generation failed. "
+                    + (detail or "The Chatterbox worker returned no usable audio.")
                 )
-        except (BrokenPipeError, OSError, json.JSONDecodeError) as exc:
+        except (BrokenPipeError, OSError) as exc:
             self.close()
             raise RuntimeError(f"Custom voice worker communication failed: {exc}") from exc
 
@@ -228,18 +256,34 @@ class ChatterboxProvider(TTSProvider):
         return output_path
 
     def close(self) -> None:
-        if self._worker is not None:
+        worker = self._worker
+        self._worker = None
+        self._stdout_queue = None
+        self._stdout_thread = None
+        if worker is not None:
             try:
-                if self._worker.stdin:
-                    self._worker.stdin.close()
+                if worker.stdin:
+                    worker.stdin.close()
             except OSError:
                 pass
             try:
-                self._worker.terminate()
-                self._worker.wait(timeout=5)
+                if worker.poll() is None:
+                    worker.terminate()
+                    worker.wait(timeout=5)
             except Exception:
                 try:
-                    self._worker.kill()
+                    worker.kill()
                 except Exception:
                     pass
-            self._worker = None
+            try:
+                if worker.stdout:
+                    worker.stdout.close()
+            except OSError:
+                pass
+        if self._worker_log is not None:
+            try:
+                self._worker_log.flush()
+                self._worker_log.close()
+            except OSError:
+                pass
+            self._worker_log = None
