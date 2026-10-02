@@ -52,6 +52,89 @@ jobs:
           python -c "from pathlib import Path; import os, inspect, app; p=Path('app/chapters/characters.py'); raw=p.read_text(encoding='utf-8'); print('FILE HAS DASH COMMENT=' + str('dash-only line' in raw)); import app.chapters.characters as m; print('TEST CWD=' + os.getcwd()); print('PYTHONPATH=' + os.environ.get('PYTHONPATH','')); print('APP MODULE=' + str(getattr(app,'__file__',None))); print('APP SPEC=' + str(app.__spec__)); print('CHARACTERS MODULE=' + m.__file__); print('CHARACTERS LOADER=' + str(m.__loader__)); print('CHARACTERS CACHED=' + str(getattr(m,'__cached__',None))); print('DASH PARSER=' + str('dash-only line' in inspect.getsource(m._all_dialogue_spans))); print('DIRECT FILE FUNCTION=' + str('dash-only line' in raw[raw.find('def _all_dialogue_spans'):raw.find('def _clean_name')]))"
           python -B -m unittest discover -s tests -v
 
+      - name: Real Audiobook AI smoke test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $root = Join-Path $env:RUNNER_TEMP "ryu-ai-smoke"
+          $bin = Join-Path $root "llama"
+          $model = Join-Path $root "Qwen3-1.7B-Q5_K_M.gguf"
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+
+          $llamaZip = Join-Path $root "llama.zip"
+          if (-not (Test-Path $bin)) {
+            New-Item -ItemType Directory -Force -Path $bin | Out-Null
+            curl.exe -L --fail --retry 3 -o $llamaZip "https://github.com/ggml-org/llama.cpp/releases/download/b11193/llama-b11193-bin-win-cpu-x64.zip"
+            Expand-Archive -Force $llamaZip $bin
+          }
+          $server = Get-ChildItem $bin -Recurse -Filter "llama-server.exe" | Select-Object -First 1
+          if (-not $server) { throw "llama-server.exe was not found in the smoke-test runtime." }
+
+          if (-not (Test-Path $model)) {
+            curl.exe -L --fail --retry 3 -o "$model.part" "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/4102b64b54bf3f0ddb9408d83f42d5091e0a7b64/Qwen3-1.7B-Q5_K_M.gguf?download=true"
+            Move-Item -Force "$model.part" $model
+          }
+
+          $log = Join-Path $root "llama.log"
+          $proc = Start-Process -FilePath $server.FullName -ArgumentList @(
+            "-m", $model,
+            "--host", "127.0.0.1",
+            "--port", "18765",
+            "--ctx-size", "4096",
+            "--threads", "4",
+            "--no-webui",
+            "--reasoning", "off",
+            "--reasoning-format", "none"
+          ) -RedirectStandardOutput $log -RedirectStandardError $log -PassThru -WindowStyle Hidden
+
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 120; $i++) {
+              if ($proc.HasExited) { throw "llama-server exited before becoming ready. Log: $log" }
+              try {
+                $health = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:18765/health" -TimeoutSec 2
+                if ($health.StatusCode -eq 200) { $ready = $true; break }
+              } catch {}
+              Start-Sleep -Seconds 1
+            }
+            if (-not $ready) { throw "llama-server did not become ready within 120 seconds." }
+
+            $body = @{
+              messages = @(
+                @{ role = "system"; content = "You are the Ryu's Audiobook AI self-test. Return only JSON." },
+                @{ role = "user"; content = "Return ok=true and message=ready." }
+              )
+              temperature = 0.0
+              top_p = 0.8
+              max_tokens = 80
+              stream = $false
+              response_format = @{
+                type = "json_object"
+                schema = @{
+                  type = "object"
+                  additionalProperties = $false
+                  properties = @{
+                    ok = @{ type = "boolean" }
+                    message = @{ type = "string" }
+                  }
+                  required = @("ok", "message")
+                }
+              }
+              chat_template_kwargs = @{ enable_thinking = $false }
+            } | ConvertTo-Json -Depth 20
+
+            $response = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:18765/v1/chat/completions" -ContentType "application/json" -Body $body
+            $content = [string]$response.choices[0].message.content
+            $obj = $content | ConvertFrom-Json
+            if (-not $obj.ok -or $obj.message -ne "ready") {
+              throw "Audiobook AI returned unexpected self-test JSON: $content"
+            }
+            Write-Host "Real Audiobook AI smoke test PASSED."
+          }
+          finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          }
+
       - name: Download built-in offline neural voices
         shell: pwsh
         run: |
