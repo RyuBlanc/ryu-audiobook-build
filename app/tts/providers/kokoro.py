@@ -93,12 +93,37 @@ class KokoroProvider(TTSProvider):
                 "and voices-v1.0.bin to the app's Models\\kokoro folder."
             )
         try:
-            from kokoro_onnx import Kokoro
+            from kokoro_onnx import EspeakConfig, Kokoro
         except ImportError as exc:
             raise RuntimeError(
                 "Kokoro runtime is not installed. Install the application's optional Kokoro runtime first."
             ) from exc
-        self._runtime = Kokoro(str(self.model_path), str(self.voices_path))
+
+        espeak_config = None
+        try:
+            import espeakng_loader
+            data_path = Path(espeakng_loader.get_data_path())
+            lib_path = Path(espeakng_loader.get_library_path())
+            if not data_path.exists():
+                raise RuntimeError(f"Kokoro eSpeak data is missing at {data_path}")
+            if not lib_path.exists():
+                raise RuntimeError(f"Kokoro eSpeak library is missing at {lib_path}")
+            espeak_config = EspeakConfig(
+                lib_path=str(lib_path),
+                data_path=str(data_path),
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "Kokoro's offline phonemizer data is not installed correctly. "
+                "Repair/reinstall Natural Voices and restart Ryu's Audiobook. "
+                f"Details: {exc}"
+            ) from exc
+
+        self._runtime = Kokoro(
+            str(self.model_path),
+            str(self.voices_path),
+            espeak_config=espeak_config,
+        )
         return self._runtime
 
     @staticmethod
