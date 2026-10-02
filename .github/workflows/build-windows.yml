@@ -75,7 +75,8 @@ jobs:
             Move-Item -Force "$model.part" $model
           }
 
-          $log = Join-Path $root "llama.log"
+          $stdoutLog = Join-Path $root "llama.stdout.log"
+          $stderrLog = Join-Path $root "llama.stderr.log"
           $proc = Start-Process -FilePath $server.FullName -ArgumentList @(
             "-m", $model,
             "--host", "127.0.0.1",
@@ -85,12 +86,12 @@ jobs:
             "--no-webui",
             "--reasoning", "off",
             "--reasoning-format", "none"
-          ) -RedirectStandardOutput $log -RedirectStandardError $log -PassThru -WindowStyle Hidden
+          ) -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru -WindowStyle Hidden
 
           try {
             $ready = $false
             for ($i = 0; $i -lt 120; $i++) {
-              if ($proc.HasExited) { throw "llama-server exited before becoming ready. Log: $log" }
+              if ($proc.HasExited) { throw "llama-server exited before becoming ready. Logs: $stdoutLog / $stderrLog" }
               try {
                 $health = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:18765/health" -TimeoutSec 2
                 if ($health.StatusCode -eq 200) { $ready = $true; break }
