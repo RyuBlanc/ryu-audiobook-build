@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   actions: write
 
 jobs:
@@ -139,8 +139,42 @@ jobs:
         shell: pwsh
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer\RyuAudiobook.iss"
+          $installer = "installer\installer-output\Ryu's Audiobook Setup.exe"
+          if (-not (Test-Path $installer)) {
+            throw "Installer was not produced: $installer"
+          }
+          $size = (Get-Item $installer).Length
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash
+          Write-Host "Installer size: $size bytes"
+          Write-Host "Installer SHA256: $hash"
 
-      - name: Remove old workflow artifacts before upload
+      - name: Publish Windows installer as GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = "${{ github.repository }}"
+          $tag = "build-${{ github.run_number }}"
+          $installer = "installer\installer-output\Ryu's Audiobook Setup.exe"
+          $title = "Ryu's Audiobook Build #${{ github.run_number }}"
+          $notes = @"
+          Automated Windows installer for Ryu's Audiobook.
+
+          Commit: ${{ github.sha }}
+          Build: #${{ github.run_number }}
+          This is a prerelease build for testing.
+          "@
+
+          gh release view $tag --repo $repo *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $installer --repo $repo --clobber
+          } else {
+            gh release create $tag $installer --repo $repo --title $title --notes $notes --prerelease --target "${{ github.sha }}"
+          }
+
+          Write-Host "Published installer to GitHub Release: $tag"
+
+      - name: Clean old workflow artifacts
         if: always()
         shell: pwsh
         env:
@@ -154,32 +188,13 @@ jobs:
           }
           $response = Invoke-RestMethod -Method Get -Uri "https://api.github.com/repos/$repo/actions/artifacts?per_page=100" -Headers $headers
           foreach ($artifact in @($response.artifacts)) {
-            Write-Host "Deleting old artifact $($artifact.name) ($($artifact.id))"
+            Write-Host "Deleting old workflow artifact $($artifact.name) ($($artifact.id))"
             try {
               Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$repo/actions/artifacts/$($artifact.id)" -Headers $headers
             } catch {
               Write-Warning "Could not delete artifact $($artifact.id): $($_.Exception.Message)"
             }
           }
-
-      - name: Upload Windows installer
-        id: upload-installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ryu-Audiobook-Setup-${{ github.sha }}
-          path: "installer/installer-output/Ryu's Audiobook Setup.exe"
-          if-no-files-found: error
-          retention-days: 7
-          overwrite: true
-
-      - name: Report installer artifact status
-        if: always()
-        shell: pwsh
-        run: |
-          if ('${{ steps.upload-installer.outcome }}' -ne 'success') {
-            throw "Windows installer was built, but GitHub artifact upload failed. Check Actions artifact storage/quota."
-          }
-          Write-Host "Windows installer artifact uploaded successfully."
 
       - name: Clean old workflow runs
         if: always()
