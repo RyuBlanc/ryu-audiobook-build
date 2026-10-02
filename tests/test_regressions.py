@@ -5,6 +5,7 @@ import subprocess
 import inspect
 import sys
 import wave
+import json
 
 # Always import the application package from this checkout, not an identically
 # named package that may be present in the CI Python environment.
@@ -72,6 +73,24 @@ class RegressionTests(unittest.TestCase):
         from PySide6.QtCore import QThread
         from app.ui.generation_page import VoicePreviewWorker
         self.assertTrue(issubclass(VoicePreviewWorker, QThread))
+
+    def test_chatterbox_runtime_rejects_stale_marker(self):
+        import tempfile
+        from unittest.mock import patch
+        import app.tts.chatterbox_runtime as runtime
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            marker = root / "runtime.json"
+            marker.write_text(json.dumps({
+                "provider": "chatterbox",
+                "ready": True,
+                "source_revision": "old-revision",
+                "nano_supported": True,
+            }), encoding="utf-8")
+            with patch.object(runtime, "MARKER", marker), \
+                 patch.object(runtime, "runtime_python", return_value=Path(sys.executable)):
+                self.assertFalse(runtime.runtime_ready())
 
     def test_generation_page_exposes_custom_runtime_check(self):
         import app.ui.generation_page as generation_page
