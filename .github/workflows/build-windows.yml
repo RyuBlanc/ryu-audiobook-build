@@ -108,26 +108,13 @@ jobs:
 
             $body = @{
               messages = @(
-                @{ role = "system"; content = "You are the Ryu's Audiobook AI self-test. Return only JSON." },
-                @{ role = "user"; content = "Return ok=true and message=ready." }
+                @{ role = "system"; content = "You are the Ryu's Audiobook AI self-test. Return only one valid JSON object. Do not think. Do not use markdown." },
+                @{ role = "user"; content = "/no_think Return {\"ok\":true,\"message\":\"ready\"}. Do not add any other text." }
               )
-              temperature = 0.0
+              temperature = 0.2
               top_p = 0.8
               max_tokens = 80
               stream = $false
-              response_format = @{
-                type = "json_object"
-                schema = @{
-                  type = "object"
-                  additionalProperties = $false
-                  properties = @{
-                    ok = @{ type = "boolean" }
-                    message = @{ type = "string" }
-                  }
-                  required = @("ok", "message")
-                }
-              }
-              chat_template_kwargs = @{ enable_thinking = $false }
             } | ConvertTo-Json -Depth 20
 
             $response = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:18765/v1/chat/completions" -ContentType "application/json" -Body $body
