@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
     QWidget,
+    QProgressBar,
     QInputDialog,
     QSizePolicy,
 )
@@ -27,7 +28,7 @@ from app.ai.brain import AudiobookBrain
 class AudiobookAIWorker(QThread):
     finished_ok = Signal(object)
     failed = Signal(str)
-    progress = Signal(str)
+    progress = Signal(float, str)
 
     def __init__(self, project_folder, chapters):
         super().__init__()
@@ -38,8 +39,8 @@ class AudiobookAIWorker(QThread):
         brain = None
         try:
             brain = AudiobookBrain(self.project_folder)
-            def update(done, total, title):
-                self.progress.emit(f"AI analyzing chapter {done}/{total} • {title}")
+            def update(fraction, message):
+                self.progress.emit(float(fraction), message)
             self.finished_ok.emit(brain.analyze_book(self.chapters, progress=update))
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -60,6 +61,11 @@ class ChapterEditorPage(QWidget):
         self.on_redetect = on_redetect
         self.project_folder = project_folder
         self.ai_worker: AudiobookAIWorker | None = None
+        self.ai_started_at: float | None = None
+        self.ai_last_fraction = 0.0
+        self.ai_stats_timer = QTimer(self)
+        self.ai_stats_timer.setInterval(1000)
+        self.ai_stats_timer.timeout.connect(self._update_ai_stats)
         self.list = QListWidget()
         self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.title = QTextEdit()
@@ -123,6 +129,19 @@ class ChapterEditorPage(QWidget):
         editor_layout.addWidget(self.text, 1)
         body.addLayout(editor_layout, 3)
         root.addLayout(body, 1)
+
+        ai_status = QVBoxLayout()
+        self.ai_status_label = QLabel("Audiobook AI: idle")
+        self.ai_progress = QProgressBar()
+        self.ai_progress.setRange(0, 100)
+        self.ai_progress.setValue(0)
+        self.ai_eta_label = QLabel("")
+        self.ai_eta_label.setStyleSheet("color:#9aa0a6;")
+        ai_status.addWidget(self.ai_status_label)
+        ai_status.addWidget(self.ai_progress)
+        ai_status.addWidget(self.ai_eta_label)
+        root.addLayout(ai_status)
+
         self.list.currentRowChanged.connect(self.load_selected)
         self.title.textChanged.connect(self._schedule_autosave)
         self.text.textChanged.connect(self._schedule_autosave)
@@ -235,6 +254,13 @@ class ChapterEditorPage(QWidget):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
+        import time
+        self.ai_started_at = time.monotonic()
+        self.ai_last_fraction = 0.0
+        self.ai_progress.setValue(0)
+        self.ai_status_label.setText("Starting local Audiobook AI…")
+        self.ai_eta_label.setText("Elapsed: 0:00 • Estimated remaining: calculating…")
+        self.ai_stats_timer.start()
         self._set_editor_busy(True)
         self.ai_worker = AudiobookAIWorker(self.project_folder, self.editor.chapters)
         self.ai_worker.progress.connect(self._ai_progress)
@@ -244,15 +270,42 @@ class ChapterEditorPage(QWidget):
         self.ai_worker.start()
 
     def _set_editor_busy(self, busy: bool) -> None:
+        # Keep the overall application responsive: only the chapter editing
+        # controls are locked while the local model is analyzing.
         self.text.setEnabled(not busy)
         self.title.setEnabled(not busy)
         self.list.setEnabled(not busy)
 
-    def _ai_progress(self, message: str) -> None:
-        self.save_status.setText(message)
+    def _ai_progress(self, fraction: float, message: str) -> None:
+        self.ai_last_fraction = max(0.0, min(1.0, float(fraction)))
+        self.ai_progress.setValue(int(round(self.ai_last_fraction * 100)))
+        self.ai_status_label.setText(message)
+        self._update_ai_stats()
+
+    def _update_ai_stats(self) -> None:
+        started = self.ai_started_at
+        if started is None or not (self.ai_worker and self.ai_worker.isRunning()):
+            return
+        import time
+        elapsed = max(0.0, time.monotonic() - started)
+        fraction = self.ai_last_fraction
+        if fraction > 0.01:
+            remaining = max(0, int(elapsed * (1.0 - fraction) / fraction))
+            self.ai_eta_label.setText(
+                f"Elapsed: {int(elapsed) // 60}:{int(elapsed) % 60:02d} • "
+                f"Estimated remaining: {remaining // 60}:{remaining % 60:02d}"
+            )
+        else:
+            self.ai_eta_label.setText(
+                f"Elapsed: {int(elapsed) // 60}:{int(elapsed) % 60:02d} • "
+                "Estimated remaining: calculating…"
+            )
 
     def _ai_failed(self, message: str) -> None:
+        self.ai_stats_timer.stop()
         self._set_editor_busy(False)
+        self.ai_status_label.setText("Audiobook AI: failed")
+        self.ai_eta_label.setText("The chapter text was not changed. You can retry the analysis.")
         QMessageBox.warning(self, "Audiobook AI Failed", message)
         self.save_status.setText("AI analysis failed — your chapter text is unchanged.")
 
@@ -299,6 +352,16 @@ class ChapterEditorPage(QWidget):
                     "evidence": str(item.get("evidence", "")),
                 })
                 assignments_added += 1
+        self.ai_stats_timer.stop()
+        self.ai_last_fraction = 1.0
+        self.ai_progress.setValue(100)
+        self.ai_status_label.setText("Audiobook AI: analysis complete")
+        import time
+        elapsed = int(max(0.0, time.monotonic() - (self.ai_started_at or time.monotonic())))
+        self.ai_eta_label.setText(
+            f"Elapsed: {elapsed // 60}:{elapsed % 60:02d} • "
+            f"High-confidence dialogue assignments: {assignments_added}"
+        )
         self._set_editor_busy(False)
         self.refresh(self.list.currentRow())
         self._save_silently()
@@ -308,6 +371,7 @@ class ChapterEditorPage(QWidget):
 
     def _ai_worker_finished(self) -> None:
         self.ai_worker = None
+        self.ai_started_at = None
 
     def assign_selected_dialogue(self) -> None:
         self.commit_current()
