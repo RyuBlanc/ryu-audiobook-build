@@ -26,6 +26,15 @@ class AudiobookBrainTests(unittest.TestCase):
     def test_model_path_has_local_models_root(self):
         self.assertIn("audiobook-ai", str(model_path()))
 
+    def test_model_runtime_exports_shared_environment(self):
+        env = runtime_environment()
+        self.assertIn("HF_HOME", env)
+        self.assertTrue(env["HF_HOME"])
+
+    def test_release_version_is_current_bugfix_line(self):
+        from app.version import APP_VERSION
+        self.assertEqual(APP_VERSION, "0.3.1")
+
     def test_model_runtime_exposes_shared_environment(self):
         env = runtime_environment()
         self.assertIsInstance(env, dict)
