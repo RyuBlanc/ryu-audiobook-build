@@ -286,7 +286,7 @@ def self_test() -> str:
         }
         raw = llm.complete(
             "You are the Ryu's Audiobook AI self-test. Return only JSON.",
-            "Return {"ok":true,"message":"ready"}. Do not add any other text.",
+            'Return {"ok":true,"message":"ready"}. Do not add any other text.',
             max_tokens=80,
             temperature=0.0,
             response_schema=schema,
