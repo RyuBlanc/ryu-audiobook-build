@@ -300,7 +300,7 @@ Rias Gremory
 
             def synthesize(self, text, output_path, voice=None):
                 self.calls += 1
-                _write_wav(output_path, 0.05)
+                _write_wav(output_path, 0.20)
                 return output_path
 
         with tempfile.TemporaryDirectory() as temp:
