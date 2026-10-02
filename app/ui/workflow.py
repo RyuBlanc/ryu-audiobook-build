@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.chapters.detector import Chapter, detect_chapters
+from app.version import full_version
 from app.core.project import Project, create_project
 from app.core.state import load_state, save_state
 from app.documents.parser import extract_text
@@ -53,7 +54,7 @@ class ProjectWorkflow(QMainWindow):
         brand = QLabel("RYU'S AUDIOBOOK")
         brand.setObjectName("brand")
         brand_col.addWidget(brand)
-        subtitle = QLabel("Local audiobook studio")
+        subtitle = QLabel(f"Local audiobook studio • {full_version()}")
         subtitle.setObjectName("muted")
         brand_col.addWidget(subtitle)
         header.addLayout(brand_col)
