@@ -119,8 +119,21 @@ jobs:
 
             $response = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:18765/v1/chat/completions" -ContentType "application/json" -Body $body
             $content = [string]$response.choices[0].message.content
-            $obj = $content | ConvertFrom-Json
-            if (-not $obj.ok -or $obj.message -ne "ready") {
+            Write-Host "Audiobook AI raw self-test response:"
+            Write-Host $content
+            # Match the application parser: ignore an optional reasoning block
+            # or markdown fence and validate the JSON object itself.
+            $clean = $content -replace '(?s)<think>.*?</think>', ''
+            $clean = $clean -replace '^\s*```(?:json)?\s*', ''
+            $clean = $clean -replace '\s*```\s*$', ''
+            $start = $clean.IndexOf('{')
+            $end = $clean.LastIndexOf('}')
+            if ($start -lt 0 -or $end -le $start) {
+              throw "Audiobook AI returned no JSON object: $content"
+            }
+            $jsonText = $clean.Substring($start, $end - $start + 1)
+            $obj = $jsonText | ConvertFrom-Json
+            if (-not $obj.ok -or $obj.message -ne 'ready') {
               throw "Audiobook AI returned unexpected self-test JSON: $content"
             }
             Write-Host "Real Audiobook AI smoke test PASSED."
