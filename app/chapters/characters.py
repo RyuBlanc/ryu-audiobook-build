@@ -92,6 +92,16 @@ def analyze_book(chapters: list[Chapter]) -> CharacterAnalysis:
     for speaker in manual_speakers:
         if _is_plausible_name(speaker):
             canonical.append(speaker)
+            key = speaker.casefold()
+            if key not in records:
+                records[key] = Character(
+                    name=speaker,
+                    role="Manually Assigned Character",
+                    dialogue_count=0,
+                    confidence=1.0,
+                )
+            records[key].confidence = max(records[key].confidence, 1.0)
+            records[key].role = "Manually Assigned Character"
     canonical = sorted(set(canonical), key=str.casefold)
 
     for start, end, dialogue in spans:
