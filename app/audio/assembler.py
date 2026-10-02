@@ -89,6 +89,7 @@ def assemble_m4b(
     cover: Path | None = None,
     chapter_titles: list[str] | None = None,
     metadata: dict[str, str] | None = None,
+    progress=None,
 ) -> Path:
     """Create one M4B containing all chapters, navigation markers, metadata and cover."""
     if not chapter_dirs:
@@ -172,20 +173,22 @@ def assemble_m4b(
             start = end
         metadata_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-        # First make one stable AAC audio stream. Then mux metadata/chapters
-        # and cover in a separate pass. Keeping concat and MP4 chapter/cover
-        # muxing separate makes failures much easier to diagnose and avoids
-        # fragile multi-input timestamp interactions.
+        # Chapter files already share the same AAC parameters. Join them
+        # without re-encoding the whole audiobook. This is important for
+        # multi-hour books because final packaging should not perform another
+        # full-length audio encode.
         audio_only = temp_dir / "audiobook-audio.m4a"
         _run([
             "-f", "concat", "-safe", "0", "-i", str(concat),
-            "-vn", "-c:a", "aac", "-b:a", "96k", "-ar", "44100",
+            "-vn", "-c:a", "copy",
             str(audio_only),
         ])
         if not audio_only.exists() or audio_only.stat().st_size == 0:
             raise RuntimeError("FFmpeg created no intermediate audiobook audio.")
         if _duration_ms(audio_only) <= 0:
             raise RuntimeError("FFmpeg created an intermediate audiobook with no audio duration.")
+        if progress:
+            progress(len(chapters), len(chapters), "joined-audio")
 
         # Build the audiobook container and chapters first, without the
         # cover. This isolates MP4 chapter/metadata muxing from image
@@ -268,15 +271,16 @@ def assemble_m4b(
 
     if not output_path.exists() or output_path.stat().st_size == 0:
         raise RuntimeError("FFmpeg completed but the final M4B is missing.")
-    # Validate the final container by actually decoding its audio stream.
-    # Some MP4/M4B files with attached artwork can report an unreliable
-    # container-level duration even though the audio track is valid.
+    # Validate only the beginning of the audio stream. The previous
+    # implementation decoded the complete audiobook a second time, which
+    # could make a 5+ hour book appear stuck after generation finished.
     probe = subprocess.run(
         [
             ffmpeg_path(),
             "-v", "error",
             "-i", str(output_path),
             "-map", "0:a:0",
+            "-t", "0.25",
             "-f", "null",
             "-",
         ],
@@ -286,6 +290,6 @@ def assemble_m4b(
     if probe.returncode != 0:
         detail = (probe.stderr or probe.stdout or "").strip()
         raise RuntimeError(
-            f"FFmpeg completed but the final M4B audio could not be validated.\\n{detail}"
+            f"FFmpeg completed but the final M4B audio could not be validated.\n{detail}"
         )
     return output_path
