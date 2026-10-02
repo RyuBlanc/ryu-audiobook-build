@@ -31,10 +31,10 @@ ANALYSIS_SCHEMA = {
                 "role": {"type": "string"},
                 "traits": {"type": "array", "maxItems": 6, "items": {"type": "string"}},
                 "voice_direction": {"type": "object", "additionalProperties": False, "properties": {
-                    "age_impression": {"type": ["string", "null"]},
-                    "gender": {"type": ["string", "null"]},
-                    "tone": {"type": ["string", "null"]},
-                    "energy": {"type": ["string", "null"]}
+                    "age_impression": {"type": "string"},
+                    "gender": {"type": "string"},
+                    "tone": {"type": "string"},
+                    "energy": {"type": "string"}
                 }, "required": ["age_impression", "gender", "tone", "energy"]},
                 "confidence": {"type": "number"}
             }, "required": ["name", "aliases", "role", "traits", "voice_direction", "confidence"]}
@@ -43,7 +43,7 @@ ANALYSIS_SCHEMA = {
             "type": "array", "maxItems": 12,
             "items": {"type": "object", "additionalProperties": False, "properties": {
                 "quote": {"type": "string"},
-                "speaker": {"type": ["string", "null"]},
+                "speaker": {"type": "string"},
                 "confidence": {"type": "number"},
                 "evidence": {"type": "string"}
             }, "required": ["quote", "speaker", "confidence", "evidence"]}
@@ -52,8 +52,8 @@ ANALYSIS_SCHEMA = {
             "type": "array", "maxItems": 6,
             "items": {"type": "object", "additionalProperties": False, "properties": {
                 "summary": {"type": "string"},
-                "location": {"type": ["string", "null"]},
-                "time": {"type": ["string", "null"]},
+                "location": {"type": "string"},
+                "time": {"type": "string"},
                 "mood": {"type": "string"},
                 "narrator_direction": {"type": "object", "additionalProperties": False, "properties": {
                     "pace": {"type": "string"},
@@ -62,7 +62,7 @@ ANALYSIS_SCHEMA = {
                 }, "required": ["pace", "energy", "delivery"]},
                 "ambience": {"type": "array", "maxItems": 5, "items": {"type": "string"}},
                 "music": {"type": "object", "additionalProperties": False, "properties": {
-                    "style": {"type": ["string", "null"]},
+                    "style": {"type": "string"},
                     "intensity": {"type": "number"}
                 }, "required": ["style", "intensity"]},
                 "sfx": {"type": "array", "maxItems": 6, "items": {"type": "string"}},
@@ -74,8 +74,8 @@ ANALYSIS_SCHEMA = {
             "items": {"type": "object", "additionalProperties": False, "properties": {
                 "written": {"type": "string"},
                 "spoken": {"type": "string"},
-                "ipa": {"type": ["string", "null"]},
-                "source_language": {"type": ["string", "null"]},
+                "ipa": {"type": "string"},
+                "source_language": {"type": "string"},
                 "script": {"type": "string"},
                 "reason": {"type": "string"},
                 "confidence": {"type": "number"},
