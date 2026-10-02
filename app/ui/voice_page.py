@@ -3,7 +3,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QUrl, QThread, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
@@ -31,6 +31,36 @@ from app.tts.voice_profile import (
 from app.tts.providers.edge_tts import EdgeTTSProvider
 
 
+class VoicePreviewWorker(QThread):
+    finished_ok = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, profile: VoiceProfile, text: str, output: Path):
+        super().__init__()
+        self.profile = profile
+        self.text = text
+        self.output = output
+
+    def run(self) -> None:
+        provider = None
+        try:
+            provider, voice = provider_from_profile(self.profile)
+            self.output.parent.mkdir(parents=True, exist_ok=True)
+            provider.synthesize(self.text, self.output, voice)
+            if not self.output.exists() or self.output.stat().st_size < 1024:
+                raise RuntimeError("The voice engine did not produce valid audio.")
+            self.finished_ok.emit(str(self.output))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+        finally:
+            close = getattr(provider, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+
+
 class VoicePage(QWidget):
     """Offline-first voice library and reusable narration profiles."""
 
@@ -40,6 +70,7 @@ class VoicePage(QWidget):
         self.sapi = SystemSAPIProvider()
         self.sample_path: Path | None = None
         self.last_preview: Path | None = None
+        self.preview_worker: VoicePreviewWorker | None = None
         self.edge_voices: list[dict] = []
         self.offline_voices: list[VoiceProfile] = builtin_voice_profiles()
 
@@ -772,29 +803,43 @@ class VoicePage(QWidget):
             self.status.setText("Enter preview text first.")
             return
 
+        if profile.provider == "chatterbox" and not runtime_ready():
+            QMessageBox.warning(
+                self,
+                "Custom Voice Engine Not Ready",
+                "Install / Repair the Custom Voice Engine first, then return here and test the voice."
+            )
+            return
+
         output = Path(tempfile.gettempdir()) / "ryu_audiobook_voice_preview.wav"
-        try:
-            if profile.provider == "chatterbox" and not runtime_ready():
-                raise RuntimeError(
-                    "The custom voice engine is not installed. Open Models → Install / Repair Custom Voice Engine, "
-                    "then return here and try the preview again."
-                )
-            self.preview_button.setEnabled(False)
-            self.status.setText("Generating preview…")
-            provider, voice = provider_from_profile(profile)
-            provider.synthesize(text, output, voice)
-            if not output.exists() or output.stat().st_size < 1024:
-                raise RuntimeError("The voice engine did not produce valid audio.")
-            self.last_preview = output
-            self.player.setSource(QUrl.fromLocalFile(str(output)))
-            self.play_button.setEnabled(True)
-            self.status.setText("Preview ready. Playing locally.")
-            self.player.play()
-        except Exception as exc:
-            QMessageBox.critical(self, "Voice Preview Failed", str(exc))
-            self.status.setText(f"Preview failed: {exc}")
-        finally:
-            self.preview_button.setEnabled(True)
+        self.preview_button.setEnabled(False)
+        self.test_profile_button.setEnabled(False)
+        self.status.setText(
+            "Preparing voice preview… "
+            "the interface remains responsive while the voice engine loads."
+        )
+        self.preview_worker = VoicePreviewWorker(profile, text, output)
+        self.preview_worker.finished_ok.connect(self._preview_worker_ok)
+        self.preview_worker.failed.connect(self._preview_worker_failed)
+        self.preview_worker.finished.connect(self._preview_worker_finished)
+        self.preview_worker.start()
+
+    def _preview_worker_ok(self, path: str) -> None:
+        self.last_preview = Path(path)
+        self.player.stop()
+        self.player.setSource(QUrl.fromLocalFile(path))
+        self.play_button.setEnabled(True)
+        self.status.setText("Preview ready. Playing locally.")
+        self.player.play()
+
+    def _preview_worker_failed(self, message: str) -> None:
+        self.status.setText(f"Preview failed: {message}")
+        QMessageBox.warning(self, "Voice Preview Failed", message)
+
+    def _preview_worker_finished(self) -> None:
+        self.preview_button.setEnabled(True)
+        self.test_profile_button.setEnabled(True)
+        self.preview_worker = None
 
     def save_profile(self) -> None:
         profile = self._profile_from_ui()
