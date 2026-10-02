@@ -176,7 +176,8 @@ class LocalLLM:
             "--host", "127.0.0.1", "--port", str(self.port),
             "--ctx-size", "16384", "--batch-size", "512",
             "--ubatch-size", "256", "--no-webui",
-            "--reasoning", "off", "--reasoning-format", "none",
+            "--reasoning", "auto", "--reasoning-format", "none",
+            "--chat-template-kwargs", "{\"enable_thinking\":false}",
         ]
         if vram >= 4.0:
             args += ["--n-gpu-layers", "99"]
