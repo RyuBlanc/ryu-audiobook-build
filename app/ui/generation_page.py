@@ -142,7 +142,7 @@ class GenerationPage(QWidget):
         pronunciation_actions = QHBoxLayout()
         self.add_pronunciation = QPushButton("+ Add Pronunciation")
         self.add_pronunciation.clicked.connect(self._add_pronunciation_row)
-        self.suggest_pronunciation = QPushButton("Suggest Character Pronunciations")
+        self.suggest_pronunciation = QPushButton("Import AI Pronunciations")
         self.suggest_pronunciation.clicked.connect(self._suggest_pronunciations)
         self.remove_pronunciation = QPushButton("Remove Selected")
         self.remove_pronunciation.clicked.connect(self._remove_pronunciation_row)
@@ -375,50 +375,91 @@ class GenerationPage(QWidget):
         self.pronunciation_table.setItem(row, 2, item)
 
     def _suggest_pronunciations(self):
+        """Import high-confidence multilingual pronunciation suggestions from the local AI analysis."""
+        if not self.project_folder:
+            self.pronunciation_status.setText("Open a saved book before importing AI pronunciation suggestions.")
+            return
+
+        analysis_path = self.project_folder / "analysis" / "audiobook_brain.json"
+        if not analysis_path.exists():
+            self.pronunciation_status.setText(
+                "No Audiobook AI analysis found. Open Chapters → Analyze Book with AI first."
+            )
+            return
+
+        try:
+            data = json.loads(analysis_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            self.pronunciation_status.setText(f"Could not read Audiobook AI analysis: {exc}")
+            return
+
         existing = {
             str(self.pronunciation_table.item(row, 0).text()).casefold()
             for row in range(self.pronunciation_table.rowCount())
             if self.pronunciation_table.item(row, 0)
         }
-        suggestions = []
-        try:
-            analysis = analyze_book(self.chapters)
-            for character in analysis.characters:
-                if character.name:
-                    suggestions.append(character.name)
-                suggestions.extend(character.aliases or [])
-        except Exception:
-            pass
 
-        # Automatic suggestions come only from detected characters/aliases.
-        # Do not scan every capitalized word because ordinary English words
-        # such as "But", "She", "Her", and "What" are not names.
         added = 0
-        for name in suggestions:
-            clean = name.strip()
-            key = clean.casefold()
-            if (
-                not clean
-                or key in existing
-                or len(clean) < 3
-                or key in COMMON_ENGLISH_WORDS
-            ):
-                continue
-            spoken = suggest_pronunciation(clean)
-            self._add_pronunciation_row(clean, spoken, True)
-            existing.add(key)
-            added += 1
-            if added >= 40:
-                break
+        skipped = 0
+        for item in data.get("chapters", []):
+            for suggestion in item.get("pronunciation", []) or []:
+                written = str(
+                    suggestion.get("written")
+                    or suggestion.get("text")
+                    or ""
+                ).strip()
+                spoken = str(
+                    suggestion.get("spoken")
+                    or suggestion.get("pronunciation")
+                    or ""
+                ).strip()
+                confidence = float(suggestion.get("confidence", 0.0) or 0.0)
+                language = str(suggestion.get("source_language") or "unknown").strip()
+                script = str(suggestion.get("script") or "unknown").strip()
+                ipa = str(suggestion.get("ipa") or "").strip()
+                reason = str(suggestion.get("reason") or "").strip()
+
+                if (
+                    not written
+                    or not spoken
+                    or written.casefold() in existing
+                    or written.casefold() in COMMON_ENGLISH_WORDS
+                    or confidence < 0.80
+                ):
+                    skipped += 1
+                    continue
+
+                self._add_pronunciation_row(written, spoken, True)
+                row = self.pronunciation_table.rowCount() - 1
+                written_item = self.pronunciation_table.item(row, 0)
+                spoken_item = self.pronunciation_table.item(row, 1)
+                tip = (
+                    f"AI confidence: {confidence:.0%}\n"
+                    f"Source language: {language}\n"
+                    f"Script: {script}"
+                )
+                if ipa:
+                    tip += f"\nIPA: {ipa}"
+                if reason:
+                    tip += f"\nEvidence: {reason}"
+                if written_item:
+                    written_item.setToolTip(tip)
+                if spoken_item:
+                    spoken_item.setToolTip(tip)
+
+                existing.add(written.casefold())
+                added += 1
 
         if added:
             self.pronunciation_status.setText(
-                f"Added {added} character name{'s' if added != 1 else ''} with draft pronunciation suggestions. "
-                "Only detected characters/aliases are suggested automatically; review the spoken form before saving."
+                f"Imported {added} high-confidence AI pronunciation{'s' if added != 1 else ''}. "
+                f"{skipped} lower-confidence/duplicate entries were left out. "
+                "Review the spoken form before saving."
             )
         else:
             self.pronunciation_status.setText(
-                "No new character names found. Use + Add Pronunciation for custom terms."
+                "No new high-confidence AI pronunciation suggestions were found. "
+                "Use Chapters → Analyze Book with AI or + Add Pronunciation."
             )
 
     def _clean_obvious_english_pronunciations(self):
