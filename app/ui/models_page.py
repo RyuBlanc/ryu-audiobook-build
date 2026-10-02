@@ -4,6 +4,12 @@ from pathlib import Path
 import subprocess
 import sys
 import urllib.request
+import ssl
+
+try:
+    import certifi
+except ImportError:
+    certifi = None
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
@@ -61,8 +67,23 @@ class KokoroDownloadWorker(QThread):
         temp = target.with_suffix(target.suffix + ".part")
         try:
             self.progress.emit(f"Downloading {label}…")
-            request = urllib.request.Request(url, headers={"User-Agent": "Ryu-Audiobook/1.0"})
-            with urllib.request.urlopen(request, timeout=60) as response, temp.open("wb") as handle:
+            request = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "Ryu-Audiobook/1.1",
+                    "Accept": "application/octet-stream",
+                },
+            )
+            # Some Windows Python installations do not have a usable local
+            # CA bundle even though browsers work normally. Use certifi's
+            # maintained CA bundle when available; never disable TLS
+            # verification for model downloads.
+            context = (
+                ssl.create_default_context(cafile=certifi.where())
+                if certifi is not None
+                else ssl.create_default_context()
+            )
+            with urllib.request.urlopen(request, timeout=90, context=context) as response, temp.open("wb") as handle:
                 total = int(response.headers.get("Content-Length", "0") or 0)
                 received = 0
                 while True:
@@ -191,7 +212,15 @@ class ModelsPage(QWidget):
     def _kokoro_failed(self, message: str) -> None:
         self.install_kokoro.setEnabled(True)
         self.status.setText("Kokoro download failed")
-        QMessageBox.warning(self, "Natural Voice Download Failed", message)
+        detail = str(message)
+        if "CERTIFICATE_VERIFY_FAILED" in detail or "CERTIFICATE_VERIFY_FAILED".casefold() in detail.casefold():
+            detail += (
+                "\n\nRyu's Audiobook now uses a bundled CA certificate store for this download. "
+                "Please retry after installing this build. If a corporate antivirus/proxy intercepts HTTPS, "
+                "use a normal browser to download the two Kokoro files and place them in "
+                "Models\\kokoro."
+            )
+        QMessageBox.warning(self, "Natural Voice Download Failed", detail)
 
     def download_piper(self) -> None:
         voice, ok = QInputDialog.getText(
