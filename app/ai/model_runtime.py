@@ -156,17 +156,21 @@ def _free_port() -> int:
 
 class LocalLLM:
     def __init__(self, model: Path | None = None):
+        self.external_url = os.environ.get("RYU_AI_SERVER_URL", "").strip().rstrip("/")
         self.model = model or model_path()
         self.server = server_path()
-        if self.server is None:
-            raise BrainRuntimeError("Audiobook AI runtime is not installed.")
-        if not self.model.exists():
-            raise BrainRuntimeError("Audiobook AI model is not installed.")
+        if not self.external_url:
+            if self.server is None:
+                raise BrainRuntimeError("Audiobook AI runtime is not installed.")
+            if not self.model.exists():
+                raise BrainRuntimeError("Audiobook AI model is not installed.")
         self.process: subprocess.Popen | None = None
         self.port: int | None = None
         self.log_path = brain_root() / "llama-server.log"
 
     def start(self) -> None:
+        if self.external_url:
+            return
         if self.process and self.process.poll() is None:
             return
         self.port = _free_port()
@@ -186,7 +190,7 @@ class LocalLLM:
             stdout=log_handle,
             stderr=log_handle,
             stdin=subprocess.DEVNULL,
-            env=env,
+            env=runtime_environment(),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
         )
         deadline = time.monotonic() + 90
@@ -228,8 +232,9 @@ class LocalLLM:
         # locally. This is slower to constrain, but much more reliable across
         # Windows builds and Qwen3 variants.
         payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        base_url = self.external_url or f"http://127.0.0.1:{self.port}"
         request = urllib.request.Request(
-            f"http://127.0.0.1:{self.port}/v1/chat/completions",
+            f"{base_url}/v1/chat/completions",
             data=payload,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -254,6 +259,8 @@ class LocalLLM:
             raise BrainRuntimeError(f"Local AI returned an unexpected response: {data}") from exc
 
     def close(self) -> None:
+        if self.external_url:
+            return
         process = self.process
         self.process = None
         self.port = None
