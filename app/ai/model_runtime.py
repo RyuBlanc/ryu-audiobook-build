@@ -181,8 +181,6 @@ class LocalLLM:
         if vram >= 4.0:
             args += ["--n-gpu-layers", "99"]
         log_handle = self.log_path.open("a", encoding="utf-8", errors="replace")
-        env = os.environ.copy()
-        env["LLAMA_ARG_CHAT_TEMPLATE_KWARGS"] = '{"enable_thinking":false}'
         self.process = subprocess.Popen(
             args,
             stdout=log_handle,
