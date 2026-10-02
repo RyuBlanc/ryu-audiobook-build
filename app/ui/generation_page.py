@@ -5,7 +5,7 @@ import json
 import time
 import tempfile
 
-from PySide6.QtCore import QObject, Signal, QUrl, QTimer
+from PySide6.QtCore import QObject, Signal, QUrl, QTimer, QThread
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
@@ -30,6 +30,69 @@ from app.tts.chatterbox_runtime import runtime_ready
 from app.tts.resume import inspect_generation_state
 
 
+class VoicePreviewWorker(QThread):
+    finished_ok = Signal(object)
+    failed = Signal(str)
+    progress = Signal(str)
+
+    def __init__(self, profile, backend, project_folder, profiles, pronunciation_dictionary,
+                 text, output, narration_speed, pacing_profile):
+        super().__init__()
+        self.profile = profile
+        self.backend = backend
+        self.project_folder = project_folder
+        self.profiles = profiles
+        self.pronunciation_dictionary = pronunciation_dictionary
+        self.text = text
+        self.output = output
+        self.narration_speed = narration_speed
+        self.pacing_profile = pacing_profile
+        self._provider = None
+
+    def run(self) -> None:
+        try:
+            self.progress.emit('Loading voice engine…')
+            provider, voice = provider_from_profile(self.profile)
+            self._provider = provider
+            if hasattr(provider, 'backend'):
+                provider.backend = self.backend
+
+            if self.project_folder:
+                state = load_state(self.project_folder)
+                assignments = state.get('voice_cast', {}) if isinstance(state, dict) else {}
+                if assignments:
+                    from app.tts.cast_provider import CastAwareProvider
+                    self._provider = CastAwareProvider(
+                        provider, voice,
+                        {profile.name: profile for profile in self.profiles},
+                        assignments,
+                        narrating_character=state.get('voice_cast_narrating_character'),
+                        backend_override=self.backend,
+                    )
+
+            self.progress.emit('Generating voice preview…')
+            result = build_voice_preview(
+                self.text,
+                self._provider,
+                voice,
+                self.output,
+                pronunciation_dictionary=self.pronunciation_dictionary,
+                narration_speed=self.narration_speed,
+                pacing_profile=self.pacing_profile,
+            )
+            self.progress.emit('Finalizing preview…')
+            self.finished_ok.emit(result)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+        finally:
+            close = getattr(self._provider, 'close', None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+            self._provider = None
+
 class GenerationSignals(QObject):
     progress = Signal(int, int, int, str)
     finished = Signal(object)
@@ -48,6 +111,7 @@ class GenerationPage(QWidget):
         self.last_progress_value = 0
         self.initial_progress_value = 0
         self.generation_phase = "idle"
+        self.preview_worker: VoicePreviewWorker | None = None
 
         self.player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
@@ -262,6 +326,14 @@ class GenerationPage(QWidget):
         preview_time_row.addWidget(self.preview_status, 1)
         preview_time_row.addWidget(self.preview_time)
         preview_layout.addLayout(preview_time_row)
+
+        self.preview_loading = QProgressBar()
+        self.preview_loading.setRange(0, 0)
+        self.preview_loading.setTextVisible(False)
+        self.preview_loading.setFixedHeight(6)
+        self.preview_loading.setVisible(False)
+        preview_layout.addWidget(self.preview_loading)
+
         root.addWidget(preview_box)
 
         progress_box = QGroupBox("Generation")
@@ -707,64 +779,74 @@ class GenerationPage(QWidget):
         return provider, voice
 
     def preview(self) -> None:
-        provider, voice = self._provider()
-        if not provider:
-            self.status.setText("Create or select a Voice Profile first.")
+        profile = self._selected_profile()
+        if not profile:
+            self.status.setText('Create or select a Voice Profile first.')
             return
 
         index = self.preview_chapter.currentIndex()
         if index < 0 or index >= len(self.chapters):
-            self.status.setText("Select a chapter for the preview.")
+            self.status.setText('Select a chapter for the preview.')
+            return
+        if self.preview_worker and self.preview_worker.isRunning():
             return
 
         chapter = self.chapters[index]
         self._save_pronunciations()
         pronunciation_dictionary = self._pronunciation_entries()
-        provider = self._cast_provider(provider, voice)[0]
-
         text = chapter.text
-        output = Path(tempfile.gettempdir()) / "ryu_audiobook_voice_preview.wav"
+        output = Path(tempfile.gettempdir()) / 'ryu_audiobook_voice_preview.wav'
+        backend = self.backend.currentData() or profile.backend
+        if backend == 'automatic':
+            backend = profile.backend
 
-        try:
-            result = build_voice_preview(
-                text,
-                provider,
-                voice,
-                output,
-                pronunciation_dictionary=pronunciation_dictionary,
-                narration_speed=float(self.narration_speed.currentData() or 0.90),
-                pacing_profile=self.pacing_profile.currentData() or "natural",
-            )
-            self.preview_path = result.output_path
-            self.preview_player.stop()
-            self.preview_player.setSource(QUrl.fromLocalFile(str(result.output_path)))
-            self.preview_play_button.setEnabled(True)
-            self.preview_stop_button.setEnabled(True)
-            self.preview_play_button.setText("▶  Play Preview")
+        self.preview_worker = VoicePreviewWorker(
+            profile, backend, self.project_folder, self.profiles, pronunciation_dictionary,
+            text, output, float(self.narration_speed.currentData() or 0.90),
+            self.pacing_profile.currentData() or 'natural',
+        )
+        self.preview_worker.progress.connect(self._preview_worker_progress)
+        self.preview_worker.finished_ok.connect(self._preview_worker_ok)
+        self.preview_worker.failed.connect(self._preview_worker_failed)
+        self.preview_worker.finished.connect(self._preview_worker_finished)
 
-            voice_summary = ", ".join(result.voices_used) if result.voices_used else "Narrator"
-            message = (
-                f"Preview ready • {result.segments} narration segment(s) • "
-                f"Voices: {voice_summary}"
-            )
-            self.preview_status.setText(message)
-            self.status.setText(
-                f"Preview generated from Chapter {chapter.number} using the current "
-                "pronunciation, voice cast, speed and pacing settings."
-            )
-        except Exception as exc:
-            self.preview_path = None
-            self.preview_play_button.setEnabled(False)
-            self.preview_stop_button.setEnabled(False)
-            self.preview_status.setText("Preview generation failed.")
-            self.status.setText(f"Preview failed: {exc}")
-        finally:
-            close = getattr(provider, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except Exception:
-                    pass
+        self.preview_button.setEnabled(False)
+        self.preview_play_button.setEnabled(False)
+        self.preview_stop_button.setEnabled(True)
+        self.preview_loading.setVisible(True)
+        self.preview_status.setText('Preparing voice preview…')
+        self.status.setText('Voice preview is running in the background; the app remains responsive.')
+        self.preview_worker.start()
+
+    def _preview_worker_progress(self, message: str) -> None:
+        self.preview_status.setText(message)
+
+    def _preview_worker_ok(self, result) -> None:
+        self.preview_path = result.output_path
+        self.preview_player.stop()
+        self.preview_player.setSource(QUrl.fromLocalFile(str(result.output_path)))
+        self.preview_play_button.setEnabled(True)
+        self.preview_stop_button.setEnabled(True)
+        self.preview_play_button.setText('▶  Play Preview')
+        voice_summary = ', '.join(result.voices_used) if result.voices_used else 'Narrator'
+        self.preview_status.setText(
+            f'Preview ready • {result.segments} narration segment(s) • Voices: {voice_summary}'
+        )
+        self.status.setText(
+            'Preview generated from the current pronunciation, voice cast, speed and pacing settings.'
+        )
+
+    def _preview_worker_failed(self, message: str) -> None:
+        self.preview_path = None
+        self.preview_play_button.setEnabled(False)
+        self.preview_stop_button.setEnabled(False)
+        self.preview_status.setText('Preview generation failed.')
+        self.status.setText(f'Preview failed: {message}')
+
+    def _preview_worker_finished(self) -> None:
+        self.preview_loading.setVisible(False)
+        self.preview_button.setEnabled(True)
+        self.preview_worker = None
 
     def play_preview(self) -> None:
         if not self.preview_path or not self.preview_path.exists():
@@ -777,6 +859,11 @@ class GenerationPage(QWidget):
 
     def stop_preview(self) -> None:
         self.preview_player.stop()
+        worker = self.preview_worker
+        if worker is not None and worker.isRunning():
+            worker.requestInterruption()
+            self.preview_loading.setVisible(False)
+            self.preview_status.setText('Stopping preview…')
 
     def _preview_state_changed(self, state) -> None:
         if state == QMediaPlayer.PlaybackState.PlayingState:
