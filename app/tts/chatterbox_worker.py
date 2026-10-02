@@ -43,25 +43,22 @@ def _choose_variant(requested: str, multilingual: bool, device: str) -> str:
         return "base"
     if requested in {"nano", "base", "turbo"}:
         return requested
-    # English custom voices can use the much smaller Nano model on
-    # resource-constrained Windows systems. This is especially useful on
-    # 4 GB GPUs and on machines with a small Windows commit/pagefile limit.
-    status = _windows_memory_status()
-    if status:
-        total_phys, _avail_phys, _total_pagefile, avail_pagefile = status
-        if total_phys <= 16 * 1024**3 or avail_pagefile < 8 * 1024**3:
-            return "nano"
+    # Choose by actual GPU memory first. A 16 GB system with an RTX 4060
+    # should use Turbo; the old RAM-first rule incorrectly forced both 4 GB
+    # and 8 GB GPUs into Nano.
     if device == "cuda":
         try:
             import torch
             props = torch.cuda.get_device_properties(0)
-            if int(props.total_memory) <= 5 * 1024**3:
-                return "nano"
+            return "nano" if int(props.total_memory) <= 5 * 1024**3 else "turbo"
         except Exception:
-            pass
-    if device == "cpu":
-        return "nano"
-    return "turbo"
+            return "nano"
+    status = _windows_memory_status()
+    if status:
+        _total_phys, _avail_phys, _total_pagefile, avail_pagefile = status
+        if avail_pagefile < 6 * 1024**3:
+            return "nano"
+    return "nano"
 
 
 def _is_paging_file_error(exc: BaseException) -> bool:
