@@ -95,7 +95,11 @@ def assemble_m4b(
     if not chapter_dirs:
         raise ValueError("No chapters were supplied.")
 
-    chapters = [assemble_chapter(directory) for directory in chapter_dirs]
+    chapters: list[Path] = []
+    for index, directory in enumerate(chapter_dirs, start=1):
+        chapters.append(assemble_chapter(directory))
+        if progress:
+            progress(index, len(chapter_dirs), "chapter-audio")
     names = chapter_titles or [
         directory.name.split("_", 1)[1] if "_" in directory.name else directory.name
         for directory in chapter_dirs
