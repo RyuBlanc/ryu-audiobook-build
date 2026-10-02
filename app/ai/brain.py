@@ -395,6 +395,25 @@ class AudiobookBrain:
             start = max(end - self.config.overlap_chars, end)
         return out
 
+    @staticmethod
+    def _numeric_intensity(value: Any) -> float:
+        if isinstance(value, (int, float)):
+            return max(0.0, min(1.0, float(value)))
+        text = str(value or '').strip().casefold()
+        mapping = {
+            'none': 0.0,
+            'very low': 0.15, 'low': 0.25,
+            'light': 0.25, 'soft': 0.25,
+            'moderate': 0.5, 'medium': 0.5,
+            'high': 0.75, 'strong': 0.75,
+            'very high': 0.9, 'intense': 0.9,
+        }
+        if text in mapping:
+            return mapping[text]
+        try:
+            return max(0.0, min(1.0, float(text)))
+        except (TypeError, ValueError):
+            return 0.0
     def _merge_scenes(self, out: dict[str, Any], data: dict[str, Any]) -> None:
         for raw in data.get('scenes', []) or []:
             out['scenes'].append({
@@ -410,7 +429,7 @@ class AudiobookBrain:
                 'ambience': list(raw.get('ambience', []) or [])[:3],
                 'music': {
                     'style': str(raw.get('music_style', '')).strip() or None,
-                    'intensity': float(raw.get('music_intensity', 0.0) or 0.0),
+                    'intensity': self._numeric_intensity(raw.get('music_intensity', 0.0)),
                 },
                 'sfx': list(raw.get('sfx', []) or [])[:4],
                 'confidence': float(raw.get('confidence', 0.0) or 0.0),
