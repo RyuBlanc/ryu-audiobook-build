@@ -125,7 +125,7 @@ class ChatterboxProvider(TTSProvider):
         )
         self._stdout_thread.start()
 
-        ready, detail = self._read_worker_response(timeout=180.0)
+        ready, detail = self._read_worker_response(timeout=900.0)
         if ready:
             return
 
@@ -144,8 +144,8 @@ class ChatterboxProvider(TTSProvider):
             return
 
         raise RuntimeError(
-            "The custom voice worker could not become ready within 3 minutes. "
-            + (detail or "Check the custom voice engine log for details.")
+            "The custom voice worker could not become ready. "
+            + (detail or "Check Settings\\chatterbox_worker.log for details.")
         )
 
     def _drain_worker_stdout(self) -> None:
@@ -171,7 +171,16 @@ class ChatterboxProvider(TTSProvider):
         if line is None:
             detail = ""
             if worker is not None:
-                detail = f"Worker exited with code {worker.poll()}."
+                code = worker.poll()
+                detail = f"Worker exited with code {code}."
+            log_path = Path.home() / "Ryu's Audiobook" / "Settings" / "chatterbox_worker.log"
+            try:
+                if log_path.exists():
+                    tail = log_path.read_text(encoding="utf-8", errors="replace")[-6000:].strip()
+                    if tail:
+                        detail += f"\n\nCustom voice engine log:\n{tail}"
+            except OSError:
+                pass
             return {}, detail
         try:
             value = json.loads(line)
@@ -181,7 +190,35 @@ class ChatterboxProvider(TTSProvider):
                 return {}, str(value.get("error") or "The custom voice worker returned an error.")
             return {}, "The custom voice worker returned an invalid response."
         except json.JSONDecodeError:
-            return {}, f"Unexpected custom voice worker output: {line[-1000:]}"
+            # Libraries sometimes emit harmless startup diagnostics on stdout.
+            # Ignore those lines while waiting for the worker's JSON handshake.
+            # If the process dies, the EOF branch above reports the real log.
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                try:
+                    line = q.get(timeout=min(1.0, max(0.01, deadline - time.monotonic())))
+                except queue.Empty:
+                    return {}, "Timed out waiting for the custom voice worker."
+                if line is None:
+                    detail = "Worker exited before sending its ready response."
+                    log_path = Path.home() / "Ryu's Audiobook" / "Settings" / "chatterbox_worker.log"
+                    try:
+                        if log_path.exists():
+                            tail = log_path.read_text(encoding="utf-8", errors="replace")[-6000:].strip()
+                            if tail:
+                                detail += f"\n\nCustom voice engine log:\n{tail}"
+                    except OSError:
+                        pass
+                    return {}, detail
+                try:
+                    value = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(value, dict):
+                    if value.get("ready") or value.get("ok"):
+                        return value, ""
+                    return {}, str(value.get("error") or "The custom voice worker returned an error.")
+            return {}, "Timed out waiting for a usable response from the custom voice worker."
 
     def _synthesize_external(self, text: str, output_path: Path) -> Path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
