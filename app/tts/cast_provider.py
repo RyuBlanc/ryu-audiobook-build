@@ -73,7 +73,15 @@ class CastAwareProvider(TTSProvider):
             "narrator": self.narrator_voice,
             "assignments": sorted(self.assignments.items()),
             "profiles": sorted(
-                (k, self.profiles[k].provider, self.profiles[k].voice_id, self.profiles[k].sample_path)
+                (
+                    k,
+                    self.profiles[k].provider,
+                    self.profiles[k].voice_id,
+                    self.profiles[k].sample_path,
+                    self.profiles[k].model_id,
+                    self.profiles[k].backend,
+                    self.profiles[k].language,
+                )
                 for k in self.assignments if k in self.profiles
             ),
             "narrating_character": self.narrating_character,
