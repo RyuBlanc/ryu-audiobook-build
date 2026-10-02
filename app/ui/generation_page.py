@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from app.chapters.detector import Chapter, detect_chapters
 from app.chapters.characters import analyze_book
-from app.tts.pronunciation_suggester import suggest_pronunciation, COMMON_ENGLISH_WORDS
+from app.tts.pronunciation_suggester import suggest_pronunciation, suggest_names_from_text, COMMON_ENGLISH_WORDS
 from app.documents.parser import extract_text
 from app.core.state import load_state, save_state
 from app.tts.manager import GenerationManager, GenerationSummary
@@ -454,7 +454,42 @@ class GenerationPage(QWidget):
 
         analysis_path = self.project_folder / 'analysis' / 'audiobook_brain.json'
         if not analysis_path.exists():
-            self.pronunciation_status.setText('No Audiobook AI analysis found. Open Chapters → Analyze Book with AI first.')
+            # Keep the feature useful even when the local AI analysis failed or
+            # has not been run: provide conservative name-only drafts from the
+            # chapter text. These are explicitly marked as fallback suggestions.
+            existing = {
+                str(self.pronunciation_table.item(row, 0).text()).casefold()
+                for row in range(self.pronunciation_table.rowCount())
+                if self.pronunciation_table.item(row, 0)
+            }
+            added = 0
+            for name in suggest_names_from_text("\n".join(ch.text or "" for ch in self.chapters)):
+                clean = name.strip()
+                if (
+                    not clean
+                    or clean.casefold() in existing
+                    or clean.casefold() in COMMON_ENGLISH_WORDS
+                    or all(part.casefold() in COMMON_ENGLISH_WORDS for part in clean.split())
+                ):
+                    continue
+                spoken = suggest_pronunciation(clean)
+                if not spoken or spoken.casefold() == clean.casefold():
+                    continue
+                self._add_pronunciation_row(clean, spoken, True)
+                existing.add(clean.casefold())
+                added += 1
+                if added >= 30:
+                    break
+            if added:
+                self._save_pronunciations()
+                self.pronunciation_status.setText(
+                    f"AI analysis unavailable. Added {added} conservative name-only pronunciation drafts. "
+                    "Review them; run Audiobook AI later for multilingual evidence and confidence."
+                )
+            else:
+                self.pronunciation_status.setText(
+                    "No Audiobook AI analysis found and no conservative name-only pronunciation drafts were found."
+                )
             return
         try:
             data = json.loads(analysis_path.read_text(encoding='utf-8'))
