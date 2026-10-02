@@ -193,6 +193,8 @@ def _discover_candidates(text: str) -> set[str]:
             if _is_plausible_name(name):
                 candidates.add(name)
 
+    counts = Counter()
+    mid_sentence = Counter()
     # Discover repeated proper-name tokens outside quoted dialogue too.
     # Many novels introduce a character in narration long before the first
     # explicit "Name said" tag. The previous detector missed these characters,
