@@ -10,8 +10,8 @@ from app.tts.voice_profile import VoiceProfile, builtin_voice_profiles
 
 class KokoroProviderTests(unittest.TestCase):
     def test_voice_catalog_is_broad_and_contains_core_english_voices(self):
-        self.assertGreaterEqual(len(KOKORO_VOICES), 40)
-        for voice in ("af_heart", "af_sarah", "am_michael", "bf_emma", "bm_george"):
+        self.assertGreaterEqual(len(KOKORO_VOICES), 54)
+        for voice in ("af_heart", "af_sarah", "am_michael", "bf_emma", "bm_george", "if_sara", "im_nicola", "pf_dora", "pm_santa"):
             self.assertIn(voice, KOKORO_VOICES)
 
     def test_voice_language_mapping(self):
@@ -19,6 +19,8 @@ class KokoroProviderTests(unittest.TestCase):
         self.assertEqual(KokoroProvider._language_for_voice("bm_george"), "en-gb")
         self.assertEqual(KokoroProvider._language_for_voice("jf_alpha"), "ja")
         self.assertEqual(KokoroProvider._language_for_voice("zf_xiaobei"), "cmn")
+        self.assertEqual(KokoroProvider._language_for_voice("if_sara"), "it")
+        self.assertEqual(KokoroProvider._language_for_voice("pm_santa"), "pt-br")
 
     def test_missing_assets_are_reported_without_loading_runtime(self):
         with TemporaryDirectory() as tmp:
