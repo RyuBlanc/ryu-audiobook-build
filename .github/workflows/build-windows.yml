@@ -303,14 +303,16 @@ jobs:
           Write-Host "Installer size: $size bytes"
           Write-Host "Installer SHA256: $hash"
           $expectedVersion = "0.3.1.${{ github.run_number }}"
+          $actualFileVersion = ([string]$info.FileVersion).Trim()
+          $actualProductVersion = ([string]$info.ProductVersion).Trim()
           $info = (Get-Item $installer).VersionInfo
           Write-Host "Installer FileVersion: $($info.FileVersion)"
           Write-Host "Installer ProductVersion: $($info.ProductVersion)"
-          if ($info.FileVersion -ne $expectedVersion) {
-            throw "Installer FileVersion is '$($info.FileVersion)', expected '$expectedVersion'"
+          if ($actualFileVersion -ne $expectedVersion) {
+            throw "Installer FileVersion is '$actualFileVersion', expected '$expectedVersion'"
           }
-          if ($info.ProductVersion -ne $expectedVersion) {
-            throw "Installer ProductVersion is '$($info.ProductVersion)', expected '$expectedVersion'"
+          if ($actualProductVersion -ne $expectedVersion) {
+            throw "Installer ProductVersion is '$actualProductVersion', expected '$expectedVersion'"
           }
 
       - name: Publish Windows installer as GitHub Release
