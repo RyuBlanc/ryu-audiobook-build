@@ -62,14 +62,23 @@ class CharacterReviewDialog(QDialog):
             return
         character = self.analysis.characters[index - 1]
         examples = character.examples or []
+        manual = [
+            item for item in getattr(self.chapter, "dialogue_assignments", [])
+            if str(item.get("speaker", "")).strip().casefold() == character.name.casefold()
+        ]
         text = [
             f"Name: {character.name}",
             f"Role: {character.role}",
-            f"Dialogue cues: {character.dialogue_count}",
+            f"Dialogue cues detected: {character.dialogue_count}",
+            f"Manual assignments saved: {len(manual)}",
             "",
             "Detected dialogue examples:",
         ]
         text.extend(f"• {example}" for example in examples)
         if not examples:
             text.append("No quoted dialogue example was confidently linked.")
+        if manual:
+            text.extend(["", "Saved manual assignments:"])
+            for item in manual[:8]:
+                text.append(f"• {str(item.get('text', '')).strip()[:180]}")
         self.details.setPlainText("\n".join(text))
