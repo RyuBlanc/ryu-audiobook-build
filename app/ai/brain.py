@@ -252,11 +252,19 @@ class AudiobookBrain:
         result = {'chapter': chapter.number, 'title': chapter.title, 'characters': [], 'dialogue': [], 'scenes': [], 'pronunciation': [], 'continuity_notes': []}
         seen = set()
         for idx, chunk in enumerate(chunks, 1):
-            known_characters = [
-                str(item.get('name', '')).strip()
-                for item in (book_context or {}).get('characters', [])
-                if str(item.get('name', '')).strip()
-            ]
+            context = book_context or {}
+            if isinstance(context.get("characters"), list):
+                known_characters = [
+                    str(item.get("name", "")).strip()
+                    for item in context.get("characters", [])
+                    if str(item.get("name", "")).strip()
+                ]
+            else:
+                known_characters = [
+                    str(name).strip()
+                    for name in context.keys()
+                    if str(name).strip() and str(name).strip().casefold() not in {"version", "continuity_notes"}
+                ]
             common_context = (
                 'Known characters from earlier chapters: '
                 + json.dumps(known_characters, ensure_ascii=False)
