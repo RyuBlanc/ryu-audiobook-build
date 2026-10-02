@@ -41,6 +41,13 @@ def assemble_chapter(chapter_dir: Path) -> Path:
         raise ValueError(f"No audio chunks found for {chapter_dir.name}")
     output = chapter_dir / "chapter.m4a"
     concat_file = chapter_dir / "concat.txt"
+
+    # Reuse a previously assembled chapter when none of its WAV chunks have
+    # changed. This makes an M4B retry after a late packaging failure fast.
+    if output.exists() and output.stat().st_size >= 1024:
+        newest_chunk = max((chunk.stat().st_mtime for chunk in chunks), default=0.0)
+        if output.stat().st_mtime >= newest_chunk:
+            return output
     concat_file.write_text(
         "ffconcat version 1.0\n"
         + "\n".join(f"file '{_ffconcat_path(p)}'" for p in chunks)
