@@ -238,13 +238,23 @@ class AudiobookBrain:
         self._save_chapter(result)
         return result
 
-    def analyze_book(self, chapters: list[Chapter], progress: Callable[[int, int, str], None] | None = None) -> dict[str, Any]:
+    def analyze_book(self, chapters: list[Chapter], progress: Callable[[float, str], None] | None = None) -> dict[str, Any]:
         bible = {}
         results = []
         for idx, chapter in enumerate(chapters, 1):
             def chapter_progress(message: str, idx=idx):
                 if progress:
-                    progress(idx - 1, len(chapters), message)
+                    # Message is emitted at excerpt boundaries. Estimate within
+                    # the current chapter while keeping completed chapters exact.
+                    match = re.search(r"excerpt (\d+)/(\d+)", message)
+                    if match:
+                        excerpt_index = int(match.group(1))
+                        excerpt_total = max(1, int(match.group(2)))
+                        fraction = ((idx - 1) + ((excerpt_index - 1) / excerpt_total)) / max(1, len(chapters))
+                    else:
+                        fraction = (idx - 1) / max(1, len(chapters))
+                    progress(max(0.0, min(0.999, fraction)), message)
+
             item = self.analyze_chapter(chapter, bible, progress=chapter_progress)
             results.append(item)
             for char in item.get('characters', []):
@@ -253,7 +263,10 @@ class AudiobookBrain:
                     bible.setdefault(name, char)
             self._save_book({'version': 1, 'book_bible': bible, 'chapters': results})
             if progress:
-                progress(idx, len(chapters), f"Completed {chapter.title}")
+                progress(
+                    idx / max(1, len(chapters)),
+                    f"Completed chapter {idx}/{len(chapters)} • {chapter.title}",
+                )
         return {'version': 1, 'book_bible': bible, 'chapters': results}
 
     def _chunks(self, text: str) -> list[str]:
