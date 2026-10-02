@@ -118,11 +118,12 @@ class GenerationManager:
                 cancelled = True
                 break
             try:
+                chapter_offset = self._chunk_offsets[index] if index < len(self._chunk_offsets) else 0
                 self._emit(
                     index + 1,
                     len(self.chapters),
-                    offset,
-                    f"chunk-start:{offset + 1}/{max(1, self._total_chunks)}",
+                    chapter_offset,
+                    f"chunk-start:{chapter_offset + 1}/{max(1, self._total_chunks)}",
                 )
                 result = generate_chapter(
                     chapter,
