@@ -291,6 +291,52 @@ Rias Gremory
             finally:
                 vp.voices_root = original_root
 
+    def test_generation_resume_reuses_completed_chunks_without_reopening_them(self):
+        from app.tts.generator import generate_chapter
+
+        class DummyProvider:
+            def __init__(self):
+                self.calls = 0
+
+            def synthesize(self, text, output_path, voice=None):
+                self.calls += 1
+                _write_wav(output_path, 0.05)
+                return output_path
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "audio"
+            chapter = Chapter(
+                1,
+                "Chapter One",
+                "This is the first sentence. This is the second sentence. "
+                "This is the third sentence. This is the fourth sentence.",
+            )
+            provider = DummyProvider()
+
+            first = generate_chapter(
+                chapter,
+                provider,
+                "Narrator",
+                root,
+                narration_speed=1.0,
+                pacing_profile="off",
+            )
+            first_calls = provider.calls
+            self.assertGreater(first_calls, 0)
+            self.assertEqual(first.chunks_completed, first.chunks_total)
+
+            second = generate_chapter(
+                chapter,
+                provider,
+                "Narrator",
+                root,
+                narration_speed=1.0,
+                pacing_profile="off",
+            )
+            self.assertEqual(provider.calls, first_calls)
+            self.assertEqual(second.chunks_completed, second.chunks_total)
+
+
     def test_generation_resume_state_detects_completed_and_partial_chapters(self):
         from app.tts.resume import inspect_generation_state
 
