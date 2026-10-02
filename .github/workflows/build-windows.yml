@@ -86,7 +86,7 @@ jobs:
             "--no-webui",
             "--reasoning", "auto",
             "--reasoning-format", "none",
-            "--chat-template-kwargs", "{\"enable_thinking\":false}"
+            "--chat-template-kwargs", '{"enable_thinking":false}'
           ) -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru -WindowStyle Hidden
 
           try {
