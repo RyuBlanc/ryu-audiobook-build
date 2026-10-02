@@ -177,16 +177,18 @@ class LocalLLM:
             "--ctx-size", "16384", "--batch-size", "512",
             "--ubatch-size", "256", "--no-webui",
             "--reasoning", "auto", "--reasoning-format", "none",
-            "--chat-template-kwargs", "{\"enable_thinking\":false}",
         ]
         if vram >= 4.0:
             args += ["--n-gpu-layers", "99"]
         log_handle = self.log_path.open("a", encoding="utf-8", errors="replace")
+        env = os.environ.copy()
+        env["LLAMA_ARG_CHAT_TEMPLATE_KWARGS"] = '{"enable_thinking":false}'
         self.process = subprocess.Popen(
             args,
             stdout=log_handle,
             stderr=log_handle,
             stdin=subprocess.DEVNULL,
+            env=env,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
         )
         deadline = time.monotonic() + 90
