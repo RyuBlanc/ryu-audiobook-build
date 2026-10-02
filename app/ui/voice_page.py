@@ -660,7 +660,7 @@ class VoicePage(QWidget):
     def delete_selected_profile(self) -> None:
         name = self.saved_profiles.currentData()
         profile = next((p for p in self.profiles if p.name == name), None)
-        if not profile or profile.provider == "piper":
+        if not profile or profile.provider in {"piper", "kokoro"}:
             return
         if QMessageBox.question(
             self, "Delete Voice Profile", f"Delete '{name}'?"
@@ -685,11 +685,11 @@ class VoicePage(QWidget):
 
     def update_mode(self) -> None:
         mode = self.mode.currentData()
-        self.neural_box.setVisible(mode in {"piper", "edge-tts"})
+        self.neural_box.setVisible(mode in {"offline-neural", "edge-tts"})
         self.sapi_box.setVisible(mode == "windows-sapi")
         self.custom_box.setVisible(mode == "chatterbox")
 
-        if mode == "piper":
+        if mode == "offline-neural":
             self.source_hint.setText(
                 "Built-in local neural voices. No internet connection is used for preview or generation."
             )
