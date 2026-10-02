@@ -19,6 +19,74 @@ class BrainConfig:
     overlap_chars: int = 1400
     max_tokens: int = 2200
 
+ANALYSIS_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "characters": {
+            "type": "array", "maxItems": 12,
+            "items": {"type": "object", "additionalProperties": False, "properties": {
+                "name": {"type": "string"},
+                "aliases": {"type": "array", "maxItems": 5, "items": {"type": "string"}},
+                "role": {"type": "string"},
+                "traits": {"type": "array", "maxItems": 6, "items": {"type": "string"}},
+                "voice_direction": {"type": "object", "additionalProperties": False, "properties": {
+                    "age_impression": {"type": ["string", "null"]},
+                    "gender": {"type": ["string", "null"]},
+                    "tone": {"type": ["string", "null"]},
+                    "energy": {"type": ["string", "null"]}
+                }, "required": ["age_impression", "gender", "tone", "energy"]},
+                "confidence": {"type": "number"}
+            }, "required": ["name", "aliases", "role", "traits", "voice_direction", "confidence"]}
+        },
+        "dialogue": {
+            "type": "array", "maxItems": 12,
+            "items": {"type": "object", "additionalProperties": False, "properties": {
+                "quote": {"type": "string"},
+                "speaker": {"type": ["string", "null"]},
+                "confidence": {"type": "number"},
+                "evidence": {"type": "string"}
+            }, "required": ["quote", "speaker", "confidence", "evidence"]}
+        },
+        "scenes": {
+            "type": "array", "maxItems": 6,
+            "items": {"type": "object", "additionalProperties": False, "properties": {
+                "summary": {"type": "string"},
+                "location": {"type": ["string", "null"]},
+                "time": {"type": ["string", "null"]},
+                "mood": {"type": "string"},
+                "narrator_direction": {"type": "object", "additionalProperties": False, "properties": {
+                    "pace": {"type": "string"},
+                    "energy": {"type": "string"},
+                    "delivery": {"type": "string"}
+                }, "required": ["pace", "energy", "delivery"]},
+                "ambience": {"type": "array", "maxItems": 5, "items": {"type": "string"}},
+                "music": {"type": "object", "additionalProperties": False, "properties": {
+                    "style": {"type": ["string", "null"]},
+                    "intensity": {"type": "number"}
+                }, "required": ["style", "intensity"]},
+                "sfx": {"type": "array", "maxItems": 6, "items": {"type": "string"}},
+                "confidence": {"type": "number"}
+            }, "required": ["summary", "location", "time", "mood", "narrator_direction", "ambience", "music", "sfx", "confidence"]}
+        },
+        "pronunciation": {
+            "type": "array", "maxItems": 8,
+            "items": {"type": "object", "additionalProperties": False, "properties": {
+                "written": {"type": "string"},
+                "spoken": {"type": "string"},
+                "ipa": {"type": ["string", "null"]},
+                "source_language": {"type": ["string", "null"]},
+                "script": {"type": "string"},
+                "reason": {"type": "string"},
+                "confidence": {"type": "number"},
+                "alternatives": {"type": "array", "maxItems": 2, "items": {"type": "string"}}
+            }, "required": ["written", "spoken", "ipa", "source_language", "script", "reason", "confidence", "alternatives"]}
+        },
+        "continuity_notes": {"type": "array", "maxItems": 12, "items": {"type": "string"}}
+    },
+    "required": ["characters", "dialogue", "scenes", "pronunciation", "continuity_notes"]
+}
+
 PROMPT = '''You are Ryu's Audiobook Director. Analyze the supplied novel excerpt only.
 Return JSON. Do not invent facts. Identify canonical characters and aliases, exact dialogue and likely speaker with confidence and evidence, scene boundaries, location, time, mood, narrator delivery, character delivery, pacing, pronunciation hints, ambience, music, SFX, and continuity notes.
 
@@ -108,7 +176,12 @@ class AudiobookBrain:
     def close(self) -> None:
         self.llm.close()
 
-    def analyze_chapter(self, chapter: Chapter, book_context: dict[str, Any] | None = None) -> dict[str, Any]:
+    def analyze_chapter(
+        self,
+        chapter: Chapter,
+        book_context: dict[str, Any] | None = None,
+        progress: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
         text = (chapter.text or '').strip()
         chunks = self._chunks(text)
         result = {'chapter': chapter.number, 'title': chapter.title, 'characters': [], 'dialogue': [], 'scenes': [], 'pronunciation': [], 'continuity_notes': []}
@@ -129,30 +202,39 @@ class AudiobookBrain:
                 + '\nPronunciation entries must be rare and useful: only names, foreign terms or fictional terms that truly occur in this excerpt and genuinely need a pronunciation change.'
                 + '\nReturn at most 20 dialogue items, 8 scenes, 12 pronunciation items and 20 characters.'
             )
-            raw = self.llm.complete(
-                PROMPT + '\nBe concise. Never output markdown.',
-                user,
-                max_tokens=max(self.config.max_tokens, 3000),
-                temperature=0.08,
-            )
+            if progress:
+                progress(f"Analyzing chapter {chapter.number} • excerpt {idx}/{len(chunks)}")
             try:
+                raw = self.llm.complete(
+                    PROMPT + '\nBe concise. Return only JSON matching the supplied schema.',
+                    user,
+                    max_tokens=1800,
+                    temperature=0.06,
+                    response_schema=ANALYSIS_SCHEMA,
+                )
                 data = _json(raw)
-            except BrainUnavailableError:
+            except BrainUnavailableError as first_error:
+                # Retry once without asking the model to produce a gigantic
+                # response. Structured output is preferred; this retry is a
+                # safety net for older local llama.cpp runtimes.
                 repaired = self.llm.complete(
-                    'Repair the following malformed JSON to valid JSON for the audiobook schema. Return JSON only. Do not invent information.',
-                    raw[:18000],
-                    max_tokens=max(self.config.max_tokens, 3000),
-                    temperature=0.02,
+                    'Return only a compact valid JSON object matching the same audiobook analysis schema. '
+                    'Never use markdown. Do not invent facts.',
+                    raw[:10000] if 'raw' in locals() else str(first_error),
+                    max_tokens=1800,
+                    temperature=0.01,
+                    response_schema=ANALYSIS_SCHEMA,
                 )
                 try:
                     data = _json(repaired)
                 except BrainUnavailableError as second_error:
                     raw_path = self.analysis_dir / f'chapter_{int(chapter.number):04d}_excerpt_{idx}.raw.txt'
-                    raw_path.write_text(str(raw), encoding='utf-8', errors='replace')
+                    raw_path.write_text(str(raw if 'raw' in locals() else first_error), encoding='utf-8', errors='replace')
                     raise BrainUnavailableError(
-                        f'Chapter {chapter.number}, excerpt {idx}: {second_error}. Raw model output was saved to {raw_path.name}.'
+                        f'Chapter {chapter.number}, excerpt {idx}: {second_error}. Raw output saved to {raw_path.name}.'
                     ) from second_error
             self._merge(result, data, seen, source_text=chunk)
+            self._save_chapter(result)
         self._save_chapter(result)
         return result
 
@@ -160,7 +242,10 @@ class AudiobookBrain:
         bible = {}
         results = []
         for idx, chapter in enumerate(chapters, 1):
-            item = self.analyze_chapter(chapter, bible)
+            def chapter_progress(message: str, idx=idx):
+                if progress:
+                    progress(idx - 1, len(chapters), message)
+            item = self.analyze_chapter(chapter, bible, progress=chapter_progress)
             results.append(item)
             for char in item.get('characters', []):
                 name = str(char.get('name', '')).strip()
@@ -168,7 +253,7 @@ class AudiobookBrain:
                     bible.setdefault(name, char)
             self._save_book({'version': 1, 'book_bible': bible, 'chapters': results})
             if progress:
-                progress(idx, len(chapters), chapter.title)
+                progress(idx, len(chapters), f"Completed {chapter.title}")
         return {'version': 1, 'book_bible': bible, 'chapters': results}
 
     def _chunks(self, text: str) -> list[str]:
