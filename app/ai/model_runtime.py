@@ -176,7 +176,7 @@ class LocalLLM:
             "--host", "127.0.0.1", "--port", str(self.port),
             "--ctx-size", "16384", "--batch-size", "512",
             "--ubatch-size", "256", "--no-webui",
-            "--reasoning", "auto", "--reasoning-format", "none",
+            "--reasoning", "off", "--reasoning-format", "none",
         ]
         if vram >= 4.0:
             args += ["--n-gpu-layers", "99"]
@@ -221,15 +221,12 @@ class LocalLLM:
             "max_tokens": max_tokens,
             "stream": False,
         }
-        if response_schema:
-            body["response_format"] = {
-                "type": "json_object",
-                "schema": response_schema,
-            }
-        # Qwen3 supports a per-request non-thinking switch; keep the server
-        # itself in reasoning-off mode as the primary guard, and also pass the
-        # template hint for older compatible llama.cpp builds.
-        body["chat_template_kwargs"] = {"enable_thinking": False}
+        # Do not send JSON-schema grammar to llama-server for Qwen3.
+        # Current llama.cpp releases have a known interaction between
+        # schema grammar and Qwen-family <think> template control tokens.
+        # We instead request compact JSON in the prompt and validate/repair it
+        # locally. This is slower to constrain, but much more reliable across
+        # Windows builds and Qwen3 variants.
         payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
             f"http://127.0.0.1:{self.port}/v1/chat/completions",
