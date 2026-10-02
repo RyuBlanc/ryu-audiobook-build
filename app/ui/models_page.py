@@ -22,7 +22,7 @@ from app.tts.chatterbox_runtime import install_runtime, runtime_status
 from app.tts.model_registry import BUILTIN_CATALOG, installed_models, mark_installed
 from app.tts.providers.piper import PiperProvider
 from app.tts.providers.kokoro import KokoroProvider
-from app.ai.model_runtime import brain_root, install_runtime as install_audiobook_ai, recommended_model, installed as audiobook_ai_installed
+from app.ai.model_runtime import brain_root, install_runtime as install_audiobook_ai, recommended_model, installed as audiobook_ai_installed, self_test as test_audiobook_ai
 
 
 KOKORO_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.onnx"
@@ -125,7 +125,9 @@ class AudiobookAIInstallWorker(QThread):
         try:
             model_id, filename, size = recommended_model()
             install_audiobook_ai(self.progress.emit)
-            self.finished_ok.emit(f"{model_id}|{filename}|{size}")
+            self.progress.emit("Testing local Audiobook AI inference…")
+            test_result = test_audiobook_ai()
+            self.finished_ok.emit(f"{model_id}|{filename}|{size}|{test_result}")
         except Exception as exc:
             self.failed.emit(str(exc))
 
@@ -296,7 +298,9 @@ class ModelsPage(QWidget):
 
     def _audiobook_ai_ok(self, detail: str) -> None:
         self.install_audiobook_ai.setEnabled(True)
-        self.status.setText("Audiobook AI installed. It is fully local after download.")
+        parts = detail.split("|", 3)
+        result = parts[3] if len(parts) > 3 else "ready"
+        self.status.setText(f"Audiobook AI installed and self-tested successfully • {result}")
         self.refresh()
 
     def _audiobook_ai_failed(self, message: str) -> None:
