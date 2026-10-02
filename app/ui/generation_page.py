@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import re
 import time
 import tempfile
 
@@ -16,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from app.chapters.detector import Chapter, detect_chapters
 from app.chapters.characters import analyze_book
+from app.ai.brain import _numeric_score
 from app.tts.pronunciation_suggester import suggest_pronunciation, suggest_names_from_text, COMMON_ENGLISH_WORDS
 from app.documents.parser import extract_text
 from app.core.state import load_state, save_state
@@ -201,6 +203,12 @@ class GenerationPage(QWidget):
 
         self.pronunciation_table = QTableWidget(0, 3)
         self.pronunciation_table.setHorizontalHeaderLabels(["Written", "Pronounce as", "Enabled"])
+        self.pronunciation_table.setWordWrap(False)
+        self.pronunciation_table.setMinimumHeight(150)
+        self.pronunciation_table.verticalHeader().setDefaultSectionSize(34)
+        self.pronunciation_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.pronunciation_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.pronunciation_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         pronunciation_layout.addWidget(self.pronunciation_table)
 
         pronunciation_actions = QHBoxLayout()
@@ -436,27 +444,70 @@ class GenerationPage(QWidget):
         self._refresh_resume_state()
         self._refresh_readiness()
 
-    def _add_pronunciation_row(self, written="", spoken="", enabled=True):
+    def _add_pronunciation_row(self, written="", spoken="", enabled=True, source="manual"):
         from PySide6.QtCore import Qt
         row = self.pronunciation_table.rowCount()
         self.pronunciation_table.insertRow(row)
-        self.pronunciation_table.setItem(row, 0, QTableWidgetItem(written))
-        self.pronunciation_table.setItem(row, 1, QTableWidgetItem(spoken))
+        written_item = QTableWidgetItem(written)
+        spoken_item = QTableWidgetItem(spoken)
+        written_item.setData(Qt.ItemDataRole.UserRole, source)
+        spoken_item.setData(Qt.ItemDataRole.UserRole, source)
+        self.pronunciation_table.setItem(row, 0, written_item)
+        self.pronunciation_table.setItem(row, 1, spoken_item)
         item = QTableWidgetItem()
+        item.setData(Qt.ItemDataRole.UserRole, source)
         item.setCheckState(Qt.CheckState.Checked if enabled else Qt.CheckState.Unchecked)
         self.pronunciation_table.setItem(row, 2, item)
 
+    def _load_audiobook_analysis(self):
+        """Load the completed AI book analysis, or partial chapter analyses."""
+        if not self.project_folder:
+            return None, False
+        analysis_dir = self.project_folder / "analysis"
+        aggregate = analysis_dir / "audiobook_brain.json"
+        if aggregate.exists():
+            try:
+                return json.loads(aggregate.read_text(encoding="utf-8")), False
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                pass
+
+        chapter_payloads = []
+        for path in sorted(analysis_dir.glob("chapter_*.json")):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(payload, dict):
+                chapter_payloads.append(payload)
+        if not chapter_payloads:
+            return None, False
+
+        bible = {}
+        for payload in chapter_payloads:
+            for character in payload.get("characters", []) or []:
+                if not isinstance(character, dict):
+                    continue
+                name = str(character.get("name") or "").strip()
+                if name:
+                    bible.setdefault(name, character)
+
+        return {
+            "version": 1,
+            "book_bible": bible,
+            "chapters": sorted(
+                chapter_payloads,
+                key=lambda item: int(item.get("chapter", 0) or 0),
+            ),
+        }, True
+
     def _suggest_pronunciations(self):
-        """Import only grounded, genuinely useful AI pronunciation candidates."""
+        """Import grounded AI pronunciation candidates from completed or partial analysis."""
         if not self.project_folder:
             self.pronunciation_status.setText('Open a saved book before importing AI pronunciation suggestions.')
             return
 
-        analysis_path = self.project_folder / 'analysis' / 'audiobook_brain.json'
-        if not analysis_path.exists():
-            # Keep the feature useful even when the local AI analysis failed or
-            # has not been run: provide conservative name-only drafts from the
-            # chapter text. These are explicitly marked as fallback suggestions.
+        data, partial = self._load_audiobook_analysis()
+        if data is None:
             existing = {
                 str(self.pronunciation_table.item(row, 0).text()).casefold()
                 for row in range(self.pronunciation_table.rowCount())
@@ -475,7 +526,7 @@ class GenerationPage(QWidget):
                 spoken = suggest_pronunciation(clean)
                 if not spoken or spoken.casefold() == clean.casefold():
                     continue
-                self._add_pronunciation_row(clean, spoken, True)
+                self._add_pronunciation_row(clean, spoken, True, source="fallback")
                 existing.add(clean.casefold())
                 added += 1
                 if added >= 30:
@@ -483,27 +534,23 @@ class GenerationPage(QWidget):
             if added:
                 self._save_pronunciations()
                 self.pronunciation_status.setText(
-                    f"AI analysis unavailable. Added {added} conservative name-only pronunciation drafts. "
-                    "Review them; run Audiobook AI later for multilingual evidence and confidence."
+                    f"Audiobook AI analysis is not available yet. Added {added} conservative name-only drafts. "
+                    "Run Audiobook AI from Chapters for multilingual evidence and richer suggestions."
                 )
             else:
                 self.pronunciation_status.setText(
-                    "No Audiobook AI analysis found and no conservative name-only pronunciation drafts were found."
+                    "Audiobook AI has not produced an analysis yet. Open Chapters → Analyze with Audiobook AI, "
+                    "then return here to import grounded pronunciation suggestions."
                 )
             return
-        try:
-            data = json.loads(analysis_path.read_text(encoding='utf-8'))
-        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
-            self.pronunciation_status.setText(f'Could not read Audiobook AI analysis: {exc}')
-            return
 
-        book_text = '\n'.join(ch.text or '' for ch in self.chapters)
+        book_text = "\n".join(ch.text or "" for ch in self.chapters)
         character_names = set()
-        bible = data.get('book_bible', {}) or {}
+        bible = data.get("book_bible", {}) or {}
         for name, value in bible.items():
             if str(name).strip():
                 character_names.add(str(name).strip().casefold())
-            for alias in (value or {}).get('aliases', []) if isinstance(value, dict) else []:
+            for alias in (value or {}).get("aliases", []) if isinstance(value, dict) else []:
                 if str(alias).strip():
                     character_names.add(str(alias).strip().casefold())
 
@@ -519,12 +566,8 @@ class GenerationPage(QWidget):
                 return False
             if folded in existing:
                 return False
-            # The source phrase must actually occur in the book. This stops
-            # the local model from inventing names such as 'Hinata Kakashi'.
             if folded not in book_text.casefold():
                 return False
-            # A pronunciation override that is identical to the written text
-            # is not useful for narration.
             if spoken.casefold() == folded:
                 return False
             words = [w.strip('.,!?;:()[]{}') for w in written.split()]
@@ -533,9 +576,6 @@ class GenerationPage(QWidget):
                 and w.casefold() in COMMON_ENGLISH_WORDS
                 for w in words
             )
-            # Allow a character name even when it is ASCII/Latin, but do not
-            # create dictionary rows for phrases such as 'Unique Skill' or
-            # 'Measurer' unless AI provides non-English evidence.
             language_key = language.casefold()
             if ordinary_english and folded not in character_names:
                 return language_key not in {'', 'english', 'en', 'unknown'}
@@ -545,9 +585,11 @@ class GenerationPage(QWidget):
         skipped = 0
         for chapter_data in data.get('chapters', []):
             for suggestion in chapter_data.get('pronunciation', []) or []:
+                if not isinstance(suggestion, dict):
+                    continue
                 written = str(suggestion.get('written') or suggestion.get('text') or '').strip()
                 spoken = str(suggestion.get('spoken') or suggestion.get('pronunciation') or '').strip()
-                confidence = float(suggestion.get('confidence', 0.0) or 0.0)
+                confidence = _numeric_score(suggestion.get('confidence', 0.0))
                 language = str(suggestion.get('source_language') or 'unknown').strip()
                 script = str(suggestion.get('script') or 'unknown').strip()
                 ipa = str(suggestion.get('ipa') or '').strip()
@@ -556,7 +598,7 @@ class GenerationPage(QWidget):
                     skipped += 1
                     continue
 
-                self._add_pronunciation_row(written, spoken, True)
+                self._add_pronunciation_row(written, spoken, True, source="ai")
                 row = self.pronunciation_table.rowCount() - 1
                 tip = (
                     f'AI confidence: {confidence:.0%}\n'
@@ -574,15 +616,18 @@ class GenerationPage(QWidget):
                 existing.add(written.casefold())
                 added += 1
 
+        self._save_pronunciations()
         if added:
-            self._save_pronunciations()
-            self.pronunciation_status.setText(
-                f'Imported {added} grounded AI pronunciation suggestion(s). {skipped} candidates were filtered. '
-                'Review them before generation.'
+            status = (
+                f'Imported {added} grounded AI pronunciation suggestion(s). {skipped} candidates were filtered.'
             )
+            if partial:
+                status += ' Partial chapter analysis was used; run the full book analysis for final coverage.'
+            self.pronunciation_status.setText(status)
         else:
             self.pronunciation_status.setText(
                 f'No new grounded pronunciation suggestions found. {skipped} AI candidates were filtered.'
+                + (' Partial analysis is available; continue AI analysis for remaining chapters.' if partial else '')
             )
 
     def _clean_obvious_english_pronunciations(self):
@@ -626,7 +671,13 @@ class GenerationPage(QWidget):
             written = a.text().strip() if a else ""
             spoken = b.text().strip() if b else ""
             if written and spoken:
-                entries.append({"written": written, "spoken": spoken, "enabled": c is not None and c.checkState() == Qt.CheckState.Checked})
+                source = str(a.data(Qt.ItemDataRole.UserRole) or "manual")
+                entries.append({
+                    "written": written,
+                    "spoken": spoken,
+                    "enabled": c is not None and c.checkState() == Qt.CheckState.Checked,
+                    "source": source,
+                })
         return entries
 
     def _load_pronunciations(self):
@@ -635,27 +686,80 @@ class GenerationPage(QWidget):
             return
         state = load_state(self.project_folder)
         entries = state.get("pronunciation_dictionary", [])
+        version = int(state.get("pronunciation_dictionary_version", 0) or 0)
+
+        # One-time migration: older builds could persist AI-generated garbage
+        # without provenance. Start this release with a clean dictionary and
+        # preserve all future manual/AI entries with explicit source metadata.
+        if version < 2 and entries:
+            entries = []
+            state["pronunciation_dictionary"] = []
+            state["pronunciation_dictionary_version"] = 2
+            save_state(self.project_folder, state)
+            self.pronunciation_status.setText(
+                "Previous pronunciation suggestions were reset because older builds could save inaccurate AI entries. "
+                "The original book text was not changed."
+            )
+            return
+
+        book_text = "\n".join(ch.text or "" for ch in self.chapters)
+        folded_book = book_text.casefold()
+        name_candidates = {
+            str(name).casefold() for name in suggest_names_from_text(book_text)
+        }
         cleaned = []
-        removed_obvious = 0
+        seen = set()
+        removed_stale = 0
         if isinstance(entries, list):
             for item in entries:
                 if not isinstance(item, dict):
                     continue
                 written = str(item.get("written", "")).strip()
-                if written.casefold() in COMMON_ENGLISH_WORDS:
-                    removed_obvious += 1
+                spoken = str(item.get("spoken", "")).strip()
+                if not written or not spoken:
+                    removed_stale += 1
                     continue
-                cleaned.append(item)
+                key = written.casefold()
+                if key in seen or key not in folded_book or spoken.casefold() == key:
+                    removed_stale += 1
+                    continue
+                source = str(item.get("source") or "manual").strip().casefold()
+                words = [w.strip('.,!?;:()[]{}') for w in written.split()]
+                ordinary_english = bool(words) and all(
+                    re.fullmatch(r"[A-Za-z][A-Za-z'’-]*", w or '')
+                    and w.casefold() in COMMON_ENGLISH_WORDS
+                    for w in words
+                )
+                if source in {"ai", "fallback"} and ordinary_english and key not in name_candidates:
+                    removed_stale += 1
+                    continue
+                cleaned_item = dict(item)
+                cleaned_item["source"] = source
+                cleaned.append(cleaned_item)
+                seen.add(key)
                 self._add_pronunciation_row(
                     written,
-                    str(item.get("spoken", "")),
+                    spoken,
                     item.get("enabled", True) is not False,
+                    source=source,
                 )
-        if removed_obvious and cleaned != entries:
+
+        if removed_stale or cleaned != entries or version < 2:
             state["pronunciation_dictionary"] = cleaned
+            state["pronunciation_dictionary_version"] = 2
             save_state(self.project_folder, state)
+
         count = len(self._pronunciation_entries())
-        self.pronunciation_status.setText(f"{count} pronunciation override{'s' if count != 1 else ''} saved for this book." if count else "No pronunciation overrides saved for this book.")
+        if removed_stale:
+            self.pronunciation_status.setText(
+                f"{count} pronunciation override{'s' if count != 1 else ''} loaded. "
+                f"{removed_stale} stale/invalid entry{' was' if removed_stale == 1 else 's were'} removed."
+            )
+        else:
+            self.pronunciation_status.setText(
+                f"{count} pronunciation override{'s' if count != 1 else ''} saved for this book."
+                if count else "No pronunciation overrides saved for this book."
+            )
 
     def _save_pronunciations(self):
         if not self.project_folder:
