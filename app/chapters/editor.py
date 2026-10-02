@@ -15,7 +15,13 @@ class ChapterEditor:
         )
 
     def edit_text(self, index: int, text: str) -> None:
-        self.chapters[index] = replace(self.chapters[index], text=text)
+        chapter = self.chapters[index]
+        assignments = _remap_assignments(text, list(getattr(chapter, "dialogue_assignments", [])))
+        self.chapters[index] = replace(
+            chapter,
+            text=text,
+            dialogue_assignments=assignments,
+        )
 
     def delete(self, index: int) -> None:
         del self.chapters[index]
@@ -92,3 +98,43 @@ class ChapterEditor:
     def _renumber(self) -> None:
         for number, chapter in enumerate(self.chapters, 1):
             self.chapters[number - 1] = replace(chapter, number=number)
+
+
+def _remap_assignments(text: str, assignments: list[dict]) -> list[dict]:
+    """Keep assignments attached to their dialogue text after local edits.
+
+    Exact dialogue text is preferred. If a text was edited, its old
+    assignment is dropped instead of being silently attached to a different
+    passage.
+    """
+    remapped: list[dict] = []
+    used: set[int] = set()
+    for item in assignments or []:
+        snippet = str(item.get("text", "")).strip()
+        speaker = str(item.get("speaker", "")).strip()
+        if not snippet or not speaker:
+            continue
+        old_start = int(item.get("start", 0) or 0)
+        candidates: list[int] = []
+        cursor = 0
+        while True:
+            position = text.find(snippet, cursor)
+            if position < 0:
+                break
+            if position not in used:
+                candidates.append(position)
+            cursor = position + 1
+        if not candidates:
+            # The dialogue text was changed. Do not keep stale offsets.
+            continue
+        start = min(candidates, key=lambda pos: abs(pos - old_start))
+        end = start + len(snippet)
+        used.add(start)
+        remapped.append({
+            "start": start,
+            "end": end,
+            "text": snippet,
+            "speaker": speaker,
+            "source": str(item.get("source", "manual")),
+        })
+    return remapped
