@@ -34,31 +34,52 @@ from app.tts.providers.edge_tts import EdgeTTSProvider
 class VoicePreviewWorker(QThread):
     finished_ok = Signal(str)
     failed = Signal(str)
+    cancelled = Signal()
+
 
     def __init__(self, profile: VoiceProfile, text: str, output: Path):
         super().__init__()
         self.profile = profile
         self.text = text
         self.output = output
+        self.provider = None
+        self.cancel_requested = False
 
     def run(self) -> None:
-        provider = None
         try:
-            provider, voice = provider_from_profile(self.profile)
+            self.provider, voice = provider_from_profile(self.profile)
             self.output.parent.mkdir(parents=True, exist_ok=True)
-            provider.synthesize(self.text, self.output, voice)
+            if self.cancel_requested:
+                self.cancelled.emit()
+                return
+            self.provider.synthesize(self.text, self.output, voice)
+            if self.cancel_requested:
+                self.cancelled.emit()
+                return
             if not self.output.exists() or self.output.stat().st_size < 1024:
                 raise RuntimeError("The voice engine did not produce valid audio.")
             self.finished_ok.emit(str(self.output))
         except Exception as exc:
             self.failed.emit(str(exc))
         finally:
+            provider = self.provider
+            self.provider = None
             close = getattr(provider, "close", None)
             if callable(close):
                 try:
                     close()
                 except Exception:
                     pass
+
+    def cancel(self) -> None:
+        self.cancel_requested = True
+        provider = self.provider
+        close = getattr(provider, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
 
 
 class VoicePage(QWidget):
@@ -284,7 +305,7 @@ class VoicePage(QWidget):
         self.play_button.setEnabled(False)
         self.play_button.clicked.connect(self.play_last_preview)
         self.stop_button = QPushButton("■  Stop")
-        self.stop_button.clicked.connect(self.player.stop)
+        self.stop_button.clicked.connect(self.stop_preview_or_playback)
         pa.addWidget(self.preview_button)
         pa.addWidget(self.play_button)
         pa.addWidget(self.stop_button)
@@ -823,6 +844,7 @@ class VoicePage(QWidget):
         self.preview_worker = VoicePreviewWorker(profile, text, output)
         self.preview_worker.finished_ok.connect(self._preview_worker_ok)
         self.preview_worker.failed.connect(self._preview_worker_failed)
+        self.preview_worker.cancelled.connect(self._preview_worker_cancelled)
         self.preview_worker.finished.connect(self._preview_worker_finished)
         self.preview_worker.start()
 
@@ -831,12 +853,17 @@ class VoicePage(QWidget):
         self.player.stop()
         self.player.setSource(QUrl.fromLocalFile(path))
         self.play_button.setEnabled(True)
-        self.status.setText("Preview ready. Playing locally.")
-        self.player.play()
+        self.play_button.setText("▶  Play")
+        self.status.setText("Preview ready. Press Play to listen.")
 
     def _preview_worker_failed(self, message: str) -> None:
         self.status.setText(f"Preview failed: {message}")
         QMessageBox.warning(self, "Voice Preview Failed", message)
+
+    def _preview_worker_cancelled(self) -> None:
+        self.status.setText("Voice preview cancelled.")
+        self.preview_button.setEnabled(True)
+        self.test_profile_button.setEnabled(True)
 
     def _preview_worker_finished(self) -> None:
         self.preview_button.setEnabled(True)
@@ -865,6 +892,14 @@ class VoicePage(QWidget):
         self.profile_badge.setText(profile.name)
         self._update_profile_details(profile)
         self.status.setText(f"Saved voice profile '{profile.name}' • {self._provider_label(profile)}.")
+
+    def stop_preview_or_playback(self) -> None:
+        self.player.stop()
+        self.play_button.setText("▶  Play")
+        worker = self.preview_worker
+        if worker is not None and worker.isRunning():
+            worker.cancel()
+            self.status.setText("Stopping voice preview…")
 
     def play_last_preview(self) -> None:
         if not self.last_preview or not self.last_preview.exists():
