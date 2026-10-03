@@ -62,6 +62,20 @@ class RegressionTests(unittest.TestCase):
         from app.ui.voice_cast_page import VoiceCastAnalysisWorker
         self.assertTrue(issubclass(VoiceCastAnalysisWorker, QThread))
 
+    def test_chatterbox_reference_shorter_than_six_seconds_is_rejected(self):
+        import app.tts.voice_profile as vp
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "short.wav"
+            _write_wav(source, 1.0)
+            original_root = vp.voices_root
+            vp.voices_root = lambda: root / "Voices"
+            try:
+                with self.assertRaisesRegex(RuntimeError, "longer than 5 seconds"):
+                    vp.import_reference_audio(source, "Short Voice")
+            finally:
+                vp.voices_root = original_root
+
     def test_voice_preview_runs_in_a_worker_thread(self):
         from app.ui.voice_page import VoicePreviewWorker
         from PySide6.QtCore import QThread
