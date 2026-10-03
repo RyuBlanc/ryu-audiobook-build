@@ -215,7 +215,7 @@ jobs:
             if (-not $pythonExe -or -not (Test-Path $pythonExe)) {
               throw "Python executable could not be located for the full Audiobook AI brain smoke test."
             }
-            & $pythonExe -B tests/smoke_audiobook_ai_live.py
+            & $pythonExe -c "import runpy; runpy.run_path(r'tests/smoke_audiobook_ai_live.py', run_name='__main__')"
             if ($LASTEXITCODE -ne 0) {
               throw "The full Audiobook AI brain integration test failed."
             }
