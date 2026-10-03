@@ -253,9 +253,14 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $iscc = Get-ChildItem 'C:\Program Files*' -Recurse -Filter 'ISCC.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $iscc) { throw 'ISCC.exe was not found after Inno Setup installation.' }
-          & $iscc.FullName 'installer\RyuAudiobook.iss'
+          $candidates = @(
+            'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
+            'C:\Program Files\Inno Setup 6\ISCC.exe'
+          )
+          $isccPath = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $isccPath) { throw 'ISCC.exe was not found after Inno Setup installation.' }
+          Write-Host "Using Inno Setup compiler: $isccPath"
+          & $isccPath 'installer\RyuAudiobook.iss'
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed with exit code $LASTEXITCODE." }
           $installer = Join-Path (Get-Location) "installer-output\Ryu's Audiobook Setup.exe"
           if (-not (Test-Path $installer)) { throw "Installer was not produced: $installer" }
