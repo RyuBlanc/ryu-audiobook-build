@@ -72,6 +72,11 @@ class ChapterEditorPage(QWidget):
         self.title.setMaximumHeight(55)
         self.text = QTextEdit()
         self._loading_fields = False
+        self.quick_assign_button = QPushButton("＋ Quick Assign Speaker")
+        self.quick_assign_button.setObjectName("primary")
+        self.quick_assign_button.setToolTip("Quickly assign the selected dialogue to a saved book character")
+        self.quick_assign_button.setVisible(False)
+        self.text.selectionChanged.connect(self._update_quick_assign_button)
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.setInterval(900)
@@ -125,7 +130,11 @@ class ChapterEditorPage(QWidget):
         editor_layout = QVBoxLayout()
         editor_layout.addWidget(QLabel("Chapter Title"))
         editor_layout.addWidget(self.title)
-        editor_layout.addWidget(QLabel("Chapter Text"))
+        chapter_text_header = QHBoxLayout()
+        chapter_text_header.addWidget(QLabel("Chapter Text"))
+        chapter_text_header.addStretch(1)
+        chapter_text_header.addWidget(self.quick_assign_button)
+        editor_layout.addLayout(chapter_text_header)
         editor_layout.addWidget(self.text, 1)
         body.addLayout(editor_layout, 3)
         root.addLayout(body, 1)
@@ -171,6 +180,14 @@ class ChapterEditorPage(QWidget):
                 self.text.clear()
         finally:
             self._loading_fields = False
+
+    def _update_quick_assign_button(self) -> None:
+        cursor = self.text.textCursor()
+        has_selection = cursor.hasSelection() and cursor.selectionStart() < cursor.selectionEnd()
+        self.quick_assign_button.setVisible(has_selection and not self._loading_fields)
+
+    def quick_assign_dialogue(self) -> None:
+        self.assign_selected_dialogue()
 
     def _schedule_autosave(self) -> None:
         if self._loading_fields:
@@ -399,7 +416,14 @@ class ChapterEditorPage(QWidget):
             )
             return
         start, end = cursor.selectionStart(), cursor.selectionEnd()
-        dialog = DialogueAssignmentDialog(self.editor.chapters[index], start, end, self)
+        dialog = DialogueAssignmentDialog(
+            self.editor.chapters[index],
+            start,
+            end,
+            book_chapters=self.editor.chapters,
+            project_folder=self.project_folder,
+            parent=self,
+        )
         if dialog.exec():
             self.refresh(index)
             self._loading_fields = True
