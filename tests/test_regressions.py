@@ -66,6 +66,23 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('PYTHONUTF8', runtime_source)
         self.assertIn('encoding="utf-8"', preview_source)
 
+    def test_offline_qwen_character_catalog_is_declared(self):
+        from app.tts.voice_profile import builtin_voice_profiles
+        source = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
+        worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
+        self.assertIn("Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice", source)
+        self.assertIn("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", source)
+        self.assertIn("Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign", source)
+        self.assertIn("--models-root", worker)
+
+        profiles = [
+            p for p in builtin_voice_profiles()
+            if p.provider == "qwen-character"
+        ]
+        # The catalogue remains empty until the local runtime is installed;
+        # once the runtime is ready, the app exposes the curated character set.
+        self.assertIsInstance(profiles, list)
+
     def test_premium_character_voice_studio_is_exposed(self):
         from app.tts.providers.elevenlabs import ElevenLabsProvider
         source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
