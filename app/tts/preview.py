@@ -10,6 +10,7 @@ import imageio_ffmpeg
 from app.tts.narration import prepare_for_narration
 from app.tts.pacing import append_silence, pause_after_ms, split_for_pacing
 from app.tts.base import TTSProvider
+from app.tts.multivoice import synthesize_voice_set
 
 
 @dataclass(frozen=True)
@@ -83,18 +84,28 @@ def _preview_units(
     voice: str | None,
     pronunciation_dictionary: list[dict] | None,
     max_chars: int,
-) -> list[tuple[str, str | None]]:
+    dialogue_assignments=None,
+) -> list[tuple[str, str | list[str] | None]]:
     narration = prepare_for_narration(
         text,
         pronunciation_dictionary=pronunciation_dictionary,
     ).narration_text
 
     if hasattr(provider, "split_for_cast"):
-        raw = provider.split_for_cast(narration, voice)
+        try:
+            raw = provider.split_for_cast(
+                narration,
+                voice,
+                dialogue_assignments=dialogue_assignments,
+            )
+        except TypeError as exc:
+            if "dialogue_assignments" not in str(exc):
+                raise
+            raw = provider.split_for_cast(narration, voice)
     else:
         raw = [(narration, voice)]
 
-    units: list[tuple[str, str | None]] = []
+    units: list[tuple[str, str | list[str] | None]] = []
     used_chars = 0
     for segment, segment_voice in raw:
         for unit in split_for_pacing(segment, max_chars=900, max_sentences=2):
@@ -120,6 +131,7 @@ def build_voice_preview(
     narration_speed: float = 0.90,
     pacing_profile: str = "natural",
     max_chars: int = 1400,
+    dialogue_assignments=None,
 ) -> PreviewResult:
     units = _preview_units(
         text,
@@ -127,6 +139,7 @@ def build_voice_preview(
         voice,
         pronunciation_dictionary,
         max_chars=max_chars,
+        dialogue_assignments=dialogue_assignments,
     )
     if not units:
         raise ValueError("The selected chapter does not contain enough readable text for a preview.")
@@ -145,7 +158,10 @@ def build_voice_preview(
         for index, (unit, unit_voice) in enumerate(units):
             raw_path = root / f"{index:03d}.wav"
             normalized_path = root / f"{index:03d}-normalized.wav"
-            provider.synthesize(unit, raw_path, unit_voice)
+            if isinstance(unit_voice, list):
+                synthesize_voice_set(provider, unit, unit_voice, raw_path)
+            else:
+                provider.synthesize(unit, raw_path, unit_voice)
             if not provider_handles_controls:
                 _apply_speed(raw_path, narration_speed)
                 pause_ms = pause_after_ms(unit, pacing_profile)
