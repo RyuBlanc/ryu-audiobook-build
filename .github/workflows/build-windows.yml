@@ -208,12 +208,16 @@ jobs:
             $env:RYU_AI_SERVER_URL = "http://127.0.0.1:18765"
             $env:PYTHONPATH = (Get-Location).Path
             $env:PATH = "$env:pythonLocation;$env:PATH"
-            $pythonExe = Join-Path $env:pythonLocation "python.exe"
+            $pythonCommand = Get-Command python -CommandType Application -ErrorAction SilentlyContinue
+            $pythonExe = if ($pythonCommand) { $pythonCommand.Source } else { Join-Path $env:pythonLocation "python.exe" }
+            Write-Host "Resolved Python executable: $pythonExe"
+            Write-Host "pythonLocation: $env:pythonLocation"
             if (-not (Test-Path $pythonExe)) {
-              $pythonExe = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
+              throw "Resolved Python executable does not exist: $pythonExe"
             }
-            if (-not $pythonExe -or -not (Test-Path $pythonExe)) {
-              throw "Python executable could not be located for the full Audiobook AI brain smoke test."
+            & $pythonExe --version
+            if ($LASTEXITCODE -ne 0) {
+              throw "Resolved Python executable failed its version check."
             }
             & $pythonExe -c "import runpy; runpy.run_path(r'tests/smoke_audiobook_ai_live.py', run_name='__main__')"
             if ($LASTEXITCODE -ne 0) {
