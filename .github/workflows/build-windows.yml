@@ -143,14 +143,12 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           Write-Host 'The HTTP smoke above validates the local AI server; running the application parser/integration smoke with a fresh CI Python interpreter.'
-          $pythonExe = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
-          if (-not $pythonExe) {
-            $toolRoot = Join-Path $env:RUNNER_TOOL_CACHE 'Python'
-            $pythonExe = Get-ChildItem $toolRoot -Recurse -Filter 'python.exe' -ErrorAction SilentlyContinue |
-              Select-Object -First 1 -ExpandProperty FullName
-          }
+          $toolRoot = Join-Path $env:RUNNER_TOOL_CACHE 'Python'
+          $pythonExe = Get-ChildItem $toolRoot -Recurse -Filter 'python.exe' -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notlike '*WindowsApps*' } |
+            Select-Object -First 1 -ExpandProperty FullName
           if (-not $pythonExe -or -not (Test-Path $pythonExe)) {
-            throw "CI Python executable could not be resolved after actions/setup-python."
+            throw "CI Python executable could not be resolved from the Actions tool cache."
           }
           Write-Host "Using CI Python executable: $pythonExe"
           & $pythonExe -B -m unittest tests.smoke_audiobook_ai_live -v
