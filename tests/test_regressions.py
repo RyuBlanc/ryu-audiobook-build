@@ -57,6 +57,15 @@ class RegressionTests(unittest.TestCase):
             finally:
                 eleven.ElevenLabsProvider.KEY_FILE = original
 
+    def test_custom_voice_worker_uses_utf8_ipc(self):
+        provider_source = Path("app/tts/providers/chatterbox.py").read_text(encoding="utf-8")
+        runtime_source = Path("app/tts/chatterbox_runtime.py").read_text(encoding="utf-8")
+        preview_source = Path("app/tts/preview.py").read_text(encoding="utf-8")
+        self.assertIn('encoding="utf-8"', provider_source)
+        self.assertIn('PYTHONIOENCODING', runtime_source)
+        self.assertIn('PYTHONUTF8', runtime_source)
+        self.assertIn('encoding="utf-8"', preview_source)
+
     def test_premium_character_voice_studio_is_exposed(self):
         from app.tts.providers.elevenlabs import ElevenLabsProvider
         source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
