@@ -7,6 +7,7 @@ from app.tts.providers.kokoro import KokoroProvider
 from app.tts.providers.chatterbox import ChatterboxProvider
 from app.tts.providers.edge_tts import EdgeTTSProvider
 from app.tts.providers.elevenlabs import ElevenLabsProvider
+from app.tts.providers.qwen_character import QwenCharacterProvider
 
 
 def provider_from_profile(profile: VoiceProfile):
@@ -18,6 +19,18 @@ def provider_from_profile(profile: VoiceProfile):
 
     if profile.provider == "elevenlabs":
         return ElevenLabsProvider(), profile.voice_id
+
+    if profile.provider == "qwen-character":
+        return (
+            QwenCharacterProvider(
+                voice_id=profile.voice_id,
+                language=profile.language or "English",
+                instruct=profile.notes,
+                backend=profile.backend,
+                model_kind=profile.model_id or "auto",
+            ),
+            profile.voice_id,
+        )
 
     if profile.provider == "piper":
         return PiperProvider(backend=profile.backend), profile.voice_id
