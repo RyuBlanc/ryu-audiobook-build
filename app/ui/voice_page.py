@@ -1239,7 +1239,7 @@ class VoicePage(QWidget):
             self.premium_key_button.setVisible(mode == "elevenlabs")
         if hasattr(self, "character_box"):
             self.character_box.setVisible(mode == "elevenlabs")
-        self.neural_box.setVisible(mode in {"offline-neural", "edge-tts", "elevenlabs"})
+        self.neural_box.setVisible(mode in {"offline-neural", "offline-character", "edge-tts", "elevenlabs"})
         self.sapi_box.setVisible(mode == "windows-sapi")
         self.custom_box.setVisible(mode == "chatterbox")
 
@@ -1248,6 +1248,22 @@ class VoicePage(QWidget):
                 "Built-in local neural voices. No internet connection is used for preview or generation."
             )
             self._refresh_offline_catalog()
+            self._set_filter_values([
+                profile for profile in self.offline_voices
+                if profile.provider != "qwen-character"
+            ])
+            self._refresh_voice_list()
+        elif mode == "offline-character":
+            self.source_hint.setText(
+                "Premium local English character voices powered by Qwen3-TTS. "
+                "No API key or internet connection is required after the model is downloaded."
+            )
+            self._refresh_offline_catalog()
+            self._set_filter_values([
+                profile for profile in self.offline_voices
+                if profile.provider == "qwen-character"
+            ])
+            self._refresh_voice_list()
         elif mode == "edge-tts":
             self.source_hint.setText(
                 "Microsoft Edge online neural catalog. Internet is required for synthesis."
