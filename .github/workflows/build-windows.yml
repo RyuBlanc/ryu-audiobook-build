@@ -149,7 +149,7 @@ jobs:
             Write-Host 'HTTP Audiobook AI smoke test PASSED.'
             $env:PYTHONPATH = (Get-Location).Path
             $env:RYU_AI_SERVER_URL = 'http://127.0.0.1:18765'
-            & $pythonExe -B -m unittest tests.smoke_audiobook_ai_live -v
+            & $pythonExe -B tests/smoke_audiobook_ai_live.py
           } finally {
             if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
           }
