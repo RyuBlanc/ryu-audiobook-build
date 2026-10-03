@@ -35,14 +35,15 @@ class AudiobookBrainTests(unittest.TestCase):
         from app.version import APP_VERSION
         self.assertEqual(APP_VERSION, "0.3.1")
 
-    def test_chatterbox_pinned_source_is_installed_after_dependency_wheels(self):
+    def test_chatterbox_runtime_is_resume_safe_and_pinned(self):
         from pathlib import Path
         source = (Path(__file__).resolve().parents[1] / "app" / "tts" / "chatterbox_runtime.py").read_text(encoding="utf-8")
-        dependency_loop = source.index("pip", source.index("def install_runtime"))
-        verify = source.index("ChatterboxTurboTTS.from_pretrained")
-        self.assertLess(dependency_loop, verify)
         self.assertIn("CHATTERBOX_SOURCE_REVISION", source)
+        self.assertIn('"--no-cache-dir", "--upgrade", "-r"', source)
+        self.assertIn('"--no-cache-dir", "--no-deps", str(source_archive)', source)
+        self.assertIn("def _verify_runtime", source)
         self.assertIn('"nano_supported": True', source)
+        self.assertIn("if runtime_ready():", source)
 
     def test_versioned_pyinstaller_resource_is_enabled(self):
         from pathlib import Path
