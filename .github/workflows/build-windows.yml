@@ -211,7 +211,7 @@ jobs:
           $env:PYTHONPATH = (Get-Location).Path
           $version = python -c "from app.version import full_version; print(full_version())"
           Write-Host "Application version: $version"
-          $expected = "v0.3.1"
+          $expected = "v0.3.2"
           if (-not $version.StartsWith($expected) -or -not $version.EndsWith("Build $env:RYU_BUILD_NUMBER")) {
             throw "Unexpected application version: $version"
           }
