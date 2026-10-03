@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+import webbrowser
+import secrets
 
 from PySide6.QtCore import QUrl, QThread, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
@@ -101,6 +103,8 @@ class PremiumCharacterVoiceWorker(QThread):
                     gender=self.payload.get("gender", "female"),
                     age=self.payload.get("age", "young adult"),
                     temperament=self.payload.get("temperament", "expressive"),
+                    archetype=self.payload.get("archetype", "heroine"),
+                    seed=self.payload.get("seed"),
                 )
                 self.previews_ready.emit(previews)
             elif self.action == "create":
@@ -193,9 +197,14 @@ class VoicePage(QWidget):
         premium_row = QHBoxLayout()
         self.premium_key_button = QPushButton("Set Premium API Key")
         self.premium_key_button.clicked.connect(self._set_premium_api_key)
+        self.premium_key_help_button = QPushButton("Get API Key")
+        self.premium_key_help_button.clicked.connect(
+            lambda: webbrowser.open("https://elevenlabs.io")
+        )
         self.premium_key_status = QLabel("Premium key: not configured")
         self.premium_key_status.setObjectName("muted")
         premium_row.addWidget(self.premium_key_button)
+        premium_row.addWidget(self.premium_key_help_button)
         premium_row.addWidget(self.premium_key_status, 1)
         source_layout.addLayout(premium_row)
 
@@ -227,8 +236,28 @@ class VoicePage(QWidget):
             "Villain / ominous",
             "Calm / cinematic",
         ])
+        self.character_archetype = QComboBox()
+        archetypes = [
+            ("Anime Heroine", "heroine"),
+            ("Anime Hero", "hero"),
+            ("Anime Rival", "rival"),
+            ("Anime Tsundere", "tsundere"),
+            ("Anime Healer", "healer"),
+            ("Anime Villain", "villain"),
+            ("Anime Mentor", "mentor"),
+            ("Anime Chibi", "chibi"),
+            ("Anime Sidekick", "sidekick"),
+            ("Anime Mysterious", "mysterious"),
+            ("Cartoon Hero", "cartoon_hero"),
+            ("Cartoon Sidekick", "cartoon_sidekick"),
+            ("Cartoon Villain", "cartoon_villain"),
+            ("Cartoon Friend", "cartoon_friend"),
+        ]
+        for label, value in archetypes:
+            self.character_archetype.addItem(label, value)
         for label, widget in (
             ("Style", self.character_style),
+            ("Archetype", self.character_archetype),
             ("Gender", self.character_gender),
             ("Age", self.character_age),
             ("Temperament", self.character_temperament),
@@ -244,6 +273,10 @@ class VoicePage(QWidget):
         self.design_character_button.setObjectName("primary")
         self.design_character_button.clicked.connect(self.design_character_voices)
         character_actions.addWidget(self.design_character_button)
+        self.design_character_more_button = QPushButton("Generate 3 More")
+        self.design_character_more_button.clicked.connect(self.design_character_voices)
+        self.design_character_more_button.setEnabled(False)
+        character_actions.addWidget(self.design_character_more_button)
         self.character_preview_selector = QComboBox()
         self.character_preview_selector.addItem("No generated previews", None)
         character_actions.addWidget(self.character_preview_selector, 1)
@@ -570,11 +603,14 @@ class VoicePage(QWidget):
         self.character_preview_selector.addItem("Generating premium previews…", None)
         self.play_character_button.setEnabled(False)
         self.design_character_button.setEnabled(False)
+        self.design_character_more_button.setEnabled(False)
         self.add_character_button.setEnabled(False)
         style = str(self.character_style.currentData() or "anime")
         gender = self.character_gender.currentText().casefold()
         age = self.character_age.currentText()
         temperament = self.character_temperament.currentText()
+        archetype = str(self.character_archetype.currentData() or "heroine")
+        seed = secrets.randbelow(2_147_483_647)
         self.character_status.setText(
             "Generating 3 premium character-voice options… "
             "The service is online; the rest of Ryu's Audiobook remains responsive."
@@ -586,6 +622,8 @@ class VoicePage(QWidget):
                 "gender": gender,
                 "age": age,
                 "temperament": temperament,
+                "archetype": archetype,
+                "seed": seed,
             },
         )
         self.character_worker.previews_ready.connect(self._character_previews_ready)
@@ -609,7 +647,8 @@ class VoicePage(QWidget):
             self.character_name.setText(
                 f"{style} {gender} Character"
             )
-            self.character_status.setText(
+            self.design_character_more_button.setEnabled(True)
+        self.character_status.setText(
                 f"Generated {len(self.character_previews)} premium {style.lower()} voice options. "
                 "Play one, then add your selected option to ElevenLabs My Voices."
             )
@@ -619,6 +658,7 @@ class VoicePage(QWidget):
 
     def _character_worker_finished(self) -> None:
         self.design_character_button.setEnabled(True)
+        self.design_character_more_button.setEnabled(bool(self.character_previews))
         self.add_character_button.setEnabled(True)
         self.character_worker = None
 
