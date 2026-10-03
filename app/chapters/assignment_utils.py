@@ -98,7 +98,7 @@ def build_book_character_registry(chapters, project_folder: Path | None = None) 
         key = clean.casefold()
         entry = registry.setdefault(
             key,
-            {"name": clean, "chapters": set(), "sources": set()},
+            {"name": clean, "chapters": set(), "sources": set(), "voice": None},
         )
         if chapter_number is not None:
             entry["chapters"].add(int(chapter_number))
@@ -115,8 +115,11 @@ def build_book_character_registry(chapters, project_folder: Path | None = None) 
         state = load_state(project_folder)
         cast = state.get("voice_cast", {}) if isinstance(state, dict) else {}
         if isinstance(cast, dict):
-            for name in cast:
+            for name, voice in cast.items():
                 add(name, None, "saved voice cast")
+                entry = registry.get(str(name).casefold())
+                if entry:
+                    entry["voice"] = str(voice).strip() or None
 
     for name in _load_ai_character_names(project_folder):
         add(name, None, "Audiobook AI")
@@ -138,6 +141,8 @@ def format_character_registry_entry(entry: dict) -> str:
         location = "Chapter" + ("s" if len(chapters) != 1 else "") + " " + ", ".join(map(str, chapters))
     else:
         location = source or "saved book character"
+    voice = str(entry.get("voice") or "").strip()
+    voice_note = f"Voice: {voice}" if voice else "Voice: not assigned"
     if source and chapters:
-        return f"{entry['name']}  ·  {location}  ·  {source}"
-    return f"{entry['name']}  ·  {location}"
+        return f"{entry['name']}  ·  {location}  ·  {voice_note}  ·  {source}"
+    return f"{entry['name']}  ·  {location}  ·  {voice_note}"
