@@ -9,12 +9,12 @@ import sys
 import urllib.error
 import urllib.request
 import ssl
+from typing import Callable
 
 try:
     import certifi
 except ImportError:
     certifi = None
-from typing import Callable
 
 from app.core.paths import models_root
 
@@ -74,9 +74,6 @@ def _python_311(command: list[str]) -> bool:
 
 
 def _system_python() -> list[str] | None:
-    # The custom Chatterbox runtime is isolated from the main application.
-    # Its current dependency set is pinned around Python 3.11, so a newer
-    # system Python (such as 3.14) must not be used for this environment.
     candidates = (
         ["py", "-3.11"],
         ["pymanager", "-3.11"],
@@ -88,26 +85,17 @@ def _system_python() -> list[str] | None:
         if command and _python_311(command):
             return command
 
-    # On current Windows Python installations, the Python Installation
-    # Manager can install a side-by-side 3.11 runtime. The user already
-    # explicitly requested custom voice installation, so perform this
-    # dependency setup automatically instead of requiring a second manual
-    # Python installation step.
     manager = shutil.which("py") or shutil.which("pymanager")
     if manager:
         try:
             install = subprocess.run(
-                [manager, "install", "3.11"],
-                capture_output=True, text=True, timeout=900,
+                [manager, "install", "3.11"], capture_output=True, text=True, timeout=900,
             )
             if install.returncode == 0 and _python_311([manager, "-3.11"]):
                 return [manager, "-3.11"]
         except (OSError, subprocess.SubprocessError):
             pass
 
-    # Last resort: install the official per-user CPython 3.11.9 Windows
-    # installer. This keeps custom voice setup one-click even on machines
-    # that only have a newer Python release and no Python install manager.
     local_app_data = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local"))
     install_dir = local_app_data / "Programs" / "Python" / "Python311"
     direct_candidates = (
@@ -123,15 +111,8 @@ def _system_python() -> list[str] | None:
     try:
         installer.parent.mkdir(parents=True, exist_ok=True)
         if not installer.exists() or installer.stat().st_size < 5_000_000:
-            context = (
-                ssl.create_default_context(cafile=certifi.where())
-                if certifi is not None
-                else ssl.create_default_context()
-            )
-            request = urllib.request.Request(
-                PYTHON_311_URL,
-                headers={"User-Agent": "Ryu-Audiobook/1.1"},
-            )
+            context = ssl.create_default_context(cafile=certifi.where()) if certifi else ssl.create_default_context()
+            request = urllib.request.Request(PYTHON_311_URL, headers={"User-Agent": "Ryu-Audiobook/1.1"})
             with urllib.request.urlopen(request, timeout=90, context=context) as response, installer.open("wb") as handle:
                 while True:
                     block = response.read(1024 * 1024)
@@ -139,19 +120,9 @@ def _system_python() -> list[str] | None:
                         break
                     handle.write(block)
         result = subprocess.run(
-            [
-                str(installer),
-                "/quiet",
-                "InstallAllUsers=0",
-                "PrependPath=0",
-                "Include_launcher=1",
-                "Include_pip=1",
-                "Include_test=0",
-                f"TargetDir={install_dir}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=900,
+            [str(installer), "/quiet", "InstallAllUsers=0", "PrependPath=0", "Include_launcher=1",
+             "Include_pip=1", "Include_test=0", f"TargetDir={install_dir}"],
+            capture_output=True, text=True, timeout=900,
         )
         if result.returncode == 0:
             for candidate in direct_candidates:
@@ -175,134 +146,115 @@ def _has_nvidia() -> bool:
     if not command:
         return False
     try:
-        return subprocess.run(
-            [command, "-L"], capture_output=True, text=True, timeout=5
-        ).returncode == 0
+        return subprocess.run([command, "-L"], capture_output=True, text=True, timeout=5).returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
+
+
+def _ssl_context() -> ssl.SSLContext:
+    return ssl.create_default_context(cafile=certifi.where()) if certifi else ssl.create_default_context()
+
+
+def _run(command: list[str], timeout: int, label: str) -> str:
+    result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()[-5000:]
+        raise RuntimeError(f"{label} failed. {detail}")
+    return (result.stdout or "").strip()
+
+
+def _verify_runtime(python: Path) -> str:
+    script = (
+        "import inspect, torch; "
+        "from chatterbox.tts_turbo import ChatterboxTurboTTS; "
+        "sig=inspect.signature(ChatterboxTurboTTS.from_pretrained); "
+        "assert 'nano' in sig.parameters, 'Chatterbox Turbo/Nano API missing nano= parameter'; "
+        "print(f'nano_api={sig}'); print(f'torch={torch.__version__}'); "
+        "print(f'cuda={torch.cuda.is_available()}'); "
+        "print('gpu=' + (torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'))"
+    )
+    return _run([str(python), "-c", script], 180, "Chatterbox runtime verification")
 
 
 def install_runtime(progress: Callable[[str], None] | None = None) -> None:
     system_python = _system_python()
     if not system_python:
         raise RuntimeError(
-            "Automatic Python 3.11 setup could not be completed. "
-            "The custom voice engine needs Python 3.11 (64-bit). "
+            "Automatic Python 3.11 setup could not be completed. The custom voice engine needs Python 3.11 (64-bit). "
             "Check your internet connection and retry the installation."
         )
 
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     python = _venv_python()
-    if progress:
-        progress("Creating isolated custom voice environment…")
-    if not python.exists():
-        result = subprocess.run(
-            system_python + ["-m", "venv", str(RUNTIME_DIR)],
-            capture_output=True, text=True, timeout=600,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                "Could not create the custom voice environment. "
-                + (result.stderr or result.stdout).strip()[-2500:]
-            )
 
-    if progress:
-        progress("Installing Chatterbox and audio dependencies…")
+    if runtime_ready():
+        if progress:
+            progress("Custom voice engine is already installed and ready.")
+        return
+
+    if not python.exists():
+        if progress:
+            progress("Creating isolated custom voice environment…")
+        _run(system_python + ["-m", "venv", str(RUNTIME_DIR)], 600, "Python 3.11 environment creation")
+
     requirements = _resource_path("requirements-voice-cloning.txt")
     if not requirements.exists():
         raise RuntimeError(f"Voice-cloning requirements are missing from this build: {requirements}")
 
-    # Repair in-place, even when an older Chatterbox runtime already exists.
-    # The Turbo/Nano API changed over time; install the exact source revision
-    # after all wheel dependencies so pip cannot overwrite the nano-capable source.
-    source_archive = RUNTIME_DIR / "chatterbox-source.zip"
-    commands = [
-        [str(python), "-m", "pip", "install", "--upgrade", "pip"],
-        [str(python), "-m", "pip", "uninstall", "-y", "chatterbox-tts", "chatterbox"],
-        [str(python), "-m", "pip", "install", "--no-cache-dir", "--upgrade", "--force-reinstall", "-r", str(requirements)],
-    ]
+    if progress:
+        progress("Checking existing Chatterbox dependencies…")
+    try:
+        _verify_runtime(python)
+        runtime_ok = True
+    except Exception:
+        runtime_ok = False
 
-    if _has_nvidia():
-        # Chatterbox 0.1.7 pins torch 2.6.0. Replace the default CPU wheel
-        # with the official CUDA 12.4 wheels used by RTX 20/30/40-class GPUs.
-        commands.append([
-            str(python), "-m", "pip", "install", "--upgrade", "--force-reinstall",
-            "torch==2.6.0", "torchaudio==2.6.0",
-            "--index-url", "https://download.pytorch.org/whl/cu124",
-        ])
-
-    for command in commands:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=3600,
+    if not runtime_ok:
+        if progress:
+            progress("Installing Chatterbox dependencies (resume-safe; existing packages are reused)…")
+        _run([str(python), "-m", "pip", "install", "--upgrade", "pip"], 900, "pip upgrade")
+        _run(
+            [str(python), "-m", "pip", "install", "--no-cache-dir", "--upgrade", "-r", str(requirements)],
+            3600,
+            "Chatterbox dependency installation",
         )
-        if result.returncode != 0:
-            raise RuntimeError(
-                "Custom voice runtime installation failed. "
-                + (result.stderr or result.stdout).strip()[-5000:]
+        if _has_nvidia():
+            if progress:
+                progress("Ensuring CUDA-enabled Torch is installed for NVIDIA custom voice…")
+            _run(
+                [str(python), "-m", "pip", "install", "--upgrade", "torch==2.6.0", "torchaudio==2.6.0",
+                 "--index-url", "https://download.pytorch.org/whl/cu124"],
+                3600,
+                "CUDA Torch installation",
             )
 
-    # Install the pinned Chatterbox source LAST and without dependency resolution.
-    # The upstream pyproject declares Perth via git+https, but PyPI publishes the
-    # same package as a normal wheel. End users therefore do not need Git.
+    if progress:
+        progress("Installing the pinned Chatterbox source…")
+    source_archive = RUNTIME_DIR / "chatterbox-source.zip"
     try:
-        if progress:
-            progress("Installing the offline Chatterbox voice engine…")
         request = urllib.request.Request(
             CHATTERBOX_SOURCE_URL,
             headers={"User-Agent": "Ryu-Audiobook/1.1", "Accept": "application/zip"},
         )
-        context = (
-            ssl.create_default_context(cafile=certifi.where())
-            if certifi is not None
-            else ssl.create_default_context()
-        )
-        with urllib.request.urlopen(request, timeout=180, context=context) as response, source_archive.open("wb") as handle:
+        with urllib.request.urlopen(request, timeout=180, context=_ssl_context()) as response, source_archive.open("wb") as handle:
             while True:
                 block = response.read(1024 * 1024)
                 if not block:
                     break
                 handle.write(block)
-        result = subprocess.run(
+        _run(
             [str(python), "-m", "pip", "install", "--no-cache-dir", "--no-deps", str(source_archive)],
-            capture_output=True, text=True, timeout=1800,
+            1800,
+            "Pinned Chatterbox source installation",
         )
-        if result.returncode != 0:
-            raise RuntimeError((result.stderr or result.stdout).strip()[-5000:])
     finally:
         source_archive.unlink(missing_ok=True)
 
-    verify = subprocess.run(
-        [
-            str(python), "-c",
-            "import chatterbox, torch, torchaudio, inspect; "
-            "from chatterbox.tts_turbo import ChatterboxTurboTTS; "
-            "sig=inspect.signature(ChatterboxTurboTTS.from_pretrained); "
-            "assert 'nano' in sig.parameters, 'Chatterbox Turbo/Nano API missing nano= parameter'; "
-            "print(f'chatterbox_turbo={ChatterboxTurboTTS.__module__}'); "
-            "print(f'nano_api={sig}'); "
-            "print(f'torch={torch.__version__}'); "
-            "print(f'cuda={torch.cuda.is_available()}'); "
-            "print('gpu=' + (torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU'))",
-        ],
-        capture_output=True, text=True, timeout=180,
-    )
-    if verify.returncode != 0:
-        raise RuntimeError(
-            "The custom voice runtime installed but could not be imported. "
-            + (verify.stderr or verify.stdout).strip()[-3000:]
-        )
-
+    runtime_info = _verify_runtime(python)
     MARKER.write_text(json.dumps({
-        "provider": "chatterbox",
-        "ready": True,
-        "python": str(python),
-        "runtime": (verify.stdout or "").strip(),
-        "gpu_acceleration": _has_nvidia(),
-        "source_revision": CHATTERBOX_SOURCE_REVISION,
-        "nano_supported": True,
+        "provider": "chatterbox", "ready": True, "python": str(python),
+        "runtime": runtime_info, "gpu_acceleration": _has_nvidia(),
+        "source_revision": CHATTERBOX_SOURCE_REVISION, "nano_supported": True,
     }, indent=2), encoding="utf-8")
     if progress:
         progress("Custom voice engine is ready.")
