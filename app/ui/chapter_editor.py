@@ -76,6 +76,7 @@ class ChapterEditorPage(QWidget):
         self.quick_assign_button.setObjectName("primary")
         self.quick_assign_button.setToolTip("Quickly assign the selected dialogue to a saved book character")
         self.quick_assign_button.setVisible(False)
+        self.quick_assign_button.clicked.connect(self.quick_assign_dialogue)
         self.text.selectionChanged.connect(self._update_quick_assign_button)
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
