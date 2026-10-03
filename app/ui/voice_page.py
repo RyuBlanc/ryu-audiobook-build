@@ -274,7 +274,7 @@ class VoicePage(QWidget):
         self.design_character_button.clicked.connect(self.design_character_voices)
         character_actions.addWidget(self.design_character_button)
         self.design_character_more_button = QPushButton("Generate 3 More")
-        self.design_character_more_button.clicked.connect(self.design_character_voices)
+        self.design_character_more_button.clicked.connect(lambda: self.design_character_voices(more=True))
         self.design_character_more_button.setEnabled(False)
         character_actions.addWidget(self.design_character_more_button)
         self.character_preview_selector = QComboBox()
@@ -588,7 +588,7 @@ class VoicePage(QWidget):
                 f"Online catalog unavailable: {exc}. Offline voices remain available."
             )
 
-    def design_character_voices(self) -> None:
+    def design_character_voices(self, more: bool = False) -> None:
         if not ElevenLabsProvider.load_api_key():
             QMessageBox.warning(
                 self,
@@ -598,9 +598,13 @@ class VoicePage(QWidget):
             return
         if self.character_worker is not None and self.character_worker.isRunning():
             return
-        self.character_previews = []
-        self.character_preview_selector.clear()
-        self.character_preview_selector.addItem("Generating premium previews…", None)
+        if not more:
+            self.character_previews = []
+            self.character_preview_selector.clear()
+        self.character_preview_selector.addItem(
+            "Generating 3 more premium previews…" if more else "Generating premium previews…",
+            None,
+        )
         self.play_character_button.setEnabled(False)
         self.design_character_button.setEnabled(False)
         self.design_character_more_button.setEnabled(False)
