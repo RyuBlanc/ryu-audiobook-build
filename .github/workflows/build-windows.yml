@@ -279,18 +279,3 @@ jobs:
         run: |
           $tag = "v0.3.7-build-${{ github.run_number }}"
           gh release create $tag "installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, Audiobook AI smoke validation, Chatterbox runtime validation, and installer verification." --target $env:GITHUB_SHA
-
-              if ($candidate) { $pythonExe = $candidate }
-            }
-            if (-not $pythonExe -or -not (Test-Path $pythonExe)) {
-              throw "A real Python 3.12 interpreter is not available for the AI integration smoke."
-            }
-            $pythonVersion = & $pythonExe -c "import sys; print('.'.join(map(str, sys.version_info[:2])))"
-            if ($pythonVersion -ne '3.12') {
-              throw "Audiobook AI integration smoke is running under Python $pythonVersion instead of Python 3.12."
-            }
-            Write-Host "Using Python for AI integration smoke: $pythonExe"
-            $env:PYTHONPATH = (Get-Location).Path
-            $env:RYU_AI_SERVER_URL = 'http://127.0.0.1:18765'
-            & $pythonExe -B -m unittest tests.smoke_audiobook_ai_live -v
-          } finally { if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force } }
