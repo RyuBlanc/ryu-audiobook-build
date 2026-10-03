@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QPushButton, QVBoxLayout, QWidget, QLineEdit, QTextEdit,
@@ -12,6 +13,44 @@ from app.chapters.detector import detect_chapters
 from app.documents.parser import extract_text
 from app.tts.voice_profile import load_profiles
 from app.core.state import load_state, save_state
+
+
+class VoiceCastAnalysisWorker(QThread):
+    finished_ok = Signal(object, object, bool)
+    failed = Signal(str)
+    progress = Signal(str)
+
+    def __init__(self, chapters, source_path=None):
+        super().__init__()
+        self.chapters = list(chapters or [])
+        self.source_path = source_path
+
+    def run(self) -> None:
+        try:
+            chapters = list(self.chapters)
+            source_used = False
+            if self.source_path:
+                try:
+                    path = Path(self.source_path)
+                    if path.exists():
+                        self.progress.emit("Extracting the original manuscript…")
+                        fresh = detect_chapters(extract_text(path).text)
+                        if fresh:
+                            chapters = fresh
+                            source_used = True
+                except Exception:
+                    # Source extraction is best-effort; the already-loaded
+                    # chapter text remains a safe fallback.
+                    pass
+
+            if not chapters:
+                raise RuntimeError("There are no chapters available to analyze.")
+
+            self.progress.emit("Analyzing characters and dialogue cues…")
+            analysis = analyze_book(chapters)
+            self.finished_ok.emit(chapters, analysis, source_used)
+        except Exception as exc:
+            self.failed.emit(str(exc))
 
 
 def confidence_band(value: float) -> str:
@@ -55,6 +94,7 @@ class VoiceCastPage(QWidget):
         self.get_source = get_source or (lambda: None)
         self.rows: list[dict] = []
         self.profiles = []
+        self.analysis_worker: VoiceCastAnalysisWorker | None = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(22, 22, 22, 22)
@@ -196,22 +236,26 @@ class VoiceCastPage(QWidget):
         return None
 
     def analyze(self):
-        chapters = self.get_chapters() or []
+        if self.analysis_worker is not None and self.analysis_worker.isRunning():
+            return
+
+        chapters = list(self.get_chapters() or [])
         source = self.get_source()
-        source_used = False
 
-        if source:
-            try:
-                path = Path(source)
-                if path.exists():
-                    fresh = detect_chapters(extract_text(path).text)
-                    if fresh:
-                        chapters = fresh
-                        source_used = True
-            except Exception:
-                pass
+        if not chapters and not source:
+            self.summary.setText("No chapter text is available to analyze.")
+            return
 
-        analysis = analyze_book(chapters)
+        self.analyze_button.setEnabled(False)
+        self.summary.setText("Preparing character analysis… The interface remains responsive.")
+        self.analysis_worker = VoiceCastAnalysisWorker(chapters, source)
+        self.analysis_worker.progress.connect(self.summary.setText)
+        self.analysis_worker.finished_ok.connect(self._analysis_finished)
+        self.analysis_worker.failed.connect(self._analysis_failed)
+        self.analysis_worker.finished.connect(self._analysis_worker_finished)
+        self.analysis_worker.start()
+
+    def _analysis_finished(self, chapters, analysis, source_used):
         saved = {
             str(k).casefold(): str(v)
             for k, v in self._saved_assignments().items()
@@ -251,6 +295,16 @@ class VoiceCastPage(QWidget):
         self._refresh_labels()
         if rows:
             self.list.setCurrentRow(0)
+
+    def _analysis_failed(self, message: str):
+        self.summary.setText(f"Character analysis failed: {message}")
+        self.review_hint.setText(
+            "The original chapter text is unchanged. You can retry the analysis."
+        )
+
+    def _analysis_worker_finished(self):
+        self.analyze_button.setEnabled(True)
+        self.analysis_worker = None
 
     def show_details(self, index):
         row = self._row_for_visible_index(index)
