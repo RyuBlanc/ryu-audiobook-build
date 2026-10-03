@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from app.chapters.characters import infer_speaker_for_quote, _all_dialogue_spans
+from app.chapters.assignment_utils import assignment_speakers
 from app.tts.base import TTSProvider
 from app.tts.profile_provider import provider_from_profile
 from app.tts.voice_profile import VoiceProfile
@@ -91,6 +92,65 @@ class CastAwareProvider(TTSProvider):
             json.dumps(payload, sort_keys=True).encode("utf-8")
         ).hexdigest()
 
+    def _assignment_for_span(self, text: str, start: int, end: int, dialogue_assignments) -> dict | None:
+        assignments = list(dialogue_assignments or [])
+        if not assignments:
+            return None
+
+        # Prefer exact/nearby source offsets, then normalized dialogue text.
+        candidates = []
+        raw = text[start:end].strip()
+        normalized_raw = re.sub(r"[^\w]+", " ", raw, flags=re.UNICODE).casefold().strip()
+
+        for item in assignments:
+            speakers = assignment_speakers(item)
+            if not speakers:
+                continue
+            try:
+                a_start = int(item.get("start", -1))
+                a_end = int(item.get("end", -1))
+            except (TypeError, ValueError):
+                a_start, a_end = -1, -1
+
+            item_text = str(item.get("text") or "").strip()
+            normalized_item = re.sub(r"[^\w]+", " ", item_text, flags=re.UNICODE).casefold().strip()
+            overlap = 0
+            if a_start >= 0 and a_end > a_start:
+                overlap = max(0, min(end, a_end) - max(start, a_start))
+
+            score = float(overlap)
+            if normalized_item and normalized_item == normalized_raw:
+                score += 100000.0
+            elif normalized_item and (
+                normalized_item in normalized_raw or normalized_raw in normalized_item
+            ):
+                score += 1000.0
+            if a_start >= 0:
+                score -= abs(start - a_start) * 0.01
+            candidates.append((score, item))
+
+        if not candidates:
+            return None
+        score, item = max(candidates, key=lambda value: value[0])
+        return item if score > 0 else None
+
+    def _speakers_for(
+        self,
+        text: str,
+        start: int,
+        end: int,
+        last_speaker: str | None,
+        dialogue_assignments=None,
+    ) -> tuple[list[str], str | None]:
+        manual = self._assignment_for_span(text, start, end, dialogue_assignments)
+        if manual:
+            speakers = assignment_speakers(manual)
+            if speakers:
+                return speakers, (str(manual.get("multi_speaker_mode") or "chorus").strip().lower())
+
+        speaker = self._speaker_for(text, start, end, last_speaker)
+        return ([speaker] if speaker else []), None
+
     def _speaker_for(self, text: str, start: int, end: int, last_speaker: str | None) -> str | None:
         return infer_speaker_for_quote(
             text,
@@ -101,8 +161,7 @@ class CastAwareProvider(TTSProvider):
             last_speaker=last_speaker,
         )
 
-    def split_for_cast(self, text: str, fallback_voice: str | None):
-        # Use the same dialogue span detector as Voice Cast analysis so
+    def split_for_cast(self, text: str, fallback_voice: str | None, dialogue_assignments=None):        # Use the same dialogue span detector as Voice Cast analysis so
         # generation and review cannot disagree about what counts as dialogue.
         spans = _all_dialogue_spans(text)
 
@@ -116,10 +175,28 @@ class CastAwareProvider(TTSProvider):
             if start > cursor:
                 parts.append((text[cursor:start], fallback_voice))
 
-            speaker = self._speaker_for(text, start, end, last_speaker)
-            voice = self.assignments.get(speaker.casefold()) if speaker else fallback_voice
-            if speaker:
-                last_speaker = speaker.casefold()
+            speakers, multi_mode = self._speakers_for(
+                text,
+                start,
+                end,
+                last_speaker,
+                dialogue_assignments=dialogue_assignments,
+            )
+            assigned_voices = [
+                self.assignments.get(speaker.casefold())
+                for speaker in speakers
+                if self.assignments.get(speaker.casefold())
+            ]
+            if assigned_voices:
+                voice = (
+                    assigned_voices
+                    if len(assigned_voices) > 1 and multi_mode != "sequential"
+                    else assigned_voices[0]
+                )
+            else:
+                voice = fallback_voice
+            if speakers:
+                last_speaker = speakers[-1].casefold()
 
             raw = text[start:end].strip()
             dialogue = raw
