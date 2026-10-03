@@ -53,11 +53,6 @@ jobs:
           python -c "import sys; print(sys.executable)" | Set-Content -Encoding UTF8 (Join-Path $env:RUNNER_TEMP "ryu-python-path.txt")
           python -B -m unittest discover -s tests -v
 
-      - name: Restore Python runtime after workspace cleanup
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
       - name: Verify offline character Python bootstrap
         shell: pwsh
         run: |
@@ -213,16 +208,13 @@ jobs:
 
             $env:RYU_AI_SERVER_URL = "http://127.0.0.1:18765"
             $env:PYTHONPATH = (Get-Location).Path
-            $pythonExe = Join-Path $env:pythonLocation "python.exe"
-            Write-Host "Resolved Python executable from setup-python: $pythonExe"
-            if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
-              throw "setup-python interpreter was not found at: $pythonExe"
-            }
-            & $pythonExe -c "import sys; print('Python executable:', sys.executable)"
+            $pythonCommand = Get-Command python -CommandType Application -ErrorAction Stop
+            Write-Host "Resolved Python executable for live AI smoke: $($pythonCommand.Source)"
+            & $pythonCommand.Source -c "import sys; print('Python executable:', sys.executable)"
             if ($LASTEXITCODE -ne 0) {
-              throw "The setup-python interpreter could not be executed."
+              throw "The live AI smoke Python interpreter could not be executed."
             }
-            & $pythonExe -B tests/smoke_audiobook_ai_live.py
+            & $pythonCommand.Source -B tests/smoke_audiobook_ai_live.py
             if ($LASTEXITCODE -ne 0) {
               throw "The full Audiobook AI brain integration test failed with exit code $LASTEXITCODE."
             }
