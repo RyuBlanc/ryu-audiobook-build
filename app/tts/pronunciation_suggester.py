@@ -11,6 +11,18 @@ COMMON_ENGLISH_WORDS = {
     "these","they","this","those","to","too","under","up","us","very","was",
     "we","were","what","when","where","which","who","whom","why","will","with",
     "would","you","your","yours",
+    # Common content words that are frequently capitalized at sentence starts
+    # and must never become pronunciation overrides just because the model
+    # assigned them a non-English language label.
+    "all","another","any","anything","around","back","because","before","between",
+    "both","bring","call","called","can","close","come","comes","confirmed","day",
+    "dead","down","each","even","every","first","found","from","get","give","go",
+    "good","gravity","great","hey","holy","home","house","just","keep","know",
+    "last","later","let","life","little","look","looks","made","make","man","master",
+    "maybe","much","must","never","new","now","only","other","over","part","right",
+    "said","same","see","sir","small","still","sure","take","tell","than","thing",
+    "think","through","time","today","together","under","very","wait","want","well",
+    "went","while","world","would",
 }
 
 _KNOWN = {
@@ -23,6 +35,72 @@ _KNOWN = {
 
 _STOPWORDS = COMMON_ENGLISH_WORDS | {"chapter", "volume", "school", "academy"}
 
+def is_common_english_phrase(text: str) -> bool:
+    """Return True when a candidate is ordinary English vocabulary, not a name."""
+    words = [
+        re.sub(r"[^A-Za-z'’-]", "", part).casefold()
+        for part in str(text or "").split()
+    ]
+    words = [word for word in words if word]
+    return bool(words) and all(word in COMMON_ENGLISH_WORDS for word in words)
+
+def nativeish_pronunciation(name: str, language: str | None = None) -> str:
+    """Create a TTS-friendly native-ish phonetic spelling for common romanized names.
+
+    This is deliberately conservative. It is a readability aid for an English
+    narrator, not an authoritative linguistic transcription.
+    """
+    key = re.sub(r"\s+", " ", str(name or "").strip()).casefold()
+    lang = re.sub(r"[^a-z]", "", str(language or "").casefold())
+    if key in _KNOWN:
+        return _KNOWN[key]
+
+    if lang in {"japanese", "ja", "jpn"}:
+        value = key
+        replacements = [
+            ("dzu", "zoo"), ("tsu", "tsoo"), ("shi", "shee"), ("chi", "chee"),
+            ("tchi", "chee"), ("fu", "foo"), ("ji", "jee"), ("ryu", "ryoo"),
+            ("ryo", "ryoh"), ("kyo", "kyoh"), ("sho", "shoh"), ("cho", "choh"),
+            ("ja", "jah"), ("ju", "joo"), ("jo", "joh"), ("nya", "nyah"),
+            ("nyu", "nyoo"), ("nyo", "nyoh"),
+        ]
+        for src, dst in replacements:
+            value = value.replace(src, dst)
+        value = re.sub(r"ou", "oh", value)
+        value = re.sub(r"oo", "oh", value)
+        value = re.sub(r"ei", "ay", value)
+        value = re.sub(r"([bcdfghjklmnpqrstvwxyz])(?=[aeiou])", r"-\1", value)
+        value = re.sub(r"-+", "-", value).strip("-")
+        # Clean the leading hyphen introduced by consonant-onset words.
+        value = value.lstrip("-")
+        return value.replace("  ", " ").title()
+
+    if lang in {"korean", "ko", "kor"}:
+        value = key
+        replacements = [
+            ("hyeon", "hyun"), ("gyeong", "kyung"), ("jeong", "jung"),
+            ("seong", "sung"), ("yeong", "young"), ("eun", "uhn"),
+            ("eop", "up"), ("eo", "uh"), ("eu", "uh"), ("ae", "eh"),
+            ("oe", "weh"), ("ui", "wee"), ("woo", "oo"),
+        ]
+        for src, dst in replacements:
+            value = value.replace(src, dst)
+        value = re.sub(r"([bcdfghjklmnpqrstvwxyz])(?=[aeiou])", r"-\1", value)
+        value = re.sub(r"-+", "-", value).strip("-")
+        return value.replace("  ", " ").title().lstrip("-")
+
+    if lang in {"chinese", "mandarin", "zh", "cmn"}:
+        value = key
+        replacements = [
+            ("zh", "j"), ("q", "ch"), ("x", "sh"),
+            ("c", "ts"), ("z", "dz"),
+        ]
+        for src, dst in replacements:
+            value = value.replace(src, dst)
+        return value.replace("  ", " ").title()
+
+    return suggest_pronunciation(name)
+
 def suggest_pronunciation(name: str) -> str:
     key = re.sub(r"\s+", " ", name.strip()).casefold()
     if key in _KNOWN:
@@ -31,26 +109,7 @@ def suggest_pronunciation(name: str) -> str:
     return " ".join(_suggest_word(word) for word in words)
 
 def _suggest_word(word: str) -> str:
-    # Conservative readable approximation for romanized Japanese names.
-    # This is a draft for the user to review, not a claim of authoritative IPA.
-    replacements = [
-        ("tch", "ch"), ("shi", "shee"), ("chi", "chee"),
-        ("tsu", "tsoo"), ("fu", "foo"), ("ji", "jee"),
-        ("ryu", "ryoo"), ("ryo", "ryoh"), ("kyo", "kyoh"),
-        ("sho", "shoh"), ("cho", "choh"),
-    ]
-    value = word
-    for src, dst in replacements:
-        value = value.replace(src, dst)
-    value = re.sub(r"ou$", "oh", value)
-    value = re.sub(r"oo$", "oh", value)
-    value = re.sub(r"ei$", "ay", value)
-    value = re.sub(r"ei", "ay", value)
-    value = re.sub(r"([aeiou])([bcdfghjklmnpqrstvwxyz])([aeiou])", r"\1-\2\3", value)
-    value = re.sub(r"([aeiou])([bcdfghjklmnpqrstvwxyz])", r"\1-\2", value)
-    value = value.replace("aa", "ah").replace("ee", "ee").replace("ii", "ee")
-    value = value.replace("uu", "oo")
-    return value.title()
+    return nativeish_pronunciation(word, "japanese")
 
 def suggest_names_from_text(text: str) -> list[str]:
     candidates: set[str] = set()
