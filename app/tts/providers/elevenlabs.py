@@ -97,30 +97,37 @@ class ElevenLabsProvider(TTSProvider):
             raise RuntimeError(f"ElevenLabs network request failed: {exc}") from exc
 
     @staticmethod
-    def _character_archetype_hint(style: str, temperament: str) -> str:
-        value = f"{str(style or '').casefold()} {str(temperament or '').casefold()}"
-        if "anime" in value:
-            if "heroic" in value:
-                return "Bright shonen-style young hero energy with confident determination and emotional lifts."
-            if "villain" in value or "ominous" in value:
-                return "Elegant anime antagonist presence with controlled menace, low warmth and precise diction."
-            if "mischievous" in value:
-                return "Playful anime rival energy, teasing confidence and quick emotional reactions."
-            if "calm" in value or "cinematic" in value:
-                return "Cool anime mentor or strategist presence with restrained intensity and cinematic phrasing."
-            if "warm" in value:
-                return "Kind anime healer or gentle heroine quality with soft warmth and reassuring delivery."
-            return "Expressive anime character performance with clear English diction and distinct personality."
-        if "cartoon" in value:
-            if "villain" in value or "ominous" in value:
-                return "Stylized animated villain energy with playful menace and crisp comic timing."
-            if "mischievous" in value:
-                return "Fast, cheeky cartoon sidekick energy with elastic emotional reactions."
-            if "calm" in value:
-                return "Warm animated storyteller quality with polished family-friendly delivery."
-            return "Distinct animated-cartoon character acting with playful timing and expressive reactions."
+    def _character_archetype_hint(style: str, temperament: str, archetype: str = "") -> str:
+        key = str(archetype or "").strip().casefold().replace(" ", "_").replace("-", "_")
+        presets = {
+            "heroine": "Confident anime heroine with bright expressive reactions and natural English diction.",
+            "hero": "Young anime hero with determined confidence, warm charisma and emotional range.",
+            "rival": "Cool anime rival with competitive energy, controlled intensity and sharp delivery.",
+            "tsundere": "Sharp-tongued anime character who moves between defensive sarcasm and sudden warmth.",
+            "healer": "Gentle anime healer with soft warmth, reassuring tone and emotionally sincere delivery.",
+            "villain": "Elegant anime villain with controlled menace, theatrical presence and precise diction.",
+            "mentor": "Calm anime mentor with mature authority, quiet confidence and cinematic pacing.",
+            "chibi": "Cute chibi-style anime character with youthful energy and playful reactions.",
+            "sidekick": "Mischievous anime sidekick with quick timing, bright energy and comic reactions.",
+            "mysterious": "Mysterious anime character with restrained emotion, airy intensity and subtle drama.",
+            "cartoon_hero": "Stylized cartoon hero with upbeat confidence and family-friendly adventure energy.",
+            "cartoon_sidekick": "Fast, funny cartoon sidekick with elastic reactions and playful timing.",
+            "cartoon_villain": "Comedic cartoon villain with theatrical menace, exaggerated personality and crisp comic timing.",
+            "cartoon_friend": "Warm, friendly cartoon companion with expressive but natural English delivery.",
+        }
+        if key in presets:
+            return presets[key]
 
-        return "Distinct fictional character voice with stable identity across long-form narration."
+        value = f"{str(style or '').casefold()} {str(temperament or '').casefold()}"
+        if "villain" in value or "ominous" in value:
+            return "Distinct fictional villain character energy with controlled menace and crisp diction."
+        if "mischievous" in value:
+            return "Playful fictional sidekick energy with quick timing and bright emotional reactions."
+        if "calm" in value or "cinematic" in value:
+            return "Calm cinematic fictional character presence with restrained intensity."
+        if "warm" in value:
+            return "Warm fictional companion or healer quality with reassuring delivery."
+        return "Expressive fictional character performance with clear English diction and distinct personality."
 
     @classmethod
     def design_character_voice(
@@ -129,7 +136,9 @@ class ElevenLabsProvider(TTSProvider):
         gender: str = "female",
         age: str = "young adult",
         temperament: str = "expressive",
+        archetype: str = "heroine",
         model_id: str = "eleven_ttv_v3",
+        seed: int | None = None,
     ) -> list[dict]:
         """Generate premium character-voice previews through ElevenLabs Voice Design.
 
@@ -154,7 +163,7 @@ class ElevenLabsProvider(TTSProvider):
         gender_phrase = str(gender or "female").strip().casefold()
         age_phrase = str(age or "young adult").strip()
         temperament_phrase = str(temperament or "expressive").strip()
-        archetype = str(self._character_archetype_hint(style, temperament)).strip()
+        archetype = str(self._character_archetype_hint(style, temperament, archetype)).strip()
         description = (
             f"{prompt_base} Speaker: {age_phrase} {gender_phrase}. "
             f"Temperament: {temperament_phrase}. {archetype} "
@@ -175,6 +184,7 @@ class ElevenLabsProvider(TTSProvider):
                 "voice_description": description,
                 "text": sample,
                 "auto_generate_text": False,
+                **({"seed": int(seed)} if seed is not None else {}),
             },
             ensure_ascii=False,
         ).encode("utf-8")
