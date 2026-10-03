@@ -91,7 +91,7 @@ jobs:
           }
           & $venvPython -m pip --version
           & $venvPython -m pip install --no-deps qwen-tts==0.1.1
-          & $venvPython -c "import qwen_tts; print('qwen_tts bootstrap import OK')"
+          & $venvPython -c "import importlib.metadata as md; assert md.version('qwen-tts') == '0.1.1'; print('qwen_tts wheel bootstrap OK')"
 
       - name: Verify pinned Chatterbox Nano source
         shell: pwsh
