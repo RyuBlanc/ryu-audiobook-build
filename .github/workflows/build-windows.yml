@@ -207,7 +207,14 @@ jobs:
 
             $env:RYU_AI_SERVER_URL = "http://127.0.0.1:18765"
             $env:PYTHONPATH = (Get-Location).Path
-            python -B tests/smoke_audiobook_ai_live.py
+            $pythonExe = Join-Path $env:pythonLocation "python.exe"
+            if (-not (Test-Path $pythonExe)) {
+              $pythonExe = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
+            }
+            if (-not $pythonExe -or -not (Test-Path $pythonExe)) {
+              throw "Python executable could not be located for the full Audiobook AI brain smoke test."
+            }
+            & $pythonExe -B tests/smoke_audiobook_ai_live.py
             if ($LASTEXITCODE -ne 0) {
               throw "The full Audiobook AI brain integration test failed."
             }
@@ -252,7 +259,7 @@ jobs:
           $env:PYTHONPATH = (Get-Location).Path
           $version = python -c "from app.version import full_version; print(full_version())"
           Write-Host "Application version: $version"
-          $expected = "v0.3.6"
+          $expected = "v0.3.7"
           if (-not $version.StartsWith($expected) -or -not $version.EndsWith("Build $env:RYU_BUILD_NUMBER")) {
             throw "Unexpected application version: $version"
           }
@@ -309,7 +316,7 @@ jobs:
           RYU_BUILD_NUMBER: ${{ github.run_number }}
         run: |
           $exe = "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
-          $expected = "0.3.6.$env:RYU_BUILD_NUMBER"
+          $expected = "0.3.7.$env:RYU_BUILD_NUMBER"
           $info = (Get-Item $exe).VersionInfo
           Write-Host "EXE FileVersion: $($info.FileVersion)"
           Write-Host "EXE ProductVersion: $($info.ProductVersion)"
@@ -369,7 +376,7 @@ jobs:
           $hash = (Get-FileHash $installer -Algorithm SHA256).Hash
           Write-Host "Installer size: $size bytes"
           Write-Host "Installer SHA256: $hash"
-          $expectedVersion = "0.3.6.${{ github.run_number }}"
+          $expectedVersion = "0.3.7.${{ github.run_number }}"
           $info = (Get-Item $installer).VersionInfo
           $actualFileVersion = ([string]$info.FileVersion).Trim()
           $actualProductVersion = ([string]$info.ProductVersion).Trim()
@@ -395,7 +402,7 @@ jobs:
 
           Commit: ${{ github.sha }}
           Build: #${{ github.run_number }}
-          Version: v0.3.6
+          Version: v0.3.7
           This is a prerelease build for testing.
           "@
 
