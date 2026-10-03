@@ -321,17 +321,35 @@ class AudiobookBrain:
             try:
                 core_raw = self.llm.complete(
                     PROMPT + '\nFocus ONLY on characters, dialogue ownership and pronunciation. Return JSON only.',
-                    '/no_think ' + common_context + '\nDo not guess a speaker. Keep dialogue.quote exact. Only include pronunciation terms that truly occur in this excerpt.',
+                    '/no_think ' + common_context + '\nDo not guess a speaker. Keep dialogue.quote exact. Only include pronunciation terms that truly occur in this excerpt. Keep the response compact.',
                     max_tokens=1100,
                     temperature=0.05,
                     response_schema=CORE_SCHEMA,
                 )
                 core_data = _json(core_raw)
-            except (BrainRuntimeError, BrainUnavailableError) as exc:
-                core_data = self._fallback_core(chapter)
-                result.setdefault('warnings', []).append(
-                    f'AI core pass fallback for chapter {chapter.number}, excerpt {idx}: {exc}'
-                )
+            except (BrainRuntimeError, BrainUnavailableError) as first_error:
+                # Qwen can occasionally stop inside a JSON string even though
+                # inference itself succeeded. Retry with a much smaller,
+                # repair-only prompt before falling back to deterministic
+                # analysis. This avoids marking a healthy AI runtime as failed
+                # because of one malformed generation.
+                try:
+                    repair_raw = self.llm.complete(
+                        'Return ONLY one compact valid JSON object with keys characters, dialogue, pronunciation. '
+                        'Do not use markdown. Do not add explanations. Do not guess.',
+                        '/no_think Extract only the factual character, dialogue and pronunciation information from this excerpt. '
+                        'Preserve exact dialogue quotes. Use at most 6 pronunciation entries and keep each reason very short. '
+                        f'Chapter: {chapter.title}\nExcerpt:\n{chunk}',
+                        max_tokens=850,
+                        temperature=0.0,
+                        response_schema=CORE_SCHEMA,
+                    )
+                    core_data = _json(repair_raw)
+                except (BrainRuntimeError, BrainUnavailableError) as second_error:
+                    core_data = self._fallback_core(chapter)
+                    result.setdefault('warnings', []).append(
+                        f'AI core pass fallback for chapter {chapter.number}, excerpt {idx}: {second_error}'
+                    )
             self._merge(result, core_data, seen, source_text=chunk)
 
             if progress:
