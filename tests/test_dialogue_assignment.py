@@ -1,7 +1,8 @@
 import unittest
 
 from app.chapters.detector import Chapter
-from app.chapters.dialogue import dialogue_segments
+from app.chapters.dialogue import dialogue_segments, dialogue_segment_for_selection
+from app.chapters.assignment_utils import assignment_speakers, normalize_assignment, build_book_character_registry
 
 
 class DialogueAssignmentTests(unittest.TestCase):
@@ -81,6 +82,63 @@ class DialogueAssignmentTests(unittest.TestCase):
         )
         self.assertEqual(chapter.dialogue_assignments[0]["speaker"], "Sarah")
         self.assertEqual(chapter.dialogue_assignments[0]["source"], "manual")
+
+
+    def test_multi_speaker_assignment_round_trip(self):
+        item = normalize_assignment(
+            {
+                "start": 0,
+                "end": 8,
+                "text": '"Hello."',
+                "source": "manual",
+            },
+            ["Rias", "Akeno"],
+            "chorus",
+        )
+        self.assertEqual(assignment_speakers(item), ["Rias", "Akeno"])
+        self.assertEqual(item["speaker"], "Rias")
+        self.assertEqual(item["multi_speaker_mode"], "chorus")
+
+    def test_book_character_registry_includes_other_chapters_and_cast(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from app.core.state import save_state
+
+        chapters = [
+            Chapter(
+                1,
+                "One",
+                '"Hello."',
+                [{"start": 0, "end": 8, "text": '"Hello."', "speaker": "Kurenai", "source": "manual"}],
+            ),
+            Chapter(
+                2,
+                "Two",
+                '"Hi."',
+                [{"start": 0, "end": 5, "text": '"Hi."', "speaker": "Rias", "source": "manual"}],
+            ),
+        ]
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            save_state(root, {"voice_cast": {"Akeno": "Anime Voice"}})
+            registry = build_book_character_registry(chapters, root)
+            self.assertIn("kurenai", registry)
+            self.assertIn("akeno", registry)
+            self.assertIn(1, registry["kurenai"]["chapters"])
+            self.assertIn("saved voice cast", registry["akeno"]["sources"])
+
+    def test_fast_assignment_respects_existing_exact_manual_speaker(self):
+        text = '"I am here."'
+        chapter = Chapter(
+            1,
+            "Test",
+            text,
+            [{"start": 0, "end": len(text), "text": text, "speaker": "Kurenai", "source": "manual"}],
+        )
+        segment = dialogue_segment_for_selection(chapter, 0, len(text))
+        self.assertIsNotNone(segment)
+        self.assertEqual(segment.suggested_speaker, "Kurenai")
+        self.assertEqual(segment.confidence, 1.0)
 
 
 if __name__ == "__main__":
