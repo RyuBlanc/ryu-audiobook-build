@@ -15,6 +15,7 @@ from app.tts.base import TTSProvider
 from app.tts.chunker import split_text
 from app.tts.narration import prepare_for_narration
 from app.tts.pacing import append_silence, pause_after_ms, split_for_pacing
+from app.tts.multivoice import synthesize_voice_set
 
 
 @dataclass
@@ -28,7 +29,7 @@ class GenerationResult:
 @dataclass(frozen=True)
 class ChapterPlan:
     chapter_dir: Path
-    chunks_with_voices: tuple[tuple[str, str | None], ...]
+    chunks_with_voices: tuple[tuple[str, str | list[str] | None], ...]
     signature: str
     completed: frozenset[int]
 
@@ -56,7 +57,7 @@ def save_state(chapter_dir: Path, state: dict) -> None:
     state_path(chapter_dir).write_text(json.dumps(state, indent=2), encoding="utf-8")
 
 
-def _provider_signature(provider: TTSProvider, voice: str | None, chunks: list[tuple[str, str | None]]) -> str:
+def _provider_signature(provider: TTSProvider, voice: str | None, chunks: list[tuple[str, str | list[str] | None]]) -> str:
     custom = getattr(provider, "generation_signature", None)
     if callable(custom):
         base = custom()
@@ -125,13 +126,22 @@ def prepare_chapter_plan(
     )
 
     if hasattr(provider, "split_for_cast"):
-        raw_chunks_with_voices = provider.split_for_cast(narration.narration_text, voice)
+        try:
+            raw_chunks_with_voices = provider.split_for_cast(
+                narration.narration_text,
+                voice,
+                dialogue_assignments=getattr(chapter, "dialogue_assignments", []),
+            )
+        except TypeError as exc:
+            if "dialogue_assignments" not in str(exc):
+                raise
+            raw_chunks_with_voices = provider.split_for_cast(narration.narration_text, voice)
     else:
         raw_chunks_with_voices = [
             (chunk, voice) for chunk in split_text(narration.narration_text)
         ]
 
-    chunks_with_voices: list[tuple[str, str | None]] = []
+    chunks_with_voices: list[tuple[str, str | list[str] | None]] = []
     for chunk_text, chunk_voice in raw_chunks_with_voices:
         paced_chunks = split_for_pacing(
             chunk_text,
@@ -241,7 +251,11 @@ def generate_chapter(
         if index in completed and output.exists():
             continue
 
-        provider.synthesize(chunk, output, chunks_with_voices[index][1])
+        chunk_voice = chunks_with_voices[index][1]
+        if isinstance(chunk_voice, list):
+            synthesize_voice_set(provider, chunk, chunk_voice, output)
+        else:
+            provider.synthesize(chunk, output, chunk_voice)
         if not getattr(provider, "handles_narration_controls", False):
             if abs(narration_speed - 1.0) > 0.001:
                 _apply_narration_speed(output, narration_speed)
