@@ -56,25 +56,43 @@ def nativeish_pronunciation(name: str, language: str | None = None) -> str:
         return _KNOWN[key]
 
     if lang in {"japanese", "ja", "jpn"}:
-        value = key
-        replacements = [
-            ("dzu", "zoo"), ("tsu", "tsoo"), ("shi", "shee"), ("chi", "chee"),
-            ("tchi", "chee"), ("fu", "foo"), ("ji", "jee"), ("ryu", "ryoo"),
-            ("ryo", "ryoh"), ("kyo", "kyoh"), ("sho", "shoh"), ("cho", "choh"),
-            ("ja", "jah"), ("ju", "joo"), ("jo", "joh"), ("nya", "nyah"),
-            ("nyu", "nyoo"), ("nyo", "nyoh"),
-        ]
-        for src, dst in replacements:
-            value = value.replace(src, dst)
-        value = re.sub(r"ou", "oh", value)
-        value = re.sub(r"oo", "oh", value)
-        value = re.sub(r"ei", "ay", value)
-        value = re.sub(r"([bcdfghjklmnpqrstvwxyz])(?=[aeiou])", r"-\1", value)
-        value = re.sub(r"-+", "-", value).strip("-")
-        # Clean the leading hyphen introduced by consonant-onset words.
-        value = value.lstrip("-")
-        return value.replace("  ", " ").title()
-
+        value = key.replace("-", "").replace(" ", "")
+        special = {
+            "shi": "shee", "chi": "chee", "tsu": "tsoo", "fu": "foo",
+            "ji": "jee", "ryu": "ryoo", "ryo": "ryoh", "kyo": "kyoh",
+            "sho": "shoh", "cho": "choh", "nya": "nyah", "nyu": "nyoo",
+            "nyo": "nyoh", "ja": "jah", "ju": "joo", "jo": "joh",
+        }
+        vowels = {"a": "ah", "i": "ee", "u": "oo", "e": "eh", "o": "oh"}
+        onsets = (
+            "ky", "gy", "sh", "ch", "ts", "dz", "ny", "hy", "my",
+            "ry", "by", "py", "dy", "ty", "j", "k", "g", "s", "z",
+            "t", "d", "n", "h", "b", "p", "m", "y", "r", "w",
+        )
+        morae = []
+        i = 0
+        while i < len(value):
+            if value[i] == "n" and (i + 1 == len(value) or value[i + 1] not in "aeiou"):
+                morae.append("n")
+                i += 1
+                continue
+            matched = None
+            for onset in onsets:
+                if value.startswith(onset, i) and i + len(onset) < len(value):
+                    matched = onset
+                    break
+            if matched is None:
+                matched = ""
+            j = i + len(matched)
+            if j < len(value) and value[j] in "aeiou":
+                syllable = value[i:j + 1]
+                morae.append(special.get(syllable, matched + vowels[value[j]]))
+                i = j + 1
+            else:
+                morae.append(value[i])
+                i += 1
+        return "-".join(morae).replace("--", "-").title().lstrip("-")
+    
     if lang in {"korean", "ko", "kor"}:
         value = key
         replacements = [
