@@ -262,7 +262,7 @@ jobs:
           Write-Host "Using Inno Setup compiler: $isccPath"
           & $isccPath 'installer\RyuAudiobook.iss'
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed with exit code $LASTEXITCODE." }
-          $installer = Join-Path (Get-Location) "installer-output\Ryu's Audiobook Setup.exe"
+          $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
           if (-not (Test-Path $installer)) { throw "Installer was not produced: $installer" }
           Write-Host "Installer created: $installer"
 
@@ -271,7 +271,7 @@ jobs:
         with:
           name: Ryu-Audiobook-Windows-${{ github.run_number }}
           path: |
-            installer-output/Ryu's Audiobook Setup.exe
+            installer/installer-output/Ryu's Audiobook Setup.exe
             dist/Ryu's Audiobook/Ryu's Audiobook.exe
           if-no-files-found: error
           retention-days: 14
@@ -283,4 +283,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "v0.3.7-build-${{ github.run_number }}"
-          gh release create $tag "installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, Audiobook AI smoke validation, Chatterbox runtime validation, and installer verification." --target $env:GITHUB_SHA
+          gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, Audiobook AI smoke validation, Chatterbox runtime validation, and installer verification." --target $env:GITHUB_SHA
