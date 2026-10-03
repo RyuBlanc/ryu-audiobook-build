@@ -867,7 +867,8 @@ class VoicePage(QWidget):
 
     def update_mode(self) -> None:
         mode = self.mode.currentData()
-        self.premium_key_button.setVisible(mode == "elevenlabs")
+        if hasattr(self, "premium_key_button"):
+            self.premium_key_button.setVisible(mode == "elevenlabs")
         self.neural_box.setVisible(mode in {"offline-neural", "edge-tts", "elevenlabs"})
         self.sapi_box.setVisible(mode == "windows-sapi")
         self.custom_box.setVisible(mode == "chatterbox")
