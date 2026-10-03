@@ -632,29 +632,39 @@ class VoicePage(QWidget):
         self.character_worker.start()
 
     def _character_previews_ready(self, previews: list[dict]) -> None:
-        self.character_previews = list(previews or [])
+        incoming = [dict(item) for item in (previews or []) if isinstance(item, dict)]
+        offset = len(self.character_previews)
+        for index, preview in enumerate(incoming, 1):
+            preview["index"] = offset + index
+        self.character_previews.extend(incoming)
         self.character_preview_selector.clear()
         for preview in self.character_previews:
             self.character_preview_selector.addItem(
-                f"Preview {preview.get('index', 1)}  · {float(preview.get('duration_secs') or 0):.1f}s",
+                f"Preview {preview.get('index', 1)}  · "
+                f"{str(preview.get('archetype') or preview.get('style') or 'Character').replace('_', ' ').title()}  · "
+                f"{float(preview.get('duration_secs') or 0):.1f}s",
                 preview.get("index"),
             )
         if self.character_previews:
-            preview = self.character_previews[0]
-            self.character_preview_selector.setCurrentIndex(0)
+            preview = self.character_previews[-len(incoming)] if incoming else self.character_previews[0]
+            self.character_preview_selector.setCurrentIndex(
+                max(0, self.character_preview_selector.count() - len(incoming))
+            )
             style = str(preview.get("style") or "anime").title()
             gender = str(preview.get("gender") or "female").title()
+            archetype = str(preview.get("archetype") or "").replace("_", " ").title()
             self.character_name.setText(
-                f"{style} {gender} Character"
+                f"{archetype or style + ' ' + gender} Character"
             )
             self.design_character_more_button.setEnabled(True)
-        self.character_status.setText(
-                f"Generated {len(self.character_previews)} premium {style.lower()} voice options. "
+            self.character_status.setText(
+                f"Now holding {len(self.character_previews)} premium character voice previews. "
                 "Play one, then add your selected option to ElevenLabs My Voices."
             )
             self.play_character_button.setEnabled(True)
         else:
             self.character_status.setText("ElevenLabs returned no usable character voice previews.")
+
 
     def _character_worker_finished(self) -> None:
         self.design_character_button.setEnabled(True)
