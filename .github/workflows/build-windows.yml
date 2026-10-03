@@ -268,7 +268,7 @@ jobs:
           RYU_BUILD_NUMBER: ${{ github.run_number }}
         run: |
           $exe = "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
-          $expected = "0.3.1.$env:RYU_BUILD_NUMBER"
+          $expected = "0.3.2.$env:RYU_BUILD_NUMBER"
           $info = (Get-Item $exe).VersionInfo
           Write-Host "EXE FileVersion: $($info.FileVersion)"
           Write-Host "EXE ProductVersion: $($info.ProductVersion)"
