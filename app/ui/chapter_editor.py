@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTextEdit,
     QVBoxLayout,
+    QMenu,
     QWidget,
     QProgressBar,
     QInputDialog,
@@ -22,6 +23,8 @@ from app.documents.parser import remove_page_noise
 from app.ui.character_review import CharacterReviewDialog
 from app.ui.dialogue_assignment import DialogueAssignmentDialog
 from app.ui.dialogue_manager import DialogueAssignmentManagerDialog
+from app.chapters.dialogue import dialogue_segment_for_selection
+from app.chapters.assignment_utils import build_book_character_registry, normalize_assignment, format_character_registry_entry
 from app.ai.brain import AudiobookBrain, _numeric_score
 
 
@@ -190,8 +193,92 @@ class ChapterEditorPage(QWidget):
         self.quick_assign_button.setVisible(has_selection and not self._loading_fields)
 
     def quick_assign_dialogue(self) -> None:
-        self.assign_selected_dialogue()
+        index = self.list.currentRow()
+        if index < 0:
+            return
+        cursor = self.text.textCursor()
+        if not cursor.hasSelection() or cursor.selectionStart() >= cursor.selectionEnd():
+            return
 
+        chapter = self.editor.chapters[index]
+        start, end = cursor.selectionStart(), cursor.selectionEnd()
+        segment = dialogue_segment_for_selection(chapter, start, end)
+        registry = build_book_character_registry(self.editor.chapters, self.project_folder)
+
+        menu = QMenu(self)
+        menu.setMinimumWidth(420)
+
+        if segment and segment.suggestions:
+            suggested_added = set()
+            header = menu.addAction("Suggested speakers")
+            header.setEnabled(False)
+            for name, confidence, evidence in segment.suggestions:
+                entry = registry.get(name.casefold())
+                if not entry:
+                    continue
+                suggested_added.add(name.casefold())
+                action = menu.addAction(
+                    f"✓ {name}  ·  {confidence:.0%}\n"
+                    f"   {format_character_registry_entry(entry)}"
+                )
+                action.setToolTip(evidence)
+                action.triggered.connect(
+                    lambda _checked=False, speaker=name, s=start, e=end: self._quick_assign_character(index, s, e, speaker)
+                )
+
+        saved_header = menu.addAction("Saved characters in this book")
+        saved_header.setEnabled(False)
+        for key, entry in registry.items():
+            if key in suggested_added:
+                continue
+            action = menu.addAction(format_character_registry_entry(entry))
+            action.triggered.connect(
+                lambda _checked=False, speaker=entry["name"], s=start, e=end: self._quick_assign_character(index, s, e, speaker)
+            )
+
+        if menu.isEmpty():
+            empty = menu.addAction("No saved characters yet — add one below.")
+            empty.setEnabled(False)
+
+        menu.addSeparator()
+        add_action = menu.addAction("＋ Add New Character…")
+        add_action.triggered.connect(lambda _checked=False: self.assign_selected_dialogue())
+        multi_action = menu.addAction("Assign multiple speakers / advanced…")
+        multi_action.triggered.connect(lambda _checked=False: self.assign_selected_dialogue())
+
+        menu.exec(self.quick_assign_button.mapToGlobal(self.quick_assign_button.rect().bottomLeft()))
+
+    def _quick_assign_character(self, chapter_index: int, start: int, end: int, speaker: str) -> None:
+        if not (0 <= chapter_index < len(self.editor.chapters)):
+            return
+        chapter = self.editor.chapters[chapter_index]
+        selected_text = chapter.text[start:end].strip()
+        if not selected_text:
+            return
+
+        assignment = normalize_assignment(
+            {
+                "start": int(start),
+                "end": int(end),
+                "text": selected_text,
+                "source": "manual",
+            },
+            [speaker],
+            mode="chorus",
+        )
+        chapter.dialogue_assignments = [
+            item
+            for item in getattr(chapter, "dialogue_assignments", [])
+            if not (
+                int(item.get("start", -1)) == start
+                and int(item.get("end", -1)) == end
+            )
+        ]
+        chapter.dialogue_assignments.append(assignment)
+        self._save_silently()
+        self.refresh(chapter_index)
+        self.load_selected(chapter_index)
+        self.save_status.setText(f"✓ Dialogue assigned to {speaker}")
     def _schedule_autosave(self) -> None:
         if self._loading_fields:
             return
