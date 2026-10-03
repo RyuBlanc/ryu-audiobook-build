@@ -24,6 +24,8 @@ def _run_ffmpeg(args: list[str]) -> None:
         [imageio_ffmpeg.get_ffmpeg_exe(), *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     if result.returncode != 0:
