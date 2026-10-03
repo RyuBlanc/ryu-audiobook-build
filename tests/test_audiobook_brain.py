@@ -33,7 +33,7 @@ class AudiobookBrainTests(unittest.TestCase):
 
     def test_release_version_is_current_bugfix_line(self):
         from app.version import APP_VERSION
-        self.assertEqual(APP_VERSION, "0.3.1")
+        self.assertEqual(APP_VERSION, "0.3.2")
 
     def test_chatterbox_runtime_is_resume_safe_and_pinned(self):
         from pathlib import Path
@@ -66,6 +66,12 @@ class AudiobookBrainTests(unittest.TestCase):
         self.assertEqual([x["quote"] for x in result["dialogue"]], ["Hello"])
         self.assertEqual(len(result["scenes"]), 1)
         self.assertEqual(result["continuity_notes"], ["rain"])
+
+    def test_native_pronunciation_and_english_filtering(self):
+        from app.tts.pronunciation_suggester import is_common_english_phrase, nativeish_pronunciation
+        self.assertTrue(is_common_english_phrase("Gravity"))
+        self.assertTrue(is_common_english_phrase("Let"))
+        self.assertEqual(nativeish_pronunciation("Hinata", "Japanese"), "Hee-nah-tah")
 
     def test_empty_chapter_skips_ai(self):
         from pathlib import Path
