@@ -9,7 +9,7 @@ from typing import Any, Callable
 from app.chapters.detector import Chapter
 from app.chapters.characters import analyze_chapter as deterministic_character_analysis
 from app.chapters.dialogue import dialogue_segments
-from app.tts.pronunciation_suggester import COMMON_ENGLISH_WORDS
+from app.tts.pronunciation_suggester import COMMON_ENGLISH_WORDS, is_common_english_phrase, nativeish_pronunciation
 from .model_runtime import LocalLLM, BrainRuntimeError
 
 class BrainUnavailableError(BrainRuntimeError):
@@ -157,12 +157,13 @@ Return JSON. Do not invent facts. Identify canonical characters and aliases, exa
 
 Pronunciation is critical. Detect unusual names, fictional names, place names, honorifics, food, cultural terms, spells, titles, organizations and borrowed words from Japanese, Korean, Hindi, Tamil, Telugu, Malayalam, Kannada, Bengali, Marathi, Chinese, Spanish, French and other languages when the evidence supports it. Also detect romanized/transliterated words such as Japanese or Korean names written with Latin letters.
 
-Do NOT create pronunciation overrides for ordinary English words just because they are capitalized. Do not guess a pronunciation when the evidence is weak.
+Do NOT create pronunciation overrides for ordinary English words, common titles, or ordinary English phrases. A language label alone is NOT enough to override an English word. Do not guess a pronunciation when the evidence is weak.
+For romanized Japanese/Korean names, prefer the native sound represented by the original language. Examples: Japanese "Hinata" should be closer to "hee-nah-tah" than "hi-Na-Ta"; Korean "Hyeon-woo" should be closer to "hyun-oo".
 
 For every pronunciation candidate return:
 - written: exact text as it appears in the book
-- spoken: an English-readable spoken form for the selected narrator voice
-- ipa: IPA when you are confident; otherwise null
+- spoken: a TTS-friendly native-ish phonetic form for the selected narrator voice. Do NOT spell every letter separately and do NOT capitalize each syllable.
+- ipa: native IPA when you are confident; otherwise null
 - source_language: likely source language or language family, or null
 - script: Latin, Hiragana/Katakana, Kanji, Hangul, Devanagari, Tamil, etc.
 - confidence: 0.0 to 1.0
@@ -225,6 +226,8 @@ def _numeric_score(value: Any) -> float:
 
 
 def _normalise_pronunciation(item: dict[str, Any], source_text: str) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
     written = str(item.get('written') or item.get('text') or '').strip()
     spoken = str(item.get('spoken') or item.get('pronunciation') or '').strip()
     if not written or not spoken:
@@ -233,23 +236,31 @@ def _normalise_pronunciation(item: dict[str, Any], source_text: str) -> dict[str
         return None
     source_language = str(item.get('source_language') or '').strip().casefold()
     confidence = _numeric_score(item.get('confidence', 0.0))
-    if spoken.casefold() == written.casefold() and not item.get('ipa'):
+    ipa = str(item.get('ipa') or '').strip() or None
+    if spoken.casefold() == written.casefold() and not ipa:
         return None
-    english_phrase = all(
-        re.fullmatch(r"[A-Za-z][A-Za-z'’-]*", part or '')
-        and part.casefold() in COMMON_ENGLISH_WORDS
-        for part in written.split()
-    )
-    if english_phrase and source_language in {'', 'english', 'en', 'unknown'}:
+
+    # Hard safety gate: ordinary English vocabulary should never become a
+    # pronunciation override merely because the model mislabeled its language.
+    if is_common_english_phrase(written):
         return None
+
     if confidence < 0.80:
         return None
+
     normalized = dict(item)
     normalized['written'] = written
-    normalized['spoken'] = spoken
+    if source_language in {'japanese', 'ja', 'jpn', 'korean', 'ko', 'kor', 'chinese', 'zh', 'cmn'}:
+        # The AI's IPA remains useful evidence, but the narration dictionary
+        # needs readable text that an English narrator can actually speak.
+        nativeish = nativeish_pronunciation(written, source_language)
+        if nativeish:
+            normalized['spoken'] = nativeish
+    else:
+        normalized['spoken'] = spoken
     normalized['confidence'] = confidence
-    normalized.setdefault('ipa', None)
-    normalized.setdefault('source_language', None)
+    normalized['ipa'] = ipa
+    normalized.setdefault('source_language', source_language or None)
     normalized.setdefault('script', 'Latin')
     normalized.setdefault('alternatives', [])
     return normalized
@@ -276,8 +287,14 @@ class AudiobookBrain:
         progress: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         text = (chapter.text or '').strip()
-        chunks = self._chunks(text)
         result = {'chapter': chapter.number, 'title': chapter.title, 'characters': [], 'dialogue': [], 'scenes': [], 'pronunciation': [], 'continuity_notes': []}
+        if not text:
+            result['warnings'] = [
+                f'Chapter {chapter.number} has no body text; AI analysis was skipped.'
+            ]
+            self._save_chapter(result)
+            return result
+        chunks = self._chunks(text)
         seen = set()
         for idx, chunk in enumerate(chunks, 1):
             context = book_context or {}
@@ -309,7 +326,6 @@ class AudiobookBrain:
                     temperature=0.05,
                     response_schema=CORE_SCHEMA,
                 )
-                core_data = _json(core_raw)
                 core_data = _json(core_raw)
             except (BrainRuntimeError, BrainUnavailableError) as exc:
                 core_data = self._fallback_core(chapter)
@@ -349,7 +365,6 @@ class AudiobookBrain:
                         temperature=0.0,
                         response_schema=SCENE_SCHEMA,
                     )
-                    scene_data = _json(repair)
                     scene_data = _json(repair)
                     self._merge_scenes(result, scene_data)
                 except (BrainRuntimeError, BrainUnavailableError) as second_error:
@@ -452,6 +467,8 @@ class AudiobookBrain:
             return 0.0
     def _merge_scenes(self, out: dict[str, Any], data: dict[str, Any]) -> None:
         for raw in data.get('scenes', []) or []:
+            if not isinstance(raw, dict):
+                continue
             out['scenes'].append({
                 'summary': str(raw.get('summary', '')).strip(),
                 'location': str(raw.get('location', '')).strip(),
@@ -476,11 +493,15 @@ class AudiobookBrain:
                 out['continuity_notes'].append(note)
     def _merge(self, out: dict[str, Any], data: dict[str, Any], seen: set[str], source_text: str = '') -> None:
         for character in data.get('characters', []) or []:
+            if not isinstance(character, dict):
+                continue
             item = dict(character)
             item['confidence'] = _numeric_score(item.get('confidence', 0.0))
             out['characters'].append(item)
 
         for scene in data.get('scenes', []) or []:
+            if not isinstance(scene, dict):
+                continue
             item = dict(scene)
             item['confidence'] = _numeric_score(item.get('confidence', 0.0))
             out['scenes'].append(item)
@@ -491,6 +512,8 @@ class AudiobookBrain:
             if str(item.get('written', '')).strip()
         }
         for item in data.get('pronunciation', []) or []:
+            if not isinstance(item, dict):
+                continue
             normalized = _normalise_pronunciation(item, source_text)
             if normalized is None:
                 continue
@@ -500,6 +523,8 @@ class AudiobookBrain:
                 existing_pronunciations[key] = normalized
         out['pronunciation'] = list(existing_pronunciations.values())
         for item in data.get('dialogue', []) or []:
+            if not isinstance(item, dict):
+                continue
             quote = str(item.get('quote', '')).strip()
             if quote and quote.casefold() not in seen:
                 normalized_dialogue = dict(item)
