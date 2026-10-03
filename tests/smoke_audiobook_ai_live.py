@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import tempfile
+import sys
+import traceback
 
 from app.ai.brain import AudiobookBrain
 from app.chapters.detector import Chapter
@@ -52,4 +54,9 @@ def main() -> None:
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        print("LIVE_AUDIOBOOK_AI_PYTHON=", sys.executable, flush=True)
+        main()
+    except BaseException:
+        traceback.print_exc()
+        raise
