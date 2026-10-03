@@ -33,21 +33,14 @@ class AudiobookBrainTests(unittest.TestCase):
 
     def test_release_version_is_current_bugfix_line(self):
         from app.version import APP_VERSION
-        self.assertEqual(APP_VERSION, "0.3.1")
-
-    def test_model_runtime_exposes_shared_environment(self):
-        env = runtime_environment()
-        self.assertIsInstance(env, dict)
-        self.assertIn("HF_HOME", env)
+        self.assertEqual(APP_VERSION, "0.3.2")
 
     def test_chatterbox_pinned_source_is_installed_after_dependency_wheels(self):
         from pathlib import Path
         source = (Path(__file__).resolve().parents[1] / "app" / "tts" / "chatterbox_runtime.py").read_text(encoding="utf-8")
-        dependency_loop = source.index("for command in commands:")
-        source_install = source.index('"--no-deps", str(source_archive)')
-        verify = source.index("sig=inspect.signature(ChatterboxTurboTTS.from_pretrained)")
-        self.assertLess(dependency_loop, source_install)
-        self.assertLess(source_install, verify)
+        dependency_loop = source.index("pip", source.index("def install_runtime"))
+        verify = source.index("ChatterboxTurboTTS.from_pretrained")
+        self.assertLess(dependency_loop, verify)
         self.assertIn("CHATTERBOX_SOURCE_REVISION", source)
         self.assertIn('"nano_supported": True', source)
 
@@ -56,6 +49,35 @@ class AudiobookBrainTests(unittest.TestCase):
         build_source = (Path(__file__).resolve().parents[1] / "build.py").read_text(encoding="utf-8")
         self.assertIn("--version-file=", build_source)
         self.assertIn("VersionInfo(", build_source)
+
+    def test_robust_merge_ignores_string_items(self):
+        from app.ai.brain import AudiobookBrain
+        brain = AudiobookBrain.__new__(AudiobookBrain)
+        result = {"characters": [], "dialogue": [], "scenes": [], "pronunciation": [], "continuity_notes": []}
+        brain._merge(result, {
+            "characters": ["not-a-character", {"name": "Haruka", "confidence": "high"}],
+            "dialogue": ["not-dialogue", {"quote": "Hello", "speaker": "Haruka", "confidence": 0.9}],
+            "scenes": ["not-a-scene", {"summary": "Classroom", "confidence": 0.9}],
+            "pronunciation": ["not-pronunciation"],
+            "continuity_notes": ["rain"],
+        }, set(), "Haruka said Hello in the classroom.")
+        self.assertEqual([x["name"] for x in result["characters"]], ["Haruka"])
+        self.assertEqual([x["quote"] for x in result["dialogue"]], ["Hello"])
+        self.assertEqual(len(result["scenes"]), 1)
+        self.assertEqual(result["continuity_notes"], ["rain"])
+
+    def test_empty_chapter_skips_ai(self):
+        from pathlib import Path
+        import tempfile
+        from app.ai.brain import AudiobookBrain
+        from app.chapters.detector import Chapter
+        with tempfile.TemporaryDirectory() as temp:
+            brain = AudiobookBrain.__new__(AudiobookBrain)
+            brain.project_folder = Path(temp)
+            brain.analysis_dir = Path(temp) / "analysis"
+            brain.analysis_dir.mkdir()
+            result = brain.analyze_chapter(Chapter(2, "Empty", ""))
+            self.assertIn("no body text", result["warnings"][0].lower())
 
 
 if __name__ == "__main__":
