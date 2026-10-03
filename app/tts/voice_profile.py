@@ -22,6 +22,9 @@ class VoiceProfile:
     language: str | None = None
     notes: str = ""
     authorized: bool = False
+    exaggeration: float = 0.5
+    cfg_weight: float = 0.35
+    style_preset: str = "Natural"
 
 
 def profiles_file() -> Path:
