@@ -328,7 +328,7 @@ jobs:
           $hash = (Get-FileHash $installer -Algorithm SHA256).Hash
           Write-Host "Installer size: $size bytes"
           Write-Host "Installer SHA256: $hash"
-          $expectedVersion = "0.3.1.${{ github.run_number }}"
+          $expectedVersion = "0.3.2.${{ github.run_number }}"
           $info = (Get-Item $installer).VersionInfo
           $actualFileVersion = ([string]$info.FileVersion).Trim()
           $actualProductVersion = ([string]$info.ProductVersion).Trim()
@@ -354,7 +354,7 @@ jobs:
 
           Commit: ${{ github.sha }}
           Build: #${{ github.run_number }}
-          Version: v0.3.1
+          Version: v0.3.2
           This is a prerelease build for testing.
           "@
 
