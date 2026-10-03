@@ -18,9 +18,9 @@ def _make_reference(path: Path) -> None:
         handle.setframerate(rate)
         frames = bytearray()
         # Chatterbox-Nano/Turbo requires a reference longer than 5 seconds.
-    # Use a deterministic 6-second reference so the smoke test exercises the
-    # actual model constraint instead of failing on an invalid fixture.
-    for i in range(rate * 6):
+        # Use a deterministic 6-second reference so the smoke test exercises
+        # the actual model constraint instead of failing on an invalid fixture.
+        for i in range(rate * 6):
             sample = int(0.06 * 32767 * math.sin(2 * math.pi * 220 * i / rate))
             frames.extend(int(sample).to_bytes(2, "little", signed=True))
         handle.writeframes(frames)
