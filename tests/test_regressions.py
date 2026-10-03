@@ -57,6 +57,15 @@ class RegressionTests(unittest.TestCase):
             finally:
                 eleven.ElevenLabsProvider.KEY_FILE = original
 
+    def test_premium_character_voice_studio_is_exposed(self):
+        from app.tts.providers.elevenlabs import ElevenLabsProvider
+        source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
+        self.assertIn("Premium Character Voice Studio", source)
+        self.assertIn("Generate 3 Premium Character Voices", source)
+        self.assertIn("Add Selected to My Voices", source)
+        self.assertTrue(hasattr(ElevenLabsProvider, "design_character_voice"))
+        self.assertTrue(hasattr(ElevenLabsProvider, "create_designed_voice"))
+
     def test_voice_cast_analysis_is_background_thread(self):
         from PySide6.QtCore import QThread
         from app.ui.voice_cast_page import VoiceCastAnalysisWorker
