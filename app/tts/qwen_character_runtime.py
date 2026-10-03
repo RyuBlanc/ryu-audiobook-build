@@ -13,7 +13,7 @@ from app.core.paths import models_root
 # The official qwen-tts package is 0.1.1 and supports Python 3.12. We keep this
 # runtime completely separate from the frozen Ryu's Audiobook interpreter so
 # PyInstaller cannot accidentally become the "python.exe" for venv creation.
-PYTHON_VERSION = "3.12.15"
+PYTHON_VERSION = "3.12.10"
 PYTHON_INSTALLER_URL = (
     f"https://www.python.org/ftp/python/{PYTHON_VERSION}/"
     f"python-{PYTHON_VERSION}-amd64.exe"
@@ -99,7 +99,7 @@ def _download_file(url: str, target: Path, progress=None) -> None:
             progress("Downloading the private Qwen runtime's Python 3.12 bootstrap…")
         request = urllib.request.Request(
             url,
-            headers={"User-Agent": "Ryu-Audiobook-QwenRuntime/0.3.6"},
+            headers={"User-Agent": "Ryu-Audiobook-QwenRuntime/0.3.7"},
         )
         with urllib.request.urlopen(request, timeout=120) as response, temp.open("wb") as handle:
             total = int(response.headers.get("Content-Length", "0") or 0)
