@@ -7,6 +7,7 @@ import tempfile
 import queue
 import threading
 import time
+import wave
 
 from ..base import TTSProvider
 from ..chatterbox_runtime import runtime_ready, runtime_python, runtime_environment, worker_script
@@ -259,9 +260,23 @@ class ChatterboxProvider(TTSProvider):
             raise RuntimeError("Custom voice engine did not produce a valid WAV output.")
         return output_path
 
-    def synthesize(self, text: str, output_path: Path, voice: str | None = None) -> Path:
+    def _validate_reference(self) -> None:
         if not self.reference_audio or not self.reference_audio.exists():
             raise RuntimeError("A reference voice sample is required for Chatterbox voice cloning.")
+        try:
+            with wave.open(str(self.reference_audio), "rb") as handle:
+                duration = handle.getnframes() / max(1, handle.getframerate())
+        except (OSError, wave.Error) as exc:
+            raise RuntimeError(f"The custom voice reference could not be inspected: {exc}") from exc
+        if duration <= 5.0:
+            raise RuntimeError(
+                f"The custom voice reference is {duration:.1f} seconds long. "
+                "Chatterbox requires a reference longer than 5 seconds. "
+                "Use a clean recording of at least 6 seconds."
+            )
+
+    def synthesize(self, text: str, output_path: Path, voice: str | None = None) -> Path:
+        self._validate_reference()
 
         if getattr(sys, "frozen", False) or runtime_ready():
             return self._synthesize_external(text, output_path)
