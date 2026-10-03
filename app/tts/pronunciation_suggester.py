@@ -91,7 +91,8 @@ def nativeish_pronunciation(name: str, language: str | None = None) -> str:
             else:
                 morae.append(value[i])
                 i += 1
-        return "-".join(morae).replace("--", "-").title().lstrip("-")
+        result = "-".join(morae).replace("--", "-").lower().lstrip("-")
+        return result[:1].upper() + result[1:] if result else result
     
     if lang in {"korean", "ko", "kor"}:
         value = key
