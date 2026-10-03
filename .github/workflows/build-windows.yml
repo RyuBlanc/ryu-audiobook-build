@@ -131,24 +131,17 @@ jobs:
             Write-Host 'HTTP Audiobook AI smoke test PASSED.'
           } finally { if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force } }
 
-      - name: Restore build Python after heavy AI smoke
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
       - name: Run full Audiobook AI brain integration smoke
         shell: pwsh
         env:
           RYU_AI_SERVER_URL: http://127.0.0.1:18765
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          Write-Host 'The HTTP smoke above validates the local AI server; running the application parser/integration smoke with a fresh CI Python interpreter.'
-          $toolRoot = Join-Path $env:RUNNER_TOOL_CACHE 'Python'
-          $pythonExe = Get-ChildItem $toolRoot -Recurse -Filter 'python.exe' -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -notlike '*WindowsApps*' } |
-            Select-Object -First 1 -ExpandProperty FullName
-          if (-not $pythonExe -or -not (Test-Path $pythonExe)) {
-            throw "CI Python executable could not be resolved from the Actions tool cache."
+          Write-Host 'The HTTP smoke above validates the local AI server; running the application parser/integration smoke with the original CI Python interpreter.'
+          $pythonCommand = Get-Command python.exe -ErrorAction Stop
+          $pythonExe = $pythonCommand.Source
+          if ($pythonExe -like '*WindowsApps*') {
+            throw "CI Python resolved to the Microsoft Store shim: $pythonExe"
           }
           Write-Host "Using CI Python executable: $pythonExe"
           & $pythonExe -B -m unittest tests.smoke_audiobook_ai_live -v
