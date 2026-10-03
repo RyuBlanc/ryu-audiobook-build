@@ -130,10 +130,29 @@ class QwenCharacterInstallWorker(QThread):
             # On the RTX 4060 8GB target we also install the 1.7B CustomVoice
             # model for higher-quality local character timbre.
             vram_gb = 0.0
+            # Main Ryu environment intentionally does not depend on PyTorch.
+            # Detect NVIDIA VRAM through nvidia-smi when available so the
+            # installer can choose 1.7B on the 8GB RTX 4060 and 0.6B on the
+            # 4GB RTX 3050.
             try:
-                import torch
-                if torch.cuda.is_available():
-                    vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
+                result = subprocess.run(
+                    [
+                        "nvidia-smi",
+                        "--query-gpu=memory.total",
+                        "--format=csv,noheader,nounits",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if result.returncode == 0:
+                    values = [
+                        float(line.strip())
+                        for line in result.stdout.splitlines()
+                        if line.strip().replace(".", "", 1).isdigit()
+                    ]
+                    if values:
+                        vram_gb = max(values) / 1024.0
             except Exception:
                 pass
             kind = "custom-1.7b" if vram_gb >= 7.0 else "custom-0.6b"
