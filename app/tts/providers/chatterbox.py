@@ -113,6 +113,8 @@ class ChatterboxProvider(TTSProvider):
             stdout=subprocess.PIPE,
             stderr=self._worker_log,
             text=True,
+            encoding="utf-8",
+            errors="strict",
             bufsize=1,
             env=runtime_environment(),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
