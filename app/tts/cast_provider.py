@@ -211,7 +211,15 @@ class CastAwareProvider(TTSProvider):
                     dialogue = stripped[1:].strip()
 
             if dialogue:
-                parts.append((dialogue, voice))
+                if (
+                    assigned_voices
+                    and len(assigned_voices) > 1
+                    and multi_mode == "sequential"
+                ):
+                    for assigned_voice in assigned_voices:
+                        parts.append((dialogue, assigned_voice))
+                else:
+                    parts.append((dialogue, voice))
             cursor = end
 
         if cursor < len(text):
