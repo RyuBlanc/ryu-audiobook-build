@@ -210,11 +210,36 @@ jobs:
       - name: Verify bundled voice assets and critical modules
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $exeDir = Join-Path (Get-Location) "dist\Ryu's Audiobook"
-          foreach ($name in @('app','bundled_models')) { if (-not (Test-Path (Join-Path $exeDir $name))) { throw "Frozen package is missing $name." } }
-          if (-not (Get-ChildItem (Join-Path $exeDir 'bundled_models\piper') -Filter '*.onnx' -ErrorAction SilentlyContinue)) { throw 'Frozen package has no Piper voices.' }
-          if (-not (Test-Path (Join-Path $exeDir 'bundled_models\kokoro\voices-v1.0.bin'))) { throw 'Frozen package has no Kokoro voice pack.' }
-          Write-Host 'Bundled offline Piper and Kokoro assets verified.'
+          $exe = Join-Path $exeDir "Ryu's Audiobook.exe"
+          if (-not (Test-Path $exe)) { throw "Frozen EXE is missing: $exe" }
+
+          # PyInstaller 6 may place package/data directories directly beside the
+          # EXE or under _internal. Accept either layout and verify the actual
+          # bundled assets that the frozen self-test already exercises.
+          $roots = @($exeDir, (Join-Path $exeDir '_internal')) | Where-Object { Test-Path $_ }
+          $piperModels = @()
+          $kokoroVoices = $null
+          foreach ($root in $roots) {
+            $piperDir = Join-Path $root 'bundled_models\piper'
+            if (Test-Path $piperDir) {
+              $piperModels += @(Get-ChildItem $piperDir -Filter '*.onnx' -ErrorAction SilentlyContinue)
+            }
+            $candidateVoices = Join-Path $root 'bundled_models\kokoro\voices-v1.0.bin'
+            if (Test-Path $candidateVoices) {
+              $kokoroVoices = $candidateVoices
+            }
+          }
+
+          if ($piperModels.Count -lt 2) {
+            throw "Frozen package has fewer than two bundled Piper voices; found $($piperModels.Count)."
+          }
+          if (-not $kokoroVoices) {
+            throw 'Frozen package has no Kokoro voice pack.'
+          }
+          Write-Host "Bundled offline assets verified: Piper=$($piperModels.Count), Kokoro=$kokoroVoices"
+          Write-Host 'Critical application modules were already exercised by the frozen EXE self-test.'
 
       - name: Real Audiobook AI + application integration smoke test
         shell: pwsh
