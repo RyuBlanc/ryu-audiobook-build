@@ -1,0 +1,83 @@
+name: Provider Functional Smoke
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ryu-audiobook-provider-functional
+  cancel-in-progress: true
+
+jobs:
+  piper-edge:
+    name: Piper offline + Edge online synthesis
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install application dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Download Piper voice
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "bundled_models\piper" | Out-Null
+          python -m piper.download_voices --data-dir "bundled_models\piper" en_US-lessac-medium
+          if (-not (Get-ChildItem "bundled_models\piper\*.onnx")) { throw "Piper voice was not downloaded." }
+
+      - name: Run Piper and Edge synthesis
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          PYTHONWARNINGS: ignore
+        run: python -B tests/smoke_piper_edge.py
+
+  chatterbox:
+    name: Chatterbox Nano real synthesis
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Chatterbox dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip
+          python -m pip install --no-cache-dir --upgrade -r requirements-voice-cloning.txt
+          $root = Join-Path $env:RUNNER_TEMP "ryu-chatterbox-functional"
+          $zip = Join-Path $root "chatterbox.zip"
+          $extract = Join-Path $root "src"
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $revision = '5de7a54aa4e5e2baadb0182dde554908b48b85c2'
+          curl.exe -L --fail --retry 3 -o $zip "https://github.com/resemble-ai/chatterbox/archive/$revision.zip"
+          Expand-Archive -Force $zip $extract
+          $source = Get-ChildItem $extract -Recurse -Filter "tts_turbo.py" | Select-Object -First 1
+          if (-not $source) { throw "Pinned Chatterbox source is missing tts_turbo.py." }
+          python -m pip install --no-cache-dir --no-deps (Get-ChildItem $extract -Directory | Select-Object -First 1).FullName
+
+      - name: Run real Chatterbox Nano synthesis
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          HF_HOME: ${{ runner.temp }}\ryu-hf
+          PYTHONWARNINGS: ignore
+        run: python -B tests/smoke_chatterbox_runtime.py
