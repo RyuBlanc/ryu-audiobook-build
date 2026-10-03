@@ -21,6 +21,7 @@ from app.chapters.editor import ChapterEditor
 from app.documents.parser import remove_page_noise
 from app.ui.character_review import CharacterReviewDialog
 from app.ui.dialogue_assignment import DialogueAssignmentDialog
+from app.ui.dialogue_manager import DialogueAssignmentManagerDialog
 from app.ai.brain import AudiobookBrain, _numeric_score
 
 
@@ -108,6 +109,7 @@ class ChapterEditorPage(QWidget):
             ("Split", self.split),
             ("Mark Selection as Chapter", self.mark_selection_as_chapter),
             ("Assign Selected Dialogue", self.assign_selected_dialogue),
+            ("Dialogue Assignment Manager", self.open_dialogue_manager),
             ("Analyze Book with AI", self.analyze_with_ai),
             ("View Characters & Dialogue", self.view_characters),
             ("Merge Next", self.merge),
@@ -402,6 +404,18 @@ class ChapterEditorPage(QWidget):
     def _ai_worker_finished(self) -> None:
         self.ai_worker = None
         self.ai_started_at = None
+
+    def open_dialogue_manager(self) -> None:
+        self.commit_current()
+        dialog = DialogueAssignmentManagerDialog(
+            self.editor.chapters,
+            project_folder=self.project_folder,
+            on_save=self.on_save,
+            parent=self,
+        )
+        dialog.exec()
+        self.refresh(self.list.currentRow())
+        self.load_selected(self.list.currentRow())
 
     def assign_selected_dialogue(self) -> None:
         self.commit_current()
