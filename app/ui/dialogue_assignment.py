@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
 )
 
-from app.chapters.dialogue import DialogueSegment, dialogue_segments
+from app.chapters.dialogue import DialogueSegment, dialogue_segment_for_selection
 from app.chapters.detector import Chapter
 
 
@@ -33,8 +33,8 @@ class DialogueAssignmentDialog(QDialog):
         self.chapter = chapter
         self.start = max(0, min(int(start), len(chapter.text)))
         self.end = max(self.start, min(int(end), len(chapter.text)))
-        self.segments = dialogue_segments(chapter)
-        self.selected_segment = self._segment_for_selection()
+        self.selected_segment = dialogue_segment_for_selection(chapter, self.start, self.end)
+        self.segments = [self.selected_segment] if self.selected_segment else []
         self.characters = self._character_names()
         self.assigned = False
 
