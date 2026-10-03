@@ -279,4 +279,9 @@ def runtime_environment() -> dict[str, str]:
     hf_home.mkdir(parents=True, exist_ok=True)
     env["HF_HOME"] = str(hf_home)
     env.setdefault("TRANSFORMERS_ATTN_IMPLEMENTATION", "eager")
+    # The Windows parent/child IPC carries Japanese/Korean/emoji and other
+    # Unicode book text. Force UTF-8 so the child never falls back to cp1252
+    # and raises the classic "'charmap' codec can't encode characters" error.
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     return env
