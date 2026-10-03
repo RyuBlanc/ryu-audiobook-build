@@ -143,7 +143,10 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           Write-Host 'The HTTP smoke above validates the local AI server; running the application parser/integration smoke with a fresh CI Python interpreter.'
-          python -B -m unittest tests.smoke_audiobook_ai_live -v
+          $pythonExe = Join-Path $env:pythonLocation 'python.exe'
+          if (-not (Test-Path $pythonExe)) { throw "CI Python executable was not found at $pythonExe" }
+          Write-Host "Using CI Python executable: $pythonExe"
+          & $pythonExe -B -m unittest tests.smoke_audiobook_ai_live -v
 
       - name: Download built-in offline neural voices
         shell: pwsh
