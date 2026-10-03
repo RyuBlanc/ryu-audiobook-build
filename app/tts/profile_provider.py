@@ -6,6 +6,7 @@ from app.tts.providers.piper import PiperProvider
 from app.tts.providers.kokoro import KokoroProvider
 from app.tts.providers.chatterbox import ChatterboxProvider
 from app.tts.providers.edge_tts import EdgeTTSProvider
+from app.tts.providers.elevenlabs import ElevenLabsProvider
 
 
 def provider_from_profile(profile: VoiceProfile):
@@ -14,6 +15,9 @@ def provider_from_profile(profile: VoiceProfile):
 
     if profile.provider == "edge-tts":
         return EdgeTTSProvider(), profile.voice_id
+
+    if profile.provider == "elevenlabs":
+        return ElevenLabsProvider(), profile.voice_id
 
     if profile.provider == "piper":
         return PiperProvider(backend=profile.backend), profile.voice_id
@@ -39,6 +43,8 @@ def provider_from_profile(profile: VoiceProfile):
                 backend=profile.backend,
                 language=profile.language,
                 multilingual=profile.model_id == "chatterbox-multilingual",
+                exaggeration=profile.exaggeration,
+                cfg_weight=profile.cfg_weight,
             ),
             profile.voice_id,
         )
