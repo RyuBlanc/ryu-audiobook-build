@@ -213,16 +213,15 @@ jobs:
 
             $env:RYU_AI_SERVER_URL = "http://127.0.0.1:18765"
             $env:PYTHONPATH = (Get-Location).Path
-            $pythonExe = $null
-            $pythonPathFile = Join-Path $env:RUNNER_TEMP "ryu-python-path.txt"
-            if (Test-Path -LiteralPath $pythonPathFile) {
-              $pythonExe = (Get-Content -LiteralPath $pythonPathFile -Raw).Trim()
+            $pythonExe = Join-Path $env:pythonLocation "python.exe"
+            Write-Host "Resolved Python executable from setup-python: $pythonExe"
+            if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+              throw "setup-python interpreter was not found at: $pythonExe"
             }
-            if (-not $pythonExe -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
-              throw "The exact Python interpreter used by regression tests could not be recovered."
+            & $pythonExe -c "import sys; print('Python executable:', sys.executable)"
+            if ($LASTEXITCODE -ne 0) {
+              throw "The setup-python interpreter could not be executed."
             }
-            Write-Host "Resolved Python executable from regression step: $pythonExe"
-            & $pythonExe -c "import sys; print(sys.executable)"
             & $pythonExe -B tests/smoke_audiobook_ai_live.py
             if ($LASTEXITCODE -ne 0) {
               throw "The full Audiobook AI brain integration test failed with exit code $LASTEXITCODE."
