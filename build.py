@@ -134,7 +134,9 @@ required_modules = [
     "app.version",
     "app.tts.cast_provider",
     "app.tts.chatterbox_runtime",
+    "app.tts.qwen_character_runtime",
     "app.tts.providers.kokoro",
+    "app.tts.providers.qwen_character",
     "app.ui.workflow",
 ]
 
@@ -171,6 +173,7 @@ args = [
     f"--add-data={ROOT / "requirements-voice-cloning.txt"};.",
     f"--add-data={LOGO_PNG};assets",
     f"--add-data={ROOT / "app" / "tts" / "chatterbox_worker.py"};app/tts",
+    f"--add-data={ROOT / "app" / "tts" / "qwen_character_worker.py"};app/tts",
     *[
         f"--add-data={ROOT / (module.replace('.', '/') + '.py')};{module.rsplit('.', 1)[0].replace('.', '/')}"
         for module in required_modules
