@@ -23,24 +23,18 @@ def _health(endpoint: str) -> bool:
 
 
 def _start_local_server(endpoint: str):
-    """Start the CI's local llama server when the workflow has already cleaned it up.
-
-    The normal application never uses this helper; it exists only to make the
-    integration smoke deterministic across GitHub Actions Windows step
-    boundaries. The workflow places the binary and model in RUNNER_TEMP.
-    """
     parsed = urlparse(endpoint)
     if parsed.scheme not in {'http', 'https'} or not parsed.hostname or not parsed.port:
         raise RuntimeError(f'Invalid RYU_AI_SERVER_URL: {endpoint}')
 
     root = Path(os.environ.get('RUNNER_TEMP', tempfile.gettempdir())) / 'ryu-ai-smoke'
-    binary = Path(os.environ.get('RYU_AI_SERVER_BINARY', ''))
-    model = Path(os.environ.get('RYU_AI_MODEL', ''))
-    if not binary:
+    binary_value = os.environ.get('RYU_AI_SERVER_BINARY', '').strip()
+    model_value = os.environ.get('RYU_AI_MODEL', '').strip()
+    binary = Path(binary_value) if binary_value else None
+    model = Path(model_value) if model_value else root / 'Qwen3-0.6B-Q5_K_M.gguf'
+    if binary is None:
         matches = list(root.rglob('llama-server.exe'))
         binary = matches[0] if matches else Path('llama-server.exe')
-    if not model:
-        model = root / 'Qwen3-0.6B-Q5_K_M.gguf'
     if not binary.is_file():
         raise RuntimeError(f'AI smoke server binary was not found: {binary}')
     if not model.is_file():
@@ -62,12 +56,7 @@ def _start_local_server(endpoint: str):
         '--reasoning-format', 'none',
     ]
     creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if os.name == 'nt' else 0
-    process = subprocess.Popen(
-        command,
-        stdout=stdout,
-        stderr=stderr,
-        creationflags=creationflags,
-    )
+    process = subprocess.Popen(command, stdout=stdout, stderr=stderr, creationflags=creationflags)
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
         if process.poll() is not None:
