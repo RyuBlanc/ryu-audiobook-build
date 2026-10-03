@@ -10,6 +10,7 @@ import time
 
 from ..base import TTSProvider
 from ..qwen_character_runtime import (
+    RUNTIME_ROOT,
     best_custom_kind,
     model_installed,
     runtime_environment,
@@ -83,6 +84,7 @@ class QwenCharacterProvider(TTSProvider):
             "--kind", self.model_kind,
             "--task", "clone" if self.reference_audio else "custom",
             "--backend", self.backend,
+            "--models-root", str(RUNTIME_ROOT),
         ]
         self._worker = subprocess.Popen(
             command,
