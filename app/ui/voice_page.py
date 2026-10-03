@@ -183,6 +183,7 @@ class VoicePage(QWidget):
         ))
         self.mode = PassiveScrollComboBox()
         self.mode.addItem("Offline Neural Voices  ·  built into this app", "offline-neural")
+        self.mode.addItem("Offline Character Voices  ·  Anime / Cartoon", "offline-character")
         self.mode.addItem("Windows SAPI  ·  installed offline voices", "windows-sapi")
         self.mode.addItem("Online Neural Voices  ·  Edge TTS", "edge-tts")
         self.mode.addItem("Premium Online Voices  ·  ElevenLabs", "elevenlabs")
@@ -302,7 +303,7 @@ class VoicePage(QWidget):
         source_layout.addWidget(self.character_box)
         root.addWidget(source)
 
-        self.neural_box = QGroupBox("2  •  Neural Voice")
+        self.neural_box = QGroupBox("2  •  Neural / Character Voice")
         neural = QVBoxLayout(self.neural_box)
         row = QHBoxLayout()
         self.language_filter = QComboBox()
@@ -518,6 +519,16 @@ class VoicePage(QWidget):
             if len(prefix) >= 2 and prefix[1] == "m":
                 return "Male"
             return "Neutral"
+        if profile.provider == "qwen-character":
+            name = profile.name.casefold()
+            if any(token in name for token in ("heroine", "healer", "chibi", "friend")):
+                return "Female"
+            if any(token in name for token in ("hero", "rival", "villain", "sidekick")):
+                return "Male"
+            if "serena" in voice_id or "vivian" in voice_id:
+                return "Female"
+            if any(name in voice_id for name in ("ryan", "aiden", "uncle_fu")):
+                return "Male"
         if "amy" in voice_id:
             return "Female"
         if any(name in voice_id for name in ("lessac", "ryan")):
@@ -899,8 +910,12 @@ class VoicePage(QWidget):
         region = self.accent_filter.currentData() or ""
         matches = []
 
-        if self.mode.currentData() == "offline-neural":
+        if self.mode.currentData() in {"offline-neural", "offline-character"}:
             for profile in self.offline_voices:
+                if self.mode.currentData() == "offline-character" and profile.provider != "qwen-character":
+                    continue
+                if self.mode.currentData() == "offline-neural" and profile.provider == "qwen-character":
+                    continue
                 voice_gender = self._voice_gender(profile)
                 lang = (profile.language or "en").split("-")[0]
                 reg = profile.voice_id.split("-", 1)[0] if "-" in profile.voice_id else ""
@@ -972,9 +987,17 @@ class VoicePage(QWidget):
         voice_id = self.neural_voice.currentData()
         if not voice_id:
             return
-        if self.mode.currentData() == "offline-neural":
+        if self.mode.currentData() in {"offline-neural", "offline-character"}:
             profile = next(
-                (x for x in self.offline_voices if x.voice_id == voice_id), None
+                (
+                    x for x in self.offline_voices
+                    if x.voice_id == voice_id
+                    and (
+                        (self.mode.currentData() == "offline-character" and x.provider == "qwen-character")
+                        or (self.mode.currentData() == "offline-neural" and x.provider != "qwen-character")
+                    )
+                ),
+                None,
             )
             if profile:
                 self.name.setText(profile.name)
@@ -1044,6 +1067,7 @@ class VoicePage(QWidget):
             "edge-tts": "Online Neural • Edge TTS",
             "elevenlabs": "Premium Online Natural • ElevenLabs",
             "chatterbox": "Custom Voice • Chatterbox",
+            "qwen-character": "Offline Character • Qwen3-TTS",
         }
         return labels.get(profile.provider, profile.provider)
 
@@ -1051,6 +1075,8 @@ class VoicePage(QWidget):
     def _profile_category(profile: VoiceProfile) -> str:
         if profile.provider in {"piper", "kokoro"}:
             return "builtin"
+        if profile.provider == "qwen-character":
+            return "offline-character"
         return profile.provider
 
     @staticmethod
@@ -1313,18 +1339,26 @@ class VoicePage(QWidget):
         provider = self.mode.currentData()
         name = self.name.text().strip()
 
-        if provider == "offline-neural":
+        if provider in {"offline-neural", "offline-character"}:
             voice_id = self.neural_voice.currentData()
             profile = next(
-                (x for x in self.offline_voices if x.voice_id == voice_id), None
+                (
+                    x for x in self.offline_voices
+                    if x.voice_id == voice_id
+                    and (
+                        (provider == "offline-character" and x.provider == "qwen-character")
+                        or (provider == "offline-neural" and x.provider != "qwen-character")
+                    )
+                ),
+                None,
             )
             if not profile:
-                self.status.setText("Select an offline neural voice first.")
+                self.status.setText(
+                    "Select an offline character voice first."
+                    if provider == "offline-character"
+                    else "Select an offline neural voice first."
+                )
                 return None
-            # IMPORTANT: keep the actual provider from the selected catalogue
-            # entry. Kokoro voices used to be reconstructed as Piper voices,
-            # causing Piper to fall back to Amy when it could not find ef_dora
-            # (or another Kokoro voice id).
             return VoiceProfile(
                 name=name or profile.name,
                 provider=profile.provider,
@@ -1421,6 +1455,15 @@ class VoicePage(QWidget):
             self.status.setText("Enter preview text first.")
             return
 
+        if profile.provider == "qwen-character":
+            from app.tts.qwen_character_runtime import runtime_ready, model_installed, best_custom_kind
+            if not runtime_ready() or not model_installed(best_custom_kind()):
+                QMessageBox.warning(
+                    self,
+                    "Offline Character Voices Not Ready",
+                    "Open Models → Download Offline Character Voices first."
+                )
+                return
         if profile.provider == "chatterbox" and not runtime_ready():
             QMessageBox.warning(
                 self,
