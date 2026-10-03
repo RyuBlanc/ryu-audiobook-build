@@ -99,7 +99,16 @@ class GenerationManager:
                 self.pronunciation_dictionary,
             ).narration_text
             if hasattr(self.provider, "split_for_cast"):
-                raw_parts = self.provider.split_for_cast(narration_text, self.voice)
+                try:
+                    raw_parts = self.provider.split_for_cast(
+                        narration_text,
+                        self.voice,
+                        dialogue_assignments=getattr(chapter, "dialogue_assignments", []),
+                    )
+                except TypeError as exc:
+                    if "dialogue_assignments" not in str(exc):
+                        raise
+                    raw_parts = self.provider.split_for_cast(narration_text, self.voice)
             else:
                 raw_parts = [(chunk, self.voice) for chunk in split_text(narration_text)]
             from app.tts.pacing import split_for_pacing
