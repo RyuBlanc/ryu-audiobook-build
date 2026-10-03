@@ -83,6 +83,42 @@ class VoicePreviewWorker(QThread):
                 pass
 
 
+class PremiumCharacterVoiceWorker(QThread):
+    previews_ready = Signal(object)
+    voice_created = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, action: str, payload: dict):
+        super().__init__()
+        self.action = action
+        self.payload = dict(payload or {})
+
+    def run(self) -> None:
+        try:
+            if self.action == "design":
+                previews = ElevenLabsProvider.design_character_voice(
+                    style=self.payload.get("style", "anime"),
+                    gender=self.payload.get("gender", "female"),
+                    age=self.payload.get("age", "young adult"),
+                    temperament=self.payload.get("temperament", "expressive"),
+                )
+                self.previews_ready.emit(previews)
+            elif self.action == "create":
+                result = ElevenLabsProvider.create_designed_voice(
+                    generated_voice_id=str(self.payload["generated_voice_id"]),
+                    voice_name=str(self.payload["voice_name"]),
+                    voice_description=str(self.payload["voice_description"]),
+                    style=str(self.payload.get("style", "anime")),
+                    gender=str(self.payload.get("gender", "female")),
+                    age=str(self.payload.get("age", "young adult")),
+                )
+                self.voice_created.emit(result)
+            else:
+                raise RuntimeError(f"Unknown premium character action: {self.action}")
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class VoicePage(QWidget):
     """Offline-first voice library and reusable narration profiles."""
 
@@ -93,6 +129,8 @@ class VoicePage(QWidget):
         self.sample_path: Path | None = None
         self.last_preview: Path | None = None
         self.preview_worker: VoicePreviewWorker | None = None
+        self.character_worker: PremiumCharacterVoiceWorker | None = None
+        self.character_previews: list[dict] = []
         self.edge_voices: list[dict] = []
         self.premium_voices: list[dict] = []
         self.offline_voices: list[VoiceProfile] = builtin_voice_profiles()
@@ -160,6 +198,75 @@ class VoicePage(QWidget):
         premium_row.addWidget(self.premium_key_button)
         premium_row.addWidget(self.premium_key_status, 1)
         source_layout.addLayout(premium_row)
+
+        self.character_box = QGroupBox("Premium Character Voice Studio")
+        character = QVBoxLayout(self.character_box)
+        character_info = QLabel(
+            "Create premium English character voices through ElevenLabs Voice Design. "
+            "Anime and cartoon presets generate fresh voice options; you choose one and explicitly "
+            "add it to your ElevenLabs library before Ryu's Audiobook uses it for generation."
+        )
+        character_info.setObjectName("muted")
+        character_info.setWordWrap(True)
+        character.addWidget(character_info)
+
+        character_filters = QHBoxLayout()
+        self.character_style = QComboBox()
+        self.character_style.addItem("Anime", "anime")
+        self.character_style.addItem("Cartoon", "cartoon")
+        self.character_gender = QComboBox()
+        self.character_gender.addItems(["Female", "Male", "Neutral"])
+        self.character_age = QComboBox()
+        self.character_age.addItems(["Child", "Teen", "Young adult", "Adult", "Older adult"])
+        self.character_temperament = QComboBox()
+        self.character_temperament.addItems([
+            "Bright / cheerful",
+            "Dramatic / heroic",
+            "Mischievous",
+            "Warm / friendly",
+            "Villain / ominous",
+            "Calm / cinematic",
+        ])
+        for label, widget in (
+            ("Style", self.character_style),
+            ("Gender", self.character_gender),
+            ("Age", self.character_age),
+            ("Temperament", self.character_temperament),
+        ):
+            col = QVBoxLayout()
+            col.addWidget(QLabel(label))
+            col.addWidget(widget)
+            character_filters.addLayout(col, 1)
+        character.addLayout(character_filters)
+
+        character_actions = QHBoxLayout()
+        self.design_character_button = QPushButton("Generate 3 Premium Character Voices")
+        self.design_character_button.setObjectName("primary")
+        self.design_character_button.clicked.connect(self.design_character_voices)
+        character_actions.addWidget(self.design_character_button)
+        self.character_preview_selector = QComboBox()
+        self.character_preview_selector.addItem("No generated previews", None)
+        character_actions.addWidget(self.character_preview_selector, 1)
+        self.play_character_button = QPushButton("▶  Play")
+        self.play_character_button.setEnabled(False)
+        self.play_character_button.clicked.connect(self.play_character_preview)
+        character_actions.addWidget(self.play_character_button)
+        character.addLayout(character_actions)
+
+        save_character_row = QHBoxLayout()
+        self.character_name = QLineEdit()
+        self.character_name.setPlaceholderText("e.g. Aiko • Anime Heroine")
+        save_character_row.addWidget(self.character_name, 1)
+        self.add_character_button = QPushButton("Add Selected to My Voices")
+        self.add_character_button.clicked.connect(self.add_selected_character_voice)
+        save_character_row.addWidget(self.add_character_button)
+        character.addLayout(save_character_row)
+
+        self.character_status = QLabel("No character voice preview generated yet.")
+        self.character_status.setObjectName("muted")
+        self.character_status.setWordWrap(True)
+        character.addWidget(self.character_status)
+        source_layout.addWidget(self.character_box)
         root.addWidget(source)
 
         self.neural_box = QGroupBox("2  •  Neural Voice")
@@ -447,6 +554,187 @@ class VoicePage(QWidget):
             self.status.setText(
                 f"Online catalog unavailable: {exc}. Offline voices remain available."
             )
+
+    def design_character_voices(self) -> None:
+        if not ElevenLabsProvider.load_api_key():
+            QMessageBox.warning(
+                self,
+                "Premium Voice Key Required",
+                "Set your ElevenLabs API key first. Premium character voice design uses the online ElevenLabs service."
+            )
+            return
+        if self.character_worker is not None and self.character_worker.isRunning():
+            return
+        self.character_previews = []
+        self.character_preview_selector.clear()
+        self.character_preview_selector.addItem("Generating premium previews…", None)
+        self.play_character_button.setEnabled(False)
+        self.design_character_button.setEnabled(False)
+        self.add_character_button.setEnabled(False)
+        style = str(self.character_style.currentData() or "anime")
+        gender = self.character_gender.currentText().casefold()
+        age = self.character_age.currentText()
+        temperament = self.character_temperament.currentText()
+        self.character_status.setText(
+            "Generating 3 premium character-voice options… "
+            "The service is online; the rest of Ryu's Audiobook remains responsive."
+        )
+        self.character_worker = PremiumCharacterVoiceWorker(
+            "design",
+            {
+                "style": style,
+                "gender": gender,
+                "age": age,
+                "temperament": temperament,
+            },
+        )
+        self.character_worker.previews_ready.connect(self._character_previews_ready)
+        self.character_worker.failed.connect(self._character_worker_failed)
+        self.character_worker.finished.connect(self._character_worker_finished)
+        self.character_worker.start()
+
+    def _character_previews_ready(self, previews: list[dict]) -> None:
+        self.character_previews = list(previews or [])
+        self.character_preview_selector.clear()
+        for preview in self.character_previews:
+            self.character_preview_selector.addItem(
+                f"Preview {preview.get('index', 1)}  · {float(preview.get('duration_secs') or 0):.1f}s",
+                preview.get("index"),
+            )
+        if self.character_previews:
+            preview = self.character_previews[0]
+            self.character_preview_selector.setCurrentIndex(0)
+            style = str(preview.get("style") or "anime").title()
+            gender = str(preview.get("gender") or "female").title()
+            self.character_name.setText(
+                f"{style} {gender} Character"
+            )
+            self.character_status.setText(
+                f"Generated {len(self.character_previews)} premium {style.lower()} voice options. "
+                "Play one, then add your selected option to ElevenLabs My Voices."
+            )
+            self.play_character_button.setEnabled(True)
+        else:
+            self.character_status.setText("ElevenLabs returned no usable character voice previews.")
+
+    def _character_worker_finished(self) -> None:
+        self.design_character_button.setEnabled(True)
+        self.add_character_button.setEnabled(True)
+        self.character_worker = None
+
+    def _character_worker_failed(self, message: str) -> None:
+        self.character_status.setText(f"Premium character voice operation failed: {message}")
+        self.character_preview_selector.clear()
+        self.character_preview_selector.addItem("No generated previews", None)
+        self.play_character_button.setEnabled(False)
+
+    def _selected_character_preview(self) -> dict | None:
+        index = self.character_preview_selector.currentData()
+        if index is None:
+            return None
+        try:
+            numeric = int(index)
+        except (TypeError, ValueError):
+            return None
+        return next(
+            (preview for preview in self.character_previews if int(preview.get("index", 0)) == numeric),
+            None,
+        )
+
+    def play_character_preview(self) -> None:
+        preview = self._selected_character_preview()
+        if not preview:
+            self.character_status.setText("Generate a premium character preview first.")
+            return
+        try:
+            import base64
+            audio = base64.b64decode(str(preview.get("audio_base_64") or ""))
+            output = Path(tempfile.gettempdir()) / f"ryu_character_preview_{preview.get('index', 1)}.mp3"
+            output.write_bytes(audio)
+            self.last_preview = output
+            self.player.stop()
+            self.player.setSource(QUrl.fromLocalFile(str(output)))
+            self.player.play()
+            self.play_button.setEnabled(True)
+            self.play_button.setText("Ⅱ  Pause")
+            self.character_status.setText("Playing the selected premium character preview.")
+        except Exception as exc:
+            QMessageBox.warning(self, "Character Preview Failed", str(exc))
+
+    def add_selected_character_voice(self) -> None:
+        preview = self._selected_character_preview()
+        if not preview:
+            QMessageBox.warning(
+                self,
+                "No Character Preview",
+                "Generate and select a premium anime or cartoon preview first."
+            )
+            return
+        if not ElevenLabsProvider.load_api_key():
+            QMessageBox.warning(
+                self,
+                "Premium Voice Key Required",
+                "Set your ElevenLabs API key first."
+            )
+            return
+        voice_name = self.character_name.text().strip()
+        if not voice_name:
+            QMessageBox.warning(self, "Voice Name Required", "Enter a name for the premium character voice.")
+            return
+        if self.character_worker is not None and self.character_worker.isRunning():
+            return
+
+        self.add_character_button.setEnabled(False)
+        self.design_character_button.setEnabled(False)
+        self.character_status.setText("Adding the selected voice to your ElevenLabs My Voices…")
+        self.character_worker = PremiumCharacterVoiceWorker(
+            "create",
+            {
+                "generated_voice_id": preview["generated_voice_id"],
+                "voice_name": voice_name,
+                "voice_description": str(preview.get("description") or "Premium English character voice"),
+                "style": str(preview.get("style") or "anime"),
+                "gender": str(preview.get("gender") or "female"),
+                "age": str(preview.get("age") or "young adult"),
+            },
+        )
+        self.character_worker.voice_created.connect(self._character_voice_created)
+        self.character_worker.failed.connect(self._character_worker_failed)
+        self.character_worker.finished.connect(self._character_worker_finished)
+        self.character_worker.start()
+
+    def _character_voice_created(self, result: dict) -> None:
+        voice_id = str(result.get("voice_id") or "").strip()
+        if not voice_id:
+            self.character_status.setText("ElevenLabs created the voice but returned no voice ID.")
+            return
+        name = str(result.get("name") or self.character_name.text().strip() or "Premium Character Voice")
+        style = str((self._selected_character_preview() or {}).get("style") or "anime")
+        gender = str((self._selected_character_preview() or {}).get("gender") or "female")
+        profile = VoiceProfile(
+            name=name,
+            provider="elevenlabs",
+            voice_id=voice_id,
+            language="en",
+            notes=f"Premium {style.title()} character voice • ElevenLabs • {gender.title()}",
+            authorized=True,
+        )
+        profiles = [
+            p for p in self.profiles
+            if p.name.casefold() != name.casefold()
+        ]
+        profiles.append(profile)
+        save_profiles(profiles)
+        self.profiles = profiles
+        self.refresh_profiles()
+        self.status.setText(
+            f"Added premium character voice '{name}' to Ryu's Audiobook. "
+            "It is now available as an ElevenLabs voice profile."
+        )
+        self.character_status.setText(
+            f"✓ Added '{name}' to your ElevenLabs My Voices and Ryu's Audiobook."
+        )
+        self._refresh_premium_catalog()
 
     def _update_premium_key_status(self) -> None:
         configured = bool(ElevenLabsProvider.load_api_key())
@@ -869,6 +1157,8 @@ class VoicePage(QWidget):
         mode = self.mode.currentData()
         if hasattr(self, "premium_key_button"):
             self.premium_key_button.setVisible(mode == "elevenlabs")
+        if hasattr(self, "character_box"):
+            self.character_box.setVisible(mode == "elevenlabs")
         self.neural_box.setVisible(mode in {"offline-neural", "edge-tts", "elevenlabs"})
         self.sapi_box.setVisible(mode == "windows-sapi")
         self.custom_box.setVisible(mode == "chatterbox")
