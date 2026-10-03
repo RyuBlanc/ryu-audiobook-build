@@ -207,6 +207,7 @@ jobs:
 
             $env:RYU_AI_SERVER_URL = "http://127.0.0.1:18765"
             $env:PYTHONPATH = (Get-Location).Path
+            $env:PATH = "$env:pythonLocation;$env:PATH"
             $pythonExe = Join-Path $env:pythonLocation "python.exe"
             if (-not (Test-Path $pythonExe)) {
               $pythonExe = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
