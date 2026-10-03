@@ -26,6 +26,18 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Capture CI Python executable
+        shell: pwsh
+        run: |
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          if ($pythonExe -like '*WindowsApps*') {
+            throw "actions/setup-python resolved to the Microsoft Store shim: $pythonExe"
+          }
+          if (-not (Test-Path $pythonExe)) {
+            throw "Resolved CI Python executable does not exist: $pythonExe"
+          }
+          "RYU_CI_PYTHON=$pythonExe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Install dependencies
         shell: pwsh
         run: |
@@ -137,11 +149,10 @@ jobs:
           RYU_AI_SERVER_URL: http://127.0.0.1:18765
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          Write-Host 'The HTTP smoke above validates the local AI server; running the application parser/integration smoke with the original CI Python interpreter.'
-          $pythonCommand = Get-Command python.exe -ErrorAction Stop
-          $pythonExe = $pythonCommand.Source
-          if ($pythonExe -like '*WindowsApps*') {
-            throw "CI Python resolved to the Microsoft Store shim: $pythonExe"
+          Write-Host 'The HTTP smoke above validates the local AI server; running the application parser/integration smoke with the captured CI Python interpreter.'
+          $pythonExe = $env:RYU_CI_PYTHON
+          if (-not $pythonExe -or -not (Test-Path $pythonExe)) {
+            throw "Captured CI Python executable is unavailable: $pythonExe"
           }
           Write-Host "Using CI Python executable: $pythonExe"
           & $pythonExe -B -m unittest tests.smoke_audiobook_ai_live -v
@@ -150,7 +161,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path 'bundled_models\piper' | Out-Null
-          python -m piper.download_voices --data-dir 'bundled_models\piper' en_US-amy-medium en_US-lessac-medium
+          & $env:RYU_CI_PYTHON -m piper.download_voices --data-dir 'bundled_models\piper' en_US-amy-medium en_US-lessac-medium
           $models = @(Get-ChildItem 'bundled_models\piper\*.onnx')
           if ($models.Count -lt 2) { throw "Expected two bundled Piper voices, found $($models.Count)." }
 
@@ -170,7 +181,7 @@ jobs:
           RYU_BUILD_NUMBER: ${{ github.run_number }}
         run: |
           $env:PYTHONPATH = (Get-Location).Path
-          $version = python -c "from app.version import full_version; print(full_version())"
+          $version = & $env:RYU_CI_PYTHON -c "from app.version import full_version; print(full_version())"
           $expected = 'v0.3.7'
           if (-not $version.StartsWith($expected) -or -not $version.EndsWith("Build $env:RYU_BUILD_NUMBER")) { throw "Unexpected application version: $version" }
           Write-Host "Application version verified: $version"
@@ -179,7 +190,7 @@ jobs:
         shell: pwsh
         env:
           RYU_BUILD_NUMBER: ${{ github.run_number }}
-        run: python build.py
+        run: '& $env:RYU_CI_PYTHON build.py'
 
       - name: Verify frozen application
         shell: pwsh
