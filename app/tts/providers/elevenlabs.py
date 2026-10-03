@@ -97,6 +97,138 @@ class ElevenLabsProvider(TTSProvider):
             raise RuntimeError(f"ElevenLabs network request failed: {exc}") from exc
 
     @classmethod
+    def design_character_voice(
+        cls,
+        style: str,
+        gender: str = "female",
+        age: str = "young adult",
+        temperament: str = "expressive",
+        model_id: str = "eleven_ttv_v3",
+    ) -> list[dict]:
+        """Generate premium character-voice previews through ElevenLabs Voice Design.
+
+        The generated previews remain local until the user explicitly chooses
+        one and creates it in their ElevenLabs voice library.
+        """
+        api_key = cls.load_api_key()
+        if not api_key:
+            raise RuntimeError("Set the ElevenLabs API key before generating a premium character voice.")
+
+        presets = {
+            "anime": (
+                "Anime character voice, dynamic Japanese-animation-inspired English delivery. "
+                "Clear diction, expressive emotion, youthful performance, cinematic character acting."
+            ),
+            "cartoon": (
+                "High-quality English cartoon character voice. "
+                "Distinctive animated performance, clear diction, playful timing and strong personality."
+            ),
+        }
+        prompt_base = presets.get(str(style or "").casefold(), presets["anime"])
+        gender_phrase = str(gender or "female").strip().casefold()
+        age_phrase = str(age or "young adult").strip()
+        temperament_phrase = str(temperament or "expressive").strip()
+        description = (
+            f"{prompt_base} Speaker: {age_phrase} {gender_phrase}. "
+            f"Temperament: {temperament_phrase}. "
+            "Designed for long-form audiobook dialogue and frequent character scenes; "
+            "natural breath, stable identity, emotionally controlled without sounding synthetic."
+        )
+        sample = (
+            "I finally found you! Wait—don't move. The whole town is counting on us, "
+            "and this time I'm not running away. Come on, let's finish this together."
+            if str(style or "").casefold() == "anime"
+            else
+            "Well, well, look who wandered into my little corner of trouble! "
+            "Relax, friend—I've got a plan, and for once it might actually work."
+        )
+        payload = json.dumps(
+            {
+                "model_id": model_id,
+                "voice_description": description,
+                "text": sample,
+                "auto_generate_text": False,
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        raw, _ = cls._request(
+            "POST",
+            f"{cls.API_BASE}/text-to-voice/design?output_format=mp3_22050_32",
+            api_key,
+            payload,
+        )
+        data = json.loads(raw.decode("utf-8"))
+        previews = data.get("previews", []) if isinstance(data, dict) else []
+        cleaned: list[dict] = []
+        for index, preview in enumerate(previews, 1):
+            if not isinstance(preview, dict):
+                continue
+            encoded = str(preview.get("audio_base_64") or "").strip()
+            generated_id = str(preview.get("generated_voice_id") or "").strip()
+            if not encoded or not generated_id:
+                continue
+            cleaned.append(
+                {
+                    "index": index,
+                    "generated_voice_id": generated_id,
+                    "audio_base_64": encoded,
+                    "duration_secs": preview.get("duration_secs"),
+                    "language": preview.get("language") or "en",
+                    "style": style,
+                    "description": description,
+                    "sample_text": sample,
+                    "gender": gender,
+                    "age": age,
+                    "temperament": temperament,
+                    "model_id": model_id,
+                }
+            )
+        if not cleaned:
+            raise RuntimeError("ElevenLabs did not return any voice-design previews.")
+        return cleaned
+
+    @classmethod
+    def create_designed_voice(
+        cls,
+        generated_voice_id: str,
+        voice_name: str,
+        voice_description: str,
+        style: str,
+        gender: str,
+        age: str,
+    ) -> dict:
+        """Create a selected Voice Design preview as a voice in My Voices."""
+        api_key = cls.load_api_key()
+        if not api_key:
+            raise RuntimeError("Set the ElevenLabs API key before saving a premium character voice.")
+        payload = json.dumps(
+            {
+                "voice_name": voice_name,
+                "voice_description": voice_description,
+                "generated_voice_id": generated_voice_id,
+                "labels": {
+                    "language": "en",
+                    "gender": str(gender or "unknown"),
+                    "age": str(age or "unknown"),
+                    "description": f"{str(style or 'character').title()} character voice",
+                    "use_case": "audiobook character",
+                },
+            },
+            ensure_ascii=False,
+        ).encode("utf-8")
+        raw, _ = cls._request(
+            "POST",
+            f"{cls.API_BASE}/text-to-voice",
+            api_key,
+            payload,
+        )
+        data = json.loads(raw.decode("utf-8"))
+        voice_id = str(data.get("voice_id") or "").strip() if isinstance(data, dict) else ""
+        if not voice_id:
+            raise RuntimeError("ElevenLabs did not return a voice ID after creating the premium character voice.")
+        return data
+
+    @classmethod
     def fetch_voice_metadata(cls, refresh: bool = False) -> list[dict]:
         # A small local cache keeps the voice picker usable between sessions,
         # but synthesis itself remains online.
