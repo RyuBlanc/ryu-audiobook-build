@@ -7,14 +7,20 @@ import gc
 import json
 import sys
 
-from app.tts.qwen_character_runtime import MODEL_IDS, MODEL_DIRS, runtime_environment
+MODEL_IDS = {
+    "custom-0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+    "custom-1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+    "design-1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    "base-0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+}
 
 
-def _load_model(kind: str, backend: str):
+
+def _load_model(kind: str, backend: str, root: Path):
     import torch
     from qwen_tts import Qwen3TTSModel
 
-    model_path = MODEL_DIRS[kind]
+    model_path = root / kind
     if not model_path.exists():
         raise RuntimeError(f"Qwen model is not installed: {MODEL_IDS[kind]}")
 
@@ -82,7 +88,8 @@ def _generate_clone(model, request: dict, output: Path) -> None:
 
 
 def server(args) -> int:
-    model, device = _load_model(args.kind, args.backend)
+    root = Path(args.models_root).resolve()
+    model, device = _load_model(args.kind, args.backend, root)
     print(json.dumps({"ready": True, "device": device, "model": MODEL_IDS[args.kind]}), flush=True)
     for line in sys.stdin:
         line = line.strip()
@@ -112,6 +119,7 @@ def main() -> int:
     parser.add_argument("--kind", required=True)
     parser.add_argument("--task", choices=["custom", "clone"], default="custom")
     parser.add_argument("--backend", default="automatic")
+    parser.add_argument("--models-root", required=True)
     args = parser.parse_args()
     if args.server:
         return server(args)
