@@ -69,7 +69,8 @@ class RegressionTests(unittest.TestCase):
     def test_offline_qwen_runtime_never_creates_venv_from_frozen_app(self):
         source = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
         self.assertIn("python312", source)
-        self.assertIn("python-3.12.15-amd64.exe", source)
+        self.assertIn('PYTHON_INSTALLER_URL =', source)
+        self.assertIn('PYTHON_VERSION = "3.12.15"', source)
         self.assertIn("TargetDir=", source)
         self.assertNotIn("EnvBuilder(with_pip=True, clear=False, upgrade_deps=True)", source)
 
