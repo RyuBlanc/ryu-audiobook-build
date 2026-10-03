@@ -206,11 +206,23 @@ class ChapterEditorPage(QWidget):
             self.save_status.setText(f"Save failed: {exc}")
             return False
 
-    def commit_current(self) -> None:
+    def commit_current(self) -> bool:
         index = self.list.currentRow()
-        if index >= 0:
-            self.editor.rename(index, self.title.toPlainText())
-            self.editor.edit_text(index, self.text.toPlainText())
+        if index < 0:
+            return False
+        chapter = self.editor.chapters[index]
+        new_title = self.title.toPlainText()
+        new_text = self.text.toPlainText()
+        # Most editor actions do not change the chapter text. Avoid rebuilding
+        # every dialogue-assignment offset on every click, especially on large
+        # chapters with dozens of assigned dialogue spans.
+        if new_title == chapter.title and new_text == chapter.text:
+            return False
+        if new_title != chapter.title:
+            self.editor.rename(index, new_title)
+        if new_text != chapter.text:
+            self.editor.edit_text(index, new_text)
+        return True
 
     def rename(self) -> None:
         index = self.list.currentRow()
