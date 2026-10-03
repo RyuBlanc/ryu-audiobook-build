@@ -26,18 +26,6 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Capture CI Python executable
-        shell: pwsh
-        run: |
-          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
-          if ($pythonExe -like '*WindowsApps*') {
-            throw "actions/setup-python resolved to the Microsoft Store shim: $pythonExe"
-          }
-          if (-not (Test-Path $pythonExe)) {
-            throw "Resolved CI Python executable does not exist: $pythonExe"
-          }
-          "RYU_CI_PYTHON=$pythonExe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
       - name: Install dependencies
         shell: pwsh
         run: |
@@ -99,69 +87,11 @@ jobs:
           if (-not $nanoExample) { throw 'Pinned Chatterbox source does not contain example_tts_nano.py.' }
           Write-Host "Pinned Chatterbox source $revision exposes the Nano API."
 
-      - name: Real Audiobook AI smoke test
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $root = Join-Path $env:RUNNER_TEMP 'ryu-ai-smoke'
-          $bin = Join-Path $root 'llama'
-          $model = Join-Path $root 'Qwen3-0.6B-Q5_K_M.gguf'
-          New-Item -ItemType Directory -Force -Path $root | Out-Null
-          $llamaZip = Join-Path $root 'llama.zip'
-          if (-not (Test-Path $bin)) {
-            New-Item -ItemType Directory -Force -Path $bin | Out-Null
-            curl.exe -L --fail --retry 3 -o $llamaZip 'https://github.com/ggml-org/llama.cpp/releases/download/b11193/llama-b11193-bin-win-cpu-x64.zip'
-            Expand-Archive -Force $llamaZip $bin
-          }
-          $server = Get-ChildItem $bin -Recurse -Filter 'llama-server.exe' | Select-Object -First 1
-          if (-not $server) { throw 'llama-server.exe was not found.' }
-          if (-not (Test-Path $model)) {
-            curl.exe -L --fail --retry 3 -o "$model.part" 'https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/ef4088322893040952513f532f736ddeab518403/Qwen3-0.6B-Q5_K_M.gguf?download=true'
-            Move-Item -Force "$model.part" $model
-          }
-          $stdoutLog = Join-Path $root 'llama.stdout.log'
-          $stderrLog = Join-Path $root 'llama.stderr.log'
-          $proc = Start-Process -FilePath $server.FullName -ArgumentList @('-m',$model,'--host','127.0.0.1','--port','18765','--ctx-size','4096','--threads','4','--no-webui','--reasoning','off','--reasoning-format','none') -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru -WindowStyle Hidden
-          try {
-            $ready = $false
-            for ($i = 0; $i -lt 120; $i++) {
-              if ($proc.HasExited) { Get-Content $stderrLog -Tail 100 -ErrorAction SilentlyContinue; throw 'llama-server exited before becoming ready.' }
-              try { $health = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:18765/health' -TimeoutSec 2; if ($health.StatusCode -eq 200) { $ready = $true; break } } catch {}
-              Start-Sleep -Seconds 1
-            }
-            if (-not $ready) { throw 'llama-server did not become ready within 120 seconds.' }
-            $body = @{ messages = @(@{role='system';content="You are the Ryu's Audiobook AI self-test. Return only one valid JSON object. Do not think. Do not use markdown."},@{role='user';content='/no_think Return {"ok":true,"message":"ready"}. Do not add any other text.'}); temperature=0.2; top_p=0.8; max_tokens=80; stream=$false } | ConvertTo-Json -Depth 20
-            $response = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:18765/v1/chat/completions' -ContentType 'application/json' -Body $body
-            $content = [string]$response.choices[0].message.content
-            $clean = $content -replace '(?s)<think>.*?</think>', ''
-            $clean = $clean -replace '^\s*```(?:json)?\s*', ''
-            $clean = $clean -replace '\s*```\s*$', ''
-            $start = $clean.IndexOf('{'); $end = $clean.LastIndexOf('}')
-            if ($start -lt 0 -or $end -le $start) { throw "Audiobook AI returned no JSON object: $content" }
-            $obj = $clean.Substring($start,$end-$start+1) | ConvertFrom-Json
-            if (-not $obj.ok -or $obj.message -ne 'ready') { throw "Unexpected Audiobook AI JSON: $content" }
-            Write-Host 'HTTP Audiobook AI smoke test PASSED.'
-          } finally { if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force } }
-
-      - name: Run full Audiobook AI brain integration smoke
-        shell: pwsh
-        env:
-          RYU_AI_SERVER_URL: http://127.0.0.1:18765
-          PYTHONPATH: ${{ github.workspace }}
-        run: |
-          Write-Host 'The HTTP smoke above validates the local AI server; running the application parser/integration smoke with the captured CI Python interpreter.'
-          $pythonExe = $env:RYU_CI_PYTHON
-          if (-not $pythonExe -or -not (Test-Path $pythonExe)) {
-            throw "Captured CI Python executable is unavailable: $pythonExe"
-          }
-          Write-Host "Using CI Python executable: $pythonExe"
-          & $pythonExe -B -m unittest tests.smoke_audiobook_ai_live -v
-
       - name: Download built-in offline neural voices
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path 'bundled_models\piper' | Out-Null
-          & $env:RYU_CI_PYTHON -m piper.download_voices --data-dir 'bundled_models\piper' en_US-amy-medium en_US-lessac-medium
+          python -m piper.download_voices --data-dir 'bundled_models\piper' en_US-amy-medium en_US-lessac-medium
           $models = @(Get-ChildItem 'bundled_models\piper\*.onnx')
           if ($models.Count -lt 2) { throw "Expected two bundled Piper voices, found $($models.Count)." }
 
@@ -181,7 +111,7 @@ jobs:
           RYU_BUILD_NUMBER: ${{ github.run_number }}
         run: |
           $env:PYTHONPATH = (Get-Location).Path
-          $version = & $env:RYU_CI_PYTHON -c "from app.version import full_version; print(full_version())"
+          $version = python -c "from app.version import full_version; print(full_version())"
           $expected = 'v0.3.7'
           if (-not $version.StartsWith($expected) -or -not $version.EndsWith("Build $env:RYU_BUILD_NUMBER")) { throw "Unexpected application version: $version" }
           Write-Host "Application version verified: $version"
@@ -190,7 +120,7 @@ jobs:
         shell: pwsh
         env:
           RYU_BUILD_NUMBER: ${{ github.run_number }}
-        run: '& $env:RYU_CI_PYTHON build.py'
+        run: 'python build.py'
 
       - name: Verify frozen application
         shell: pwsh
@@ -232,6 +162,66 @@ jobs:
           if (-not (Get-ChildItem (Join-Path $exeDir 'bundled_models\piper') -Filter '*.onnx' -ErrorAction SilentlyContinue)) { throw 'Frozen package has no Piper voices.' }
           if (-not (Test-Path (Join-Path $exeDir 'bundled_models\kokoro\voices-v1.0.bin'))) { throw 'Frozen package has no Kokoro voice pack.' }
           Write-Host 'Bundled offline Piper and Kokoro assets verified.'
+
+      - name: Real Audiobook AI + application integration smoke test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'ryu-ai-smoke'
+          $bin = Join-Path $root 'llama'
+          $model = Join-Path $root 'Qwen3-0.6B-Q5_K_M.gguf'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $llamaZip = Join-Path $root 'llama.zip'
+          if (-not (Test-Path $bin)) {
+            New-Item -ItemType Directory -Force -Path $bin | Out-Null
+            curl.exe -L --fail --retry 3 -o $llamaZip 'https://github.com/ggml-org/llama.cpp/releases/download/b11193/llama-b11193-bin-win-cpu-x64.zip'
+            Expand-Archive -Force $llamaZip $bin
+          }
+          $server = Get-ChildItem $bin -Recurse -Filter 'llama-server.exe' | Select-Object -First 1
+          if (-not $server) { throw 'llama-server.exe was not found.' }
+          if (-not (Test-Path $model)) {
+            curl.exe -L --fail --retry 3 -o "$model.part" 'https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/ef4088322893040952513f532f736ddeab518403/Qwen3-0.6B-Q5_K_M.gguf?download=true'
+            Move-Item -Force "$model.part" $model
+          }
+          $stdoutLog = Join-Path $root 'llama.stdout.log'
+          $stderrLog = Join-Path $root 'llama.stderr.log'
+          $proc = Start-Process -FilePath $server.FullName -ArgumentList @('-m',$model,'--host','127.0.0.1','--port','18765','--ctx-size','4096','--threads','4','--no-webui','--reasoning','off','--reasoning-format','none') -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru -WindowStyle Hidden
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 120; $i++) {
+              if ($proc.HasExited) { Get-Content $stderrLog -Tail 100 -ErrorAction SilentlyContinue; throw 'llama-server exited before becoming ready.' }
+              try { $health = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:18765/health' -TimeoutSec 2; if ($health.StatusCode -eq 200) { $ready = $true; break } } catch {}
+              Start-Sleep -Seconds 1
+            }
+            if (-not $ready) { throw 'llama-server did not become ready within 120 seconds.' }
+            $body = @{ messages = @(@{role='system';content="You are the Ryu's Audiobook AI self-test. Return only one valid JSON object. Do not think. Do not use markdown."},@{role='user';content='/no_think Return {"ok":true,"message":"ready"}. Do not add any other text.'}); temperature=0.2; top_p=0.8; max_tokens=80; stream=$false } | ConvertTo-Json -Depth 20
+            $response = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:18765/v1/chat/completions' -ContentType 'application/json' -Body $body
+            $content = [string]$response.choices[0].message.content
+            $clean = $content -replace '(?s)<think>.*?</think>', ''
+            $clean = $clean -replace '^\s*```(?:json)?\s*', ''
+            $clean = $clean -replace '\s*```\s*$', ''
+            $start = $clean.IndexOf('{'); $end = $clean.LastIndexOf('}')
+            if ($start -lt 0 -or $end -le $start) { throw "Audiobook AI returned no JSON object: $content" }
+            $obj = $clean.Substring($start,$end-$start+1) | ConvertFrom-Json
+            if (-not $obj.ok -or $obj.message -ne 'ready') { throw "Unexpected Audiobook AI JSON: $content" }
+            Write-Host 'HTTP Audiobook AI smoke test PASSED.'
+
+            # Exercise the real application parser/integration while the local
+            # llama-server is still running. This avoids the runner Python-path
+            # mutation that occurs after the smoke process has been launched.
+            $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+            if ($pythonExe -like '*WindowsApps*') {
+              throw "CI Python resolved to the Microsoft Store shim: $pythonExe"
+            }
+            $pythonVersion = & $pythonExe -c "import sys; print('.'.join(map(str, sys.version_info[:2])))"
+            if ($pythonVersion -ne '3.12') {
+              throw "Audiobook AI integration smoke is running under Python $pythonVersion instead of Python 3.12."
+            }
+            $env:PYTHONPATH = (Get-Location).Path
+            $env:RYU_AI_SERVER_URL = 'http://127.0.0.1:18765'
+            & $pythonExe -B -m unittest tests.smoke_audiobook_ai_live -v
+          } finally { if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force } }
+
 
       - name: Install Inno Setup
         shell: pwsh
