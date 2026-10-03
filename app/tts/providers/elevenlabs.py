@@ -96,6 +96,32 @@ class ElevenLabsProvider(TTSProvider):
         except (OSError, urllib.error.URLError) as exc:
             raise RuntimeError(f"ElevenLabs network request failed: {exc}") from exc
 
+    @staticmethod
+    def _character_archetype_hint(style: str, temperament: str) -> str:
+        value = f"{str(style or '').casefold()} {str(temperament or '').casefold()}"
+        if "anime" in value:
+            if "heroic" in value:
+                return "Bright shonen-style young hero energy with confident determination and emotional lifts."
+            if "villain" in value or "ominous" in value:
+                return "Elegant anime antagonist presence with controlled menace, low warmth and precise diction."
+            if "mischievous" in value:
+                return "Playful anime rival energy, teasing confidence and quick emotional reactions."
+            if "calm" in value or "cinematic" in value:
+                return "Cool anime mentor or strategist presence with restrained intensity and cinematic phrasing."
+            if "warm" in value:
+                return "Kind anime healer or gentle heroine quality with soft warmth and reassuring delivery."
+            return "Expressive anime character performance with clear English diction and distinct personality."
+        if "cartoon" in value:
+            if "villain" in value or "ominous" in value:
+                return "Stylized animated villain energy with playful menace and crisp comic timing."
+            if "mischievous" in value:
+                return "Fast, cheeky cartoon sidekick energy with elastic emotional reactions."
+            if "calm" in value:
+                return "Warm animated storyteller quality with polished family-friendly delivery."
+            return "Distinct animated-cartoon character acting with playful timing and expressive reactions."
+
+        return "Distinct fictional character voice with stable identity across long-form narration."
+
     @classmethod
     def design_character_voice(
         cls,
@@ -128,9 +154,10 @@ class ElevenLabsProvider(TTSProvider):
         gender_phrase = str(gender or "female").strip().casefold()
         age_phrase = str(age or "young adult").strip()
         temperament_phrase = str(temperament or "expressive").strip()
+        archetype = str(self._character_archetype_hint(style, temperament)).strip()
         description = (
             f"{prompt_base} Speaker: {age_phrase} {gender_phrase}. "
-            f"Temperament: {temperament_phrase}. "
+            f"Temperament: {temperament_phrase}. {archetype} "
             "Designed for long-form audiobook dialogue and frequent character scenes; "
             "natural breath, stable identity, emotionally controlled without sounding synthetic."
         )
