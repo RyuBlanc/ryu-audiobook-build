@@ -228,6 +228,48 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(segment.suggested_speaker, 'Rias Gremory')
         self.assertGreaterEqual(segment.confidence, 0.99)
 
+    def test_multi_speaker_cast_routes_exact_dialogue_to_multiple_voices(self):
+        from app.tts.cast_provider import CastAwareProvider
+
+        class DummyProvider:
+            recommended_chunk_chars = 1400
+            recommended_chunk_sentences = 2
+
+            def synthesize(self, text, output_path, voice=None):
+                return output_path
+
+        from app.tts.voice_profile import VoiceProfile
+
+        profiles = {
+            "Voice A": VoiceProfile("Voice A", "piper", "a"),
+            "Voice B": VoiceProfile("Voice B", "piper", "b"),
+        }
+        cast = CastAwareProvider(
+            DummyProvider(),
+            "Voice A",
+            profiles,
+            {"Rias": "Voice A", "Akeno": "Voice B"},
+        )
+        text = 'Rias and Akeno shouted, “We are here!”'
+        start = text.index("“")
+        end = text.index("”") + 1
+        parts = cast.split_for_cast(
+            text,
+            "Voice A",
+            dialogue_assignments=[{
+                "start": start,
+                "end": end,
+                "text": text[start:end],
+                "speakers": ["Rias", "Akeno"],
+                "speaker": "Rias",
+                "source": "manual",
+                "multi_speaker_mode": "chorus",
+            }],
+        )
+        dialogue_parts = [item for item in parts if "We are here!" in item[0]]
+        self.assertEqual(len(dialogue_parts), 1)
+        self.assertEqual(dialogue_parts[0][1], ["Voice A", "Voice B"])
+
     def test_light_novel_dialogue_discovers_characters(self):
         text = """Life.0
 Issei Hyoudou—that’s my name, but my friends and family just call me Issei.
