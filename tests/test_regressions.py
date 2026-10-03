@@ -70,7 +70,7 @@ class RegressionTests(unittest.TestCase):
         source = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
         self.assertIn("python312", source)
         self.assertIn('PYTHON_INSTALLER_URL =', source)
-        self.assertIn('PYTHON_VERSION = "3.12.15"', source)
+        self.assertIn('PYTHON_VERSION = "3.12.10"', source)
         self.assertIn("TargetDir=", source)
         self.assertNotIn("EnvBuilder(with_pip=True, clear=False, upgrade_deps=True)", source)
 
