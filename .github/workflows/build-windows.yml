@@ -247,6 +247,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          Write-Host '=== Live Audiobook AI + application integration smoke ==='
           $root = Join-Path $env:RUNNER_TEMP 'ryu-ai-smoke'
           $bin = Join-Path $root 'llama'
           $model = Join-Path $root 'Qwen3-0.6B-Q5_K_M.gguf'
@@ -269,35 +270,60 @@ jobs:
           try {
             $ready = $false
             for ($i = 0; $i -lt 120; $i++) {
-              if ($proc.HasExited) { Get-Content $stderrLog -Tail 100 -ErrorAction SilentlyContinue; throw 'llama-server exited before becoming ready.' }
-              try { $health = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:18765/health' -TimeoutSec 2; if ($health.StatusCode -eq 200) { $ready = $true; break } } catch {}
+              if ($proc.HasExited) {
+                Get-Content $stderrLog -Tail 100 -ErrorAction SilentlyContinue
+                throw 'llama-server exited before becoming ready.'
+              }
+              try {
+                $health = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:18765/health' -TimeoutSec 2
+                if ($health.StatusCode -eq 200) { $ready = $true; break }
+              } catch {}
               Start-Sleep -Seconds 1
             }
             if (-not $ready) { throw 'llama-server did not become ready within 120 seconds.' }
-            $body = @{ messages = @(@{role='system';content="You are the Ryu's Audiobook AI self-test. Return only one valid JSON object. Do not think. Do not use markdown."},@{role='user';content='/no_think Return {"ok":true,"message":"ready"}. Do not add any other text.'}); temperature=0.2; top_p=0.8; max_tokens=80; stream=$false } | ConvertTo-Json -Depth 20
+            $body = @{
+              messages = @(
+                @{role='system';content="You are the Ryu's Audiobook AI self-test. Return only one valid JSON object. Do not think. Do not use markdown."},
+                @{role='user';content='/no_think Return {"ok":true,"message":"ready"}. Do not add any other text.'}
+              )
+              temperature = 0.2
+              top_p = 0.8
+              max_tokens = 80
+              stream = $false
+            } | ConvertTo-Json -Depth 20
             $response = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:18765/v1/chat/completions' -ContentType 'application/json' -Body $body
             $content = [string]$response.choices[0].message.content
             $clean = $content -replace '(?s)<think>.*?</think>', ''
             $clean = $clean -replace '^\s*```(?:json)?\s*', ''
             $clean = $clean -replace '\s*```\s*$', ''
-            $start = $clean.IndexOf('{'); $end = $clean.LastIndexOf('}')
-            if ($start -lt 0 -or $end -le $start) { throw "Audiobook AI returned no JSON object: $content" }
-            $obj = $clean.Substring($start,$end-$start+1) | ConvertFrom-Json
+            $startIndex = $clean.IndexOf('{')
+            $endIndex = $clean.LastIndexOf('}')
+            if ($startIndex -lt 0 -or $endIndex -le $startIndex) { throw "Audiobook AI returned no JSON object: $content" }
+            $obj = $clean.Substring($startIndex,$endIndex-$startIndex+1) | ConvertFrom-Json
             if (-not $obj.ok -or $obj.message -ne 'ready') { throw "Unexpected Audiobook AI JSON: $content" }
             Write-Host 'HTTP Audiobook AI smoke test PASSED.'
 
-            # Exercise the real application parser/integration while the local
-            # llama-server is still running. This avoids the runner Python-path
-            # mutation that occurs after the smoke process has been launched.
-            # Reuse the exact setup-python interpreter captured at the start
-            # of this build step. PATH may contain the Microsoft Store shim by
-            # this point, but the real interpreter remains addressable directly.
             if (-not (Test-Path $pythonExe)) {
               $toolRoot = Join-Path $env:RUNNER_TOOL_CACHE 'Python'
               $candidate = Get-ChildItem $toolRoot -Recurse -Filter 'python.exe' -ErrorAction SilentlyContinue |
-                Where-Object { $_.FullName -match 'Python[\\/]3\.12\.[0-9]+[\\/]x64[\\/]python\.exe
-          } finally { if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force } }
-
+                Where-Object { $_.FullName -match 'Python[\\/]3\.12\.[0-9]+[\\/]x64[\\/]python\.exe$' } |
+                Select-Object -First 1 -ExpandProperty FullName
+              if ($candidate) { $pythonExe = $candidate }
+            }
+            if (-not $pythonExe -or -not (Test-Path $pythonExe)) {
+              throw 'A real Python 3.12 interpreter is not available for the AI integration smoke.'
+            }
+            $pythonVersion = & $pythonExe -c "import sys; print('.'.join(map(str, sys.version_info[:2])))"
+            if ($pythonVersion -ne '3.12') {
+              throw "Audiobook AI integration smoke is running under Python $pythonVersion instead of Python 3.12."
+            }
+            Write-Host "Using Python for AI integration smoke: $pythonExe"
+            $env:PYTHONPATH = (Get-Location).Path
+            $env:RYU_AI_SERVER_URL = 'http://127.0.0.1:18765'
+            & $pythonExe -B -m unittest tests.smoke_audiobook_ai_live -v
+          } finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          }
 
       - name: Install Inno Setup
         shell: pwsh
