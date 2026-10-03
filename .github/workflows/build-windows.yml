@@ -57,12 +57,12 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $root = Join-Path $env:RUNNER_TEMP "ryu-qwen-python-bootstrap"
-          $installer = Join-Path $root "python-3.12.15-amd64.exe"
+          $installer = Join-Path $root "python-3.12.10-amd64.exe"
           $target = Join-Path $root "python312"
           $venv = Join-Path $root "runtime"
           New-Item -ItemType Directory -Force -Path $root | Out-Null
 
-          curl.exe -L --fail --retry 3 -o $installer "https://www.python.org/ftp/python/3.12.15/python-3.12.15-amd64.exe"
+          curl.exe -L --fail --retry 3 -o $installer "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe"
           $arguments = @(
             "/quiet",
             "/passive",
