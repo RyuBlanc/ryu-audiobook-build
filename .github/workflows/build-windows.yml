@@ -143,134 +143,10 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           Write-Host 'The HTTP smoke above validates the local AI server; running the application parser/integration smoke with a fresh CI Python interpreter.'
-          $pythonExe = $null
-          $command = Get-Command python.exe -ErrorAction SilentlyContinue
-          if ($command) {
-            $pythonExe = $command.Source
-          }
+          $pythonExe = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
           if (-not $pythonExe) {
             $toolRoot = Join-Path $env:RUNNER_TOOL_CACHE 'Python'
             $pythonExe = Get-ChildItem $toolRoot -Recurse -Filter 'python.exe' -ErrorAction SilentlyContinue |
-              Where-Object { $_.FullName -match '\\3\.12\.[0-9]+\\x64\\python\.exe
-
-      - name: Download built-in offline neural voices
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path 'bundled_models\piper' | Out-Null
-          python -m piper.download_voices --data-dir 'bundled_models\piper' en_US-amy-medium en_US-lessac-medium
-          $models = @(Get-ChildItem 'bundled_models\piper\*.onnx')
-          if ($models.Count -lt 2) { throw "Expected two bundled Piper voices, found $($models.Count)." }
-
-      - name: Download built-in offline natural voices
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path 'bundled_models\kokoro' | Out-Null
-          curl.exe -L --fail --retry 3 -o 'bundled_models\kokoro\kokoro-v1.0.fp16.onnx' 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.fp16.onnx'
-          curl.exe -L --fail --retry 3 -o 'bundled_models\kokoro\voices-v1.0.bin' 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin'
-          $model = Get-Item 'bundled_models\kokoro\kokoro-v1.0.fp16.onnx'
-          $voices = Get-Item 'bundled_models\kokoro\voices-v1.0.bin'
-          if ($model.Length -lt 100MB -or $voices.Length -lt 10MB) { throw 'Kokoro offline assets are incomplete.' }
-
-      - name: Verify application version
-        shell: pwsh
-        env:
-          RYU_BUILD_NUMBER: ${{ github.run_number }}
-        run: |
-          $env:PYTHONPATH = (Get-Location).Path
-          $version = python -c "from app.version import full_version; print(full_version())"
-          $expected = 'v0.3.7'
-          if (-not $version.StartsWith($expected) -or -not $version.EndsWith("Build $env:RYU_BUILD_NUMBER")) { throw "Unexpected application version: $version" }
-          Write-Host "Application version verified: $version"
-
-      - name: Build application
-        shell: pwsh
-        env:
-          RYU_BUILD_NUMBER: ${{ github.run_number }}
-        run: python build.py
-
-      - name: Verify frozen application
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $exe = Join-Path (Get-Location) "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
-          if (-not (Test-Path $exe)) { throw "Frozen EXE not found: $exe" }
-          $info = (Get-Item $exe).VersionInfo
-          Write-Host "EXE FileVersion=$($info.FileVersion) ProductVersion=$($info.ProductVersion)"
-          if (-not $info.ProductVersion.StartsWith('0.3.7.')) { throw "Unexpected frozen EXE product version: $($info.ProductVersion)" }
-
-          # Run the frozen binary's internal TTS/assets self-test before allowing
-          # the build to proceed. This exercises the bundled offline Piper voice,
-          # PyInstaller's resource paths, and the custom-voice module imports.
-          $marker = Join-Path $env:TEMP "RyuAudiobookFrozenSelfTest-$env:GITHUB_RUN_ID.ok"
-          Remove-Item -Force $marker -ErrorAction SilentlyContinue
-          $selfTest = Start-Process -FilePath $exe -ArgumentList @('--self-test') -Wait -PassThru -WindowStyle Hidden -Environment @{
-            RYU_FROZEN_SELF_TEST_MARKER = $marker
-          }
-          if ($selfTest.ExitCode -ne 0) {
-            throw "Frozen EXE self-test failed with exit code $($selfTest.ExitCode)."
-          }
-          if (-not (Test-Path $marker)) {
-            throw "Frozen EXE self-test did not create its success marker."
-          }
-          Remove-Item -Force $marker -ErrorAction SilentlyContinue
-          Write-Host 'Frozen EXE offline synthesis self-test PASSED.'
-
-          # Also verify normal GUI startup stays alive.
-          $proc = Start-Process -FilePath $exe -PassThru
-          try {
-            Start-Sleep -Seconds 12
-            if ($proc.HasExited) { throw "Frozen EXE exited during startup smoke with code $($proc.ExitCode)." }
-            Write-Host 'Frozen EXE startup smoke PASSED.'
-          } finally {
-            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
-          }
-
-      - name: Verify bundled voice assets and critical modules
-        shell: pwsh
-        run: |
-          $exeDir = Join-Path (Get-Location) "dist\Ryu's Audiobook"
-          foreach ($name in @('app','bundled_models')) { if (-not (Test-Path (Join-Path $exeDir $name))) { throw "Frozen package is missing $name." } }
-          if (-not (Get-ChildItem (Join-Path $exeDir 'bundled_models\piper') -Filter '*.onnx' -ErrorAction SilentlyContinue)) { throw 'Frozen package has no Piper voices.' }
-          if (-not (Test-Path (Join-Path $exeDir 'bundled_models\kokoro\voices-v1.0.bin'))) { throw 'Frozen package has no Kokoro voice pack.' }
-          Write-Host 'Bundled offline Piper and Kokoro assets verified.'
-
-      - name: Install Inno Setup
-        shell: pwsh
-        run: |
-          choco install innosetup -y --no-progress
-          if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed with exit code $LASTEXITCODE." }
-
-      - name: Build installer
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $iscc = Get-ChildItem 'C:\Program Files*' -Recurse -Filter 'ISCC.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $iscc) { throw 'ISCC.exe was not found after Inno Setup installation.' }
-          & $iscc.FullName 'installer\RyuAudiobook.iss'
-          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed with exit code $LASTEXITCODE." }
-          $installer = Join-Path (Get-Location) "installer-output\Ryu's Audiobook Setup.exe"
-          if (-not (Test-Path $installer)) { throw "Installer was not produced: $installer" }
-          Write-Host "Installer created: $installer"
-
-      - name: Upload Windows installer artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ryu-Audiobook-Windows-${{ github.run_number }}
-          path: |
-            installer-output/Ryu's Audiobook Setup.exe
-            dist/Ryu's Audiobook/Ryu's Audiobook.exe
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Publish verified installer release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $tag = "v0.3.7-build-${{ github.run_number }}"
-          gh release create $tag "installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, Audiobook AI smoke validation, Chatterbox runtime validation, and installer verification." --target $env:GITHUB_SHA
- } |
               Select-Object -First 1 -ExpandProperty FullName
           }
           if (-not $pythonExe -or -not (Test-Path $pythonExe)) {
@@ -318,11 +194,25 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Join-Path (Get-Location) "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
+          $exe = Join-Path (Get-Location) "dist/Ryu's Audiobook/Ryu's Audiobook.exe"
           if (-not (Test-Path $exe)) { throw "Frozen EXE not found: $exe" }
           $info = (Get-Item $exe).VersionInfo
           Write-Host "EXE FileVersion=$($info.FileVersion) ProductVersion=$($info.ProductVersion)"
           if (-not $info.ProductVersion.StartsWith('0.3.7.')) { throw "Unexpected frozen EXE product version: $($info.ProductVersion)" }
+
+          $marker = Join-Path $env:TEMP "RyuAudiobookFrozenSelfTest-$env:GITHUB_RUN_ID.ok"
+          Remove-Item -Force $marker -ErrorAction SilentlyContinue
+          $env:RYU_FROZEN_SELF_TEST_MARKER = $marker
+          $selfTest = Start-Process -FilePath $exe -ArgumentList @('--self-test') -Wait -PassThru -WindowStyle Hidden
+          if ($selfTest.ExitCode -ne 0) {
+            throw "Frozen EXE self-test failed with exit code $($selfTest.ExitCode)."
+          }
+          if (-not (Test-Path $marker)) {
+            throw "Frozen EXE self-test did not create its success marker."
+          }
+          Remove-Item -Force $marker -ErrorAction SilentlyContinue
+          Write-Host 'Frozen EXE offline synthesis self-test PASSED.'
+
           $proc = Start-Process -FilePath $exe -PassThru
           try {
             Start-Sleep -Seconds 12
