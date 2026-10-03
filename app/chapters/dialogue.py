@@ -75,12 +75,24 @@ def dialogue_segment_for_selection(
     exact_manual = next(
         (
             item for item in manual_items
-            if int(item.get("start", -1)) == best_start
-            and int(item.get("end", -1)) == best_end
+            if int(item.get("start", -1)) == start
+            and int(item.get("end", -1)) == end
             and str(item.get("speaker", "")).strip()
         ),
         None,
     )
+    if exact_manual is not None:
+        exact_name = str(exact_manual.get("speaker", "")).strip()
+        selected_raw = text[start:end]
+        return DialogueSegment(
+            1,
+            _clean_dialogue(selected_raw),
+            start,
+            end,
+            exact_name,
+            1.0,
+            ((exact_name, 1.0, "Saved manual assignment for this exact selection."),),
+        )
 
     # A narrow local window is enough to find nearby names without running the
     # full chapter-wide character detector used by the AI analysis screen.
