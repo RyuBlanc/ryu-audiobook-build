@@ -207,25 +207,15 @@ jobs:
 
             $env:RYU_AI_SERVER_URL = "http://127.0.0.1:18765"
             $env:PYTHONPATH = (Get-Location).Path
-            $env:PATH = "$env:pythonLocation;$env:PATH"
             $pythonExe = Join-Path $env:pythonLocation "python.exe"
-            if (-not (Test-Path $pythonExe)) {
-              $whereMatches = @(where.exe python 2>$null | Where-Object { $_ -and ($_ -notmatch "WindowsApps") })
-              if ($whereMatches.Count -gt 0) {
-                $pythonExe = $whereMatches[0].Trim()
-              }
-            }
             Write-Host "Resolved Python executable: $pythonExe"
             Write-Host "pythonLocation: $env:pythonLocation"
-            if (-not (Test-Path $pythonExe)) {
-              throw "Could not locate the real Python executable for the live Audiobook AI smoke test."
+            if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+              throw "setup-python did not provide the expected interpreter: $pythonExe"
             }
-            $py = Start-Process -FilePath $pythonExe -ArgumentList @(
-              "-c",
-              "import runpy; runpy.run_path(r'tests/smoke_audiobook_ai_live.py', run_name='__main__')"
-            ) -Wait -PassThru -NoNewWindow
-            if ($py.ExitCode -ne 0) {
-              throw "The full Audiobook AI brain integration test failed with exit code $($py.ExitCode)."
+            & $pythonExe -B -c "import runpy; runpy.run_path(r'tests/smoke_audiobook_ai_live.py', run_name='__main__')"
+            if ($LASTEXITCODE -ne 0) {
+              throw "The full Audiobook AI brain integration test failed with exit code $LASTEXITCODE."
             }
             Write-Host "Full Audiobook AI brain smoke test PASSED."
           }
