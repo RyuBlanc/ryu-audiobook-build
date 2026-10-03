@@ -59,26 +59,6 @@ jobs:
           $env:PYTHONDONTWRITEBYTECODE = '1'
           & $pythonExe -B -m unittest discover -s tests -v
 
-          Write-Host '=== Verify offline character Python bootstrap ==='
-          $root = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap'
-          $installer = Join-Path $root 'python-3.12.10-amd64.exe'
-          $target = Join-Path $root 'python312'
-          $venv = Join-Path $root 'runtime'
-          New-Item -ItemType Directory -Force -Path $root | Out-Null
-          curl.exe -L --fail --retry 3 -o $installer 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe'
-          $arguments = @('/quiet','/passive','InstallAllUsers=0','Include_launcher=0','Include_test=0','PrependPath=0','Shortcuts=0',"TargetDir=$target")
-          $process = Start-Process -FilePath $installer -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
-          if ($process.ExitCode -notin @(0,3010)) { throw "Private Python installer failed with exit code $($process.ExitCode)." }
-          $privatePython = Join-Path $target 'python.exe'
-          if (-not (Test-Path $privatePython)) { throw 'Private Python executable was not installed.' }
-          & $privatePython -c "import sys; assert sys.version_info[:2] == (3,12); print(sys.version)"
-          & $privatePython -m venv $venv
-          $venvPython = Join-Path $venv 'Scripts\python.exe'
-          if (-not (Test-Path $venvPython)) { throw 'Private Qwen venv was not created.' }
-          & $venvPython -m pip --version
-          & $venvPython -m pip install --no-deps qwen-tts==0.1.1
-          & $venvPython -c "import importlib.metadata as md; assert md.version('qwen-tts') == '0.1.1'; print('qwen_tts wheel bootstrap OK')"
-
           Write-Host '=== Verify pinned Chatterbox Nano source ==='
           $source = Get-Content 'app\tts\chatterbox_runtime.py' -Raw
           $match = [regex]::Match($source, 'CHATTERBOX_SOURCE_REVISION\s*=\s*"([0-9a-f]{40})"')
@@ -171,6 +151,30 @@ jobs:
           } finally {
             if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
           }
+
+          # Run the private Qwen runtime bootstrap last so the private Python
+          # installer cannot invalidate the main setup-python interpreter used
+          # by the application build and live AI smoke.
+          Write-Host '=== Verify offline character Python bootstrap ==='
+          $root = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap'
+          $installer = Join-Path $root 'python-3.12.10-amd64.exe'
+          $target = Join-Path $root 'python312'
+          $venv = Join-Path $root 'runtime'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          curl.exe -L --fail --retry 3 -o $installer 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe'
+          $arguments = @('/quiet','/passive','InstallAllUsers=0','Include_launcher=0','Include_test=0','PrependPath=0','Shortcuts=0',"TargetDir=$target")
+          $process = Start-Process -FilePath $installer -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
+          if ($process.ExitCode -notin @(0,3010)) { throw "Private Python installer failed with exit code $($process.ExitCode)." }
+          $privatePython = Join-Path $target 'python.exe'
+          if (-not (Test-Path $privatePython)) { throw 'Private Python executable was not installed.' }
+          & $privatePython -c "import sys; assert sys.version_info[:2] == (3,12); print(sys.version)"
+          & $privatePython -m venv $venv
+          $venvPython = Join-Path $venv 'Scripts\python.exe'
+          if (-not (Test-Path $venvPython)) { throw 'Private Qwen venv was not created.' }
+          & $venvPython -m pip --version
+          & $venvPython -m pip install --no-deps qwen-tts==0.1.1
+          & $venvPython -c "import importlib.metadata as md; assert md.version('qwen-tts') == '0.1.1'; print('qwen_tts wheel bootstrap OK')"
+
       - name: Verify frozen application
         shell: pwsh
         run: |
