@@ -5,6 +5,7 @@ from pathlib import Path
 import json
 import shutil
 import subprocess
+import wave
 
 import imageio_ffmpeg
 
@@ -191,4 +192,22 @@ def import_reference_audio(source: Path, profile_name: str) -> Path:
                 "The selected audio could not be converted to a local WAV reference. "
                 + (result.stderr[-1200:] if result.stderr else "")
             )
+    # Chatterbox reference conditioning requires audio longer than five seconds.
+    # Validate imported references here so the user gets a clear error before
+    # the model is loaded.
+    try:
+        with wave.open(str(target), "rb") as handle:
+            duration = handle.getnframes() / max(1, handle.getframerate())
+    except (OSError, wave.Error) as exc:
+        raise RuntimeError(f"The reference audio could not be inspected: {exc}") from exc
+    if duration <= 5.0:
+        try:
+            target.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise RuntimeError(
+            f"The reference recording is {duration:.1f} seconds long. "
+            "Chatterbox requires a reference longer than 5 seconds. "
+            "Please choose a clean voice recording of at least 6 seconds."
+        )
     return target
