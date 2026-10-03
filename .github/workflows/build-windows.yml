@@ -35,7 +35,9 @@ jobs:
           $env:PYTHONDONTWRITEBYTECODE = '1'
           $env:PYTHONPATH = (Get-Location).Path
 
-          # Capture the real interpreter once. Later setup/install operations are
+          # Capture the real interpreter once. The whole build runs in one step so
+          # runner PATH changes cannot swap it for the WindowsApps shim.
+          # Later setup/install operations are
           # allowed to alter PATH, so every Python operation in this step uses
           # this exact executable instead of re-resolving the WindowsApps shim.
           $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
