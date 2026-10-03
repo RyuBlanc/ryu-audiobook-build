@@ -32,6 +32,14 @@ def profiles_file() -> Path:
     return voices_root() / "voices.json"
 
 
+def _qwen_runtime_available() -> bool:
+    try:
+        from app.tts.qwen_character_runtime import runtime_ready
+        return runtime_ready()
+    except Exception:
+        return False
+
+
 def builtin_voice_profiles() -> list[VoiceProfile]:
     """Return local neural voices available on this installation."""
     result: list[VoiceProfile] = []
@@ -98,6 +106,38 @@ def builtin_voice_profiles() -> list[VoiceProfile]:
                 )
     except Exception:
         pass
+
+    # Qwen3-TTS offline character voices. The same local speakers can be
+    # instructed toward anime/cartoon delivery without any API key.
+    qwen_profiles = [
+        ("Anime Heroine", "Serena", "Bright young anime heroine; lively but natural English acting, clear diction, soft warmth, cinematic emotional lifts."),
+        ("Anime Heroine • Light", "Vivian", "Young anime heroine with bright playful energy, clear English, youthful sparkle and natural emotional reactions."),
+        ("Anime Hero", "Ryan", "Dynamic anime protagonist; confident English delivery, energetic rhythm, heroic determination and controlled emotion."),
+        ("Anime Hero • Warm", "Aiden", "Warm young anime protagonist; clear American English, optimistic confidence and sincere emotional delivery."),
+        ("Anime Rival", "Ryan", "Cool anime rival; restrained confidence, teasing edge, controlled intensity and crisp English diction."),
+        ("Anime Villain", "Uncle_Fu", "Stylized anime villain; low authoritative presence, elegant menace, theatrical control and cinematic pauses."),
+        ("Anime Healer", "Serena", "Gentle anime healer; soft warm English delivery, reassuring tone, emotional sincerity and calm breath."),
+        ("Anime Chibi", "Vivian", "Cute chibi-inspired anime character; youthful bright energy, playful reactions and clear English."),
+        ("Anime Sidekick", "Aiden", "Mischievous anime sidekick; quick comic timing, bright energy and expressive English reactions."),
+        ("Cartoon Hero", "Ryan", "Premium animated cartoon hero; upbeat confident English, playful timing, family-friendly adventure energy."),
+        ("Cartoon Sidekick", "Vivian", "Premium animated cartoon sidekick; funny, quick reactions, expressive but intelligible English."),
+        ("Cartoon Villain", "Uncle_Fu", "Premium animated cartoon villain; theatrical comic menace, exaggerated personality and crisp diction."),
+        ("Cartoon Friend", "Serena", "Premium animated cartoon friend; warm, expressive English with polished family-friendly delivery."),
+    ]
+    if _qwen_runtime_available():
+        for name, speaker, instruct in qwen_profiles:
+            result.append(
+                VoiceProfile(
+                    name=f"Offline Character • {name}",
+                    provider="qwen-character",
+                    voice_id=speaker,
+                    model_id="auto",
+                    backend="automatic",
+                    language="English",
+                    notes=instruct,
+                    authorized=True,
+                )
+            )
 
     # Prefer Kokoro natural voices in the picker when installed; keep Piper
     # available as the lightweight fallback.
