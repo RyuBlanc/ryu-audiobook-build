@@ -15,6 +15,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from app.audio.assembler import assemble_m4b
 from app.chapters.characters import analyze_book, _all_dialogue_spans
+from app.chapters.dialogue import dialogue_segment_for_selection
 from app.chapters.detector import Chapter, detect_chapters
 from app.tts.voice_profile import VoiceProfile, save_profiles, load_profiles
 from app.tts.narration import prepare_for_narration
@@ -198,6 +199,34 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("_update_profile_details(profile)", source)
         self.assertIn("_clear_saved_profile_selection()", source)
 
+
+    def test_dialogue_assignment_fast_path_avoids_full_chapter_analysis(self):
+        # The Assign Dialogue dialog should not run the expensive whole-chapter
+        # character analysis just to suggest a speaker for one selected quote.
+        from unittest.mock import patch
+
+        text = 'Rias Gremory said hello. “Hello, Issei.” Rias Gremory smiled.'
+        chapter = Chapter(
+            1,
+            'Chapter 1',
+            text,
+            dialogue_assignments=[
+                {
+                    'start': text.index('“Hello, Issei.”'),
+                    'end': text.index('“Hello, Issei.”') + len('“Hello, Issei.”'),
+                    'text': '“Hello, Issei.”',
+                    'speaker': 'Rias Gremory',
+                    'source': 'manual',
+                }
+            ],
+        )
+        start = text.index('“Hello, Issei.”')
+        end = start + len('“Hello, Issei.”')
+        with patch('app.chapters.dialogue.analyze_chapter', side_effect=AssertionError('full analysis called')):
+            segment = dialogue_segment_for_selection(chapter, start, end)
+        self.assertIsNotNone(segment)
+        self.assertEqual(segment.suggested_speaker, 'Rias Gremory')
+        self.assertGreaterEqual(segment.confidence, 0.99)
 
     def test_light_novel_dialogue_discovers_characters(self):
         text = """Life.0
