@@ -52,6 +52,47 @@ jobs:
           python -c "from pathlib import Path; import os, inspect, app; p=Path('app/chapters/characters.py'); raw=p.read_text(encoding='utf-8'); print('FILE HAS DASH COMMENT=' + str('dash-only line' in raw)); import app.chapters.characters as m; print('TEST CWD=' + os.getcwd()); print('PYTHONPATH=' + os.environ.get('PYTHONPATH','')); print('APP MODULE=' + str(getattr(app,'__file__',None))); print('APP SPEC=' + str(app.__spec__)); print('CHARACTERS MODULE=' + m.__file__); print('CHARACTERS LOADER=' + str(m.__loader__)); print('CHARACTERS CACHED=' + str(getattr(m,'__cached__',None))); print('DASH PARSER=' + str('dash-only line' in inspect.getsource(m._all_dialogue_spans))); print('DIRECT FILE FUNCTION=' + str('dash-only line' in raw[raw.find('def _all_dialogue_spans'):raw.find('def _clean_name')]))"
           python -B -m unittest discover -s tests -v
 
+      - name: Verify offline character Python bootstrap
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $root = Join-Path $env:RUNNER_TEMP "ryu-qwen-python-bootstrap"
+          $installer = Join-Path $root "python-3.12.15-amd64.exe"
+          $target = Join-Path $root "python312"
+          $venv = Join-Path $root "runtime"
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+
+          curl.exe -L --fail --retry 3 -o $installer "https://www.python.org/ftp/python/3.12.15/python-3.12.15-amd64.exe"
+          $arguments = @(
+            "/quiet",
+            "/passive",
+            "InstallAllUsers=0",
+            "Include_launcher=0",
+            "Include_test=0",
+            "PrependPath=0",
+            "Shortcuts=0",
+            "TargetDir=$target"
+          )
+          $process = Start-Process -FilePath $installer -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
+          if ($process.ExitCode -notin @(0, 3010)) {
+            throw "Private Python installer failed with exit code $($process.ExitCode)."
+          }
+
+          $python = Join-Path $target "python.exe"
+          if (-not (Test-Path $python)) {
+            throw "Private Python executable was not installed."
+          }
+
+          & $python -c "import sys; assert sys.version_info[:2] == (3,12); print(sys.version)"
+          & $python -m venv $venv
+          $venvPython = Join-Path $venv "Scripts\python.exe"
+          if (-not (Test-Path $venvPython)) {
+            throw "Private Qwen venv was not created."
+          }
+          & $venvPython -m pip --version
+          & $venvPython -m pip install --no-deps qwen-tts==0.1.1
+          & $venvPython -c "import qwen_tts; print('qwen_tts bootstrap import OK')"
+
       - name: Verify pinned Chatterbox Nano source
         shell: pwsh
         run: |
