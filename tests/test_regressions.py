@@ -45,6 +45,18 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(is_common_english_phrase("Sure"))
         self.assertEqual(nativeish_pronunciation("Hinata", "Japanese"), "Hee-nah-tah")
 
+    def test_elevenlabs_key_round_trip_is_local(self):
+        import app.tts.providers.elevenlabs as eleven
+        with tempfile.TemporaryDirectory() as temp:
+            original = eleven.ElevenLabsProvider.KEY_FILE
+            eleven.ElevenLabsProvider.KEY_FILE = Path(temp) / "elevenlabs.json"
+            try:
+                eleven.ElevenLabsProvider.save_api_key("test-key")
+                self.assertEqual(eleven.ElevenLabsProvider.load_api_key(), "test-key")
+                self.assertTrue(eleven.ElevenLabsProvider.KEY_FILE.exists())
+            finally:
+                eleven.ElevenLabsProvider.KEY_FILE = original
+
     def test_voice_cast_analysis_is_background_thread(self):
         from PySide6.QtCore import QThread
         from app.ui.voice_cast_page import VoiceCastAnalysisWorker
