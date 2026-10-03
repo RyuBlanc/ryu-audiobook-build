@@ -217,6 +217,7 @@ class ElevenLabsProvider(TTSProvider):
                     "gender": gender,
                     "age": age,
                     "temperament": temperament,
+                    "archetype": str(archetype or "").strip(),
                     "model_id": model_id,
                 }
             )
