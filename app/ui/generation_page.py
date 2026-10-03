@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 from app.chapters.detector import Chapter, detect_chapters
 from app.chapters.characters import analyze_book
 from app.ai.brain import _numeric_score
-from app.tts.pronunciation_suggester import suggest_pronunciation, suggest_names_from_text, COMMON_ENGLISH_WORDS
+from app.tts.pronunciation_suggester import suggest_pronunciation, suggest_names_from_text, COMMON_ENGLISH_WORDS, is_common_english_phrase, nativeish_pronunciation
 from app.documents.parser import extract_text
 from app.core.state import load_state, save_state
 from app.tts.manager import GenerationManager, GenerationSummary
@@ -574,15 +574,11 @@ class GenerationPage(QWidget):
                 return False
             if spoken.casefold() == folded:
                 return False
-            words = [w.strip('.,!?;:()[]{}') for w in written.split()]
-            ordinary_english = bool(words) and all(
-                re.fullmatch(r"[A-Za-z][A-Za-z'’-]*", w or '')
-                and w.casefold() in COMMON_ENGLISH_WORDS
-                for w in words
-            )
-            language_key = language.casefold()
-            if ordinary_english and folded not in character_names:
-                return language_key not in {'', 'english', 'en', 'unknown'}
+            # Never import ordinary English vocabulary merely because the AI
+            # assigned it a non-English language. Preserve English words only
+            # when they are also a confirmed character name.
+            if is_common_english_phrase(written) and folded not in character_names:
+                return False
             return True
 
         added = 0
@@ -602,6 +598,9 @@ class GenerationPage(QWidget):
                     skipped += 1
                     continue
 
+                language_key = language.casefold()
+                if language_key in {"japanese", "ja", "jpn", "korean", "ko", "kor", "chinese", "zh", "cmn"}:
+                    spoken = nativeish_pronunciation(written, language_key) or spoken
                 self._add_pronunciation_row(written, spoken, True, source="ai")
                 row = self.pronunciation_table.rowCount() - 1
                 tip = (
@@ -642,12 +641,7 @@ class GenerationPage(QWidget):
             spoken_item = self.pronunciation_table.item(row, 1)
             written = item.text().strip() if item else ''
             spoken = spoken_item.text().strip() if spoken_item else ''
-            words = [w.strip('.,!?;:()[]{}') for w in written.split()]
-            ordinary_english = bool(words) and all(
-                re.fullmatch(r"[A-Za-z][A-Za-z'’-]*", w or '')
-                and w.casefold() in COMMON_ENGLISH_WORDS
-                for w in words
-            )
+            ordinary_english = is_common_english_phrase(written)
             if ordinary_english or not spoken or spoken.casefold() == written.casefold():
                 self.pronunciation_table.removeRow(row)
                 removed += 1
@@ -711,6 +705,21 @@ class GenerationPage(QWidget):
         name_candidates = {
             str(name).casefold() for name in suggest_names_from_text(book_text)
         }
+        # Character names from completed/partial AI analysis are stronger
+        # evidence than capitalization alone.
+        analysis_data, _partial = self._load_audiobook_analysis()
+        analysis_character_names = set(name_candidates)
+        if isinstance(analysis_data, dict):
+            bible = analysis_data.get("book_bible", {}) or {}
+            if isinstance(bible, dict):
+                analysis_character_names.update(str(name).casefold() for name in bible.keys() if str(name).strip())
+                for value in bible.values():
+                    if isinstance(value, dict):
+                        analysis_character_names.update(
+                            str(alias).casefold()
+                            for alias in (value.get("aliases") or [])
+                            if str(alias).strip()
+                        )
         cleaned = []
         seen = set()
         removed_stale = 0
@@ -734,7 +743,7 @@ class GenerationPage(QWidget):
                     and w.casefold() in COMMON_ENGLISH_WORDS
                     for w in words
                 )
-                if source in {"ai", "fallback"} and ordinary_english and key not in name_candidates:
+                if source in {"ai", "fallback"} and ordinary_english and key not in analysis_character_names:
                     removed_stale += 1
                     continue
                 cleaned_item = dict(item)
