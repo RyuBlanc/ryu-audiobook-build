@@ -29,6 +29,7 @@ from app.tts.voice_profile import (
     load_profiles, save_profiles,
 )
 from app.tts.providers.edge_tts import EdgeTTSProvider
+from app.tts.providers.elevenlabs import ElevenLabsProvider
 
 
 class VoicePreviewWorker(QThread):
@@ -93,6 +94,7 @@ class VoicePage(QWidget):
         self.last_preview: Path | None = None
         self.preview_worker: VoicePreviewWorker | None = None
         self.edge_voices: list[dict] = []
+        self.premium_voices: list[dict] = []
         self.offline_voices: list[VoiceProfile] = builtin_voice_profiles()
 
         self.player = QMediaPlayer(self)
@@ -141,6 +143,7 @@ class VoicePage(QWidget):
         self.mode.addItem("Offline Neural Voices  ·  built into this app", "offline-neural")
         self.mode.addItem("Windows SAPI  ·  installed offline voices", "windows-sapi")
         self.mode.addItem("Online Neural Voices  ·  Edge TTS", "edge-tts")
+        self.mode.addItem("Premium Online Voices  ·  ElevenLabs", "elevenlabs")
         self.mode.addItem("Custom Voice  ·  authorized reference audio", "chatterbox")
         self.mode.currentIndexChanged.connect(self.update_mode)
         source_layout.addWidget(self.mode)
@@ -148,6 +151,15 @@ class VoicePage(QWidget):
         self.source_hint.setObjectName("muted")
         self.source_hint.setWordWrap(True)
         source_layout.addWidget(self.source_hint)
+
+        premium_row = QHBoxLayout()
+        self.premium_key_button = QPushButton("Set Premium API Key")
+        self.premium_key_button.clicked.connect(self._set_premium_api_key)
+        self.premium_key_status = QLabel("Premium key: not configured")
+        self.premium_key_status.setObjectName("muted")
+        premium_row.addWidget(self.premium_key_button)
+        premium_row.addWidget(self.premium_key_status, 1)
+        source_layout.addLayout(premium_row)
         root.addWidget(source)
 
         self.neural_box = QGroupBox("2  •  Neural Voice")
@@ -196,6 +208,20 @@ class VoicePage(QWidget):
 
         self.custom_box = QGroupBox("2  •  Custom Authorized Voice")
         custom = QVBoxLayout(self.custom_box)
+        style_row = QHBoxLayout()
+        style_row.addWidget(QLabel("Character style"))
+        self.style_preset = QComboBox()
+        self.style_preset.addItem("Natural", ("Natural", 0.50, 0.35))
+        self.style_preset.addItem("Anime Bright", ("Anime Bright", 0.72, 0.28))
+        self.style_preset.addItem("Anime Dramatic", ("Anime Dramatic", 0.62, 0.45))
+        self.style_preset.addItem("Cartoon Energetic", ("Cartoon Energetic", 0.85, 0.20))
+        self.style_preset.addItem("Warm Storyteller", ("Warm Storyteller", 0.45, 0.42))
+        self.style_preset.addItem("Calm / Emotional", ("Calm / Emotional", 0.35, 0.50))
+        self.style_preset.setToolTip(
+            "Expression presets for the local Chatterbox engine. They shape delivery from your authorized reference voice."
+        )
+        style_row.addWidget(self.style_preset, 1)
+        custom.addLayout(style_row)
         custom_row = QHBoxLayout()
         self.sample_button = QPushButton("Choose MP3 / WAV / M4A / FLAC…")
         self.sample_button.clicked.connect(self.select_sample)
@@ -235,6 +261,7 @@ class VoicePage(QWidget):
         self.library_filter.addItem("Saved custom", "custom")
         self.library_filter.addItem("Windows", "windows-sapi")
         self.library_filter.addItem("Online", "edge-tts")
+        self.library_filter.addItem("Premium Online", "elevenlabs")
         self.library_filter.currentIndexChanged.connect(self.refresh_profiles)
         library_filters.addWidget(QLabel("Library"))
         library_filters.addWidget(self.library_filter)
@@ -405,6 +432,9 @@ class VoicePage(QWidget):
         self.accent_filter.blockSignals(False)
 
     def _refresh_online_catalog(self) -> None:
+        if self.mode.currentData() == "elevenlabs":
+            self._refresh_premium_catalog()
+            return
         try:
             self.edge_voices = EdgeTTSProvider.fetch_voice_metadata(refresh=True) or []
             if not self.edge_voices:
@@ -417,6 +447,80 @@ class VoicePage(QWidget):
             self.status.setText(
                 f"Online catalog unavailable: {exc}. Offline voices remain available."
             )
+
+    def _update_premium_key_status(self) -> None:
+        configured = bool(ElevenLabsProvider.load_api_key())
+        self.premium_key_status.setText(
+            "Premium key: configured" if configured else "Premium key: not configured"
+        )
+
+    def _set_premium_api_key(self) -> None:
+        current = ElevenLabsProvider.load_api_key()
+        value, ok = QInputDialog.getText(
+            self,
+            "ElevenLabs API Key",
+            "Enter your ElevenLabs API key. It is stored locally in the Ryu's Audiobook settings folder:",
+            text=current,
+            echo=QLineEdit.EchoMode.Password,
+        )
+        if not ok:
+            return
+        value = value.strip()
+        if not value:
+            ElevenLabsProvider.clear_api_key()
+            self.premium_voices = []
+            self._update_premium_key_status()
+            self.status.setText("Premium ElevenLabs API key cleared.")
+            return
+        ElevenLabsProvider.save_api_key(value)
+        self.premium_voices = []
+        self._update_premium_key_status()
+        self.status.setText("Premium ElevenLabs API key saved locally. Refreshing voices…")
+        self._refresh_premium_catalog()
+
+    def _refresh_premium_catalog(self) -> None:
+        try:
+            self.premium_voices = ElevenLabsProvider.fetch_voice_metadata(refresh=True) or []
+            if not self.premium_voices:
+                self.status.setText(
+                    "No ElevenLabs voices were returned. Check the API key and account access."
+                )
+            else:
+                self.status.setText(f"Loaded {len(self.premium_voices)} premium online voices.")
+            self._set_filter_values_premium()
+            self._refresh_voice_list()
+        except Exception as exc:
+            self.premium_voices = []
+            self.status.setText(f"Premium voice catalog unavailable: {exc}")
+
+    def _set_filter_values_premium(self) -> None:
+        current_lang = self.language_filter.currentData()
+        current_region = self.accent_filter.currentData()
+        self.language_filter.blockSignals(True)
+        self.accent_filter.blockSignals(True)
+        self.language_filter.clear()
+        self.language_filter.addItem("All languages", "")
+        languages = sorted({
+            str(v.get("language") or "en").split("-", 1)[0]
+            for v in self.premium_voices
+        })
+        for lang in languages:
+            self.language_filter.addItem(self._language_name(lang), lang)
+        self.accent_filter.clear()
+        self.accent_filter.addItem("All accents", "")
+        for accent in sorted({
+            str(v.get("accent") or "")
+            for v in self.premium_voices if v.get("accent")
+        }):
+            self.accent_filter.addItem(accent, accent)
+        if current_lang:
+            i = self.language_filter.findData(current_lang)
+            self.language_filter.setCurrentIndex(i if i >= 0 else 0)
+        if current_region:
+            i = self.accent_filter.findData(current_region)
+            self.accent_filter.setCurrentIndex(i if i >= 0 else 0)
+        self.language_filter.blockSignals(False)
+        self.accent_filter.blockSignals(False)
 
     def _set_filter_values_edge(self) -> None:
         current_lang = self.language_filter.currentData()
@@ -478,6 +582,26 @@ class VoicePage(QWidget):
                     f"{voice_gender}  ·  {reg}",
                     profile.voice_id,
                 )
+        elif self.mode.currentData() == "elevenlabs":
+            for voice in self.premium_voices:
+                language_value = str(voice.get("language") or "en")
+                voice_gender = str(voice.get("gender") or "Neutral")
+                accent = str(voice.get("accent") or "")
+                if language and not language_value.lower().startswith(language.lower()):
+                    continue
+                if region and accent != region:
+                    continue
+                if gender != "All" and voice_gender != gender:
+                    continue
+                matches.append(voice)
+            self.neural_count.setText(f"{len(matches)} premium voices")
+            self.neural_voice.clear()
+            for voice in matches:
+                self.neural_voice.addItem(
+                    f"{voice.get('name') or voice.get('voice_id')}  · "
+                    f"{voice.get('language') or 'en'}  · {voice.get('accent') or 'Premium'}",
+                    voice.get("voice_id"),
+                )
         else:
             for voice in self.edge_voices:
                 locale = str(voice.get("locale", ""))
@@ -513,6 +637,27 @@ class VoicePage(QWidget):
             if profile:
                 self.name.setText(profile.name)
                 self.profile_badge.setText(profile.name)
+                self._update_profile_details(profile)
+                self._clear_saved_profile_selection()
+        elif self.mode.currentData() == "elevenlabs":
+            voice = next(
+                (x for x in self.premium_voices if x.get("voice_id") == voice_id), None
+            )
+            if voice:
+                label = voice.get("name") or voice_id
+                profile = VoiceProfile(
+                    name=label,
+                    provider="elevenlabs",
+                    voice_id=voice_id,
+                    language=voice.get("language") or "en",
+                    notes=(
+                        "Premium online voice • ElevenLabs. "
+                        f"{voice.get('description') or voice.get('use_case') or ''}"
+                    ).strip(),
+                    authorized=True,
+                )
+                self.name.setText(label)
+                self.profile_badge.setText(label)
                 self._update_profile_details(profile)
                 self._clear_saved_profile_selection()
         else:
@@ -555,6 +700,7 @@ class VoicePage(QWidget):
             "kokoro": "Built-in Offline Natural • Kokoro",
             "windows-sapi": "Windows SAPI",
             "edge-tts": "Online Neural • Edge TTS",
+            "elevenlabs": "Premium Online Natural • ElevenLabs",
             "chatterbox": "Custom Voice • Chatterbox",
         }
         return labels.get(profile.provider, profile.provider)
@@ -591,6 +737,12 @@ class VoicePage(QWidget):
         self.detail_voice_id.setText(profile.voice_id or "—")
         self.detail_reference.setText(self._reference_label(profile))
         self.detail_backend.setText(profile.backend or "automatic")
+        if hasattr(self, "style_preset") and profile.provider == "chatterbox":
+            idx = self.style_preset.findData(
+                (profile.style_preset or "Natural", float(profile.exaggeration), float(profile.cfg_weight))
+            )
+            if idx >= 0:
+                self.style_preset.setCurrentIndex(idx)
         self.detail_authorization.setText(
             "✓ Authorized" if profile.authorized else "⚠ Permission not confirmed"
         )
@@ -715,7 +867,8 @@ class VoicePage(QWidget):
 
     def update_mode(self) -> None:
         mode = self.mode.currentData()
-        self.neural_box.setVisible(mode in {"offline-neural", "edge-tts"})
+        self.premium_key_button.setVisible(mode == "elevenlabs")
+        self.neural_box.setVisible(mode in {"offline-neural", "edge-tts", "elevenlabs"})
         self.sapi_box.setVisible(mode == "windows-sapi")
         self.custom_box.setVisible(mode == "chatterbox")
 
@@ -726,14 +879,27 @@ class VoicePage(QWidget):
             self._refresh_offline_catalog()
         elif mode == "edge-tts":
             self.source_hint.setText(
-                "Online neural catalog. Internet is required for synthesis; this is optional "
-                "and not used by the offline voices."
+                "Microsoft Edge online neural catalog. Internet is required for synthesis."
             )
+            self.premium_key_button.setVisible(False)
             if not self.edge_voices:
                 self._refresh_online_catalog()
             else:
                 self._set_filter_values_edge()
                 self._refresh_voice_list()
+        elif mode == "elevenlabs":
+            self.source_hint.setText(
+                "Premium online natural voices powered by ElevenLabs. Internet and a personal API key are required. "
+                "The key stays local and is never bundled with Ryu's Audiobook."
+            )
+            self.premium_key_button.setVisible(True)
+            self._update_premium_key_status()
+            if ElevenLabsProvider.load_api_key():
+                if not self.premium_voices:
+                    self._refresh_premium_catalog()
+                else:
+                    self._set_filter_values_premium()
+                    self._refresh_voice_list()
         elif mode == "windows-sapi":
             self.source_hint.setText("Uses voices already installed in Windows. Fully offline.")
         else:
@@ -785,6 +951,9 @@ class VoicePage(QWidget):
                 backend="automatic",
                 language="en",
                 authorized=False,
+                style_preset="Natural",
+                exaggeration=0.50,
+                cfg_weight=0.35,
             )
             self._update_profile_details(draft)
             self._clear_saved_profile_selection()
@@ -850,6 +1019,26 @@ class VoicePage(QWidget):
                 authorized=True,
             )
 
+        if provider == "elevenlabs":
+            voice_id = self.neural_voice.currentData()
+            voice = next(
+                (x for x in self.premium_voices if x.get("voice_id") == voice_id), None
+            )
+            if not voice:
+                self.status.setText("Select a premium online voice first.")
+                return None
+            return VoiceProfile(
+                name=name or voice.get("name") or voice_id,
+                provider=provider,
+                voice_id=voice_id,
+                language=voice.get("language") or "en",
+                notes=(
+                    "Premium online voice • ElevenLabs. "
+                    f"{voice.get('description') or voice.get('use_case') or ''}"
+                ).strip(),
+                authorized=True,
+            )
+
         if not self.sample_path or not self.sample_path.exists():
             self.status.setText(
                 "Choose a reference audio file first, or load a custom profile with a valid local reference."
@@ -863,6 +1052,7 @@ class VoicePage(QWidget):
         custom_name = name or self.sample_path.stem
         if custom_name.startswith("Offline Neural •") or custom_name.startswith("Microsoft "):
             custom_name = self.sample_path.stem
+        preset = self.style_preset.currentData() if hasattr(self, "style_preset") else ("Natural", 0.50, 0.35)
         return VoiceProfile(
             name=custom_name,
             provider="chatterbox",
@@ -872,6 +1062,9 @@ class VoicePage(QWidget):
             backend="automatic",
             language="en",
             authorized=True,
+            style_preset=str(preset[0]),
+            exaggeration=float(preset[1]),
+            cfg_weight=float(preset[2]),
         )
 
     def preview(self) -> None:
