@@ -33,7 +33,7 @@ class AudiobookBrainTests(unittest.TestCase):
 
     def test_release_version_is_current_bugfix_line(self):
         from app.version import APP_VERSION
-        self.assertEqual(APP_VERSION, "0.3.2")
+        self.assertEqual(APP_VERSION, "0.3.1")
 
     def test_chatterbox_pinned_source_is_installed_after_dependency_wheels(self):
         from pathlib import Path
