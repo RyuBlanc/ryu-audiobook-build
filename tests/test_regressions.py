@@ -20,7 +20,10 @@ from app.tts.voice_profile import VoiceProfile, save_profiles, load_profiles
 from app.tts.narration import prepare_for_narration
 from app.tts.pacing import append_silence, pause_after_ms, split_for_pacing
 from app.tts.preview import build_voice_preview
-from app.tts.pronunciation_suggester import suggest_pronunciation, suggest_names_from_text, COMMON_ENGLISH_WORDS
+from app.tts.pronunciation_suggester import (
+    suggest_pronunciation, suggest_names_from_text, COMMON_ENGLISH_WORDS,
+    is_common_english_phrase, nativeish_pronunciation,
+ )
 
 
 def _write_wav(path: Path, seconds: float = 0.05) -> None:
@@ -35,6 +38,18 @@ def _write_wav(path: Path, seconds: float = 0.05) -> None:
 
 
 class RegressionTests(unittest.TestCase):
+    def test_pronunciation_candidates_reject_ordinary_english(self):
+        self.assertTrue(is_common_english_phrase("All"))
+        self.assertTrue(is_common_english_phrase("Confirmed"))
+        self.assertTrue(is_common_english_phrase("Sir"))
+        self.assertTrue(is_common_english_phrase("Sure"))
+        self.assertEqual(nativeish_pronunciation("Hinata", "Japanese"), "Hee-nah-tah")
+
+    def test_voice_cast_analysis_is_background_thread(self):
+        from PySide6.QtCore import QThread
+        from app.ui.voice_cast_page import VoiceCastAnalysisWorker
+        self.assertTrue(issubclass(VoiceCastAnalysisWorker, QThread))
+
     def test_voice_preview_runs_in_a_worker_thread(self):
         from app.ui.voice_page import VoicePreviewWorker
         from PySide6.QtCore import QThread
