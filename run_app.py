@@ -8,8 +8,42 @@ import sys
 # Avoid importing Qt/UI modules here because Qt can keep native worker threads
 # alive even after SystemExit in a windowed frozen process.
 if "--self-test" in sys.argv:
+    # Frozen-package smoke test. It intentionally uses the bundled offline
+    # Piper runtime because that path must work immediately after installation,
+    # without cloud access or a separately installed voice engine.
+    from pathlib import Path
+    import tempfile
+    import wave
+
     import app.tts.chatterbox_runtime  # noqa: F401
     import app.tts.providers.chatterbox  # noqa: F401
+    from app.tts.providers.piper import PiperProvider
+
+    models = PiperProvider.model_paths()
+    if len(models) < 2:
+        raise RuntimeError(
+            f"Frozen package is missing bundled Piper voices; found {len(models)}."
+        )
+
+    output = Path(tempfile.gettempdir()) / "ryu_audiobook_frozen_self_test.wav"
+    try:
+        provider = PiperProvider(backend="cpu")
+        provider.synthesize(
+            "Ryu's Audiobook frozen build self test passed.",
+            output,
+            models[0].stem,
+        )
+        if not output.exists() or output.stat().st_size < 1024:
+            raise RuntimeError("Bundled Piper synthesis produced no valid audio file.")
+        with wave.open(str(output), "rb") as handle:
+            if handle.getnframes() <= 0 or handle.getframerate() <= 0:
+                raise RuntimeError("Bundled Piper synthesis produced invalid WAV audio.")
+    finally:
+        output.unlink(missing_ok=True)
+
+    marker = os.environ.get("RYU_FROZEN_SELF_TEST_MARKER")
+    if marker:
+        Path(marker).write_text("ok", encoding="utf-8")
     os._exit(0)
 
 # Explicit module imports are intentional: PyInstaller must see every UI
