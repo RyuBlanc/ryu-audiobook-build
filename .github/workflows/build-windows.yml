@@ -287,14 +287,64 @@ jobs:
             # Exercise the real application parser/integration while the local
             # llama-server is still running. This avoids the runner Python-path
             # mutation that occurs after the smoke process has been launched.
-            $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
-            if ($pythonExe -like '*WindowsApps*') {
-              throw "CI Python resolved to the Microsoft Store shim: $pythonExe"
+            # Reuse the exact setup-python interpreter captured at the start
+            # of this build step. PATH may contain the Microsoft Store shim by
+            # this point, but the real interpreter remains addressable directly.
+            if (-not (Test-Path $pythonExe)) {
+              $toolRoot = Join-Path $env:RUNNER_TOOL_CACHE 'Python'
+              $candidate = Get-ChildItem $toolRoot -Recurse -Filter 'python.exe' -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -match 'Python[\\/]3\.12\.[0-9]+[\\/]x64[\\/]python\.exe
+          } finally { if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force } }
+
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed with exit code $LASTEXITCODE." }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $iscc = Get-ChildItem 'C:\Program Files*' -Recurse -Filter 'ISCC.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $iscc) { throw 'ISCC.exe was not found after Inno Setup installation.' }
+          & $iscc.FullName 'installer\RyuAudiobook.iss'
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed with exit code $LASTEXITCODE." }
+          $installer = Join-Path (Get-Location) "installer-output\Ryu's Audiobook Setup.exe"
+          if (-not (Test-Path $installer)) { throw "Installer was not produced: $installer" }
+          Write-Host "Installer created: $installer"
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Audiobook-Windows-${{ github.run_number }}
+          path: |
+            installer-output/Ryu's Audiobook Setup.exe
+            dist/Ryu's Audiobook/Ryu's Audiobook.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish verified installer release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v0.3.7-build-${{ github.run_number }}"
+          gh release create $tag "installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, Audiobook AI smoke validation, Chatterbox runtime validation, and installer verification." --target $env:GITHUB_SHA
+ } |
+                Select-Object -First 1 -ExpandProperty FullName
+              if ($candidate) { $pythonExe = $candidate }
+            }
+            if (-not $pythonExe -or -not (Test-Path $pythonExe)) {
+              throw "A real Python 3.12 interpreter is not available for the AI integration smoke."
             }
             $pythonVersion = & $pythonExe -c "import sys; print('.'.join(map(str, sys.version_info[:2])))"
             if ($pythonVersion -ne '3.12') {
               throw "Audiobook AI integration smoke is running under Python $pythonVersion instead of Python 3.12."
             }
+            Write-Host "Using Python for AI integration smoke: $pythonExe"
             $env:PYTHONPATH = (Get-Location).Path
             $env:RYU_AI_SERVER_URL = 'http://127.0.0.1:18765'
             & $pythonExe -B -m unittest tests.smoke_audiobook_ai_live -v
