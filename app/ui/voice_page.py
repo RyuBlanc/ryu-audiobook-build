@@ -199,7 +199,7 @@ class VoicePage(QWidget):
         self.premium_key_button.clicked.connect(self._set_premium_api_key)
         self.premium_key_help_button = QPushButton("Get API Key")
         self.premium_key_help_button.clicked.connect(
-            lambda: webbrowser.open("https://elevenlabs.io")
+            lambda: webbrowser.open("https://elevenlabs.io/app/developers/api-keys")
         )
         self.premium_key_status = QLabel("Premium key: not configured")
         self.premium_key_status.setObjectName("muted")
