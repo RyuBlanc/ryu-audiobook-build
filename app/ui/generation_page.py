@@ -38,7 +38,7 @@ class VoicePreviewWorker(QThread):
     progress = Signal(str)
 
     def __init__(self, profile, backend, project_folder, profiles, pronunciation_dictionary,
-                 text, output, narration_speed, pacing_profile):
+                 text, output, narration_speed, pacing_profile, dialogue_assignments=None):
         super().__init__()
         self.profile = profile
         self.backend = backend
@@ -49,6 +49,7 @@ class VoicePreviewWorker(QThread):
         self.output = output
         self.narration_speed = narration_speed
         self.pacing_profile = pacing_profile
+        self.dialogue_assignments = list(dialogue_assignments or [])
         self._provider = None
 
     def run(self) -> None:
@@ -81,6 +82,7 @@ class VoicePreviewWorker(QThread):
                 pronunciation_dictionary=self.pronunciation_dictionary,
                 narration_speed=self.narration_speed,
                 pacing_profile=self.pacing_profile,
+                dialogue_assignments=self.dialogue_assignments,
             )
             self.progress.emit('Finalizing preview…')
             self.finished_ok.emit(result)
@@ -957,6 +959,7 @@ class GenerationPage(QWidget):
             profile, backend, self.project_folder, self.profiles, pronunciation_dictionary,
             text, output, float(self.narration_speed.currentData() or 0.90),
             self.pacing_profile.currentData() or 'natural',
+            dialogue_assignments=getattr(chapter, "dialogue_assignments", []),
         )
         self.preview_worker.progress.connect(self._preview_worker_progress)
         self.preview_worker.finished_ok.connect(self._preview_worker_ok)
