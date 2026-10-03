@@ -94,7 +94,13 @@ def _generate_clone(model, request: dict, output: Path) -> None:
 
 def server(args) -> int:
     root = Path(args.models_root).resolve()
-    model, device = _load_model(args.kind, args.backend, root)
+    try:
+        model, device = _load_model(args.kind, args.backend, root)
+    except Exception as exc:
+        if _is_cuda_oom(exc) and args.backend != "cpu":
+            model, device = _load_model(args.kind, "cpu", root)
+        else:
+            raise
     print(json.dumps({"ready": True, "device": device, "model": MODEL_IDS[args.kind]}), flush=True)
     for line in sys.stdin:
         line = line.strip()
