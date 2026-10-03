@@ -26,26 +26,40 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install dependencies
+      - name: Prepare, validate and build application
         shell: pwsh
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-
-      - name: Run regression tests
-        shell: pwsh
+        env:
+          RYU_BUILD_NUMBER: ${{ github.run_number }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          $env:PYTHONPATH = (Get-Location).Path
+
+          # Capture the real interpreter once. Later setup/install operations are
+          # allowed to alter PATH, so every Python operation in this step uses
+          # this exact executable instead of re-resolving the WindowsApps shim.
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          if ($pythonExe -like '*WindowsApps*') {
+            throw "actions/setup-python did not provide a real Python interpreter: $pythonExe"
+          }
+          if (-not (Test-Path $pythonExe)) {
+            throw "CI Python executable does not exist: $pythonExe"
+          }
+          Write-Host "Using CI Python executable: $pythonExe"
+          & $pythonExe -c "import sys; print(sys.executable); print(sys.version)"
+
+          Write-Host '=== Install dependencies ==='
+          & $pythonExe -m pip install --upgrade pip
+          & $pythonExe -m pip install -r requirements.txt
+
+          Write-Host '=== Run regression tests ==='
           git reset --hard HEAD
           git clean -ffdx
           $env:PYTHONPATH = (Get-Location).Path
           $env:PYTHONDONTWRITEBYTECODE = '1'
-          python -B -m unittest discover -s tests -v
+          & $pythonExe -B -m unittest discover -s tests -v
 
-      - name: Verify offline character Python bootstrap
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
+          Write-Host '=== Verify offline character Python bootstrap ==='
           $root = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap'
           $installer = Join-Path $root 'python-3.12.10-amd64.exe'
           $target = Join-Path $root 'python312'
@@ -55,49 +69,42 @@ jobs:
           $arguments = @('/quiet','/passive','InstallAllUsers=0','Include_launcher=0','Include_test=0','PrependPath=0','Shortcuts=0',"TargetDir=$target")
           $process = Start-Process -FilePath $installer -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
           if ($process.ExitCode -notin @(0,3010)) { throw "Private Python installer failed with exit code $($process.ExitCode)." }
-          $python = Join-Path $target 'python.exe'
-          if (-not (Test-Path $python)) { throw 'Private Python executable was not installed.' }
-          & $python -c "import sys; assert sys.version_info[:2] == (3,12); print(sys.version)"
-          & $python -m venv $venv
+          $privatePython = Join-Path $target 'python.exe'
+          if (-not (Test-Path $privatePython)) { throw 'Private Python executable was not installed.' }
+          & $privatePython -c "import sys; assert sys.version_info[:2] == (3,12); print(sys.version)"
+          & $privatePython -m venv $venv
           $venvPython = Join-Path $venv 'Scripts\python.exe'
           if (-not (Test-Path $venvPython)) { throw 'Private Qwen venv was not created.' }
           & $venvPython -m pip --version
           & $venvPython -m pip install --no-deps qwen-tts==0.1.1
           & $venvPython -c "import importlib.metadata as md; assert md.version('qwen-tts') == '0.1.1'; print('qwen_tts wheel bootstrap OK')"
 
-      - name: Verify pinned Chatterbox Nano source
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
+          Write-Host '=== Verify pinned Chatterbox Nano source ==='
           $source = Get-Content 'app\tts\chatterbox_runtime.py' -Raw
           $match = [regex]::Match($source, 'CHATTERBOX_SOURCE_REVISION\s*=\s*"([0-9a-f]{40})"')
           if (-not $match.Success) { throw 'Pinned Chatterbox source revision was not found.' }
           $revision = $match.Groups[1].Value
-          $root = Join-Path $env:RUNNER_TEMP 'ryu-chatterbox-source'
-          $zip = Join-Path $root 'chatterbox.zip'
-          $extract = Join-Path $root 'src'
-          New-Item -ItemType Directory -Force -Path $root | Out-Null
-          curl.exe -L --fail --retry 3 -o $zip "https://github.com/resemble-ai/chatterbox/archive/$revision.zip"
-          Expand-Archive -Force $zip $extract
-          $ttsTurbo = Get-ChildItem $extract -Recurse -Filter 'tts_turbo.py' | Select-Object -First 1
-          $nanoExample = Get-ChildItem $extract -Recurse -Filter 'example_tts_nano.py' | Select-Object -First 1
+          $cbRoot = Join-Path $env:RUNNER_TEMP 'ryu-chatterbox-source'
+          $cbZip = Join-Path $cbRoot 'chatterbox.zip'
+          $cbExtract = Join-Path $cbRoot 'src'
+          New-Item -ItemType Directory -Force -Path $cbRoot | Out-Null
+          curl.exe -L --fail --retry 3 -o $cbZip "https://github.com/resemble-ai/chatterbox/archive/$revision.zip"
+          Expand-Archive -Force $cbZip $cbExtract
+          $ttsTurbo = Get-ChildItem $cbExtract -Recurse -Filter 'tts_turbo.py' | Select-Object -First 1
+          $nanoExample = Get-ChildItem $cbExtract -Recurse -Filter 'example_tts_nano.py' | Select-Object -First 1
           if (-not $ttsTurbo) { throw 'Pinned Chatterbox source does not contain tts_turbo.py.' }
           $ttsText = Get-Content $ttsTurbo.FullName -Raw
           if ($ttsText -notmatch 'def from_pretrained\(cls, device, nano=False\)') { throw 'Pinned Chatterbox Nano API was not found.' }
           if (-not $nanoExample) { throw 'Pinned Chatterbox source does not contain example_tts_nano.py.' }
           Write-Host "Pinned Chatterbox source $revision exposes the Nano API."
 
-      - name: Download built-in offline neural voices
-        shell: pwsh
-        run: |
+          Write-Host '=== Download bundled offline Piper voices ==='
           New-Item -ItemType Directory -Force -Path 'bundled_models\piper' | Out-Null
-          python -m piper.download_voices --data-dir 'bundled_models\piper' en_US-amy-medium en_US-lessac-medium
+          & $pythonExe -m piper.download_voices --data-dir 'bundled_models\piper' en_US-amy-medium en_US-lessac-medium
           $models = @(Get-ChildItem 'bundled_models\piper\*.onnx')
           if ($models.Count -lt 2) { throw "Expected two bundled Piper voices, found $($models.Count)." }
 
-      - name: Download built-in offline natural voices
-        shell: pwsh
-        run: |
+          Write-Host '=== Download bundled offline Kokoro voices ==='
           New-Item -ItemType Directory -Force -Path 'bundled_models\kokoro' | Out-Null
           curl.exe -L --fail --retry 3 -o 'bundled_models\kokoro\kokoro-v1.0.fp16.onnx' 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.fp16.onnx'
           curl.exe -L --fail --retry 3 -o 'bundled_models\kokoro\voices-v1.0.bin' 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin'
@@ -105,23 +112,65 @@ jobs:
           $voices = Get-Item 'bundled_models\kokoro\voices-v1.0.bin'
           if ($model.Length -lt 100MB -or $voices.Length -lt 10MB) { throw 'Kokoro offline assets are incomplete.' }
 
-      - name: Verify application version
-        shell: pwsh
-        env:
-          RYU_BUILD_NUMBER: ${{ github.run_number }}
-        run: |
+          Write-Host '=== Verify application version ==='
           $env:PYTHONPATH = (Get-Location).Path
-          $version = python -c "from app.version import full_version; print(full_version())"
+          $version = & $pythonExe -c "from app.version import full_version; print(full_version())"
           $expected = 'v0.3.7'
           if (-not $version.StartsWith($expected) -or -not $version.EndsWith("Build $env:RYU_BUILD_NUMBER")) { throw "Unexpected application version: $version" }
           Write-Host "Application version verified: $version"
 
-      - name: Build application
-        shell: pwsh
-        env:
-          RYU_BUILD_NUMBER: ${{ github.run_number }}
-        run: 'python build.py'
+          Write-Host '=== Build Windows application ==='
+          & $pythonExe build.py
 
+          Write-Host '=== Live Audiobook AI + application integration smoke ==='
+          $aiRoot = Join-Path $env:RUNNER_TEMP 'ryu-ai-smoke'
+          $aiBin = Join-Path $aiRoot 'llama'
+          $aiModel = Join-Path $aiRoot 'Qwen3-0.6B-Q5_K_M.gguf'
+          New-Item -ItemType Directory -Force -Path $aiRoot | Out-Null
+          $llamaZip = Join-Path $aiRoot 'llama.zip'
+          if (-not (Test-Path $aiBin)) {
+            New-Item -ItemType Directory -Force -Path $aiBin | Out-Null
+            curl.exe -L --fail --retry 3 -o $llamaZip 'https://github.com/ggml-org/llama.cpp/releases/download/b11193/llama-b11193-bin-win-cpu-x64.zip'
+            Expand-Archive -Force $llamaZip $aiBin
+          }
+          $server = Get-ChildItem $aiBin -Recurse -Filter 'llama-server.exe' | Select-Object -First 1
+          if (-not $server) { throw 'llama-server.exe was not found.' }
+          if (-not (Test-Path $aiModel)) {
+            curl.exe -L --fail --retry 3 -o "$aiModel.part" 'https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/ef4088322893040952513f532f736ddeab518403/Qwen3-0.6B-Q5_K_M.gguf?download=true'
+            Move-Item -Force "$aiModel.part" $aiModel
+          }
+          $stdoutLog = Join-Path $aiRoot 'llama.stdout.log'
+          $stderrLog = Join-Path $aiRoot 'llama.stderr.log'
+          $proc = Start-Process -FilePath $server.FullName -ArgumentList @('-m',$aiModel,'--host','127.0.0.1','--port','18765','--ctx-size','4096','--threads','4','--no-webui','--reasoning','off','--reasoning-format','none') -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru -WindowStyle Hidden
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 120; $i++) {
+              if ($proc.HasExited) { Get-Content $stderrLog -Tail 100 -ErrorAction SilentlyContinue; throw 'llama-server exited before becoming ready.' }
+              try {
+                $health = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:18765/health' -TimeoutSec 2
+                if ($health.StatusCode -eq 200) { $ready = $true; break }
+              } catch {}
+              Start-Sleep -Seconds 1
+            }
+            if (-not $ready) { throw 'llama-server did not become ready within 120 seconds.' }
+            $body = @{ messages = @(@{role='system';content="You are the Ryu's Audiobook AI self-test. Return only one valid JSON object. Do not think. Do not use markdown."},@{role='user';content='/no_think Return {\"ok\":true,\"message\":\"ready\"}. Do not add any other text.'}); temperature=0.2; top_p=0.8; max_tokens=80; stream=$false } | ConvertTo-Json -Depth 20
+            $response = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:18765/v1/chat/completions' -ContentType 'application/json' -Body $body
+            $content = [string]$response.choices[0].message.content
+            $clean = $content -replace '(?s)<think>.*?</think>', ''
+            $clean = $clean -replace '^\s*```(?:json)?\s*', ''
+            $clean = $clean -replace '\s*```\s*$', ''
+            $startIndex = $clean.IndexOf('{')
+            $endIndex = $clean.LastIndexOf('}')
+            if ($startIndex -lt 0 -or $endIndex -le $startIndex) { throw "Audiobook AI returned no JSON object: $content" }
+            $obj = $clean.Substring($startIndex,$endIndex-$startIndex+1) | ConvertFrom-Json
+            if (-not $obj.ok -or $obj.message -ne 'ready') { throw "Unexpected Audiobook AI JSON: $content" }
+            Write-Host 'HTTP Audiobook AI smoke test PASSED.'
+            $env:PYTHONPATH = (Get-Location).Path
+            $env:RYU_AI_SERVER_URL = 'http://127.0.0.1:18765'
+            & $pythonExe -B -m unittest tests.smoke_audiobook_ai_live -v
+          } finally {
+            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          }
       - name: Verify frozen application
         shell: pwsh
         run: |
