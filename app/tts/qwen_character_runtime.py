@@ -5,9 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 import urllib.request
-import zipfile
 
 from app.core.paths import models_root
 
@@ -385,7 +383,7 @@ def install_model(kind: str, progress=None) -> Path:
     )
     if progress:
         progress(f"Downloading {MODEL_IDS[kind]}… This model stays on this PC.")
-    _run([str(PYTHON if False else VENV_PYTHON), "-c", script], progress, timeout=7200)
+    _run([str(VENV_PYTHON), "-c", script], progress, timeout=7200)
     if not model_installed(kind):
         raise RuntimeError(f"Qwen model download finished, but {MODEL_IDS[kind]} is incomplete.")
     return target
