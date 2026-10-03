@@ -152,9 +152,7 @@ class ElevenLabsProvider(TTSProvider):
                 "voice_settings": {
                     "stability": 0.45,
                     "similarity_boost": 0.78,
-                    "style": 0.15,
                     "use_speaker_boost": True,
-                    "speed": 0.98,
                 },
                 "apply_text_normalization": "auto",
             },
