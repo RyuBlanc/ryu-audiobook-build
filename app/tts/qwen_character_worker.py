@@ -46,6 +46,11 @@ def _load_model(kind: str, backend: str, root: Path):
     return model, device
 
 
+def _is_cuda_oom(exc: BaseException) -> bool:
+    message = str(exc).casefold()
+    return "out of memory" in message and ("cuda" in message or "cublas" in message)
+
+
 def _generate_custom(model, request: dict, output: Path) -> None:
     import soundfile as sf
 
@@ -101,15 +106,30 @@ def server(args) -> int:
             text = str(request.get("text") or "").strip()
             if not text:
                 raise RuntimeError("Qwen character text is empty.")
-            if args.task == "custom":
-                _generate_custom(model, request, output)
-            elif args.task == "clone":
-                _generate_clone(model, request, output)
-            else:
-                raise RuntimeError(f"Unsupported Qwen task: {args.task}")
-            print(json.dumps({"ok": True, "output": str(output)}), flush=True)
+            try:
+                if args.task == "custom":
+                    _generate_custom(model, request, output)
+                elif args.task == "clone":
+                    _generate_clone(model, request, output)
+                else:
+                    raise RuntimeError(f"Unsupported Qwen task: {args.task}")
+            except Exception as exc:
+                if _is_cuda_oom(exc) and device.startswith("cuda"):
+                    # 4GB-class GPUs can occasionally run out of memory because
+                    # Windows desktop apps consume VRAM. Reload the same model
+                    # on CPU rather than failing the audiobook generation.
+                    import gc
+                    gc.collect()
+                    model, device = _load_model(args.kind, "cpu", root)
+                    if args.task == "custom":
+                        _generate_custom(model, request, output)
+                    else:
+                        _generate_clone(model, request, output)
+                else:
+                    raise
+            print(json.dumps({"ok": True, "output": str(output), "device": device}), flush=True)
         except Exception as exc:
-            print(json.dumps({"ok": False, "error": str(exc)}), flush=True)
+            print(json.dumps({"ok": False, "error": str(exc), "device": device}), flush=True)
     return 0
 
 
