@@ -63,6 +63,17 @@ jobs:
           $ErrorActionPreference = "Stop"
           python -m pip install --upgrade pip
           python -m pip install --no-cache-dir --upgrade -r requirements-voice-cloning.txt
+          $perthRevision = 'ff1c8ac55a976971245cdd53c18d6131ca00d993'
+          $perthRoot = Join-Path $env:RUNNER_TEMP "ryu-perth-functional"
+          $perthZip = Join-Path $perthRoot "perth.zip"
+          $perthExtract = Join-Path $perthRoot "src"
+          New-Item -ItemType Directory -Force -Path $perthRoot | Out-Null
+          curl.exe -L --fail --retry 3 -o $perthZip "https://github.com/resemble-ai/Perth/archive/$perthRevision.zip"
+          Expand-Archive -Force $perthZip $perthExtract
+          $perthSource = Get-ChildItem $perthExtract -Recurse -Filter "pyproject.toml" | Where-Object { $_.FullName -match "Perth-" } | Select-Object -First 1
+          if (-not $perthSource) { throw "Pinned Perth source was not found." }
+          python -m pip install --no-cache-dir --no-deps $perthSource.Directory.FullName
+          python -c "import perth; print(perth.__file__); assert getattr(perth,'PerthImplicitWatermarker',None) is not None or getattr(perth,'DummyWatermarker',None) is not None"
           $root = Join-Path $env:RUNNER_TEMP "ryu-chatterbox-functional"
           $zip = Join-Path $root "chatterbox.zip"
           $extract = Join-Path $root "src"
