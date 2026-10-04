@@ -1348,16 +1348,18 @@ class VoicePage(QWidget):
 
     def update_mode(self) -> None:
         mode = self.mode.currentData()
-        if hasattr(self, "premium_key_button"):
-            visible = mode == "elevenlabs"
-            self.premium_key_button.setVisible(visible)
-            self.premium_key_help_button.setVisible(visible)
-            self.premium_key_status.setVisible(visible)
-        if hasattr(self, "character_box"):
-            self.character_box.setVisible(mode == "elevenlabs")
-        if hasattr(self, "install_character_voices_button"):
-            self.install_character_voices_button.setVisible(mode == "offline-character")
-        self.neural_box.setVisible(mode in {"offline-neural", "offline-character", "edge-tts", "elevenlabs"})
+        premium_visible = mode == "elevenlabs"
+        self.premium_key_button.setVisible(premium_visible)
+        self.premium_key_help_button.setVisible(premium_visible)
+        self.premium_key_status.setVisible(premium_visible)
+        self.character_box.setVisible(premium_visible)
+
+        qwen_visible = mode in {"qwen-custom", "qwen-design", "qwen-clone"}
+        self.install_character_voices_button.setVisible(qwen_visible)
+        self.qwen_phase_box.setVisible(qwen_visible)
+        self.qwen_design_box.setVisible(mode == "qwen-design")
+        self.qwen_clone_box.setVisible(mode == "qwen-clone")
+        self.neural_box.setVisible(mode in {"offline-neural", "qwen-custom", "edge-tts", "elevenlabs"})
         self.sapi_box.setVisible(mode == "windows-sapi")
         self.custom_box.setVisible(mode == "chatterbox")
 
@@ -1371,51 +1373,77 @@ class VoicePage(QWidget):
                 if profile.provider != "qwen-character"
             ])
             self._refresh_voice_list()
-        elif mode == "offline-character":
+
+        elif mode == "qwen-custom":
             self._refresh_offline_catalog()
-            self._set_filter_values([
+            qwen_profiles = [
                 profile for profile in self.offline_voices
                 if profile.provider == "qwen-character"
-            ])
+                and (profile.qwen_mode or "custom") == "custom"
+            ]
+            self._set_filter_values(qwen_profiles)
             self._refresh_voice_list()
             ready = qwen_runtime_ready()
-            installed = qwen_model_installed(best_custom_kind())
-            if ready and installed:
-                self.source_hint.setText(
-                    "Premium local character voices powered by Qwen3-TTS. "
-                    "No API key or cloud TTS service is used."
-                )
-                self.offline_character_status.setText(
-                    "Character voice pack is installed and ready. English-native Ryan/Aiden voices are "
-                    "the best fit for English anime-style narration."
-                )
-                self.install_character_voices_button.setText("Repair / Reinstall Offline Character Voice Pack")
-            else:
-                self.source_hint.setText(
-                    "Qwen3-TTS character voices are listed here before installation. "
-                    "Install the local voice pack once; after that, preview and audiobook generation remain offline."
-                )
-                self.offline_character_status.setText(
-                    "Model not installed yet. Click the button to open Models and download the compatible "
-                    "0.6B/1.7B character voice pack for this PC."
-                )
-                self.install_character_voices_button.setText("Install Offline Character Voice Pack")
+            kind = best_custom_kind()
+            installed = ready and qwen_model_installed(kind)
+            self.source_hint.setText(
+                "Qwen3-TTS CustomVoice • reusable named speakers with local style instructions on the 1.7B path. "
+                "Ryan and Aiden are the native-English Qwen speakers."
+            )
+            self.offline_character_status.setText(
+                f"{'✓' if installed else '○'} CustomVoice model: {kind} • "
+                + ("ready" if installed else "not installed")
+            )
+            self.qwen_phase_status.setText(
+                "Phase 1 • CustomVoice — stable reusable speakers. The 1.7B model is the quality path."
+            )
+
+        elif mode == "qwen-design":
+            ready = qwen_runtime_ready()
+            installed = ready and qwen_model_installed(best_voice_design_kind())
+            self.source_hint.setText(
+                "Qwen3-TTS VoiceDesign • create a brand-new fictional voice from a natural-language description. "
+                "VoiceDesign uses the 1.7B model."
+            )
+            self.offline_character_status.setText(
+                f"{'✓' if installed else '○'} VoiceDesign model: design-1.7b • "
+                + ("ready" if installed else "not installed")
+            )
+            self.qwen_phase_status.setText(
+                "Phase 2 • VoiceDesign — ideal for anime heroines, heroes, villains, narrators and cinematic character voices. "
+                "On 4GB GPUs it may fall back to CPU."
+            )
+
+        elif mode == "qwen-clone":
+            ready = qwen_runtime_ready()
+            kind = best_clone_kind()
+            installed = ready and qwen_model_installed(kind)
+            self.source_hint.setText(
+                "Qwen3-TTS Base • authorized voice cloning from a short local reference recording."
+            )
+            self.offline_character_status.setText(
+                f"{'✓' if installed else '○'} Clone model: {kind} • "
+                + ("ready" if installed else "not installed")
+            )
+            self.qwen_phase_status.setText(
+                "Phase 3 • Voice Clone — provide the exact reference transcript for Qwen's higher-fidelity ICL mode."
+            )
+
         elif mode == "edge-tts":
             self.source_hint.setText(
                 "Microsoft Edge online neural catalog. Internet is required for synthesis."
             )
-            self.premium_key_button.setVisible(False)
             if not self.edge_voices:
                 self._refresh_online_catalog()
             else:
                 self._set_filter_values_edge()
                 self._refresh_voice_list()
+
         elif mode == "elevenlabs":
             self.source_hint.setText(
                 "Premium online natural voices powered by ElevenLabs. Internet and a personal API key are required. "
                 "The key stays local and is never bundled with Ryu's Audiobook."
             )
-            self.premium_key_button.setVisible(True)
             self._update_premium_key_status()
             if ElevenLabsProvider.load_api_key():
                 if not self.premium_voices:
@@ -1423,8 +1451,10 @@ class VoicePage(QWidget):
                 else:
                     self._set_filter_values_premium()
                     self._refresh_voice_list()
+
         elif mode == "windows-sapi":
             self.source_hint.setText("Uses voices already installed in Windows. Fully offline.")
+
         else:
             self.source_hint.setText(
                 "Use only a reference recording you are authorized to use. The reference remains local. "
