@@ -9,7 +9,7 @@ from PySide6.QtCore import QUrl, QThread, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QInputDialog, QFormLayout, QGroupBox, QHBoxLayout,
-    QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QTextEdit,
+    QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QTextEdit, QSpinBox,
     QVBoxLayout, QWidget,
 )
 
@@ -25,7 +25,13 @@ class PassiveScrollComboBox(QComboBox):
 
 from app.tts.profile_provider import provider_from_profile
 from app.tts.chatterbox_runtime import runtime_ready, runtime_status
-from app.tts.qwen_character_runtime import runtime_ready as qwen_runtime_ready, model_installed as qwen_model_installed, best_custom_kind
+from app.tts.qwen_character_runtime import (
+    runtime_ready as qwen_runtime_ready,
+    model_installed as qwen_model_installed,
+    best_clone_kind,
+    best_custom_kind,
+    best_voice_design_kind,
+)
 from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.voice_profile import (
     VoiceProfile, builtin_voice_profiles, import_reference_audio,
@@ -184,7 +190,9 @@ class VoicePage(QWidget):
         ))
         self.mode = PassiveScrollComboBox()
         self.mode.addItem("Offline Neural Voices  ·  built into this app", "offline-neural")
-        self.mode.addItem("Offline Character Voices  ·  Anime / Cartoon", "offline-character")
+        self.mode.addItem("Qwen3-TTS  ·  CustomVoice", "qwen-custom")
+        self.mode.addItem("Qwen3-TTS  ·  VoiceDesign", "qwen-design")
+        self.mode.addItem("Qwen3-TTS  ·  Voice Clone", "qwen-clone")
         self.mode.addItem("Windows SAPI  ·  installed offline voices", "windows-sapi")
         self.mode.addItem("Online Neural Voices  ·  Edge TTS", "edge-tts")
         self.mode.addItem("Premium Online Voices  ·  ElevenLabs", "elevenlabs")
@@ -196,7 +204,7 @@ class VoicePage(QWidget):
         self.source_hint.setWordWrap(True)
         source_layout.addWidget(self.source_hint)
 
-        self.install_character_voices_button = QPushButton('Install / Repair Offline Character Voice Pack')
+        self.install_character_voices_button = QPushButton("Install / Repair Qwen Voice Studio")
         self.install_character_voices_button.clicked.connect(self.open_offline_character_models)
         self.install_character_voices_button.setVisible(False)
         source_layout.addWidget(self.install_character_voices_button)
@@ -351,6 +359,77 @@ class VoicePage(QWidget):
         voice_row.addWidget(self.neural_count)
         neural.addLayout(voice_row)
         root.addWidget(self.neural_box)
+
+        self.qwen_phase_box = QGroupBox("2  •  Qwen3-TTS Voice Studio")
+        qwen_phase = QVBoxLayout(self.qwen_phase_box)
+        self.qwen_phase_status = QLabel()
+        self.qwen_phase_status.setObjectName("muted")
+        self.qwen_phase_status.setWordWrap(True)
+        qwen_phase.addWidget(self.qwen_phase_status)
+
+        self.qwen_design_box = QGroupBox("VoiceDesign • create a brand-new voice from a description")
+        design_layout = QVBoxLayout(self.qwen_design_box)
+        design_top = QHBoxLayout()
+        design_top.addWidget(QLabel("Preset"))
+        self.qwen_design_preset = QComboBox()
+        presets = [
+            ("Anime Heroine", "Young adult female voice, bright and warm, slightly playful anime heroine timbre, clear natural English diction, expressive emotional reactions, cinematic storytelling, medium-fast pace with soft warmth and controlled breath."),
+            ("Anime Hero", "Young adult male voice, confident and dynamic anime protagonist timbre, clear English diction, strong rhythmic drive, heroic energy, expressive but natural emotional changes, cinematic pacing."),
+            ("Anime Rival", "Young adult male voice, cool restrained anime rival timbre, slightly husky edge, precise English diction, teasing confidence, controlled intensity and cinematic pauses."),
+            ("Anime Villain", "Adult male voice, low mellow theatrical anime villain timbre, elegant menace, controlled authority, slower cinematic pacing, crisp English diction and restrained emotion."),
+            ("Anime Healer", "Young adult female voice, gentle warm anime healer timbre, soft breath, reassuring tone, emotionally sincere English narration, calm cinematic pacing and delicate reactions."),
+            ("Custom voice description", ""),
+        ]
+        for label, prompt in presets:
+            self.qwen_design_preset.addItem(label, prompt)
+        self.qwen_design_preset.currentIndexChanged.connect(self._qwen_design_preset_changed)
+        design_top.addWidget(self.qwen_design_preset, 1)
+        design_top.addWidget(QLabel("Language"))
+        self.qwen_design_language = QComboBox()
+        self.qwen_design_language.addItems(["English", "Japanese", "Korean", "Chinese", "German", "French", "Spanish", "Italian", "Portuguese", "Russian"])
+        design_top.addWidget(self.qwen_design_language)
+        design_layout.addLayout(design_top)
+        design_layout.addWidget(QLabel("Voice description"))
+        self.qwen_design_prompt = QTextEdit()
+        self.qwen_design_prompt.setPlainText(str(self.qwen_design_preset.currentData() or ""))
+        self.qwen_design_prompt.setMinimumHeight(88)
+        self.qwen_design_prompt.setMaximumHeight(125)
+        self.qwen_design_prompt.setPlaceholderText("Describe age, timbre, accent, emotion, energy, pace and cinematic style.")
+        design_layout.addWidget(self.qwen_design_prompt)
+        seed_row = QHBoxLayout()
+        seed_row.addWidget(QLabel("Design seed"))
+        self.qwen_design_seed = QSpinBox()
+        self.qwen_design_seed.setRange(0, 2147483647)
+        self.qwen_design_seed.setValue(0)
+        seed_row.addWidget(self.qwen_design_seed)
+        seed_row.addWidget(QLabel("0 = natural variation"))
+        seed_row.addStretch(1)
+        design_layout.addLayout(seed_row)
+        qwen_phase.addWidget(self.qwen_design_box)
+
+        self.qwen_clone_box = QGroupBox("Voice Clone • authorized reference audio")
+        clone_layout = QVBoxLayout(self.qwen_clone_box)
+        clone_row = QHBoxLayout()
+        self.qwen_clone_sample_button = QPushButton("Choose reference MP3 / WAV / M4A / FLAC…")
+        self.qwen_clone_sample_button.clicked.connect(self.select_qwen_clone_sample)
+        clone_row.addWidget(self.qwen_clone_sample_button)
+        self.qwen_clone_sample_label = QLabel("No reference selected")
+        self.qwen_clone_sample_label.setWordWrap(True)
+        clone_row.addWidget(self.qwen_clone_sample_label, 1)
+        clone_layout.addLayout(clone_row)
+        clone_layout.addWidget(QLabel("Reference transcript • recommended for highest-fidelity ICL cloning"))
+        self.qwen_reference_text = QLineEdit()
+        self.qwen_reference_text.setPlaceholderText("Exact words spoken in the reference. Leave blank for speaker-embedding-only cloning.")
+        clone_layout.addWidget(self.qwen_reference_text)
+        self.qwen_clone_authorized = QCheckBox("I have permission to use this reference recording.")
+        clone_layout.addWidget(self.qwen_clone_authorized)
+        self.qwen_clone_hint = QLabel("Qwen Base supports short-reference cloning. An exact transcript enables its ICL mode; blank uses speaker-embedding-only cloning.")
+        self.qwen_clone_hint.setObjectName("muted")
+        self.qwen_clone_hint.setWordWrap(True)
+        clone_layout.addWidget(self.qwen_clone_hint)
+        qwen_phase.addWidget(self.qwen_clone_box)
+
+        root.addWidget(self.qwen_phase_box)
 
         self.sapi_box = QGroupBox("2  •  Windows Voice")
         sapi_layout = QHBoxLayout(self.sapi_box)
