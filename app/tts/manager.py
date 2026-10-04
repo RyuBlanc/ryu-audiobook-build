@@ -41,6 +41,7 @@ class GenerationManager:
         narration_speed: float = 0.90,
         pacing_profile: str = "natural",
         metadata: dict[str, str] | None = None,
+        bitrate: int | str | None = 256,
     ) -> None:
         self.provider = provider
         self.voice = voice
@@ -52,6 +53,7 @@ class GenerationManager:
         self.narration_speed = narration_speed
         self.pacing_profile = pacing_profile
         self.metadata = metadata or {}
+        self.bitrate = bitrate
         self.cancel_event = Event()
         self._thread: Thread | None = None
         self.failed: list[int] = []
@@ -200,6 +202,7 @@ class GenerationManager:
                     [c.title for c in self.chapters],
                     metadata=metadata,
                     progress=lambda done, total, message: self._package_progress(done, total, message),
+                    bitrate=self.bitrate,
                 )
                 self._emit(len(self.chapters), len(self.chapters), 1, "m4b-complete")
                 # Only delete intermediate files after the final M4B has been
