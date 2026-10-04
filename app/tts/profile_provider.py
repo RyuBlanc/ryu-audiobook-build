@@ -25,9 +25,16 @@ def provider_from_profile(profile: VoiceProfile):
             QwenCharacterProvider(
                 voice_id=profile.voice_id,
                 language=profile.language or "English",
-                instruct=profile.notes,
+                instruct=profile.qwen_prompt or profile.notes,
                 backend=profile.backend,
                 model_kind=profile.model_id or "auto",
+                reference_audio=(
+                    Path(profile.sample_path).expanduser()
+                    if profile.sample_path else None
+                ),
+                reference_text=profile.reference_text or "",
+                qwen_mode=profile.qwen_mode or "custom",
+                qwen_seed=profile.qwen_seed,
             ),
             profile.voice_id,
         )
