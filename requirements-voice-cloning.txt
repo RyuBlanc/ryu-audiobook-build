@@ -14,4 +14,6 @@ spacy-pkuseg
 pykakasi==2.3.0
 pyloudnorm
 omegaconf
-resemble-perth==1.0.1
+# Use the current official Perth implementation. Older PyPI builds can expose
+# PerthImplicitWatermarker as None and prevent Chatterbox from initializing.
+resemble-perth @ git+https://github.com/resemble-ai/Perth.git@master
