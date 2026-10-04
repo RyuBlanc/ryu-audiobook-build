@@ -10,6 +10,39 @@ import imageio_ffmpeg
 from app.audio.metadata import sanitize_metadata
 
 
+# Audiobook output is intentionally kept in a premium, listener-friendly
+# range. 64k AAC was previously used here and produced visibly low-bitrate
+# M4A/M4B files (and could make cloned-voice output appear even worse after
+# packaging).  256k is the default premium setting; callers can request any
+# value from 128k through 320k.
+MIN_AUDIO_BITRATE_KBPS = 128
+DEFAULT_AUDIO_BITRATE_KBPS = 256
+MAX_AUDIO_BITRATE_KBPS = 320
+
+
+def normalize_audio_bitrate(bitrate: int | str | None) -> str:
+    """Return a validated AAC bitrate in the supported audiobook range."""
+    if bitrate is None:
+        kbps = DEFAULT_AUDIO_BITRATE_KBPS
+    elif isinstance(bitrate, str):
+        value = bitrate.strip().lower().replace("kbps", "").replace("k", "")
+        try:
+            kbps = int(float(value))
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid audiobook bitrate '{bitrate}'. Choose 128, 160, 192, 224, 256, 288 or 320 kbps."
+            ) from exc
+    else:
+        kbps = int(bitrate)
+
+    if not MIN_AUDIO_BITRATE_KBPS <= kbps <= MAX_AUDIO_BITRATE_KBPS:
+        raise ValueError(
+            f"Audiobook bitrate must be between {MIN_AUDIO_BITRATE_KBPS} and "
+            f"{MAX_AUDIO_BITRATE_KBPS} kbps; received {kbps} kbps."
+        )
+    return f"{kbps}k"
+
+
 def ffmpeg_path() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
@@ -35,19 +68,29 @@ def _ffconcat_path(path: Path) -> str:
     return path.as_posix().replace("'", "'\\''")
 
 
-def assemble_chapter(chapter_dir: Path) -> Path:
+def assemble_chapter(chapter_dir: Path, bitrate: int | str | None = None) -> Path:
     chunks = sorted_chunks(chapter_dir)
     if not chunks:
         raise ValueError(f"No audio chunks found for {chapter_dir.name}")
     output = chapter_dir / "chapter.m4a"
     concat_file = chapter_dir / "concat.txt"
+    audio_bitrate = normalize_audio_bitrate(bitrate)
 
-    # Reuse a previously assembled chapter when none of its WAV chunks have
-    # changed. This makes an M4B retry after a late packaging failure fast.
+    # Reuse a previously assembled chapter only when its WAV chunks are newer
+    # than the M4A. Existing chapters from the old 64k encoder are deliberately
+    # not trusted: they are rebuilt so a new premium export cannot silently
+    # retain the old low-bitrate audio.
     if output.exists() and output.stat().st_size >= 1024:
         newest_chunk = max((chunk.stat().st_mtime for chunk in chunks), default=0.0)
-        if output.stat().st_mtime >= newest_chunk:
+        bitrate_stamp = chapter_dir / ".audio-bitrate"
+        stored_bitrate = ""
+        try:
+            stored_bitrate = bitrate_stamp.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+        if output.stat().st_mtime >= newest_chunk and stored_bitrate == audio_bitrate:
             return output
+
     concat_file.write_text(
         "ffconcat version 1.0\n"
         + "\n".join(f"file '{_ffconcat_path(p)}'" for p in chunks)
@@ -56,10 +99,14 @@ def assemble_chapter(chapter_dir: Path) -> Path:
     )
     _run([
         "-f", "concat", "-safe", "0", "-i", str(concat_file),
-        "-vn", "-c:a", "aac", "-b:a", "64k", "-ar", "44100", str(output),
+        "-vn", "-c:a", "aac", "-b:a", audio_bitrate, "-ar", "44100", str(output),
     ])
     if not output.exists() or output.stat().st_size < 1024:
         raise RuntimeError(f"Chapter audio was not created: {output}")
+    try:
+        (chapter_dir / ".audio-bitrate").write_text(audio_bitrate, encoding="utf-8")
+    except OSError:
+        pass
     return output
 
 
@@ -97,14 +144,20 @@ def assemble_m4b(
     chapter_titles: list[str] | None = None,
     metadata: dict[str, str] | None = None,
     progress=None,
+    bitrate: int | str | None = None,
 ) -> Path:
-    """Create one M4B containing all chapters, navigation markers, metadata and cover."""
+    """Create one premium M4B containing all chapters and navigation metadata.
+
+    ``bitrate`` is AAC bitrate in kbps and is constrained to 128–320 kbps.
+    The default is 256 kbps for a premium audiobook export.
+    """
     if not chapter_dirs:
         raise ValueError("No chapters were supplied.")
+    audio_bitrate = normalize_audio_bitrate(bitrate)
 
     chapters: list[Path] = []
     for index, directory in enumerate(chapter_dirs, start=1):
-        chapters.append(assemble_chapter(directory))
+        chapters.append(assemble_chapter(directory, audio_bitrate))
         if progress:
             progress(index, len(chapter_dirs), "chapter-audio")
     names = chapter_titles or [
@@ -124,8 +177,6 @@ def assemble_m4b(
     with tempfile.TemporaryDirectory(prefix="ryu-m4b-") as temp:
         temp_dir = Path(temp)
 
-        # Give the concat demuxer explicit durations. This avoids the
-        # "Duration: N/A" timing ambiguity seen with some generated M4A files.
         concat = temp_dir / "chapters.txt"
         concat_lines = ["ffconcat version 1.0"]
         durations: list[int] = []
@@ -184,10 +235,6 @@ def assemble_m4b(
             start = end
         metadata_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-        # Chapter files already share the same AAC parameters. Join them
-        # without re-encoding the whole audiobook. This is important for
-        # multi-hour books because final packaging should not perform another
-        # full-length audio encode.
         audio_only = temp_dir / "audiobook-audio.m4a"
         _run([
             "-f", "concat", "-safe", "0", "-i", str(concat),
@@ -201,9 +248,6 @@ def assemble_m4b(
         if progress:
             progress(len(chapters), len(chapters), "joined-audio")
 
-        # Build the audiobook container and chapters first, without the
-        # cover. This isolates MP4 chapter/metadata muxing from image
-        # handling and leaves a known-good audio M4B if cover embedding fails.
         base_m4b = temp_dir / "audiobook-base.m4b"
         args = [
             "-i", str(audio_only),
@@ -215,6 +259,7 @@ def assemble_m4b(
             "-movflags", "+faststart+use_metadata_tags",
             "-metadata", f"title={_metadata_value(clean_title)}",
             "-metadata", f"album={_metadata_value(clean_title)}",
+            "-metadata", f"comment=Ryu's Audiobook • AAC {audio_bitrate}",
         ]
         if clean_artist:
             args += ["-metadata", f"artist={clean_artist}"]
@@ -240,16 +285,7 @@ def assemble_m4b(
         if not base_m4b.exists() or base_m4b.stat().st_size == 0:
             raise RuntimeError("FFmpeg created no base M4B before cover embedding.")
 
-        # Do not probe container-level duration here. Some valid MP4/M4B
-        # containers expose an unreliable or N/A format duration after the
-        # metadata/chapter mux even though their audio stream is valid.
-        # Final validation below decodes the actual audio stream instead.
-
         if cover:
-            # FFmpeg's MOV documentation recommends mapping the existing
-            # media and image as separate inputs and stream-copying the
-            # attached picture. Normalize PNG/JPEG/etc. to a single JPEG
-            # first so cover embedding is independent of the source format.
             cover_jpg = temp_dir / "cover.jpg"
             _run([
                 "-i", str(cover),
@@ -282,18 +318,14 @@ def assemble_m4b(
 
     if not output_path.exists() or output_path.stat().st_size == 0:
         raise RuntimeError("FFmpeg completed but the final M4B is missing.")
-    # Validate only the beginning of the audio stream. The previous
-    # implementation decoded the complete audiobook a second time, which
-    # could make a 5+ hour book appear stuck after generation finished.
+
+    # Validate that the final M4B really contains an audio stream. We also
+    # inspect the encoded stream bitrate so a future packaging regression
+    # cannot silently return another sub-128k audiobook.
     probe = subprocess.run(
         [
-            ffmpeg_path(),
-            "-v", "error",
-            "-i", str(output_path),
-            "-map", "0:a:0",
-            "-t", "0.25",
-            "-f", "null",
-            "-",
+            ffmpeg_path(), "-v", "error", "-i", str(output_path),
+            "-map", "0:a:0", "-t", "0.25", "-f", "null", "-",
         ],
         capture_output=True,
         text=True,
@@ -303,4 +335,22 @@ def assemble_m4b(
         raise RuntimeError(
             f"FFmpeg completed but the final M4B audio could not be validated.\n{detail}"
         )
+
+    bitrate_probe = subprocess.run(
+        [
+            ffmpeg_path(), "-hide_banner", "-i", str(output_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    probe_text = str(bitrate_probe.stderr or bitrate_probe.stdout or "")
+    stream_match = re.search(r"Audio:.*?(\d+) kb/s", probe_text, re.IGNORECASE)
+    if stream_match:
+        detected_kbps = int(stream_match.group(1))
+        if detected_kbps < MIN_AUDIO_BITRATE_KBPS:
+            raise RuntimeError(
+                f"Final audiobook bitrate is only {detected_kbps} kbps. "
+                f"Ryu's Audiobook requires at least {MIN_AUDIO_BITRATE_KBPS} kbps."
+            )
+
     return output_path
