@@ -1327,7 +1327,9 @@ class VoicePage(QWidget):
             i = self.sapi_voice.findData(profile.voice_id)
             if i >= 0:
                 self.sapi_voice.setCurrentIndex(i)
-        elif profile.provider in {"piper", "kokoro", "qwen-character", "edge-tts"}:
+        elif profile.provider in {"piper", "kokoro", "edge-tts"} or (
+            profile.provider == "qwen-character" and (profile.qwen_mode or "custom") == "custom"
+        ):
             self._refresh_voice_list()
             i = self.neural_voice.findData(profile.voice_id)
             if i >= 0:
