@@ -23,6 +23,8 @@ MARKER = RUNTIME_DIR / "runtime.json"
 PYTHON_311_URL = "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
 CHATTERBOX_SOURCE_REVISION = "5de7a54aa4e5e2baadb0182dde554908b48b85c2"
 CHATTERBOX_SOURCE_URL = f"https://github.com/resemble-ai/chatterbox/archive/{CHATTERBOX_SOURCE_REVISION}.zip"
+PERTH_SOURCE_REVISION = "ff1c8ac55a976971245cdd53c18d6131ca00d993"
+PERTH_SOURCE_URL = f"https://github.com/resemble-ai/Perth/archive/{PERTH_SOURCE_REVISION}.zip"
 
 
 def _venv_python() -> Path:
@@ -44,6 +46,7 @@ def runtime_ready() -> bool:
             data.get("provider") == "chatterbox"
             and data.get("ready")
             and data.get("source_revision") == CHATTERBOX_SOURCE_REVISION
+            and data.get("perth_revision") == PERTH_SOURCE_REVISION
             and data.get("nano_supported") is True
         )
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
@@ -176,6 +179,40 @@ def _verify_runtime(python: Path) -> str:
     return _run([str(python), "-c", script], 180, "Chatterbox runtime verification")
 
 
+def _install_perth(python: Path, progress: Callable[[str], None] | None = None) -> str:
+    if progress:
+        progress("Installing the pinned Perth audio utility…")
+    source_archive = RUNTIME_DIR / "perth-source.zip"
+    try:
+        request = urllib.request.Request(
+            PERTH_SOURCE_URL,
+            headers={"User-Agent": "Ryu-Audiobook/1.1", "Accept": "application/zip"},
+        )
+        with urllib.request.urlopen(request, timeout=180, context=_ssl_context()) as response, source_archive.open("wb") as handle:
+            while True:
+                block = response.read(1024 * 1024)
+                if not block:
+                    break
+                handle.write(block)
+        _run(
+            [str(python), "-m", "pip", "install", "--no-cache-dir", "--no-deps", str(source_archive)],
+            1800,
+            "Pinned Perth source installation",
+        )
+    finally:
+        source_archive.unlink(missing_ok=True)
+
+    return _run(
+        [str(python), "-c",
+         "import perth; "
+         "assert getattr(perth, 'PerthImplicitWatermarker', None) is not None or "
+         "getattr(perth, 'DummyWatermarker', None) is not None; "
+         "print(perth.__file__)"],
+        120,
+        "Perth runtime verification",
+    )
+
+
 def install_runtime(progress: Callable[[str], None] | None = None) -> None:
     system_python = _system_python()
     if not system_python:
@@ -228,6 +265,8 @@ def install_runtime(progress: Callable[[str], None] | None = None) -> None:
                 "CUDA Torch installation",
             )
 
+    _install_perth(python, progress)
+
     if progress:
         progress("Installing the pinned Chatterbox source…")
     source_archive = RUNTIME_DIR / "chatterbox-source.zip"
@@ -254,7 +293,8 @@ def install_runtime(progress: Callable[[str], None] | None = None) -> None:
     MARKER.write_text(json.dumps({
         "provider": "chatterbox", "ready": True, "python": str(python),
         "runtime": runtime_info, "gpu_acceleration": _has_nvidia(),
-        "source_revision": CHATTERBOX_SOURCE_REVISION, "nano_supported": True,
+        "source_revision": CHATTERBOX_SOURCE_REVISION, "perth_revision": PERTH_SOURCE_REVISION,
+        "nano_supported": True,
     }, indent=2), encoding="utf-8")
     if progress:
         progress("Custom voice engine is ready.")
