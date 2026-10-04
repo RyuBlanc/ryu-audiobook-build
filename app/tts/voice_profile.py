@@ -107,37 +107,39 @@ def builtin_voice_profiles() -> list[VoiceProfile]:
     except Exception:
         pass
 
-    # Qwen3-TTS offline character voices. The same local speakers can be
-    # instructed toward anime/cartoon delivery without any API key.
+    # Qwen3-TTS offline character voices. Keep the catalogue visible even
+    # before the model is installed so the user can choose a character first;
+    # preview/generation will clearly request the local model when it is missing.
+    # Native languages are respected: only Ryan/Aiden are native-English Qwen
+    # speakers, while Vivian/Serena/Uncle_Fu/Dylan/Eric/Ono_Anna/Sohee retain
+    # their documented native languages.
     qwen_profiles = [
-        ("Anime Heroine", "Serena", "Bright young anime heroine; lively but natural English acting, clear diction, soft warmth, cinematic emotional lifts."),
-        ("Anime Heroine • Light", "Vivian", "Young anime heroine with bright playful energy, clear English, youthful sparkle and natural emotional reactions."),
-        ("Anime Hero", "Ryan", "Dynamic anime protagonist; confident English delivery, energetic rhythm, heroic determination and controlled emotion."),
-        ("Anime Hero • Warm", "Aiden", "Warm young anime protagonist; clear American English, optimistic confidence and sincere emotional delivery."),
-        ("Anime Rival", "Ryan", "Cool anime rival; restrained confidence, teasing edge, controlled intensity and crisp English diction."),
-        ("Anime Villain", "Uncle_Fu", "Stylized anime villain; low authoritative presence, elegant menace, theatrical control and cinematic pauses."),
-        ("Anime Healer", "Serena", "Gentle anime healer; soft warm English delivery, reassuring tone, emotional sincerity and calm breath."),
-        ("Anime Chibi", "Vivian", "Cute chibi-inspired anime character; youthful bright energy, playful reactions and clear English."),
-        ("Anime Sidekick", "Aiden", "Mischievous anime sidekick; quick comic timing, bright energy and expressive English reactions."),
-        ("Cartoon Hero", "Ryan", "Premium animated cartoon hero; upbeat confident English, playful timing, family-friendly adventure energy."),
-        ("Cartoon Sidekick", "Vivian", "Premium animated cartoon sidekick; funny, quick reactions, expressive but intelligible English."),
-        ("Cartoon Villain", "Uncle_Fu", "Premium animated cartoon villain; theatrical comic menace, exaggerated personality and crisp diction."),
-        ("Cartoon Friend", "Serena", "Premium animated cartoon friend; warm, expressive English with polished family-friendly delivery."),
+        ("Anime Hero", "Ryan", "Dynamic English male character; confident anime-protagonist energy, crisp diction, expressive emotional lifts and cinematic pacing.", "English"),
+        ("Anime Rival", "Ryan", "Cool English male rival; restrained confidence, teasing edge, controlled intensity and clean audiobook diction.", "English"),
+        ("Anime Hero • Warm", "Aiden", "Sunny American English male character; warm young-protagonist energy, optimistic emotion and natural conversational delivery.", "English"),
+        ("Anime Sidekick", "Aiden", "Playful American English male sidekick; bright comic timing, lively reactions and clear intelligible delivery.", "English"),
+        ("Anime / Cartoon • Vivian", "Vivian", "Bright slightly edgy young female voice. Best quality is obtained in the speaker's native Chinese; style instructions can add animated energy.", "Chinese"),
+        ("Anime / Cartoon • Serena", "Serena", "Warm gentle young female voice. Best quality is obtained in the speaker's native Chinese; style instructions can add soft anime warmth.", "Chinese"),
+        ("Anime Villain • Uncle Fu", "Uncle_Fu", "Seasoned low mellow male voice. Best quality is obtained in native Chinese; strong theatrical villain delivery.", "Chinese"),
+        ("Anime • Japanese Female", "Ono_Anna", "Playful Japanese female voice with a light nimble timbre; ideal for Japanese character dialogue.", "Japanese"),
+        ("Anime • Korean Female", "Sohee", "Warm Korean female voice with rich emotion; ideal for Korean character dialogue.", "Korean"),
     ]
-    if _qwen_runtime_available():
-        for name, speaker, instruct in qwen_profiles:
-            result.append(
-                VoiceProfile(
-                    name=f"Offline Character • {name}",
-                    provider="qwen-character",
-                    voice_id=speaker,
-                    model_id="auto",
-                    backend="automatic",
-                    language="English",
-                    notes=instruct,
-                    authorized=True,
-                )
+    for name, speaker, instruct, language in qwen_profiles:
+        result.append(
+            VoiceProfile(
+                name=f"Offline Character • {name}",
+                provider="qwen-character",
+                voice_id=speaker,
+                model_id="auto",
+                backend="automatic",
+                language=language,
+                notes=(
+                    f"{instruct} "
+                    "Requires the local Qwen3-TTS Offline Character Voice Pack."
+                ),
+                authorized=True,
             )
+        )
 
     # Prefer Kokoro natural voices in the picker when installed; keep Piper
     # available as the lightweight fallback.
