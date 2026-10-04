@@ -580,7 +580,7 @@ class GenerationPage(QWidget):
 
         def grounded(written: str, spoken: str, confidence: float, language: str) -> bool:
             folded = written.casefold()
-            if not written or not spoken or confidence < 0.85:
+            if not written or not spoken or confidence < 0.80:
                 return False
             if folded in existing:
                 return False
