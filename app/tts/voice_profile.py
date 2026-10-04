@@ -216,7 +216,7 @@ def save_profiles(profiles: list[VoiceProfile]) -> None:
     )
 
 
-def import_reference_audio(source: Path, profile_name: str) -> Path:
+def import_reference_audio(source: Path, profile_name: str, minimum_seconds: float = 6.0) -> Path:
     voices_root().mkdir(parents=True, exist_ok=True)
     safe = "".join(c if c.isalnum() or c in " _-" else "_" for c in profile_name).strip() or "voice"
     target_dir = voices_root() / safe
@@ -251,14 +251,14 @@ def import_reference_audio(source: Path, profile_name: str) -> Path:
             duration = handle.getnframes() / max(1, handle.getframerate())
     except (OSError, wave.Error) as exc:
         raise RuntimeError(f"The reference audio could not be inspected: {exc}") from exc
-    if duration < 6.0:
+    if duration < float(minimum_seconds):
         try:
             target.unlink(missing_ok=True)
         except OSError:
             pass
         raise RuntimeError(
             f"The reference recording is only {duration:.1f} seconds long. "
-            "Premium cloning requires a clean reference of at least 6 seconds; "
+            f"Premium cloning requires a clean reference of at least {float(minimum_seconds):.0f} seconds; "
             "around 10 seconds of clear single-speaker speech is recommended."
         )
     try:
