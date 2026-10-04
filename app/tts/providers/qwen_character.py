@@ -11,7 +11,9 @@ import time
 from ..base import TTSProvider
 from ..qwen_character_runtime import (
     RUNTIME_ROOT,
+    best_clone_kind,
     best_custom_kind,
+    best_voice_design_kind,
     model_installed,
     runtime_environment,
     runtime_python,
@@ -37,11 +39,15 @@ class QwenCharacterProvider(TTSProvider):
         model_kind: str = "auto",
         reference_audio: Path | None = None,
         reference_text: str = "",
+        qwen_mode: str = "custom",
+        qwen_seed: int | None = None,
     ):
         self.voice_id = voice_id
         self.language = language or "English"
         self.instruct = instruct or ""
         self.backend = backend
+        self.qwen_mode = (qwen_mode or "custom").casefold()
+        self.qwen_seed = qwen_seed
         self.model_kind = self._resolve_kind(model_kind)
         self.reference_audio = reference_audio
         self.reference_text = reference_text
@@ -50,9 +56,14 @@ class QwenCharacterProvider(TTSProvider):
         self._stdout_thread: threading.Thread | None = None
         self._worker_log = None
 
-    @staticmethod
-    def _resolve_kind(requested: str) -> str:
+    def _resolve_kind(self, requested: str) -> str:
         requested = (requested or "auto").lower()
+        if self.qwen_mode == "design":
+            return requested if requested == "design-1.7b" else best_voice_design_kind()
+        if self.qwen_mode == "clone":
+            if requested in {"base-0.6b", "base-1.7b"}:
+                return requested
+            return best_clone_kind()
         if requested in {"custom-0.6b", "custom-1.7b"}:
             return requested
         return best_custom_kind()
@@ -69,9 +80,12 @@ class QwenCharacterProvider(TTSProvider):
                 "Download Offline Character Voices first."
             )
         if not model_installed(self.model_kind):
+            phase = {"design": "VoiceDesign", "clone": "Voice Clone (Base)"}.get(
+                self.qwen_mode, "CustomVoice"
+            )
             raise RuntimeError(
-                f"The selected offline character model ({self.model_kind}) is not installed. "
-                "Open Models and download the compatible character voice model."
+                f"The selected Qwen {phase} model ({self.model_kind}) is not installed. "
+                "Open Models and install the corresponding Qwen3-TTS phase."
             )
 
         log_path = Path.home() / "Ryu's Audiobook" / "Settings" / "qwen_character_worker.log"
@@ -82,7 +96,7 @@ class QwenCharacterProvider(TTSProvider):
             str(worker_script()),
             "--server",
             "--kind", self.model_kind,
-            "--task", "clone" if self.reference_audio else "custom",
+            "--task", self.qwen_mode,
             "--backend", self.backend,
             "--models-root", str(RUNTIME_ROOT),
         ]
@@ -152,16 +166,21 @@ class QwenCharacterProvider(TTSProvider):
             "speaker": self.voice_id,
             "language": self.language,
             "instruct": self.instruct,
+            "seed": self.qwen_seed,
+            "allow_instruct": self.model_kind == "custom-1.7b",
         }
-        if self.reference_audio:
+        if self.qwen_mode == "clone":
+            if not self.reference_audio:
+                raise RuntimeError("Qwen Base voice cloning requires a reference audio recording.")
             request["reference"] = str(self.reference_audio.resolve())
             request["ref_text"] = self.reference_text
+            request["x_vector_only_mode"] = not bool(self.reference_text.strip())
         self._worker.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
         self._worker.stdin.flush()
         response = self._read_response(timeout=300.0)
         if not response.get("ok"):
             raise RuntimeError(
-                "Offline character generation failed. "
+                "Qwen3-TTS generation failed. "
                 + str(response.get("error") or "Unknown Qwen error.")
             )
         if not output_path.exists() or output_path.stat().st_size < 1024:
