@@ -5,6 +5,8 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Build artifacts are produced and verified on every main build.
+
 permissions:
   contents: write
   actions: write
