@@ -1168,7 +1168,11 @@ class VoicePage(QWidget):
             "edge-tts": "Online Neural • Edge TTS",
             "elevenlabs": "Premium Online Natural • ElevenLabs",
             "chatterbox": "Custom Voice • Chatterbox",
-            "qwen-character": "Offline Character • Qwen3-TTS",
+            "qwen-character": {
+                "custom": "Qwen3-TTS • CustomVoice",
+                "design": "Qwen3-TTS • VoiceDesign",
+                "clone": "Qwen3-TTS • Voice Clone",
+            }.get(profile.qwen_mode or "custom", "Qwen3-TTS"),
         }
         return labels.get(profile.provider, profile.provider)
 
@@ -1182,6 +1186,14 @@ class VoicePage(QWidget):
 
     @staticmethod
     def _reference_label(profile: VoiceProfile) -> str:
+        if profile.provider == "qwen-character" and (profile.qwen_mode or "custom") == "clone":
+            if not profile.sample_path:
+                return "Missing • no Qwen reference recorded"
+            path = Path(profile.sample_path)
+            if not path.exists():
+                return f"Missing • {path.name}"
+            suffix = " • ICL transcript saved" if profile.reference_text.strip() else " • speaker embedding mode"
+            return f"✓ Local reference • {path.name}{suffix}"
         if profile.provider != "chatterbox":
             return "Not required"
         if not profile.sample_path:
@@ -1278,7 +1290,16 @@ class VoicePage(QWidget):
             self.status.setText("Select a saved profile first.")
             return
 
-        source_provider = "offline-neural" if profile.provider in {"piper", "kokoro"} else profile.provider
+        if profile.provider in {"piper", "kokoro"}:
+            source_provider = "offline-neural"
+        elif profile.provider == "qwen-character":
+            source_provider = {
+                "custom": "qwen-custom",
+                "design": "qwen-design",
+                "clone": "qwen-clone",
+            }.get(profile.qwen_mode or "custom", "qwen-custom")
+        else:
+            source_provider = profile.provider
         index = self.mode.findData(source_provider)
         if index >= 0:
             self.mode.setCurrentIndex(index)
@@ -1289,6 +1310,17 @@ class VoicePage(QWidget):
             self.sample_label.setText(f"✓ {self.sample_path.name}")
         elif profile.provider == "chatterbox":
             self.sample_label.setText("⚠ Saved reference audio is missing from this PC.")
+
+        if profile.provider == "qwen-character":
+            self.qwen_design_prompt.setPlainText(
+                (profile.qwen_prompt or profile.notes).replace("Qwen VoiceDesign • ", "")
+            )
+            if profile.qwen_seed:
+                self.qwen_design_seed.setValue(int(profile.qwen_seed))
+            self.qwen_reference_text.setText(profile.reference_text or "")
+            self.qwen_clone_authorized.setChecked(profile.authorized)
+            if self.sample_path and self.sample_path.exists():
+                self.qwen_clone_sample_label.setText(f"✓ {self.sample_path.name}")
 
         if profile.provider == "windows-sapi":
             i = self.sapi_voice.findData(profile.voice_id)
@@ -1725,12 +1757,27 @@ class VoicePage(QWidget):
             return
 
         if profile.provider == "qwen-character":
-            from app.tts.qwen_character_runtime import runtime_ready, model_installed, best_custom_kind
-            if not runtime_ready() or not model_installed(best_custom_kind()):
+            from app.tts.qwen_character_runtime import (
+                runtime_ready, model_installed,
+                best_custom_kind, best_clone_kind, best_voice_design_kind,
+            )
+            kind = (
+                best_voice_design_kind()
+                if profile.qwen_mode == "design"
+                else best_clone_kind()
+                if profile.qwen_mode == "clone"
+                else best_custom_kind()
+            )
+            if not runtime_ready() or not model_installed(kind):
+                phase = {
+                    "custom": "CustomVoice",
+                    "design": "VoiceDesign",
+                    "clone": "Voice Clone",
+                }.get(profile.qwen_mode, "Qwen3-TTS")
                 QMessageBox.warning(
                     self,
-                    "Offline Character Voices Not Ready",
-                    "Open Models → Download Offline Character Voices first."
+                    f"Qwen {phase} Not Ready",
+                    f"Open Models and install the Qwen {phase} model first."
                 )
                 return
         if profile.provider == "chatterbox" and not runtime_ready():
