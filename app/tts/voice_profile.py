@@ -217,21 +217,22 @@ def import_reference_audio(source: Path, profile_name: str) -> Path:
     original = target_dir / source.name
     shutil.copy2(source, original)
     target = target_dir / "reference.wav"
-    if source.suffix.lower() == ".wav":
-        shutil.copy2(source, target)
-    else:
-        result = subprocess.run(
-            [
-                imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-i", str(source), "-vn",
-                "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", str(target),
-            ],
-            check=False, capture_output=True, text=True,
+
+    # Always normalize the clone reference, including WAV files. This prevents
+    # stereo/48 kHz/float input differences from changing Chatterbox conditioning.
+    result = subprocess.run(
+        [
+            imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-i", str(source), "-vn",
+            "-ac", "1", "-ar", "24000", "-sample_fmt", "s16",
+            "-c:a", "pcm_s16le", str(target),
+        ],
+        check=False, capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not target.exists() or target.stat().st_size < 1024:
+        raise RuntimeError(
+            "The selected audio could not be converted to a normalized Chatterbox reference. "
+            + (result.stderr[-1600:] if result.stderr else "")
         )
-        if result.returncode != 0 or not target.exists() or target.stat().st_size < 1024:
-            raise RuntimeError(
-                "The selected audio could not be converted to a local WAV reference. "
-                + (result.stderr[-1200:] if result.stderr else "")
-            )
     # Chatterbox reference conditioning requires audio longer than five seconds.
     # Validate imported references here so the user gets a clear error before
     # the model is loaded.
@@ -240,14 +241,26 @@ def import_reference_audio(source: Path, profile_name: str) -> Path:
             duration = handle.getnframes() / max(1, handle.getframerate())
     except (OSError, wave.Error) as exc:
         raise RuntimeError(f"The reference audio could not be inspected: {exc}") from exc
-    if duration <= 5.0:
+    if duration < 6.0:
         try:
             target.unlink(missing_ok=True)
         except OSError:
             pass
         raise RuntimeError(
-            f"The reference recording is {duration:.1f} seconds long. "
-            "Chatterbox requires a reference longer than 5 seconds. "
-            "Please choose a clean voice recording of at least 6 seconds."
+            f"The reference recording is only {duration:.1f} seconds long. "
+            "Premium cloning requires a clean reference of at least 6 seconds; "
+            "around 10 seconds of clear single-speaker speech is recommended."
         )
+    try:
+        with wave.open(str(target), "rb") as handle:
+            channels = handle.getnchannels()
+            sample_rate = handle.getframerate()
+            sample_width = handle.getsampwidth()
+        if channels != 1 or sample_rate != 24000 or sample_width != 2:
+            raise RuntimeError(
+                f"Normalized reference format is {channels}ch/{sample_rate}Hz/{sample_width * 8}-bit; "
+                "expected mono 24 kHz PCM16."
+            )
+    except (OSError, wave.Error) as exc:
+        raise RuntimeError(f"The normalized reference could not be validated: {exc}") from exc
     return target
