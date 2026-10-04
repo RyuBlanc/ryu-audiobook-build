@@ -644,7 +644,7 @@ class VoicePage(QWidget):
 
     def _refresh_voice_source(self) -> None:
         mode = self.mode.currentData()
-        if mode in {"offline-neural", "offline-character"}:
+        if mode in {"offline-neural", "qwen-custom"}:
             self._refresh_offline_catalog()
         elif mode == "elevenlabs":
             self._refresh_premium_catalog()
@@ -677,6 +677,11 @@ class VoicePage(QWidget):
             self.accent_filter.setCurrentIndex(i if i >= 0 else 0)
         self.language_filter.blockSignals(False)
         self.accent_filter.blockSignals(False)
+
+    def _qwen_design_preset_changed(self) -> None:
+        value = str(self.qwen_design_preset.currentData() or "")
+        if value:
+            self.qwen_design_prompt.setPlainText(value)
 
     def _refresh_online_catalog(self) -> None:
         if self.mode.currentData() == "elevenlabs":
@@ -1006,9 +1011,9 @@ class VoicePage(QWidget):
         region = self.accent_filter.currentData() or ""
         matches = []
 
-        if self.mode.currentData() in {"offline-neural", "offline-character"}:
+        if self.mode.currentData() in {"offline-neural", "qwen-custom"}:
             for profile in self.offline_voices:
-                if self.mode.currentData() == "offline-character" and profile.provider != "qwen-character":
+                if self.mode.currentData() == "qwen-custom" and profile.provider != "qwen-character":
                     continue
                 if self.mode.currentData() == "offline-neural" and profile.provider == "qwen-character":
                     continue
@@ -1083,13 +1088,13 @@ class VoicePage(QWidget):
         voice_id = self.neural_voice.currentData()
         if not voice_id:
             return
-        if self.mode.currentData() in {"offline-neural", "offline-character"}:
+        if self.mode.currentData() in {"offline-neural", "qwen-custom"}:
             profile = next(
                 (
                     x for x in self.offline_voices
                     if x.voice_id == voice_id
                     and (
-                        (self.mode.currentData() == "offline-character" and x.provider == "qwen-character")
+                        (self.mode.currentData() == "qwen-custom" and x.provider == "qwen-character")
                         or (self.mode.currentData() == "offline-neural" and x.provider != "qwen-character")
                     )
                 ),
