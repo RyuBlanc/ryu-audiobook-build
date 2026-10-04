@@ -1461,6 +1461,34 @@ class VoicePage(QWidget):
                 f"Custom voice engine: {runtime_status()}. Install or repair it from Models before preview/generation."
             )
 
+    def select_qwen_clone_sample(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Qwen Clone Reference",
+            "",
+            "Audio (*.wav *.mp3 *.m4a *.flac *.aac *.ogg *.opus *.wma);;All files (*.*)",
+        )
+        if not path:
+            return
+        source = Path(path)
+        name = self.name.text().strip() or source.stem
+        try:
+            idx = self.mode.findData("qwen-clone")
+            if idx >= 0:
+                self.mode.setCurrentIndex(idx)
+            self.sample_path = import_reference_audio(source, name, minimum_seconds=3.0)
+            self.qwen_clone_sample_label.setText(
+                f"✓ {source.name} → {self.sample_path.name}"
+            )
+            self.name.setText(name)
+            self.qwen_clone_authorized.setChecked(False)
+            self._clear_saved_profile_selection()
+            self.status.setText(
+                "Qwen clone reference imported locally. Add the exact transcript and confirm permission before saving."
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Qwen Clone Import Failed", str(exc))
+
     def select_sample(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
