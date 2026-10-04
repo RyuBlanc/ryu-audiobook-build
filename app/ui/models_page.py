@@ -22,7 +22,14 @@ from app.tts.chatterbox_runtime import install_runtime, runtime_status
 from app.tts.model_registry import BUILTIN_CATALOG, installed_models, mark_installed
 from app.tts.providers.piper import PiperProvider
 from app.tts.providers.kokoro import KokoroProvider
-from app.tts.qwen_character_runtime import install_runtime as install_qwen_runtime, install_model as install_qwen_model, model_installed as qwen_model_installed, best_custom_kind
+from app.tts.qwen_character_runtime import (
+    install_runtime as install_qwen_runtime,
+    install_model as install_qwen_model,
+    model_installed as qwen_model_installed,
+    best_custom_kind,
+    best_clone_kind,
+    best_voice_design_kind,
+)
 from app.ai.model_runtime import brain_root, install_runtime as install_audiobook_ai, recommended_model, installed as audiobook_ai_installed, self_test as test_audiobook_ai
 
 
@@ -122,45 +129,38 @@ class QwenCharacterInstallWorker(QThread):
     failed = Signal(str)
     progress = Signal(str)
 
+    def __init__(self, selection: str):
+        super().__init__()
+        self.selection = selection
+
     def run(self) -> None:
         try:
             self.progress.emit("Installing isolated Qwen3-TTS runtime…")
             install_qwen_runtime(self.progress.emit)
-            # Keep the 0.6B model compatible with the RTX 3050 4GB target.
-            # On the RTX 4060 8GB target we also install the 1.7B CustomVoice
-            # model for higher-quality local character timbre.
-            vram_gb = 0.0
-            # Main Ryu environment intentionally does not depend on PyTorch.
-            # Detect NVIDIA VRAM through nvidia-smi when available so the
-            # installer can choose 1.7B on the 8GB RTX 4060 and 0.6B on the
-            # 4GB RTX 3050.
-            try:
-                result = subprocess.run(
-                    [
-                        "nvidia-smi",
-                        "--query-gpu=memory.total",
-                        "--format=csv,noheader,nounits",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
-                if result.returncode == 0:
-                    values = [
-                        float(line.strip())
-                        for line in result.stdout.splitlines()
-                        if line.strip().replace(".", "", 1).isdigit()
-                    ]
-                    if values:
-                        vram_gb = max(values) / 1024.0
-            except Exception:
-                pass
-            kind = "custom-1.7b" if vram_gb >= 7.0 else "custom-0.6b"
-            self.progress.emit(
-                f"Preparing offline character voices using {'1.7B' if kind.endswith('1.7b') else '0.6B'} Qwen3-TTS…"
+
+            choices = {
+                "CustomVoice": [best_custom_kind()],
+                "VoiceDesign": [best_voice_design_kind()],
+                "Voice Clone": [best_clone_kind()],
+            }
+            if self.selection == "Full Qwen Voice Studio":
+                targets = []
+                for kind in [
+                    best_custom_kind(),
+                    best_voice_design_kind(),
+                    best_clone_kind(),
+                ]:
+                    if kind not in targets:
+                        targets.append(kind)
+            else:
+                targets = choices[self.selection]
+
+            for kind in targets:
+                self.progress.emit(f"Preparing Qwen3-TTS {self.selection} model: {kind}…")
+                install_qwen_model(kind, self.progress.emit)
+            self.finished_ok.emit(
+                f"{self.selection}|{','.join(targets)}"
             )
-            install_qwen_model(kind, self.progress.emit)
-            self.finished_ok.emit(kind)
         except Exception as exc:
             self.failed.emit(str(exc))
 
@@ -218,7 +218,7 @@ class ModelsPage(QWidget):
         self.install_kokoro = QPushButton("Download Natural Voices")
         self.install_piper = QPushButton("Download Piper Voice")
         self.install_chatterbox = QPushButton("Install / Repair Custom Voice Engine")
-        self.install_qwen_character = QPushButton("Download Offline Character Voices")
+        self.install_qwen_character = QPushButton("Install Qwen Voice Studio")
         self.install_audiobook_ai = QPushButton("Install Audiobook AI")
         self.refresh_button = QPushButton("Refresh")
         row.addWidget(self.install_kokoro)
@@ -255,11 +255,17 @@ class ModelsPage(QWidget):
         self.list.addItem(f"Custom voice runtime: {runtime_status()}")
         qwen_status = []
         if qwen_model_installed("custom-1.7b"):
-            qwen_status.append("1.7B")
-        if qwen_model_installed("custom-0.6b"):
-            qwen_status.append("0.6B")
+            qwen_status.append("CustomVoice 1.7B")
+        elif qwen_model_installed("custom-0.6b"):
+            qwen_status.append("CustomVoice 0.6B")
+        if qwen_model_installed("design-1.7b"):
+            qwen_status.append("VoiceDesign 1.7B")
+        if qwen_model_installed("base-1.7b"):
+            qwen_status.append("Clone Base 1.7B")
+        elif qwen_model_installed("base-0.6b"):
+            qwen_status.append("Clone Base 0.6B")
         self.list.addItem(
-            "Offline character voices: " + (", ".join(qwen_status) if qwen_status else "Not installed")
+            "Qwen3-TTS Voice Studio: " + (", ".join(qwen_status) if qwen_status else "Not installed")
         )
 
         model_id, filename, size = recommended_model()
@@ -339,29 +345,38 @@ class ModelsPage(QWidget):
         QMessageBox.warning(self, "Piper Download Failed", message)
 
     def install_qwen_character_runtime(self) -> None:
-        answer = QMessageBox.question(
+        choices = [
+            "CustomVoice",
+            "VoiceDesign",
+            "Voice Clone",
+            "Full Qwen Voice Studio",
+        ]
+        selection, ok = QInputDialog.getItem(
             self,
-            "Download Offline Character Voices",
-            "Ryu's Audiobook will install the Qwen3-TTS offline character engine and a "
-            "compatible local voice model. No API key is required and generation remains "
-            "on this PC after installation. The model download may be several GB. Continue?",
+            "Install Qwen Voice Studio",
+            "Choose the Qwen3-TTS phase to install:",
+            choices,
+            0,
+            False,
         )
-        if answer != QMessageBox.StandardButton.Yes:
+        if not ok:
             return
         self.install_qwen_character.setEnabled(False)
-        self.status.setText("Preparing offline character voices…")
-        self.qwen_character_worker = QwenCharacterInstallWorker()
+        self.status.setText(f"Preparing Qwen {selection}…")
+        self.qwen_character_worker = QwenCharacterInstallWorker(selection)
         self.qwen_character_worker.finished_ok.connect(self._qwen_character_ok)
         self.qwen_character_worker.failed.connect(self._qwen_character_failed)
         self.qwen_character_worker.progress.connect(self.status.setText)
         self.qwen_character_worker.start()
 
-    def _qwen_character_ok(self, kind: str) -> None:
+    def _qwen_character_ok(self, detail: str) -> None:
         self.install_qwen_character.setEnabled(True)
-        label = "1.7B premium" if kind.endswith("1.7b") else "0.6B compatible"
+        parts = detail.split("|", 1)
+        selection = parts[0]
+        models = parts[1] if len(parts) > 1 else ""
         self.status.setText(
-            f"Offline character voices installed • {label} Qwen3-TTS model. "
-            "Return to Voice & Narration and select an Offline Character voice."
+            f"Qwen {selection} installed • {models}. "
+            "Return to Voice & Narration to preview the selected phase."
         )
         self.refresh()
 
