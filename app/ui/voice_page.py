@@ -25,6 +25,7 @@ class PassiveScrollComboBox(QComboBox):
 
 from app.tts.profile_provider import provider_from_profile
 from app.tts.chatterbox_runtime import runtime_ready, runtime_status
+from app.tts.qwen_character_runtime import runtime_ready as qwen_runtime_ready, model_installed as qwen_model_installed, best_custom_kind
 from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.voice_profile import (
     VoiceProfile, builtin_voice_profiles, import_reference_audio,
@@ -195,6 +196,15 @@ class VoicePage(QWidget):
         self.source_hint.setWordWrap(True)
         source_layout.addWidget(self.source_hint)
 
+        self.install_character_voices_button = QPushButton('Install / Repair Offline Character Voice Pack')
+        self.install_character_voices_button.clicked.connect(self.open_offline_character_models)
+        self.install_character_voices_button.setVisible(False)
+        source_layout.addWidget(self.install_character_voices_button)
+        self.offline_character_status = QLabel()
+        self.offline_character_status.setObjectName('muted')
+        self.offline_character_status.setWordWrap(True)
+        source_layout.addWidget(self.offline_character_status)
+
         premium_row = QHBoxLayout()
         self.premium_key_button = QPushButton("Set Premium API Key")
         self.premium_key_button.clicked.connect(self._set_premium_api_key)
@@ -208,6 +218,9 @@ class VoicePage(QWidget):
         premium_row.addWidget(self.premium_key_help_button)
         premium_row.addWidget(self.premium_key_status, 1)
         source_layout.addLayout(premium_row)
+        self.premium_key_button.setVisible(False)
+        self.premium_key_help_button.setVisible(False)
+        self.premium_key_status.setVisible(False)
 
         self.character_box = QGroupBox("Premium Character Voice Studio")
         character = QVBoxLayout(self.character_box)
@@ -331,7 +344,7 @@ class VoicePage(QWidget):
         self.neural_voice.currentIndexChanged.connect(self._neural_voice_changed)
         voice_row.addWidget(self.neural_voice, 1)
         self.refresh_neural = QPushButton("Refresh")
-        self.refresh_neural.clicked.connect(self._refresh_online_catalog)
+        self.refresh_neural.clicked.connect(self._refresh_voice_source)
         voice_row.addWidget(self.refresh_neural)
         self.neural_count = QLabel("")
         self.neural_count.setObjectName("muted")
@@ -520,14 +533,9 @@ class VoicePage(QWidget):
                 return "Male"
             return "Neutral"
         if profile.provider == "qwen-character":
-            name = profile.name.casefold()
-            if any(token in name for token in ("heroine", "healer", "chibi", "friend")):
+            if voice_id in {"Vivian", "Serena", "Ono_Anna", "Sohee"}:
                 return "Female"
-            if any(token in name for token in ("hero", "rival", "villain", "sidekick")):
-                return "Male"
-            if "serena" in voice_id or "vivian" in voice_id:
-                return "Female"
-            if any(name in voice_id for name in ("ryan", "aiden", "uncle_fu")):
+            if voice_id in {"Ryan", "Aiden", "Uncle_Fu", "Dylan", "Eric"}:
                 return "Male"
         if "amy" in voice_id:
             return "Female"
@@ -554,6 +562,15 @@ class VoicePage(QWidget):
         self.offline_voices = builtin_voice_profiles()
         self._set_filter_values(self.offline_voices)
         self._refresh_voice_list()
+
+    def _refresh_voice_source(self) -> None:
+        mode = self.mode.currentData()
+        if mode in {"offline-neural", "offline-character"}:
+            self._refresh_offline_catalog()
+        elif mode == "elevenlabs":
+            self._refresh_premium_catalog()
+        elif mode == "edge-tts":
+            self._refresh_online_catalog()
 
     def _set_filter_values(self, profiles: list[VoiceProfile]) -> None:
         current_lang = self.language_filter.currentData()
@@ -1193,7 +1210,7 @@ class VoicePage(QWidget):
             i = self.sapi_voice.findData(profile.voice_id)
             if i >= 0:
                 self.sapi_voice.setCurrentIndex(i)
-        elif profile.provider in {"piper", "kokoro", "edge-tts"}:
+        elif profile.provider in {"piper", "kokoro", "qwen-character", "edge-tts"}:
             self._refresh_voice_list()
             i = self.neural_voice.findData(profile.voice_id)
             if i >= 0:
@@ -1221,6 +1238,18 @@ class VoicePage(QWidget):
         self.refresh_profiles()
         self.status.setText(f"Deleted voice profile: {name}")
 
+    def open_offline_character_models(self) -> None:
+        window = self.window()
+        if hasattr(window, "select_section"):
+            window.select_section("Models")
+            self.status.setText(
+                "Models opened. Click Download Offline Character Voices to install the local Qwen3-TTS character pack."
+            )
+        else:
+            self.status.setText(
+                "Open Models → Download Offline Character Voices to install the local Qwen3-TTS character pack."
+            )
+
     def open_custom_engine_installer(self) -> None:
         window = self.window()
         if hasattr(window, "select_section"):
@@ -1236,9 +1265,14 @@ class VoicePage(QWidget):
     def update_mode(self) -> None:
         mode = self.mode.currentData()
         if hasattr(self, "premium_key_button"):
-            self.premium_key_button.setVisible(mode == "elevenlabs")
+            visible = mode == "elevenlabs"
+            self.premium_key_button.setVisible(visible)
+            self.premium_key_help_button.setVisible(visible)
+            self.premium_key_status.setVisible(visible)
         if hasattr(self, "character_box"):
             self.character_box.setVisible(mode == "elevenlabs")
+        if hasattr(self, "install_character_voices_button"):
+            self.install_character_voices_button.setVisible(mode == "offline-character")
         self.neural_box.setVisible(mode in {"offline-neural", "offline-character", "edge-tts", "elevenlabs"})
         self.sapi_box.setVisible(mode == "windows-sapi")
         self.custom_box.setVisible(mode == "chatterbox")
@@ -1254,16 +1288,34 @@ class VoicePage(QWidget):
             ])
             self._refresh_voice_list()
         elif mode == "offline-character":
-            self.source_hint.setText(
-                "Premium local English character voices powered by Qwen3-TTS. "
-                "No API key or internet connection is required after the model is downloaded."
-            )
             self._refresh_offline_catalog()
             self._set_filter_values([
                 profile for profile in self.offline_voices
                 if profile.provider == "qwen-character"
             ])
             self._refresh_voice_list()
+            ready = qwen_runtime_ready()
+            installed = qwen_model_installed(best_custom_kind())
+            if ready and installed:
+                self.source_hint.setText(
+                    "Premium local character voices powered by Qwen3-TTS. "
+                    "No API key or cloud TTS service is used."
+                )
+                self.offline_character_status.setText(
+                    "Character voice pack is installed and ready. English-native Ryan/Aiden voices are "
+                    "the best fit for English anime-style narration."
+                )
+                self.install_character_voices_button.setText("Repair / Reinstall Offline Character Voice Pack")
+            else:
+                self.source_hint.setText(
+                    "Qwen3-TTS character voices are listed here before installation. "
+                    "Install the local voice pack once; after that, preview and audiobook generation remain offline."
+                )
+                self.offline_character_status.setText(
+                    "Model not installed yet. Click the button to open Models and download the compatible "
+                    "0.6B/1.7B character voice pack for this PC."
+                )
+                self.install_character_voices_button.setText("Install Offline Character Voice Pack")
         elif mode == "edge-tts":
             self.source_hint.setText(
                 "Microsoft Edge online neural catalog. Internet is required for synthesis."
