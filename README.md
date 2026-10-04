@@ -33,3 +33,8 @@ Books, generated audio, voice samples, and project data are intended to remain o
 ## Repository
 
 This repository contains source code and build configuration. User books, generated audiobooks, voice samples, model files, and other large/local data must not be committed to Git.
+
+
+## Current Test Build
+
+Voice library now exposes the offline Qwen character catalogue before installation, with hardware-aware 0.6B/1.7B selection and pronunciation audio testing.
