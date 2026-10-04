@@ -33,6 +33,7 @@ MODEL_IDS = {
     "custom-1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
     "design-1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
     "base-0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
+    "base-1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
 }
 MODEL_DIRS = {key: RUNTIME_ROOT / key for key in MODEL_IDS}
 TOKENIZER_ID = "Qwen/Qwen3-TTS-Tokenizer-12Hz"
@@ -326,10 +327,9 @@ def _detected_vram_gb() -> float:
 
 
 def best_custom_kind(vram_gb: float | None = None) -> str:
-    # Qwen 1.7B is the quality path for 8GB-class GPUs; 0.6B is the
-    # compatibility path for 4GB-class GPUs. Detect VRAM automatically when
-    # the caller does not provide it so Voice Cast and generation make the
-    # same hardware-aware choice as the Models installer.
+    # Qwen 1.7B CustomVoice is the quality path for 8GB-class GPUs; 0.6B is
+    # the compatibility path for 4GB-class GPUs. Detect VRAM automatically
+    # when the caller does not provide it.
     if vram_gb is None:
         vram_gb = _detected_vram_gb()
     if vram_gb >= 7.0 and model_installed("custom-1.7b"):
@@ -339,6 +339,25 @@ def best_custom_kind(vram_gb: float | None = None) -> str:
     if model_installed("custom-1.7b"):
         return "custom-1.7b"
     return "custom-0.6b"
+
+
+def best_clone_kind(vram_gb: float | None = None) -> str:
+    # Voice cloning uses Qwen Base, not CustomVoice. The 1.7B Base model is
+    # the higher-quality path for 8GB-class GPUs; 0.6B is the lighter option.
+    if vram_gb is None:
+        vram_gb = _detected_vram_gb()
+    if vram_gb >= 7.0 and model_installed("base-1.7b"):
+        return "base-1.7b"
+    if model_installed("base-0.6b"):
+        return "base-0.6b"
+    if model_installed("base-1.7b"):
+        return "base-1.7b"
+    return "base-0.6b"
+
+
+def best_voice_design_kind() -> str:
+    # Qwen's official VoiceDesign API is provided by the 1.7B VoiceDesign model.
+    return "design-1.7b"
 
 
 def _run(command: list[str], progress=None, timeout: int = 3600) -> None:
