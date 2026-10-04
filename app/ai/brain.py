@@ -171,6 +171,8 @@ For every pronunciation candidate return:
 - prioritize character names, aliases, place names, invented terms, and genuinely non-obvious foreign words
 - do not spend pronunciation slots on ordinary English words; return as many useful high-confidence entries as the schema allows
 - alternatives: up to 2 plausible alternatives if ambiguity exists
+- prioritize character names, aliases, places, invented terms, and genuinely non-obvious foreign words
+- never spend pronunciation slots on ordinary English vocabulary
 
 When the same name appears with different spellings, treat them as aliases and keep one canonical pronunciation entry.
 
