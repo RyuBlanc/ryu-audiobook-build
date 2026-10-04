@@ -98,7 +98,6 @@ class RegressionTests(unittest.TestCase):
     def test_pronunciation_dictionary_has_audio_test_controls(self):
         source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
         self.assertIn("Test Selected", source)
-        self.assertIn("pronunciation_preview_playback_state_changed", source) if False else None
         self.assertIn("PronunciationPreviewWorker", source)
         self.assertIn("pronunciation_preview_status", source)
         self.assertIn("current voice", source)
