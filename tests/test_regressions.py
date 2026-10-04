@@ -13,11 +13,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from app.audio.assembler import assemble_m4b
+from app.audio.assembler import assemble_m4b, _probe_audio_bitrate_kbps, DEFAULT_AUDIO_BITRATE_KBPS
 from app.chapters.characters import analyze_book, _all_dialogue_spans
 from app.chapters.dialogue import dialogue_segment_for_selection
 from app.chapters.detector import Chapter, detect_chapters
-from app.tts.voice_profile import VoiceProfile, save_profiles, load_profiles
+from app.tts.voice_profile import VoiceProfile, save_profiles, load_profiles, import_reference_audio
 from app.tts.narration import prepare_for_narration
 from app.tts.pacing import append_silence, pause_after_ms, split_for_pacing
 from app.tts.preview import build_voice_preview
@@ -152,7 +152,56 @@ class RegressionTests(unittest.TestCase):
             self.assertGreater(output.stat().st_size, 1024)
             self.assertTrue(any(message == "chapter-audio" for _, _, message in progress))
             self.assertTrue(any(message == "joined-audio" for _, _, message in progress))
+            self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
+            self.assertEqual(DEFAULT_AUDIO_BITRATE_KBPS, 256)
 
+    def test_audio_bitrate_range_is_enforced(self):
+        from app.audio.assembler import normalize_audio_bitrate
+        self.assertEqual(normalize_audio_bitrate(None), "256k")
+        self.assertEqual(normalize_audio_bitrate(128), "128k")
+        self.assertEqual(normalize_audio_bitrate("320 kbps"), "320k")
+        with self.assertRaises(ValueError):
+            normalize_audio_bitrate(127)
+        with self.assertRaises(ValueError):
+            normalize_audio_bitrate(321)
+
+    def test_generation_page_exposes_premium_bitrate_selector(self):
+        source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        self.assertIn("256 kbps", source)
+        self.assertIn("320", source)
+        self.assertIn("audio_bitrate", source)
+
+    def test_custom_reference_audio_is_normalized_for_cloning(self):
+        with tempfile.TemporaryDirectory() as temp:
+            import app.tts.voice_profile as vp
+            root = Path(temp) / "Voices"
+            source = Path(temp) / "stereo-8000.wav"
+            rate = 8000
+            frames = rate * 7
+            with wave.open(str(source), "wb") as wav:
+                wav.setnchannels(2)
+                wav.setsampwidth(2)
+                wav.setframerate(rate)
+                wav.writeframes(b"\x01\x00\x01\x00" * frames)
+
+            original_root = vp.voices_root
+            vp.voices_root = lambda: root
+            try:
+                target = import_reference_audio(source, "Premium Test Voice")
+                with wave.open(str(target), "rb") as handle:
+                    self.assertEqual(handle.getnchannels(), 1)
+                    self.assertEqual(handle.getframerate(), 24000)
+                    self.assertEqual(handle.getsampwidth(), 2)
+                    self.assertGreaterEqual(handle.getnframes() / handle.getframerate(), 6.0)
+            finally:
+                vp.voices_root = original_root
+
+    def test_custom_voice_runtime_uses_pinned_perth_without_git_requirement(self):
+        requirements = Path("requirements-voice-cloning.txt").read_text(encoding="utf-8")
+        runtime = Path("app/tts/chatterbox_runtime.py").read_text(encoding="utf-8")
+        self.assertNotIn("git+https://", requirements)
+        self.assertIn("PERTH_SOURCE_REVISION", runtime)
+        self.assertIn("perth_revision", runtime)
 
     def test_generation_page_preview_uses_background_worker(self):
         from PySide6.QtCore import QThread
@@ -385,6 +434,25 @@ Page 12
         self.assertEqual(suggest_pronunciation("Hyoudou Issei"), "Hee-doh Is-say")
         self.assertEqual(suggest_pronunciation("Ise"), "Ee-say")
         self.assertEqual(suggest_pronunciation("Rias"), "Ree-ahs")
+
+    def test_pronunciation_filter_rejects_more_everyday_english(self):
+        for word in ("actually", "already", "please", "probably", "everyone", "something", "yesterday"):
+            self.assertTrue(is_common_english_phrase(word), word)
+
+    def test_ai_pronunciation_keeps_model_spoken_form(self):
+        from app.ai.brain import _normalise_pronunciation
+        result = _normalise_pronunciation(
+            {
+                "written": "Hyeon-woo",
+                "spoken": "hyun-woo",
+                "ipa": "/hjʌn.u/",
+                "source_language": "Korean",
+                "confidence": 0.97,
+            },
+            "Hyeon-woo met the others.",
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result["spoken"], "hyun-woo")
 
     def test_pronunciation_suggester_ignores_common_english_words(self):
         text = """But she looked at Her friend.
