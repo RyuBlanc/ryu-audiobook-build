@@ -495,6 +495,7 @@ class VoicePage(QWidget):
         self.library_filter.addItem("Windows", "windows-sapi")
         self.library_filter.addItem("Online", "edge-tts")
         self.library_filter.addItem("Premium Online", "elevenlabs")
+        self.library_filter.addItem("Qwen3-TTS", "qwen3-tts")
         self.library_filter.currentIndexChanged.connect(self.refresh_profiles)
         library_filters.addWidget(QLabel("Library"))
         library_filters.addWidget(self.library_filter)
@@ -612,9 +613,9 @@ class VoicePage(QWidget):
                 return "Male"
             return "Neutral"
         if profile.provider == "qwen-character":
-            if voice_id in {"Vivian", "Serena", "Ono_Anna", "Sohee"}:
+            if voice_id in {"vivian", "serena", "ono_anna", "sohee"}:
                 return "Female"
-            if voice_id in {"Ryan", "Aiden", "Uncle_Fu", "Dylan", "Eric"}:
+            if voice_id in {"ryan", "aiden", "uncle_fu", "dylan", "eric"}:
                 return "Male"
         if "amy" in voice_id:
             return "Female"
@@ -1181,7 +1182,7 @@ class VoicePage(QWidget):
         if profile.provider in {"piper", "kokoro"}:
             return "builtin"
         if profile.provider == "qwen-character":
-            return "offline-character"
+            return "qwen3-tts"
         return profile.provider
 
     @staticmethod
@@ -1359,11 +1360,11 @@ class VoicePage(QWidget):
         if hasattr(window, "select_section"):
             window.select_section("Models")
             self.status.setText(
-                "Models opened. Click Download Offline Character Voices to install the local Qwen3-TTS character pack."
+                "Models opened. Choose the Qwen3-TTS phase to install: CustomVoice, VoiceDesign, Voice Clone, or Full Voice Studio."
             )
         else:
             self.status.setText(
-                "Open Models → Download Offline Character Voices to install the local Qwen3-TTS character pack."
+                "Open Models → Install Qwen Voice Studio and choose the Qwen3-TTS phase you need."
             )
 
     def open_custom_engine_installer(self) -> None:
