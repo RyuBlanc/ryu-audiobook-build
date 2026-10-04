@@ -26,6 +26,12 @@ class VoiceProfile:
     exaggeration: float = 0.5
     cfg_weight: float = 0.35
     style_preset: str = "Natural"
+    # Qwen3-TTS phase/profile metadata. These fields are optional so older
+    # voice profiles continue to load without migration.
+    qwen_mode: str = "custom"
+    qwen_prompt: str = ""
+    qwen_seed: int | None = None
+    reference_text: str = ""
 
 
 def profiles_file() -> Path:
