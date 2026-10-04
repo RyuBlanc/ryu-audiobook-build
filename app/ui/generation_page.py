@@ -98,6 +98,41 @@ class VoicePreviewWorker(QThread):
                     pass
             self._provider = None
 
+class PronunciationPreviewWorker(QThread):
+    """Generate a short audio sample of one pronunciation override using the active voice."""
+    finished_ok = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, profile, backend, text, output):
+        super().__init__()
+        self.profile = profile
+        self.backend = backend
+        self.text = text
+        self.output = output
+        self._provider = None
+
+    def run(self) -> None:
+        try:
+            self._provider, voice = provider_from_profile(self.profile)
+            if hasattr(self._provider, "backend"):
+                self._provider.backend = self.backend
+            self.output.parent.mkdir(parents=True, exist_ok=True)
+            self._provider.synthesize(self.text, self.output, voice)
+            if not self.output.exists() or self.output.stat().st_size < 1024:
+                raise RuntimeError("The voice engine did not produce valid pronunciation audio.")
+            self.finished_ok.emit(str(self.output))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+        finally:
+            close = getattr(self._provider, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+            self._provider = None
+
+
 class GenerationSignals(QObject):
     progress = Signal(int, int, int, str)
     finished = Signal(object)
@@ -133,6 +168,13 @@ class GenerationPage(QWidget):
         self.preview_player.durationChanged.connect(self._preview_duration)
         self.preview_player.playbackStateChanged.connect(self._preview_state_changed)
         self.preview_path: Path | None = None
+        self.pronunciation_preview_worker: PronunciationPreviewWorker | None = None
+        self.pronunciation_preview_path: Path | None = None
+        self.pronunciation_player = QMediaPlayer(self)
+        self.pronunciation_audio_output = QAudioOutput(self)
+        self.pronunciation_audio_output.setVolume(0.85)
+        self.pronunciation_player.setAudioOutput(self.pronunciation_audio_output)
+        self.pronunciation_player.playbackStateChanged.connect(self._pronunciation_playback_state_changed)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(12, 10, 12, 10)
@@ -217,6 +259,25 @@ class GenerationPage(QWidget):
         self.pronunciation_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.pronunciation_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         pronunciation_layout.addWidget(self.pronunciation_table)
+
+        pronunciation_preview_row = QHBoxLayout()
+        pronunciation_preview_row.addWidget(QLabel("Test with current voice"))
+        self.pronunciation_preview_test = QPushButton("▶ Test Selected")
+        self.pronunciation_preview_test.clicked.connect(self._test_selected_pronunciation)
+        self.pronunciation_preview_play = QPushButton("▶ Play")
+        self.pronunciation_preview_play.setEnabled(False)
+        self.pronunciation_preview_play.clicked.connect(self._play_pronunciation_preview)
+        self.pronunciation_preview_stop = QPushButton("■ Stop")
+        self.pronunciation_preview_stop.setEnabled(False)
+        self.pronunciation_preview_stop.clicked.connect(self._stop_pronunciation_preview)
+        self.pronunciation_preview_status = QLabel("Select a row to hear exactly how its 'Pronounce as' text sounds.")
+        self.pronunciation_preview_status.setObjectName("muted")
+        self.pronunciation_preview_status.setWordWrap(True)
+        pronunciation_preview_row.addWidget(self.pronunciation_preview_test)
+        pronunciation_preview_row.addWidget(self.pronunciation_preview_play)
+        pronunciation_preview_row.addWidget(self.pronunciation_preview_stop)
+        pronunciation_preview_row.addWidget(self.pronunciation_preview_status, 1)
+        pronunciation_layout.addLayout(pronunciation_preview_row)
 
         pronunciation_actions = QHBoxLayout()
         self.add_pronunciation = QPushButton("+ Add Pronunciation")
@@ -593,6 +654,20 @@ class GenerationPage(QWidget):
             # when they are also a confirmed character name.
             if is_common_english_phrase(written) and folded not in character_names:
                 return False
+
+            # For English/unknown-language suggestions, require stronger evidence:
+            # a confirmed character/alias name. This prevents common and ordinary
+            # English vocabulary from filling the pronunciation dictionary.
+            normalized_language = language.casefold().replace("_", "-")
+            english_like = normalized_language in {
+                "", "unknown", "english", "en", "en-us", "en-gb", "en-in"
+            }
+            if (
+                english_like
+                and folded not in character_names
+                and script.casefold() in {"", "unknown", "latin", "roman", "english"}
+            ):
+                return False
             return True
 
         added = 0
@@ -797,6 +872,94 @@ class GenerationPage(QWidget):
         state["pronunciation_dictionary_version"] = 2
         save_state(self.project_folder, state)
         self.pronunciation_status.setText(f"{len(entries)} pronunciation override{'s' if len(entries) != 1 else ''} saved for this book." if entries else "No pronunciation overrides saved for this book.")
+    def _test_selected_pronunciation(self) -> None:
+        row = self.pronunciation_table.currentRow()
+        if row < 0:
+            self.pronunciation_preview_status.setText("Select a pronunciation row first.")
+            return
+        written_item = self.pronunciation_table.item(row, 0)
+        spoken_item = self.pronunciation_table.item(row, 1)
+        written = written_item.text().strip() if written_item else ""
+        spoken = spoken_item.text().strip() if spoken_item else ""
+        if not written or not spoken:
+            self.pronunciation_preview_status.setText("The selected row needs both Written and Pronounce as text.")
+            return
+
+        profile = self._selected_profile()
+        if not profile:
+            self.pronunciation_preview_status.setText(
+                "Select a Voice in Audio settings below the pronunciation dictionary first."
+            )
+            return
+        if self.pronunciation_preview_worker and self.pronunciation_preview_worker.isRunning():
+            return
+
+        backend = self.backend.currentData() or profile.backend or "automatic"
+        if backend == "automatic":
+            backend = profile.backend or "automatic"
+        output = Path(tempfile.gettempdir()) / "ryu_pronunciation_preview.wav"
+        self.pronunciation_preview_test.setEnabled(False)
+        self.pronunciation_preview_play.setEnabled(False)
+        self.pronunciation_preview_stop.setEnabled(True)
+        self.pronunciation_preview_status.setText(
+            f"Generating '{spoken}' with {profile.name}…"
+        )
+        self.pronunciation_preview_worker = PronunciationPreviewWorker(
+            profile, backend, spoken, output
+        )
+        self.pronunciation_preview_worker.finished_ok.connect(self._pronunciation_preview_ok)
+        self.pronunciation_preview_worker.failed.connect(self._pronunciation_preview_failed)
+        self.pronunciation_preview_worker.finished.connect(self._pronunciation_preview_finished)
+        self.pronunciation_preview_worker.start()
+
+    def _pronunciation_preview_ok(self, path: str) -> None:
+        self.pronunciation_preview_path = Path(path)
+        self.pronunciation_player.stop()
+        self.pronunciation_player.setSource(QUrl.fromLocalFile(path))
+        self.pronunciation_preview_play.setEnabled(True)
+        self.pronunciation_preview_stop.setEnabled(True)
+        self.pronunciation_preview_play.setText("▶ Play")
+        self.pronunciation_preview_status.setText("Pronunciation preview ready.")
+
+    def _pronunciation_preview_failed(self, message: str) -> None:
+        self.pronunciation_preview_path = None
+        self.pronunciation_preview_play.setEnabled(False)
+        self.pronunciation_preview_stop.setEnabled(False)
+        self.pronunciation_preview_status.setText(f"Pronunciation preview failed: {message}")
+
+    def _pronunciation_preview_finished(self) -> None:
+        self.pronunciation_preview_test.setEnabled(True)
+        self.pronunciation_preview_worker = None
+
+    def _play_pronunciation_preview(self) -> None:
+        path = self.pronunciation_preview_path
+        if not path or not path.exists():
+            self.pronunciation_preview_status.setText("Generate a pronunciation preview first.")
+            return
+        if self.pronunciation_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.pronunciation_player.pause()
+        else:
+            self.pronunciation_player.play()
+
+    def _stop_pronunciation_preview(self) -> None:
+        self.pronunciation_player.stop()
+        self.pronunciation_preview_stop.setEnabled(False)
+        worker = self.pronunciation_preview_worker
+        if worker is not None and worker.isRunning():
+            worker.requestInterruption()
+        self.pronunciation_preview_status.setText("Pronunciation preview stopped.")
+
+    def _pronunciation_playback_state_changed(self, state) -> None:
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.pronunciation_preview_play.setText("Ⅱ Pause")
+            self.pronunciation_preview_stop.setEnabled(True)
+        elif state == QMediaPlayer.PlaybackState.PausedState:
+            self.pronunciation_preview_play.setText("▶ Resume")
+            self.pronunciation_preview_stop.setEnabled(True)
+        else:
+            self.pronunciation_preview_play.setText("▶ Play")
+            self.pronunciation_preview_stop.setEnabled(bool(self.pronunciation_preview_path))
+
     def _load_voice_cast_summary(self):
         if not self.project_folder:
             return
