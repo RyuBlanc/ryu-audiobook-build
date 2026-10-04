@@ -276,7 +276,7 @@ jobs:
             installer/installer-output/Ryu's Audiobook Setup.exe
             dist/Ryu's Audiobook/Ryu's Audiobook.exe
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 3
 
       - name: Publish verified installer release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
