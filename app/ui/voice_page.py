@@ -1549,25 +1549,90 @@ class VoicePage(QWidget):
         provider = self.mode.currentData()
         name = self.name.text().strip()
 
-        if provider in {"offline-neural", "offline-character"}:
+        if provider == "qwen-custom":
             voice_id = self.neural_voice.currentData()
             profile = next(
                 (
                     x for x in self.offline_voices
-                    if x.voice_id == voice_id
-                    and (
-                        (provider == "offline-character" and x.provider == "qwen-character")
-                        or (provider == "offline-neural" and x.provider != "qwen-character")
-                    )
+                    if x.provider == "qwen-character"
+                    and x.voice_id == voice_id
+                    and (x.qwen_mode or "custom") == "custom"
                 ),
                 None,
             )
             if not profile:
-                self.status.setText(
-                    "Select an offline character voice first."
-                    if provider == "offline-character"
-                    else "Select an offline neural voice first."
-                )
+                self.status.setText("Select a Qwen CustomVoice speaker first.")
+                return None
+            return VoiceProfile(
+                name=name or profile.name,
+                provider="qwen-character",
+                voice_id=profile.voice_id,
+                model_id=profile.model_id,
+                backend="automatic",
+                language=profile.language,
+                notes=profile.notes,
+                authorized=True,
+                qwen_mode="custom",
+                qwen_prompt=profile.qwen_prompt or profile.notes,
+            )
+
+        if provider == "qwen-design":
+            prompt = self.qwen_design_prompt.toPlainText().strip()
+            if not prompt:
+                self.status.setText("Describe the Qwen VoiceDesign voice first.")
+                return None
+            design_name = name or "Qwen VoiceDesign Voice"
+            safe_id = "".join(
+                c.lower() if c.isalnum() else "-"
+                for c in design_name
+            ).strip("-")[:50]
+            seed = int(self.qwen_design_seed.value())
+            return VoiceProfile(
+                name=design_name,
+                provider="qwen-character",
+                voice_id=f"design-{safe_id or 'voice'}",
+                model_id="design-1.7b",
+                backend="automatic",
+                language=self.qwen_design_language.currentText(),
+                notes=f"Qwen VoiceDesign • {prompt}",
+                authorized=True,
+                qwen_mode="design",
+                qwen_prompt=prompt,
+                qwen_seed=seed if seed > 0 else None,
+            )
+
+        if provider == "qwen-clone":
+            if not self.sample_path or not self.sample_path.exists():
+                self.status.setText("Choose an authorized Qwen clone reference first.")
+                return None
+            if not self.qwen_clone_authorized.isChecked():
+                self.status.setText("Confirm that you have permission to use this voice reference.")
+                return None
+            clone_name = name or self.sample_path.stem
+            return VoiceProfile(
+                name=clone_name,
+                provider="qwen-character",
+                voice_id=self.sample_path.stem,
+                sample_path=str(self.sample_path),
+                model_id="auto",
+                backend="automatic",
+                language="English",
+                authorized=True,
+                qwen_mode="clone",
+                reference_text=self.qwen_reference_text.text().strip(),
+            )
+
+        if provider == "offline-neural":
+            voice_id = self.neural_voice.currentData()
+            profile = next(
+                (
+                    x for x in self.offline_voices
+                    if x.voice_id == voice_id and x.provider != "qwen-character"
+                ),
+                None,
+            )
+            if not profile:
+                self.status.setText("Select an offline neural voice first.")
                 return None
             return VoiceProfile(
                 name=name or profile.name,
@@ -1629,18 +1694,12 @@ class VoicePage(QWidget):
             )
 
         if not self.sample_path or not self.sample_path.exists():
-            self.status.setText(
-                "Choose a reference audio file first, or load a custom profile with a valid local reference."
-            )
+            self.status.setText("Choose a reference audio file first, or load a custom profile with a valid local reference.")
             return None
         if not self.authorized.isChecked():
-            self.status.setText(
-                "Confirm that you have permission to use this voice."
-            )
+            self.status.setText("Confirm that you have permission to use this voice.")
             return None
         custom_name = name or self.sample_path.stem
-        if custom_name.startswith("Offline Neural •") or custom_name.startswith("Microsoft "):
-            custom_name = self.sample_path.stem
         preset = self.style_preset.currentData() if hasattr(self, "style_preset") else ("Natural", 0.50, 0.35)
         return VoiceProfile(
             name=custom_name,
