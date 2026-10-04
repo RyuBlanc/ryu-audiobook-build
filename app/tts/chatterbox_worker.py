@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from contextlib import redirect_stdout
 import ctypes
+gc
 import gc
 import json
 import os
@@ -43,9 +44,6 @@ def _choose_variant(requested: str, multilingual: bool, device: str) -> str:
         return "base"
     if requested in {"nano", "base", "turbo"}:
         return requested
-    # Choose by actual GPU memory first. A 16 GB system with an RTX 4060
-    # should use Turbo; the old RAM-first rule incorrectly forced both 4 GB
-    # and 8 GB GPUs into Nano.
     if device == "cuda":
         try:
             import torch
@@ -77,9 +75,7 @@ def _friendly_model_error(exc: BaseException) -> str:
         detail = ""
         if status:
             _total_phys, _avail_phys, _total_pagefile, avail_pagefile = status
-            detail = (
-                f" Available Windows commit/pagefile space: {avail_pagefile / 1024**3:.1f} GB."
-            )
+            detail = f" Available Windows commit/pagefile space: {avail_pagefile / 1024**3:.1f} GB."
         return (
             "Windows virtual memory is too small to load the custom voice model. "
             "Ryu's Audiobook uses a low-memory Chatterbox mode automatically when possible, "
@@ -93,6 +89,22 @@ def _friendly_model_error(exc: BaseException) -> str:
 
 def _load_model(backend: str, multilingual: bool, variant: str):
     import torch
+
+    # Chatterbox imports Perth at module level and constructs the watermarker
+    # when the model is created. Some Windows/Python environments can import
+    # the published Perth package but expose PerthImplicitWatermarker as None
+    # because its optional resource dependency is unavailable. That should not
+    # prevent voice cloning from working: Chatterbox's DummyWatermarker keeps
+    # the generated speech path intact without modifying the voice.
+    try:
+        import perth
+        if getattr(perth, "PerthImplicitWatermarker", None) is None:
+            dummy = getattr(perth, "DummyWatermarker", None)
+            if dummy is not None:
+                perth.PerthImplicitWatermarker = dummy
+    except Exception:
+        pass
+
     from chatterbox.tts import ChatterboxTTS
     from chatterbox.mtl_tts import ChatterboxMultilingualTTS
     from chatterbox.tts_turbo import ChatterboxTurboTTS
