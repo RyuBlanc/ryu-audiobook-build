@@ -141,9 +141,11 @@ def builtin_voice_profiles() -> list[VoiceProfile]:
                 language=language,
                 notes=(
                     f"{instruct} "
-                    "Requires the local Qwen3-TTS Offline Character Voice Pack."
+                    "Qwen3-TTS CustomVoice • use the speaker's native language for best quality."
                 ),
                 authorized=True,
+                qwen_mode="custom",
+                qwen_prompt=instruct,
             )
         )
 
