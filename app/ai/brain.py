@@ -72,7 +72,7 @@ ANALYSIS_SCHEMA = {
             }, "required": ["summary", "location", "time", "mood", "narrator_direction", "ambience", "music", "sfx", "confidence"]}
         },
         "pronunciation": {
-            "type": "array", "maxItems": 8,
+            "type": "array", "maxItems": 16,
             "items": {"type": "object", "additionalProperties": False, "properties": {
                 "written": {"type": "string"},
                 "spoken": {"type": "string"},
@@ -112,7 +112,7 @@ CORE_SCHEMA = {
             "confidence": {"type": "number"},
             "evidence": {"type": "string"}
         }, "required": ["quote", "speaker", "confidence", "evidence"]}},
-        "pronunciation": {"type": "array", "maxItems": 6, "items": {"type": "object", "additionalProperties": False, "properties": {
+        "pronunciation": {"type": "array", "maxItems": 12, "items": {"type": "object", "additionalProperties": False, "properties": {
             "written": {"type": "string"},
             "spoken": {"type": "string"},
             "ipa": {"type": "string"},
@@ -168,6 +168,8 @@ For every pronunciation candidate return:
 - script: Latin, Hiragana/Katakana, Kanji, Hangul, Devanagari, Tamil, etc.
 - confidence: 0.0 to 1.0
 - reason: concise evidence for the pronunciation
+- prioritize character names, aliases, place names, invented terms, and genuinely non-obvious foreign words
+- do not spend pronunciation slots on ordinary English words; return as many useful high-confidence entries as the schema allows
 - alternatives: up to 2 plausible alternatives if ambiguity exists
 
 When the same name appears with different spellings, treat them as aliases and keep one canonical pronunciation entry.
@@ -250,14 +252,15 @@ def _normalise_pronunciation(item: dict[str, Any], source_text: str) -> dict[str
 
     normalized = dict(item)
     normalized['written'] = written
-    if source_language in {'japanese', 'ja', 'jpn', 'korean', 'ko', 'kor', 'chinese', 'zh', 'cmn'}:
-        # The AI's IPA remains useful evidence, but the narration dictionary
-        # needs readable text that an English narrator can actually speak.
+    # Preserve the AI-generated spoken form when it is present and distinct.
+    # A deterministic nativeish fallback is useful only when the model failed to
+    # provide a usable spoken form; overwriting a good model result with a rough
+    # transliteration was making some Japanese/Korean/Chinese names less accurate.
+    normalized['spoken'] = spoken
+    if not normalized['spoken'] or normalized['spoken'].casefold() == written.casefold():
         nativeish = nativeish_pronunciation(written, source_language)
         if nativeish:
             normalized['spoken'] = nativeish
-    else:
-        normalized['spoken'] = spoken
     normalized['confidence'] = confidence
     normalized['ipa'] = ipa
     normalized.setdefault('source_language', source_language or None)
@@ -322,7 +325,7 @@ class AudiobookBrain:
                 core_raw = self.llm.complete(
                     PROMPT + '\nFocus ONLY on characters, dialogue ownership and pronunciation. Return JSON only.',
                     '/no_think ' + common_context + '\nDo not guess a speaker. Keep dialogue.quote exact. Only include pronunciation terms that truly occur in this excerpt. Keep the response compact.',
-                    max_tokens=1100,
+                    max_tokens=1450,
                     temperature=0.05,
                     response_schema=CORE_SCHEMA,
                 )
@@ -338,9 +341,9 @@ class AudiobookBrain:
                         'Return ONLY one compact valid JSON object with keys characters, dialogue, pronunciation. '
                         'Do not use markdown. Do not add explanations. Do not guess.',
                         '/no_think Extract only the factual character, dialogue and pronunciation information from this excerpt. '
-                        'Preserve exact dialogue quotes. Use at most 6 pronunciation entries and keep each reason very short. '
+                        'Preserve exact dialogue quotes. Use at most 12 pronunciation entries and keep each reason very short. '
                         f'Chapter: {chapter.title}\nExcerpt:\n{chunk}',
-                        max_tokens=850,
+                        max_tokens=1050,
                         temperature=0.0,
                         response_schema=CORE_SCHEMA,
                     )
