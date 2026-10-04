@@ -135,6 +135,20 @@ def _duration_ms(path: Path) -> int:
     return int((int(hours) * 3600 + int(minutes) * 60 + float(seconds)) * 1000)
 
 
+def _probe_audio_bitrate_kbps(path: Path) -> int:
+    """Read the encoded primary audio stream bitrate reported by FFmpeg."""
+    probe = subprocess.run(
+        [ffmpeg_path(), "-hide_banner", "-i", str(path)],
+        capture_output=True,
+        text=True,
+    )
+    probe_text = str(probe.stderr or probe.stdout or "")
+    match = re.search(r"Audio:\s.*?(\d+)\s+kb/s", probe_text, re.IGNORECASE | re.DOTALL)
+    if not match:
+        raise RuntimeError(f"Could not determine audio bitrate of {path.name}")
+    return int(match.group(1))
+
+
 def assemble_m4b(
     chapter_dirs: list[Path],
     output_path: Path,
@@ -336,21 +350,11 @@ def assemble_m4b(
             f"FFmpeg completed but the final M4B audio could not be validated.\n{detail}"
         )
 
-    bitrate_probe = subprocess.run(
-        [
-            ffmpeg_path(), "-hide_banner", "-i", str(output_path),
-        ],
-        capture_output=True,
-        text=True,
-    )
-    probe_text = str(bitrate_probe.stderr or bitrate_probe.stdout or "")
-    stream_match = re.search(r"Audio:.*?(\d+) kb/s", probe_text, re.IGNORECASE)
-    if stream_match:
-        detected_kbps = int(stream_match.group(1))
-        if detected_kbps < MIN_AUDIO_BITRATE_KBPS:
-            raise RuntimeError(
-                f"Final audiobook bitrate is only {detected_kbps} kbps. "
-                f"Ryu's Audiobook requires at least {MIN_AUDIO_BITRATE_KBPS} kbps."
-            )
+    detected_kbps = _probe_audio_bitrate_kbps(output_path)
+    if detected_kbps < MIN_AUDIO_BITRATE_KBPS:
+        raise RuntimeError(
+            f"Final audiobook bitrate is only {detected_kbps} kbps. "
+            f"Ryu's Audiobook requires at least {MIN_AUDIO_BITRATE_KBPS} kbps."
+        )
 
     return output_path
