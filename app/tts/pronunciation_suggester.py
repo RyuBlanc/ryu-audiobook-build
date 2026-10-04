@@ -36,6 +36,9 @@ COMMON_ENGLISH_WORDS = {
     "said","same","see","sir","small","still","sure","take","tell","than","thing",
     "think","through","time","today","together","under","very","wait","want","well",
     "went","while","world","would",
+    "god","gods","town","city","cities","king","queen","lord","lady","madam","mrs",
+    "miss","doctor","professor","captain","prince","princess","emperor","empress",
+    "father","mother","brother","sister","son","daughter","uncle","aunt",
 }
 
 _KNOWN = {
