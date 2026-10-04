@@ -98,6 +98,35 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(english_ids, {"Ryan", "Aiden"})
         self.assertTrue(any(p.provider == "qwen-character" and p.voice_id == "Ono_Anna" for p in profiles))
 
+    def test_qwen_provider_selects_the_three_real_model_phases(self):
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+
+        custom = QwenCharacterProvider(
+            voice_id="Ryan",
+            model_kind="custom-1.7b",
+            qwen_mode="custom",
+        )
+        design = QwenCharacterProvider(
+            voice_id="design-test",
+            model_kind="design-1.7b",
+            qwen_mode="design",
+            instruct="Warm cinematic young female anime heroine.",
+            qwen_seed=123,
+        )
+        clone = QwenCharacterProvider(
+            voice_id="clone-test",
+            model_kind="base-1.7b",
+            qwen_mode="clone",
+            reference_audio=Path("reference.wav"),
+            reference_text="Hello there.",
+        )
+        self.assertEqual(custom.model_kind, "custom-1.7b")
+        self.assertEqual(design.model_kind, "design-1.7b")
+        self.assertEqual(design.qwen_mode, "design")
+        self.assertEqual(clone.model_kind, "base-1.7b")
+        self.assertEqual(clone.qwen_mode, "clone")
+        self.assertEqual(clone.reference_text, "Hello there.")
+
     def test_qwen_three_phase_voice_studio_is_exposed(self):
         source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
