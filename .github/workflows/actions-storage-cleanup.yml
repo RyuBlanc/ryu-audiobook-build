@@ -1,0 +1,53 @@
+name: Actions Storage Cleanup
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: ryu-audiobook-actions-cleanup
+  cancel-in-progress: true
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prune old completed workflow runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Keeping the newest 2 completed/cancelled runs per workflow."
+          gh api --paginate             -H "Accept: application/vnd.github+json"             "/repos/${REPOSITORY}/actions/runs?per_page=100"             --jq '.workflow_runs[] | [.id,.name,.status,.created_at] | @tsv' |
+          while IFS=$'\t' read -r run_id workflow_name status created_at; do
+            if [[ "$status" == "in_progress" || "$status" == "queued" || "$status" == "waiting" || "$status" == "requested" || "$status" == "pending" ]]; then
+              continue
+            fi
+            printf '%s\t%s\t%s\n' "$run_id" "$workflow_name" "$created_at"
+          done > "${RUNNER_TEMP}/runs.tsv"
+
+          while IFS= read -r workflow_name; do
+            count=0
+            while IFS=$'\t' read -r run_id name created_at; do
+              if [[ "$name" != "$workflow_name" ]]; then
+                continue
+              fi
+              count=$((count + 1))
+              if (( count > 2 )); then
+                echo "Deleting old run ${run_id} (${workflow_name}) from ${created_at}"
+                gh api --method DELETE                   -H "Accept: application/vnd.github+json"                   "/repos/${REPOSITORY}/actions/runs/${run_id}" >/dev/null
+              fi
+            done < <(sort -t $'\t' -k3,3r "${RUNNER_TEMP}/runs.tsv")
+          done < <(cut -f2 "${RUNNER_TEMP}/runs.tsv" | sort -u)
+
+          echo "Actions cleanup complete."
