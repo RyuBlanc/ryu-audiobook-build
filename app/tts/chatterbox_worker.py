@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 from contextlib import redirect_stdout
 import ctypes
-gc
 import gc
 import json
 import os
