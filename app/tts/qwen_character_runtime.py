@@ -296,10 +296,43 @@ def model_installed(kind: str) -> bool:
     return (root / "config.json").exists() and any(root.glob("*.safetensors"))
 
 
+def _detected_vram_gb() -> float:
+    """Return the largest NVIDIA VRAM size visible to this PC, or 0."""
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return 0.0
+        values = []
+        for line in result.stdout.splitlines():
+            value = line.strip()
+            try:
+                values.append(float(value))
+            except ValueError:
+                continue
+        return max(values, default=0.0) / 1024.0
+    except (OSError, subprocess.SubprocessError):
+        return 0.0
+
+
 def best_custom_kind(vram_gb: float | None = None) -> str:
-    # Prefer the 1.7B model only when it is already installed and there is
-    # enough VRAM. Otherwise keep the 0.6B path for 4GB-class machines.
-    if vram_gb is not None and vram_gb >= 7.0 and model_installed("custom-1.7b"):
+    # Qwen 1.7B is the quality path for 8GB-class GPUs; 0.6B is the
+    # compatibility path for 4GB-class GPUs. Detect VRAM automatically when
+    # the caller does not provide it so Voice Cast and generation make the
+    # same hardware-aware choice as the Models installer.
+    if vram_gb is None:
+        vram_gb = _detected_vram_gb()
+    if vram_gb >= 7.0 and model_installed("custom-1.7b"):
         return "custom-1.7b"
     if model_installed("custom-0.6b"):
         return "custom-0.6b"
