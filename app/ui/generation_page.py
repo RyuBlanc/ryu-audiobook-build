@@ -612,9 +612,9 @@ class GenerationPage(QWidget):
                     skipped += 1
                     continue
 
-                language_key = language.casefold()
-                if language_key in {"japanese", "ja", "jpn", "korean", "ko", "kor", "chinese", "zh", "cmn"}:
-                    spoken = nativeish_pronunciation(written, language_key) or spoken
+                # Keep the AI's grounded spoken form. The brain layer now
+                # preserves a good model reading instead of replacing it with a
+                # rough transliteration heuristic.
                 self._add_pronunciation_row(written, spoken, True, source="ai")
                 row = self.pronunciation_table.rowCount() - 1
                 tip = (
