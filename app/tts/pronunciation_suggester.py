@@ -11,6 +11,19 @@ COMMON_ENGLISH_WORDS = {
     "these","they","this","those","to","too","under","up","us","very","was",
     "we","were","what","when","where","which","who","whom","why","will","with",
     "would","you","your","yours",
+    # Additional everyday English vocabulary frequently misclassified by AI.
+    "actually","after","again","against","almost","already","also","although",
+    "always","another","anyone","anything","away","back","bad","because","become",
+    "before","behind","believe","best","better","black","body","both","brought",
+    "change","children","clean","clear","different","doesnt","during","early",
+    "else","enough","especially","ever","everyone","everything","everywhere",
+    "few","finally","first","follow","found","full","give","given","getting",
+    "guess","heard","hello","help","hope","important","inside","instead","keep",
+    "kind","knew","left","listen","maybe","mean","might","never","nothing","often",
+    "once","people","perhaps","please","probably","really","remember","right",
+    "running","should","since","sometimes","something","sorry","start","started",
+    "surely","though","together","toward","usually","wait","without","wonder",
+    "yeah","yes","yesterday","young",
     # Common content words that are frequently capitalized at sentence starts
     # and must never become pronunciation overrides just because the model
     # assigned them a non-English language label.
