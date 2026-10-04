@@ -29,6 +29,7 @@ from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.preview import build_voice_preview
 from app.tts.readiness import build_generation_readiness
 from app.tts.chatterbox_runtime import runtime_ready
+from app.audio.assembler import DEFAULT_AUDIO_BITRATE_KBPS
 from app.tts.resume import inspect_generation_state
 
 
@@ -275,6 +276,17 @@ class GenerationPage(QWidget):
         self.pacing_profile.addItem("Off • provider timing only", "off")
         self.pacing_profile.setCurrentIndex(0)
         settings_form.addRow("Story pacing", self.pacing_profile)
+
+        self.audio_bitrate = QComboBox()
+        for kbps in (128, 160, 192, 224, 256, 288, 320):
+            label = f"{kbps} kbps"
+            if kbps == DEFAULT_AUDIO_BITRATE_KBPS:
+                label += " • Premium recommended"
+            self.audio_bitrate.addItem(label, kbps)
+        self.audio_bitrate.setCurrentIndex(
+            max(0, self.audio_bitrate.findData(DEFAULT_AUDIO_BITRATE_KBPS))
+        )
+        settings_form.addRow("Audio quality", self.audio_bitrate)
         self.pacing_hint = QLabel(
             "Adds small, sentence-aware pauses after generated narration units. "
             "The original wording is not changed."
@@ -300,7 +312,7 @@ class GenerationPage(QWidget):
         self.change_output = QPushButton("Change output location…")
         self.change_output.clicked.connect(self.choose_output)
         output_actions.addWidget(self.change_output)
-        output_actions.addWidget(QLabel("M4B with embedded chapters"))
+        output_actions.addWidget(QLabel("M4B • AAC 128–320 kbps • 256 kbps recommended"))
         output_actions.addStretch(1)
         output_layout.addLayout(output_actions)
         root.addWidget(output_box)
@@ -1256,6 +1268,7 @@ class GenerationPage(QWidget):
                 "description": self.description.text().strip(),
                 "narration_speed": float(self.narration_speed.currentData() or 0.90),
                 "pacing_profile": self.pacing_profile.currentData() or "natural",
+                "audio_bitrate": int(self.audio_bitrate.currentData() or DEFAULT_AUDIO_BITRATE_KBPS),
                 "status": "generating",
             })
             save_state(self.project_folder, state)
@@ -1297,6 +1310,7 @@ class GenerationPage(QWidget):
             narration_speed=float(self.narration_speed.currentData() or 0.90),
             pacing_profile=self.pacing_profile.currentData() or "natural",
             metadata=metadata,
+            bitrate=int(self.audio_bitrate.currentData() or DEFAULT_AUDIO_BITRATE_KBPS),
         )
         self.manager.start(
             output,
