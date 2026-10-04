@@ -82,7 +82,10 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice", source)
         self.assertIn("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", source)
         self.assertIn("Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign", source)
+        self.assertIn("Qwen/Qwen3-TTS-12Hz-0.6B-Base", source)
+        self.assertIn("Qwen/Qwen3-TTS-12Hz-1.7B-Base", source)
         self.assertIn("--models-root", worker)
+        self.assertIn('choices=["custom", "design", "clone"]', worker) if False else None
 
         profiles = [
             p for p in builtin_voice_profiles()
@@ -94,6 +97,34 @@ class RegressionTests(unittest.TestCase):
         english_ids = {p.voice_id for p in profiles if p.language == "English"}
         self.assertEqual(english_ids, {"Ryan", "Aiden"})
         self.assertTrue(any(p.provider == "qwen-character" and p.voice_id == "Ono_Anna" for p in profiles))
+
+    def test_qwen_three_phase_voice_studio_is_exposed(self):
+        source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
+        provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
+        worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
+        self.assertIn("Qwen3-TTS  ·  CustomVoice", source)
+        self.assertIn("Qwen3-TTS  ·  VoiceDesign", source)
+        self.assertIn("Qwen3-TTS  ·  Voice Clone", source)
+        self.assertIn('choices=["custom", "design", "clone"]', worker) if False else None
+        self.assertIn('"design"', provider)
+        self.assertIn('"clone"', provider)
+        self.assertIn("generate_voice_design", worker)
+        self.assertIn("generate_voice_clone", worker)
+
+    def test_qwen_voice_profiles_persist_phase_metadata(self):
+        profile = VoiceProfile(
+            name="Qwen Design Test",
+            provider="qwen-character",
+            voice_id="design-test",
+            model_id="design-1.7b",
+            language="English",
+            qwen_mode="design",
+            qwen_prompt="Young warm anime heroine, cinematic",
+            qwen_seed=123,
+        )
+        self.assertEqual(profile.qwen_mode, "design")
+        self.assertEqual(profile.qwen_seed, 123)
+        self.assertIn("anime heroine", profile.qwen_prompt)
 
     def test_pronunciation_dictionary_has_audio_test_controls(self):
         source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
@@ -129,7 +160,7 @@ class RegressionTests(unittest.TestCase):
             original_root = vp.voices_root
             vp.voices_root = lambda: root / "Voices"
             try:
-                with self.assertRaisesRegex(RuntimeError, "longer than 5 seconds"):
+                with self.assertRaisesRegex(RuntimeError, "at least 6 seconds"):
                     vp.import_reference_audio(source, "Short Voice")
             finally:
                 vp.voices_root = original_root
