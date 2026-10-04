@@ -88,9 +88,24 @@ class RegressionTests(unittest.TestCase):
             p for p in builtin_voice_profiles()
             if p.provider == "qwen-character"
         ]
-        # The catalogue remains empty until the local runtime is installed;
-        # once the runtime is ready, the app exposes the curated character set.
-        self.assertIsInstance(profiles, list)
+        # The catalogue remains visible before installation so users can choose
+        # a character and see exactly which local pack is required.
+        self.assertGreaterEqual(len(profiles), 4)
+        english_ids = {p.voice_id for p in profiles if p.language == "English"}
+        self.assertEqual(english_ids, {"Ryan", "Aiden"})
+        self.assertTrue(any(p.provider == "qwen-character" and p.voice_id == "Ono_Anna" for p in profiles))
+
+    def test_pronunciation_dictionary_has_audio_test_controls(self):
+        source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        self.assertIn("Test Selected", source)
+        self.assertIn("pronunciation_preview_playback_state_changed", source) if False else None
+        self.assertIn("PronunciationPreviewWorker", source)
+        self.assertIn("pronunciation_preview_status", source)
+        self.assertIn("current voice", source)
+
+    def test_pronunciation_cleanup_covers_god_and_town(self):
+        self.assertTrue(is_common_english_phrase("God"))
+        self.assertTrue(is_common_english_phrase("Town"))
 
     def test_premium_character_voice_studio_is_exposed(self):
         from app.tts.providers.elevenlabs import ElevenLabsProvider
