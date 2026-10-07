@@ -152,6 +152,9 @@ class GenerationPage(QWidget):
         self.initial_progress_value = 0
         self.generation_phase = "idle"
         self.preview_worker: VoicePreviewWorker | None = None
+        self._eta_ema_sec_per_unit: float | None = None
+        self._eta_last_work: int | None = None
+        self._eta_last_time: float | None = None
 
         self.player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
@@ -1440,6 +1443,9 @@ class GenerationPage(QWidget):
         self.progress.setValue(0)
         self.last_progress_value = 0
         self.initial_progress_value = 0
+        self._eta_ema_sec_per_unit = None
+        self._eta_last_work = 0
+        self._eta_last_time = time.monotonic()
         self.generation_phase = "synthesis"
         self.started_at = time.monotonic()
         self.timer.start(1000)
@@ -1492,22 +1498,31 @@ class GenerationPage(QWidget):
         if message.startswith("plan:"):
             try:
                 parts = message.split(":")
-                planned = max(1, int(parts[1]))
-                completed_at_start = max(0, min(planned, int(parts[2]))) if len(parts) >= 3 else 0
+                work_total = max(1, int(parts[1]))
+                completed_work = max(0, min(work_total, int(parts[2]))) if len(parts) >= 3 else 0
+                chunk_total = max(1, int(parts[3])) if len(parts) >= 4 else work_total
             except (ValueError, IndexError):
-                planned = max(1, total)
-                completed_at_start = 0
-            self.progress.setRange(0, planned)
-            self.progress.setValue(completed_at_start)
-            self.last_progress_value = completed_at_start
-            self.initial_progress_value = completed_at_start
+                work_total = max(1, total)
+                completed_work = 0
+                chunk_total = work_total
+            self.progress.setRange(0, work_total)
+            self.progress.setValue(completed_work)
+            self.last_progress_value = completed_work
+            self.initial_progress_value = completed_work
+            self._eta_ema_sec_per_unit = None
+            self._eta_last_work = completed_work
+            self._eta_last_time = time.monotonic()
             self.generation_phase = "synthesis"
-            self.stage.setText(
-                f"Preparing {planned:,} audio chunks… "
-                f"{completed_at_start:,} already reusable"
-                if completed_at_start
-                else f"Preparing {planned:,} audio chunks…"
-            )
+            if completed_work:
+                self.stage.setText(
+                    f"Preparing {chunk_total:,} audio segments… "
+                    f"{completed_work:,}/{work_total:,} text-units already reusable"
+                )
+            else:
+                self.stage.setText(
+                    f"Preparing {chunk_total:,} audio segments… "
+                    f"ETA will calibrate after the first few segments"
+                )
             return
 
         if message.startswith("m4b-package:"):
@@ -1555,14 +1570,37 @@ class GenerationPage(QWidget):
             )
         elif message.startswith("chunk:"):
             try:
-                current, planned = message.split(":", 1)[1].split("/", 1)
+                payload = message.split(":", 1)[1]
+                chunk_part, work_part = payload.split(":", 1)
+                current, planned = chunk_part.split("/", 1)
+                work_done, work_total = work_part.split("/", 1)
                 current_n, planned_n = int(current), int(planned)
-                self.progress.setRange(0, max(1, planned_n))
-                self.progress.setValue(current_n)
-                self.last_progress_value = current_n
+                work_done_n, work_total_n = int(work_done), max(1, int(work_total))
+                self.progress.setRange(0, work_total_n)
+                self.progress.setValue(max(0, min(work_total_n, work_done_n)))
+                self.last_progress_value = work_done_n
                 self.stage.setText(
-                    f"Generating audio • chunk {current_n:,}/{planned_n:,} • chapter {chapter}/{total}"
+                    f"Generating audio • segment {current_n:,}/{planned_n:,} • "
+                    f"chapter {chapter}/{total}"
                 )
+                now = time.monotonic()
+                if self._eta_last_work is not None and self._eta_last_time is not None:
+                    delta_work = work_done_n - self._eta_last_work
+                    delta_time = now - self._eta_last_time
+                    if delta_work > 0 and delta_time >= 0.2:
+                        sample = delta_time / delta_work
+                        # Ignore the unusually expensive first sample (usually
+                        # model startup) and smooth all subsequent samples.
+                        if self._eta_ema_sec_per_unit is None:
+                            self._eta_ema_sec_per_unit = sample
+                        else:
+                            alpha = 0.20
+                            self._eta_ema_sec_per_unit = (
+                                alpha * sample
+                                + (1.0 - alpha) * self._eta_ema_sec_per_unit
+                            )
+                self._eta_last_work = work_done_n
+                self._eta_last_time = now
             except (ValueError, IndexError):
                 self.stage.setText(f"Chapter {chapter}/{total}")
         else:
@@ -1604,19 +1642,23 @@ class GenerationPage(QWidget):
         work_done = max(0, current - self.initial_progress_value)
         work_remaining = max(0, total - current)
 
-        if work_done > 0 and elapsed > 2:
-            speed = work_done / elapsed * 60
-            if speed > 0 and work_remaining > 0:
-                remaining = int(work_remaining / (work_done / elapsed))
-                self.remaining.setText(
-                    f"Remaining: {remaining // 60}:{remaining % 60:02d}"
-                )
-            else:
-                self.remaining.setText("Remaining: almost done…")
-            self.speed.setText(f"Speed: {speed:.2f} chunks/min")
+        if self._eta_ema_sec_per_unit is not None and work_remaining > 0:
+            remaining = max(0, int(work_remaining * self._eta_ema_sec_per_unit))
+            self.remaining.setText(
+                f"Remaining: {remaining // 60}:{remaining % 60:02d}"
+            )
+            units_per_min = 60.0 / max(self._eta_ema_sec_per_unit, 1e-9)
+            self.speed.setText(f"Speed: {units_per_min:,.0f} text-units/min")
+        elif work_done > 0 and elapsed > 8:
+            fallback_rate = work_done / elapsed
+            remaining = max(0, int(work_remaining / max(fallback_rate, 1e-9)))
+            self.remaining.setText(
+                f"Remaining: {remaining // 60}:{remaining % 60:02d}"
+            )
+            self.speed.setText(f"Speed: {fallback_rate * 60:,.0f} text-units/min")
         else:
-            self.remaining.setText("Remaining: calculating…")
-            self.speed.setText("Speed: calculating…")
+            self.remaining.setText("Remaining: calibrating…")
+            self.speed.setText("Speed: calibrating…")
 
     def finished(self, summary: GenerationSummary) -> None:
         self.timer.stop()
