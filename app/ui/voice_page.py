@@ -405,6 +405,25 @@ class VoicePage(QWidget):
         seed_row.addWidget(QLabel("0 = natural variation"))
         seed_row.addStretch(1)
         design_layout.addLayout(seed_row)
+
+        design_test_row = QHBoxLayout()
+        design_test_row.addWidget(QLabel("Test preview length"))
+        self.qwen_design_preview_duration = QComboBox()
+        for seconds in (10, 20, 30, 40, 50, 60):
+            self.qwen_design_preview_duration.addItem(f"{seconds} seconds", seconds)
+        self.qwen_design_preview_duration.setCurrentIndex(2)
+        design_test_row.addWidget(self.qwen_design_preview_duration)
+        self.qwen_design_preview_button = QPushButton("▶ Test VoiceDesign")
+        self.qwen_design_preview_button.setObjectName("primary")
+        self.qwen_design_preview_button.clicked.connect(self.test_qwen_design_voice)
+        design_test_row.addWidget(self.qwen_design_preview_button)
+        self.qwen_design_preview_status = QLabel(
+            "Test the custom description before saving. The preview uses a neutral audiobook sample script."
+        )
+        self.qwen_design_preview_status.setObjectName("muted")
+        self.qwen_design_preview_status.setWordWrap(True)
+        design_test_row.addWidget(self.qwen_design_preview_status, 1)
+        design_layout.addLayout(design_test_row)
         qwen_phase.addWidget(self.qwen_design_box)
 
         self.qwen_clone_box = QGroupBox("Voice Clone • authorized reference audio")
@@ -1750,6 +1769,98 @@ class VoicePage(QWidget):
             cfg_weight=float(preset[2]),
         )
 
+    @staticmethod
+    def _qwen_preview_script(seconds: int) -> str:
+        script = (
+            "Welcome to Ryu's Audiobook. "
+            "Tonight, the world is quieter than usual, and every small sound seems to carry a meaning. "
+            "The speaker pauses, takes a calm breath, and continues with confidence. "
+            "Some moments should feel warm and gentle, while others should carry a little tension, curiosity, or wonder. "
+            "The important thing is that the voice remains recognizable and natural from one sentence to the next. "
+            "This short sample is only a voice test, designed to let you hear the character clearly before you save the profile. "
+            "Thank you for listening, and welcome to the story."
+        )
+        target_words = max(25, int(seconds * 2.4))
+        words = script.split()
+        if len(words) >= target_words:
+            return " ".join(words[:target_words])
+        output = []
+        while len(output) < target_words:
+            output.extend(words)
+        return " ".join(output[:target_words])
+
+    def test_qwen_design_voice(self) -> None:
+        if self.mode.currentData() != "qwen-design":
+            return
+        prompt = self.qwen_design_prompt.toPlainText().strip()
+        if not prompt:
+            self.qwen_design_preview_status.setText("Enter a custom VoiceDesign description first.")
+            return
+        if self.preview_worker is not None and self.preview_worker.isRunning():
+            return
+
+        from app.tts.qwen_character_runtime import runtime_ready, model_installed, best_voice_design_kind
+
+        if not runtime_ready() or not model_installed(best_voice_design_kind()):
+            QMessageBox.warning(
+                self,
+                "Qwen VoiceDesign Not Ready",
+                "Install the Qwen VoiceDesign model from Models before testing this description."
+            )
+            return
+
+        seconds = int(self.qwen_design_preview_duration.currentData() or 30)
+        seed = int(self.qwen_design_seed.value())
+        preview_name = f"Preview • {self.name.text().strip() or 'VoiceDesign'}"
+        profile = VoiceProfile(
+            name=preview_name,
+            provider="qwen-character",
+            voice_id="preview-voice",
+            model_id="design-1.7b",
+            backend="automatic",
+            language=self.qwen_design_language.currentText(),
+            notes=f"Qwen VoiceDesign • {prompt}",
+            authorized=True,
+            qwen_mode="design",
+            qwen_prompt=prompt,
+            qwen_seed=seed if seed > 0 else None,
+        )
+        output = Path(tempfile.gettempdir()) / "ryu_qwen_voice_design_preview.wav"
+        text = self._qwen_preview_script(seconds)
+        self.qwen_design_preview_button.setEnabled(False)
+        self.qwen_design_preview_status.setText(
+            f"Generating approximately {seconds} seconds with the current VoiceDesign description…"
+        )
+        self.preview_button.setEnabled(False)
+        self.test_profile_button.setEnabled(False)
+        self.play_button.setEnabled(False)
+        self.preview_worker = VoicePreviewWorker(
+            profile,
+            "automatic",
+            self.project_folder,
+            self.profiles,
+            [],
+            text,
+            output,
+            1.0,
+            "natural",
+            [],
+        )
+        self.preview_worker.finished_ok.connect(self._preview_worker_ok)
+        self.preview_worker.failed.connect(self._preview_worker_failed)
+        self.preview_worker.cancelled.connect(self._preview_worker_cancelled)
+        self.preview_worker.finished.connect(self._qwen_design_preview_finished)
+        self.preview_worker.start()
+
+    def _qwen_design_preview_finished(self) -> None:
+        self.qwen_design_preview_button.setEnabled(True)
+        self.preview_worker = None
+        self.preview_button.setEnabled(True)
+        self.test_profile_button.setEnabled(True)
+        self.qwen_design_preview_status.setText(
+            "VoiceDesign preview finished. Use Play in the Preview section to listen, then save the profile with your chosen name."
+        )
+
     def preview(self) -> None:
         profile = self._profile_from_ui()
         if not profile:
@@ -1831,9 +1942,52 @@ class VoicePage(QWidget):
         profile = self._profile_from_ui()
         if not profile:
             return
+
+        default_name = profile.name.strip() or (
+            "Qwen VoiceDesign Voice"
+            if profile.qwen_mode == "design"
+            else "Voice Profile"
+        )
+        entered, ok = QInputDialog.getText(
+            self,
+            "Save Voice Profile",
+            "Profile name:",
+            text=default_name,
+        )
+        if not ok:
+            return
+        entered = entered.strip()
+        if not entered:
+            self.status.setText("A profile name is required before saving.")
+            return
+
+        profile.name = entered
+        existing = next(
+            (
+                p for p in self.profiles
+                if p.name.casefold() == entered.casefold()
+                and not p.name.startswith("Offline Neural •")
+            ),
+            None,
+        )
+        if existing and (
+            existing.provider != profile.provider
+            or existing.voice_id.casefold() != profile.voice_id.casefold()
+            or existing.qwen_mode != profile.qwen_mode
+        ):
+            answer = QMessageBox.question(
+                self,
+                "Replace Voice Profile?",
+                f"A voice profile named '{entered}' already exists. Replace it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
         profiles = [
             p for p in self.profiles
-            if p.name.casefold() != profile.name.casefold()
+            if p.name.casefold() != entered.casefold()
             or p.name.startswith("Offline Neural •")
         ]
         profiles.append(profile)
