@@ -1453,6 +1453,16 @@ class VoicePage(QWidget):
             )
 
         elif mode == "qwen-design":
+            current_name = self.name.text().strip()
+            if not current_name or current_name.startswith("Offline Character"):
+                preset_name = self.qwen_design_preset.currentText()
+                self.name.setText(
+                    "Qwen VoiceDesign • " + (
+                        "Custom Description"
+                        if preset_name == "Custom voice description"
+                        else preset_name
+                    )
+                )
             ready = qwen_runtime_ready()
             design_installed = ready and qwen_model_installed(best_voice_design_kind())
             clone_kind = best_clone_kind()
