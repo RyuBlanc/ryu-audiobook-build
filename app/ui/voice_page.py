@@ -1454,14 +1454,21 @@ class VoicePage(QWidget):
 
         elif mode == "qwen-design":
             ready = qwen_runtime_ready()
-            installed = ready and qwen_model_installed(best_voice_design_kind())
+            design_installed = ready and qwen_model_installed(best_voice_design_kind())
+            clone_kind = best_clone_kind()
+            clone_installed = ready and qwen_model_installed(clone_kind)
+            installed = design_installed and clone_installed
             self.source_hint.setText(
-                "Qwen3-TTS VoiceDesign • create a brand-new fictional voice from a natural-language description. "
-                "VoiceDesign uses the 1.7B model."
+                "Qwen3-TTS VoiceDesign • create the voice once, then lock it through the Base clone phase for consistent long-form narration."
             )
+            if installed:
+                status = "ready"
+            elif design_installed:
+                status = f"VoiceDesign ready, but Base model {clone_kind} is required for voice locking"
+            else:
+                status = "VoiceDesign model not installed"
             self.offline_character_status.setText(
-                f"{'✓' if installed else '○'} VoiceDesign model: design-1.7b • "
-                + ("ready" if installed else "not installed")
+                f"{'✓' if installed else '○'} VoiceDesign + Base voice-lock pipeline • {status}"
             )
             self.qwen_phase_status.setText(
                 "Phase 2 • VoiceDesign — ideal for anime heroines, heroes, villains, narrators and cinematic character voices. "
@@ -1628,6 +1635,7 @@ class VoicePage(QWidget):
                 authorized=True,
                 qwen_mode="custom",
                 qwen_prompt=profile.qwen_prompt or profile.notes,
+                qwen_seed=profile.qwen_seed,
             )
 
         if provider == "qwen-design":
@@ -1652,7 +1660,8 @@ class VoicePage(QWidget):
                 authorized=True,
                 qwen_mode="design",
                 qwen_prompt=prompt,
-                qwen_seed=seed if seed > 0 else None,
+                qwen_seed=seed if seed > 0 else 3101,
+                qwen_anchor_text=self._qwen_preview_script(12),
             )
 
         if provider == "qwen-clone":
@@ -1799,13 +1808,18 @@ class VoicePage(QWidget):
         if self.preview_worker is not None and self.preview_worker.isRunning():
             return
 
-        from app.tts.qwen_character_runtime import runtime_ready, model_installed, best_voice_design_kind
+        from app.tts.qwen_character_runtime import runtime_ready, model_installed, best_voice_design_kind, best_clone_kind
 
-        if not runtime_ready() or not model_installed(best_voice_design_kind()):
+        clone_kind = best_clone_kind()
+        if (
+            not runtime_ready()
+            or not model_installed(best_voice_design_kind())
+            or not model_installed(clone_kind)
+        ):
             QMessageBox.warning(
                 self,
                 "Qwen VoiceDesign Not Ready",
-                "Install the Qwen VoiceDesign model from Models before testing this description."
+                "Install VoiceDesign and the matching Qwen Base model. The Base model is required to lock the designed voice identity for long-form consistency."
             )
             return
 
