@@ -140,7 +140,7 @@ class QwenCharacterInstallWorker(QThread):
 
             choices = {
                 "CustomVoice": [best_custom_kind()],
-                "VoiceDesign": [best_voice_design_kind()],
+                "VoiceDesign": [best_voice_design_kind(), best_clone_kind()],
                 "Voice Clone": [best_clone_kind()],
             }
             if self.selection == "Full Qwen Voice Studio":
