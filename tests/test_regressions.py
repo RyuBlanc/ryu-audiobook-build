@@ -127,6 +127,64 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(clone.qwen_mode, "clone")
         self.assertEqual(clone.reference_text, "Hello there.")
 
+    def test_qwen_voice_consistency_uses_design_anchor_and_base_prompt(self):
+        worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
+        provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
+        self.assertIn("create_voice_clone_prompt", worker)
+        self.assertIn("generate_voice_design", worker)
+        self.assertIn("voice_anchors", worker)
+        self.assertIn("--clone-kind", worker)
+        self.assertIn("recommended_chunk_chars = 1200", provider)
+        self.assertIn("recommended_chunk_sentences = 5", provider)
+
+    def test_voice_profile_save_and_qwen_preview_controls_are_exposed(self):
+        source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
+        self.assertIn("Save Voice Profile", source)
+        self.assertIn("qwen_design_preview_duration", source)
+        for seconds in ("10, 20, 30, 40, 50, 60"):
+            self.assertIn(seconds, source)
+        self.assertIn("Test VoiceDesign", source)
+
+    def test_chapter_cleaner_detects_and_reflows_import_noise(self):
+        from app.documents.parser import detect_repeated_book_noise, clean_import_noise, reflow_source_text
+        raw = (
+            "The hero walked toward the door and
+"
+            "stopped when he heard a sound.
+"
+            "41
+"
+            "Report
+"
+            "www.asianovel.com
+
+"
+            "A second paragraph begins here.
+"
+            "41
+"
+            "Report
+"
+            "www.asianovel.com
+"
+        )
+        noise = detect_repeated_book_noise([raw])
+        self.assertIn("41", noise)
+        self.assertIn("report", noise)
+        cleaned, removed = clean_import_noise(raw, set(noise))
+        cleaned = reflow_source_text(cleaned)
+        self.assertNotIn("asianovel.com", cleaned)
+        self.assertNotIn("Report", cleaned)
+        self.assertNotIn("\n41\n", "\n" + cleaned + "\n")
+        self.assertIn("hero walked toward the door and stopped", cleaned)
+        self.assertGreaterEqual(len(removed), 3)
+
+    def test_cast_provider_keeps_qwen_long_form_chunk_settings(self):
+        source = Path("app/tts/cast_provider.py").read_text(encoding="utf-8")
+        self.assertIn("profile.provider == "qwen-character"", source)
+        self.assertIn("limits.append(1200)", source)
+        self.assertIn("return 5", source)
+
     def test_qwen_three_phase_voice_studio_is_exposed(self):
         source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
