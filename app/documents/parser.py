@@ -95,11 +95,17 @@ def clean_import_noise(text: str, repeated_noise: set[str] | None = None) -> tup
     repeated_noise = {str(item).casefold() for item in (repeated_noise or set())}
     removed: list[str] = []
     kept: list[str] = []
+    obvious_noise = (
+        re.compile(r"^https?://", re.I),
+        re.compile(r"^(?:www\.)?[^\s]+\.(?:com|net|org|cc|me)(?:/.*)?$", re.I),
+        re.compile(r"^.*(?:asianovel\.com|mp4directs\.com).*$", re.I),
+    )
     for raw_line in text.splitlines():
         line = raw_line.strip()
         normalized = re.sub(r"\s+", " ", line).casefold()
-        is_noise = normalized in repeated_noise or any(
-            pattern.fullmatch(line) for pattern in BOOK_NOISE_PATTERNS
+        is_noise = (
+            normalized in repeated_noise
+            or any(pattern.fullmatch(line) for pattern in obvious_noise)
         )
         if is_noise and line:
             removed.append(line)
