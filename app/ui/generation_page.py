@@ -997,10 +997,14 @@ class GenerationPage(QWidget):
 
     def _update_overview(self) -> None:
         words = sum(len(ch.text.split()) for ch in self.chapters)
-        minutes = max(1, round(words / 150))
+        speed = float(self.narration_speed.currentData() or 0.90) if hasattr(self, "narration_speed") else 0.90
+        effective_wpm = max(60.0, 150.0 * speed)
+        minutes = max(1, round(words / effective_wpm))
         self.chapter_count.setText(f"Chapters: {len(self.chapters)}")
         self.word_count.setText(f"Words: {words:,}")
-        self.duration_estimate.setText(f"Estimated length: {minutes // 60}h {minutes % 60:02d}m")
+        self.duration_estimate.setText(
+            f"Estimated length: {minutes // 60}h {minutes % 60:02d}m at {speed:.2f}× narration speed"
+        )
 
     def _default_output(self) -> Path | None:
         if not self.project_folder:
