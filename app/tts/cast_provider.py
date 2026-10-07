@@ -41,13 +41,24 @@ class CastAwareProvider(TTSProvider):
 
     @property
     def recommended_chunk_chars(self) -> int:
-        limits = [300 if profile.provider == "chatterbox" else 1400 for profile in self.profiles.values()]
-        return min(limits) if limits else getattr(self.narrator_provider, "recommended_chunk_chars", 1400)
+        limits = []
+        for profile in self.profiles.values():
+            if profile.provider == "chatterbox":
+                limits.append(300)
+            elif profile.provider == "qwen-character":
+                limits.append(1200)
+            else:
+                limits.append(getattr(self.narrator_provider, "recommended_chunk_chars", 1400))
+        if not limits:
+            return getattr(self.narrator_provider, "recommended_chunk_chars", 1400)
+        return min(limits)
 
     @property
     def recommended_chunk_sentences(self) -> int:
         if any(profile.provider == "chatterbox" for profile in self.profiles.values()):
             return 1
+        if any(profile.provider == "qwen-character" for profile in self.profiles.values()):
+            return 5
         return getattr(self.narrator_provider, "recommended_chunk_sentences", 2)
 
     @property
