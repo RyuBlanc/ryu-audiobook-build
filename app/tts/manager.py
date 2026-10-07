@@ -59,7 +59,10 @@ class GenerationManager:
         self.failed: list[int] = []
         self.failure_details: dict[int, str] = {}
         self._chunk_offsets: list[int] = []
+        self._chunk_work_offsets: list[int] = []
+        self._chapter_work_units: list[list[int]] = []
         self._total_chunks = 0
+        self._total_work_units = 0
 
     def start(
         self,
@@ -93,9 +96,13 @@ class GenerationManager:
         self.failed = []
         self.failure_details = {}
         self._chunk_offsets = []
+        self._chunk_work_offsets = []
+        self._chapter_work_units = []
         offset = 0
+        work_offset = 0
         for chapter in self.chapters:
             self._chunk_offsets.append(offset)
+            self._chunk_work_offsets.append(work_offset)
             narration_text = prepare_for_narration(
                 chapter.text,
                 self.pronunciation_dictionary,
@@ -114,12 +121,23 @@ class GenerationManager:
             else:
                 raw_parts = [(chunk, self.voice) for chunk in split_text(narration_text)]
             from app.tts.pacing import split_for_pacing
+            chapter_units: list[int] = []
             for part, _part_voice in raw_parts:
-                offset += len(split_for_pacing(part))
+                for paced in split_for_pacing(
+                    part,
+                    max_chars=int(getattr(self.provider, "recommended_chunk_chars", 1400)),
+                    max_sentences=int(getattr(self.provider, "recommended_chunk_sentences", 2)),
+                ):
+                    unit = max(1, len(paced))
+                    chapter_units.append(unit)
+                    offset += 1
+                    work_offset += unit
+            self._chapter_work_units.append(chapter_units)
         self._total_chunks = offset
+        self._total_work_units = max(1, work_offset)
         generated_chapter_dirs: list[Path] = []
         completed_numbers: list[int] = []
-        self._emit(0, len(self.chapters), 0, f"plan:{self._total_chunks}")
+        self._emit(0, len(self.chapters), 0, f"plan:{self._total_work_units}:0:{self._total_chunks}")
         cancelled = False
         packaging_failed = False
         packaging_error = None
@@ -153,16 +171,17 @@ class GenerationManager:
                 completed += 1
                 completed_numbers.append(chapter.number)
                 generated_chapter_dirs.append(result.output_path)
-                overall_done = (
-                    self._chunk_offsets[index] + result.chunks_completed
-                    if index < len(self._chunk_offsets)
-                    else result.chunks_completed
+                chapter_units = self._chapter_work_units[index] if index < len(self._chapter_work_units) else []
+                completed_units = sum(chapter_units[: result.chunks_completed])
+                overall_work = (
+                    (self._chunk_work_offsets[index] if index < len(self._chunk_work_offsets) else 0)
+                    + completed_units
                 )
                 self._emit(
                     index + 1,
                     len(self.chapters),
-                    overall_done,
-                    "chapter-complete",
+                    overall_work,
+                    f"chapter-complete:{result.chunks_completed}/{result.chunks_total}",
                 )
             except Exception as exc:
                 self.failed.append(chapter.number)
@@ -237,7 +256,7 @@ class GenerationManager:
         self._emit(
             len(self.chapters),
             len(self.chapters),
-            self._total_chunks,
+            self._total_work_units,
             f"m4b-package:{done}/{max(1, total)}:{message}",
         )
 
@@ -253,13 +272,17 @@ class GenerationManager:
                         pass
 
     def _progress(self, chapter_index: int, chapter_total: int, done: int, total: int) -> None:
-        offset = self._chunk_offsets[chapter_index] if chapter_index < len(self._chunk_offsets) else 0
-        overall_done = offset + done
+        chunk_offset = self._chunk_offsets[chapter_index] if chapter_index < len(self._chunk_offsets) else 0
+        work_offset = self._chunk_work_offsets[chapter_index] if chapter_index < len(self._chunk_work_offsets) else 0
+        units = self._chapter_work_units[chapter_index] if chapter_index < len(self._chapter_work_units) else []
+        completed_work = sum(units[: max(0, min(done, len(units)))])
+        overall_work = work_offset + completed_work
+        overall_chunk = chunk_offset + done
         self._emit(
             chapter_index + 1,
             chapter_total,
-            overall_done,
-            f"chunk:{overall_done}/{max(1, self._total_chunks)}",
+            overall_work,
+            f"chunk:{overall_chunk}/{max(1, self._total_chunks)}:{overall_work}/{max(1, self._total_work_units)}",
         )
 
     def _emit(self, chapter: int, total: int, done: int, message: str) -> None:
