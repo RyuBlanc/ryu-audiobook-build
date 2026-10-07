@@ -26,8 +26,11 @@ class QwenCharacterProvider(TTSProvider):
     """Offline Qwen3-TTS character voices with no API key or cloud service."""
 
     provider_id = "qwen-character"
-    recommended_chunk_chars = 360
-    recommended_chunk_sentences = 2
+    # Qwen can safely handle substantially larger sentence-aware units. The
+    # previous 360-char/2-sentence setting created thousands of tiny generation
+    # jobs on long novels and made GPU utilization/ETA unnecessarily poor.
+    recommended_chunk_chars = 1200
+    recommended_chunk_sentences = 5
     handles_narration_controls = False
 
     def __init__(
