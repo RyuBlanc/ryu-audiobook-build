@@ -132,6 +132,15 @@ def builtin_voice_profiles() -> list[VoiceProfile]:
         ("Anime • Japanese Female", "Ono_Anna", "Playful Japanese female voice with a light nimble timbre; ideal for Japanese character dialogue.", "Japanese"),
         ("Anime • Korean Female", "Sohee", "Warm Korean female voice with rich emotion; ideal for Korean character dialogue.", "Korean"),
     ]
+    qwen_seeds = {
+        "Ryan": 1103,
+        "Aiden": 1207,
+        "Vivian": 1301,
+        "Serena": 1409,
+        "Uncle_Fu": 1601,
+        "Ono_Anna": 1709,
+        "Sohee": 1801,
+    }
     for name, speaker, instruct, language in qwen_profiles:
         result.append(
             VoiceProfile(
@@ -148,6 +157,7 @@ def builtin_voice_profiles() -> list[VoiceProfile]:
                 authorized=True,
                 qwen_mode="custom",
                 qwen_prompt=instruct,
+                qwen_seed=qwen_seeds.get(speaker),
             )
         )
 
