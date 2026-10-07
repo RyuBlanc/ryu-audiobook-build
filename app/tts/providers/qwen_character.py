@@ -44,6 +44,8 @@ class QwenCharacterProvider(TTSProvider):
         reference_text: str = "",
         qwen_mode: str = "custom",
         qwen_seed: int | None = None,
+        qwen_anchor_path: Path | None = None,
+        qwen_anchor_text: str = "",
     ):
         self.voice_id = voice_id
         self.language = language or "English"
@@ -51,6 +53,8 @@ class QwenCharacterProvider(TTSProvider):
         self.backend = backend
         self.qwen_mode = (qwen_mode or "custom").casefold()
         self.qwen_seed = qwen_seed
+        self.qwen_anchor_path = qwen_anchor_path
+        self.qwen_anchor_text = qwen_anchor_text or ""
         self.model_kind = self._resolve_kind(model_kind)
         self.reference_audio = reference_audio
         self.reference_text = reference_text
@@ -94,6 +98,7 @@ class QwenCharacterProvider(TTSProvider):
         log_path = Path.home() / "Ryu's Audiobook" / "Settings" / "qwen_character_worker.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         self._worker_log = log_path.open("a", encoding="utf-8", errors="replace")
+        clone_kind = best_clone_kind()
         command = [
             str(runtime_python()),
             str(worker_script()),
@@ -102,7 +107,12 @@ class QwenCharacterProvider(TTSProvider):
             "--task", self.qwen_mode,
             "--backend", self.backend,
             "--models-root", str(RUNTIME_ROOT),
+            "--clone-kind", clone_kind,
         ]
+        if self.qwen_anchor_path:
+            command.extend(["--anchor-path", str(self.qwen_anchor_path.resolve())])
+        if self.qwen_anchor_text:
+            command.extend(["--anchor-text", self.qwen_anchor_text])
         self._worker = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
