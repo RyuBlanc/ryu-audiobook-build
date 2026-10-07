@@ -35,6 +35,11 @@ def provider_from_profile(profile: VoiceProfile):
                 reference_text=profile.reference_text or "",
                 qwen_mode=profile.qwen_mode or "custom",
                 qwen_seed=profile.qwen_seed,
+                qwen_anchor_path=(
+                    Path(profile.qwen_anchor_path).expanduser()
+                    if profile.qwen_anchor_path else None
+                ),
+                qwen_anchor_text=profile.qwen_anchor_text or "",
             ),
             profile.voice_id,
         )
