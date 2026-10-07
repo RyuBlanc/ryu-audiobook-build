@@ -4,6 +4,7 @@ import argparse
 from contextlib import redirect_stdout
 from pathlib import Path
 import gc
+import hashlib
 import json
 import sys
 
@@ -56,8 +57,6 @@ def _is_cuda_oom(exc: BaseException) -> bool:
 
 
 def _generation_kwargs(request: dict) -> dict:
-    # These values mirror Qwen's official 12Hz examples and give the audiobook
-    # engine expressive but stable speech rather than flat greedy decoding.
     return {
         "do_sample": bool(request.get("do_sample", True)),
         "top_k": int(request.get("top_k", 50)),
@@ -85,27 +84,49 @@ def _set_seed(seed):
             pass
 
 
+def _default_anchor_text(language: str) -> str:
+    key = (language or "English").casefold()
+    if key.startswith("japanese"):
+        return "こんにちは。これは声のテストです。落ち着いて、自然に、はっきりと話します。"
+    if key.startswith("korean"):
+        return "안녕하세요. 이것은 자연스러운 목소리 테스트입니다. 차분하고 또렷하게 말합니다."
+    if key.startswith("chinese"):
+        return "你好。这是一段自然的声音测试。我会用清晰、稳定、富有表现力的方式说话。"
+    return (
+        "Hello. This is a short voice identity sample for Ryu's Audiobook. "
+        "The character speaks clearly, naturally, and with a steady identity from one sentence to the next."
+    )
+
+
+def _anchor_path(root: Path, request: dict) -> Path:
+    explicit = str(request.get("anchor_path") or "").strip()
+    if explicit:
+        return Path(explicit)
+    identity = "|".join(
+        [
+            str(request.get("speaker") or request.get("voice_id") or "voice"),
+            str(request.get("language") or "English"),
+            str(request.get("instruct") or ""),
+            str(request.get("seed") or ""),
+        ]
+    )
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
+    return root / "voice_anchors" / f"qwen-design-{digest}.wav"
+
+
 def _generate_custom(model, request: dict, output: Path) -> None:
     import soundfile as sf
 
     speaker = str(request.get("speaker") or "").strip()
     if not speaker:
         raise RuntimeError("A Qwen CustomVoice speaker is required.")
-    language = str(request.get("language") or "English")
-    instruct = str(request.get("instruct") or "").strip()
-
-    kwargs = _generation_kwargs(request)
-    # Qwen's 0.6B CustomVoice model is the lightweight fallback and does not
-    # provide the same instruction-control surface as 1.7B.
-    if request.get("allow_instruct", True) is False:
-        instruct = ""
-
+    _set_seed(request.get("seed"))
     wavs, sr = model.generate_custom_voice(
         text=str(request.get("text") or ""),
-        language=language,
+        language=str(request.get("language") or "English"),
         speaker=speaker,
-        instruct=instruct,
-        **kwargs,
+        instruct=str(request.get("instruct") or "").strip(),
+        **_generation_kwargs(request),
     )
     if not wavs:
         raise RuntimeError("Qwen CustomVoice did not return audio.")
@@ -113,24 +134,75 @@ def _generate_custom(model, request: dict, output: Path) -> None:
     sf.write(str(output), wavs[0], sr)
 
 
-def _generate_design(model, request: dict, output: Path) -> None:
+def _generate_design_anchor(model, request: dict, anchor: Path) -> str:
     import soundfile as sf
 
-    instruct = str(request.get("instruct") or "").strip()
-    if not instruct:
-        raise RuntimeError(
-            "VoiceDesign needs a voice description such as age, timbre, accent, "
-            "energy, emotion and speaking style."
-        )
+    language = str(request.get("language") or "English")
+    anchor_text = str(request.get("anchor_text") or "").strip() or _default_anchor_text(language)
     _set_seed(request.get("seed"))
     wavs, sr = model.generate_voice_design(
+        text=anchor_text,
+        language=language,
+        instruct=str(request.get("instruct") or "").strip(),
+        **_generation_kwargs(
+            {
+                **request,
+                "max_new_tokens": min(int(request.get("max_new_tokens", 2048)), 768),
+            }
+        ),
+    )
+    if not wavs:
+        raise RuntimeError("Qwen VoiceDesign did not return a reusable voice anchor.")
+    anchor.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(str(anchor), wavs[0], sr)
+    return anchor_text
+
+
+def _prepare_design_clone(model, request: dict, args):
+    # Build the reusable character voice identity once from VoiceDesign, then
+    # switch to the Base model and reuse one VoiceClonePromptItem for every
+    # narration chunk. This prevents per-chunk VoiceDesign timbre drift.
+    import torch
+    from qwen_tts import Qwen3TTSModel
+
+    anchor = _anchor_path(Path(args.models_root).resolve(), request)
+    anchor_text = str(request.get("anchor_text") or "").strip() or _default_anchor_text(
+        str(request.get("language") or "English")
+    )
+
+    if not anchor.exists() or anchor.stat().st_size < 1024:
+        anchor_text = _generate_design_anchor(model, request, anchor)
+
+    del model
+    gc.collect()
+    if torch.cuda.is_available():
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+
+    clone_model, clone_device = _load_model(args.clone_kind, args.backend, Path(args.models_root).resolve())
+    x_vector_only = False
+    prompt = clone_model.create_voice_clone_prompt(
+        ref_audio=str(anchor),
+        ref_text=anchor_text,
+        x_vector_only_mode=x_vector_only,
+    )
+    return clone_model, clone_device, prompt, anchor
+
+
+def _generate_design_locked(model, prompt, request: dict, output: Path) -> None:
+    import soundfile as sf
+
+    _set_seed(request.get("seed"))
+    wavs, sr = model.generate_voice_clone(
         text=str(request.get("text") or ""),
         language=str(request.get("language") or "English"),
-        instruct=instruct,
+        voice_clone_prompt=prompt,
         **_generation_kwargs(request),
     )
     if not wavs:
-        raise RuntimeError("Qwen VoiceDesign did not return audio.")
+        raise RuntimeError("Qwen locked VoiceDesign/Base generation did not return audio.")
     output.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(output), wavs[0], sr)
 
@@ -144,8 +216,7 @@ def _generate_clone(model, request: dict, output: Path) -> None:
     ref_text = str(request.get("ref_text") or "").strip()
     x_vector_only = bool(request.get("x_vector_only_mode", not bool(ref_text)))
 
-    # Qwen Base supports both x-vector-only cloning and higher-fidelity ICL
-    # cloning when an exact reference transcript is supplied.
+    _set_seed(request.get("seed"))
     kwargs = {
         "text": str(request.get("text") or ""),
         "language": str(request.get("language") or "English"),
@@ -170,6 +241,17 @@ def server(args) -> int:
             model, device = _load_model(args.kind, "cpu", root)
         else:
             raise
+
+    locked_prompt = None
+    anchor_path = None
+    active_task = args.task
+    active_kind = args.kind
+
+    if args.task == "design":
+        # VoiceDesign itself creates the identity anchor only once. Generation
+        # then continues through the Base model in the same worker process.
+        pass
+
     print(
         json.dumps(
             {
@@ -182,63 +264,119 @@ def server(args) -> int:
         ),
         flush=True,
     )
+
     for line in sys.stdin:
         line = line.strip()
         if not line:
             continue
+
         try:
             request = json.loads(line)
             output = Path(request["output"])
             text = str(request.get("text") or "").strip()
             if not text:
                 raise RuntimeError("Qwen character text is empty.")
-            try:
-                if args.task == "custom":
-                    _generate_custom(model, request, output)
-                elif args.task == "design":
-                    _generate_design(model, request, output)
-                elif args.task == "clone":
-                    _generate_clone(model, request, output)
-                else:
-                    raise RuntimeError(f"Unsupported Qwen task: {args.task}")
-            except Exception as exc:
-                if _is_cuda_oom(exc) and device.startswith("cuda"):
-                    gc.collect()
-                    try:
-                        import torch
-                        torch.cuda.empty_cache()
-                    except Exception:
-                        pass
-                    model, device = _load_model(args.kind, "cpu", root)
-                    if args.task == "custom":
-                        _generate_custom(model, request, output)
-                    elif args.task == "design":
-                        _generate_design(model, request, output)
+
+            if active_task == "design" and locked_prompt is None:
+                try:
+                    model, device, locked_prompt, anchor_path = _prepare_design_clone(model, request, args)
+                    active_task = "design-locked"
+                    active_kind = args.clone_kind
+                except Exception as exc:
+                    if _is_cuda_oom(exc) and device.startswith("cuda"):
+                        try:
+                            import torch
+                            torch.cuda.empty_cache()
+                        except Exception:
+                            pass
+                        model, device = _load_model(args.kind, "cpu", root)
+                        args.backend = "cpu"
+                        model, device, locked_prompt, anchor_path = _prepare_design_clone(model, request, args)
+                        active_task = "design-locked"
+                        active_kind = args.clone_kind
                     else:
-                        _generate_clone(model, request, output)
-                else:
-                    raise
+                        raise
+
+            if active_task == "custom":
+                _generate_custom(model, request, output)
+            elif active_task == "design-locked":
+                _generate_design_locked(model, locked_prompt, request, output)
+            elif active_task == "clone":
+                _generate_clone(model, request, output)
+            else:
+                raise RuntimeError(f"Unsupported Qwen task: {active_task}")
+
             print(
                 json.dumps(
                     {
                         "ok": True,
                         "output": str(output),
                         "device": device,
-                        "kind": args.kind,
-                        "task": args.task,
+                        "kind": active_kind,
+                        "task": active_task,
+                        "anchor": str(anchor_path) if anchor_path else None,
                     }
                 ),
                 flush=True,
             )
         except Exception as exc:
+            # A CUDA OOM should not destroy a long audiobook. For Base clone
+            # and CustomVoice we can reload on CPU. For a locked VoiceDesign
+            # profile, the same policy applies after the anchor exists.
+            if _is_cuda_oom(exc) and device.startswith("cuda"):
+                try:
+                    import torch
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
+                try:
+                    model, device = _load_model(
+                        active_kind,
+                        "cpu",
+                        root,
+                    )
+                    if active_task == "design-locked":
+                        # Prompt tensors remain device-specific in Qwen, so rebuild
+                        # the Base prompt after switching devices.
+                        if anchor_path and Path(anchor_path).exists():
+                            anchor_text = str(request.get("anchor_text") or "").strip() or _default_anchor_text(
+                                str(request.get("language") or "English")
+                            )
+                            locked_prompt = model.create_voice_clone_prompt(
+                                ref_audio=str(anchor_path),
+                                ref_text=anchor_text,
+                                x_vector_only_mode=False,
+                            )
+                    device = "cpu"
+                    if active_task == "custom":
+                        _generate_custom(model, request, output)
+                    elif active_task == "design-locked":
+                        _generate_design_locked(model, locked_prompt, request, output)
+                    else:
+                        _generate_clone(model, request, output)
+                    print(
+                        json.dumps(
+                            {
+                                "ok": True,
+                                "output": str(output),
+                                "device": device,
+                                "kind": active_kind,
+                                "task": active_task,
+                            }
+                        ),
+                        flush=True,
+                    )
+                    continue
+                except Exception as retry_exc:
+                    exc = retry_exc
             print(
                 json.dumps(
                     {
                         "ok": False,
                         "error": str(exc),
                         "device": device,
-                        "kind": args.kind,
-                        "task": args.task,
+                        "kind": active_kind,
+                        "task": active_task,
                     }
                 ),
                 flush=True,
@@ -250,6 +388,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--server", action="store_true")
     parser.add_argument("--kind", required=True, choices=sorted(MODEL_IDS))
+    parser.add_argument("--clone-kind", default="base-0.6b", choices=["base-0.6b", "base-1.7b"])
+    parser.add_argument("--anchor-path", default="")
+    parser.add_argument("--anchor-text", default="")
     parser.add_argument(
         "--task",
         choices=["custom", "design", "clone"],
