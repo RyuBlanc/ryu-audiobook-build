@@ -19,7 +19,12 @@ from PySide6.QtWidgets import (
 )
 from app.chapters.detector import Chapter
 from app.chapters.editor import ChapterEditor
-from app.documents.parser import remove_page_noise
+from app.documents.parser import (
+    remove_page_noise,
+    detect_repeated_book_noise,
+    clean_import_noise,
+    reflow_source_text,
+)
 from app.ui.character_review import CharacterReviewDialog
 from app.ui.dialogue_assignment import DialogueAssignmentDialog
 from app.ui.dialogue_manager import DialogueAssignmentManagerDialog
@@ -114,6 +119,7 @@ class ChapterEditorPage(QWidget):
             ("Assign Selected Dialogue", self.assign_selected_dialogue),
             ("Dialogue Assignment Manager", self.open_dialogue_manager),
             ("Analyze Book with AI", self.analyze_with_ai),
+            ("Clean Book Text", self.clean_book_text),
             ("View Characters & Dialogue", self.view_characters),
             ("Merge Next", self.merge),
             ("Move Up", lambda: self.move(-1)),
@@ -358,6 +364,58 @@ class ChapterEditorPage(QWidget):
         except ValueError as exc:
             QMessageBox.information(self, "Mark as Chapter", str(exc))
 
+
+    def clean_book_text(self) -> None:
+        self.commit_current()
+        chapters = self.editor.chapters
+        if not chapters:
+            return
+
+        noise = detect_repeated_book_noise([chapter.text for chapter in chapters])
+        preview_lines = []
+        for line, count in sorted(noise.items(), key=lambda item: (-item[1], item[0])):
+            preview_lines.append(f"• {line}  × {count} chapters")
+
+        if preview_lines:
+            message = (
+                "Ryu found repeated page/website-style text in this book. "
+                "It can remove those occurrences from all chapters and reflow obvious wrapped sentences.\n\n"
+                "Detected text:\n" + "\n".join(preview_lines[:30])
+            )
+            if len(preview_lines) > 30:
+                message += f"\n… and {len(preview_lines) - 30} more."
+        else:
+            message = (
+                "No repeated page/website markers were detected. "
+                "Ryu can still reflow obvious PDF line-wrapped sentences without changing paragraph boundaries."
+            )
+
+        answer = QMessageBox.question(
+            self,
+            "Clean Book Text",
+            message + "\n\nApply this cleanup to every chapter?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        total_removed = 0
+        changed_chapters = 0
+        repeated = set(noise.keys())
+        for chapter in chapters:
+            cleaned, removed = clean_import_noise(chapter.text, repeated)
+            cleaned = reflow_source_text(cleaned)
+            if cleaned != chapter.text:
+                self.editor.edit_text(chapters.index(chapter), cleaned)
+                changed_chapters += 1
+            total_removed += len(removed)
+
+        self.refresh(self.list.currentRow())
+        self._save_silently()
+        self.save_status.setText(
+            f"✓ Book cleaned • {changed_chapters} chapter(s) updated • {total_removed} noise line(s) removed"
+        )
 
     def analyze_with_ai(self) -> None:
         if not self.project_folder:
