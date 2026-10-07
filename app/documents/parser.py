@@ -24,6 +24,89 @@ NOISE_PATTERNS = (
     re.compile(r"^Page\s+\d+\s+.*mp4directs\.com.*$", re.I),
 )
 
+BOOK_NOISE_PATTERNS = (
+    re.compile(r"^(?:report|read\s+online|download)$", re.I),
+    re.compile(r"^\d{1,5}$"),
+    re.compile(r"^page\s+\d{1,5}$", re.I),
+    re.compile(r"^(?:www\.)?[^\s]+\.(?:com|net|org|cc|me)(?:/.*)?$", re.I),
+    re.compile(r"^.*(?:asianovel\.com|mp4directs\.com).*$", re.I),
+)
+
+
+def reflow_source_text(text: str) -> str:
+    """Rejoin obvious PDF line wraps while preserving real paragraph/dialogue breaks."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    paragraphs = re.split(r"\n\s*\n", text)
+    output = []
+
+    for paragraph in paragraphs:
+        lines = [re.sub(r"[ \t]+", " ", line).strip() for line in paragraph.split("\n")]
+        lines = [line for line in lines if line]
+        if not lines:
+            continue
+
+        rebuilt: list[str] = [lines[0]]
+        for line in lines[1:]:
+            previous = rebuilt[-1]
+            intentional_break = (
+                previous.endswith((".", "!", "?", "…", ":", ";"))
+                and (
+                    line.startswith(("“", '"', "‘", "'", "—", "–", "-", "•", "*"))
+                    or re.match(r"^(?:Chapter|Prologue|Epilogue|Interlude|Extra)\b", line, re.I)
+                )
+            )
+            if intentional_break:
+                rebuilt.append(line)
+                continue
+
+            if previous.endswith("-") and line and line[0].islower():
+                rebuilt[-1] = previous[:-1] + line
+                continue
+
+            previous_terminal = bool(re.search(r"[.!?…][\"'”’»)]*$", previous))
+            next_starts_sentence = bool(re.match(r"^[A-ZÀ-ÖØ-Þ0-9]", line))
+            if not previous_terminal or not next_starts_sentence:
+                rebuilt[-1] = f"{previous} {line}".strip()
+            else:
+                rebuilt.append(line)
+
+        output.append("\n".join(rebuilt).strip())
+
+    return re.sub(r"\n{3,}", "\n\n", "\n\n".join(output)).strip()
+
+
+def detect_repeated_book_noise(chapter_texts: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for text in chapter_texts:
+        seen_in_chapter: set[str] = set()
+        for raw_line in text.splitlines():
+            line = re.sub(r"\s+", " ", raw_line).strip()
+            if not line:
+                continue
+            normalized = line.casefold()
+            if any(pattern.fullmatch(line) for pattern in BOOK_NOISE_PATTERNS):
+                if normalized not in seen_in_chapter:
+                    counts[normalized] = counts.get(normalized, 0) + 1
+                    seen_in_chapter.add(normalized)
+    return {line: count for line, count in counts.items() if count >= 2}
+
+
+def clean_import_noise(text: str, repeated_noise: set[str] | None = None) -> tuple[str, list[str]]:
+    repeated_noise = {str(item).casefold() for item in (repeated_noise or set())}
+    removed: list[str] = []
+    kept: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        normalized = re.sub(r"\s+", " ", line).casefold()
+        is_noise = normalized in repeated_noise or any(
+            pattern.fullmatch(line) for pattern in BOOK_NOISE_PATTERNS
+        )
+        if is_noise and line:
+            removed.append(line)
+            continue
+        kept.append(raw_line)
+    return reflow_source_text("\n".join(kept)), removed
+
 
 def extract_text(path: Path) -> ExtractedBook:
     suffix = path.suffix.lower()
@@ -89,4 +172,4 @@ def clean_text(text: str) -> str:
     text = remove_page_noise(text)
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    return reflow_source_text(text).strip()
