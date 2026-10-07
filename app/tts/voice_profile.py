@@ -32,6 +32,8 @@ class VoiceProfile:
     qwen_prompt: str = ""
     qwen_seed: int | None = None
     reference_text: str = ""
+    qwen_anchor_path: str | None = None
+    qwen_anchor_text: str = ""
 
 
 def profiles_file() -> Path:
