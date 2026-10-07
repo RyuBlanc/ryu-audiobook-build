@@ -108,6 +108,7 @@ def _anchor_path(root: Path, request: dict) -> Path:
             str(request.get("language") or "English"),
             str(request.get("instruct") or ""),
             str(request.get("seed") or ""),
+            str(request.get("anchor_text") or ""),
         ]
     )
     digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
