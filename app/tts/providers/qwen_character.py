@@ -189,6 +189,8 @@ class QwenCharacterProvider(TTSProvider):
             "instruct": self.instruct,
             "seed": self.qwen_seed,
             "allow_instruct": self.model_kind == "custom-1.7b",
+            "anchor_path": str(self.qwen_anchor_path.resolve()) if self.qwen_anchor_path else "",
+            "anchor_text": self.qwen_anchor_text,
         }
         if self.qwen_mode == "clone":
             if not self.reference_audio:
