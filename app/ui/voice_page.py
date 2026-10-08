@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 from dataclasses import replace
+import re
 from pathlib import Path
 import webbrowser
 import secrets
@@ -1910,137 +1911,134 @@ class VoicePage(QWidget):
             output.extend(words)
         return " ".join(output[:target_words])
 
+    @staticmethod
+    def _preview_text_for_duration(text: str, seconds: int) -> str:
+        words = text.split()
+        if not words:
+            return ""
+        max_words = max(18, int(seconds * 2.35))
+        if len(words) <= max_words:
+            return text.strip()
+        shortened = " ".join(words[:max_words]).strip()
+        matches = list(re.finditer(r"[.!?…](?=\s|$)", shortened))
+        if matches:
+            return shortened[:matches[-1].end()].strip()
+        return shortened + "…"
+
     def test_qwen_design_voice(self) -> None:
         if self.mode.currentData() != "qwen-design":
-            return
-        prompt = self.qwen_design_prompt.toPlainText().strip()
-        if not prompt:
-            self.qwen_design_preview_status.setText("Enter a custom VoiceDesign description first.")
-            return
-        if self.preview_worker is not None and self.preview_worker.isRunning():
-            return
-
-        from app.tts.qwen_character_runtime import runtime_ready, model_installed, best_voice_design_kind, best_clone_kind
-
-        clone_kind = best_clone_kind()
-        if (
-            not runtime_ready()
-            or not model_installed(best_voice_design_kind())
-            or not model_installed(clone_kind)
-        ):
-            QMessageBox.warning(
-                self,
-                "Qwen VoiceDesign Not Ready",
-                "Install VoiceDesign and the matching Qwen Base model. The Base model is required to lock the designed voice identity for long-form consistency."
-            )
-            return
-
-        seconds = int(self.qwen_design_preview_duration.currentData() or 30)
-        seed = int(self.qwen_design_seed.value())
-        preview_name = f"Preview • {self.name.text().strip() or 'VoiceDesign'}"
-        profile = VoiceProfile(
-            name=preview_name,
-            provider="qwen-character",
-            voice_id="preview-voice",
-            model_id="design-1.7b",
-            backend="automatic",
-            language=self.qwen_design_language.currentText(),
-            notes=f"Qwen VoiceDesign • {prompt}",
-            authorized=True,
-            qwen_mode="design",
-            qwen_prompt=prompt,
-            qwen_seed=seed if seed > 0 else None,
-        )
-        output = Path(tempfile.gettempdir()) / "ryu_qwen_voice_design_preview.wav"
-        text = self._qwen_preview_script(seconds)
-        self.qwen_design_preview_button.setEnabled(False)
-        self.qwen_design_preview_status.setText(
-            f"Generating approximately {seconds} seconds with the current VoiceDesign description…"
-        )
-        self.preview_button.setEnabled(False)
-        self.test_profile_button.setEnabled(False)
-        self.play_button.setEnabled(False)
-        self.preview_worker = VoicePreviewWorker(
-            profile,
-            "automatic",
-            self.project_folder,
-            self.profiles,
-            [],
-            text,
-            output,
-            1.0,
-            "natural",
-            [],
-        )
-        self.preview_worker.finished_ok.connect(self._preview_worker_ok)
-        self.preview_worker.failed.connect(self._preview_worker_failed)
-        self.preview_worker.cancelled.connect(self._preview_worker_cancelled)
-        self.preview_worker.finished.connect(self._qwen_design_preview_finished)
-        self.preview_worker.start()
-
-    def _qwen_design_preview_finished(self) -> None:
-        self.qwen_design_preview_button.setEnabled(True)
-        self.preview_worker = None
-        self.preview_button.setEnabled(True)
-        self.test_profile_button.setEnabled(True)
-        self.qwen_design_preview_status.setText(
-            "VoiceDesign preview finished. Use Play in the Preview section to listen, then save the profile with your chosen name."
-        )
+            index = self.mode.findData("qwen-design")
+            if index >= 0:
+                self.mode.setCurrentIndex(index)
+        self.preview()
 
     def preview(self) -> None:
         profile = self._profile_from_ui()
         if not profile:
             return
-        text = self.preview_text.toPlainText().strip()
+
+        seconds = int(self.preview_duration.currentData() or 30)
+        raw_text = self.preview_text.toPlainText().strip()
+        if not raw_text:
+            raw_text = self._qwen_preview_script(seconds)
+        text = self._preview_text_for_duration(raw_text, seconds)
         if not text:
             self.status.setText("Enter preview text first.")
             return
+
+        preview_profile = profile
+        preview_library = self._provider_label(profile)
+        preview_model = profile.model_id or "automatic"
 
         if profile.provider == "qwen-character":
             from app.tts.qwen_character_runtime import (
                 runtime_ready, model_installed,
                 best_custom_kind, best_clone_kind, best_voice_design_kind,
             )
-            kind = (
-                best_voice_design_kind()
-                if profile.qwen_mode == "design"
-                else best_clone_kind()
-                if profile.qwen_mode == "clone"
-                else best_custom_kind()
-            )
-            if not runtime_ready() or not model_installed(kind):
-                phase = {
-                    "custom": "CustomVoice",
-                    "design": "VoiceDesign",
-                    "clone": "Voice Clone",
-                }.get(profile.qwen_mode, "Qwen3-TTS")
+            if not runtime_ready():
                 QMessageBox.warning(
                     self,
-                    f"Qwen {phase} Not Ready",
-                    f"Open Models and install the Qwen {phase} model first."
+                    "Qwen3-TTS Not Ready",
+                    "Open Models and install the Qwen3-TTS local runtime first.",
                 )
                 return
-        if profile.provider == "chatterbox" and not runtime_ready():
-            QMessageBox.warning(
-                self,
-                "Custom Voice Engine Not Ready",
-                "Install / Repair the Custom Voice Engine first, then return here and test the voice."
-            )
-            return
+
+            if profile.qwen_mode == "design":
+                # The preview only tests VoiceDesign identity. Long-form
+                # generation continues to use the Design -> Base voice-lock
+                # pipeline, but the preview does not load both 1.7B models.
+                kind = best_voice_design_kind()
+                if not model_installed(kind):
+                    QMessageBox.warning(
+                        self,
+                        "Qwen VoiceDesign Not Ready",
+                        "Install the Qwen VoiceDesign model from Models first.",
+                    )
+                    return
+                preview_profile = replace(
+                    profile,
+                    qwen_mode="design-preview",
+                    model_id=kind,
+                    qwen_anchor_path=None,
+                    qwen_anchor_text="",
+                )
+                preview_model = f"{kind} • VoiceDesign preview"
+            elif profile.qwen_mode == "clone":
+                kind = best_clone_kind()
+                if not model_installed(kind):
+                    QMessageBox.warning(
+                        self,
+                        "Qwen Voice Clone Not Ready",
+                        f"Install the Qwen Base model ({kind}) from Models first.",
+                    )
+                    return
+                preview_model = f"{kind} • Base voice clone"
+            else:
+                kind = best_custom_kind()
+                if not model_installed(kind):
+                    QMessageBox.warning(
+                        self,
+                        "Qwen CustomVoice Not Ready",
+                        f"Install the Qwen CustomVoice model ({kind}) from Models first.",
+                    )
+                    return
+                preview_model = f"{kind} • CustomVoice"
+
+        elif profile.provider == "chatterbox":
+            if not runtime_ready():
+                QMessageBox.warning(
+                    self,
+                    "Custom Voice Engine Not Ready",
+                    "Install / Repair the Custom Voice Engine first, then return here and test the voice.",
+                )
+                return
+
+        self.preview_library.setText(preview_library)
+        self.preview_provider.setText(self._provider_label(preview_profile))
+        self.preview_voice.setText(profile.name or profile.voice_id or "Unnamed voice")
+        self.preview_model.setText(preview_model)
+        self.preview_profile.setText(profile.name or "Unsaved profile")
+        self.preview_engine_status.setText(
+            f"Queued • up to {seconds} seconds • {len(text.split()):,} words"
+        )
+        self.status.setText(
+            f"Generating preview • {preview_library} • {profile.name or profile.voice_id} • up to {seconds} seconds"
+        )
 
         output = Path(tempfile.gettempdir()) / "ryu_audiobook_voice_preview.wav"
         self.preview_button.setEnabled(False)
-        self.test_profile_button.setEnabled(False)
-        self.status.setText(
-            "Preparing voice preview… "
-            "the interface remains responsive while the voice engine loads."
-        )
-        self.preview_worker = VoicePreviewWorker(profile, text, output)
+        self.play_button.setEnabled(False)
+        self.preview_worker = VoicePreviewWorker(preview_profile, text, output)
+        self.preview_worker.status.connect(self._preview_worker_status)
         self.preview_worker.finished_ok.connect(self._preview_worker_ok)
         self.preview_worker.failed.connect(self._preview_worker_failed)
         self.preview_worker.cancelled.connect(self._preview_worker_cancelled)
         self.preview_worker.finished.connect(self._preview_worker_finished)
         self.preview_worker.start()
+
+    def _preview_worker_status(self, message: str) -> None:
+        self.preview_engine_status.setText(message)
+        self.status.setText(message)
 
     def _preview_worker_ok(self, path: str) -> None:
         self.last_preview = Path(path)
@@ -2048,20 +2046,26 @@ class VoicePage(QWidget):
         self.player.setSource(QUrl.fromLocalFile(path))
         self.play_button.setEnabled(True)
         self.play_button.setText("▶  Play")
-        self.status.setText("Preview ready. Press Play to listen.")
+        self.preview_engine_status.setText("Preview ready • press Play to listen")
+        self.status.setText(
+            f"Preview ready • {self.preview_provider.text()} • {self.preview_voice.text()}"
+        )
 
     def _preview_worker_failed(self, message: str) -> None:
+        self.preview_engine_status.setText(f"Preview failed • {message}")
         self.status.setText(f"Preview failed: {message}")
+        self.preview_button.setEnabled(True)
+        self.play_button.setEnabled(False)
         QMessageBox.warning(self, "Voice Preview Failed", message)
 
     def _preview_worker_cancelled(self) -> None:
+        self.preview_engine_status.setText("Preview cancelled")
         self.status.setText("Voice preview cancelled.")
         self.preview_button.setEnabled(True)
-        self.test_profile_button.setEnabled(True)
+        self.play_button.setEnabled(False)
 
     def _preview_worker_finished(self) -> None:
         self.preview_button.setEnabled(True)
-        self.test_profile_button.setEnabled(True)
         self.preview_worker = None
 
     def save_profile(self) -> None:
