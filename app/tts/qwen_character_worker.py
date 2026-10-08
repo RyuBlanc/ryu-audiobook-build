@@ -135,6 +135,27 @@ def _generate_custom(model, request: dict, output: Path) -> None:
     sf.write(str(output), wavs[0], sr)
 
 
+def _generate_design_preview(model, request: dict, output: Path) -> None:
+    import soundfile as sf
+
+    _set_seed(request.get("seed"))
+    wavs, sr = model.generate_voice_design(
+        text=str(request.get("text") or ""),
+        language=str(request.get("language") or "English"),
+        instruct=str(request.get("instruct") or "").strip(),
+        **_generation_kwargs(
+            {
+                **request,
+                "max_new_tokens": min(int(request.get("max_new_tokens", 2048)), 1024),
+            }
+        ),
+    )
+    if not wavs:
+        raise RuntimeError("Qwen VoiceDesign did not return preview audio.")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(str(output), wavs[0], sr)
+
+
 def _generate_design_anchor(model, request: dict, anchor: Path) -> str:
     import soundfile as sf
 
@@ -236,6 +257,7 @@ def _generate_clone(model, request: dict, output: Path) -> None:
 def server(args) -> int:
     root = Path(args.models_root).resolve()
     try:
+        print(json.dumps({"progress": f"Loading Qwen model • {args.kind}"}), flush=True)
         model, device = _load_model(args.kind, args.backend, root)
     except Exception as exc:
         if _is_cuda_oom(exc) and args.backend != "cpu":
@@ -252,6 +274,8 @@ def server(args) -> int:
         # VoiceDesign itself creates the identity anchor only once. Generation
         # then continues through the Base model in the same worker process.
         pass
+
+    print(json.dumps({"progress": "Qwen model loaded • ready for preview"}), flush=True)
 
     print(
         json.dumps(
@@ -279,6 +303,7 @@ def server(args) -> int:
                 raise RuntimeError("Qwen character text is empty.")
 
             if active_task == "design" and locked_prompt is None:
+                print(json.dumps({"progress": "Creating and locking the VoiceDesign identity…"}), flush=True)
                 try:
                     model, device, locked_prompt, anchor_path = _prepare_design_clone(model, request, args)
                     active_task = "design-locked"
@@ -300,6 +325,9 @@ def server(args) -> int:
 
             if active_task == "custom":
                 _generate_custom(model, request, output)
+            elif active_task == "design-preview":
+                print(json.dumps({"progress": "Generating VoiceDesign preview audio…"}), flush=True)
+                _generate_design_preview(model, request, output)
             elif active_task == "design-locked":
                 _generate_design_locked(model, locked_prompt, request, output)
             elif active_task == "clone":
@@ -351,6 +379,8 @@ def server(args) -> int:
                     device = "cpu"
                     if active_task == "custom":
                         _generate_custom(model, request, output)
+                    elif active_task == "design-preview":
+                        _generate_design_preview(model, request, output)
                     elif active_task == "design-locked":
                         _generate_design_locked(model, locked_prompt, request, output)
                     else:
@@ -394,7 +424,7 @@ def main() -> int:
     parser.add_argument("--anchor-text", default="")
     parser.add_argument(
         "--task",
-        choices=["custom", "design", "clone"],
+        choices=["custom", "design", "design-preview", "clone"],
         default="custom",
     )
     parser.add_argument("--backend", default="automatic")
