@@ -127,6 +127,31 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(clone.qwen_mode, "clone")
         self.assertEqual(clone.reference_text, "Hello there.")
 
+    def test_voice_page_uses_four_stage_preview_layout(self):
+        source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
+        for marker in (
+            'QGroupBox("1  •  Voice Library")',
+            'QGroupBox("2  •  Library Configuration")',
+            'QGroupBox("3  •  Voice Profile")',
+            'QGroupBox("4  •  Preview")',
+        ):
+            self.assertIn(marker, source)
+        self.assertIn("for seconds in (10, 20, 30):", source)
+        self.assertIn("preview_library", source)
+        self.assertIn("preview_voice", source)
+        self.assertIn("preview_model", source)
+        self.assertIn("VoiceDesign preview", source)
+        self.assertNotIn("qwen_design_preview_duration", source)
+        self.assertNotIn("test_profile_button", source)
+
+    def test_qwen_design_preview_does_not_require_base_model(self):
+        provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
+        worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
+        self.assertIn('"design-preview"', provider)
+        self.assertIn('args.task', worker)
+        self.assertIn('_generate_design_preview', worker)
+        self.assertIn('"design-preview"', worker)
+
     def test_qwen_voice_consistency_uses_design_anchor_and_base_prompt(self):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
