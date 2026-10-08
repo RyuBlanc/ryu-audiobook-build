@@ -218,15 +218,6 @@ class VoicePage(QWidget):
         self.source_hint.setWordWrap(True)
         source_layout.addWidget(self.source_hint)
 
-        self.install_character_voices_button = QPushButton("Install / Repair Qwen Voice Studio")
-        self.install_character_voices_button.clicked.connect(self.open_offline_character_models)
-        self.install_character_voices_button.setVisible(False)
-        source_layout.addWidget(self.install_character_voices_button)
-        self.offline_character_status = QLabel()
-        self.offline_character_status.setObjectName('muted')
-        self.offline_character_status.setWordWrap(True)
-        source_layout.addWidget(self.offline_character_status)
-
         premium_row = QHBoxLayout()
         self.premium_key_button = QPushButton("Set Premium API Key")
         self.premium_key_button.clicked.connect(self._set_premium_api_key)
@@ -239,11 +230,6 @@ class VoicePage(QWidget):
         premium_row.addWidget(self.premium_key_button)
         premium_row.addWidget(self.premium_key_help_button)
         premium_row.addWidget(self.premium_key_status, 1)
-        source_layout.addLayout(premium_row)
-        self.premium_key_button.setVisible(False)
-        self.premium_key_help_button.setVisible(False)
-        self.premium_key_status.setVisible(False)
-
         self.character_box = QGroupBox("Premium Character Voice Studio")
         character = QVBoxLayout(self.character_box)
         character_info = QLabel(
@@ -335,10 +321,38 @@ class VoicePage(QWidget):
         self.character_status.setObjectName("muted")
         self.character_status.setWordWrap(True)
         character.addWidget(self.character_status)
-        source_layout.addWidget(self.character_box)
         root.addWidget(source)
 
-        self.neural_box = QGroupBox("2  •  Neural / Character Voice")
+        library_config_box = QGroupBox("2  •  Library Configuration")
+        library_config = QVBoxLayout(library_config_box)
+        self.install_character_voices_button = QPushButton("Install / Repair Qwen Voice Studio")
+        self.install_character_voices_button.clicked.connect(self.open_offline_character_models)
+        self.install_character_voices_button.setVisible(False)
+        library_config.addWidget(self.install_character_voices_button)
+        self.offline_character_status = QLabel()
+        self.offline_character_status.setObjectName("muted")
+        self.offline_character_status.setWordWrap(True)
+        library_config.addWidget(self.offline_character_status)
+
+        premium_row = QHBoxLayout()
+        self.premium_key_button = QPushButton("Set Premium API Key")
+        self.premium_key_button.clicked.connect(self._set_premium_api_key)
+        self.premium_key_help_button = QPushButton("Get API Key")
+        self.premium_key_help_button.clicked.connect(
+            lambda: webbrowser.open("https://elevenlabs.io/app/developers/api-keys")
+        )
+        self.premium_key_status = QLabel("Premium key: not configured")
+        self.premium_key_status.setObjectName("muted")
+        premium_row.addWidget(self.premium_key_button)
+        premium_row.addWidget(self.premium_key_help_button)
+        premium_row.addWidget(self.premium_key_status, 1)
+        library_config.addLayout(premium_row)
+        self.premium_key_button.setVisible(False)
+        self.premium_key_help_button.setVisible(False)
+        self.premium_key_status.setVisible(False)
+        library_config.addWidget(self.character_box)
+
+        self.neural_box = QGroupBox("Voice Browser • filters and voice selection")
         neural = QVBoxLayout(self.neural_box)
         row = QHBoxLayout()
         self.language_filter = QComboBox()
@@ -372,9 +386,9 @@ class VoicePage(QWidget):
         self.neural_count.setObjectName("muted")
         voice_row.addWidget(self.neural_count)
         neural.addLayout(voice_row)
-        root.addWidget(self.neural_box)
+        library_config.addWidget(self.neural_box)
 
-        self.qwen_phase_box = QGroupBox("2  •  Qwen3-TTS Voice Studio")
+        self.qwen_phase_box = QGroupBox("Qwen3-TTS Voice Studio")
         qwen_phase = QVBoxLayout(self.qwen_phase_box)
         self.qwen_phase_status = QLabel()
         self.qwen_phase_status.setObjectName("muted")
@@ -420,24 +434,9 @@ class VoicePage(QWidget):
         seed_row.addStretch(1)
         design_layout.addLayout(seed_row)
 
-        design_test_row = QHBoxLayout()
-        design_test_row.addWidget(QLabel("Test preview length"))
-        self.qwen_design_preview_duration = QComboBox()
-        for seconds in (10, 20, 30, 40, 50, 60):
-            self.qwen_design_preview_duration.addItem(f"{seconds} seconds", seconds)
-        self.qwen_design_preview_duration.setCurrentIndex(2)
-        design_test_row.addWidget(self.qwen_design_preview_duration)
-        self.qwen_design_preview_button = QPushButton("▶ Test VoiceDesign")
-        self.qwen_design_preview_button.setObjectName("primary")
-        self.qwen_design_preview_button.clicked.connect(self.test_qwen_design_voice)
-        design_test_row.addWidget(self.qwen_design_preview_button)
-        self.qwen_design_preview_status = QLabel(
-            "Test the custom description before saving. The preview uses a neutral audiobook sample script."
-        )
-        self.qwen_design_preview_status.setObjectName("muted")
-        self.qwen_design_preview_status.setWordWrap(True)
-        design_test_row.addWidget(self.qwen_design_preview_status, 1)
-        design_layout.addLayout(design_test_row)
+        design_layout.addWidget(QLabel(
+            "VoiceDesign describes the character identity. Use the Preview section below to test it before saving."
+        ))
         qwen_phase.addWidget(self.qwen_design_box)
 
         self.qwen_clone_box = QGroupBox("Voice Clone • authorized reference audio")
@@ -462,17 +461,17 @@ class VoicePage(QWidget):
         clone_layout.addWidget(self.qwen_clone_hint)
         qwen_phase.addWidget(self.qwen_clone_box)
 
-        root.addWidget(self.qwen_phase_box)
+        library_config.addWidget(self.qwen_phase_box)
 
-        self.sapi_box = QGroupBox("2  •  Windows Voice")
+        self.sapi_box = QGroupBox("Windows Voice")
         sapi_layout = QHBoxLayout(self.sapi_box)
         sapi_layout.addWidget(QLabel("Installed voice"))
         self.sapi_voice = QComboBox()
         sapi_layout.addWidget(self.sapi_voice, 1)
         self.sapi_voice.currentIndexChanged.connect(self._sapi_voice_changed)
-        root.addWidget(self.sapi_box)
+        library_config.addWidget(self.sapi_box)
 
-        self.custom_box = QGroupBox("2  •  Custom Authorized Voice")
+        self.custom_box = QGroupBox("Custom Authorized Voice")
         custom = QVBoxLayout(self.custom_box)
         style_row = QHBoxLayout()
         style_row.addWidget(QLabel("Character style"))
@@ -520,7 +519,6 @@ class VoicePage(QWidget):
         form.addRow("Profile name", self.name)
         profile.addLayout(form)
 
-        library_filters = QHBoxLayout()
         self.library_filter = QComboBox()
         self.library_filter.addItem("All voices", "all")
         self.library_filter.addItem("Built-in offline", "builtin")
@@ -529,14 +527,15 @@ class VoicePage(QWidget):
         self.library_filter.addItem("Online", "edge-tts")
         self.library_filter.addItem("Premium Online", "elevenlabs")
         self.library_filter.addItem("Qwen3-TTS", "qwen3-tts")
-        self.library_filter.currentIndexChanged.connect(self.refresh_profiles)
-        library_filters.addWidget(QLabel("Library"))
-        library_filters.addWidget(self.library_filter)
+        self.library_filter.setVisible(False)
+
+        saved_search_row = QHBoxLayout()
+        saved_search_row.addWidget(QLabel("Search saved profiles"))
         self.library_search = QLineEdit()
-        self.library_search.setPlaceholderText("Search saved voices…")
+        self.library_search.setPlaceholderText("Search by profile, provider, language, voice ID or description…")
         self.library_search.textChanged.connect(self.refresh_profiles)
-        library_filters.addWidget(self.library_search, 1)
-        profile.addLayout(library_filters)
+        saved_search_row.addWidget(self.library_search, 1)
+        profile.addLayout(saved_search_row)
 
         saved_row = QHBoxLayout()
         saved_row.addWidget(QLabel("Voice profiles"))
@@ -553,19 +552,33 @@ class VoicePage(QWidget):
 
         details_box = QGroupBox("Selected Voice Details")
         details = QFormLayout(details_box)
+        self.detail_library = QLabel("—")
         self.detail_provider = QLabel("—")
-        self.detail_language = QLabel("—")
+        self.detail_mode = QLabel("—")
         self.detail_voice_id = QLabel("—")
+        self.detail_language = QLabel("—")
+        self.detail_gender = QLabel("—")
         self.detail_reference = QLabel("—")
         self.detail_backend = QLabel("—")
+        self.detail_model = QLabel("—")
+        self.detail_seed = QLabel("—")
+        self.detail_anchor = QLabel("—")
         self.detail_authorization = QLabel("—")
+        self.detail_description = QLabel("—")
         for label, widget in (
+            ("Library", self.detail_library),
             ("Provider", self.detail_provider),
-            ("Language", self.detail_language),
+            ("Mode", self.detail_mode),
             ("Voice ID", self.detail_voice_id),
+            ("Language", self.detail_language),
+            ("Gender", self.detail_gender),
             ("Reference", self.detail_reference),
             ("Backend", self.detail_backend),
+            ("Model", self.detail_model),
+            ("Design seed", self.detail_seed),
+            ("Voice anchor", self.detail_anchor),
             ("Authorization", self.detail_authorization),
+            ("Description / style", self.detail_description),
         ):
             widget.setWordWrap(True)
             details.addRow(label, widget)
@@ -575,21 +588,51 @@ class VoicePage(QWidget):
         self.save_profile_button = QPushButton("Save / Update Profile")
         self.save_profile_button.setObjectName("primary")
         self.save_profile_button.clicked.connect(self.save_profile)
-        self.test_profile_button = QPushButton("Test Current Voice")
-        self.test_profile_button.clicked.connect(self.preview)
         actions.addWidget(self.save_profile_button)
-        actions.addWidget(self.test_profile_button)
         actions.addStretch(1)
         profile.addLayout(actions)
         root.addWidget(profile_box)
 
         preview_box = QGroupBox("4  •  Preview")
         pv = QVBoxLayout(preview_box)
+
+        target_box = QGroupBox("Current Preview Target")
+        target_layout = QFormLayout(target_box)
+        self.preview_library = QLabel("—")
+        self.preview_provider = QLabel("—")
+        self.preview_voice = QLabel("—")
+        self.preview_model = QLabel("—")
+        self.preview_profile = QLabel("—")
+        for label, widget in (
+            ("Library", self.preview_library),
+            ("Provider", self.preview_provider),
+            ("Voice", self.preview_voice),
+            ("Model", self.preview_model),
+            ("Profile", self.preview_profile),
+        ):
+            widget.setWordWrap(True)
+            target_layout.addRow(label, widget)
+        pv.addWidget(target_box)
+
         self.preview_text = QTextEdit()
         self.preview_text.setPlainText("Welcome to Ryu's Audiobook. This is a short voice preview.")
         self.preview_text.setMinimumHeight(78)
         self.preview_text.setMaximumHeight(125)
+        pv.addWidget(QLabel("Preview text • will be trimmed to the selected preview length"))
         pv.addWidget(self.preview_text)
+
+        settings = QHBoxLayout()
+        settings.addWidget(QLabel("Preview length"))
+        self.preview_duration = QComboBox()
+        for seconds in (10, 20, 30):
+            self.preview_duration.addItem(f"{seconds} seconds", seconds)
+        self.preview_duration.setCurrentIndex(2)
+        settings.addWidget(self.preview_duration)
+        self.preview_engine_status = QLabel("Ready")
+        self.preview_engine_status.setObjectName("muted")
+        self.preview_engine_status.setWordWrap(True)
+        settings.addWidget(self.preview_engine_status, 1)
+        pv.addLayout(settings)
 
         pa = QHBoxLayout()
         self.preview_button = QPushButton("▶  Generate Preview")
@@ -598,7 +641,7 @@ class VoicePage(QWidget):
         self.play_button = QPushButton("▶  Play")
         self.play_button.setEnabled(False)
         self.play_button.clicked.connect(self.play_last_preview)
-        self.stop_button = QPushButton("■  Stop")
+        self.stop_button = QPushButton("■  Stop / Cancel")
         self.stop_button.clicked.connect(self.stop_preview_or_playback)
         pa.addWidget(self.preview_button)
         pa.addWidget(self.play_button)
