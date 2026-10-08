@@ -55,6 +55,7 @@ class QwenCharacterProvider(TTSProvider):
         self.qwen_seed = qwen_seed
         self.qwen_anchor_path = qwen_anchor_path
         self.qwen_anchor_text = qwen_anchor_text or ""
+        self.status_callback = None
         self.model_kind = self._resolve_kind(model_kind)
         self.reference_audio = reference_audio
         self.reference_text = reference_text
@@ -71,12 +72,25 @@ class QwenCharacterProvider(TTSProvider):
             if requested in {"base-0.6b", "base-1.7b"}:
                 return requested
             return best_clone_kind()
+        if self.qwen_mode in {"design", "design-preview"}:
+            return requested if requested == "design-1.7b" else best_voice_design_kind()
         if requested in {"custom-0.6b", "custom-1.7b"}:
             return requested
         return best_custom_kind()
 
     def voices(self) -> list[str]:
         return [self.voice_id]
+
+    def set_status_callback(self, callback) -> None:
+        self.status_callback = callback
+
+    def _status(self, message: str) -> None:
+        callback = self.status_callback
+        if callable(callback):
+            try:
+                callback(str(message))
+            except Exception:
+                pass
 
     def _start_worker(self) -> None:
         if self._worker is not None and self._worker.poll() is None:
@@ -141,7 +155,12 @@ class QwenCharacterProvider(TTSProvider):
             daemon=True,
         )
         self._stdout_thread.start()
-        response = self._read_response(timeout=900.0)
+        self._status(
+            "Loading Qwen3-TTS "
+            + ("VoiceDesign preview" if self.qwen_mode == "design-preview" else "voice engine")
+            + f" • {self.model_kind}"
+        )
+        response = self._read_response(timeout=600.0)
         if response.get("ready"):
             return
         detail = response.get("error") or "The offline character worker did not become ready."
@@ -174,6 +193,10 @@ class QwenCharacterProvider(TTSProvider):
             except json.JSONDecodeError:
                 continue
             if isinstance(value, dict):
+                progress = value.get("progress")
+                if progress:
+                    self._status(str(progress))
+                    continue
                 return value
         raise RuntimeError("Timed out waiting for the offline character worker.")
 
@@ -198,6 +221,9 @@ class QwenCharacterProvider(TTSProvider):
             request["reference"] = str(self.reference_audio.resolve())
             request["ref_text"] = self.reference_text
             request["x_vector_only_mode"] = not bool(self.reference_text.strip())
+        self._status(
+            "Generating preview…" if "preview" in self.qwen_mode else "Generating narration…"
+        )
         self._worker.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
         self._worker.stdin.flush()
         response = self._read_response(timeout=300.0)
