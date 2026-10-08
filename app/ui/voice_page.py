@@ -1281,29 +1281,74 @@ class VoicePage(QWidget):
         return f"✓ Local reference • {path.name}"
 
     def _update_profile_details(self, profile: VoiceProfile | None) -> None:
+        fields = (
+            "detail_library", "detail_provider", "detail_mode", "detail_voice_id",
+            "detail_language", "detail_gender", "detail_reference", "detail_backend",
+            "detail_model", "detail_seed", "detail_anchor", "detail_authorization",
+            "detail_description",
+        )
         if profile is None:
-            self.detail_provider.setText("—")
-            self.detail_language.setText("—")
-            self.detail_voice_id.setText("—")
-            self.detail_reference.setText("—")
-            self.detail_backend.setText("—")
-            self.detail_authorization.setText("—")
+            for field in fields:
+                getattr(self, field).setText("—")
             return
+
+        library_labels = {
+            "builtin": "Offline Neural",
+            "qwen3-tts": "Qwen3-TTS",
+            "windows-sapi": "Windows SAPI",
+            "edge-tts": "Edge TTS",
+            "elevenlabs": "ElevenLabs",
+            "chatterbox": "Custom Voice",
+        }
+        library = library_labels.get(self._profile_category(profile), self._profile_category(profile))
+        if profile.provider == "qwen-character":
+            mode = {
+                "custom": "CustomVoice • reusable speaker",
+                "design": "VoiceDesign • design once + Base voice lock",
+                "clone": "Voice Clone • authorized reference",
+                "design-preview": "VoiceDesign preview",
+            }.get(profile.qwen_mode or "custom", "Qwen3-TTS")
+        elif profile.provider == "chatterbox":
+            mode = profile.style_preset or "Natural"
+        elif profile.provider in {"piper", "kokoro"}:
+            mode = "Built-in offline"
+        else:
+            mode = "Standard provider"
+
         language = profile.language or "Not specified"
+        model = profile.model_id or "automatic"
+        if profile.provider == "qwen-character" and (profile.qwen_mode or "custom") == "design":
+            model = f"VoiceDesign {profile.model_id or 'design-1.7b'} → Base {best_clone_kind()} voice lock"
+
+        anchor = "Not used"
+        if profile.qwen_anchor_path:
+            path = Path(profile.qwen_anchor_path)
+            anchor = f"✓ {path.name}" if path.exists() else f"⚠ Missing • {path.name}"
+
+        self.detail_library.setText(library)
         self.detail_provider.setText(self._provider_label(profile))
-        self.detail_language.setText(self._language_name(language) if language else "Not specified")
+        self.detail_mode.setText(mode)
         self.detail_voice_id.setText(profile.voice_id or "—")
+        self.detail_language.setText(self._language_name(language) if language else "Not specified")
+        self.detail_gender.setText(self._voice_gender(profile))
         self.detail_reference.setText(self._reference_label(profile))
         self.detail_backend.setText(profile.backend or "automatic")
+        self.detail_model.setText(model)
+        self.detail_seed.setText(
+            str(profile.qwen_seed) if profile.qwen_seed not in (None, 0) else "Automatic / natural variation"
+        )
+        self.detail_anchor.setText(anchor)
+        self.detail_authorization.setText(
+            "✓ Authorized" if profile.authorized else "⚠ Permission not confirmed"
+        )
+        self.detail_description.setText(profile.qwen_prompt or profile.notes or profile.style_preset or "—")
+
         if hasattr(self, "style_preset") and profile.provider == "chatterbox":
             idx = self.style_preset.findData(
                 (profile.style_preset or "Natural", float(profile.exaggeration), float(profile.cfg_weight))
             )
             if idx >= 0:
                 self.style_preset.setCurrentIndex(idx)
-        self.detail_authorization.setText(
-            "✓ Authorized" if profile.authorized else "⚠ Permission not confirmed"
-        )
 
     def _clear_saved_profile_selection(self) -> None:
         if not hasattr(self, "saved_profiles"):
