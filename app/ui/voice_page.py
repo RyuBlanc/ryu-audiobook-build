@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 import webbrowser
 import secrets
@@ -45,7 +46,7 @@ class VoicePreviewWorker(QThread):
     finished_ok = Signal(str)
     failed = Signal(str)
     cancelled = Signal()
-
+    status = Signal(str)
 
     def __init__(self, profile: VoiceProfile, text: str, output: Path):
         super().__init__()
@@ -55,13 +56,25 @@ class VoicePreviewWorker(QThread):
         self.provider = None
         self.cancel_requested = False
 
+    def _status(self, message: str) -> None:
+        if message:
+            self.status.emit(str(message))
+
     def run(self) -> None:
         try:
+            self._status(
+                f"Preparing preview • {self.profile.provider} • "
+                f"{self.profile.qwen_mode if self.profile.provider == 'qwen-character' else self.profile.backend}"
+            )
             self.provider, voice = provider_from_profile(self.profile)
+            callback = getattr(self.provider, "set_status_callback", None)
+            if callable(callback):
+                callback(self._status)
             self.output.parent.mkdir(parents=True, exist_ok=True)
             if self.cancel_requested:
                 self.cancelled.emit()
                 return
+            self._status("Voice engine ready • generating audio…")
             self.provider.synthesize(self.text, self.output, voice)
             if self.cancel_requested:
                 self.cancelled.emit()
@@ -83,6 +96,7 @@ class VoicePreviewWorker(QThread):
 
     def cancel(self) -> None:
         self.cancel_requested = True
+        self._status("Stopping preview…")
         provider = self.provider
         close = getattr(provider, "close", None)
         if callable(close):
