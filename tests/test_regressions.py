@@ -204,6 +204,17 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("hero walked toward the door and stopped", cleaned)
         self.assertGreaterEqual(len(removed), 3)
 
+    def test_chapter_editor_uses_inline_sentence_assignment_ui(self):
+        source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
+        self.assertIn('QPushButton("＋", self.text.viewport())', source)
+        self.assertIn("_open_inline_assignment_dialog", source)
+        self.assertIn("_selection_sentence_span", source)
+        self.assertIn('label = QLabel("Assigned: " + ", ".join(speakers)', source)
+        self.assertIn("setExtraSelections", source)
+        self.assertNotIn("Quick Assign Speaker", source)
+        self.assertNotIn("_update_quick_assign_button", source)
+        self.assertNotIn('("Assign Selected Dialogue"', source)
+
     def test_cast_provider_keeps_qwen_long_form_chunk_settings(self):
         source = Path("app/tts/cast_provider.py").read_text(encoding="utf-8")
         self.assertIn("profile.provider == "qwen-character"", source)
