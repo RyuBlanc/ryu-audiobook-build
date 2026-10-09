@@ -43,6 +43,7 @@ class AudiobookAIWorker(QThread):
     def __init__(self, project_folder, chapters):
         super().__init__()
         self.project_folder = project_folder
+        self.project_title = str(project_title or "").strip()
         self.chapters = chapters
 
     def run(self):
@@ -59,7 +60,7 @@ class AudiobookAIWorker(QThread):
                 brain.close()
 
 class ChapterEditorPage(QWidget):
-    def __init__(self, chapters: list[Chapter], on_save=None, on_rename_book=None, on_redetect=None, project_folder=None) -> None:
+    def __init__(self, chapters: list[Chapter], on_save=None, on_rename_book=None, on_redetect=None, project_folder=None, project_title: str | None = None) -> None:
         super().__init__()
         cleaned = [
             Chapter(ch.number, ch.title, remove_page_noise(ch.text), list(getattr(ch, "dialogue_assignments", [])))
@@ -84,12 +85,16 @@ class ChapterEditorPage(QWidget):
         self._loading_fields = False
         self._assignment_plus = QPushButton("＋", self.text.viewport())
         self._assignment_plus.setObjectName("assignmentPlus")
-        self._assignment_plus.setFixedSize(34, 34)
+        self.text.setViewportMargins(82, 0, 0, 0)
+        self._assignment_plus.setFixedSize(24, 24)
         self._assignment_plus.setToolTip("Assign this sentence to a character")
         self._assignment_plus.hide()
         self._assignment_plus.clicked.connect(self._open_inline_assignment_dialog)
         self._assignment_badges: list[QLabel] = []
-        self._assignment_palette = ("#BDE0FE", "#FFE29A", "#FFC6D9", "#C7F9CC", "#D9C2FF", "#FFD6A5", "#A8DADC", "#F1C0E8")
+        self._assignment_palette = (
+            "#8EC5FF", "#F0C674", "#E8A7C7", "#8FD8A8",
+            "#B8A2EE", "#F1B881", "#72C9C1", "#D7A5D6",
+        )
         self.text.selectionChanged.connect(self._update_assignment_plus)
         self.text.verticalScrollBar().valueChanged.connect(self._refresh_assignment_visuals)
         self.text.horizontalScrollBar().valueChanged.connect(self._refresh_assignment_visuals)
@@ -122,7 +127,6 @@ class ChapterEditorPage(QWidget):
             ("Rename", self.rename),
             ("Split", self.split),
             ("Mark Selection as Chapter", self.mark_selection_as_chapter),
-            ("Dialogue Assignment Manager", self.open_dialogue_manager),
             ("Analyze Book with AI", self.analyze_with_ai),
             ("Clean Book Text", self.clean_book_text),
             ("View Characters & Dialogue", self.view_characters),
@@ -153,6 +157,10 @@ class ChapterEditorPage(QWidget):
         hint.setObjectName("muted")
         chapter_text_header.addWidget(hint)
         chapter_text_header.addStretch(1)
+        assignment_manager_button = QPushButton("Assignments")
+        assignment_manager_button.setToolTip("Open the full dialogue assignment manager")
+        assignment_manager_button.clicked.connect(self.open_dialogue_manager)
+        chapter_text_header.addWidget(assignment_manager_button)
         editor_layout.addLayout(chapter_text_header)
         editor_layout.addWidget(self.text, 1)
         body.addLayout(editor_layout, 3)
@@ -271,7 +279,7 @@ class ChapterEditorPage(QWidget):
             self.text.setExtraSelections(selections)
             return
         chapter = self.editor.chapters[chapter_index]
-        for index, assignment in enumerate(getattr(chapter, "dialogue_assignments", [])):
+        for assignment in getattr(chapter, "dialogue_assignments", []):
             try:
                 start = int(assignment.get("start", -1))
                 end = int(assignment.get("end", -1))
@@ -283,27 +291,43 @@ class ChapterEditorPage(QWidget):
             speakers = self._assignment_speakers(assignment)
             if not speakers:
                 continue
+
             cursor = self.text.textCursor()
             cursor.setPosition(start)
             cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+
             color = self._assignment_color(speakers[0])
+            soft = QColor(color)
+            soft.setAlpha(52)
             fmt = QTextCharFormat()
-            fmt.setBackground(color)
-            fmt.setForeground(QColor("#111111"))
+            fmt.setBackground(soft)
+
             selection = QTextEdit.ExtraSelection()
             selection.cursor = cursor
             selection.format = fmt
             selections.append(selection)
+
             probe = self.text.textCursor()
             probe.setPosition(start)
             rect = self.text.cursorRect(probe)
-            badge = QLabel("Assigned: " + ", ".join(speakers), self.text.viewport())
+
+            display_name = speakers[0]
+            if len(speakers) > 1:
+                display_name += f" +{len(speakers) - 1}"
+            badge = QLabel(display_name, self.text.viewport())
             badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-            badge.setStyleSheet("QLabel { background:%s; color:#111111; border:1px solid rgba(0,0,0,0.18); border-radius:8px; padding:2px 7px; font-weight:600; }" % color.name())
-            badge.adjustSize()
-            x = min(max(4, rect.left()), max(4, self.text.viewport().width() - badge.width() - 4))
-            y = max(2, rect.top() - badge.height() - 2)
-            badge.move(x, y)
+            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            badge.setFixedWidth(72)
+            badge.setFixedHeight(18)
+            badge.setToolTip("Assigned: " + ", ".join(speakers))
+            badge.setStyleSheet(
+                "QLabel {"
+                f"background:rgba({color.red()},{color.green()},{color.blue()},95);"
+                "color:#f6f7fb; border:1px solid rgba(255,255,255,0.16);"
+                "border-radius:8px; padding:0 4px; font-size:8pt; font-weight:600;"
+                "}"
+            )
+            badge.move(4, max(2, rect.top() + 1))
             badge.show()
             self._assignment_badges.append(badge)
         self.text.setExtraSelections(selections)
@@ -327,8 +351,8 @@ class ChapterEditorPage(QWidget):
         button = self._assignment_plus
         button.show()
         button.raise_()
-        x = min(max(3, rect.left() + 6), max(3, self.text.viewport().width() - button.width() - 4))
-        y = min(max(3, rect.top() - button.height() // 2), max(3, self.text.viewport().height() - button.height() - 4))
+        x = 31
+        y = min(max(3, rect.top()), max(3, self.text.viewport().height() - button.height() - 4))
         button.move(x, y)
 
     def _open_inline_assignment_dialog(self) -> None:
@@ -747,14 +771,26 @@ class ChapterEditorPage(QWidget):
         self._save_silently()
 
     def rename_book(self) -> None:
-        value, ok = QInputDialog.getText(self, "Rename Audiobook", "Audiobook / project title:", text=self.window().windowTitle() if self.window() else "")
+        current_title = self.project_title or "Untitled Book"
+        value, ok = QInputDialog.getText(
+            self,
+            "Rename Audiobook",
+            "Audiobook / project title:",
+            text=current_title,
+        )
         if not ok or not value.strip():
             return
+        new_title = value.strip()
         if self.on_rename_book:
-            self.on_rename_book(value.strip())
-            QMessageBox.information(self, "Renamed", f"Audiobook renamed to '{value.strip()}'.")
+            self.on_rename_book(new_title)
+            self.project_title = new_title
+            QMessageBox.information(self, "Renamed", f"Audiobook renamed to '{new_title}'.")
         else:
-            QMessageBox.information(self, "Rename Audiobook", "Open the project through the Library to rename its title.")
+            QMessageBox.information(
+                self,
+                "Rename Audiobook",
+                "Open the project through the Library to rename its title.",
+            )
 
     def save(self) -> None:
         if self._save_silently():
