@@ -205,6 +205,7 @@ class ProjectWorkflow(QMainWindow):
             self.rename_project,
             self.redetect_chapters,
             self.project.folder,
+            self.project.title,
         )
         self.stack.addWidget(self.editor)
         self._editor_index = self.stack.indexOf(self.editor)
