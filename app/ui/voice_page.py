@@ -464,6 +464,10 @@ class VoicePage(QWidget):
 
         library_config.addWidget(self.qwen_phase_box)
 
+        # Stage 2 is the library-specific configuration area. It must be
+        # attached to the page or none of the voice selectors are visible.
+        root.addWidget(library_config_box)
+
         self.sapi_box = QGroupBox("Windows Voice")
         sapi_layout = QHBoxLayout(self.sapi_box)
         sapi_layout.addWidget(QLabel("Installed voice"))
@@ -510,7 +514,7 @@ class VoicePage(QWidget):
         self.install_custom_button = QPushButton("Install / Repair Custom Voice Engine")
         self.install_custom_button.clicked.connect(self.open_custom_engine_installer)
         custom.addWidget(self.install_custom_button)
-        root.addWidget(self.custom_box)
+        library_config.addWidget(self.custom_box)
 
         profile_box = QGroupBox("3  •  Voice Profile")
         profile = QVBoxLayout(profile_box)
