@@ -258,8 +258,10 @@ class ChapterEditorPage(QWidget):
             badge.deleteLater()
         self._assignment_badges.clear()
 
-    def _assignment_color(self, index: int) -> QColor:
-        return QColor(self._assignment_palette[index % len(self._assignment_palette)])
+    def _assignment_color(self, speaker: str) -> QColor:
+        key = str(speaker or "speaker").casefold().strip()
+        stable_index = sum((position + 1) * ord(char) for position, char in enumerate(key))
+        return QColor(self._assignment_palette[stable_index % len(self._assignment_palette)])
 
     def _refresh_assignment_visuals(self) -> None:
         if not hasattr(self, "text"):
@@ -286,7 +288,7 @@ class ChapterEditorPage(QWidget):
             cursor = self.text.textCursor()
             cursor.setPosition(start)
             cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
-            color = self._assignment_color(index)
+            color = self._assignment_color(speakers[0])
             fmt = QTextCharFormat()
             fmt.setBackground(color)
             fmt.setForeground(QColor("#111111"))
