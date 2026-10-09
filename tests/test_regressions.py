@@ -127,6 +127,16 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(clone.qwen_mode, "clone")
         self.assertEqual(clone.reference_text, "Hello there.")
 
+    def test_voice_page_stage_two_contains_library_selectors(self):
+        source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
+        self.assertIn("library_config_box = QGroupBox", source)
+        self.assertIn("root.addWidget(library_config_box)", source)
+        self.assertIn("library_config.addWidget(self.neural_box)", source)
+        self.assertIn("library_config.addWidget(self.qwen_phase_box)", source)
+        self.assertIn("library_config.addWidget(self.sapi_box)", source)
+        self.assertIn("library_config.addWidget(self.custom_box)", source)
+        self.assertNotIn("root.addWidget(self.custom_box)", source)
+
     def test_voice_page_uses_four_stage_preview_layout(self):
         source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
         for marker in (
