@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QItemSelectionModel, QTimer, QThread, Signal, Qt
+from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -16,9 +17,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QInputDialog,
     QSizePolicy,
-    QColor,
-    QTextCharFormat,
-    QTextCursor,
 )
 from app.chapters.detector import Chapter
 from app.chapters.editor import ChapterEditor
