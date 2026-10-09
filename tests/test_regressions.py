@@ -127,6 +127,21 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(clone.qwen_mode, "clone")
         self.assertEqual(clone.reference_text, "Hello there.")
 
+    def test_chapter_editor_assignment_ui_is_subtle_and_uses_project_title(self):
+        source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
+        self.assertIn("self.text.setViewportMargins(82, 0, 0, 0)", source)
+        self.assertIn('assignment_manager_button = QPushButton("Assignments")', source)
+        self.assertIn('badge.setFixedWidth(72)', source)
+        self.assertIn('badge.setFixedHeight(18)', source)
+        self.assertIn("soft.setAlpha(52)", source)
+        self.assertIn("self.project_title = str(project_title or \\"\\").strip()", source)
+        self.assertNotIn('text=self.window().windowTitle()', source)
+
+    def test_workflow_passes_real_project_title_to_chapter_editor(self):
+        source = Path("app/ui/workflow.py").read_text(encoding="utf-8")
+        self.assertIn("self.project.folder,", source)
+        self.assertIn("self.project.title,", source)
+
     def test_voice_page_stage_two_contains_library_selectors(self):
         source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
         self.assertIn("library_config_box = QGroupBox", source)
