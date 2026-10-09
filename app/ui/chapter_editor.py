@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QItemSelectionModel, QTimer, QThread, Signal
+from PySide6.QtCore import QItemSelectionModel, QTimer, QThread, Signal, Qt
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -16,6 +16,9 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QInputDialog,
     QSizePolicy,
+    QColor,
+    QTextCharFormat,
+    QTextCursor,
 )
 from app.chapters.detector import Chapter
 from app.chapters.editor import ChapterEditor
@@ -81,12 +84,17 @@ class ChapterEditorPage(QWidget):
         self.title.setMaximumHeight(55)
         self.text = QTextEdit()
         self._loading_fields = False
-        self.quick_assign_button = QPushButton("＋ Quick Assign Speaker")
-        self.quick_assign_button.setObjectName("primary")
-        self.quick_assign_button.setToolTip("Quickly assign the selected dialogue to a saved book character")
-        self.quick_assign_button.setVisible(False)
-        self.quick_assign_button.clicked.connect(self.quick_assign_dialogue)
-        self.text.selectionChanged.connect(self._update_quick_assign_button)
+        self._assignment_plus = QPushButton("＋", self.text.viewport())
+        self._assignment_plus.setObjectName("assignmentPlus")
+        self._assignment_plus.setFixedSize(34, 34)
+        self._assignment_plus.setToolTip("Assign this sentence to a character")
+        self._assignment_plus.hide()
+        self._assignment_plus.clicked.connect(self._open_inline_assignment_dialog)
+        self._assignment_badges: list[QLabel] = []
+        self._assignment_palette = ("#BDE0FE", "#FFE29A", "#FFC6D9", "#C7F9CC", "#D9C2FF", "#FFD6A5", "#A8DADC", "#F1C0E8")
+        self.text.selectionChanged.connect(self._update_assignment_plus)
+        self.text.verticalScrollBar().valueChanged.connect(self._refresh_assignment_visuals)
+        self.text.horizontalScrollBar().valueChanged.connect(self._refresh_assignment_visuals)
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.setInterval(900)
@@ -116,7 +124,6 @@ class ChapterEditorPage(QWidget):
             ("Rename", self.rename),
             ("Split", self.split),
             ("Mark Selection as Chapter", self.mark_selection_as_chapter),
-            ("Assign Selected Dialogue", self.assign_selected_dialogue),
             ("Dialogue Assignment Manager", self.open_dialogue_manager),
             ("Analyze Book with AI", self.analyze_with_ai),
             ("Clean Book Text", self.clean_book_text),
@@ -144,8 +151,10 @@ class ChapterEditorPage(QWidget):
         editor_layout.addWidget(self.title)
         chapter_text_header = QHBoxLayout()
         chapter_text_header.addWidget(QLabel("Chapter Text"))
+        hint = QLabel("Select a sentence • click ＋ to assign its speaker")
+        hint.setObjectName("muted")
+        chapter_text_header.addWidget(hint)
         chapter_text_header.addStretch(1)
-        chapter_text_header.addWidget(self.quick_assign_button)
         editor_layout.addLayout(chapter_text_header)
         editor_layout.addWidget(self.text, 1)
         body.addLayout(editor_layout, 3)
@@ -186,6 +195,8 @@ class ChapterEditorPage(QWidget):
                 chapter = self.editor.chapters[index]
                 self.title.setPlainText(chapter.title)
                 self.text.setPlainText(chapter.text)
+                self._clear_assignment_badges()
+                self._refresh_assignment_visuals()
                 self.save_status.setText("Auto-save enabled")
             else:
                 self.title.clear()
@@ -193,98 +204,157 @@ class ChapterEditorPage(QWidget):
         finally:
             self._loading_fields = False
 
-    def _update_quick_assign_button(self) -> None:
+    def _selection_sentence_span(self) -> tuple[int, int]:
         cursor = self.text.textCursor()
-        has_selection = cursor.hasSelection() and cursor.selectionStart() < cursor.selectionEnd()
-        self.quick_assign_button.setVisible(has_selection and not self._loading_fields)
+        if not cursor.hasSelection():
+            return (-1, -1)
+        start = min(cursor.selectionStart(), cursor.selectionEnd())
+        end = max(cursor.selectionStart(), cursor.selectionEnd())
+        source = self.text.toPlainText()
+        if not source or end <= start:
+            return (-1, -1)
 
-    def quick_assign_dialogue(self) -> None:
-        index = self.list.currentRow()
-        if index < 0:
+        left = start
+        while left > 0:
+            ch = source[left - 1]
+            if ch in ".!?…":
+                while left < len(source) and source[left].isspace():
+                    left += 1
+                break
+            if ch in "\n\r":
+                break
+            left -= 1
+
+        right = end
+        while right < len(source):
+            ch = source[right]
+            if ch in ".!?…":
+                right += 1
+                while right < len(source) and source[right] in "\"”’»)]":
+                    right += 1
+                break
+            if ch in "\n\r":
+                break
+            right += 1
+
+        while left > 0 and source[left - 1].isspace() and source[left - 1] not in "\n\r":
+            left -= 1
+        while right < len(source) and source[right].isspace() and source[right] not in "\n\r":
+            right += 1
+        return left, right
+
+    @staticmethod
+    def _assignment_speakers(item: dict) -> list[str]:
+        raw = item.get("speakers")
+        if isinstance(raw, list):
+            values = [str(value).strip() for value in raw if str(value).strip()]
+            if values:
+                return values
+        speaker = str(item.get("speaker", "")).strip()
+        return [speaker] if speaker else []
+
+    def _clear_assignment_badges(self) -> None:
+        for badge in self._assignment_badges:
+            badge.deleteLater()
+        self._assignment_badges.clear()
+
+    def _assignment_color(self, index: int) -> QColor:
+        return QColor(self._assignment_palette[index % len(self._assignment_palette)])
+
+    def _refresh_assignment_visuals(self) -> None:
+        if not hasattr(self, "text"):
             return
-        cursor = self.text.textCursor()
-        if not cursor.hasSelection() or cursor.selectionStart() >= cursor.selectionEnd():
-            return
-
-        chapter = self.editor.chapters[index]
-        start, end = cursor.selectionStart(), cursor.selectionEnd()
-        segment = dialogue_segment_for_selection(chapter, start, end)
-        registry = build_book_character_registry(self.editor.chapters, self.project_folder)
-
-        menu = QMenu(self)
-        menu.setMinimumWidth(420)
-
-        if segment and segment.suggestions:
-            suggested_added = set()
-            header = menu.addAction("Suggested speakers")
-            header.setEnabled(False)
-            for name, confidence, evidence in segment.suggestions:
-                entry = registry.get(name.casefold())
-                if not entry:
-                    continue
-                suggested_added.add(name.casefold())
-                action = menu.addAction(
-                    f"✓ {name}  ·  {confidence:.0%}\n"
-                    f"   {format_character_registry_entry(entry)}"
-                )
-                action.setToolTip(evidence)
-                action.triggered.connect(
-                    lambda _checked=False, speaker=name, s=start, e=end: self._quick_assign_character(index, s, e, speaker)
-                )
-
-        saved_header = menu.addAction("Saved characters in this book")
-        saved_header.setEnabled(False)
-        for key, entry in registry.items():
-            if key in suggested_added:
-                continue
-            action = menu.addAction(format_character_registry_entry(entry))
-            action.triggered.connect(
-                lambda _checked=False, speaker=entry["name"], s=start, e=end: self._quick_assign_character(index, s, e, speaker)
-            )
-
-        if menu.isEmpty():
-            empty = menu.addAction("No saved characters yet — add one below.")
-            empty.setEnabled(False)
-
-        menu.addSeparator()
-        add_action = menu.addAction("＋ Add New Character…")
-        add_action.triggered.connect(lambda _checked=False: self.assign_selected_dialogue())
-        multi_action = menu.addAction("Assign multiple speakers / advanced…")
-        multi_action.triggered.connect(lambda _checked=False: self.assign_selected_dialogue())
-
-        menu.exec(self.quick_assign_button.mapToGlobal(self.quick_assign_button.rect().bottomLeft()))
-
-    def _quick_assign_character(self, chapter_index: int, start: int, end: int, speaker: str) -> None:
+        self._clear_assignment_badges()
+        selections: list[QTextEdit.ExtraSelection] = []
+        chapter_index = self.list.currentRow()
         if not (0 <= chapter_index < len(self.editor.chapters)):
+            self.text.setExtraSelections(selections)
             return
         chapter = self.editor.chapters[chapter_index]
-        selected_text = chapter.text[start:end].strip()
-        if not selected_text:
-            return
+        for index, assignment in enumerate(getattr(chapter, "dialogue_assignments", [])):
+            try:
+                start = int(assignment.get("start", -1))
+                end = int(assignment.get("end", -1))
+            except (TypeError, ValueError):
+                continue
+            if start < 0 or end <= start or start >= len(chapter.text):
+                continue
+            end = min(end, len(chapter.text))
+            speakers = self._assignment_speakers(assignment)
+            if not speakers:
+                continue
+            cursor = self.text.textCursor()
+            cursor.setPosition(start)
+            cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+            color = self._assignment_color(index)
+            fmt = QTextCharFormat()
+            fmt.setBackground(color)
+            fmt.setForeground(QColor("#111111"))
+            selection = QTextEdit.ExtraSelection()
+            selection.cursor = cursor
+            selection.format = fmt
+            selections.append(selection)
+            probe = self.text.textCursor()
+            probe.setPosition(start)
+            rect = self.text.cursorRect(probe)
+            badge = QLabel("Assigned: " + ", ".join(speakers), self.text.viewport())
+            badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            badge.setStyleSheet("QLabel { background:%s; color:#111111; border:1px solid rgba(0,0,0,0.18); border-radius:8px; padding:2px 7px; font-weight:600; }" % color.name())
+            badge.adjustSize()
+            x = min(max(4, rect.left()), max(4, self.text.viewport().width() - badge.width() - 4))
+            y = max(2, rect.top() - badge.height() - 2)
+            badge.move(x, y)
+            badge.show()
+            self._assignment_badges.append(badge)
+        self.text.setExtraSelections(selections)
+        self._update_assignment_plus()
 
-        assignment = normalize_assignment(
-            {
-                "start": int(start),
-                "end": int(end),
-                "text": selected_text,
-                "source": "manual",
-            },
-            [speaker],
-            mode="chorus",
+    def _update_assignment_plus(self) -> None:
+        if self._loading_fields or not self.text.isEnabled():
+            self._assignment_plus.hide()
+            return
+        cursor = self.text.textCursor()
+        if not cursor.hasSelection() or cursor.selectionStart() == cursor.selectionEnd():
+            self._assignment_plus.hide()
+            return
+        start, end = self._selection_sentence_span()
+        if start < 0 or end <= start:
+            self._assignment_plus.hide()
+            return
+        probe = self.text.textCursor()
+        probe.setPosition(end)
+        rect = self.text.cursorRect(probe)
+        button = self._assignment_plus
+        button.show()
+        button.raise_()
+        x = min(max(3, rect.left() + 6), max(3, self.text.viewport().width() - button.width() - 4))
+        y = min(max(3, rect.top() - button.height() // 2), max(3, self.text.viewport().height() - button.height() - 4))
+        button.move(x, y)
+
+    def _open_inline_assignment_dialog(self) -> None:
+        chapter_index = self.list.currentRow()
+        if chapter_index < 0:
+            return
+        start, end = self._selection_sentence_span()
+        if start < 0 or end <= start:
+            return
+        cursor = self.text.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        self.text.setTextCursor(cursor)
+        chapter = self.editor.chapters[chapter_index]
+        dialog = DialogueAssignmentDialog(
+            chapter=chapter,
+            start=start,
+            end=end,
+            book_chapters=self.editor.chapters,
+            project_folder=self.project_folder,
+            parent=self,
         )
-        chapter.dialogue_assignments = [
-            item
-            for item in getattr(chapter, "dialogue_assignments", [])
-            if not (
-                int(item.get("start", -1)) == start
-                and int(item.get("end", -1)) == end
-            )
-        ]
-        chapter.dialogue_assignments.append(assignment)
-        self._save_silently()
-        self.refresh(chapter_index)
-        self.load_selected(chapter_index)
-        self.save_status.setText(f"✓ Dialogue assigned to {speaker}")
+        if dialog.exec() == dialog.DialogCode.Accepted and dialog.assigned:
+            self._save_silently()
+            self._refresh_assignment_visuals()
+            self.save_status.setText("✓ Speaker assignment saved for selected sentence")
     def _schedule_autosave(self) -> None:
         if self._loading_fields:
             return
