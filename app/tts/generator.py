@@ -6,8 +6,6 @@ import hashlib
 import json
 import re
 import wave
-import subprocess
-import imageio_ffmpeg
 from typing import Callable
 
 from app.chapters.detector import Chapter
@@ -68,23 +66,6 @@ def _provider_signature(provider: TTSProvider, voice: str | None, chunks: list[t
         json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
 
-
-def _apply_narration_speed(path: Path, speed: float) -> None:
-    """Change playback tempo without changing pitch."""
-    speed = max(0.5, min(2.0, float(speed)))
-    if abs(speed - 1.0) < 0.001:
-        return
-    temp_path = path.with_suffix(".tempo.wav")
-    result = subprocess.run(
-        [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-i", str(path),
-         "-filter:a", f"atempo={speed:.3f}", "-c:a", "pcm_s16le", str(temp_path)],
-        capture_output=True, text=True, check=False,
-    )
-    if result.returncode != 0 or not temp_path.exists() or temp_path.stat().st_size < 1024:
-        detail = (result.stderr or result.stdout or "").strip()[-2000:]
-        temp_path.unlink(missing_ok=True)
-        raise RuntimeError(f"Could not apply narration speed {speed:.2f}x. {detail}")
-    temp_path.replace(path)
 
 def prepare_chapter_plan(
     chapter: Chapter,
@@ -256,12 +237,13 @@ def generate_chapter(
             synthesize_voice_set(provider, chunk, chunk_voice, output)
         else:
             provider.synthesize(chunk, output, chunk_voice)
-        if not getattr(provider, "handles_narration_controls", False):
-            if abs(narration_speed - 1.0) > 0.001:
-                _apply_narration_speed(output, narration_speed)
-            pause_ms = pause_after_ms(chunk, pacing_profile)
-            if pause_ms:
-                append_silence(output, pause_ms)
+
+        # Apply pacing at the WAV-chunk level only. Narration speed itself is
+        # applied once during chapter assembly so long books do not spawn an
+        # FFmpeg tempo process for every single TTS segment.
+        pause_ms = pause_after_ms(chunk, pacing_profile)
+        if pause_ms:
+            append_silence(output, pause_ms)
 
         if not output.exists() or output.stat().st_size < 1024:
             raise RuntimeError(
@@ -281,9 +263,16 @@ def generate_chapter(
 
         completed.add(index)
         state["completed"] = sorted(completed)
-        save_state(chapter_dir, state)
+        # Persist every few chunks instead of writing generation.json for
+        # every single segment. The completed set is still flushed whenever
+        # generation stops or the chapter finishes.
+        if len(completed) % 4 == 0 or len(completed) == len(chunks):
+            save_state(chapter_dir, state)
         if progress:
             progress(len(completed), len(chunks))
+
+    state["completed"] = sorted(completed)
+    save_state(chapter_dir, state)
 
     (chapter_dir / "manifest.json").write_text(
         json.dumps(
