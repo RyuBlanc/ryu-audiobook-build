@@ -57,17 +57,42 @@ def _is_cuda_oom(exc: BaseException) -> bool:
 
 
 def _generation_kwargs(request: dict) -> dict:
+    longform = bool(request.get("longform", False))
+    defaults = {
+        "do_sample": True,
+        "top_k": 50,
+        "top_p": 1.0,
+        "temperature": 0.9,
+        "repetition_penalty": 1.05,
+        "subtalker_dosample": True,
+        "subtalker_top_k": 50,
+        "subtalker_top_p": 1.0,
+        "subtalker_temperature": 0.9,
+        "max_new_tokens": 2048,
+    }
+    if longform:
+        # Long-form narration needs stable expressiveness, but does not need
+        # the very high token ceiling used by unconstrained one-off samples.
+        defaults.update(
+            {
+                "top_k": 40,
+                "temperature": 0.85,
+                "subtalker_top_k": 40,
+                "subtalker_temperature": 0.85,
+                "max_new_tokens": 1536,
+            }
+        )
     return {
-        "do_sample": bool(request.get("do_sample", True)),
-        "top_k": int(request.get("top_k", 50)),
-        "top_p": float(request.get("top_p", 1.0)),
-        "temperature": float(request.get("temperature", 0.9)),
-        "repetition_penalty": float(request.get("repetition_penalty", 1.05)),
-        "subtalker_dosample": bool(request.get("subtalker_dosample", True)),
-        "subtalker_top_k": int(request.get("subtalker_top_k", 50)),
-        "subtalker_top_p": float(request.get("subtalker_top_p", 1.0)),
-        "subtalker_temperature": float(request.get("subtalker_temperature", 0.9)),
-        "max_new_tokens": int(request.get("max_new_tokens", 2048)),
+        "do_sample": bool(request.get("do_sample", defaults["do_sample"])),
+        "top_k": int(request.get("top_k", defaults["top_k"])),
+        "top_p": float(request.get("top_p", defaults["top_p"])),
+        "temperature": float(request.get("temperature", defaults["temperature"])),
+        "repetition_penalty": float(request.get("repetition_penalty", defaults["repetition_penalty"])),
+        "subtalker_dosample": bool(request.get("subtalker_dosample", defaults["subtalker_dosample"])),
+        "subtalker_top_k": int(request.get("subtalker_top_k", defaults["subtalker_top_k"])),
+        "subtalker_top_p": float(request.get("subtalker_top_p", defaults["subtalker_top_p"])),
+        "subtalker_temperature": float(request.get("subtalker_temperature", defaults["subtalker_temperature"])),
+        "max_new_tokens": int(request.get("max_new_tokens", defaults["max_new_tokens"])),
     }
 
 
@@ -203,7 +228,38 @@ def _prepare_design_clone(model, request: dict, args):
         except Exception:
             pass
 
-    clone_model, clone_device = _load_model(args.clone_kind, args.backend, Path(args.models_root).resolve())
+    requested_clone_kind = args.clone_kind
+    try:
+        clone_model, clone_device = _load_model(
+            requested_clone_kind,
+            args.backend,
+            Path(args.models_root).resolve(),
+        )
+    except Exception as exc:
+        # VoiceDesign long-form favors the lighter 0.6B Base model when the
+        # larger Base model cannot fit on the GPU. This prevents a silent
+        # switch all the way down to CPU generation.
+        if _is_cuda_oom(exc) and str(requested_clone_kind) == "base-1.7b":
+            fallback_kind = "base-0.6b"
+            if (Path(args.models_root).resolve() / fallback_kind).exists():
+                print(
+                    json.dumps(
+                        {
+                            "progress": "Base 1.7B exceeded available GPU memory • switching to Base 0.6B for long-form generation"
+                        }
+                    ),
+                    flush=True,
+                )
+                clone_model, clone_device = _load_model(
+                    fallback_kind,
+                    args.backend,
+                    Path(args.models_root).resolve(),
+                )
+                args.clone_kind = fallback_kind
+            else:
+                raise
+        else:
+            raise
     x_vector_only = False
     prompt = clone_model.create_voice_clone_prompt(
         ref_audio=str(anchor),
@@ -275,7 +331,14 @@ def server(args) -> int:
         # then continues through the Base model in the same worker process.
         pass
 
-    print(json.dumps({"progress": "Qwen model loaded • ready for preview"}), flush=True)
+    print(
+        json.dumps(
+            {
+                "progress": f"Qwen model loaded • {device}",
+            }
+        ),
+        flush=True,
+    )
 
     print(
         json.dumps(
