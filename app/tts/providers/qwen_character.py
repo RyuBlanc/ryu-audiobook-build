@@ -135,7 +135,7 @@ class QwenCharacterProvider(TTSProvider):
                 "Open Models and install the corresponding Qwen3-TTS phase."
             )
         clone_kind = None
-        if self.qwen_mode == "design":
+        if self.qwen_mode in {"design", "design-preview"}:
             clone_kind = best_long_form_clone_kind()
             if not model_installed(clone_kind):
                 raise RuntimeError(
