@@ -433,9 +433,10 @@ class GenerationPage(QWidget):
         preview_layout.addLayout(preview_time_row)
 
         self.preview_loading = QProgressBar()
-        self.preview_loading.setRange(0, 0)
-        self.preview_loading.setTextVisible(False)
-        self.preview_loading.setFixedHeight(6)
+        self.preview_loading.setRange(0, 100)
+        self.preview_loading.setValue(0)
+        self.preview_loading.setTextVisible(True)
+        self.preview_loading.setFixedHeight(8)
         self.preview_loading.setVisible(False)
         preview_layout.addWidget(self.preview_loading)
 
@@ -1192,6 +1193,7 @@ class GenerationPage(QWidget):
         self.preview_button.setEnabled(False)
         self.preview_play_button.setEnabled(False)
         self.preview_stop_button.setEnabled(True)
+        self.preview_loading.setValue(5)
         self.preview_loading.setVisible(True)
         self.preview_status.setText('[5%] Preparing voice preview…')
         self.status.setText('Voice preview is running in the background; the app remains responsive.')
@@ -1221,7 +1223,8 @@ class GenerationPage(QWidget):
         self.preview_path = None
         self.preview_play_button.setEnabled(False)
         self.preview_stop_button.setEnabled(False)
-        self.preview_status.setText('Preview generation failed.')
+        self.preview_loading.setValue(0)
+        self.preview_status.setText('0% • Preview generation failed.')
         self.status.setText(f'Preview failed: {message}')
 
     def _preview_worker_finished(self) -> None:
