@@ -343,6 +343,8 @@ def server(args) -> int:
 
     active_task = args.task
     active_kind = args.kind
+    locked_clone_prompt = None
+    locked_anchor = None
 
     print(
         json.dumps(
@@ -380,22 +382,33 @@ def server(args) -> int:
 
             if active_task == "custom":
                 _generate_custom(model, request, output)
-            elif active_task == "design":
+            elif active_task in {"design", "design-preview"}:
+                if locked_clone_prompt is None:
+                    print(
+                        json.dumps({"progress": "Creating or loading stable VoiceDesign identity…"}),
+                        flush=True,
+                    )
+                    model, device, locked_clone_prompt, locked_anchor = _prepare_design_clone(
+                        model, request, args
+                    )
+                    active_kind = str(args.clone_kind)
+                    print(
+                        json.dumps({
+                            "progress": f"Voice identity locked • {active_kind} • {device}"
+                        }),
+                        flush=True,
+                    )
                 print(
-                    json.dumps({"progress": "Generating expressive VoiceDesign narration…"}),
+                    json.dumps({
+                        "progress": (
+                            "Generating natural VoiceDesign narration…"
+                            if active_task == "design"
+                            else "Generating natural VoiceDesign preview…"
+                        )
+                    }),
                     flush=True,
                 )
-                _generate_design(model, request, output)
-            elif active_task == "design-preview":
-                print(
-                    json.dumps({"progress": "Generating expressive VoiceDesign preview audio…"}),
-                    flush=True,
-                )
-                request = {
-                    **request,
-                    "max_new_tokens": min(int(request.get("max_new_tokens", 2048)), 1024),
-                }
-                _generate_design_preview(model, request, output)
+                _generate_design_locked(model, locked_clone_prompt, request, output)
             elif active_task == "clone":
                 _generate_clone(model, request, output)
             else:
@@ -409,8 +422,8 @@ def server(args) -> int:
                         "device": device,
                         "kind": active_kind,
                         "task": active_task,
-                        "anchor": None,
-                        "voice_lock": False,
+                        "anchor": str(locked_anchor) if locked_anchor else None,
+                        "voice_lock": bool(locked_clone_prompt is not None),
                     }
                 ),
                 flush=True,
@@ -434,10 +447,12 @@ def server(args) -> int:
                     device = "cpu"
                     if active_task == "custom":
                         _generate_custom(model, request, output)
-                    elif active_task == "design":
-                        _generate_design(model, request, output)
-                    elif active_task == "design-preview":
-                        _generate_design_preview(model, request, output)
+                    elif active_task in {"design", "design-preview"}:
+                        if locked_clone_prompt is None:
+                            raise RuntimeError(
+                                "The stable VoiceDesign identity could not be restored after GPU memory fallback."
+                            )
+                        _generate_design_locked(model, locked_clone_prompt, request, output)
                     else:
                         _generate_clone(model, request, output)
                     print(
