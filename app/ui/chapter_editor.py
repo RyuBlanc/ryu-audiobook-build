@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QItemSelectionModel, QTimer, QThread, Signal, Qt
+from PySide6.QtCore import QItemSelectionModel, QTimer, QThread, Signal, Qt, QPoint
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QGridLayout,
@@ -67,6 +67,7 @@ class ChapterEditorPage(QWidget):
         ]
         self.editor = ChapterEditor(cleaned)
         self.on_save = on_save
+        self.on_autosave = None
         self.on_rename_book = on_rename_book
         self.on_redetect = on_redetect
         self.project_folder = project_folder
@@ -323,34 +324,44 @@ class ChapterEditorPage(QWidget):
             probe = self.text.textCursor()
             probe.setPosition(end)
             rect = self.text.cursorRect(probe)
-            badge_point = self.text.viewport().mapTo(
-                self.text,
-                rect.topRight(),
-            )
 
             display_name = speakers[0]
             if len(speakers) > 1:
                 display_name += f" +{len(speakers) - 1}"
-            badge = QLabel(display_name, self.text)
-            badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-            badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            badge.setFixedWidth(72)
-            badge.setFixedHeight(18)
-            badge.setToolTip("Assigned: " + ", ".join(speakers))
+            from PySide6.QtGui import QFontMetrics
+            metrics = QFontMetrics(self.text.viewport().font())
+            badge_width = min(
+                150,
+                max(42, metrics.horizontalAdvance(display_name) + 12),
+            )
+            badge = QPushButton(display_name, self.text.viewport())
+            badge.setFixedSize(badge_width, 16)
+            badge.setToolTip("Click to change speaker • Assigned: " + ", ".join(speakers))
+            badge.setCursor(Qt.CursorShape.PointingHandCursor)
             badge.setStyleSheet(
-                "QLabel {"
-                f"background:rgba({color.red()},{color.green()},{color.blue()},95);"
-                "color:#f6f7fb; border:1px solid rgba(255,255,255,0.14);"
+                "QPushButton {"
+                f"background:rgba({color.red()},{color.green()},{color.blue()},92);"
+                "color:#f6f7fb; border:1px solid rgba(255,255,255,0.13);"
                 "border-radius:6px; padding:0 3px; font-size:7px; font-weight:500;"
                 "}"
+                "QPushButton:hover { background:rgba(255,255,255,0.20); }"
             )
+            badge.clicked.connect(
+                lambda _checked=False, a_start=start, a_end=end: self._edit_assignment_badge(
+                    a_start, a_end
+                )
+            )
+            viewport_rect = self.text.cursorRect(probe)
             x = min(
-                max(84, badge_point.x() - badge.width()),
-                max(84, self.text.width() - badge.width() - 4),
+                max(2, viewport_rect.right() - badge.width()),
+                max(2, self.text.viewport().width() - badge.width() - 4),
             )
-            y = max(2, badge_point.y() - badge.height() - 1)
-            badge.move(x, y)
-            badge.show()
+            y = viewport_rect.top() - badge.height() - 1
+            if y < 1 or viewport_rect.bottom() < 1 or viewport_rect.top() > self.text.viewport().height():
+                badge.hide()
+            else:
+                badge.move(x, max(1, y))
+                badge.show()
             self._assignment_badges.append(badge)
         self.text.setExtraSelections(selections)
         self._update_assignment_plus()
@@ -377,6 +388,28 @@ class ChapterEditorPage(QWidget):
         y = min(max(3, rect.top()), max(3, self.text.viewport().height() - button.height() - 4))
         button.move(x, y)
 
+    def _edit_assignment_badge(self, start: int, end: int) -> None:
+        chapter_index = self.list.currentRow()
+        if chapter_index < 0:
+            return
+        cursor = self.text.textCursor()
+        cursor.setPosition(start)
+        cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
+        self.text.setTextCursor(cursor)
+        chapter = self.editor.chapters[chapter_index]
+        dialog = DialogueAssignmentDialog(
+            chapter=chapter,
+            start=start,
+            end=end,
+            book_chapters=self.editor.chapters,
+            project_folder=self.project_folder,
+            parent=self,
+        )
+        if dialog.exec() == dialog.DialogCode.Accepted and dialog.assigned:
+            self._save_silently()
+            self._refresh_assignment_visuals()
+            self.save_status.setText("✓ Speaker assignment updated")
+    
     def _open_inline_assignment_dialog(self) -> None:
         chapter_index = self.list.currentRow()
         if chapter_index < 0:
@@ -412,8 +445,9 @@ class ChapterEditorPage(QWidget):
             return
         try:
             self.commit_current()
-            if self.on_save:
-                result = self.on_save(self.editor.chapters)
+            callback = self.on_autosave or self.on_save
+            if callback:
+                result = callback(self.editor.chapters)
                 if result is False:
                     self.save_status.setText("Auto-save failed — use Save Now.")
                     return
