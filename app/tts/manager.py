@@ -87,6 +87,13 @@ class GenerationManager:
 
     def cancel(self) -> None:
         self.cancel_event.set()
+        provider = self.provider
+        close = getattr(provider, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
 
     def _run(self, output_path: Path | None, title: str, author: str, cover: Path | None, metadata: dict[str, str]) -> None:
         # This directory is deliberately called working: it is not the user's
@@ -184,6 +191,9 @@ class GenerationManager:
                     f"chapter-complete:{result.chunks_completed}/{result.chunks_total}",
                 )
             except Exception as exc:
+                if self.cancel_event.is_set():
+                    cancelled = True
+                    break
                 self.failed.append(chapter.number)
                 self.failure_details[chapter.number] = str(exc)
                 self._emit(index + 1, len(self.chapters), 0, f"chapter-failed: {exc}")
@@ -222,6 +232,7 @@ class GenerationManager:
                     metadata=metadata,
                     progress=lambda done, total, message: self._package_progress(done, total, message),
                     bitrate=self.bitrate,
+                    narration_speed=self.narration_speed,
                 )
                 self._emit(len(self.chapters), len(self.chapters), 1, "m4b-complete")
                 # Only delete intermediate files after the final M4B has been
