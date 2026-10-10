@@ -177,13 +177,13 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn("qwen_design_preview_duration", source)
         self.assertNotIn("test_profile_button", source)
 
-    def test_qwen_design_preview_does_not_require_base_model(self):
+    def test_qwen_design_preview_uses_stable_identity_base_model(self):
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         self.assertIn('"design-preview"', provider)
-        self.assertIn('args.task', worker)
-        self.assertIn('_generate_design_preview', worker)
-        self.assertIn('"design-preview"', worker)
+        self.assertIn('best_long_form_clone_kind()', provider)
+        self.assertIn('_prepare_design_clone(model, request, args)', worker)
+        self.assertIn('_generate_design_locked(model, locked_clone_prompt, request, output)', worker)
 
     def test_qwen_voice_consistency_uses_design_anchor_and_base_prompt(self):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
@@ -275,22 +275,21 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('"longform": self.qwen_mode != "design-preview"', provider)
         self.assertIn('"max_new_tokens": 1536', worker)
 
-    def test_qwen_voicedesign_uses_same_direct_model_for_preview_and_audiobook(self):
+    def test_qwen_voicedesign_preview_and_audiobook_share_stable_identity(self):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         voice_page = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
         self.assertIn('elif active_task in {"design", "design-preview"}:', worker)
-        self.assertIn("_generate_design(model, request, output)", worker)
-        self.assertIn('qwen_mode="design-preview"', voice_page)
-        self.assertIn('qwen_mode == "design"', provider)
-        self.assertNotIn("Creating and locking the VoiceDesign identity", worker)
-        self.assertNotIn("_prepare_design_clone(model, request, args)", worker)
+        self.assertIn("_prepare_design_clone(model, request, args)", worker)
+        self.assertIn("_generate_design_locked(model, locked_clone_prompt, request, output)", worker)
+        self.assertIn('qwen_mode="design"', voice_page)
+        self.assertIn('best_long_form_clone_kind()', provider)
+        self.assertIn('"--clone-kind", clone_kind or best_clone_kind()', provider)
 
-    def test_voicedesign_has_no_base_model_requirement(self):
+    def test_voicedesign_requires_stable_base_model(self):
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
-        voice_page = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
-        self.assertNotIn("VoiceDesign also needs the", provider)
-        self.assertNotIn("Base model", voice_page[voice_page.index('elif mode == "qwen-design":'):voice_page.index('elif mode == "qwen-clone":')])
+        self.assertIn("VoiceDesign stable identity needs the local Qwen Base model", provider)
+        self.assertIn("best_long_form_clone_kind()", provider)
 
     def test_voice_previews_expose_percentage_progress(self):
         voice_page = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
@@ -300,6 +299,21 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("percent = Signal(int)", generation)
         self.assertIn("self.preview_loading.setRange(0, 100)", generation)
         self.assertIn("self.preview_worker.percent.connect", generation)
+
+    def test_qwen_preview_and_audiobook_use_same_generation_ceiling(self):
+        worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
+        self.assertIn('"max_new_tokens": 1536', worker)
+        self.assertNotIn('"max_new_tokens": min(int(request.get("max_new_tokens", 2048)), 1024)', worker)
+
+    def test_timed_preview_uses_target_duration_and_live_progress(self):
+        preview = Path("app/tts/preview.py").read_text(encoding="utf-8")
+        voice_page = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
+        generation = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        self.assertIn("target_seconds: float | None = None", preview)
+        self.assertIn('if target > 0 and accumulated_seconds >= target', preview)
+        self.assertIn("preview_started = time.monotonic()", voice_page)
+        self.assertIn("ETA", voice_page)
+        self.assertIn("preview_activity", generation)
 
     def test_qwen_resume_signature_tracks_exact_voice_configuration(self):
         source = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
