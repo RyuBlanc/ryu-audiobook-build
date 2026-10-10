@@ -21,6 +21,8 @@ from app.ai.brain import _numeric_score
 from app.tts.pronunciation_suggester import suggest_pronunciation, suggest_names_from_text, COMMON_ENGLISH_WORDS, is_common_english_phrase, nativeish_pronunciation
 from app.documents.parser import extract_text
 from app.core.state import load_state, save_state
+from app.core.project import list_projects
+from app.ui.metadata_widgets import HistoryComboBox, GenrePicker
 from app.tts.manager import GenerationManager, GenerationSummary
 from app.tts.profile_provider import provider_from_profile
 from app.tts.voice_profile import load_profiles, VoiceProfile
@@ -208,26 +210,24 @@ class GenerationPage(QWidget):
 
         book_name = self.project_title or (self.project_folder.name if self.project_folder else "Audiobook")
         self.title = QLineEdit(book_name)
-        self.author = QLineEdit()
-        self.narrator = QLineEdit()
-        self.publisher = QLineEdit()
-        self.series = QLineEdit()
-        self.series_number = QLineEdit()
-        self.language = QLineEdit("en")
-        self.year = QLineEdit()
-        self.genre = QLineEdit("Audiobook")
-        self.description = QLineEdit()
+        self.author = HistoryComboBox(self._metadata_history("author"))
+        self.narrator = HistoryComboBox(self._metadata_history("narrator"))
+        self.publisher = HistoryComboBox(self._metadata_history("publisher"))
+        self.series = HistoryComboBox(self._metadata_history("series"))
+        self.language = HistoryComboBox(self._metadata_history("language", ["en"]))
+        self.year = HistoryComboBox(self._metadata_history("year"))
+        self.genre = GenrePicker()
         form = QFormLayout()
         form.addRow("Book title", self.title)
         form.addRow("Author", self.author)
         form.addRow("Narrator", self.narrator)
         form.addRow("Publisher", self.publisher)
         form.addRow("Series", self.series)
-        form.addRow("Series number", self.series_number)
         form.addRow("Language", self.language)
         form.addRow("Release year", self.year)
         form.addRow("Genre", self.genre)
-        form.addRow("Description", self.description)
+        root.addWidget(QLabel("Metadata dropdowns remember values used in your previous books. You can still type a new value. Genre supports multiple selections and custom genres."))
+        root.itemAt(root.count()-1).widget().setObjectName("muted")
         root.addLayout(form)
 
         overview = QGroupBox("Audiobook")
@@ -1004,6 +1004,32 @@ class GenerationPage(QWidget):
         self._load_profiles(current)
         self.status.setText("Voice profiles refreshed.")
 
+    def _metadata_history(self, key: str, defaults: list[str] | None = None) -> list[str]:
+        values = list(defaults or [])
+        try:
+            projects = list_projects()
+        except Exception:
+            projects = []
+        for project in projects:
+            state = load_state(project.folder)
+            value = str(state.get(key) or "").strip()
+            if value:
+                values.append(value)
+        # Include this book's current value when reopening a previously saved
+        # project, without forcing the field to select it.
+        if self.project_folder:
+            state = load_state(self.project_folder)
+            value = str(state.get(key) or "").strip()
+            if value:
+                values.append(value)
+        result, seen = [], set()
+        for value in values:
+            folded = value.casefold()
+            if folded not in seen:
+                result.append(value)
+                seen.add(folded)
+        return result[:40]
+
     def _update_overview(self) -> None:
         words = sum(len(ch.text.split()) for ch in self.chapters)
         speed = float(self.narration_speed.currentData() or 0.90) if hasattr(self, "narration_speed") else 0.90
@@ -1058,11 +1084,9 @@ class GenerationPage(QWidget):
         self.narrator.setText(str(state.get("narrator") or ""))
         self.publisher.setText(str(state.get("publisher") or ""))
         self.series.setText(str(state.get("series") or ""))
-        self.series_number.setText(str(state.get("series_number") or ""))
         self.language.setText(str(state.get("language") or "en"))
         self.year.setText(str(state.get("year") or ""))
-        self.genre.setText(str(state.get("genre") or "Audiobook"))
-        self.description.setText(str(state.get("description") or ""))
+        self.genre.set_value(str(state.get("genre") or "Audiobook"))
 
         cover = state.get("cover_path")
         if cover and Path(cover).exists():
@@ -1440,11 +1464,9 @@ class GenerationPage(QWidget):
                 "narrator": self.narrator.text().strip(),
                 "publisher": self.publisher.text().strip(),
                 "series": self.series.text().strip(),
-                "series_number": self.series_number.text().strip(),
                 "language": self.language.text().strip(),
                 "year": self.year.text().strip(),
-                "genre": self.genre.text().strip(),
-                "description": self.description.text().strip(),
+                "genre": self.genre.value(),
                 "narration_speed": float(self.narration_speed.currentData() or 0.90),
                 "pacing_profile": self.pacing_profile.currentData() or "natural",
                 "audio_bitrate": int(self.audio_bitrate.currentData() or DEFAULT_AUDIO_BITRATE_KBPS),
@@ -1480,11 +1502,9 @@ class GenerationPage(QWidget):
             "narrator": self.narrator.text().strip(),
             "publisher": self.publisher.text().strip(),
             "series": self.series.text().strip(),
-            "series_number": self.series_number.text().strip(),
             "language": self.language.text().strip(),
             "year": self.year.text().strip(),
-            "genre": self.genre.text().strip(),
-            "description": self.description.text().strip(),
+            "genre": self.genre.value(),
         }
         self.manager = GenerationManager(
             provider, voice, self.chapters, self.audio_root,
