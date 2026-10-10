@@ -208,11 +208,11 @@ def _generate_design_anchor(model, request: dict, anchor: Path) -> str:
     wavs, sr = model.generate_voice_design(
         text=anchor_text,
         language=language,
-        instruct=str(request.get("instruct") or "").strip(),
+        instruct=_voice_design_instruct(request),
         **_generation_kwargs(
             {
                 **request,
-                "max_new_tokens": min(int(request.get("max_new_tokens", 2048)), 768),
+                "max_new_tokens": min(int(request.get("max_new_tokens", 1536)), 768),
             }
         ),
     )
