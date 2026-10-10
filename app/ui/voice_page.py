@@ -12,7 +12,7 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QInputDialog, QFormLayout, QGroupBox, QHBoxLayout,
     QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QTextEdit, QSpinBox,
-    QVBoxLayout, QWidget,
+    QProgressBar, QVBoxLayout, QWidget,
 )
 
 
@@ -64,8 +64,9 @@ class VoicePreviewWorker(QThread):
 
     def run(self) -> None:
         try:
+            self.progress.emit(5)
             self._status(
-                f"Preparing preview • {self.profile.provider} • "
+                f"[5%] Preparing preview • {self.profile.provider} • "
                 f"{self.profile.qwen_mode if self.profile.provider == 'qwen-character' else self.profile.backend}"
             )
             self.provider, voice = provider_from_profile(self.profile)
@@ -76,13 +77,18 @@ class VoicePreviewWorker(QThread):
             if self.cancel_requested:
                 self.cancelled.emit()
                 return
-            self._status("Voice engine ready • generating audio…")
+            self.progress.emit(25)
+            self._status("[25%] Voice engine ready • generating audio…")
+            self.progress.emit(45)
             self.provider.synthesize(self.text, self.output, voice)
             if self.cancel_requested:
                 self.cancelled.emit()
                 return
             if not self.output.exists() or self.output.stat().st_size < 1024:
                 raise RuntimeError("The voice engine did not produce valid audio.")
+            self.progress.emit(95)
+            self._status("[95%] Finalizing preview…")
+            self.progress.emit(100)
             self.finished_ok.emit(str(self.output))
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -637,8 +643,13 @@ class VoicePage(QWidget):
         self.preview_engine_status = QLabel("Ready")
         self.preview_engine_status.setObjectName("muted")
         self.preview_engine_status.setWordWrap(True)
+        self.preview_percent_bar = QProgressBar()
+        self.preview_percent_bar.setRange(0, 100)
+        self.preview_percent_bar.setValue(0)
+        self.preview_percent_bar.setTextVisible(True)
         settings.addWidget(self.preview_engine_status, 1)
         pv.addLayout(settings)
+        pv.addWidget(self.preview_percent_bar)
 
         pa = QHBoxLayout()
         self.preview_button = QPushButton("▶  Generate Preview")
@@ -2028,6 +2039,7 @@ class VoicePage(QWidget):
         self.play_button.setEnabled(False)
         self.preview_worker = VoicePreviewWorker(preview_profile, text, output)
         self.preview_worker.status.connect(self._preview_worker_status)
+        self.preview_worker.progress.connect(self.preview_percent_bar.setValue)
         self.preview_worker.finished_ok.connect(self._preview_worker_ok)
         self.preview_worker.failed.connect(self._preview_worker_failed)
         self.preview_worker.cancelled.connect(self._preview_worker_cancelled)
@@ -2044,20 +2056,23 @@ class VoicePage(QWidget):
         self.player.setSource(QUrl.fromLocalFile(path))
         self.play_button.setEnabled(True)
         self.play_button.setText("▶  Play")
-        self.preview_engine_status.setText("Preview ready • press Play to listen")
+        self.preview_percent_bar.setValue(100)
+        self.preview_engine_status.setText("100% • Preview ready • press Play to listen")
         self.status.setText(
             f"Preview ready • {self.preview_provider.text()} • {self.preview_voice.text()}"
         )
 
     def _preview_worker_failed(self, message: str) -> None:
-        self.preview_engine_status.setText(f"Preview failed • {message}")
+        self.preview_percent_bar.setValue(0)
+        self.preview_engine_status.setText(f"0% • Preview failed • {message}")
         self.status.setText(f"Preview failed: {message}")
         self.preview_button.setEnabled(True)
         self.play_button.setEnabled(False)
         QMessageBox.warning(self, "Voice Preview Failed", message)
 
     def _preview_worker_cancelled(self) -> None:
-        self.preview_engine_status.setText("Preview cancelled")
+        self.preview_percent_bar.setValue(0)
+        self.preview_engine_status.setText("0% • Preview cancelled")
         self.status.setText("Voice preview cancelled.")
         self.preview_button.setEnabled(True)
         self.play_button.setEnabled(False)
