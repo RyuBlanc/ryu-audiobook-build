@@ -467,9 +467,15 @@ class GenerationPage(QWidget):
         self.preview_loading.setRange(0, 100)
         self.preview_loading.setValue(0)
         self.preview_loading.setTextVisible(True)
-        self.preview_loading.setFixedHeight(8)
+        self.preview_loading.setFixedHeight(14)
         self.preview_loading.setVisible(False)
         preview_layout.addWidget(self.preview_loading)
+        self.preview_activity = QProgressBar()
+        self.preview_activity.setRange(0, 0)
+        self.preview_activity.setTextVisible(False)
+        self.preview_activity.setFixedHeight(4)
+        self.preview_activity.setVisible(False)
+        preview_layout.addWidget(self.preview_activity)
 
         root.addWidget(preview_box)
 
@@ -1226,6 +1232,7 @@ class GenerationPage(QWidget):
         self.preview_stop_button.setEnabled(True)
         self.preview_loading.setValue(5)
         self.preview_loading.setVisible(True)
+        self.preview_activity.setVisible(True)
         self.preview_status.setText('[5%] Preparing voice preview…')
         self.status.setText('Voice preview is running in the background; the app remains responsive.')
         self.preview_percent = getattr(self, 'preview_percent', None)
@@ -1255,11 +1262,13 @@ class GenerationPage(QWidget):
         self.preview_play_button.setEnabled(False)
         self.preview_stop_button.setEnabled(False)
         self.preview_loading.setValue(0)
+        self.preview_activity.setVisible(False)
         self.preview_status.setText('0% • Preview generation failed.')
         self.status.setText(f'Preview failed: {message}')
 
     def _preview_worker_finished(self) -> None:
         self.preview_loading.setVisible(False)
+        self.preview_activity.setVisible(False)
         self.preview_button.setEnabled(True)
         self.preview_worker = None
 
@@ -1278,6 +1287,7 @@ class GenerationPage(QWidget):
         if worker is not None and worker.isRunning():
             worker.requestInterruption()
             self.preview_loading.setVisible(False)
+            self.preview_activity.setVisible(False)
             self.preview_status.setText('Stopping preview…')
 
     def _preview_state_changed(self, state) -> None:
