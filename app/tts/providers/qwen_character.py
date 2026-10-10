@@ -83,6 +83,30 @@ class QwenCharacterProvider(TTSProvider):
     def voices(self) -> list[str]:
         return [self.voice_id]
 
+    def generation_signature(self) -> str:
+        reference = ""
+        if self.reference_audio and Path(self.reference_audio).exists():
+            try:
+                stat = Path(self.reference_audio).stat()
+                reference = f"{Path(self.reference_audio).resolve()}:{stat.st_size}:{stat.st_mtime_ns}"
+            except OSError:
+                reference = str(self.reference_audio)
+        return "|".join(
+            [
+                self.provider_id,
+                self.voice_id,
+                self.language,
+                self.qwen_mode,
+                self.model_kind,
+                self.instruct,
+                str(self.qwen_seed),
+                str(self.qwen_anchor_path or ""),
+                self.qwen_anchor_text,
+                reference,
+            ]
+        )
+
+
     def set_status_callback(self, callback) -> None:
         self.status_callback = callback
 
