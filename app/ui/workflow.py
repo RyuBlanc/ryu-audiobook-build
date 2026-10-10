@@ -235,6 +235,12 @@ class ProjectWorkflow(QMainWindow):
         self.project.save()
         self._set_project_title(self.project.title)
         self.library.refresh()
+        if self.editor:
+            self.editor.project_title = self.project.title
+        if self.generation:
+            self.generation.project_title = self.project.title
+            self.generation.title.setText(self.project.title)
+            self.generation._set_default_output()
         self.ensure_generation_page()
 
     def save_project(self, chapters: list[Chapter]) -> bool:
@@ -293,6 +299,7 @@ class ProjectWorkflow(QMainWindow):
             self.project.chapters,
             self.project.folder / "working",
             self.project.folder,
+            self.project.title,
         )
         self.stack.addWidget(self.generation)
         self._generation_index = self.stack.indexOf(self.generation)
