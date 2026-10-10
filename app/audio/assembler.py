@@ -68,7 +68,11 @@ def _ffconcat_path(path: Path) -> str:
     return path.as_posix().replace("'", "'\\''")
 
 
-def assemble_chapter(chapter_dir: Path, bitrate: int | str | None = None) -> Path:
+def assemble_chapter(
+    chapter_dir: Path,
+    bitrate: int | str | None = None,
+    narration_speed: float = 1.0,
+) -> Path:
     chunks = sorted_chunks(chapter_dir)
     if not chunks:
         raise ValueError(f"No audio chunks found for {chapter_dir.name}")
@@ -82,13 +86,14 @@ def assemble_chapter(chapter_dir: Path, bitrate: int | str | None = None) -> Pat
     # retain the old low-bitrate audio.
     if output.exists() and output.stat().st_size >= 1024:
         newest_chunk = max((chunk.stat().st_mtime for chunk in chunks), default=0.0)
-        bitrate_stamp = chapter_dir / ".audio-bitrate"
-        stored_bitrate = ""
+        settings_stamp = chapter_dir / ".audio-settings"
+        stored_settings = ""
         try:
-            stored_bitrate = bitrate_stamp.read_text(encoding="utf-8").strip()
+            stored_settings = settings_stamp.read_text(encoding="utf-8").strip()
         except OSError:
             pass
-        if output.stat().st_mtime >= newest_chunk and stored_bitrate == audio_bitrate:
+        expected_settings = f"{audio_bitrate}|speed={max(0.5, min(2.0, float(narration_speed))):.3f}"
+        if output.stat().st_mtime >= newest_chunk and stored_settings == expected_settings:
             return output
 
     concat_file.write_text(
@@ -97,14 +102,22 @@ def assemble_chapter(chapter_dir: Path, bitrate: int | str | None = None) -> Pat
         + "\n",
         encoding="utf-8",
     )
-    _run([
+    speed = max(0.5, min(2.0, float(narration_speed)))
+    args = [
         "-f", "concat", "-safe", "0", "-i", str(concat_file),
-        "-vn", "-c:a", "aac", "-b:a", audio_bitrate, "-ar", "44100", str(output),
-    ])
+        "-vn",
+    ]
+    if abs(speed - 1.0) > 0.001:
+        args += ["-filter:a", f"atempo={speed:.3f}"]
+    args += ["-c:a", "aac", "-b:a", audio_bitrate, "-ar", "44100", str(output)]
+    _run(args)
     if not output.exists() or output.stat().st_size < 1024:
         raise RuntimeError(f"Chapter audio was not created: {output}")
     try:
-        (chapter_dir / ".audio-bitrate").write_text(audio_bitrate, encoding="utf-8")
+        (chapter_dir / ".audio-settings").write_text(
+            f"{audio_bitrate}|speed={speed:.3f}",
+            encoding="utf-8",
+        )
     except OSError:
         pass
     return output
@@ -159,6 +172,7 @@ def assemble_m4b(
     metadata: dict[str, str] | None = None,
     progress=None,
     bitrate: int | str | None = None,
+    narration_speed: float = 1.0,
 ) -> Path:
     """Create one premium M4B containing all chapters and navigation metadata.
 
@@ -171,7 +185,13 @@ def assemble_m4b(
 
     chapters: list[Path] = []
     for index, directory in enumerate(chapter_dirs, start=1):
-        chapters.append(assemble_chapter(directory, audio_bitrate))
+        chapters.append(
+            assemble_chapter(
+                directory,
+                audio_bitrate,
+                narration_speed=narration_speed,
+            )
+        )
         if progress:
             progress(index, len(chapter_dirs), "chapter-audio")
     names = chapter_titles or [
