@@ -5,7 +5,7 @@ import json
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QInputDialog, QLineEdit, QMenu, QPushButton
+from PySide6.QtWidgets import QComboBox, QInputDialog, QLineEdit, QMenu, QPushButton
 
 
 BUILTIN_GENRES = [
@@ -62,6 +62,23 @@ def save_custom_genre(value: str) -> None:
         custom.append(value)
         path.write_text(json.dumps(custom, ensure_ascii=False, indent=2), encoding="utf-8")
 
+
+class HistoryComboBox(QComboBox):
+    """Editable dropdown populated from metadata used in previous books."""
+
+    def __init__(self, values: list[str] | None = None, parent=None):
+        super().__init__(parent)
+        self.setEditable(True)
+        self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.setMinimumHeight(34)
+        self.addItems([v for v in (values or []) if v])
+        self.setMaxVisibleItems(12)
+
+    def text(self) -> str:
+        return self.currentText()
+
+    def setText(self, value: str) -> None:
+        self.setCurrentText(str(value or ""))
 
 class GenrePicker(QPushButton):
     def __init__(self, parent=None):
