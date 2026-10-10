@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import subprocess
 import tempfile
+import wave
 
 import imageio_ffmpeg
 
@@ -133,13 +134,18 @@ def build_voice_preview(
     max_chars: int = 1400,
     dialogue_assignments=None,
     progress_callback=None,
+    target_seconds: float | None = None,
 ) -> PreviewResult:
+    effective_max_chars = max(
+        int(max_chars),
+        int(max_chars if target_seconds is None else max_chars + float(target_seconds) * 20.0),
+    )
     units = _preview_units(
         text,
         provider,
         voice,
         pronunciation_dictionary,
-        max_chars=max_chars,
+        max_chars=effective_max_chars,
         dialogue_assignments=dialogue_assignments,
     )
     if not units:
@@ -155,6 +161,8 @@ def build_voice_preview(
                 pass
 
     report("preparing", 0, total_units)
+    target = max(0.0, float(target_seconds or 0.0))
+    accumulated_seconds = 0.0
     output_path.parent.mkdir(parents=True, exist_ok=True)
     configure_narration = getattr(provider, "configure_narration", None)
     if callable(configure_narration):
@@ -183,7 +191,16 @@ def build_voice_preview(
             normalized.append(normalized_path)
             if unit_voice:
                 voices_used.append(str(unit_voice))
+            try:
+                with wave.open(str(normalized_path), "rb") as reader:
+                    frames = reader.getnframes()
+                    rate = max(1, reader.getframerate())
+                    accumulated_seconds += frames / float(rate)
+            except (OSError, wave.Error):
+                pass
             report("synthesizing", index + 1, total_units)
+            if target > 0 and accumulated_seconds >= target:
+                break
 
         report("finalizing", 0, 1)
         _concat(normalized, output_path)
