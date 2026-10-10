@@ -26,6 +26,7 @@ class PassiveScrollComboBox(QComboBox):
             event.ignore()
 
 from app.tts.profile_provider import provider_from_profile
+from app.tts.preview import build_voice_preview
 from app.tts.chatterbox_runtime import runtime_ready, runtime_status
 from app.tts.qwen_character_runtime import (
     runtime_ready as qwen_runtime_ready,
@@ -49,6 +50,7 @@ class VoicePreviewWorker(QThread):
     failed = Signal(str)
     cancelled = Signal()
     status = Signal(str)
+    progress = Signal(int)
 
     def __init__(self, profile: VoiceProfile, text: str, output: Path):
         super().__init__()
@@ -77,18 +79,45 @@ class VoicePreviewWorker(QThread):
             if self.cancel_requested:
                 self.cancelled.emit()
                 return
-            self.progress.emit(25)
-            self._status("[25%] Voice engine ready • generating audio…")
-            self.progress.emit(45)
-            self.provider.synthesize(self.text, self.output, voice)
+
+            self.progress.emit(10)
+            self._status("[10%] Voice engine ready • preparing preview segments…")
+
+            def preview_progress(stage: str, current: int, total: int) -> None:
+                total = max(1, int(total))
+                current = max(0, min(total, int(current)))
+                if stage == "preparing":
+                    percent = 10
+                    label = "Preparing preview segments…"
+                elif stage == "synthesizing":
+                    percent = 15 + int(70 * current / total)
+                    label = f"Generating preview segment {current}/{total}…"
+                elif stage == "finalizing":
+                    percent = 85 + int(10 * current / total)
+                    label = "Finalizing preview…"
+                else:
+                    percent = 10
+                    label = "Preparing preview…"
+                self.progress.emit(percent)
+                self._status(f"[{percent}%] {label}")
+
+            build_voice_preview(
+                self.text,
+                self.provider,
+                voice,
+                self.output,
+                narration_speed=1.0,
+                pacing_profile="off",
+                max_chars=max(1400, len(self.text) + 1),
+                progress_callback=preview_progress,
+            )
             if self.cancel_requested:
                 self.cancelled.emit()
                 return
             if not self.output.exists() or self.output.stat().st_size < 1024:
                 raise RuntimeError("The voice engine did not produce valid audio.")
-            self.progress.emit(95)
-            self._status("[95%] Finalizing preview…")
             self.progress.emit(100)
+            self._status("[100%] Preview ready.")
             self.finished_ok.emit(str(self.output))
         except Exception as exc:
             self.failed.emit(str(exc))
