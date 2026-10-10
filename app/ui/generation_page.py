@@ -1510,6 +1510,12 @@ class GenerationPage(QWidget):
             self.status.setText("Stopping generation and releasing the voice engine…")
 
     def update_progress(self, chapter: int, total: int, done: int, message: str) -> None:
+        if message.startswith("provider:"):
+            self.status.setText(message.split(":", 1)[1].strip())
+            self.stage.setText(
+                f"{message.split(':', 1)[1].strip()} • chapter {chapter}/{total}"
+            )
+            return
         if message.startswith("plan:"):
             try:
                 parts = message.split(":")
