@@ -43,7 +43,6 @@ class AudiobookAIWorker(QThread):
     def __init__(self, project_folder, chapters):
         super().__init__()
         self.project_folder = project_folder
-        self.project_title = str(project_title or "").strip()
         self.chapters = chapters
 
     def run(self):
