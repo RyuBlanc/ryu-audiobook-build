@@ -7,6 +7,7 @@ from pathlib import Path
 import webbrowser
 import secrets
 import wave
+import time
 
 from PySide6.QtCore import QUrl, QThread, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
@@ -85,18 +86,30 @@ class VoicePreviewWorker(QThread):
             self.progress.emit(10)
             self._status("[10%] Voice engine ready • preparing preview segments…")
 
+            preview_started = time.monotonic()
+            def fmt_seconds(value: float) -> str:
+                seconds = max(0, int(value))
+                return f"{seconds // 60}:{seconds % 60:02d}"
+
             def preview_progress(stage: str, current: int, total: int) -> None:
                 total = max(1, int(total))
                 current = max(0, min(total, int(current)))
+                elapsed = time.monotonic() - preview_started
+                eta = None
+                if stage == "synthesizing" and current > 0 and current < total:
+                    eta = elapsed * (total - current) / current
                 if stage == "preparing":
                     percent = 10
-                    label = "Preparing preview segments…"
+                    label = f"Preparing preview segments • elapsed {fmt_seconds(elapsed)}"
                 elif stage == "synthesizing":
                     percent = 15 + int(70 * current / total)
-                    label = f"Generating preview segment {current}/{total} • voice engine working…"
+                    timing = f" • elapsed {fmt_seconds(elapsed)}"
+                    if eta is not None:
+                        timing += f" • ETA {fmt_seconds(eta)}"
+                    label = f"Generating segment {current}/{total}{timing}"
                 elif stage == "finalizing":
                     percent = 85 + int(10 * current / total)
-                    label = "Finalizing preview…"
+                    label = f"Finalizing preview • elapsed {fmt_seconds(elapsed)}"
                 else:
                     percent = 10
                     label = "Preparing preview…"
