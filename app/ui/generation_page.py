@@ -139,11 +139,18 @@ class GenerationSignals(QObject):
 
 
 class GenerationPage(QWidget):
-    def __init__(self, chapters: list[Chapter], audio_root: Path, project_folder: Path | None = None) -> None:
+    def __init__(
+        self,
+        chapters: list[Chapter],
+        audio_root: Path,
+        project_folder: Path | None = None,
+        project_title: str | None = None,
+    ) -> None:
         super().__init__()
         self.chapters = chapters
         self.audio_root = audio_root
         self.project_folder = project_folder
+        self.project_title = str(project_title or "").strip()
         self.profiles = load_profiles()
         self.signals = GenerationSignals()
         self.manager: GenerationManager | None = None
@@ -155,6 +162,8 @@ class GenerationPage(QWidget):
         self._eta_ema_sec_per_unit: float | None = None
         self._eta_last_work: int | None = None
         self._eta_last_time: float | None = None
+        self._eta_warmup_samples = 0
+        self._eta_rates: list[float] = []
 
         self.player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
@@ -197,7 +206,7 @@ class GenerationPage(QWidget):
         header.addWidget(QLabel("Review → Generate → Listen"))
         root.addLayout(header)
 
-        book_name = self.project_folder.name if self.project_folder else "Audiobook"
+        book_name = self.project_title or (self.project_folder.name if self.project_folder else "Audiobook")
         self.title = QLineEdit(book_name)
         self.author = QLineEdit()
         self.narrator = QLineEdit()
@@ -1448,6 +1457,8 @@ class GenerationPage(QWidget):
         self.last_progress_value = 0
         self.initial_progress_value = 0
         self._eta_ema_sec_per_unit = None
+        self._eta_warmup_samples = 0
+        self._eta_rates = []
         self._eta_last_work = 0
         self._eta_last_time = time.monotonic()
         self.generation_phase = "synthesis"
@@ -1496,7 +1507,7 @@ class GenerationPage(QWidget):
     def cancel(self) -> None:
         if self.manager:
             self.manager.cancel()
-            self.status.setText("Cancelling after the current chunk…")
+            self.status.setText("Stopping generation and releasing the voice engine…")
 
     def update_progress(self, chapter: int, total: int, done: int, message: str) -> None:
         if message.startswith("plan:"):
@@ -1514,6 +1525,8 @@ class GenerationPage(QWidget):
             self.last_progress_value = completed_work
             self.initial_progress_value = completed_work
             self._eta_ema_sec_per_unit = None
+            self._eta_warmup_samples = 0
+            self._eta_rates = []
             self._eta_last_work = completed_work
             self._eta_last_time = time.monotonic()
             self.generation_phase = "synthesis"
@@ -1593,15 +1606,20 @@ class GenerationPage(QWidget):
                     delta_time = now - self._eta_last_time
                     if delta_work > 0 and delta_time >= 0.2:
                         sample = delta_time / delta_work
-                        # Ignore the unusually expensive first sample (usually
-                        # model startup) and smooth all subsequent samples.
-                        if self._eta_ema_sec_per_unit is None:
-                            self._eta_ema_sec_per_unit = sample
+                        # The first completed segments include model startup and
+                        # cache warm-up. Do not let those samples dominate the
+                        # full-book ETA.
+                        if self._eta_warmup_samples < 2:
+                            self._eta_warmup_samples += 1
                         else:
-                            alpha = 0.20
+                            self._eta_rates.append(sample)
+                            self._eta_rates = self._eta_rates[-8:]
+                            ordered = sorted(self._eta_rates)
+                            median = ordered[len(ordered) // 2]
                             self._eta_ema_sec_per_unit = (
-                                alpha * sample
-                                + (1.0 - alpha) * self._eta_ema_sec_per_unit
+                                median
+                                if self._eta_ema_sec_per_unit is None
+                                else (0.25 * median + 0.75 * self._eta_ema_sec_per_unit)
                             )
                 self._eta_last_work = work_done_n
                 self._eta_last_time = now
