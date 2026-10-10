@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 import webbrowser
 import secrets
+import wave
 
 from PySide6.QtCore import QUrl, QThread, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
@@ -52,11 +53,12 @@ class VoicePreviewWorker(QThread):
     status = Signal(str)
     progress = Signal(int)
 
-    def __init__(self, profile: VoiceProfile, text: str, output: Path):
+    def __init__(self, profile: VoiceProfile, text: str, output: Path, target_seconds: int = 30):
         super().__init__()
         self.profile = profile
         self.text = text
         self.output = output
+        self.target_seconds = max(1, int(target_seconds))
         self.provider = None
         self.cancel_requested = False
 
@@ -91,7 +93,7 @@ class VoicePreviewWorker(QThread):
                     label = "Preparing preview segments…"
                 elif stage == "synthesizing":
                     percent = 15 + int(70 * current / total)
-                    label = f"Generating preview segment {current}/{total}…"
+                    label = f"Generating preview segment {current}/{total} • voice engine working…"
                 elif stage == "finalizing":
                     percent = 85 + int(10 * current / total)
                     label = "Finalizing preview…"
@@ -108,8 +110,9 @@ class VoicePreviewWorker(QThread):
                 self.output,
                 narration_speed=1.0,
                 pacing_profile="off",
-                max_chars=max(1400, len(self.text) + 1),
+                max_chars=max(1800, len(self.text) + 1),
                 progress_callback=preview_progress,
+                target_seconds=self.target_seconds,
             )
             if self.cancel_requested:
                 self.cancelled.emit()
@@ -677,9 +680,15 @@ class VoicePage(QWidget):
         self.preview_percent_bar.setValue(0)
         self.preview_percent_bar.setTextVisible(True)
         self.preview_percent_bar.setFixedHeight(8)
+        self.preview_activity_bar = QProgressBar()
+        self.preview_activity_bar.setRange(0, 0)
+        self.preview_activity_bar.setTextVisible(False)
+        self.preview_activity_bar.setFixedHeight(4)
+        self.preview_activity_bar.setVisible(False)
         settings.addWidget(self.preview_engine_status, 1)
         pv.addLayout(settings)
         pv.addWidget(self.preview_percent_bar)
+        pv.addWidget(self.preview_activity_bar)
 
         pa = QHBoxLayout()
         self.preview_button = QPushButton("▶  Generate Preview")
@@ -1955,7 +1964,10 @@ class VoicePage(QWidget):
         words = text.split()
         if not words:
             return ""
-        max_words = max(18, int(seconds * 2.35))
+        # Supply enough source text to reach the requested duration. The
+        # preview renderer stops on actual audio duration, so this is only a
+        # safety margin rather than a fixed word-count target.
+        max_words = max(24, int(seconds * 4.5))
         if len(words) <= max_words:
             return text.strip()
         shortened = " ".join(words[:max_words]).strip()
@@ -2058,16 +2070,19 @@ class VoicePage(QWidget):
         self.preview_model.setText(preview_model)
         self.preview_profile.setText(profile.name or "Unsaved profile")
         self.preview_engine_status.setText(
-            f"Queued • up to {seconds} seconds • {len(text.split()):,} words"
+            f"Queued • target {seconds}s • {len(text.split()):,} words"
         )
         self.status.setText(
-            f"Generating preview • {preview_library} • {profile.name or profile.voice_id} • up to {seconds} seconds"
+            f"Generating preview • {preview_library} • {profile.name or profile.voice_id} • target {seconds}s"
         )
 
         output = Path(tempfile.gettempdir()) / "ryu_audiobook_voice_preview.wav"
         self.preview_button.setEnabled(False)
         self.play_button.setEnabled(False)
-        self.preview_worker = VoicePreviewWorker(preview_profile, text, output)
+        self.stop_button.setEnabled(True)
+        self.preview_activity_bar.setVisible(True)
+        self.preview_target_seconds = seconds
+        self.preview_worker = VoicePreviewWorker(preview_profile, text, output, seconds)
         self.preview_worker.status.connect(self._preview_worker_status)
         self.preview_worker.progress.connect(self.preview_percent_bar.setValue)
         self.preview_worker.finished_ok.connect(self._preview_worker_ok)
@@ -2087,13 +2102,28 @@ class VoicePage(QWidget):
         self.play_button.setEnabled(True)
         self.play_button.setText("▶  Play")
         self.preview_percent_bar.setValue(100)
-        self.preview_engine_status.setText("100% • Preview ready • press Play to listen")
+        self.preview_activity_bar.setVisible(False)
+        actual_seconds = None
+        try:
+            with wave.open(str(self.last_preview), "rb") as reader:
+                actual_seconds = reader.getnframes() / float(max(1, reader.getframerate()))
+        except (OSError, wave.Error):
+            pass
+        target = getattr(self, "preview_target_seconds", None)
+        if actual_seconds is not None and target:
+            qualifier = "target reached" if actual_seconds + 0.25 >= target else "shorter than target"
+            self.preview_engine_status.setText(
+                f"100% • Preview ready • {actual_seconds:.1f}s / {int(target)}s • {qualifier} • press Play"
+            )
+        else:
+            self.preview_engine_status.setText("100% • Preview ready • press Play to listen")
         self.status.setText(
             f"Preview ready • {self.preview_provider.text()} • {self.preview_voice.text()}"
         )
 
     def _preview_worker_failed(self, message: str) -> None:
         self.preview_percent_bar.setValue(0)
+        self.preview_activity_bar.setVisible(False)
         self.preview_engine_status.setText(f"0% • Preview failed • {message}")
         self.status.setText(f"Preview failed: {message}")
         self.preview_button.setEnabled(True)
@@ -2102,6 +2132,7 @@ class VoicePage(QWidget):
 
     def _preview_worker_cancelled(self) -> None:
         self.preview_percent_bar.setValue(0)
+        self.preview_activity_bar.setVisible(False)
         self.preview_engine_status.setText("0% • Preview cancelled")
         self.status.setText("Voice preview cancelled.")
         self.preview_button.setEnabled(True)
