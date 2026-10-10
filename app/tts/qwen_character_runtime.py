@@ -361,15 +361,20 @@ def best_voice_design_kind() -> str:
 
 
 def best_long_form_clone_kind(vram_gb: float | None = None) -> str:
-    """Prefer the lighter Base model for long-form VoiceDesign narration.
+    """Choose a stable Base clone model for reusable VoiceDesign identities.
 
-    VoiceDesign creates the identity anchor at 1.7B. Long-form rendering can
-    reuse that identity with 0.6B Base when available, substantially reducing
-    memory pressure and inference cost while keeping one locked speaker.
+    8GB-class GPUs get the higher-quality 1.7B Base when it is installed.
+    4GB-class GPUs prefer the lighter 0.6B Base to avoid memory pressure.
     """
+    if vram_gb is None:
+        vram_gb = _detected_vram_gb()
+    if vram_gb >= 7.0 and model_installed("base-1.7b"):
+        return "base-1.7b"
     if model_installed("base-0.6b"):
         return "base-0.6b"
-    return best_clone_kind(vram_gb)
+    if model_installed("base-1.7b"):
+        return "base-1.7b"
+    return "base-0.6b"
 
 
 def _run(command: list[str], progress=None, timeout: int = 3600) -> None:
