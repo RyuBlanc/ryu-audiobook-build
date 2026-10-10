@@ -29,8 +29,8 @@ class QwenCharacterProvider(TTSProvider):
     # Qwen can safely handle substantially larger sentence-aware units. The
     # previous 360-char/2-sentence setting created thousands of tiny generation
     # jobs on long novels and made GPU utilization/ETA unnecessarily poor.
-    recommended_chunk_chars = 1200
-    recommended_chunk_sentences = 5
+    recommended_chunk_chars = 1800
+    recommended_chunk_sentences = 8
     handles_narration_controls = False
 
     def __init__(
@@ -214,6 +214,7 @@ class QwenCharacterProvider(TTSProvider):
             "allow_instruct": self.model_kind == "custom-1.7b",
             "anchor_path": str(self.qwen_anchor_path.resolve()) if self.qwen_anchor_path else "",
             "anchor_text": self.qwen_anchor_text,
+            "longform": self.qwen_mode != "design-preview",
         }
         if self.qwen_mode == "clone":
             if not self.reference_audio:
@@ -226,7 +227,13 @@ class QwenCharacterProvider(TTSProvider):
         )
         self._worker.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
         self._worker.stdin.flush()
-        response = self._read_response(timeout=300.0)
+        if response := self._read_response(timeout=300.0):
+            if response.get("device"):
+                self._status(
+                    f"Qwen ready • {response.get('kind', self.model_kind)} • {response.get('device')}"
+                )
+        else:
+            response = {}
         if not response.get("ok"):
             raise RuntimeError(
                 "Qwen3-TTS generation failed. "
