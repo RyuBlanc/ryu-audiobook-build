@@ -275,6 +275,50 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('"longform": self.qwen_mode != "design-preview"', provider)
         self.assertIn('"max_new_tokens": 1536', worker)
 
+    def test_qwen_resume_signature_tracks_exact_voice_configuration(self):
+        source = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
+        generator = Path("app/tts/generator.py").read_text(encoding="utf-8")
+        cast = Path("app/tts/cast_provider.py").read_text(encoding="utf-8")
+        self.assertIn("def generation_signature(self)", source)
+        self.assertIn("self.qwen_mode", source)
+        self.assertIn("self.model_kind", source)
+        self.assertIn("self.qwen_prompt", source)
+        self.assertIn("self.qwen_seed", source)
+        self.assertIn("GENERATION_PIPELINE_VERSION", generator)
+        self.assertIn("self.profiles[k].qwen_mode", cast)
+
+    def test_qwen_failure_stops_cascading_chapter_errors(self):
+        source = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
+        self.assertIn("stop_on_failure = True", source)
+        self.assertIn("self.close()", source)
+        self.assertIn("_read_response(timeout=900.0)", source)
+
+    def test_chapter_autosave_does_not_rebuild_generation_page(self):
+        workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
+        editor = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
+        self.assertIn("def autosave_project", workflow)
+        self.assertIn("self.on_autosave or self.on_save", editor)
+        self.assertIn("self.project.save()", workflow[workflow.index("def autosave_project"):workflow.index("def save_project")])
+
+    def test_metadata_dropdowns_and_multiselect_genres_exist(self):
+        widgets = Path("app/ui/metadata_widgets.py").read_text(encoding="utf-8")
+        generation = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        self.assertIn("class HistoryComboBox", widgets)
+        self.assertIn("class GenrePicker", widgets)
+        self.assertIn("Anime • Fantasy", widgets)
+        self.assertIn("Cartoon • Comedy", widgets)
+        self.assertIn("HistoryComboBox(self._metadata_history", generation)
+        self.assertIn("GenrePicker()", generation)
+        self.assertNotIn('form.addRow("Series number"', generation)
+        self.assertNotIn('form.addRow("Description"', generation)
+
+    def test_assignment_badges_follow_scroll_and_can_edit_assignment(self):
+        source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
+        self.assertIn('QPushButton(display_name, self.text.viewport())', source)
+        self.assertIn("_edit_assignment_badge", source)
+        self.assertIn("viewport_rect.top()", source)
+        self.assertIn("badge.hide()", source)
+
     def test_generation_surfaces_provider_device_status(self):
         manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
         generation = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
