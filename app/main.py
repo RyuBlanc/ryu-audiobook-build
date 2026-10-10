@@ -130,15 +130,19 @@ QPushButton:disabled {
     background: #17171b;
 }
 QProgressBar {
-    background: #1b1b20;
-    border: 1px solid #303038;
-    border-radius: 6px;
-    height: 10px;
+    background: #17171d;
+    border: 1px solid #2f3038;
+    border-radius: 7px;
+    height: 14px;
+    padding: 1px;
     text-align: center;
+    color: #f5f5f7;
+    font-weight: 600;
 }
 QProgressBar::chunk {
-    background: #a31734;
-    border-radius: 5px;
+    background: #b51e3d;
+    border-radius: 6px;
+    margin: 1px;
 }
 QCheckBox {
     spacing: 8px;
