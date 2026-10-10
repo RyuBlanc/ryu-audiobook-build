@@ -39,6 +39,7 @@ class VoicePreviewWorker(QThread):
     finished_ok = Signal(object)
     failed = Signal(str)
     progress = Signal(str)
+    percent = Signal(int)
 
     def __init__(self, profile, backend, project_folder, profiles, pronunciation_dictionary,
                  text, output, narration_speed, pacing_profile, dialogue_assignments=None):
@@ -57,7 +58,8 @@ class VoicePreviewWorker(QThread):
 
     def run(self) -> None:
         try:
-            self.progress.emit('Loading voice engine…')
+            self.percent.emit(5)
+            self.progress.emit('[5%] Loading voice engine…')
             provider, voice = provider_from_profile(self.profile)
             self._provider = provider
             if hasattr(provider, 'backend'):
@@ -76,7 +78,8 @@ class VoicePreviewWorker(QThread):
                         backend_override=self.backend,
                     )
 
-            self.progress.emit('Generating voice preview…')
+            self.percent.emit(30)
+            self.progress.emit('[30%] Generating voice preview…')
             result = build_voice_preview(
                 self.text,
                 self._provider,
@@ -87,7 +90,9 @@ class VoicePreviewWorker(QThread):
                 pacing_profile=self.pacing_profile,
                 dialogue_assignments=self.dialogue_assignments,
             )
-            self.progress.emit('Finalizing preview…')
+            self.percent.emit(95)
+            self.progress.emit('[95%] Finalizing preview…')
+            self.percent.emit(100)
             self.finished_ok.emit(result)
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -1179,6 +1184,7 @@ class GenerationPage(QWidget):
             dialogue_assignments=getattr(chapter, "dialogue_assignments", []),
         )
         self.preview_worker.progress.connect(self._preview_worker_progress)
+        self.preview_worker.percent.connect(self.preview_loading.setValue)
         self.preview_worker.finished_ok.connect(self._preview_worker_ok)
         self.preview_worker.failed.connect(self._preview_worker_failed)
         self.preview_worker.finished.connect(self._preview_worker_finished)
@@ -1187,8 +1193,9 @@ class GenerationPage(QWidget):
         self.preview_play_button.setEnabled(False)
         self.preview_stop_button.setEnabled(True)
         self.preview_loading.setVisible(True)
-        self.preview_status.setText('Preparing voice preview…')
+        self.preview_status.setText('[5%] Preparing voice preview…')
         self.status.setText('Voice preview is running in the background; the app remains responsive.')
+        self.preview_percent = getattr(self, 'preview_percent', None)
         self.preview_worker.start()
 
     def _preview_worker_progress(self, message: str) -> None:
@@ -1202,8 +1209,9 @@ class GenerationPage(QWidget):
         self.preview_stop_button.setEnabled(True)
         self.preview_play_button.setText('▶  Play Preview')
         voice_summary = ', '.join(result.voices_used) if result.voices_used else 'Narrator'
+        self.preview_loading.setValue(100)
         self.preview_status.setText(
-            f'Preview ready • {result.segments} narration segment(s) • Voices: {voice_summary}'
+            f'100% • Preview ready • {result.segments} narration segment(s) • Voices: {voice_summary}'
         )
         self.status.setText(
             'Preview generated from the current pronunciation, voice cast, speed and pacing settings.'
