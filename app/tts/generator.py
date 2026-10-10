@@ -24,6 +24,8 @@ class GenerationResult:
     chunks_completed: int
 
 
+GENERATION_PIPELINE_VERSION = "2026-10-qwen3-voice-cache-v2"
+
 @dataclass(frozen=True)
 class ChapterPlan:
     chapter_dir: Path
@@ -61,7 +63,11 @@ def _provider_signature(provider: TTSProvider, voice: str | None, chunks: list[t
         base = custom()
     else:
         base = f"{provider.__class__.__module__}.{provider.__class__.__name__}:{voice or ''}"
-    payload = {"base": base, "chunks": [(text, chunk_voice) for text, chunk_voice in chunks]}
+    payload = {
+        "pipeline": GENERATION_PIPELINE_VERSION,
+        "base": base,
+        "chunks": [(text, chunk_voice) for text, chunk_voice in chunks],
+    }
     return hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()
