@@ -360,6 +360,18 @@ def best_voice_design_kind() -> str:
     return "design-1.7b"
 
 
+def best_long_form_clone_kind(vram_gb: float | None = None) -> str:
+    """Prefer the lighter Base model for long-form VoiceDesign narration.
+
+    VoiceDesign creates the identity anchor at 1.7B. Long-form rendering can
+    reuse that identity with 0.6B Base when available, substantially reducing
+    memory pressure and inference cost while keeping one locked speaker.
+    """
+    if model_installed("base-0.6b"):
+        return "base-0.6b"
+    return best_clone_kind(vram_gb)
+
+
 def _run(command: list[str], progress=None, timeout: int = 3600) -> None:
     process = subprocess.Popen(
         command,
