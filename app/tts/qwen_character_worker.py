@@ -56,6 +56,17 @@ def _is_cuda_oom(exc: BaseException) -> bool:
     )
 
 
+def _voice_design_instruct(request: dict) -> str:
+    base = str(request.get("instruct") or "").strip()
+    performance = (
+        "Natural audiobook performance: preserve the same speaker identity while following "
+        "punctuation, sentence meaning, dialogue, and scene context. Use varied emphasis, "
+        "pitch movement, gentle pauses, and appropriate emotional inflection. Avoid a flat "
+        "or monotone delivery; do not exaggerate emotion unless the text calls for it."
+    )
+    return f"{base}\n{performance}".strip() if base else performance
+
+
 def _generation_kwargs(request: dict) -> dict:
     # Keep VoiceDesign preview and audiobook narration on the same sampling
     # configuration so the preview is a trustworthy representation of the
@@ -159,7 +170,7 @@ def _generate_design(model, request: dict, output: Path) -> None:
     wavs, sr = model.generate_voice_design(
         text=str(request.get("text") or ""),
         language=str(request.get("language") or "English"),
-        instruct=str(request.get("instruct") or "").strip(),
+        instruct=_voice_design_instruct(request),
         **_generation_kwargs(request),
     )
     if not wavs:
@@ -174,7 +185,7 @@ def _generate_design_preview(model, request: dict, output: Path) -> None:
     wavs, sr = model.generate_voice_design(
         text=str(request.get("text") or ""),
         language=str(request.get("language") or "English"),
-        instruct=str(request.get("instruct") or "").strip(),
+        instruct=_voice_design_instruct(request),
         **_generation_kwargs(
             {
                 **request,
@@ -332,8 +343,6 @@ def server(args) -> int:
 
     active_task = args.task
     active_kind = args.kind
-    locked_clone_prompt = None
-    locked_anchor = None
 
     print(
         json.dumps(
@@ -371,48 +380,22 @@ def server(args) -> int:
 
             if active_task == "custom":
                 _generate_custom(model, request, output)
-            elif active_task in {"design", "design-preview"}:
-                if locked_clone_prompt is None:
-                    print(
-                        json.dumps(
-                            {
-                                "progress": "Locking VoiceDesign speaker identity for this voice profile…"
-                            }
-                        ),
-                        flush=True,
-                    )
-                    model, device, locked_clone_prompt, locked_anchor = _prepare_design_clone(
-                        model, request, args
-                    )
-                    active_kind = str(args.clone_kind)
-                    print(
-                        json.dumps(
-                            {
-                                "progress": (
-                                    f"Voice identity locked • {active_kind} • {device}"
-                                )
-                            }
-                        ),
-                        flush=True,
-                    )
+            elif active_task == "design":
                 print(
-                    json.dumps(
-                        {
-                            "progress": (
-                                "Generating locked VoiceDesign narration…"
-                                if active_task == "design"
-                                else "Generating locked VoiceDesign preview audio…"
-                            )
-                        }
-                    ),
+                    json.dumps({"progress": "Generating expressive VoiceDesign narration…"}),
                     flush=True,
                 )
-                if active_task == "design-preview":
-                    request = {
-                        **request,
-                        "max_new_tokens": min(int(request.get("max_new_tokens", 2048)), 1024),
-                    }
-                _generate_design_locked(model, locked_clone_prompt, request, output)
+                _generate_design(model, request, output)
+            elif active_task == "design-preview":
+                print(
+                    json.dumps({"progress": "Generating expressive VoiceDesign preview audio…"}),
+                    flush=True,
+                )
+                request = {
+                    **request,
+                    "max_new_tokens": min(int(request.get("max_new_tokens", 2048)), 1024),
+                }
+                _generate_design_preview(model, request, output)
             elif active_task == "clone":
                 _generate_clone(model, request, output)
             else:
@@ -426,8 +409,8 @@ def server(args) -> int:
                         "device": device,
                         "kind": active_kind,
                         "task": active_task,
-                        "anchor": str(locked_anchor) if locked_anchor else None,
-                        "voice_lock": bool(locked_clone_prompt is not None),
+                        "anchor": None,
+                        "voice_lock": False,
                     }
                 ),
                 flush=True,
@@ -451,12 +434,10 @@ def server(args) -> int:
                     device = "cpu"
                     if active_task == "custom":
                         _generate_custom(model, request, output)
-                    elif active_task in {"design", "design-preview"}:
-                        if locked_clone_prompt is None:
-                            raise RuntimeError(
-                                "The locked VoiceDesign prompt is unavailable after a GPU memory fallback."
-                            )
-                        _generate_design_locked(model, locked_clone_prompt, request, output)
+                    elif active_task == "design":
+                        _generate_design(model, request, output)
+                    elif active_task == "design-preview":
+                        _generate_design_preview(model, request, output)
                     else:
                         _generate_clone(model, request, output)
                     print(
