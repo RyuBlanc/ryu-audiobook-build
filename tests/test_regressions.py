@@ -275,6 +275,32 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('"longform": self.qwen_mode != "design-preview"', provider)
         self.assertIn('"max_new_tokens": 1536', worker)
 
+    def test_qwen_voicedesign_uses_same_direct_model_for_preview_and_audiobook(self):
+        worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
+        provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
+        voice_page = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
+        self.assertIn('elif active_task in {"design", "design-preview"}:', worker)
+        self.assertIn("_generate_design(model, request, output)", worker)
+        self.assertIn('qwen_mode="design-preview"', voice_page)
+        self.assertIn('qwen_mode == "design"', provider)
+        self.assertNotIn("Creating and locking the VoiceDesign identity", worker)
+        self.assertNotIn("_prepare_design_clone(model, request, args)", worker)
+
+    def test_voicedesign_has_no_base_model_requirement(self):
+        provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
+        voice_page = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
+        self.assertNotIn("VoiceDesign also needs the", provider)
+        self.assertNotIn("Base model", voice_page[voice_page.index('elif mode == "qwen-design":'):voice_page.index('elif mode == "qwen-clone":')])
+
+    def test_voice_previews_expose_percentage_progress(self):
+        voice_page = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
+        generation = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        self.assertIn("progress = Signal(int)", voice_page)
+        self.assertIn("self.preview_percent_bar", voice_page)
+        self.assertIn("percent = Signal(int)", generation)
+        self.assertIn("self.preview_loading.setRange(0, 100)", generation)
+        self.assertIn("self.preview_worker.percent.connect", generation)
+
     def test_qwen_resume_signature_tracks_exact_voice_configuration(self):
         source = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         generator = Path("app/tts/generator.py").read_text(encoding="utf-8")
