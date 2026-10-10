@@ -160,6 +160,22 @@ def _generate_custom(model, request: dict, output: Path) -> None:
     sf.write(str(output), wavs[0], sr)
 
 
+def _generate_design(model, request: dict, output: Path) -> None:
+    """Generate narration with the same VoiceDesign engine used by the UI preview."""
+    import soundfile as sf
+
+    _set_seed(request.get("seed"))
+    wavs, sr = model.generate_voice_design(
+        text=str(request.get("text") or ""),
+        language=str(request.get("language") or "English"),
+        instruct=str(request.get("instruct") or "").strip(),
+        **_generation_kwargs(request),
+    )
+    if not wavs:
+        raise RuntimeError("Qwen VoiceDesign did not return narration audio.")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(str(output), wavs[0], sr)
+
 def _generate_design_preview(model, request: dict, output: Path) -> None:
     import soundfile as sf
 
@@ -321,15 +337,8 @@ def server(args) -> int:
         else:
             raise
 
-    locked_prompt = None
-    anchor_path = None
     active_task = args.task
     active_kind = args.kind
-
-    if args.task == "design":
-        # VoiceDesign itself creates the identity anchor only once. Generation
-        # then continues through the Base model in the same worker process.
-        pass
 
     print(
         json.dumps(
@@ -365,34 +374,22 @@ def server(args) -> int:
             if not text:
                 raise RuntimeError("Qwen character text is empty.")
 
-            if active_task == "design" and locked_prompt is None:
-                print(json.dumps({"progress": "Creating and locking the VoiceDesign identity…"}), flush=True)
-                try:
-                    model, device, locked_prompt, anchor_path = _prepare_design_clone(model, request, args)
-                    active_task = "design-locked"
-                    active_kind = args.clone_kind
-                except Exception as exc:
-                    if _is_cuda_oom(exc) and device.startswith("cuda"):
-                        try:
-                            import torch
-                            torch.cuda.empty_cache()
-                        except Exception:
-                            pass
-                        model, device = _load_model(args.kind, "cpu", root)
-                        args.backend = "cpu"
-                        model, device, locked_prompt, anchor_path = _prepare_design_clone(model, request, args)
-                        active_task = "design-locked"
-                        active_kind = args.clone_kind
-                    else:
-                        raise
-
             if active_task == "custom":
                 _generate_custom(model, request, output)
-            elif active_task == "design-preview":
-                print(json.dumps({"progress": "Generating VoiceDesign preview audio…"}), flush=True)
-                _generate_design_preview(model, request, output)
-            elif active_task == "design-locked":
-                _generate_design_locked(model, locked_prompt, request, output)
+            elif active_task in {"design", "design-preview"}:
+                print(
+                    json.dumps(
+                        {
+                            "progress": (
+                                "Generating VoiceDesign narration…"
+                                if active_task == "design"
+                                else "Generating VoiceDesign preview audio…"
+                            )
+                        }
+                    ),
+                    flush=True,
+                )
+                _generate_design(model, request, output)
             elif active_task == "clone":
                 _generate_clone(model, request, output)
             else:
@@ -406,7 +403,7 @@ def server(args) -> int:
                         "device": device,
                         "kind": active_kind,
                         "task": active_task,
-                        "anchor": str(anchor_path) if anchor_path else None,
+                        "anchor": None,
                     }
                 ),
                 flush=True,
@@ -427,25 +424,11 @@ def server(args) -> int:
                         "cpu",
                         root,
                     )
-                    if active_task == "design-locked":
-                        # Prompt tensors remain device-specific in Qwen, so rebuild
-                        # the Base prompt after switching devices.
-                        if anchor_path and Path(anchor_path).exists():
-                            anchor_text = str(request.get("anchor_text") or "").strip() or _default_anchor_text(
-                                str(request.get("language") or "English")
-                            )
-                            locked_prompt = model.create_voice_clone_prompt(
-                                ref_audio=str(anchor_path),
-                                ref_text=anchor_text,
-                                x_vector_only_mode=False,
-                            )
                     device = "cpu"
                     if active_task == "custom":
                         _generate_custom(model, request, output)
-                    elif active_task == "design-preview":
-                        _generate_design_preview(model, request, output)
-                    elif active_task == "design-locked":
-                        _generate_design_locked(model, locked_prompt, request, output)
+                    elif active_task in {"design", "design-preview"}:
+                        _generate_design(model, request, output)
                     else:
                         _generate_clone(model, request, output)
                     print(
