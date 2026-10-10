@@ -31,6 +31,7 @@ from app.tts.qwen_character_runtime import (
     runtime_ready as qwen_runtime_ready,
     model_installed as qwen_model_installed,
     best_clone_kind,
+    best_long_form_clone_kind,
     best_custom_kind,
     best_voice_design_kind,
 )
@@ -1323,7 +1324,7 @@ class VoicePage(QWidget):
         language = profile.language or "Not specified"
         model = profile.model_id or "automatic"
         if profile.provider == "qwen-character" and (profile.qwen_mode or "custom") == "design":
-            model = f"VoiceDesign {profile.model_id or 'design-1.7b'} → Base {best_clone_kind()} voice lock"
+            model = f"VoiceDesign {profile.model_id or 'design-1.7b'} → Base {best_long_form_clone_kind()} long-form voice lock"
 
         anchor = "Not used"
         if profile.qwen_anchor_path:
@@ -1572,7 +1573,7 @@ class VoicePage(QWidget):
                 )
             ready = qwen_runtime_ready()
             design_installed = ready and qwen_model_installed(best_voice_design_kind())
-            clone_kind = best_clone_kind()
+            clone_kind = best_long_form_clone_kind()
             clone_installed = ready and qwen_model_installed(clone_kind)
             installed = design_installed and clone_installed
             self.source_hint.setText(
