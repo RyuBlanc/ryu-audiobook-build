@@ -127,17 +127,25 @@ class QwenCharacterProvider(TTSProvider):
                 "Download Offline Character Voices first."
             )
         if not model_installed(self.model_kind):
-            phase = {"design": "VoiceDesign", "clone": "Voice Clone (Base)"}.get(
+            phase = {"design": "VoiceDesign", "design-preview": "VoiceDesign", "clone": "Voice Clone (Base)"}.get(
                 self.qwen_mode, "CustomVoice"
             )
             raise RuntimeError(
                 f"The selected Qwen {phase} model ({self.model_kind}) is not installed. "
                 "Open Models and install the corresponding Qwen3-TTS phase."
             )
+        clone_kind = None
+        if self.qwen_mode in {"design", "design-preview"}:
+            clone_kind = best_long_form_clone_kind()
+            if not model_installed(clone_kind):
+                raise RuntimeError(
+                    f"VoiceDesign needs a local Qwen Base model for stable character identity "
+                    f"({clone_kind}). Open Models and install that Base model first."
+                )
         log_path = Path.home() / "Ryu's Audiobook" / "Settings" / "qwen_character_worker.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         self._worker_log = log_path.open("a", encoding="utf-8", errors="replace")
-        clone_kind = best_clone_kind()
+        clone_kind = clone_kind or best_clone_kind()
         command = [
             str(runtime_python()),
             str(worker_script()),
