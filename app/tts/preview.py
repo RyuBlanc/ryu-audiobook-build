@@ -132,6 +132,7 @@ def build_voice_preview(
     pacing_profile: str = "natural",
     max_chars: int = 1400,
     dialogue_assignments=None,
+    progress_callback=None,
 ) -> PreviewResult:
     units = _preview_units(
         text,
@@ -144,6 +145,16 @@ def build_voice_preview(
     if not units:
         raise ValueError("The selected chapter does not contain enough readable text for a preview.")
 
+    total_units = len(units)
+
+    def report(stage: str, current: int, total: int = total_units) -> None:
+        if callable(progress_callback):
+            try:
+                progress_callback(stage, int(current), max(1, int(total)))
+            except Exception:
+                pass
+
+    report("preparing", 0, total_units)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     configure_narration = getattr(provider, "configure_narration", None)
     if callable(configure_narration):
@@ -156,6 +167,7 @@ def build_voice_preview(
         normalized: list[Path] = []
 
         for index, (unit, unit_voice) in enumerate(units):
+            report("synthesizing", index, total_units)
             raw_path = root / f"{index:03d}.wav"
             normalized_path = root / f"{index:03d}-normalized.wav"
             if isinstance(unit_voice, list):
@@ -171,8 +183,11 @@ def build_voice_preview(
             normalized.append(normalized_path)
             if unit_voice:
                 voices_used.append(str(unit_voice))
+            report("synthesizing", index + 1, total_units)
 
+        report("finalizing", 0, 1)
         _concat(normalized, output_path)
+        report("finalizing", 1, 1)
 
     if not output_path.exists() or output_path.stat().st_size < 1024:
         raise RuntimeError("The voice preview was not created correctly.")
