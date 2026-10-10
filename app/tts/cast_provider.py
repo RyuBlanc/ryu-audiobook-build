@@ -47,7 +47,7 @@ class CastAwareProvider(TTSProvider):
             if profile.provider == "chatterbox":
                 limits.append(300)
             elif profile.provider == "qwen-character":
-                limits.append(1200)
+                limits.append(1800)
             else:
                 limits.append(getattr(self.narrator_provider, "recommended_chunk_chars", 1400))
         if not limits:
@@ -59,7 +59,7 @@ class CastAwareProvider(TTSProvider):
         if any(profile.provider == "chatterbox" for profile in self.profiles.values()):
             return 1
         if any(profile.provider == "qwen-character" for profile in self.profiles.values()):
-            return 5
+            return 8
         return getattr(self.narrator_provider, "recommended_chunk_sentences", 2)
 
     @property
