@@ -57,7 +57,10 @@ def _is_cuda_oom(exc: BaseException) -> bool:
 
 
 def _generation_kwargs(request: dict) -> dict:
-    longform = bool(request.get("longform", False))
+    # Keep VoiceDesign preview and audiobook narration on the same sampling
+    # configuration so the preview is a trustworthy representation of the
+    # final character voice. Chunking/throughput is optimized outside the
+    # model sampling parameters.
     defaults = {
         "do_sample": True,
         "top_k": 50,
@@ -70,18 +73,6 @@ def _generation_kwargs(request: dict) -> dict:
         "subtalker_temperature": 0.9,
         "max_new_tokens": 2048,
     }
-    if longform:
-        # Long-form narration needs stable expressiveness, but does not need
-        # the very high token ceiling used by unconstrained one-off samples.
-        defaults.update(
-            {
-                "top_k": 40,
-                "temperature": 0.85,
-                "subtalker_top_k": 40,
-                "subtalker_temperature": 0.85,
-                "max_new_tokens": 1536,
-            }
-        )
     return {
         "do_sample": bool(request.get("do_sample", defaults["do_sample"])),
         "top_k": int(request.get("top_k", defaults["top_k"])),
