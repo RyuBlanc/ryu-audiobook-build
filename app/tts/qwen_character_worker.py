@@ -82,7 +82,7 @@ def _generation_kwargs(request: dict) -> dict:
         "subtalker_top_k": 50,
         "subtalker_top_p": 1.0,
         "subtalker_temperature": 0.9,
-        "max_new_tokens": 2048,
+        "max_new_tokens": 1536,
     }
     return {
         "do_sample": bool(request.get("do_sample", defaults["do_sample"])),
