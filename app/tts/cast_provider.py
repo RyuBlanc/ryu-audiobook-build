@@ -38,6 +38,7 @@ class CastAwareProvider(TTSProvider):
         self.narrating_character = (narrating_character or "").casefold()
         self.backend_override = backend_override or "automatic"
         self._providers: dict[str, tuple[TTSProvider, str]] = {}
+        self._status_callback = None
 
     @property
     def recommended_chunk_chars(self) -> int:
@@ -79,6 +80,17 @@ class CastAwareProvider(TTSProvider):
 
     def voices(self) -> list[str]:
         return [self.narrator_voice] if self.narrator_voice else []
+
+    def set_status_callback(self, callback) -> None:
+        self._status_callback = callback
+        narrator_callback = getattr(self.narrator_provider, "set_status_callback", None)
+        if callable(narrator_callback):
+            narrator_callback(callback)
+        for provider, _voice in self._providers.values():
+            child_callback = getattr(provider, "set_status_callback", None)
+            if callable(child_callback):
+                child_callback(callback)
+
 
     def generation_signature(self) -> str:
         payload = {
@@ -259,6 +271,9 @@ class CastAwareProvider(TTSProvider):
             provider, provider_voice = cached
             if self.backend_override != "automatic" and hasattr(provider, "backend"):
                 provider.backend = self.backend_override
+            child_callback = getattr(provider, "set_status_callback", None)
+            if callable(child_callback):
+                child_callback(self._status_callback)
             cached = (provider, provider_voice)
             self._providers[profile_name] = cached
         provider, provider_voice = cached
