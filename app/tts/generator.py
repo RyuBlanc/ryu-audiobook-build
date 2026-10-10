@@ -24,7 +24,7 @@ class GenerationResult:
     chunks_completed: int
 
 
-GENERATION_PIPELINE_VERSION = "2026-10-qwen3-voice-cache-v2"
+GENERATION_PIPELINE_VERSION = "2026-10-qwen3-stable-voice-v3"
 
 @dataclass(frozen=True)
 class ChapterPlan:
