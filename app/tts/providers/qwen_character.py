@@ -12,6 +12,7 @@ from ..base import TTSProvider
 from ..qwen_character_runtime import (
     RUNTIME_ROOT,
     best_clone_kind,
+    best_long_form_clone_kind,
     best_custom_kind,
     best_voice_design_kind,
     model_installed,
@@ -109,7 +110,11 @@ class QwenCharacterProvider(TTSProvider):
                 "Open Models and install the corresponding Qwen3-TTS phase."
             )
         if self.qwen_mode == "design":
-            clone_kind = best_clone_kind()
+            clone_kind = (
+            best_long_form_clone_kind()
+            if self.qwen_mode == "design"
+            else best_clone_kind()
+        )
             if not model_installed(clone_kind):
                 raise RuntimeError(
                     f"Qwen VoiceDesign also needs the {clone_kind} Base model to lock the "
