@@ -167,6 +167,10 @@ class QwenCharacterProvider(TTSProvider):
         )
         response = self._read_response(timeout=600.0)
         if response.get("ready"):
+            self._status(
+                f"Qwen engine ready • {response.get('kind', self.model_kind)} • "
+                f"{response.get('device', 'unknown device')}"
+            )
             return
         detail = response.get("error") or "The offline character worker did not become ready."
         self.close()
