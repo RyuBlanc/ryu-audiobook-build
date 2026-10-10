@@ -2028,15 +2028,23 @@ class VoicePage(QWidget):
                 return
 
             if profile.qwen_mode == "design":
-                # The preview only tests VoiceDesign identity. Long-form
-                # generation continues to use the Design -> Base voice-lock
-                # pipeline, but the preview does not load both 1.7B models.
+                # Preview and audiobook use the same stable Design -> Base
+                # identity pipeline so the selected voice is trustworthy.
                 kind = best_voice_design_kind()
                 if not model_installed(kind):
                     QMessageBox.warning(
                         self,
                         "Qwen VoiceDesign Not Ready",
                         "Install the Qwen VoiceDesign model from Models first.",
+                    )
+                    return
+                base_kind = best_long_form_clone_kind()
+                if not qwen_model_installed(base_kind):
+                    QMessageBox.warning(
+                        self,
+                        "Qwen Stable Voice Model Not Ready",
+                        f"VoiceDesign preview and audiobook require the local Qwen Base model ({base_kind}) "
+                        "for consistent character identity. Open Models and install that Base phase.",
                     )
                     return
                 preview_profile = replace(
