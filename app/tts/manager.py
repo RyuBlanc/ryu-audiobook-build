@@ -155,6 +155,16 @@ class GenerationManager:
                 break
             try:
                 chapter_offset = self._chunk_offsets[index] if index < len(self._chunk_offsets) else 0
+                set_status = getattr(self.provider, "set_status_callback", None)
+                if callable(set_status):
+                    set_status(
+                        lambda message, chapter_index=index: self._emit(
+                            chapter_index + 1,
+                            len(self.chapters),
+                            0,
+                            f"provider:{message}",
+                        )
+                    )
                 self._emit(
                     index + 1,
                     len(self.chapters),
