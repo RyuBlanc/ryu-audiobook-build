@@ -225,8 +225,10 @@ def _prepare_design_clone(model, request: dict, args):
     )
 
     if not anchor.exists() or anchor.stat().st_size < 1024:
+        print(json.dumps({"progress": "Creating the fixed VoiceDesign identity anchor…"}), flush=True)
         anchor_text = _generate_design_anchor(model, request, anchor)
 
+    print(json.dumps({"progress": "VoiceDesign anchor ready • loading Base clone engine for stable identity…"}), flush=True)
     del model
     gc.collect()
     if torch.cuda.is_available():
@@ -330,6 +332,8 @@ def server(args) -> int:
 
     active_task = args.task
     active_kind = args.kind
+    locked_clone_prompt = None
+    locked_anchor = None
 
     print(
         json.dumps(
@@ -368,19 +372,47 @@ def server(args) -> int:
             if active_task == "custom":
                 _generate_custom(model, request, output)
             elif active_task in {"design", "design-preview"}:
+                if locked_clone_prompt is None:
+                    print(
+                        json.dumps(
+                            {
+                                "progress": "Locking VoiceDesign speaker identity for this voice profile…"
+                            }
+                        ),
+                        flush=True,
+                    )
+                    model, device, locked_clone_prompt, locked_anchor = _prepare_design_clone(
+                        model, request, args
+                    )
+                    active_kind = str(args.clone_kind)
+                    print(
+                        json.dumps(
+                            {
+                                "progress": (
+                                    f"Voice identity locked • {active_kind} • {device}"
+                                )
+                            }
+                        ),
+                        flush=True,
+                    )
                 print(
                     json.dumps(
                         {
                             "progress": (
-                                "Generating VoiceDesign narration…"
+                                "Generating locked VoiceDesign narration…"
                                 if active_task == "design"
-                                else "Generating VoiceDesign preview audio…"
+                                else "Generating locked VoiceDesign preview audio…"
                             )
                         }
                     ),
                     flush=True,
                 )
-                _generate_design(model, request, output)
+                if active_task == "design-preview":
+                    request = {
+                        **request,
+                        "max_new_tokens": min(int(request.get("max_new_tokens", 2048)), 1024),
+                    }
+                _generate_design_locked(model, locked_clone_prompt, request, output)
             elif active_task == "clone":
                 _generate_clone(model, request, output)
             else:
@@ -394,7 +426,8 @@ def server(args) -> int:
                         "device": device,
                         "kind": active_kind,
                         "task": active_task,
-                        "anchor": None,
+                        "anchor": str(locked_anchor) if locked_anchor else None,
+                        "voice_lock": bool(locked_clone_prompt is not None),
                     }
                 ),
                 flush=True,
@@ -419,7 +452,11 @@ def server(args) -> int:
                     if active_task == "custom":
                         _generate_custom(model, request, output)
                     elif active_task in {"design", "design-preview"}:
-                        _generate_design(model, request, output)
+                        if locked_clone_prompt is None:
+                            raise RuntimeError(
+                                "The locked VoiceDesign prompt is unavailable after a GPU memory fallback."
+                            )
+                        _generate_design_locked(model, locked_clone_prompt, request, output)
                     else:
                         _generate_clone(model, request, output)
                     print(
