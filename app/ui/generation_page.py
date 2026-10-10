@@ -78,8 +78,27 @@ class VoicePreviewWorker(QThread):
                         backend_override=self.backend,
                     )
 
-            self.percent.emit(30)
-            self.progress.emit('[30%] Generating voice preview…')
+            self.percent.emit(10)
+            self.progress.emit('[10%] Voice engine ready • preparing preview segments…')
+
+            def preview_progress(stage: str, current: int, total: int) -> None:
+                total = max(1, int(total))
+                current = max(0, min(total, int(current)))
+                if stage == "preparing":
+                    percent = 10
+                    label = "Preparing preview segments…"
+                elif stage == "synthesizing":
+                    percent = 15 + int(70 * current / total)
+                    label = f"Generating preview segment {current}/{total}…"
+                elif stage == "finalizing":
+                    percent = 85 + int(10 * current / total)
+                    label = "Finalizing preview…"
+                else:
+                    percent = 10
+                    label = "Preparing preview…"
+                self.percent.emit(percent)
+                self.progress.emit(f'[{percent}%] {label}')
+
             result = build_voice_preview(
                 self.text,
                 self._provider,
@@ -89,10 +108,10 @@ class VoicePreviewWorker(QThread):
                 narration_speed=self.narration_speed,
                 pacing_profile=self.pacing_profile,
                 dialogue_assignments=self.dialogue_assignments,
+                progress_callback=preview_progress,
             )
-            self.percent.emit(95)
-            self.progress.emit('[95%] Finalizing preview…')
             self.percent.emit(100)
+            self.progress.emit('[100%] Preview ready.')
             self.finished_ok.emit(result)
         except Exception as exc:
             self.failed.emit(str(exc))
