@@ -206,6 +206,7 @@ class ProjectWorkflow(QMainWindow):
             self.redetect_chapters,
             self.project.folder,
             self.project.title,
+            self.autosave_project,
         )
         self.stack.addWidget(self.editor)
         self._editor_index = self.stack.indexOf(self.editor)
@@ -242,6 +243,17 @@ class ProjectWorkflow(QMainWindow):
             self.generation.title.setText(self.project.title)
             self.generation._set_default_output()
         self.ensure_generation_page()
+
+    def autosave_project(self, chapters: list[Chapter]) -> bool:
+        """Persist editor text without rebuilding heavyweight UI pages."""
+        if not self.project:
+            return False
+        try:
+            self.project.chapters = list(chapters)
+            self.project.save()
+            return True
+        except Exception as exc:
+            return False
 
     def save_project(self, chapters: list[Chapter]) -> bool:
         if not self.project:
