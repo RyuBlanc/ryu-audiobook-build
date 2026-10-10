@@ -32,6 +32,20 @@ BOOK_NOISE_PATTERNS = (
     re.compile(r"^.*(?:asianovel\.com|mp4directs\.com).*$", re.I),
 )
 
+CHAPTER_HEADING_PATTERNS = (
+    re.compile(r"^\s*(?:chapter|chap\.)\s+[0-9IVXLCDM]+(?:\s*[-:–—.]\s*)?.*$", re.I),
+    re.compile(r"^\s*(?:prologue|epilogue|foreword|preface|introduction|afterword|interlude|side\s+story|extra|bonus)\b.*$", re.I),
+    re.compile(r"^\s*[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ _'’&/-]{0,35}\.\d{1,4}\s+.*$", re.I),
+    re.compile(r"^\s*Life\s*[0-9IVXLCDM]+(?:\s+.*)?$", re.I),
+    re.compile(r"^\s*New\s+Life(?:\s*[:–—-].*)?$", re.I),
+)
+
+def _is_chapter_heading_like(line: str) -> bool:
+    candidate = re.sub(r"\s+", " ", line).strip()
+    if not candidate or len(candidate) > 120:
+        return False
+    return any(pattern.fullmatch(candidate) for pattern in CHAPTER_HEADING_PATTERNS)
+
 
 def reflow_source_text(text: str) -> str:
     """Rejoin obvious PDF line wraps while preserving real paragraph/dialogue breaks."""
@@ -52,9 +66,11 @@ def reflow_source_text(text: str) -> str:
                 previous.endswith((".", "!", "?", "…", ":", ";"))
                 and (
                     line.startswith(("“", '"', "‘", "'", "—", "–", "-", "•", "*"))
-                    or re.match(r"^(?:Chapter|Prologue|Epilogue|Interlude|Extra)\b", line, re.I)
+                    or _is_chapter_heading_like(line)
                 )
             )
+            if _is_chapter_heading_like(previous) or _is_chapter_heading_like(line):
+                intentional_break = True
             if intentional_break:
                 rebuilt.append(line)
                 continue
