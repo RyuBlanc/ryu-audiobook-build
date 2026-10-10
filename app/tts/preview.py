@@ -108,8 +108,19 @@ def _preview_units(
 
     units: list[tuple[str, str | list[str] | None]] = []
     used_chars = 0
+    preview_unit_chars = 900
+    preview_unit_sentences = 2
+    # A timed voice check is easier to hit accurately with smaller, sentence-sized
+    # units; the audiobook pipeline keeps its larger Qwen chunks for throughput.
+    if max_chars > 1400:
+        preview_unit_chars = 700
+        preview_unit_sentences = 1
     for segment, segment_voice in raw:
-        for unit in split_for_pacing(segment, max_chars=900, max_sentences=2):
+        for unit in split_for_pacing(
+            segment,
+            max_chars=preview_unit_chars,
+            max_sentences=preview_unit_sentences,
+        ):
             if used_chars >= max_chars:
                 return units
             remaining = max_chars - used_chars
