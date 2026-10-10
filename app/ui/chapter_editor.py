@@ -628,13 +628,15 @@ class ChapterEditorPage(QWidget):
         if fraction > 0.01:
             remaining = max(0, int(elapsed * (1.0 - fraction) / fraction))
             self.ai_eta_label.setText(
-                f"Elapsed: {int(elapsed) // 60}:{int(elapsed) % 60:02d} • "
-                f"Estimated remaining: {remaining // 60}:{remaining % 60:02d}"
+                f"Progress: {fraction * 100:.0f}% • "
+                f"Elapsed {int(elapsed) // 60}:{int(elapsed) % 60:02d} • "
+                f"ETA {remaining // 60}:{remaining % 60:02d}"
             )
         else:
             self.ai_eta_label.setText(
-                f"Elapsed: {int(elapsed) // 60}:{int(elapsed) % 60:02d} • "
-                "Estimated remaining: calculating…"
+                f"Progress: {fraction * 100:.0f}% • "
+                f"Elapsed {int(elapsed) // 60}:{int(elapsed) % 60:02d} • "
+                "ETA calculating…"
             )
 
     def _ai_failed(self, message: str) -> None:
