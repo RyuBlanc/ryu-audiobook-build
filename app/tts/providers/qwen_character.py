@@ -33,6 +33,7 @@ class QwenCharacterProvider(TTSProvider):
     recommended_chunk_chars = 1800
     recommended_chunk_sentences = 8
     handles_narration_controls = False
+    stop_on_failure = True
 
     def __init__(
         self,
@@ -234,9 +235,17 @@ class QwenCharacterProvider(TTSProvider):
         self._status(
             "Generating preview…" if "preview" in self.qwen_mode else "Generating narration…"
         )
+        # A Qwen request owns the single long-lived worker. If a synthesis
+        # request times out or fails, do not queue another request behind a
+        # possibly still-running model call.
         self._worker.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
         self._worker.stdin.flush()
-        if response := self._read_response(timeout=300.0):
+        try:
+            response = self._read_response(timeout=900.0)
+        except Exception:
+            self.close()
+            raise
+        if response:
             if response.get("device"):
                 self._status(
                     f"Qwen ready • {response.get('kind', self.model_kind)} • {response.get('device')}"
