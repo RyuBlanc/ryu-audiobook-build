@@ -217,6 +217,7 @@ class GenerationPage(QWidget):
         self.language = HistoryComboBox(self._metadata_history("language", ["en"]))
         self.year = HistoryComboBox(self._metadata_history("year"))
         self.genre = GenrePicker()
+        self.genre.set_value("Audiobook")
         form = QFormLayout()
         form.addRow("Book title", self.title)
         form.addRow("Author", self.author)
@@ -1081,6 +1082,7 @@ class GenerationPage(QWidget):
             if index >= 0:
                 self.pacing_profile.setCurrentIndex(index)
 
+        self.author.setText(str(state.get("author") or ""))
         self.narrator.setText(str(state.get("narrator") or ""))
         self.publisher.setText(str(state.get("publisher") or ""))
         self.series.setText(str(state.get("series") or ""))
