@@ -134,23 +134,10 @@ class QwenCharacterProvider(TTSProvider):
                 f"The selected Qwen {phase} model ({self.model_kind}) is not installed. "
                 "Open Models and install the corresponding Qwen3-TTS phase."
             )
-        if self.qwen_mode == "design":
-            clone_kind = best_long_form_clone_kind()
-            if not model_installed(clone_kind):
-                raise RuntimeError(
-                    f"Qwen VoiceDesign also needs the {clone_kind} Base model to lock the "
-                    "designed voice identity for consistent long-form narration. "
-                    "Open Models → Full Qwen Voice Studio."
-                )
-
         log_path = Path.home() / "Ryu's Audiobook" / "Settings" / "qwen_character_worker.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         self._worker_log = log_path.open("a", encoding="utf-8", errors="replace")
-        clone_kind = (
-            best_long_form_clone_kind()
-            if self.qwen_mode == "design"
-            else best_clone_kind()
-        )
+        clone_kind = best_clone_kind()
         command = [
             str(runtime_python()),
             str(worker_script()),
