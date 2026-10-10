@@ -192,8 +192,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("generate_voice_design", worker)
         self.assertIn("voice_anchors", worker)
         self.assertIn("--clone-kind", worker)
-        self.assertIn("recommended_chunk_chars = 1200", provider)
-        self.assertIn("recommended_chunk_sentences = 5", provider)
+        self.assertIn("recommended_chunk_chars = 1800", provider)
+        self.assertIn("recommended_chunk_sentences = 8", provider)
 
     def test_voice_profile_save_and_qwen_preview_controls_are_exposed(self):
         source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
