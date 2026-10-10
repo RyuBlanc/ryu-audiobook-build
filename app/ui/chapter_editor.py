@@ -59,7 +59,16 @@ class AudiobookAIWorker(QThread):
                 brain.close()
 
 class ChapterEditorPage(QWidget):
-    def __init__(self, chapters: list[Chapter], on_save=None, on_rename_book=None, on_redetect=None, project_folder=None, project_title: str | None = None) -> None:
+    def __init__(
+        self,
+        chapters: list[Chapter],
+        on_save=None,
+        on_rename_book=None,
+        on_redetect=None,
+        project_folder=None,
+        project_title: str | None = None,
+        on_autosave=None,
+    ) -> None:
         super().__init__()
         cleaned = [
             Chapter(ch.number, ch.title, remove_page_noise(ch.text), list(getattr(ch, "dialogue_assignments", [])))
@@ -67,7 +76,7 @@ class ChapterEditorPage(QWidget):
         ]
         self.editor = ChapterEditor(cleaned)
         self.on_save = on_save
-        self.on_autosave = None
+        self.on_autosave = on_autosave
         self.on_rename_book = on_rename_book
         self.on_redetect = on_redetect
         self.project_folder = project_folder
