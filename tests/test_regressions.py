@@ -127,6 +127,14 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(clone.qwen_mode, "clone")
         self.assertEqual(clone.reference_text, "Hello there.")
 
+    def test_chapter_editor_keeps_assignment_labels_small_and_synced(self):
+        source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
+        self.assertIn('badge.setFixedHeight(18)', source)
+        self.assertIn('font-size:7px', source)
+        self.assertIn('probe.setPosition(end)', source)
+        self.assertIn('_update_current_chapter_list_label', source)
+        self.assertIn('self.title.textChanged.connect(self._update_current_chapter_list_label)', source)
+
     def test_chapter_editor_assignment_ui_is_subtle_and_uses_project_title(self):
         source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
         self.assertIn("self.text.setViewportMargins(82, 0, 0, 0)", source)
@@ -228,6 +236,57 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn("\n41\n", "\n" + cleaned + "\n")
         self.assertIn("hero walked toward the door and stopped", cleaned)
         self.assertGreaterEqual(len(removed), 3)
+
+    def test_source_reflow_preserves_life_chapter_headings(self):
+        from app.documents.parser import reflow_source_text
+        source = (
+            "Life.0\n"
+            "The opening of the story.\n"
+            "Life.1 I Quit Being a Human\n"
+            "The next chapter starts here.\n"
+            "Life.2 I Start as a Devil\n"
+            "Another chapter body."
+        )
+        result = reflow_source_text(source)
+        self.assertIn("Life.0\nThe opening of the story.", result)
+        self.assertIn("Life.1 I Quit Being a Human\nThe next chapter starts here.", result)
+        self.assertIn("Life.2 I Start as a Devil\nAnother chapter body.", result)
+        self.assertNotIn("Life.0 Life.1", result)
+
+    def test_generation_pipeline_applies_speed_during_chapter_packaging(self):
+        assembler = Path("app/audio/assembler.py").read_text(encoding="utf-8")
+        generator = Path("app/tts/generator.py").read_text(encoding="utf-8")
+        manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
+        self.assertIn("narration_speed: float = 1.0", assembler)
+        self.assertIn('"filter:a", f"atempo={speed:.3f}"', assembler)
+        self.assertIn("narration_speed=self.narration_speed", manager)
+        self.assertNotIn("_apply_narration_speed(", generator)
+        self.assertIn("if len(completed) % 4 == 0", generator)
+
+    def test_qwen_long_form_runtime_uses_lighter_base_and_larger_units(self):
+        provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
+        runtime = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
+        worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
+        self.assertIn("recommended_chunk_chars = 1800", provider)
+        self.assertIn("recommended_chunk_sentences = 8", provider)
+        self.assertIn("best_long_form_clone_kind", provider)
+        self.assertIn("base-0.6b", runtime)
+        self.assertIn("Base 1.7B exceeded available GPU memory", worker)
+        self.assertIn('"longform": self.qwen_mode != "design-preview"', provider)
+        self.assertIn('"max_new_tokens": 1536', worker)
+
+    def test_generation_cancel_closes_active_provider(self):
+        manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
+        self.assertIn("self.cancel_event.set()", manager)
+        self.assertIn("close = getattr(provider, "close", None)", manager)
+        self.assertIn("if self.cancel_event.is_set():", manager)
+
+    def test_project_title_is_propagated_to_generation_and_editor(self):
+        workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
+        generation = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        self.assertIn("self.project.title,", workflow)
+        self.assertIn("self.project_title = str(project_title or "").strip()", generation)
+        self.assertIn("book_name = self.project_title", generation)
 
     def test_chapter_editor_uses_inline_sentence_assignment_ui(self):
         source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
