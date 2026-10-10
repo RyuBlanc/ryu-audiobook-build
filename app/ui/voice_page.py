@@ -2028,12 +2028,10 @@ class VoicePage(QWidget):
                     return
                 preview_profile = replace(
                     profile,
-                    qwen_mode="design-preview",
+                    qwen_mode="design",
                     model_id=kind,
-                    qwen_anchor_path=None,
-                    qwen_anchor_text="",
                 )
-                preview_model = f"{kind} • VoiceDesign preview"
+                preview_model = f"{kind} • VoiceDesign • stable identity preview"
             elif profile.qwen_mode == "clone":
                 kind = best_clone_kind()
                 if not model_installed(kind):
