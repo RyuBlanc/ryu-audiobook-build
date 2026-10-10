@@ -275,6 +275,14 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('"longform": self.qwen_mode != "design-preview"', provider)
         self.assertIn('"max_new_tokens": 1536', worker)
 
+    def test_generation_surfaces_provider_device_status(self):
+        manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
+        generation = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        cast = Path("app/tts/cast_provider.py").read_text(encoding="utf-8")
+        self.assertIn('set_status = getattr(self.provider, "set_status_callback", None)', manager)
+        self.assertIn('message.startswith("provider:")', generation)
+        self.assertIn("def set_status_callback(self, callback) -> None:", cast)
+
     def test_generation_cancel_closes_active_provider(self):
         manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
         self.assertIn("self.cancel_event.set()", manager)
