@@ -1573,20 +1573,13 @@ class VoicePage(QWidget):
                 )
             ready = qwen_runtime_ready()
             design_installed = ready and qwen_model_installed(best_voice_design_kind())
-            clone_kind = best_long_form_clone_kind()
-            clone_installed = ready and qwen_model_installed(clone_kind)
-            installed = design_installed and clone_installed
+            installed = design_installed
             self.source_hint.setText(
-                "Qwen3-TTS VoiceDesign • create the voice once, then lock it through the Base clone phase for consistent long-form narration."
+                "Qwen3-TTS VoiceDesign • the same VoiceDesign engine is used for preview and audiobook narration, keeping the selected voice identity and expression consistent."
             )
-            if installed:
-                status = "ready"
-            elif design_installed:
-                status = f"VoiceDesign ready, but Base model {clone_kind} is required for voice locking"
-            else:
-                status = "VoiceDesign model not installed"
             self.offline_character_status.setText(
-                f"{'✓' if installed else '○'} VoiceDesign + Base voice-lock pipeline • {status}"
+                f"{'✓' if installed else '○'} VoiceDesign model • "
+                + ("ready" if installed else "not installed")
             )
             self.qwen_phase_status.setText(
                 "Phase 2 • VoiceDesign — ideal for anime heroines, heroes, villains, narrators and cinematic character voices. "
