@@ -105,6 +105,12 @@ class CastAwareProvider(TTSProvider):
                     self.profiles[k].model_id,
                     self.profiles[k].backend,
                     self.profiles[k].language,
+                    self.profiles[k].qwen_mode,
+                    self.profiles[k].qwen_prompt,
+                    self.profiles[k].qwen_seed,
+                    self.profiles[k].qwen_anchor_path,
+                    self.profiles[k].qwen_anchor_text,
+                    self.profiles[k].reference_text,
                 )
                 for k in self.assignments if k in self.profiles
             ),
