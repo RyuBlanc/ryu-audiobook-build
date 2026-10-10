@@ -647,6 +647,7 @@ class VoicePage(QWidget):
         self.preview_percent_bar.setRange(0, 100)
         self.preview_percent_bar.setValue(0)
         self.preview_percent_bar.setTextVisible(True)
+        self.preview_percent_bar.setFixedHeight(8)
         settings.addWidget(self.preview_engine_status, 1)
         pv.addLayout(settings)
         pv.addWidget(self.preview_percent_bar)
