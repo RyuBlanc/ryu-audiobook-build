@@ -98,6 +98,11 @@ class QwenCharacterProvider(TTSProvider):
                 self.language,
                 self.qwen_mode,
                 self.model_kind,
+                (
+                    best_long_form_clone_kind()
+                    if self.qwen_mode in {"design", "design-preview"}
+                    else ""
+                ),
                 self.instruct,
                 str(self.qwen_seed),
                 str(self.qwen_anchor_path or ""),
