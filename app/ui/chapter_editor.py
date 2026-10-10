@@ -178,6 +178,7 @@ class ChapterEditorPage(QWidget):
         root.addLayout(ai_status)
 
         self.list.currentRowChanged.connect(self.load_selected)
+        self.title.textChanged.connect(self._update_current_chapter_list_label)
         self.title.textChanged.connect(self._schedule_autosave)
         self.text.textChanged.connect(self._schedule_autosave)
         self.refresh()
@@ -208,6 +209,19 @@ class ChapterEditorPage(QWidget):
                 self.text.clear()
         finally:
             self._loading_fields = False
+
+    def _update_current_chapter_list_label(self) -> None:
+        if self._loading_fields:
+            return
+        index = self.list.currentRow()
+        if not (0 <= index < len(self.editor.chapters)):
+            return
+        title = self.title.toPlainText().strip() or self.editor.chapters[index].title
+        assigned = len(getattr(self.editor.chapters[index], "dialogue_assignments", []))
+        suffix = f" · {assigned} assigned" if assigned else ""
+        item = self.list.item(index)
+        if item is not None:
+            item.setText(f"{self.editor.chapters[index].number}. {title}{suffix}")
 
     def _selection_sentence_span(self) -> tuple[int, int]:
         cursor = self.text.textCursor()
@@ -307,13 +321,17 @@ class ChapterEditorPage(QWidget):
             selections.append(selection)
 
             probe = self.text.textCursor()
-            probe.setPosition(start)
+            probe.setPosition(end)
             rect = self.text.cursorRect(probe)
+            badge_point = self.text.viewport().mapTo(
+                self.text,
+                rect.topRight(),
+            )
 
             display_name = speakers[0]
             if len(speakers) > 1:
                 display_name += f" +{len(speakers) - 1}"
-            badge = QLabel(display_name, self.text.viewport())
+            badge = QLabel(display_name, self.text)
             badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
             badge.setFixedWidth(72)
@@ -322,11 +340,16 @@ class ChapterEditorPage(QWidget):
             badge.setStyleSheet(
                 "QLabel {"
                 f"background:rgba({color.red()},{color.green()},{color.blue()},95);"
-                "color:#f6f7fb; border:1px solid rgba(255,255,255,0.16);"
-                "border-radius:8px; padding:0 4px; font-size:8pt; font-weight:600;"
+                "color:#f6f7fb; border:1px solid rgba(255,255,255,0.14);"
+                "border-radius:6px; padding:0 3px; font-size:7px; font-weight:500;"
                 "}"
             )
-            badge.move(4, max(2, rect.top() + 1))
+            x = min(
+                max(84, badge_point.x() - badge.width()),
+                max(84, self.text.width() - badge.width() - 4),
+            )
+            y = max(2, badge_point.y() - badge.height() - 1)
+            badge.move(x, y)
             badge.show()
             self._assignment_badges.append(badge)
         self.text.setExtraSelections(selections)
