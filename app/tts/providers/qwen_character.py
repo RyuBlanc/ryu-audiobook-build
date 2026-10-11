@@ -212,7 +212,7 @@ class QwenCharacterProvider(TTSProvider):
             + ("VoiceDesign preview" if self.qwen_mode == "design-preview" else "voice engine")
             + f" • {self.model_kind}"
         )
-        response = self._read_response(timeout=600.0)
+        response = self._read_response(timeout=900.0, heartbeat="Loading Qwen model / character identity")
         if response.get("ready"):
             self._status(
                 f"Qwen engine ready • {response.get('kind', self.model_kind)} • "
