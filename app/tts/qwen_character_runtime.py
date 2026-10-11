@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import urllib.request
+from functools import lru_cache
 
 from app.core.paths import models_root
 
@@ -325,7 +326,27 @@ def _runtime_version_is_current() -> bool:
 
 
 def runtime_ready() -> bool:
-    return _runtime_version_is_current()
+    """Cheap UI-safe readiness gate.
+
+    The previous implementation imported torch, torchaudio and qwen_tts in a
+    subprocess every time a voice-selection callback queried readiness. On
+    some Windows/GPU setups that import can take several seconds and makes
+    Qt report the application as not responding. This fast gate only checks
+    local marker/filesystem state. The worker process remains responsible for
+    real model/runtime initialization, and verify_runtime() remains the full
+    diagnostic used by repair/installation workflows.
+    """
+    try:
+        if not MARKER.is_file() or not VENV_PYTHON.is_file() or not worker_script().is_file():
+            return False
+        data = json.loads(MARKER.read_text(encoding="utf-8"))
+        return (
+            data.get("ready") is True
+            and data.get("bootstrap_version") == BOOTSTRAP_VERSION
+            and data.get("qwen_tts") == QWEN_TTS_VERSION
+        )
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False
 
 
 def runtime_python() -> Path:
@@ -341,8 +362,13 @@ def model_installed(kind: str) -> bool:
     return (root / "config.json").exists() and any(root.glob("*.safetensors"))
 
 
+@lru_cache(maxsize=1)
 def _detected_vram_gb() -> float:
-    """Return the largest NVIDIA VRAM size visible to this PC, or 0."""
+    """Return the largest NVIDIA VRAM size visible to this PC, or 0.
+
+    Detection is cached per application process; voice-picker callbacks must
+    not repeatedly wait for nvidia-smi to launch.
+    """
     try:
         result = subprocess.run(
             [
@@ -354,7 +380,7 @@ def _detected_vram_gb() -> float:
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=10,
+            timeout=2,
         )
         if result.returncode != 0:
             return 0.0
