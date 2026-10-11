@@ -192,8 +192,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("generate_voice_design", worker)
         self.assertIn("voice_anchors", worker)
         self.assertIn("--clone-kind", worker)
-        self.assertIn("recommended_chunk_chars = 1800", provider)
-        self.assertIn("recommended_chunk_sentences = 8", provider)
+        self.assertIn("recommended_chunk_chars = 2400", provider)
+        self.assertIn("recommended_chunk_sentences = 10", provider)
 
     def test_voice_profile_save_and_qwen_preview_controls_are_exposed(self):
         source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
@@ -267,13 +267,15 @@ class RegressionTests(unittest.TestCase):
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         runtime = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
-        self.assertIn("recommended_chunk_chars = 1800", provider)
-        self.assertIn("recommended_chunk_sentences = 8", provider)
+        self.assertIn("recommended_chunk_chars = 2400", provider)
+        self.assertIn("recommended_chunk_sentences = 10", provider)
         self.assertIn("best_long_form_clone_kind", provider)
         self.assertIn("base-0.6b", runtime)
         self.assertIn("Base 1.7B exceeded available GPU memory", worker)
         self.assertIn('"longform": self.qwen_mode != "design-preview"', provider)
-        self.assertIn('"max_new_tokens": 1536', worker)
+        self.assertIn('"max_new_tokens": 2048', worker)
+        self.assertIn("recommended_batch_size", provider)
+        self.assertIn('"texts":', provider)
 
     def test_qwen_voicedesign_preview_and_audiobook_share_stable_identity(self):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
@@ -326,6 +328,16 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("self.qwen_seed", source)
         self.assertIn("GENERATION_PIPELINE_VERSION", generator)
         self.assertIn("self.profiles[k].qwen_mode", cast)
+
+    def test_qwen_batch_generation_path_exists(self):
+        provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
+        worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
+        generator = Path("app/tts/generator.py").read_text(encoding="utf-8")
+        self.assertIn("def synthesize_batch", provider)
+        self.assertIn('batch_texts = request.get("texts")', worker)
+        self.assertIn("model.generate_voice_clone(", worker)
+        self.assertIn("synthesize_batch", generator)
+        self.assertIn("recommended_batch_size", generator)
 
     def test_qwen_failure_stops_cascading_chapter_errors(self):
         source = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
