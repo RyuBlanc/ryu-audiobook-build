@@ -115,6 +115,7 @@ def split_for_pacing(
     text: str,
     max_chars: int = 1400,
     max_sentences: int = 2,
+    split_on_expression_change: bool = False,
 ) -> list[str]:
     """Split narration while preserving headings, paragraph boundaries and dialogue turns."""
     text = str(text or "").strip()
@@ -203,6 +204,16 @@ def split_for_pacing(
         current = []
         current_chars = 0
 
+    expression_classifier = None
+    expression_reference_style = None
+    if split_on_expression_change:
+        # Import only for providers which need story-emotion segmentation.
+        # Comparing reference families keeps neutral/warm/concerned changes
+        # expressive without splitting every sentence into a separate request.
+        from app.tts.expression import classify_expression, reference_style
+        expression_classifier = classify_expression
+        expression_reference_style = reference_style
+
     for value, paragraph_id, ends_paragraph, heading, dialogue_line in tokens:
         # Keep a hesitation ending its own unit so the audio can carry the
         # pause before the continuation ("Instead of me... then?").
@@ -240,9 +251,16 @@ def split_for_pacing(
             if current and current[-1][1] != paragraph_id
             else " "
         )
+        expression_changed = False
+        if current and expression_classifier and expression_reference_style:
+            current_text = " ".join(item[0] for item in current)
+            current_family = expression_reference_style(expression_classifier(current_text))
+            next_family = expression_reference_style(expression_classifier(value))
+            expression_changed = current_family != next_family
         would_exceed = bool(current) and (
             current_chars + len(separator) + len(value) > max_chars
             or len(current) >= max_sentences
+            or expression_changed
         )
         if would_exceed:
             flush(mark_paragraph_end=bool(current[-1][2]))
