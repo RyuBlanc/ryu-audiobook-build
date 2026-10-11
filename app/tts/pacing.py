@@ -89,8 +89,16 @@ def split_for_pacing(
             current_chars = 0
 
         if len(sentence) <= max_chars:
+            if current and current[-1].rstrip().endswith("…"):
+                chunks.append(" ".join(current).strip())
+                current = []
+                current_chars = 0
             current.append(sentence)
             current_chars += len(sentence) + (1 if current_chars else 0)
+            if sentence.rstrip().endswith("…"):
+                chunks.append(" ".join(current).strip())
+                current = []
+                current_chars = 0
             continue
 
         remaining = sentence
