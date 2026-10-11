@@ -19,6 +19,7 @@ from ..qwen_character_runtime import (
     runtime_environment,
     runtime_python,
     runtime_ready,
+    verify_runtime,
     worker_script,
 )
 from ..expression import classify_expression
@@ -146,9 +147,13 @@ class QwenCharacterProvider(TTSProvider):
         if self._worker is not None and self._worker.poll() is None:
             return
         if not runtime_ready():
+            try:
+                verify_runtime()
+            except Exception as exc:
+                raise RuntimeError(f"Qwen3-TTS runtime is not healthy: {exc}") from exc
             raise RuntimeError(
                 "Offline Character Voices are not installed. Open Models and choose "
-                "Download Offline Character Voices first."
+                "Install / Repair Qwen Voice Studio first."
             )
         if not model_installed(self.model_kind):
             phase = {"design": "VoiceDesign", "design-preview": "VoiceDesign", "clone": "Voice Clone (Base)"}.get(
