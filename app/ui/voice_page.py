@@ -8,6 +8,7 @@ import webbrowser
 import secrets
 import wave
 import time
+import uuid
 
 from PySide6.QtCore import QUrl, QThread, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
@@ -1836,6 +1837,7 @@ class VoicePage(QWidget):
                 qwen_prompt=prompt,
                 qwen_seed=seed if seed > 0 else 3101,
                 qwen_anchor_text=self._qwen_preview_script(12),
+                qwen_profile_id=uuid.uuid4().hex,
             )
 
         if provider == "qwen-clone":
@@ -1857,6 +1859,7 @@ class VoicePage(QWidget):
                 authorized=True,
                 qwen_mode="clone",
                 reference_text=self.qwen_reference_text.text().strip(),
+                qwen_profile_id=uuid.uuid4().hex,
             )
 
         if provider == "offline-neural":
