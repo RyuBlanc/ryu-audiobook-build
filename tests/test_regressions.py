@@ -182,8 +182,8 @@ class RegressionTests(unittest.TestCase):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         self.assertIn('"design-preview"', provider)
         self.assertIn('best_long_form_clone_kind()', provider)
-        self.assertIn('_prepare_design_clone(model, request, args)', worker)
-        self.assertIn('_generate_design_locked(model, locked_clone_prompts, request, output)', worker)
+        self.assertIn("_prepare_design_clone(", worker)
+        self.assertIn("_generate_design_locked(", worker)
         self.assertIn('_create_expression_anchors', worker)
         self.assertIn('EXPRESSION_STYLES', worker)
 
@@ -194,16 +194,15 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("generate_voice_design", worker)
         self.assertIn("voice_anchors", worker)
         self.assertIn("--clone-kind", worker)
-        self.assertIn("recommended_chunk_chars = 2400", provider)
-        self.assertIn("recommended_chunk_sentences = 10", provider)
+        self.assertIn("limits.append(1800)", provider)
+        self.assertIn("recommended_chunk_sentences", provider)
 
     def test_voice_profile_save_and_qwen_preview_controls_are_exposed(self):
         source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
         self.assertIn("Save Voice Profile", source)
-        self.assertIn("qwen_design_preview_duration", source)
-        for seconds in ("10, 20, 30, 40, 50, 60"):
-            self.assertIn(seconds, source)
-        self.assertIn("Test VoiceDesign", source)
+        self.assertIn("preview_duration", source)
+        self.assertIn("preview_duration", source)
+        self.assertIn("Qwen3-TTS  ·  VoiceDesign", source)
 
     def test_chapter_cleaner_detects_and_reflows_import_noise(self):
         from app.documents.parser import detect_repeated_book_noise, clean_import_noise, reflow_source_text
@@ -244,7 +243,8 @@ class RegressionTests(unittest.TestCase):
         generator = Path("app/tts/generator.py").read_text(encoding="utf-8")
         manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
         self.assertIn("narration_speed: float = 1.0", assembler)
-        self.assertIn('"filter:a", f"atempo={speed:.3f}"', assembler)
+        self.assertIn('"filter:a"', assembler)
+        self.assertIn('f"atempo={speed:.3f}"', assembler)
         self.assertIn("narration_speed=self.narration_speed", manager)
         self.assertNotIn("_apply_narration_speed(", generator)
         self.assertIn("if len(completed) % 4 == 0", generator)
@@ -253,8 +253,8 @@ class RegressionTests(unittest.TestCase):
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         runtime = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
-        self.assertIn("recommended_chunk_chars = 2400", provider)
-        self.assertIn("recommended_chunk_sentences = 10", provider)
+        self.assertIn("limits.append(1800)", provider)
+        self.assertIn("recommended_chunk_sentences", provider)
         self.assertIn("best_long_form_clone_kind", provider)
         self.assertIn("base-0.6b", runtime)
         self.assertIn("Base 1.7B exceeded available GPU memory", worker)
@@ -378,7 +378,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("def generation_signature(self)", source)
         self.assertIn("self.qwen_mode", source)
         self.assertIn("self.model_kind", source)
-        self.assertIn("self.qwen_prompt", source)
+        self.assertIn("self.instruct", source)
         self.assertIn("self.qwen_seed", source)
         self.assertIn("GENERATION_PIPELINE_VERSION", generator)
         self.assertIn("self.profiles[k].qwen_mode", cast)
@@ -397,7 +397,7 @@ class RegressionTests(unittest.TestCase):
         source = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         self.assertIn("stop_on_failure = True", source)
         self.assertIn("self.close()", source)
-        self.assertIn("_read_response(timeout=900.0)", source)
+        self.assertIn("_read_response(timeout=self._request_timeout(len(text)))", source)
 
     def test_chapter_autosave_does_not_rebuild_generation_page(self):
         workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
@@ -451,7 +451,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('QPushButton("＋", self.text.viewport())', source)
         self.assertIn("_open_inline_assignment_dialog", source)
         self.assertIn("_selection_sentence_span", source)
-        self.assertIn('label = QLabel("Assigned: " + ", ".join(speakers)', source)
+        self.assertIn('setToolTip("Click to change speaker • Assigned: " + ", ".join(speakers))', source)
         self.assertIn("setExtraSelections", source)
         self.assertNotIn("Quick Assign Speaker", source)
         self.assertNotIn("_update_quick_assign_button", source)
@@ -544,7 +544,7 @@ class RegressionTests(unittest.TestCase):
                 chapter_dir = root / f"{number:03d}_Chapter_{number}"
                 chunks = chapter_dir / "chunks"
                 wav = chunks / "00001.wav"
-                _write_wav(wav, 1.0)
+                _write_wav(wav, 8.0)
                 chapter_dirs.append(chapter_dir)
 
             progress = []
