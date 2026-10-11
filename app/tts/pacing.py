@@ -16,7 +16,7 @@ _HEADING_PREFIX = re.compile(
     r"^(?:chapter|prologue|epilogue|interlude|afterword|foreword|part|volume|book)\b",
     re.IGNORECASE,
 )
-_DIALOGUE_START = ('"', "“", "「", "『", "—", "–", "-")
+_DIALOGUE_START = ('"', "'", "“", "‘", "「", "『", "—", "–", "-")
 _SPEAKER_LINE = re.compile(r"^[A-Z][\w .'-]{0,30}:\s+['“\"]")
 _ATTRIBUTION = re.compile(
     r"^(?:he|she|they|i|[A-Z][\w’'-]*(?:\s+[A-Z][\w’'-]*){0,2})"
