@@ -489,6 +489,22 @@ def repair_runtime(progress=None) -> str:
     return verify_runtime(progress)
 
 
+def reset_voice_cache(progress=None) -> int:
+    """Remove generated Qwen voice-reference caches while preserving models/runtime."""
+    anchors = RUNTIME_ROOT / "voice_anchors"
+    removed = 0
+    if anchors.exists():
+        for path in anchors.glob("qwen-design-*.wav"):
+            try:
+                path.unlink()
+                removed += 1
+            except OSError:
+                pass
+    if progress:
+        progress(f"Removed {removed} generated Qwen voice-reference cache file(s).")
+    return removed
+
+
 def install_model(kind: str, progress=None) -> Path:
     if kind not in MODEL_IDS:
         raise ValueError(f"Unknown Qwen model kind: {kind}")
