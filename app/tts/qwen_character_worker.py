@@ -486,7 +486,7 @@ def server(args) -> int:
             print(
                 json.dumps({
                     "progress": (
-                        "Loading cached expressive voice identity • "
+                        "Loading cached canonical character identity • "
                         "reusing neutral/thoughtful/warm/concerned references…"
                     )
                 }),
@@ -498,6 +498,7 @@ def server(args) -> int:
             except Exception as exc:
                 if _is_cuda_oom(exc) and args.backend != "cpu":
                     clone_kind = "base-0.6b"
+                    args.clone_kind = clone_kind
                     clone_model, clone_device = _load_model(clone_kind, args.backend, root)
                 else:
                     raise
@@ -542,6 +543,7 @@ def server(args) -> int:
         except Exception as exc:
             if _is_cuda_oom(exc) and args.backend != "cpu":
                 clone_kind = "base-0.6b"
+                args.clone_kind = clone_kind
                 model, device = _load_model(clone_kind, args.backend, root)
             else:
                 raise
