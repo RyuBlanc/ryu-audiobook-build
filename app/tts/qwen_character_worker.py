@@ -502,7 +502,7 @@ def server(args) -> int:
                         "device": device,
                         "kind": active_kind,
                         "task": active_task,
-                        "anchor": str(locked_anchors.get("neutral") if locked_anchors else None,
+                        "anchor": (str(locked_anchors.get("neutral")) if locked_anchors else None),
                         "voice_lock": bool(locked_clone_prompts is not None),
                     }
                 ),
