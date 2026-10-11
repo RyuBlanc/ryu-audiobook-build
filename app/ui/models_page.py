@@ -166,6 +166,15 @@ class QwenCharacterInstallWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class QwenCacheResetWorker(QThread):
+    finished_ok = Signal(int)
+    progress = Signal(str)
+
+    def run(self) -> None:
+        count = reset_qwen_voice_cache(self.progress.emit)
+        self.finished_ok.emit(count)
+
+
 class QwenRepairWorker(QThread):
     finished_ok = Signal(str)
     failed = Signal(str)
@@ -219,6 +228,7 @@ class ModelsPage(QWidget):
         self.chatterbox_worker: ChatterboxInstallWorker | None = None
         self.qwen_character_worker: QwenCharacterInstallWorker | None = None
         self.qwen_repair_worker: QwenRepairWorker | None = None
+        self.qwen_cache_worker: QwenCacheResetWorker | None = None
         self.audiobook_ai_worker: AudiobookAIInstallWorker | None = None
 
         layout = QVBoxLayout(self)
@@ -236,6 +246,7 @@ class ModelsPage(QWidget):
         self.install_chatterbox = QPushButton("Install / Repair Custom Voice Engine")
         self.install_qwen_character = QPushButton("Install / Repair Qwen Voice Studio")
         self.repair_qwen = QPushButton("Repair Qwen3-TTS Runtime")
+        self.reset_qwen_cache = QPushButton("Reset Qwen Voice Cache")
         self.install_audiobook_ai = QPushButton("Install Audiobook AI")
         self.refresh_button = QPushButton("Refresh")
         row.addWidget(self.install_kokoro)
@@ -243,6 +254,7 @@ class ModelsPage(QWidget):
         row.addWidget(self.install_chatterbox)
         row.addWidget(self.install_qwen_character)
         row.addWidget(self.repair_qwen)
+        row.addWidget(self.reset_qwen_cache)
         row.addWidget(self.install_audiobook_ai)
         row.addWidget(self.refresh_button)
         layout.addLayout(row)
@@ -255,6 +267,7 @@ class ModelsPage(QWidget):
         self.install_chatterbox.clicked.connect(self.install_chatterbox_runtime)
         self.install_qwen_character.clicked.connect(self.install_qwen_character_runtime)
         self.repair_qwen.clicked.connect(self.repair_qwen_runtime)
+        self.reset_qwen_cache.clicked.connect(self.reset_qwen_voice_cache)
         self.install_audiobook_ai.clicked.connect(self.install_audiobook_ai_runtime)
         self.refresh_button.clicked.connect(self.refresh)
         self.refresh()
@@ -403,6 +416,27 @@ class ModelsPage(QWidget):
         self.install_qwen_character.setEnabled(True)
         self.status.setText("Offline character voice installation failed.")
         QMessageBox.warning(self, "Offline Character Voice Installation Failed", message)
+
+    def reset_qwen_voice_cache(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            "Reset Qwen Voice Cache",
+            "This removes only generated Qwen VoiceDesign reference-cache audio. "
+            "Downloaded Qwen models and saved voice profiles are kept. Continue?",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.reset_qwen_cache.setEnabled(False)
+        self.status.setText("Resetting generated Qwen voice cache…")
+        self.qwen_cache_worker = QwenCacheResetWorker()
+        self.qwen_cache_worker.progress.connect(self.status.setText)
+        self.qwen_cache_worker.finished_ok.connect(self._qwen_cache_reset_ok)
+        self.qwen_cache_worker.start()
+
+    def _qwen_cache_reset_ok(self, count: int) -> None:
+        self.reset_qwen_cache.setEnabled(True)
+        self.status.setText(f"Qwen voice cache reset • removed {count} generated reference file(s).")
+        self.refresh()
 
     def repair_qwen_runtime(self) -> None:
         answer = QMessageBox.question(
