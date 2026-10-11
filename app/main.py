@@ -190,7 +190,7 @@ def main() -> int:
     window = ProjectWorkflow()
     window.setWindowTitle(f"{APP_NAME} • {full_version()}")
     window.setWindowIcon(app_icon)
-    window.show()
+    window.showMaximized()
     return app.exec()
 
 
