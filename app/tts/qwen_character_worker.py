@@ -24,6 +24,8 @@ from app.tts.expression import (
     reference_style,
 )
 
+EXPRESSION_BANK_VERSION = "v4"
+
 MODEL_IDS = {
     "custom-0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
     "custom-1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
@@ -166,6 +168,7 @@ def _anchor_path(root: Path, request: dict, style: str = "neutral") -> Path:
         return Path(explicit)
     identity = "|".join(
         [
+            EXPRESSION_BANK_VERSION,
             str(request.get("speaker") or request.get("voice_id") or "voice"),
             str(request.get("language") or "English"),
             str(request.get("instruct") or ""),
