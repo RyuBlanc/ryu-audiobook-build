@@ -125,6 +125,7 @@ class QwenCharacterProvider(TTSProvider):
                 str(self.qwen_seed),
                 str(self.qwen_anchor_path or ""),
                 self.qwen_anchor_text,
+                self.qwen_profile_id,
                 reference,
             ]
         )
