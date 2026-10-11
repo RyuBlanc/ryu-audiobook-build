@@ -30,8 +30,8 @@ class QwenCharacterProvider(TTSProvider):
     # Qwen can safely handle substantially larger sentence-aware units. The
     # previous 360-char/2-sentence setting created thousands of tiny generation
     # jobs on long novels and made GPU utilization/ETA unnecessarily poor.
-    recommended_chunk_chars = 1800
-    recommended_chunk_sentences = 8
+    recommended_chunk_chars = 2400
+    recommended_chunk_sentences = 10
     handles_narration_controls = False
     stop_on_failure = True
 
@@ -79,6 +79,21 @@ class QwenCharacterProvider(TTSProvider):
         if requested in {"custom-0.6b", "custom-1.7b"}:
             return requested
         return best_custom_kind()
+
+    @property
+    def recommended_batch_size(self) -> int:
+        """Use Qwen's supported batch inference to amortize model overhead.
+
+        Batch 2 is attempted on both Base sizes; the worker falls back to
+        single-request generation automatically if the GPU cannot hold it.
+        """
+        return 2
+
+    def _request_timeout(self, text_chars: int) -> float:
+        # One 2.4k-character Qwen chunk can legitimately take many minutes on
+        # laptop GPUs. Keep a generous watchdog so slow inference is not
+        # mistaken for a dead worker.
+        return max(1800.0, min(7200.0, 900.0 + float(text_chars) * 0.8))
 
     def voices(self) -> list[str]:
         return [self.voice_id]
@@ -264,7 +279,7 @@ class QwenCharacterProvider(TTSProvider):
         self._worker.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
         self._worker.stdin.flush()
         try:
-            response = self._read_response(timeout=900.0)
+            response = self._read_response(timeout=self._request_timeout(len(text)))
         except Exception:
             self.close()
             raise
@@ -283,6 +298,70 @@ class QwenCharacterProvider(TTSProvider):
         if not output_path.exists() or output_path.stat().st_size < 1024:
             raise RuntimeError("Qwen generated an invalid or empty audio file.")
         return output_path
+
+    def synthesize_batch(
+        self,
+        items: list[tuple[str, Path]],
+    ) -> list[Path]:
+        """Generate several same-voice chunks in one Qwen request.
+
+        The worker reuses the locked VoiceDesign/Base prompt for every item.
+        """
+        if not items:
+            return []
+        self._start_worker()
+        if not self._worker or not self._worker.stdin:
+            raise RuntimeError("Offline character worker is unavailable.")
+
+        texts = [str(text).strip() for text, _output in items]
+        outputs = [str(Path(output).resolve()) for _text, output in items]
+        if any(not text for text in texts):
+            raise ValueError("Qwen batch contains empty narration text.")
+
+        request = {
+            "texts": texts,
+            "outputs": outputs,
+            "speaker": self.voice_id,
+            "language": self.language,
+            "instruct": self.instruct,
+            "seed": self.qwen_seed,
+            "anchor_path": str(self.qwen_anchor_path.resolve()) if self.qwen_anchor_path else "",
+            "anchor_text": self.qwen_anchor_text,
+            "longform": True,
+        }
+        self._status(
+            f"Generating {len(items)} Qwen narration segments together…"
+        )
+        self._worker.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
+        self._worker.stdin.flush()
+        try:
+            response = self._read_response(
+                timeout=self._request_timeout(sum(len(text) for text in texts))
+            )
+        except Exception:
+            self.close()
+            raise
+
+        if not response.get("ok"):
+            # Batch memory pressure should not kill the whole audiobook. The
+            # caller can retry these same items one at a time.
+            if response.get("batch_oom"):
+                raise RuntimeError("Qwen batch exceeded available GPU memory.")
+            raise RuntimeError(
+                "Qwen3-TTS batch generation failed. "
+                + str(response.get("error") or "Unknown Qwen error.")
+            )
+
+        produced = response.get("outputs") or []
+        if len(produced) != len(outputs):
+            raise RuntimeError(
+                f"Qwen returned {len(produced)} audio files for {len(outputs)} requested segments."
+            )
+        for output in outputs:
+            path = Path(output)
+            if not path.exists() or path.stat().st_size < 1024:
+                raise RuntimeError(f"Qwen generated an invalid or empty audio file: {path.name}")
+        return [Path(output) for output in outputs]
 
     def close(self) -> None:
         worker = self._worker
