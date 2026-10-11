@@ -1074,6 +1074,33 @@ class GenerationPage(QWidget):
                 seen.add(folded)
         return result[:40]
 
+    def refresh_chapter_sources(self) -> None:
+        """Refresh chapter-dependent UI from the current ProjectWorkflow list."""
+        selected_number = self.preview_chapter.currentData() if hasattr(self, "preview_chapter") else None
+        self.preview_chapter.blockSignals(True)
+        self.preview_chapter.clear()
+        for chapter in self.chapters:
+            self.preview_chapter.addItem(
+                f"Chapter {chapter.number}: {chapter.title}",
+                chapter.number,
+            )
+        self.preview_chapter.blockSignals(False)
+        if self.chapters:
+            target_index = 0
+            if selected_number is not None:
+                for index, chapter in enumerate(self.chapters):
+                    if chapter.number == selected_number:
+                        target_index = index
+                        break
+            self.preview_chapter.setCurrentIndex(min(target_index, len(self.chapters) - 1))
+            self.preview_chapter.setEnabled(True)
+        else:
+            self.preview_chapter.setEnabled(False)
+        self._update_overview()
+        self._refresh_readiness()
+        self._refresh_resume_state()
+
+
     def _update_overview(self) -> None:
         words = sum(len(ch.text.split()) for ch in self.chapters)
         speed = float(self.narration_speed.currentData() or 0.90) if hasattr(self, "narration_speed") else 0.90
