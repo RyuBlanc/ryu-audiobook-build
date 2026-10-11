@@ -88,11 +88,9 @@ class QwenCharacterProvider(TTSProvider):
 
     @property
     def recommended_batch_size(self) -> int:
-        """Use small, safe Qwen batches without overloading 4 GB-class GPUs."""
-        # Base 0.6B is the compatibility path. Batch 2 gives useful throughput
-        # while keeping memory predictable on 4 GB-class GPUs. The worker can
-        # still fall back to single requests on a CUDA OOM.
-        return 2
+        """Generate one Qwen segment at a time for responsive checkpoints."""
+        return 1
+
 
     def _request_timeout(self, text_chars: int) -> float:
         # One 2.4k-character Qwen chunk can legitimately take many minutes on
