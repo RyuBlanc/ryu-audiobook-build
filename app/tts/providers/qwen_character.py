@@ -233,15 +233,24 @@ class QwenCharacterProvider(TTSProvider):
         finally:
             self._stdout_queue.put(None)
 
-    def _read_response(self, timeout: float) -> dict:
+    def _read_response(self, timeout: float, heartbeat: str = "") -> dict:
         q = self._stdout_queue
         if q is None:
             raise RuntimeError("Offline character worker output is unavailable.")
         deadline = time.monotonic() + timeout
+        started = time.monotonic()
+        last_heartbeat = started
         while time.monotonic() < deadline:
             try:
                 line = q.get(timeout=min(1.0, max(0.01, deadline - time.monotonic())))
             except queue.Empty:
+                now = time.monotonic()
+                if heartbeat and now - last_heartbeat >= 2.0:
+                    elapsed = int(now - started)
+                    self._status(
+                        f"{heartbeat} • elapsed {elapsed // 60}:{elapsed % 60:02d} • Qwen is still processing…"
+                    )
+                    last_heartbeat = now
                 continue
             if line is None:
                 exit_code = self._worker.poll() if self._worker is not None else None
@@ -308,7 +317,10 @@ class QwenCharacterProvider(TTSProvider):
         self._worker.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
         self._worker.stdin.flush()
         try:
-            response = self._read_response(timeout=self._request_timeout(len(text)))
+            response = self._read_response(
+            timeout=self._request_timeout(len(text)),
+            heartbeat="Generating preview…" if "preview" in self.qwen_mode else "Generating narration…",
+        )
         except Exception:
             self.close()
             raise
@@ -368,7 +380,8 @@ class QwenCharacterProvider(TTSProvider):
         self._worker.stdin.flush()
         try:
             response = self._read_response(
-                timeout=self._request_timeout(sum(len(text) for text in texts))
+                timeout=self._request_timeout(sum(len(text) for text in texts)),
+                heartbeat=f"Generating {len(items)} Qwen segments…",
             )
         except Exception:
             self.close()
