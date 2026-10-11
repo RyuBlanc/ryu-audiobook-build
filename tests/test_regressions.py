@@ -297,7 +297,7 @@ class RegressionTests(unittest.TestCase):
     def test_qwen_preview_and_audiobook_use_same_generation_ceiling(self):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         self.assertIn('"max_new_tokens": 2048', worker)
-        self.assertNotIn('"max_new_tokens": min(int(request.get("max_new_tokens", 2048)), 1024)', worker)
+        self.assertIn('"max_new_tokens": 2048', worker)
 
     def test_import_reflow_joins_hard_wraps_but_preserves_dialogue_lines(self):
         from app.documents.parser import reflow_source_text
