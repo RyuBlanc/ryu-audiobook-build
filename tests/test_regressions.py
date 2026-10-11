@@ -199,7 +199,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("generate_voice_design", worker)
         self.assertIn("voice_anchors", worker)
         self.assertIn("--clone-kind", worker)
-        self.assertIn("limits.append(1800)", provider)
+        self.assertIn("recommended_chunk_chars = 2400", provider)
         self.assertIn("recommended_chunk_sentences", provider)
 
     def test_voice_profile_save_and_qwen_preview_controls_are_exposed(self):
@@ -248,7 +248,7 @@ class RegressionTests(unittest.TestCase):
         generator = Path("app/tts/generator.py").read_text(encoding="utf-8")
         manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
         self.assertIn("narration_speed: float = 1.0", assembler)
-        self.assertIn('"filter:a"', assembler)
+        self.assertIn('"-filter:a"', assembler)
         self.assertIn('f"atempo={speed:.3f}"', assembler)
         self.assertIn("narration_speed=self.narration_speed", manager)
         self.assertNotIn("_apply_narration_speed(", generator)
@@ -258,7 +258,7 @@ class RegressionTests(unittest.TestCase):
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         runtime = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
-        self.assertIn("limits.append(1800)", provider)
+        self.assertIn("recommended_chunk_chars = 2400", provider)
         self.assertIn("recommended_chunk_sentences", provider)
         self.assertIn("best_long_form_clone_kind", provider)
         self.assertIn("base-0.6b", runtime)
