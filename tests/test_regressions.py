@@ -148,7 +148,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('badge.setToolTip("Click to change speaker • Assigned: " + ", ".join(speakers))', source)
         self.assertIn("soft.setAlpha(52)", source)
         self.assertIn("project_title: str | None = None", source)
-        self.assertIn("self.project_title = project_title or \"Untitled Book\"", source)
+        self.assertIn('self.project_title = str(project_title or "").strip()', source)
         self.assertNotIn('text=self.window().windowTitle()', source)
 
     def test_workflow_passes_real_project_title_to_chapter_editor(self):
