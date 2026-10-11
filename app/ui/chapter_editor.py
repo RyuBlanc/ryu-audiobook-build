@@ -80,6 +80,7 @@ class ChapterEditorPage(QWidget):
         self.on_rename_book = on_rename_book
         self.on_redetect = on_redetect
         self.project_folder = project_folder
+        self.project_title = str(project_title or "").strip()
         self.ai_worker: AudiobookAIWorker | None = None
         self.ai_started_at: float | None = None
         self.ai_last_fraction = 0.0
