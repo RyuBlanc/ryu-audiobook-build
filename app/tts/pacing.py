@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import wave
 
 
@@ -11,6 +12,42 @@ _PROFILE_EXTRA_PAUSE_MS = {
     "minimal": -70,
     "off": -999999,
 }
+_HEADING_PREFIX = re.compile(
+    r"^(?:chapter|prologue|epilogue|interlude|afterword|foreword|part|volume|book)\b",
+    re.IGNORECASE,
+)
+_DIALOGUE_START = ('"', "“", "「", "『", "—", "–", "-")
+_SPEAKER_LINE = re.compile(r"^[A-Z][\w .'-]{0,30}:\s+['“\"]")
+
+
+def is_heading_line(text: str) -> bool:
+    """Recognize clear standalone headings without treating ordinary prose as one."""
+    value = str(text or "").strip().strip("#").strip()
+    if not value or len(value.split()) > 16 or re.search(r"[.!?…]$", value):
+        return False
+    if _HEADING_PREFIX.match(value):
+        return True
+
+    letters = [char for char in value if char.isalpha()]
+    if letters and value == value.upper():
+        return True
+
+    # Title-case standalone chapter names such as "The Demon Lord Summit".
+    words = [word.strip("\"'“”‘’()[]{}:;,.!?—–-") for word in value.split()]
+    words = [word for word in words if word]
+    minor = {"a", "an", "and", "as", "at", "but", "by", "for", "in", "of", "on", "or", "the", "to", "with"}
+    alpha_words = [word for word in words if any(char.isalpha() for char in word)]
+    return bool(
+        2 <= len(words) <= 10
+        and alpha_words
+        and all(word[0].isupper() or word.casefold() in minor for word in alpha_words)
+        and not value.endswith((":", ";", ",", "—", "–", "-"))
+    )
+
+
+def _starts_dialogue(text: str) -> bool:
+    value = str(text or "").lstrip()
+    return value.startswith(_DIALOGUE_START) or bool(_SPEAKER_LINE.match(value))
 
 
 def sentence_units(text: str) -> list[str]:
@@ -29,14 +66,11 @@ def sentence_units(text: str) -> list[str]:
         current.append(char)
 
         if char == "\n":
-            # A blank line marks a paragraph boundary. Keep the paragraph
-            # break out of the TTS unit so the pacing layer can add a longer
-            # breath between paragraphs.
-            if i + 1 < len(text) and text[i + 1] == "\n":
-                current.pop()
-                flush()
-                i += 1
-                continue
+            # The narration reflow step has already joined visual line wraps.
+            # Any remaining newline is intentional; keep its segment boundary.
+            flush()
+            i += 1
+            continue
 
         if char in ".!?…":
             j = i + 1
@@ -44,8 +78,7 @@ def sentence_units(text: str) -> list[str]:
                 current.append(text[j])
                 j += 1
             # Ellipsis is an intentional hesitation even when the next word
-            # is attached directly ("me…then?"). Keep it as its own TTS unit
-            # so the pacing layer can insert a real pause.
+            # is attached directly ("me…then?"). Keep it as its own unit.
             if char == "…" or j >= len(text) or text[j].isspace():
                 flush()
                 i = j - 1
@@ -61,96 +94,194 @@ def split_for_pacing(
     max_chars: int = 1400,
     max_sentences: int = 2,
 ) -> list[str]:
-    """Split narration into natural TTS units without changing text."""
-    text = text.strip()
+    """Split narration while preserving headings, paragraph boundaries and dialogue turns."""
+    text = str(text or "").strip()
     if not text:
         return []
 
-    sentences = sentence_units(text)
-    if not sentences:
-        return [text]
+    max_chars = max(80, int(max_chars))
+    max_sentences = max(1, int(max_sentences))
+    # First preserve true blank-line paragraph boundaries. The document
+    # reflow stage joins visual wraps before this point, so these boundaries
+    # represent source structure rather than arbitrary display wrapping.
+    paragraphs = [
+        part.strip()
+        for part in re.split(r"\n[ \t]*\n+", text)
+        if part.strip()
+    ]
+    if not paragraphs:
+        return []
+
+    # Each token carries its paragraph id plus whether it is the last sentence
+    # in that paragraph. This lets a flush preserve a longer paragraph breath.
+    tokens: list[tuple[str, int, bool, bool, bool]] = []
+    # (text, paragraph_id, is_paragraph_end, is_heading, is_dialogue_line)
+
+    for paragraph_id, paragraph in enumerate(paragraphs):
+        before = len(tokens)
+        lines = [line.strip() for line in paragraph.splitlines() if line.strip()]
+        ordinary: list[str] = []
+
+        def flush_ordinary() -> None:
+            if not ordinary:
+                return
+            merged = " ".join(ordinary).strip()
+            ordinary.clear()
+            if is_heading_line(merged):
+                tokens.append((merged, paragraph_id, False, True, False))
+                return
+            pieces = sentence_units(merged)
+            for piece in pieces:
+                tokens.append((piece, paragraph_id, False, False, False))
+
+        for line in lines or [paragraph]:
+            if is_heading_line(line):
+                flush_ordinary()
+                tokens.append((line, paragraph_id, False, True, False))
+            elif _starts_dialogue(line):
+                flush_ordinary()
+                line_pieces = sentence_units(line)
+                # A quoted line remains separate from adjacent narration and
+                # from another explicitly quoted speaker line. Sentences
+                # within the same line may stay together as one turn.
+                if line_pieces:
+                    tokens.append((" ".join(line_pieces), paragraph_id, False, False, True))
+            else:
+                ordinary.append(line)
+        flush_ordinary()
+
+        if len(tokens) > before:
+            # Mark the final unit of this paragraph unless the paragraph ends
+            # in a standalone heading. A following paragraph can still merge
+            # into a chunk, in which case the blank-line separator is retained.
+            last_text, last_pid, _end, last_heading, last_dialogue = tokens[-1]
+            if not last_heading:
+                tokens[-1] = (last_text, last_pid, True, last_heading, last_dialogue)
 
     chunks: list[str] = []
-    current: list[str] = []
+    current: list[tuple[str, int, bool]] = []
     current_chars = 0
 
-    for sentence in sentences:
-        sentence = sentence.strip()
-        if not sentence:
+    def joined(items: list[tuple[str, int, bool]], mark_paragraph_end: bool = False) -> str:
+        result = ""
+        previous_paragraph = None
+        for value, paragraph_id, _ends_paragraph in items:
+            if result:
+                result += "\n\n" if paragraph_id != previous_paragraph else " "
+            result += value
+            previous_paragraph = paragraph_id
+        if mark_paragraph_end:
+            result += "\n\n"
+        return result
+
+    def flush(mark_paragraph_end: bool = False) -> None:
+        nonlocal current, current_chars
+        if current:
+            chunks.append(joined(current, mark_paragraph_end))
+        current = []
+        current_chars = 0
+
+    for value, paragraph_id, ends_paragraph, heading, dialogue_line in tokens:
+        if heading:
+            # Headings get their own narration unit so they can receive a clear
+            # pause both before and after the title.
+            flush(mark_paragraph_end=bool(current and current[-1][2]))
+            chunks.append(value)
             continue
 
+        if dialogue_line:
+            flush(mark_paragraph_end=bool(current and current[-1][2]))
+            # Very long dialogue lines are still divided safely at sentence
+            # boundaries/character limits, but regular turns remain intact.
+            parts = sentence_units(value)
+            line_chunk: list[tuple[str, int, bool]] = []
+            line_chars = 0
+            for piece in parts or [value]:
+                if line_chunk and (
+                    line_chars + len(piece) + 1 > max_chars
+                    or len(line_chunk) >= max_sentences
+                ):
+                    chunks.append(joined(line_chunk))
+                    line_chunk, line_chars = [], 0
+                line_chunk.append((piece, paragraph_id, False))
+                line_chars += len(piece) + (1 if line_chars else 0)
+            if line_chunk:
+                chunks.append(joined(line_chunk))
+            continue
+
+        separator = (
+            "\n\n"
+            if current and current[-1][1] != paragraph_id
+            else " "
+        )
         would_exceed = bool(current) and (
-            current_chars + len(sentence) + 1 > max_chars
+            current_chars + len(separator) + len(value) > max_chars
             or len(current) >= max_sentences
         )
         if would_exceed:
-            chunks.append(" ".join(current).strip())
-            current = []
-            current_chars = 0
+            flush(mark_paragraph_end=bool(current[-1][2]))
+            separator = " "
+        current.append((value, paragraph_id, ends_paragraph))
+        current_chars += len(value) + (len(separator) if current_chars else 0)
 
-        if len(sentence) <= max_chars:
-            if current and current[-1].rstrip().endswith("…"):
-                chunks.append(" ".join(current).strip())
-                current = []
-                current_chars = 0
-            current.append(sentence)
-            current_chars += len(sentence) + (1 if current_chars else 0)
-            if sentence.rstrip().endswith("…"):
-                chunks.append(" ".join(current).strip())
-                current = []
-                current_chars = 0
-            continue
+        # A paragraph-ending unit is held briefly to see whether the next
+        # paragraph fits in this chunk. If it does not, flush() writes an
+        # invisible-to-speech blank-line marker consumed by pause_after_ms().
 
-        remaining = sentence
-        while len(remaining) > max_chars:
-            cut = remaining.rfind(" ", 0, max_chars + 1)
-            if cut < max_chars // 2:
-                cut = max_chars
-            chunks.append(remaining[:cut].strip())
-            remaining = remaining[cut:].strip()
-        if remaining:
-            current.append(remaining)
-            current_chars += len(remaining) + (1 if current_chars else 0)
-
-    if current:
-        chunks.append(" ".join(current).strip())
-
-    return [chunk for chunk in chunks if chunk]
+    flush(mark_paragraph_end=bool(current and current[-1][2]))
+    return [chunk for chunk in chunks if chunk.strip()]
 
 
-def pause_after_ms(text: str, profile: str = "natural") -> int:
-    """Return a small, deterministic audiobook pause for a TTS unit."""
+def pause_after_ms(
+    text: str,
+    profile: str = "natural",
+    next_text: str | None = None,
+) -> int:
+    """Return a deterministic, story-aware gap between narration units."""
     profile = (profile or "natural").lower()
     if profile == "off":
         return 0
 
-    stripped = text.strip()
+    paragraph_end = str(text or "").endswith("\n\n")
+    stripped = str(text or "").strip()
     if not stripped:
         return 0
 
-    end = stripped[-1]
-    if end in "!?…":
-        base = 360
-    elif end == ".":
-        base = 290
-    elif end in ";:":
-        base = 210
-    elif end == ",":
-        base = 110
-    elif end in "—–-":
-        base = 170
+    if is_heading_line(stripped):
+        base = 760
     else:
-        base = 90
-
-    if stripped.endswith(tuple(_CLOSERS)):
-        without_closer = stripped.rstrip(_CLOSERS).rstrip()
-        if without_closer.endswith(("?", "!", "…")):
+        end = stripped[-1]
+        if end in "!?…":
             base = 360
-        elif without_closer.endswith("."):
+        elif end == ".":
             base = 290
+        elif end in ";:":
+            base = 210
+        elif end == ",":
+            base = 110
+        elif end in "—–-":
+            base = 170
+        else:
+            base = 90
 
-    if "\n\n" in stripped:
-        base += 140
+        if stripped.endswith(tuple(_CLOSERS)):
+            without_closer = stripped.rstrip(_CLOSERS).rstrip()
+            if without_closer.endswith(("?", "!", "…")):
+                base = 360
+            elif without_closer.endswith("."):
+                base = 290
+
+    if paragraph_end:
+        base = max(base, 520)
+    if "\n\n" in str(text or "").rstrip("\n"):
+        base = max(base, 460)
+
+    if next_text and is_heading_line(next_text):
+        base = max(base, 650)
+    elif next_text and _starts_dialogue(next_text):
+        # A new spoken turn deserves a little breathing room, but not a
+        # theatrical pause between quick exchanges.
+        base = max(base, 310)
 
     base += _PROFILE_EXTRA_PAUSE_MS.get(profile, 0)
     return max(50, base)
