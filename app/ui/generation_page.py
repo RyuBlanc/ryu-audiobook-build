@@ -1631,7 +1631,15 @@ class GenerationPage(QWidget):
             self.progress.setValue(completed_work)
             self.last_progress_value = completed_work
             self.initial_progress_value = completed_work
-            self._eta_ema_sec_per_unit = None
+            baseline_rate = None
+            try:
+                provider = self.manager.provider if self.manager else None
+                estimated_cpm = float(getattr(provider, "estimated_chars_per_minute", 0) or 0)
+                if estimated_cpm > 0:
+                    baseline_rate = estimated_cpm / 60.0
+            except Exception:
+                baseline_rate = None
+            self._eta_ema_sec_per_unit = (1.0 / baseline_rate) if baseline_rate else None
             self._eta_warmup_samples = 0
             self._eta_rates = []
             self._eta_last_work = completed_work
@@ -1645,7 +1653,7 @@ class GenerationPage(QWidget):
             else:
                 self.stage.setText(
                     f"Preparing {chunk_total:,} audio segments… "
-                    f"ETA will calibrate after the first few segments"
+                    f"ETA is an initial estimate and will refine after the first segments"
                 )
             return
 
