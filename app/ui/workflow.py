@@ -171,7 +171,6 @@ class ProjectWorkflow(QMainWindow):
                     self.generation.chapters = self.project.chapters
                     self.generation._refresh_voice_profiles()
                     self.generation._load_voice_cast_summary()
-                    self.generation._update_overview()
                     self.generation.refresh_chapter_sources()
                 else:
                     self.ensure_generation_page()
