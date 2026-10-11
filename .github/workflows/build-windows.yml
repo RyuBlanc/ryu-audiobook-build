@@ -50,6 +50,7 @@ jobs:
             throw "CI Python executable does not exist: $pythonExe"
           }
           Write-Host "Using CI Python executable: $pythonExe"
+          $env:RYU_CI_PYTHON_EXE = $pythonExe
           "RYU_CI_PYTHON_EXE=$pythonExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           & $pythonExe -c "import sys; print(sys.executable); print(sys.version)"
 
