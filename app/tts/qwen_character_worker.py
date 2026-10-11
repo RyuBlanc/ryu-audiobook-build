@@ -8,6 +8,14 @@ import hashlib
 import json
 import sys
 
+# This worker is launched as a standalone Python script by the packaged
+# Windows application. In that mode Python starts with app/tts on sys.path,
+# not the PyInstaller _internal root, so explicitly add the application root
+# before importing sibling application modules.
+_APPLICATION_ROOT = Path(__file__).resolve().parents[2]
+if str(_APPLICATION_ROOT) not in sys.path:
+    sys.path.insert(0, str(_APPLICATION_ROOT))
+
 from app.tts.expression import (
     EXPRESSION_STYLES,
     classify_expression,
