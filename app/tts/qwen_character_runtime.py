@@ -532,6 +532,17 @@ def install_model(kind: str, progress=None) -> Path:
 
 def runtime_environment() -> dict[str, str]:
     env = os.environ.copy()
+    # The Qwen worker is launched as a standalone Python script from the
+    # frozen _internal/app/tts directory. Explicitly expose the frozen app
+    # root so "from app.tts..." imports work regardless of the process cwd
+    # or the Python script-path rules on Windows.
+    app_root = Path(__file__).resolve().parents[2]
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        str(app_root)
+        if not existing_pythonpath
+        else str(app_root) + os.pathsep + existing_pythonpath
+    )
     env["HF_HOME"] = str(RUNTIME_ROOT / "huggingface")
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
