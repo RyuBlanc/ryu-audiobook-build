@@ -436,14 +436,14 @@ class RegressionTests(unittest.TestCase):
     def test_generation_cancel_closes_active_provider(self):
         manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
         self.assertIn("self.cancel_event.set()", manager)
-        self.assertIn("close = getattr(provider, "close", None)", manager)
+        self.assertIn('close = getattr(provider, "close", None)', manager)
         self.assertIn("if self.cancel_event.is_set():", manager)
 
     def test_project_title_is_propagated_to_generation_and_editor(self):
         workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
         generation = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
         self.assertIn("self.project.title,", workflow)
-        self.assertIn("self.project_title = str(project_title or "").strip()", generation)
+        self.assertIn('self.project_title = str(project_title or "").strip()', generation)
         self.assertIn("book_name = self.project_title", generation)
 
     def test_chapter_editor_uses_inline_sentence_assignment_ui(self):
