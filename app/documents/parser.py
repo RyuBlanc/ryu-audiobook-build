@@ -88,10 +88,15 @@ def reflow_source_text(text: str) -> str:
                     ("“", "‘", '"', "'", "—", "–", "-", "•", "*")
                 )
                 structural = starts_structural or _is_chapter_heading_like(line)
+                previous_is_heading = _is_chapter_heading_like(previous)
+
+                # A chapter heading is always a hard source boundary. Never
+                # merge its body line into the heading even when the heading
+                # itself does not end with terminal punctuation.
 
                 # Clear PDF-style hard wrap: previous line does not end a
                 # sentence, so it is still part of the same sentence.
-                if not structural and not re.search(r"[.!?…:;][\"'”’»)]*$", previous):
+                if not structural and not previous_is_heading and not re.search(r"[.!?…:;][\"'”’»)]*$", previous):
                     if previous.endswith("-") and line and line[0].islower():
                         rebuilt[-1] = previous[:-1] + line
                     else:
@@ -137,6 +142,8 @@ def clean_import_noise(text: str, repeated_noise: set[str] | None = None) -> tup
         re.compile(r"^https?://", re.I),
         re.compile(r"^(?:www\.)?[^\s]+\.(?:com|net|org|cc|me)(?:/.*)?$", re.I),
         re.compile(r"^.*(?:asianovel\.com|mp4directs\.com).*$", re.I),
+        re.compile(r"^\d{1,5}\s+report$", re.I),
+        re.compile(r"^report$", re.I),
     )
     for raw_line in text.splitlines():
         line = raw_line.strip()
