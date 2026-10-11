@@ -287,11 +287,18 @@ class QwenCharacterProvider(TTSProvider):
         self._start_worker()
         if not self._worker or not self._worker.stdin:
             raise RuntimeError("Offline character worker is unavailable.")
+        request_language = self.language
+        # Qwen supports automatic language selection. Use it when an English
+        # narration chunk visibly contains Japanese/Chinese/Korean text so
+        # names and short foreign-language phrases are not forced through the
+        # English phoneme path.
+        if any("\u3040" <= ch <= "\u30ff" or "\u4e00" <= ch <= "\u9fff" or "\uac00" <= ch <= "\ud7af" for ch in text):
+            request_language = "Auto"
         request = {
             "text": text,
             "output": str(output_path.resolve()),
             "speaker": self.voice_id,
-            "language": self.language,
+            "language": request_language,
             "instruct": self.instruct,
             "seed": self.qwen_seed,
             "allow_instruct": self.model_kind == "custom-1.7b",
