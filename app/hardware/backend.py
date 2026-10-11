@@ -23,6 +23,22 @@ class HardwareProfile:
     backends: tuple[BackendInfo, ...]
     recommended: str
 
+    @property
+    def provider_recommendations(self) -> dict[str, str]:
+        nvidia = next((b for b in self.backends if b.name == "NVIDIA CUDA" and b.available), None)
+        vram = int(nvidia.memory_mb or 0) if nvidia else 0
+        cuda = nvidia is not None
+        return {
+            "Windows / SAPI": "CPU",
+            "Piper": "CPU",
+            "Kokoro": "CPU",
+            "Qwen3-TTS 0.6B": "CUDA GPU" if cuda and vram >= 3500 else "CPU compatibility",
+            "Qwen3-TTS 1.7B": "CUDA GPU (8 GB+ recommended)" if cuda and vram >= 7500 else "Not recommended",
+            "Chatterbox": "CUDA GPU" if cuda and vram >= 7500 else "CPU (slow)",
+            "Edge TTS": "Network",
+            "ElevenLabs": "Network",
+        }
+
 
 def _nvidia() -> BackendInfo:
     smi = shutil.which("nvidia-smi")
