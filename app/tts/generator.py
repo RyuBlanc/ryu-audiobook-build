@@ -134,6 +134,7 @@ def prepare_chapter_plan(
             chunk_text,
             max_chars=int(getattr(provider, "recommended_chunk_chars", 1400)),
             max_sentences=int(getattr(provider, "recommended_chunk_sentences", 2)),
+            split_on_expression_change=bool(getattr(provider, "split_on_expression_change", False)),
         )
         if not paced_chunks:
             continue
