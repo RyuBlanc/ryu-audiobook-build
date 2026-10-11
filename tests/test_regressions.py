@@ -200,7 +200,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("generate_voice_design", worker)
         self.assertIn("voice_anchors", worker)
         self.assertIn("--clone-kind", worker)
-        self.assertIn("recommended_chunk_chars = 2400", provider)
+        self.assertIn("recommended_chunk_chars = 1200", provider)
         self.assertIn("recommended_chunk_sentences", provider)
 
     def test_voice_profile_save_and_qwen_preview_controls_are_exposed(self):
@@ -269,7 +269,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("base-0.6b", runtime)
         self.assertIn("Base 1.7B exceeded available GPU memory", worker)
         self.assertIn('"longform": self.qwen_mode != "design-preview"', provider)
-        self.assertIn('"max_new_tokens": 2048', worker)
+        self.assertIn("def _recommended_max_new_tokens", worker)
         self.assertIn("recommended_batch_size", provider)
         self.assertIn('"texts":', provider)
 
@@ -301,8 +301,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_qwen_preview_and_audiobook_use_same_generation_ceiling(self):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
-        self.assertIn('"max_new_tokens": 2048', worker)
-        self.assertIn('"max_new_tokens": 2048', worker)
+        self.assertIn("def _recommended_max_new_tokens", worker)
 
     def test_import_reflow_joins_hard_wraps_but_preserves_dialogue_lines(self):
         from app.documents.parser import reflow_source_text
@@ -393,6 +392,14 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("GENERATION_PIPELINE_VERSION", generator)
         self.assertIn("self.profiles[k].qwen_mode", cast)
 
+    def test_qwen_generation_uses_text_sized_token_ceiling_and_heartbeat(self):
+        worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
+        provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
+        self.assertIn("def _recommended_max_new_tokens", worker)
+        self.assertIn("chars * 1.15", worker)
+        self.assertIn("max_new_tokens", worker)
+        self.assertIn("heartbeat=", provider)
+
     def test_qwen_batch_generation_path_exists(self):
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
@@ -407,7 +414,7 @@ class RegressionTests(unittest.TestCase):
         source = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         self.assertIn("stop_on_failure = True", source)
         self.assertIn("self.close()", source)
-        self.assertIn("_read_response(timeout=self._request_timeout(len(text)))", source)
+        self.assertIn("heartbeat=", source)
 
     def test_chapter_autosave_does_not_rebuild_generation_page(self):
         workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
