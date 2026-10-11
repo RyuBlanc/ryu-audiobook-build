@@ -47,48 +47,70 @@ def _is_chapter_heading_like(line: str) -> bool:
     return any(pattern.fullmatch(candidate) for pattern in CHAPTER_HEADING_PATTERNS)
 
 
+def _split_adjacent_dialogue(line: str) -> str:
+    # Separate back-to-back quoted utterances such as:
+    # “...?” “...”
+    # "..." "..."
+    # This is intentionally conservative; ordinary quoted words inside prose remain intact.
+    pattern = re.compile(
+        r'([”’"])(\\s+)(?=[“‘"])'
+    )
+    return pattern.sub(lambda match: match.group(1) + "\\n", line)
+
+
 def reflow_source_text(text: str) -> str:
-    """Rejoin obvious PDF line wraps while preserving real paragraph/dialogue breaks."""
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    paragraphs = re.split(r"\n\s*\n", text)
+    """Normalize imported line wrapping without destroying paragraph/dialogue structure."""
+    text = text.replace("\\r\\n", "\\n").replace("\\r", "\\n")
+    paragraphs = re.split(r"\\n\\s*\\n", text)
     output = []
 
     for paragraph in paragraphs:
-        lines = [re.sub(r"[ \t]+", " ", line).strip() for line in paragraph.split("\n")]
+        lines = [re.sub(r"[ \\t]+", " ", line).strip() for line in paragraph.split("\\n")]
         lines = [line for line in lines if line]
         if not lines:
             continue
 
-        rebuilt: list[str] = [lines[0]]
-        for line in lines[1:]:
-            previous = rebuilt[-1]
-            intentional_break = (
-                previous.endswith((".", "!", "?", "…", ":", ";"))
-                and (
-                    line.startswith(("“", '"', "‘", "'", "—", "–", "-", "•", "*"))
-                    or _is_chapter_heading_like(line)
+        rebuilt: list[str] = []
+        for raw_line in lines:
+            parts = _split_adjacent_dialogue(raw_line).split("\\n")
+            for part in parts:
+                line = part.strip()
+                if not line:
+                    continue
+                if not rebuilt:
+                    rebuilt.append(line)
+                    continue
+
+                previous = rebuilt[-1]
+
+                # Never join a new dialogue line, heading, list item, or bullet.
+                starts_structural = line.startswith(
+                    ("“", "‘", '"', "'", "—", "–", "-", "•", "*")
                 )
-            )
-            if _is_chapter_heading_like(previous) or _is_chapter_heading_like(line):
-                intentional_break = True
-            if intentional_break:
+                structural = starts_structural or _is_chapter_heading_like(line)
+
+                # Clear PDF-style hard wrap: previous line does not end a
+                # sentence, so it is still part of the same sentence.
+                if not structural and not re.search(r"[.!?…:;][\"'”’»)]*$", previous):
+                    if previous.endswith("-") and line and line[0].islower():
+                        rebuilt[-1] = previous[:-1] + line
+                    else:
+                        rebuilt[-1] = f"{previous} {line}".strip()
+                    continue
+
+                # If a new line starts with a quote/dash after a complete
+                # thought, keep the dialogue boundary.
+                if structural:
+                    rebuilt.append(line)
+                    continue
+
+                # Two complete prose sentences can remain separate visual
+                # lines. This makes speaker assignment and review easier.
                 rebuilt.append(line)
-                continue
 
-            if previous.endswith("-") and line and line[0].islower():
-                rebuilt[-1] = previous[:-1] + line
-                continue
+        output.append("\\n".join(rebuilt).strip())
 
-            previous_terminal = bool(re.search(r"[.!?…][\"'”’»)]*$", previous))
-            next_starts_sentence = bool(re.match(r"^[A-ZÀ-ÖØ-Þ0-9]", line))
-            if not previous_terminal or not next_starts_sentence:
-                rebuilt[-1] = f"{previous} {line}".strip()
-            else:
-                rebuilt.append(line)
-
-        output.append("\n".join(rebuilt).strip())
-
-    return re.sub(r"\n{3,}", "\n\n", "\n\n".join(output)).strip()
+    return re.sub(r"\\n{3,}", "\\n\\n", "\\n\\n".join(output)).strip()
 
 
 def detect_repeated_book_noise(chapter_texts: list[str]) -> dict[str, int]:
