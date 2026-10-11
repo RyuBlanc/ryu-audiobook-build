@@ -35,7 +35,7 @@ BOOK_NOISE_PATTERNS = (
 CHAPTER_HEADING_PATTERNS = (
     re.compile(r"^\s*(?:chapter|chap\.)\s+[0-9IVXLCDM]+(?:\s*[-:–—.]\s*)?.*$", re.I),
     re.compile(r"^\s*(?:prologue|epilogue|foreword|preface|introduction|afterword|interlude|side\s+story|extra|bonus)\b.*$", re.I),
-    re.compile(r"^\s*[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ _'’&/-]{0,35}\.\d{1,4}\s+.*$", re.I),
+    re.compile(r"^\s*[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ _'’&/-]{0,35}\.\d{1,4}(?:\s+.*)?$", re.I),
     re.compile(r"^\s*Life\s*[0-9IVXLCDM]+(?:\s+.*)?$", re.I),
     re.compile(r"^\s*New\s+Life(?:\s*[:–—-].*)?$", re.I),
 )
@@ -138,6 +138,23 @@ def clean_import_noise(text: str, repeated_noise: set[str] | None = None) -> tup
     repeated_noise = {str(item).casefold() for item in (repeated_noise or set())}
     removed: list[str] = []
     kept: list[str] = []
+    page_noise_indices: set[int] = set()
+    for idx, raw in enumerate(lines):
+        value = raw.strip().casefold()
+        if re.fullmatch(r"\d{1,5}", value):
+            neighbors = []
+            if idx > 0:
+                neighbors.append(lines[idx - 1].strip().casefold())
+            if idx + 1 < len(lines):
+                neighbors.append(lines[idx + 1].strip().casefold())
+            if any(
+                neighbor == "report"
+                or "asianovel.com" in neighbor
+                or "mp4directs.com" in neighbor
+                for neighbor in neighbors
+            ):
+                page_noise_indices.add(idx)
+
     obvious_noise = (
         re.compile(r"^https?://", re.I),
         re.compile(r"^(?:www\.)?[^\s]+\.(?:com|net|org|cc|me)(?:/.*)?$", re.I),
