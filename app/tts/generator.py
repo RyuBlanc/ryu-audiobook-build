@@ -228,25 +228,11 @@ def generate_chapter(
     if progress and completed:
         progress(len(completed), len(chunks))
 
-    for index, chunk in enumerate(chunks):
-        filename = f"{index + 1:05d}.wav"
-        output = chunks_dir / filename
+    batch_provider = getattr(provider, "synthesize_batch", None)
+    batch_size = max(1, int(getattr(provider, "recommended_batch_size", 1)))
+    batch_disabled = False
 
-        # A completed chunk with a matching generation signature is already
-        # validated from the previous run. Reusing it should be effectively
-        # free on resume.
-        if index in completed and output.exists():
-            continue
-
-        chunk_voice = chunks_with_voices[index][1]
-        if isinstance(chunk_voice, list):
-            synthesize_voice_set(provider, chunk, chunk_voice, output)
-        else:
-            provider.synthesize(chunk, output, chunk_voice)
-
-        # Apply pacing at the WAV-chunk level only. Narration speed itself is
-        # applied once during chapter assembly so long books do not spawn an
-        # FFmpeg tempo process for every single TTS segment.
+    def validate_and_commit(index: int, output: Path, chunk: str) -> None:
         pause_ms = pause_after_ms(chunk, pacing_profile)
         if pause_ms:
             append_silence(output, pause_ms)
@@ -269,13 +255,76 @@ def generate_chapter(
 
         completed.add(index)
         state["completed"] = sorted(completed)
-        # Persist every few chunks instead of writing generation.json for
-        # every single segment. The completed set is still flushed whenever
-        # generation stops or the chapter finishes.
         if len(completed) % 4 == 0 or len(completed) == len(chunks):
             save_state(chapter_dir, state)
         if progress:
             progress(len(completed), len(chunks))
+
+    index = 0
+    while index < len(chunks):
+        if index in completed and (chunks_dir / f"{index + 1:05d}.wav").exists():
+            index += 1
+            continue
+
+        chunk_voice = chunks_with_voices[index][1]
+        can_batch = (
+            callable(batch_provider)
+            and not batch_disabled
+            and not isinstance(chunk_voice, list)
+            and chunk_voice == voice
+        )
+        if can_batch:
+            batch_indices = []
+            probe = index
+            while (
+                probe < len(chunks)
+                and len(batch_indices) < batch_size
+            ):
+                probe_voice = chunks_with_voices[probe][1]
+                probe_output = chunks_dir / f"{probe + 1:05d}.wav"
+                if probe in completed and probe_output.exists():
+                    break
+                if isinstance(probe_voice, list) or probe_voice != voice:
+                    break
+                batch_indices.append(probe)
+                probe += 1
+
+            if len(batch_indices) > 1:
+                items = [
+                    (
+                        chunks[i],
+                        chunks_dir / f"{i + 1:05d}.wav",
+                    )
+                    for i in batch_indices
+                ]
+                try:
+                    batch_provider(items)
+                except Exception as exc:
+                    if "batch exceeded available GPU memory" in str(exc).casefold():
+                        batch_disabled = True
+                    else:
+                        raise
+                    for i in batch_indices:
+                        output = chunks_dir / f"{i + 1:05d}.wav"
+                        provider.synthesize(chunks[i], output, chunks_with_voices[i][1])
+                for i in batch_indices:
+                    validate_and_commit(i, chunks_dir / f"{i + 1:05d}.wav", chunks[i])
+                index = batch_indices[-1] + 1
+                continue
+
+        filename = f"{index + 1:05d}.wav"
+        output = chunks_dir / filename
+        if index in completed and output.exists():
+            index += 1
+            continue
+
+        if isinstance(chunk_voice, list):
+            synthesize_voice_set(provider, chunks[index], chunk_voice, output)
+        else:
+            provider.synthesize(chunks[index], output, chunk_voice)
+
+        validate_and_commit(index, output, chunks[index])
+        index += 1
 
     state["completed"] = sorted(completed)
     save_state(chapter_dir, state)
