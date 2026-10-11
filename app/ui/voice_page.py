@@ -49,7 +49,7 @@ from app.tts.providers.elevenlabs import ElevenLabsProvider
 
 
 class VoicePreviewWorker(QThread):
-    finished_ok = Signal(str)
+    finished_ok = Signal(str, float)
     failed = Signal(str)
     cancelled = Signal()
     status = Signal(str)
@@ -69,6 +69,9 @@ class VoicePreviewWorker(QThread):
             self.status.emit(str(message))
 
     def run(self) -> None:
+        # Measure from worker entry so model startup and provider initialization
+        # are included in the final "time taken" displayed to the user.
+        preview_started = time.monotonic()
         try:
             self.progress.emit(5)
             self._status(
@@ -87,7 +90,6 @@ class VoicePreviewWorker(QThread):
             self.progress.emit(10)
             self._status("[10%] Voice engine ready • preparing preview segments…")
 
-            preview_started = time.monotonic()
             def fmt_seconds(value: float) -> str:
                 seconds = max(0, int(value))
                 return f"{seconds // 60}:{seconds % 60:02d}"
@@ -122,8 +124,10 @@ class VoicePreviewWorker(QThread):
                 self.provider,
                 voice,
                 self.output,
-                narration_speed=1.0,
-                pacing_profile="off",
+                # Preview should represent the default full-generation path,
+                # not the old unpaced flat read.
+                narration_speed=0.90,
+                pacing_profile="natural",
                 max_chars=max(1800, len(self.text) + 1),
                 progress_callback=preview_progress,
                 target_seconds=self.target_seconds,
@@ -134,8 +138,9 @@ class VoicePreviewWorker(QThread):
             if not self.output.exists() or self.output.stat().st_size < 1024:
                 raise RuntimeError("The voice engine did not produce valid audio.")
             self.progress.emit(100)
-            self._status("[100%] Preview ready.")
-            self.finished_ok.emit(str(self.output))
+            elapsed_seconds = max(0.0, time.monotonic() - preview_started)
+            self._status(f"[100%] Preview ready • generated in {fmt_seconds(elapsed_seconds)}")
+            self.finished_ok.emit(str(self.output), elapsed_seconds)
         except Exception as exc:
             self.failed.emit(str(exc))
         finally:
@@ -207,6 +212,7 @@ class VoicePage(QWidget):
         self.sapi = SystemSAPIProvider()
         self.sample_path: Path | None = None
         self.last_preview: Path | None = None
+        self.last_preview_elapsed_seconds: float | None = None
         self.preview_worker: VoicePreviewWorker | None = None
         self.character_worker: PremiumCharacterVoiceWorker | None = None
         self.character_previews: list[dict] = []
@@ -2135,8 +2141,9 @@ class VoicePage(QWidget):
         self.preview_engine_status.setText(message)
         self.status.setText(message)
 
-    def _preview_worker_ok(self, path: str) -> None:
+    def _preview_worker_ok(self, path: str, elapsed_seconds: float = 0.0) -> None:
         self.last_preview = Path(path)
+        self.last_preview_elapsed_seconds = max(0.0, float(elapsed_seconds))
         self.player.stop()
         self.player.setSource(QUrl.fromLocalFile(path))
         self.play_button.setEnabled(True)
@@ -2150,13 +2157,23 @@ class VoicePage(QWidget):
         except (OSError, wave.Error):
             pass
         target = getattr(self, "preview_target_seconds", None)
+        elapsed = self.last_preview_elapsed_seconds or 0.0
+        elapsed_label = f"generated in {int(elapsed) // 60}:{int(elapsed) % 60:02d}"
+        rtf_label = (
+            f" • RTF {elapsed / actual_seconds:.2f}"
+            if actual_seconds is not None and actual_seconds > 0 and elapsed > 0
+            else ""
+        )
         if actual_seconds is not None and target:
             qualifier = "target reached" if actual_seconds + 0.25 >= target else "shorter than target"
             self.preview_engine_status.setText(
-                f"100% • Preview ready • {actual_seconds:.1f}s / {int(target)}s • {qualifier} • press Play"
+                f"100% • Ready • {actual_seconds:.1f}s / {int(target)}s • {qualifier} "
+                f"• {elapsed_label}{rtf_label} • press Play"
             )
         else:
-            self.preview_engine_status.setText("100% • Preview ready • press Play to listen")
+            self.preview_engine_status.setText(
+                f"100% • Preview ready • {elapsed_label}{rtf_label} • press Play"
+            )
         self.status.setText(
             f"Preview ready • {self.preview_provider.text()} • {self.preview_voice.text()}"
         )
