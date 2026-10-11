@@ -459,7 +459,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_cast_provider_keeps_qwen_long_form_chunk_settings(self):
         source = Path("app/tts/cast_provider.py").read_text(encoding="utf-8")
-        self.assertIn("profile.provider == "qwen-character"", source)
+        self.assertIn('profile.provider == "qwen-character"', source)
         self.assertIn("limits.append(1200)", source)
         self.assertIn("return 5", source)
 
