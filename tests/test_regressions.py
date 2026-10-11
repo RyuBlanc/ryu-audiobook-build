@@ -310,6 +310,24 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('"max_new_tokens": 2048', worker)
         self.assertNotIn('"max_new_tokens": min(int(request.get("max_new_tokens", 2048)), 1024)', worker)
 
+    def test_import_reflow_joins_hard_wraps_but_preserves_dialogue_lines(self):
+        from app.documents.parser import reflow_source_text
+        text = (
+            "In terms of military assistance, it seemed\n"
+            "unlikely that we would suddenly be tapped for that.\n"
+            "“Our name…?” “I mean, yeah.”\n"
+            "The next paragraph starts here."
+        )
+        result = reflow_source_text(text)
+        self.assertIn("it seemed unlikely that we would suddenly", result)
+        self.assertIn("“Our name…?”\n“I mean, yeah.”", result)
+
+    def test_generate_refresh_method_exists_for_live_chapter_updates(self):
+        source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
+        self.assertIn("def refresh_chapter_sources", source)
+        self.assertIn("self.generation.refresh_chapter_sources()", workflow)
+
     def test_qwen_expression_styles_are_subtle_and_text_driven(self):
         expression = Path("app/tts/expression.py").read_text(encoding="utf-8")
         from app.tts.expression import classify_expression
