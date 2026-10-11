@@ -72,6 +72,14 @@ def sentence_units(text: str) -> list[str]:
             i += 1
             continue
 
+        if char == "." and text[i:i + 3] == "...":
+            # Treat ASCII ellipses as one hesitation marker, not three full
+            # stops. This prevents a meaningful pause from being lost.
+            current.extend(text[i + 1:i + 3])
+            flush()
+            i += 2
+            continue
+
         if char in ".!?…":
             j = i + 1
             while j < len(text) and text[j] in _CLOSERS:
@@ -182,6 +190,10 @@ def split_for_pacing(
         current_chars = 0
 
     for value, paragraph_id, ends_paragraph, heading, dialogue_line in tokens:
+        # Keep a hesitation ending its own unit so the audio can carry the
+        # pause before the continuation ("Instead of me... then?").
+        if current and current[-1][0].rstrip().endswith(("…", "...")):
+            flush(mark_paragraph_end=bool(current[-1][2]))
         if heading:
             # Headings get their own narration unit so they can receive a clear
             # pause both before and after the title.
@@ -223,6 +235,8 @@ def split_for_pacing(
             separator = " "
         current.append((value, paragraph_id, ends_paragraph))
         current_chars += len(value) + (len(separator) if current_chars else 0)
+        if value.rstrip().endswith(("…", "...")):
+            flush(mark_paragraph_end=ends_paragraph)
 
         # A paragraph-ending unit is held briefly to see whether the next
         # paragraph fits in this chunk. If it does not, flush() writes an
