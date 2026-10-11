@@ -337,7 +337,14 @@ def _generate_design_locked(model, prompts, request: dict, output: Path) -> None
     prompt = prompts.get("neutral")
     if prompt is None:
         raise RuntimeError("The canonical Qwen voice identity is not available.")
-    request = {**request, "temperature": 0.86, "subtalker_temperature": 0.86}
+    style = classify_expression(str(request.get("text") or ""))
+    temperature = expression_temperature(style)
+    request = {
+        **request,
+        "temperature": temperature,
+        "subtalker_temperature": temperature,
+        "expression_style": style,
+    }
     _set_seed(request.get("seed"))
     wavs, sr = model.generate_voice_clone(
         text=str(request.get("text") or ""),
