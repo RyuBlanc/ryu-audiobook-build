@@ -145,7 +145,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("self.text.setViewportMargins(82, 0, 0, 0)", source)
         self.assertIn('assignment_manager_button = QPushButton("Assignments")', source)
         self.assertIn("badge.setFixedSize(badge_width, 16)", source)
-        self.assertIn("badge.setToolTip("Click to change speaker • Assigned: " + ", ".join(speakers))", source)
+        self.assertIn('badge.setToolTip("Click to change speaker • Assigned: " + ", ".join(speakers))', source)
         self.assertIn("soft.setAlpha(52)", source)
         self.assertIn("self.project_title = str(project_title or \"\").strip()", source)
         self.assertNotIn('text=self.window().windowTitle()', source)
@@ -466,7 +466,7 @@ class RegressionTests(unittest.TestCase):
         source = Path("app/tts/cast_provider.py").read_text(encoding="utf-8")
         self.assertIn('profile.provider == "qwen-character"', source)
         self.assertIn("limits.append(1800)", source)
-        self.assertIn("return getattr(self.narrator_provider, "recommended_chunk_sentences", 2)", source)
+        self.assertIn('return getattr(self.narrator_provider, "recommended_chunk_sentences", 2)', source)
         self.assertIn("return 8", source)
 
     def test_qwen_three_phase_voice_studio_is_exposed(self):
