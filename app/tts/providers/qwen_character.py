@@ -365,12 +365,18 @@ class QwenCharacterProvider(TTSProvider):
         if any(not text for text in texts):
             raise ValueError("Qwen batch contains empty narration text.")
 
+        batch_language = self.language
+        if any(
+            any("\u3040" <= ch <= "\u30ff" or "\u4e00" <= ch <= "\u9fff" or "\uac00" <= ch <= "\ud7af" for ch in text)
+            for text in texts
+        ):
+            batch_language = "Auto"
         request = {
             "texts": texts,
             "outputs": outputs,
             "styles": [classify_expression(text) for text in texts],
             "speaker": self.voice_id,
-            "language": self.language,
+            "language": batch_language,
             "instruct": self.instruct,
             "seed": self.qwen_seed,
             "anchor_path": str(self.qwen_anchor_path.resolve()) if self.qwen_anchor_path else "",
