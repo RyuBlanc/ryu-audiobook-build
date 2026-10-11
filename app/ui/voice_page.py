@@ -673,6 +673,9 @@ class VoicePage(QWidget):
         pv.addWidget(target_box)
 
         self.preview_text = QTextEdit()
+        self._preview_text_is_auto = True
+        self._preview_source_text = ""
+        self.preview_text.textChanged.connect(lambda: setattr(self, "_preview_text_is_auto", False))
         self.preview_text.setPlainText("Welcome to Ryu's Audiobook. This is a short voice preview.")
         self.preview_text.setMinimumHeight(78)
         self.preview_text.setMaximumHeight(125)
@@ -1999,6 +2002,19 @@ class VoicePage(QWidget):
                 self.mode.setCurrentIndex(index)
         self.preview()
 
+    def set_preview_source(self, text: str, title: str = "") -> None:
+        """Load chapter text for duration-targeted voice previews."""
+        value = str(text or "").strip()
+        if not value:
+            return
+        self._preview_source_text = value
+        self._preview_source_title = title or ""
+        if getattr(self, "_preview_text_is_auto", True):
+            self.preview_text.blockSignals(True)
+            self.preview_text.setPlainText(value[:20000])
+            self.preview_text.blockSignals(False)
+            self._preview_text_is_auto = True
+
     def preview(self) -> None:
         profile = self._profile_from_ui()
         if not profile:
@@ -2006,6 +2022,8 @@ class VoicePage(QWidget):
 
         seconds = int(self.preview_duration.currentData() or 30)
         raw_text = self.preview_text.toPlainText().strip()
+        if getattr(self, "_preview_text_is_auto", False) and getattr(self, "_preview_source_text", ""):
+            raw_text = self._preview_source_text
         if not raw_text:
             raw_text = self._qwen_preview_script(seconds)
         text = self._preview_text_for_duration(raw_text, seconds)
