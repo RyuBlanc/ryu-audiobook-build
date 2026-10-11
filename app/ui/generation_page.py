@@ -1799,11 +1799,18 @@ class GenerationPage(QWidget):
             for number in summary.chapters_failed:
                 reason = (summary.failure_details or {}).get(number, "Unknown generation error")
                 details.append(f"Chapter {number}: {reason}")
+            elapsed = 0
+            if self.started_at is not None:
+                elapsed = max(0, int(time.monotonic() - self.started_at))
+            self.remaining.setText("Remaining: paused at checkpoint")
+            self.speed.setText("Speed: checkpoint saved")
+            self.elapsed.setText(f"Elapsed: {elapsed // 3600:02d}:{(elapsed // 60) % 60:02d}:{elapsed % 60:02d}")
             self.result_label.setText(
-                "Generation failed. Temporary files were kept so you can retry.\n\n"
+                "Generation failed. Your completed compatible chunks were kept so Resume / Retry "
+                "can continue from the checkpoint.\n\n"
                 + "\n".join(details)
             )
-            self.status.setText("The final M4B was not created. See the chapter-specific errors above.")
+            self.status.setText("Generation stopped safely. No completed compatible audio was discarded.")
         else:
             self.stage.setText("Generation cancelled")
             self.result_label.setText("Generation cancelled. Temporary files were kept for resume.")
