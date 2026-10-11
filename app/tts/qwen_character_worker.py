@@ -542,6 +542,20 @@ def server(args) -> int:
                         destination = Path(str(batch_outputs[index]))
                         destination.parent.mkdir(parents=True, exist_ok=True)
                         sf.write(str(destination), wav, sr)
+
+                print(
+                    json.dumps(
+                        {
+                            "ok": True,
+                            "outputs": [str(Path(str(path)).resolve()) for path in batch_outputs],
+                            "device": device,
+                            "kind": active_kind,
+                            "task": active_task,
+                            "voice_lock": bool(locked_clone_prompts is not None),
+                        }
+                    ),
+                    flush=True,
+                )
                 continue
 
             output = Path(request["output"])
