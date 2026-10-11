@@ -32,8 +32,8 @@ class QwenCharacterProvider(TTSProvider):
     # Qwen can safely handle substantially larger sentence-aware units. The
     # previous 360-char/2-sentence setting created thousands of tiny generation
     # jobs on long novels and made GPU utilization/ETA unnecessarily poor.
-    recommended_chunk_chars = 1200
-    recommended_chunk_sentences = 5
+    recommended_chunk_chars = 800
+    recommended_chunk_sentences = 4
     # Conservative startup estimate used only until real chunk timings are available.
     estimated_chars_per_minute = 180.0
     handles_narration_controls = False
@@ -88,11 +88,10 @@ class QwenCharacterProvider(TTSProvider):
 
     @property
     def recommended_batch_size(self) -> int:
-        """Use Qwen's supported batch inference to amortize model overhead.
-
-        Batch 2 is attempted on both Base sizes; the worker falls back to
-        single-request generation automatically if the GPU cannot hold it.
-        """
+        """Use small, safe Qwen batches without overloading 4 GB-class GPUs."""
+        # Base 0.6B is the compatibility path. Batch 2 gives useful throughput
+        # while keeping memory predictable on 4 GB-class GPUs. The worker can
+        # still fall back to single requests on a CUDA OOM.
         return 2
 
     def _request_timeout(self, text_chars: int) -> float:
