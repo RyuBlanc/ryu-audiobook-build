@@ -390,7 +390,9 @@ def best_clone_kind(vram_gb: float | None = None) -> str:
     # the higher-quality path for 8GB-class GPUs; 0.6B is the lighter option.
     if vram_gb is None:
         vram_gb = _detected_vram_gb()
-    if vram_gb >= 7.0 and model_installed("base-1.7b"):
+    # Keep the default long-form path compatible with 4 GB and 8 GB GPUs.
+    # The 1.7B Base remains selectable explicitly for high-memory systems.
+    if vram_gb >= 10.0 and model_installed("base-1.7b"):
         return "base-1.7b"
     if model_installed("base-0.6b"):
         return "base-0.6b"
