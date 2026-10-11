@@ -6,6 +6,7 @@ import json
 import shutil
 import subprocess
 import wave
+import uuid
 
 import imageio_ffmpeg
 
@@ -34,6 +35,10 @@ class VoiceProfile:
     reference_text: str = ""
     qwen_anchor_path: str | None = None
     qwen_anchor_text: str = ""
+    # Unique identity namespace for Qwen VoiceDesign/Clone profiles. Older
+    # profiles migrate automatically on load; this prevents stale generated
+    # reference audio from being reused by a newly saved voice.
+    qwen_profile_id: str = ""
 
 
 def profiles_file() -> Path:
@@ -173,6 +178,16 @@ def load_profiles() -> list[VoiceProfile]:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             saved = [VoiceProfile(**item) for item in data]
+            migrated = False
+            for profile in saved:
+                if profile.provider == "qwen-character" and not profile.qwen_profile_id:
+                    profile.qwen_profile_id = uuid.uuid4().hex
+                    migrated = True
+            if migrated:
+                try:
+                    save_profiles(saved)
+                except OSError:
+                    pass
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             saved = []
 
@@ -212,6 +227,9 @@ def load_profiles() -> list[VoiceProfile]:
 
 def save_profiles(profiles: list[VoiceProfile]) -> None:
     voices_root().mkdir(parents=True, exist_ok=True)
+    for profile in profiles:
+        if profile.provider == "qwen-character" and not profile.qwen_profile_id:
+            profile.qwen_profile_id = uuid.uuid4().hex
     builtins = {
         (p.provider, p.voice_id.casefold())
         for p in builtin_voice_profiles()
