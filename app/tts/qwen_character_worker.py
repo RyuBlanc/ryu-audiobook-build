@@ -13,6 +13,7 @@ from app.tts.expression import (
     classify_expression,
     expression_instruction,
     expression_temperature,
+    reference_style,
 )
 
 MODEL_IDS = {
@@ -234,32 +235,32 @@ def _create_expression_anchors(model, request: dict, root: Path) -> dict[str, Pa
 
     language = str(request.get("language") or "English")
     anchor_text = str(request.get("anchor_text") or "").strip() or _default_anchor_text(language)
-    styles = list(EXPRESSION_STYLES.keys())
+    styles = ["neutral", "thoughtful", "warm"]
     paths = {style: _anchor_path(root, request, style) for style in styles}
     missing = [style for style, path in paths.items() if not path.exists() or path.stat().st_size < 1024]
     if not missing:
         return paths
 
-    print(json.dumps({"progress": f"Building {len(missing)} subtle expression references…"}), flush=True)
-    texts = [anchor_text] * len(missing)
-    languages = [language] * len(missing)
-    instructs = [_voice_design_instruct(request, style) for style in missing]
-    anchor_request = {**request, "max_new_tokens": 768}
-    _set_seed(request.get("seed"))
-    wavs, sr = model.generate_voice_design(
-        text=texts,
-        language=languages,
-        instruct=instructs,
-        **_generation_kwargs(anchor_request),
+    print(
+        json.dumps(
+            {"progress": f"Building {len(missing)} subtle expression references • one at a time for GPU safety…"}
+        ),
+        flush=True,
     )
-    if len(wavs) != len(missing):
-        raise RuntimeError(
-            f"Qwen VoiceDesign returned {len(wavs)} expression anchors for {len(missing)} styles."
+    anchor_request = {**request, "max_new_tokens": 768}
+    for style in missing:
+        _set_seed(request.get("seed"))
+        wavs, sr = model.generate_voice_design(
+            text=anchor_text,
+            language=language,
+            instruct=_voice_design_instruct(request, style),
+            **_generation_kwargs(anchor_request),
         )
-    for style, wav in zip(missing, wavs):
+        if not wavs:
+            raise RuntimeError(f"Qwen VoiceDesign did not return a {style} expression reference.")
         path = paths[style]
         path.parent.mkdir(parents=True, exist_ok=True)
-        sf.write(str(path), wav, sr)
+        sf.write(str(path), wavs[0], sr)
     return paths
 
 
@@ -310,7 +311,8 @@ def _generate_design_locked(model, prompts, request: dict, output: Path) -> None
     import soundfile as sf
 
     style = str(request.get("expression_style") or classify_expression(str(request.get("text") or "")))
-    prompt = prompts.get(style) or prompts.get("neutral")
+    prompt_style = reference_style(style)
+    prompt = prompts.get(prompt_style) or prompts.get("neutral")
     if prompt is None:
         raise RuntimeError(f"No Qwen expression prompt is available for style '{style}'.")
     temperature = expression_temperature(style)
