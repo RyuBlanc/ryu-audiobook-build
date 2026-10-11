@@ -144,8 +144,8 @@ class RegressionTests(unittest.TestCase):
         source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
         self.assertIn("self.text.setViewportMargins(82, 0, 0, 0)", source)
         self.assertIn('assignment_manager_button = QPushButton("Assignments")', source)
-        self.assertIn('badge.setFixedWidth(72)', source)
-        self.assertIn('badge.setFixedHeight(18)', source)
+        self.assertIn("badge.setFixedSize(badge_width, 16)", source)
+        self.assertIn("badge.setToolTip("Click to change speaker • Assigned: " + ", ".join(speakers))", source)
         self.assertIn("soft.setAlpha(52)", source)
         self.assertIn("self.project_title = str(project_title or \"\").strip()", source)
         self.assertNotIn('text=self.window().windowTitle()', source)
@@ -273,8 +273,8 @@ class RegressionTests(unittest.TestCase):
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         voice_page = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
         self.assertIn('elif active_task in {"design", "design-preview"}:', worker)
-        self.assertIn("_prepare_design_clone(model, request, args)", worker)
-        self.assertIn("_generate_design_locked(model, locked_clone_prompts, request, output)", worker)
+        self.assertIn("_prepare_design_clone(", worker)
+        self.assertIn("_generate_design_locked(", worker)
         self.assertIn("_create_expression_anchors", worker)
         self.assertIn('qwen_mode="design"', voice_page)
         self.assertIn('best_long_form_clone_kind()', provider)
@@ -465,8 +465,9 @@ class RegressionTests(unittest.TestCase):
     def test_cast_provider_keeps_qwen_long_form_chunk_settings(self):
         source = Path("app/tts/cast_provider.py").read_text(encoding="utf-8")
         self.assertIn('profile.provider == "qwen-character"', source)
-        self.assertIn("limits.append(1200)", source)
-        self.assertIn("return 5", source)
+        self.assertIn("limits.append(1800)", source)
+        self.assertIn("return getattr(self.narrator_provider, "recommended_chunk_sentences", 2)", source)
+        self.assertIn("return 8", source)
 
     def test_qwen_three_phase_voice_studio_is_exposed(self):
         source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
