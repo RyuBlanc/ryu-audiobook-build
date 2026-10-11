@@ -18,6 +18,12 @@ _HEADING_PREFIX = re.compile(
 )
 _DIALOGUE_START = ('"', "“", "「", "『", "—", "–", "-")
 _SPEAKER_LINE = re.compile(r"^[A-Z][\w .'-]{0,30}:\s+['“\"]")
+_ATTRIBUTION = re.compile(
+    r"^(?:he|she|they|i|[A-Z][\w’'-]*(?:\s+[A-Z][\w’'-]*){0,2})"
+    r"\s+(?:said|asked|replied|answered|whispered|murmured|shouted|called|cried|"
+    r"continued|added|exclaimed|insisted|remarked|admitted|explained|began|finished)\b",
+    re.IGNORECASE,
+)
 
 
 def is_heading_line(text: str) -> bool:
@@ -87,7 +93,15 @@ def sentence_units(text: str) -> list[str]:
                 j += 1
             # Ellipsis is an intentional hesitation even when the next word
             # is attached directly ("me…then?"). Keep it as its own unit.
-            if char == "…" or j >= len(text) or text[j].isspace():
+            attribution_follows = (
+                j < len(text)
+                and text[j].isspace()
+                and bool(_ATTRIBUTION.match(text[j:].lstrip()))
+            )
+            if char == "…" or text[i:i + 3] == "..." or (
+                not attribution_follows
+                and (j >= len(text) or text[j].isspace())
+            ):
                 flush()
                 i = j - 1
 
