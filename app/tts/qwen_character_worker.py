@@ -83,11 +83,17 @@ def _voice_design_instruct(request: dict, style: str | None = None) -> str:
     base = str(request.get("instruct") or "").strip()
     selected = style or classify_expression(str(request.get("text") or ""))
     return expression_instruction(base, selected)
+def _recommended_max_new_tokens(text: str | None) -> int:
+    # Qwen3-TTS is a 12 Hz acoustic-token model. A fixed 2048-token ceiling
+    # is far too generous for a 10–30 second preview sentence and can produce
+    # long empty tails. Scale the ceiling from the actual text while leaving
+    # a small safety margin for natural pauses and expressive delivery.
+    chars = max(1, len(str(text or "")))
+    estimated = int(chars * 1.15)
+    return max(256, min(2304, estimated))
+
+
 def _generation_kwargs(request: dict) -> dict:
-    # Keep VoiceDesign preview and audiobook narration on the same sampling
-    # configuration so the preview is a trustworthy representation of the
-    # final character voice. Chunking/throughput is optimized outside the
-    # model sampling parameters.
     defaults = {
         "do_sample": True,
         "top_k": 50,
@@ -98,8 +104,11 @@ def _generation_kwargs(request: dict) -> dict:
         "subtalker_top_k": 50,
         "subtalker_top_p": 1.0,
         "subtalker_temperature": 0.9,
-        "max_new_tokens": 2048,
     }
+    text_value = request.get("text") or ""
+    max_new_tokens = request.get("max_new_tokens")
+    if max_new_tokens is None:
+        max_new_tokens = _recommended_max_new_tokens(str(text_value))
     return {
         "do_sample": bool(request.get("do_sample", defaults["do_sample"])),
         "top_k": int(request.get("top_k", defaults["top_k"])),
@@ -110,7 +119,7 @@ def _generation_kwargs(request: dict) -> dict:
         "subtalker_top_k": int(request.get("subtalker_top_k", defaults["subtalker_top_k"])),
         "subtalker_top_p": float(request.get("subtalker_top_p", defaults["subtalker_top_p"])),
         "subtalker_temperature": float(request.get("subtalker_temperature", defaults["subtalker_temperature"])),
-        "max_new_tokens": int(request.get("max_new_tokens", defaults["max_new_tokens"])),
+        "max_new_tokens": int(max_new_tokens),
     }
 
 
@@ -205,7 +214,10 @@ def _generate_design_preview(model, request: dict, output: Path) -> None:
         **_generation_kwargs(
             {
                 **request,
-                "max_new_tokens": min(int(request.get("max_new_tokens", 2048)), 1024),
+                "max_new_tokens": min(
+                    _recommended_max_new_tokens(str(request.get("text") or "")),
+                    1024,
+                ),
             }
         ),
     )
@@ -231,7 +243,7 @@ def _generate_design_anchor(model, request: dict, anchor: Path) -> str:
         **_generation_kwargs(
             {
                 **request,
-                "max_new_tokens": min(int(request.get("max_new_tokens", 1536)), 768),
+                "max_new_tokens": min(int(request.get("max_new_tokens", 768)), 768),
             }
         ),
     )
@@ -444,6 +456,7 @@ def server(args) -> int:
                         temperature = expression_temperature(style)
                         batch_request = {
                             **request,
+                            "text": max(selected_texts, key=len) if selected_texts else "",
                             "temperature": temperature,
                             "subtalker_temperature": temperature,
                         }
