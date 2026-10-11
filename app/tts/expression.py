@@ -97,4 +97,20 @@ def expression_instruction(base_voice_description: str, style: str) -> str:
 
 
 def expression_temperature(style: str) -> float:
-    return float(EXPRESSION_TEMPERATURES.get(style, EXPRESSION_TEMPERATURES["neutral"]))
+    mapped = reference_style(style)
+    return float(EXPRESSION_TEMPERATURES.get(mapped, EXPRESSION_TEMPERATURES["neutral"]))
+
+
+# Keep the reference bank small enough for 4-GB GPUs. These aliases still
+# provide distinct delivery direction without creating five separate speaker banks.
+STYLE_ALIASES = {
+    "neutral": "neutral",
+    "thoughtful": "thoughtful",
+    "warm": "warm",
+    "concerned": "thoughtful",
+    "excited": "warm",
+}
+
+
+def reference_style(style: str) -> str:
+    return STYLE_ALIASES.get(str(style or "neutral"), "neutral")
