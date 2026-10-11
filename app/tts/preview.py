@@ -149,9 +149,13 @@ def build_voice_preview(
         # discover that the result is 3–4 minutes long. Use a conservative
         # character budget, keep sentence boundaries intact, and stop as soon
         # as the requested duration is reached.
+        # The previous 12 chars/sec source budget caused a 30-second
+        # preview to contain only a few seconds of audio. Give the preview
+        # enough sentence-complete source text to reach the requested target.
+        target_chars = int(float(target_seconds) * 40.0)
         effective_max_chars = max(
-            180,
-            min(int(max_chars), int(float(target_seconds) * 12.0)),
+            360,
+            min(int(max_chars), max(target_chars, 360)),
         )
     else:
         effective_max_chars = int(max_chars)
