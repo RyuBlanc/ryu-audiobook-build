@@ -93,8 +93,12 @@ def sentence_units(text: str) -> list[str]:
                 j += 1
             # Ellipsis is an intentional hesitation even when the next word
             # is attached directly ("me…then?"). Keep it as its own unit.
+            starts_with_quoted_speech = "".join(current).lstrip().startswith(
+                ('"', "“", "「", "『", "‘")
+            )
             attribution_follows = (
-                j < len(text)
+                starts_with_quoted_speech
+                and j < len(text)
                 and text[j].isspace()
                 and bool(_ATTRIBUTION.match(text[j:].lstrip()))
             )
@@ -274,7 +278,9 @@ def split_for_pacing(
         # paragraph fits in this chunk. If it does not, flush() writes an
         # invisible-to-speech blank-line marker consumed by pause_after_ms().
 
-    flush(mark_paragraph_end=bool(current and current[-1][2]))
+    # End-of-chapter silence is handled by chapter assembly/player transitions,
+    # not by adding a silent tail to the final audio segment.
+    flush()
     return [chunk for chunk in chunks if chunk.strip()]
 
 
