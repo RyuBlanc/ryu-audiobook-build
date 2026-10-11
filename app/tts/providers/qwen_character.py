@@ -49,6 +49,7 @@ class QwenCharacterProvider(TTSProvider):
         qwen_seed: int | None = None,
         qwen_anchor_path: Path | None = None,
         qwen_anchor_text: str = "",
+        qwen_profile_id: str = "",
     ):
         self.voice_id = voice_id
         self.language = language or "English"
@@ -58,6 +59,7 @@ class QwenCharacterProvider(TTSProvider):
         self.qwen_seed = qwen_seed
         self.qwen_anchor_path = qwen_anchor_path
         self.qwen_anchor_text = qwen_anchor_text or ""
+        self.qwen_profile_id = qwen_profile_id or ""
         self.status_callback = None
         self.model_kind = self._resolve_kind(model_kind)
         self.reference_audio = reference_audio
@@ -263,6 +265,7 @@ class QwenCharacterProvider(TTSProvider):
             "allow_instruct": self.model_kind == "custom-1.7b",
             "anchor_path": str(self.qwen_anchor_path.resolve()) if self.qwen_anchor_path else "",
             "anchor_text": self.qwen_anchor_text,
+            "profile_id": self.qwen_profile_id,
             "longform": self.qwen_mode != "design-preview",
             "expression_style": classify_expression(text),
         }
@@ -330,6 +333,8 @@ class QwenCharacterProvider(TTSProvider):
             "seed": self.qwen_seed,
             "anchor_path": str(self.qwen_anchor_path.resolve()) if self.qwen_anchor_path else "",
             "anchor_text": self.qwen_anchor_text,
+            "profile_id": self.qwen_profile_id,
+            "styles": [classify_expression(text) for text in texts],
             "longform": True,
         }
         self._status(
