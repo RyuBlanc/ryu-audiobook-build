@@ -55,7 +55,7 @@ def _split_adjacent_dialogue(line: str) -> str:
     pattern = re.compile(
         r'([”’"])(\s+)(?=[“‘"])'
     )
-    return pattern.sub(lambda match: match.group(1) + "\\n", line)
+    return pattern.sub(lambda match: match.group(1) + "\n", line)
 
 
 def reflow_source_text(text: str) -> str:
@@ -72,7 +72,7 @@ def reflow_source_text(text: str) -> str:
 
         rebuilt: list[str] = []
         for raw_line in lines:
-            parts = _split_adjacent_dialogue(raw_line).split("\\n")
+            parts = _split_adjacent_dialogue(raw_line).split("\n")
             for part in parts:
                 line = part.strip()
                 if not line:
@@ -138,6 +138,7 @@ def clean_import_noise(text: str, repeated_noise: set[str] | None = None) -> tup
     repeated_noise = {str(item).casefold() for item in (repeated_noise or set())}
     removed: list[str] = []
     kept: list[str] = []
+    lines = text.splitlines()
     page_noise_indices: set[int] = set()
     for idx, raw in enumerate(lines):
         value = raw.strip().casefold()
@@ -162,8 +163,12 @@ def clean_import_noise(text: str, repeated_noise: set[str] | None = None) -> tup
         re.compile(r"^\d{1,5}\s+report$", re.I),
         re.compile(r"^report$", re.I),
     )
-    for raw_line in text.splitlines():
+    for idx, raw_line in enumerate(lines):
         line = raw_line.strip()
+        if idx in page_noise_indices:
+            if line:
+                removed.append(line)
+            continue
         normalized = re.sub(r"\s+", " ", line).casefold()
         is_noise = (
             normalized in repeated_noise
