@@ -29,7 +29,12 @@ def main() -> None:
             "anchor_text": "Hello. This is a short, clear, natural voice test.",
         }
         model = FakeVoiceDesignModel()
-        paths = worker._create_expression_anchors(model, request, root)
+        original_set_seed = worker._set_seed
+        worker._set_seed = lambda seed: None
+        try:
+            paths = worker._create_expression_anchors(model, request, root)
+        finally:
+            worker._set_seed = original_set_seed
         assert set(paths) == {"neutral", "thoughtful", "warm"}
         assert len(model.calls) == 3, "Expression references must be generated one at a time."
         assert all(call[0] and not isinstance(call[0], list) for call in model.calls)
