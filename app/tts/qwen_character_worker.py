@@ -528,7 +528,6 @@ def server(args) -> int:
         )
         paths = _create_expression_anchors(model, request, root)
         del model
-        del model
         gc.collect()
         try:
             import torch
