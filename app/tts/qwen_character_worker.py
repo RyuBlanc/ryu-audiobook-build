@@ -210,7 +210,10 @@ def _generate_design_anchor(model, request: dict, anchor: Path) -> str:
     import soundfile as sf
 
     language = str(request.get("language") or "English")
-    anchor_text = str(request.get("anchor_text") or "").strip() or _default_anchor_text(language)
+    anchor_text = (
+        str(request.get("anchor_text") or "").strip()
+        or "Hello. This is a short, natural voice sample. I speak clearly and comfortably."
+    )
     _set_seed(request.get("seed"))
     wavs, sr = model.generate_voice_design(
         text=anchor_text,
@@ -435,7 +438,8 @@ def server(args) -> int:
                             "temperature": temperature,
                             "subtalker_temperature": temperature,
                         }
-                        prompt = locked_clone_prompts.get(style) or locked_clone_prompts.get("neutral")
+                        prompt_style = reference_style(style)
+                        prompt = locked_clone_prompts.get(prompt_style) or locked_clone_prompts.get("neutral")
                         if prompt is None:
                             raise RuntimeError(f"No Qwen expression prompt is available for style '{style}'.")
                         wavs, sr = model.generate_voice_clone(
