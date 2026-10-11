@@ -263,7 +263,7 @@ class RegressionTests(unittest.TestCase):
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         runtime = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
-        self.assertIn("recommended_chunk_chars = 2400", provider)
+        self.assertIn("recommended_chunk_chars = 1200", provider)
         self.assertIn("recommended_chunk_sentences", provider)
         self.assertIn("best_long_form_clone_kind", provider)
         self.assertIn("base-0.6b", runtime)
