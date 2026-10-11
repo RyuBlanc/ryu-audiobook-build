@@ -158,34 +158,28 @@ jobs:
             if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
           }
 
-          Write-Host '=== Verify bundled Qwen worker import ==='
+          Write-Host '=== Verify exact bundled Qwen worker standalone launch ==='
           $exeDir = Join-Path (Get-Location) "dist/Ryu's Audiobook"
-          $roots = @($exeDir, (Join-Path $exeDir '_internal')) | Where-Object { Test-Path $_ }
-          $worker = $null
-          $root = $null
-          foreach ($candidateRoot in $roots) {
-            $candidate = Get-ChildItem -Path $candidateRoot -Recurse -File -Filter 'qwen_character_worker.py' -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($candidate) {
-              $worker = $candidate.FullName
-              $root = $candidate.Directory.Parent.Parent.FullName
-              break
-            }
-          }
-          if (-not $worker) { throw "Bundled Qwen worker script was not found in the frozen package." }
-          Write-Host "Testing bundled Qwen worker: $worker"
-          $oneLine = "import sys; sys.path.insert(0, sys.argv[1]); import app.tts.qwen_character_worker; print('BUNDLED_QWEN_WORKER_IMPORT_OK')"
-          Write-Host "Using CI Python executable: $pythonExe"
-          if (-not (Test-Path $pythonExe)) { throw "CI Python executable does not exist: $pythonExe" }
-          $output = & $pythonExe -B -c $oneLine $root 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            $output | Write-Host
-            throw "Bundled Qwen worker import failed with exit code $LASTEXITCODE."
-          }
+          if (-not (Test-Path $exeDir)) { throw "Frozen application directory not found: $exeDir" }
+          $worker = Get-ChildItem -Path $exeDir -Recurse -File -Filter 'qwen_character_worker.py' -ErrorAction Stop | Select-Object -First 1
+          if (-not $worker) { throw 'Bundled qwen_character_worker.py was not found.' }
+          $sourceWorker = Join-Path (Get-Location) 'app\tts\qwen_character_worker.py'
+          $sourceHash = (Get-FileHash -Algorithm SHA256 $sourceWorker).Hash
+          $packagedHash = (Get-FileHash -Algorithm SHA256 $worker.FullName).Hash
+          if ($sourceHash -ne $packagedHash) { throw "Packaged Qwen worker differs from repository source. Source=$sourceHash Packaged=$packagedHash" }
+          $packagedText = Get-Content $worker.FullName -Raw
+          if ($packagedText -notmatch '_APPLICATION_ROOT = Path\(__file__\)\.resolve\(\)\.parents\[2\]') { throw 'Packaged Qwen worker is missing the application-root bootstrap.' }
+          $pythonExe = $env:RYU_CI_PYTHON_EXE
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or -not (Test-Path $pythonExe)) { throw "Validated CI Python executable is unavailable: $pythonExe" }
+          $previousPath = $env:PYTHONPATH
+          Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+          Write-Host "Launching exact worker with no PYTHONPATH: $($worker.FullName) --help"
+          $output = & $pythonExe -B $worker.FullName --help 2>&1
+          $exitCode = $LASTEXITCODE
+          if ($previousPath) { $env:PYTHONPATH = $previousPath }
           $output | Write-Host
-          if (-not ($output -match 'BUNDLED_QWEN_WORKER_IMPORT_OK')) {
-            throw 'Bundled Qwen worker import did not report success.'
-          }
-
+          if ($exitCode -ne 0) { throw "Exact bundled Qwen worker launch failed with exit code $exitCode." }
+          if ($output -notmatch 'Qwen3-TTS offline character worker') { throw 'Bundled Qwen worker did not return its expected help output.' }
 
           # Run the private Qwen runtime bootstrap last so the private Python
           # installer cannot invalidate the main setup-python interpreter used
