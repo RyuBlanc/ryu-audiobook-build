@@ -1692,15 +1692,19 @@ class GenerationPage(QWidget):
                         if self._eta_warmup_samples < 2:
                             self._eta_warmup_samples += 1
                         else:
-                            self._eta_rates.append(sample)
-                            self._eta_rates = self._eta_rates[-8:]
-                            ordered = sorted(self._eta_rates)
-                            median = ordered[len(ordered) // 2]
-                            self._eta_ema_sec_per_unit = (
-                                median
-                                if self._eta_ema_sec_per_unit is None
-                                else (0.25 * median + 0.75 * self._eta_ema_sec_per_unit)
-                            )
+                            previous = self._eta_ema_sec_per_unit
+                            # Ignore extreme one-sample stalls/spikes; they make
+                            # a multi-hour ETA jump from minutes to days.
+                            if previous is None or sample <= previous * 4.0:
+                                self._eta_rates.append(sample)
+                                self._eta_rates = self._eta_rates[-10:]
+                                ordered = sorted(self._eta_rates)
+                                median = ordered[len(ordered) // 2]
+                                self._eta_ema_sec_per_unit = (
+                                    median
+                                    if previous is None
+                                    else (0.18 * median + 0.82 * previous)
+                                )
                 self._eta_last_work = work_done_n
                 self._eta_last_time = now
             except (ValueError, IndexError):
@@ -1747,17 +1751,17 @@ class GenerationPage(QWidget):
         if self._eta_ema_sec_per_unit is not None and work_remaining > 0:
             remaining = max(0, int(work_remaining * self._eta_ema_sec_per_unit))
             self.remaining.setText(
-                f"Remaining: {remaining // 60}:{remaining % 60:02d}"
+                f"Remaining: {remaining // 3600:02d}:{(remaining // 60) % 60:02d}:{remaining % 60:02d}"
             )
             units_per_min = 60.0 / max(self._eta_ema_sec_per_unit, 1e-9)
-            self.speed.setText(f"Speed: {units_per_min:,.0f} text-units/min")
+            self.speed.setText(f"Speed: {units_per_min:,.0f} chars/min")
         elif work_done > 0 and elapsed > 8:
             fallback_rate = work_done / elapsed
             remaining = max(0, int(work_remaining / max(fallback_rate, 1e-9)))
             self.remaining.setText(
-                f"Remaining: {remaining // 60}:{remaining % 60:02d}"
+                f"Remaining: {remaining // 3600:02d}:{(remaining // 60) % 60:02d}:{remaining % 60:02d}"
             )
-            self.speed.setText(f"Speed: {fallback_rate * 60:,.0f} text-units/min")
+            self.speed.setText(f"Speed: {fallback_rate * 60:,.0f} chars/min")
         else:
             self.remaining.setText("Remaining: calibrating…")
             self.speed.setText("Speed: calibrating…")
