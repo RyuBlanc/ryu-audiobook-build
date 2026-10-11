@@ -200,7 +200,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("generate_voice_design", worker)
         self.assertIn("voice_anchors", worker)
         self.assertIn("--clone-kind", worker)
-        self.assertIn("recommended_chunk_chars = 1200", provider)
+        self.assertIn("recommended_chunk_chars = 800", provider)
         self.assertIn("recommended_chunk_sentences", provider)
 
     def test_voice_profile_save_and_qwen_preview_controls_are_exposed(self):
@@ -277,7 +277,7 @@ class RegressionTests(unittest.TestCase):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         voice_page = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
-        self.assertIn('elif active_task in {"design", "design-preview"}:', worker)
+        self.assertIn('if active_task in {"design", "design-preview"}:', worker)
         self.assertIn("_prepare_design_clone(", worker)
         self.assertIn("_generate_design_locked(", worker)
         self.assertIn("_create_expression_anchors", worker)
@@ -289,6 +289,10 @@ class RegressionTests(unittest.TestCase):
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         self.assertIn("VoiceDesign stable identity needs the local Qwen Base model", provider)
         self.assertIn("best_long_form_clone_kind()", provider)
+
+    def test_app_starts_maximized_for_screen_fit(self):
+        source = Path("app/main.py").read_text(encoding="utf-8")
+        self.assertIn("window.showMaximized()", source)
 
     def test_voice_previews_expose_percentage_progress(self):
         voice_page = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
@@ -396,9 +400,17 @@ class RegressionTests(unittest.TestCase):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         self.assertIn("def _recommended_max_new_tokens", worker)
-        self.assertIn("chars * 1.15", worker)
+        self.assertIn("chars * 0.95", worker)
         self.assertIn("max_new_tokens", worker)
         self.assertIn("heartbeat=", provider)
+
+    def test_qwen_design_worker_lazy_loads_cached_identity(self):
+        worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
+        runtime = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
+        self.assertIn("cached character identity", worker)
+        self.assertIn("bank_ready", worker)
+        self.assertIn('if active_task not in {"design", "design-preview"}:', worker)
+        self.assertIn('if vram_gb >= 10.0 and model_installed("base-1.7b")', runtime)
 
     def test_qwen_batch_generation_path_exists(self):
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
