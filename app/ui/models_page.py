@@ -29,6 +29,7 @@ from app.tts.qwen_character_runtime import (
     best_custom_kind,
     best_clone_kind,
     best_voice_design_kind,
+    repair_runtime as repair_qwen_runtime,
 )
 from app.ai.model_runtime import brain_root, install_runtime as install_audiobook_ai, recommended_model, installed as audiobook_ai_installed, self_test as test_audiobook_ai
 
@@ -165,6 +166,20 @@ class QwenCharacterInstallWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class QwenRepairWorker(QThread):
+    finished_ok = Signal(str)
+    failed = Signal(str)
+    progress = Signal(str)
+
+    def run(self) -> None:
+        try:
+            self.progress.emit("Repairing isolated Qwen3-TTS runtime…")
+            detail = repair_qwen_runtime(self.progress.emit)
+            self.finished_ok.emit(detail)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class AudiobookAIInstallWorker(QThread):
     finished_ok = Signal(str)
     failed = Signal(str)
@@ -203,6 +218,7 @@ class ModelsPage(QWidget):
         self.kokoro_worker: KokoroDownloadWorker | None = None
         self.chatterbox_worker: ChatterboxInstallWorker | None = None
         self.qwen_character_worker: QwenCharacterInstallWorker | None = None
+        self.qwen_repair_worker: QwenRepairWorker | None = None
         self.audiobook_ai_worker: AudiobookAIInstallWorker | None = None
 
         layout = QVBoxLayout(self)
@@ -218,13 +234,15 @@ class ModelsPage(QWidget):
         self.install_kokoro = QPushButton("Download Natural Voices")
         self.install_piper = QPushButton("Download Piper Voice")
         self.install_chatterbox = QPushButton("Install / Repair Custom Voice Engine")
-        self.install_qwen_character = QPushButton("Install Qwen Voice Studio")
+        self.install_qwen_character = QPushButton("Install / Repair Qwen Voice Studio")
+        self.repair_qwen = QPushButton("Repair Qwen3-TTS Runtime")
         self.install_audiobook_ai = QPushButton("Install Audiobook AI")
         self.refresh_button = QPushButton("Refresh")
         row.addWidget(self.install_kokoro)
         row.addWidget(self.install_piper)
         row.addWidget(self.install_chatterbox)
         row.addWidget(self.install_qwen_character)
+        row.addWidget(self.repair_qwen)
         row.addWidget(self.install_audiobook_ai)
         row.addWidget(self.refresh_button)
         layout.addLayout(row)
@@ -236,6 +254,7 @@ class ModelsPage(QWidget):
         self.install_piper.clicked.connect(self.download_piper)
         self.install_chatterbox.clicked.connect(self.install_chatterbox_runtime)
         self.install_qwen_character.clicked.connect(self.install_qwen_character_runtime)
+        self.repair_qwen.clicked.connect(self.repair_qwen_runtime)
         self.install_audiobook_ai.clicked.connect(self.install_audiobook_ai_runtime)
         self.refresh_button.clicked.connect(self.refresh)
         self.refresh()
@@ -384,6 +403,37 @@ class ModelsPage(QWidget):
         self.install_qwen_character.setEnabled(True)
         self.status.setText("Offline character voice installation failed.")
         QMessageBox.warning(self, "Offline Character Voice Installation Failed", message)
+
+    def repair_qwen_runtime(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            "Repair Qwen3-TTS Runtime",
+            "This will rebuild Ryu's isolated Qwen3-TTS Python environment and reinstall "
+            "PyTorch, torchaudio and qwen-tts. Your downloaded Qwen model files will NOT be deleted. "
+            "Continue?",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.repair_qwen.setEnabled(False)
+        self.install_qwen_character.setEnabled(False)
+        self.status.setText("Repairing Qwen3-TTS runtime…")
+        self.qwen_repair_worker = QwenRepairWorker()
+        self.qwen_repair_worker.finished_ok.connect(self._qwen_repair_ok)
+        self.qwen_repair_worker.failed.connect(self._qwen_repair_failed)
+        self.qwen_repair_worker.progress.connect(self.status.setText)
+        self.qwen_repair_worker.start()
+
+    def _qwen_repair_ok(self, detail: str) -> None:
+        self.repair_qwen.setEnabled(True)
+        self.install_qwen_character.setEnabled(True)
+        self.status.setText(f"Qwen3-TTS runtime repaired and verified • {detail}")
+        self.refresh()
+
+    def _qwen_repair_failed(self, message: str) -> None:
+        self.repair_qwen.setEnabled(True)
+        self.install_qwen_character.setEnabled(True)
+        self.status.setText("Qwen3-TTS runtime repair failed.")
+        QMessageBox.warning(self, "Qwen3-TTS Runtime Repair Failed", message)
 
     def install_audiobook_ai_runtime(self) -> None:
         model_id, filename, size = recommended_model()
