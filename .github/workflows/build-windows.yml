@@ -179,8 +179,9 @@ jobs:
           $exitCode = $LASTEXITCODE
           if ($previousPath) { $env:PYTHONPATH = $previousPath }
           $output | Write-Host
+          $outputText = ($output -join "`n")
           if ($exitCode -ne 0) { throw "Exact bundled Qwen worker launch failed with exit code $exitCode." }
-          if ($output -notmatch 'Qwen3-TTS offline character worker') { throw 'Bundled Qwen worker did not return its expected help output.' }
+          if ($outputText -notmatch 'usage:\s+qwen_character_worker\.py') { throw 'Bundled Qwen worker did not return valid argparse help output.' }
 
           # Run the private Qwen runtime bootstrap last so the private Python
           # installer cannot invalidate the main setup-python interpreter used
