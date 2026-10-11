@@ -328,6 +328,36 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("def refresh_chapter_sources", source)
         self.assertIn("self.generation.refresh_chapter_sources()", workflow)
 
+    def test_qwen_profiles_have_unique_cache_identity(self):
+        from app.tts.voice_profile import VoiceProfile, save_profiles, load_profiles
+        from app.core.paths import voices_root
+        with tempfile.TemporaryDirectory() as temp:
+            # Ensure a constructed Qwen profile receives an immutable identity on save.
+            original = voices_root
+            import app.tts.voice_profile as vp
+            vp.voices_root = lambda: Path(temp)
+            try:
+                profile = VoiceProfile(
+                    name="Test Qwen Voice",
+                    provider="qwen-character",
+                    voice_id="design-test-qwen",
+                    qwen_mode="design",
+                    qwen_prompt="A natural male narrator.",
+                    qwen_seed=3101,
+                )
+                save_profiles([profile])
+                loaded = load_profiles()
+                saved = next(p for p in loaded if p.name == "Test Qwen Voice")
+                self.assertTrue(saved.qwen_profile_id)
+            finally:
+                vp.voices_root = original
+
+    def test_qwen_repair_avoids_py_compile_and_program_files_pycache(self):
+        runtime = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
+        self.assertIn("PYTHONDONTWRITEBYTECODE", runtime)
+        self.assertIn("ast.parse", runtime)
+        self.assertNotIn('"-m", "py_compile"', runtime)
+
     def test_qwen_expression_styles_are_subtle_and_text_driven(self):
         expression = Path("app/tts/expression.py").read_text(encoding="utf-8")
         from app.tts.expression import classify_expression
