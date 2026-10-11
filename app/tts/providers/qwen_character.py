@@ -245,19 +245,24 @@ class QwenCharacterProvider(TTSProvider):
                 continue
             if line is None:
                 exit_code = self._worker.poll() if self._worker is not None else None
-        detail = ""
-        try:
-            if self._worker_log is not None:
-                self._worker_log.flush()
-                log_path = Path(self._worker_log.name)
-                if log_path.exists():
-                    detail = log_path.read_text(encoding="utf-8", errors="replace")[-2400:].strip()
-        except OSError:
-            pass
-        suffix = f" Exit code: {exit_code}."
-        if detail:
-            suffix += f" Worker log: {detail}"
-        raise RuntimeError("Offline character worker exited before returning a response." + suffix)
+                detail = ""
+                try:
+                    if self._worker_log is not None:
+                        self._worker_log.flush()
+                        log_path = Path(self._worker_log.name)
+                        if log_path.exists():
+                            detail = log_path.read_text(
+                                encoding="utf-8", errors="replace"
+                            )[-2400:].strip()
+                except OSError:
+                    pass
+                suffix = f" Exit code: {exit_code}."
+                if detail:
+                    suffix += f" Worker log: {detail}"
+                raise RuntimeError(
+                    "Offline character worker exited before returning a response."
+                    + suffix
+                )
             try:
                 value = json.loads(line)
             except json.JSONDecodeError:
