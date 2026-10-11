@@ -22,7 +22,7 @@ from app.chapters.detector import Chapter, detect_chapters
 from app.version import full_version
 from app.core.project import Project, create_project
 from app.core.state import load_state, save_state
-from app.documents.parser import extract_text
+from app.documents.parser import extract_text, reflow_source_text
 from app.ui.chapter_editor import ChapterEditorPage
 from app.ui.generation_page import GenerationPage
 from app.ui.import_page import ImportPage
@@ -166,9 +166,16 @@ class ProjectWorkflow(QMainWindow):
             self.voice_cast.refresh_profiles()
             self.stack.setCurrentWidget(self.voice_cast)
         elif name == "Generate":
+            if self.project:
+                if self.generation:
+                    self.generation.chapters = self.project.chapters
+                    self.generation._refresh_voice_profiles()
+                    self.generation._load_voice_cast_summary()
+                    self.generation._update_overview()
+                    self.generation.refresh_chapter_sources()
+                else:
+                    self.ensure_generation_page()
             if self.generation:
-                self.generation._refresh_voice_profiles()
-                self.generation._load_voice_cast_summary()
                 self.stack.setCurrentWidget(self.generation)
             else:
                 self.stack.setCurrentWidget(self.import_page)
@@ -282,6 +289,22 @@ class ProjectWorkflow(QMainWindow):
             )
             return False
 
+    def _repair_text_layout(self) -> bool:
+        if not self.project:
+            return False
+        changed = False
+        for chapter in self.project.chapters:
+            normalized = reflow_source_text(chapter.text or "")
+            if normalized != chapter.text:
+                chapter.text = normalized
+                changed = True
+        if changed:
+            try:
+                self.project.save()
+            except Exception:
+                return False
+        return changed
+
     def _repair_empty_chapters(self) -> None:
         """Repair projects created by older chapter-detector versions."""
         if not self.project or not self.project.source_path:
@@ -322,6 +345,7 @@ class ProjectWorkflow(QMainWindow):
         # Repair legacy empty chapter records before creating either editor or
         # generation UI so both views show the same corrected chapter list.
         self._repair_empty_chapters()
+        self._repair_text_layout()
         self.open_editor()
         self.ensure_generation_page()
         self.select_section("Chapters")
