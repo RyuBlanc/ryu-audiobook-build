@@ -43,7 +43,11 @@ class HardwarePage(QWidget):
         for b in self.profile.backends:
             state = "Available" if b.available else "Unavailable"
             lines.append(f"{b.name}: {state}" + (f" — {b.device}" if b.device else ""))
-        self.info.setText("\n".join(lines))
+        recommendations = ["Provider recommendations from detected hardware:"]
+        recommendations.extend(
+            f"{name}: {backend}" for name, backend in self.profile.provider_recommendations.items()
+        )
+        self.info.setText("\n".join(lines + [""] + recommendations))
 
     def run_benchmark(self):
         voices = PiperProvider.model_paths()
