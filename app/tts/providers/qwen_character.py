@@ -32,8 +32,10 @@ class QwenCharacterProvider(TTSProvider):
     # Qwen can safely handle substantially larger sentence-aware units. The
     # previous 360-char/2-sentence setting created thousands of tiny generation
     # jobs on long novels and made GPU utilization/ETA unnecessarily poor.
-    recommended_chunk_chars = 2400
-    recommended_chunk_sentences = 10
+    recommended_chunk_chars = 1200
+    recommended_chunk_sentences = 5
+    # Conservative startup estimate used only until real chunk timings are available.
+    estimated_chars_per_minute = 180.0
     handles_narration_controls = False
     stop_on_failure = True
 
