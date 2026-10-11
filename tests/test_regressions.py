@@ -401,7 +401,7 @@ class RegressionTests(unittest.TestCase):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         self.assertIn("def _recommended_max_new_tokens", worker)
-        self.assertIn("chars * 0.95", worker)
+        self.assertIn("chars * 1.10", worker)
         self.assertIn("max_new_tokens", worker)
         self.assertIn("heartbeat=", provider)
 
