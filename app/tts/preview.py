@@ -108,13 +108,10 @@ def _preview_units(
 
     units: list[tuple[str, str | list[str] | None]] = []
     used_chars = 0
-    preview_unit_chars = 900
-    preview_unit_sentences = 2
-    # A timed voice check is easier to hit accurately with smaller, sentence-sized
-    # units; the audiobook pipeline keeps its larger Qwen chunks for throughput.
-    if max_chars > 1400:
-        preview_unit_chars = 700
-        preview_unit_sentences = 1
+    preview_unit_chars = 420
+    preview_unit_sentences = 1
+    # Short previews stay sentence-sized so a 20-second request does not
+    # accidentally trigger a multi-minute synthesis unit.
     for segment, segment_voice in raw:
         for unit in split_for_pacing(
             segment,
@@ -147,10 +144,17 @@ def build_voice_preview(
     progress_callback=None,
     target_seconds: float | None = None,
 ) -> PreviewResult:
-    effective_max_chars = max(
-        int(max_chars),
-        int(max_chars if target_seconds is None else max_chars + float(target_seconds) * 20.0),
-    )
+    if target_seconds is not None and float(target_seconds) > 0:
+        # Targeted previews should not synthesize an entire chapter and then
+        # discover that the result is 3–4 minutes long. Use a conservative
+        # character budget, keep sentence boundaries intact, and stop as soon
+        # as the requested duration is reached.
+        effective_max_chars = max(
+            180,
+            min(int(max_chars), int(float(target_seconds) * 12.0)),
+        )
+    else:
+        effective_max_chars = int(max_chars)
     units = _preview_units(
         text,
         provider,
