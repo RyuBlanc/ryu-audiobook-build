@@ -43,7 +43,10 @@ def sentence_units(text: str) -> list[str]:
             while j < len(text) and text[j] in _CLOSERS:
                 current.append(text[j])
                 j += 1
-            if j >= len(text) or text[j].isspace():
+            # Ellipsis is an intentional hesitation even when the next word
+            # is attached directly ("me…then?"). Keep it as its own TTS unit
+            # so the pacing layer can insert a real pause.
+            if char == "…" or j >= len(text) or text[j].isspace():
                 flush()
                 i = j - 1
 
