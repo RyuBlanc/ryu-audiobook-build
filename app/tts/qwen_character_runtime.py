@@ -293,13 +293,14 @@ def verify_runtime(progress=None) -> str:
     worker = worker_script()
     if not worker.exists():
         raise RuntimeError(f"Qwen worker script is missing: {worker}")
-    code, detail = _run_capture(
-        [str(VENV_PYTHON), "-m", "py_compile", str(worker)],
-        timeout=120,
-    )
+    check = (
+        "import ast, pathlib; "
+        "ast.parse(pathlib.Path(r%r).read_text(encoding='utf-8'))"
+    ) % str(worker)
+    code, detail = _run_capture([str(VENV_PYTHON), "-c", check], timeout=120)
     if code != 0:
         raise RuntimeError(
-            "Qwen worker script failed its Python self-check. "
+            "Qwen worker script failed its Python syntax self-check. "
             f"Diagnostic: {detail[-3500:]}"
         )
     if progress:
@@ -518,6 +519,7 @@ def runtime_environment() -> dict[str, str]:
     env["HF_HOME"] = str(RUNTIME_ROOT / "huggingface")
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["TRANSFORMERS_ATTENTION_IMPLEMENTATION"] = "sdpa"
     return env
 
