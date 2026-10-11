@@ -142,7 +142,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('badge.setFixedWidth(72)', source)
         self.assertIn('badge.setFixedHeight(18)', source)
         self.assertIn("soft.setAlpha(52)", source)
-        self.assertIn("self.project_title = str(project_title or \\"\\").strip()", source)
+        self.assertIn("self.project_title = str(project_title or \"\").strip()", source)
         self.assertNotIn('text=self.window().windowTitle()', source)
 
     def test_workflow_passes_real_project_title_to_chapter_editor(self):
