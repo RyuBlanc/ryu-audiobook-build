@@ -88,7 +88,7 @@ def expression_instruction(base_voice_description: str, style: str) -> str:
     base = str(base_voice_description or "").strip()
     style_text = EXPRESSION_STYLES.get(style, EXPRESSION_STYLES["neutral"])
     natural_rules = (
-        " Preserve punctuation and paragraph meaning. Treat an internal ellipsis (…) as a "
+        " Preserve punctuation and paragraph meaning. When a proper noun or short phrase clearly belongs to another supported language, prefer its native pronunciation rather than spelling it with English phonetics. Treat an internal ellipsis (…) as a "
         "real brief hesitation, not ordinary sentence punctuation. Treat an em dash as a "
         "small interrupted-thought pause. Do not read stage directions aloud. Do not flatten "
         "questions or uncertainty into a generic declarative sentence. Never change speaker identity."
