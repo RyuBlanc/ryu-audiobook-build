@@ -540,9 +540,9 @@ def server(args) -> int:
                     if active_task == "custom":
                         _generate_custom(model, request, output)
                     elif active_task in {"design", "design-preview"}:
-                        if locked_clone_prompt is None:
+                        if locked_clone_prompts is None:
                             raise RuntimeError(
-                                "The stable VoiceDesign identity could not be restored after GPU memory fallback."
+                                "The stable VoiceDesign expression bank could not be restored after GPU memory fallback."
                             )
                         _generate_design_locked(model, locked_clone_prompts, request, output)
                     else:
