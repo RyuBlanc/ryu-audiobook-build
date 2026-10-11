@@ -33,6 +33,13 @@ def _load_model(kind: str, backend: str, root: Path):
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
     dtype = torch.bfloat16 if device.startswith("cuda") else torch.float32
+    if device.startswith("cuda"):
+        try:
+            torch.set_float32_matmul_precision("high")
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        except Exception:
+            pass
     kwargs = {
         "device_map": device,
         "dtype": dtype,
@@ -59,10 +66,14 @@ def _is_cuda_oom(exc: BaseException) -> bool:
 def _voice_design_instruct(request: dict) -> str:
     base = str(request.get("instruct") or "").strip()
     performance = (
-        "Natural audiobook performance: preserve the same speaker identity while following "
-        "punctuation, sentence meaning, dialogue, and scene context. Use varied emphasis, "
-        "pitch movement, gentle pauses, and appropriate emotional inflection. Avoid a flat "
-        "or monotone delivery; do not exaggerate emotion unless the text calls for it."
+        "Natural audiobook performance: preserve the exact same speaker identity while following "
+        "punctuation, sentence meaning, dialogue, and scene context. Use subtle pitch movement, "
+        "varied emphasis, gentle breath timing, and appropriate emotional inflection without becoming "
+        "dramatic. Treat an internal ellipsis (…) as a brief natural hesitation before continuing; "
+        "treat an em dash as a small interrupted-thought pause. Let questions, uncertainty, embarrassment, "
+        "quiet amusement, relief, concern, and thoughtful moments affect delivery naturally. "
+        "Allow restrained nonverbal cues such as a soft breath or faint chuckle only when the story context "
+        "supports them. Do not flatten punctuation into a normal sentence and do not overact."
     )
     return f"{base}\n{performance}".strip() if base else performance
 
@@ -82,7 +93,7 @@ def _generation_kwargs(request: dict) -> dict:
         "subtalker_top_k": 50,
         "subtalker_top_p": 1.0,
         "subtalker_temperature": 0.9,
-        "max_new_tokens": 1536,
+        "max_new_tokens": 2048,
     }
     return {
         "do_sample": bool(request.get("do_sample", defaults["do_sample"])),
@@ -375,6 +386,64 @@ def server(args) -> int:
 
         try:
             request = json.loads(line)
+            batch_texts = request.get("texts")
+            batch_outputs = request.get("outputs")
+            if isinstance(batch_texts, list):
+                if not isinstance(batch_outputs, list) or len(batch_texts) != len(batch_outputs):
+                    raise RuntimeError("Qwen batch request has mismatched texts and outputs.")
+
+                texts = [str(value or "").strip() for value in batch_texts]
+                if any(not value for value in texts):
+                    raise RuntimeError("Qwen batch contains empty narration text.")
+
+                if active_task in {"design", "design-preview"}:
+                    if locked_clone_prompt is None:
+                        print(
+                            json.dumps({"progress": "Creating or loading stable VoiceDesign identity…"}),
+                            flush=True,
+                        )
+                        model, device, locked_clone_prompt, locked_anchor = _prepare_design_clone(
+                            model, request, args
+                        )
+                        active_kind = str(args.clone_kind)
+                    print(
+                        json.dumps({
+                            "progress": f"Generating {len(texts)} narration segments in one Qwen batch…"
+                        }),
+                        flush=True,
+                    )
+                    languages = [str(request.get("language") or "English")] * len(texts)
+                    wavs, sr = model.generate_voice_clone(
+                        text=texts,
+                        language=languages,
+                        voice_clone_prompt=locked_clone_prompt,
+                        **_generation_kwargs(request),
+                    )
+                    if len(wavs) != len(texts):
+                        raise RuntimeError(
+                            f"Qwen returned {len(wavs)} outputs for {len(texts)} batch items."
+                        )
+                    import soundfile as sf
+                    for wav, output_path in zip(wavs, batch_outputs):
+                        destination = Path(str(output_path))
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        sf.write(str(destination), wav, sr)
+                    print(
+                        json.dumps({
+                            "ok": True,
+                            "outputs": [str(Path(p).resolve()) for p in batch_outputs],
+                            "device": device,
+                            "kind": active_kind,
+                            "task": active_task,
+                            "anchor": str(locked_anchor) if locked_anchor else None,
+                            "voice_lock": True,
+                        }),
+                        flush=True,
+                    )
+                    continue
+
+                raise RuntimeError("Batch generation is only supported for Qwen VoiceDesign narration.")
+
             output = Path(request["output"])
             text = str(request.get("text") or "").strip()
             if not text:
@@ -432,6 +501,20 @@ def server(args) -> int:
             # A CUDA OOM should not destroy a long audiobook. For Base clone
             # and CustomVoice we can reload on CPU. For a locked VoiceDesign
             # profile, the same policy applies after the anchor exists.
+            if _is_cuda_oom(exc) and device.startswith("cuda") and isinstance(batch_texts, list):
+                print(
+                    json.dumps({
+                        "ok": False,
+                        "batch_oom": True,
+                        "error": str(exc),
+                        "device": device,
+                        "kind": active_kind,
+                        "task": active_task,
+                    }),
+                    flush=True,
+                )
+                continue
+
             if _is_cuda_oom(exc) and device.startswith("cuda"):
                 try:
                     import torch
