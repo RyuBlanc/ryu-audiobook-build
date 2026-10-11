@@ -352,6 +352,11 @@ class RegressionTests(unittest.TestCase):
             finally:
                 vp.voices_root = original
 
+    def test_qwen_worker_bootstrap_adds_frozen_application_root(self):
+        source = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
+        self.assertIn("_APPLICATION_ROOT = Path(__file__).resolve().parents[2]", source)
+        self.assertIn("sys.path.insert(0, str(_APPLICATION_ROOT))", source)
+
     def test_qwen_repair_avoids_py_compile_and_program_files_pycache(self):
         runtime = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
         self.assertIn("PYTHONDONTWRITEBYTECODE", runtime)
