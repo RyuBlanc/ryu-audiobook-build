@@ -409,7 +409,7 @@ class RegressionTests(unittest.TestCase):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         runtime = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
         self.assertIn("cached canonical character identity", worker)
-        self.assertIn("bank_ready", worker)
+        self.assertIn("ready = neutral_path.exists()", worker)
         self.assertIn('if active_task not in {"design", "design-preview"}:', worker)
         self.assertIn('if vram_gb >= 10.0 and model_installed("base-1.7b")', runtime)
 
