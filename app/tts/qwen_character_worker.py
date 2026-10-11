@@ -144,6 +144,7 @@ def _anchor_path(root: Path, request: dict, style: str = "neutral") -> Path:
             str(request.get("instruct") or ""),
             str(request.get("seed") or ""),
             str(request.get("anchor_text") or ""),
+            str(request.get("profile_id") or ""),
             style,
         ]
     )
