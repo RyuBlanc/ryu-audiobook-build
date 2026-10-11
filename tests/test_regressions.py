@@ -198,7 +198,9 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("create_voice_clone_prompt", worker)
         self.assertIn("generate_voice_design", worker)
         self.assertIn("voice_anchors", worker)
-        self.assertIn('"neutral": model.create_voice_clone_prompt', worker)
+        self.assertIn("locked_clone_prompts[style] = model.create_voice_clone_prompt", worker)
+        self.assertIn("reference_style(style)", worker)
+        self.assertIn("ANCHOR_TEXTS", worker)
         self.assertIn("recommended_chunk_chars = 800", provider)
         self.assertIn("recommended_chunk_sentences", provider)
 
@@ -370,6 +372,83 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(classify_expression("Instead of me…then?"), "thoughtful")
         self.assertIn(classify_expression("That's amazing! Really!"), {"excited", "thoughtful"})
 
+    def test_qwen_expression_styles_map_to_stable_reference_families(self):
+        from app.tts.expression import classify_expression, reference_style
+        self.assertEqual(classify_expression("Maybe I should wait..."), "thoughtful")
+        self.assertEqual(classify_expression("That's wonderful!"), "excited")
+        self.assertEqual(reference_style("curious"), "thoughtful")
+        self.assertEqual(reference_style("excited"), "warm")
+        self.assertEqual(reference_style("sad"), "concerned")
+        self.assertEqual(reference_style("neutral"), "neutral")
+
+    def test_story_pacing_preserves_headings_dialogue_and_attribution(self):
+        from app.tts.pacing import is_heading_line
+        source = (
+            "The hallway was silent.\\n\\n"
+            "THE DEMON LORD SUMMIT\\n\\n"
+            "The three people sat down.\\n\\n"
+            "“Don't move!” he shouted.\\n"
+            "“Why?” she asked."
+        )
+        units = split_for_pacing(source, max_chars=800, max_sentences=4)
+        self.assertEqual(units[1], "THE DEMON LORD SUMMIT")
+        self.assertIn("“Don't move!” he shouted.", units)
+        self.assertIn("“Why?” she asked.", units)
+        self.assertTrue(is_heading_line("THE DEMON LORD SUMMIT"))
+        self.assertGreaterEqual(pause_after_ms("THE DEMON LORD SUMMIT"), 700)
+        self.assertGreaterEqual(
+            pause_after_ms("He stepped back.", "natural", next_text="CHAPTER 1"),
+            600,
+        )
+
+    def test_qwen_chunking_splits_only_at_expression_family_changes(self):
+        text = "The hallway was silent. He whispered, ‘Don't move.’ She shouted, ‘Run!’"
+        ordinary = split_for_pacing(text, max_chars=800, max_sentences=4)
+        emotional = split_for_pacing(
+            text,
+            max_chars=800,
+            max_sentences=4,
+            split_on_expression_change=True,
+        )
+        self.assertGreater(len(emotional), len(ordinary))
+        self.assertTrue(any("whispered" in value for value in emotional))
+
+    def test_quoted_dialogue_attribution_stays_with_the_quote(self):
+        from app.tts.pacing import sentence_units
+        units = sentence_units("“Wait!” he said. Then he left.")
+        self.assertEqual(units[0], "“Wait!” he said.")
+        self.assertEqual(units[1], "Then he left.")
+
+    def test_qwen_runtime_readiness_is_a_fast_filesystem_gate(self):
+        import app.tts.qwen_character_runtime as runtime
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            marker = root / "runtime.json"
+            python = root / "python.exe"
+            worker = root / "qwen_character_worker.py"
+            marker.write_text(json.dumps({
+                "ready": True,
+                "bootstrap_version": runtime.BOOTSTRAP_VERSION,
+                "qwen_tts": runtime.QWEN_TTS_VERSION,
+            }), encoding="utf-8")
+            python.touch()
+            worker.touch()
+            with patch.object(runtime, "MARKER", marker), \\
+                 patch.object(runtime, "VENV_PYTHON", python), \\
+                 patch.object(runtime, "worker_script", return_value=worker), \\
+                 patch.object(runtime, "_python_works", side_effect=AssertionError("subprocess check ran")), \\
+                 patch.object(runtime, "_runtime_self_test", side_effect=AssertionError("model imports ran")):
+                self.assertTrue(runtime.runtime_ready())
+
+    def test_preview_reports_elapsed_time_and_uses_natural_pacing(self):
+        source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
+        self.assertIn("finished_ok = Signal(str, float)", source)
+        self.assertIn('pacing_profile="natural"', source)
+        self.assertIn("self.finished_ok.emit(str(self.output), elapsed_seconds)", source)
+        self.assertIn("generated in {int(elapsed) // 60}", source)
+        self.assertIn("RTF", source)
+
     def test_internal_ellipsis_creates_a_separate_pacing_unit(self):
         units = split_for_pacing("Instead of me…then? Maybe later.", max_chars=200, max_sentences=4)
         self.assertGreaterEqual(len(units), 2)
@@ -409,7 +488,9 @@ class RegressionTests(unittest.TestCase):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         runtime = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
         self.assertIn("cached canonical character identity", worker)
-        self.assertIn("ready = neutral_path.exists()", worker)
+        self.assertIn("ready = all(", worker)
+        self.assertIn("ANCHOR_STYLES", worker)
+        self.assertIn("v6-story-expression-anchors", worker)
         self.assertIn('if active_task not in {"design", "design-preview"}:', worker)
         self.assertIn('if vram_gb >= 10.0 and model_installed("base-1.7b")', runtime)
 
