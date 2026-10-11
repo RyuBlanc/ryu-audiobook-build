@@ -28,14 +28,19 @@ from app.tts.pronunciation_suggester import (
 
 
 def _write_wav(path: Path, seconds: float = 0.05) -> None:
+    import math
     path.parent.mkdir(parents=True, exist_ok=True)
-    rate = 8000
+    rate = 44100
     frames = max(1, int(rate * seconds))
+    pcm = bytearray()
+    for index in range(frames):
+        sample = int(12000 * math.sin(2 * math.pi * 440 * index / rate))
+        pcm.extend(int(sample).to_bytes(2, byteorder="little", signed=True))
     with wave.open(str(path), "wb") as wav:
         wav.setnchannels(1)
         wav.setsampwidth(2)
         wav.setframerate(rate)
-        wav.writeframes(b"\x00\x00" * frames)
+        wav.writeframes(bytes(pcm))
 
 
 class RegressionTests(unittest.TestCase):
@@ -544,7 +549,7 @@ class RegressionTests(unittest.TestCase):
                 chapter_dir = root / f"{number:03d}_Chapter_{number}"
                 chunks = chapter_dir / "chunks"
                 wav = chunks / "00001.wav"
-                _write_wav(wav, 8.0)
+                _write_wav(wav, 12.0)
                 chapter_dirs.append(chapter_dir)
 
             progress = []
