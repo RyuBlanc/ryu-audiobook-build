@@ -53,19 +53,19 @@ def _split_adjacent_dialogue(line: str) -> str:
     # "..." "..."
     # This is intentionally conservative; ordinary quoted words inside prose remain intact.
     pattern = re.compile(
-        r'([”’"])(\\s+)(?=[“‘"])'
+        r'([”’"])(\s+)(?=[“‘"])'
     )
     return pattern.sub(lambda match: match.group(1) + "\\n", line)
 
 
 def reflow_source_text(text: str) -> str:
     """Normalize imported line wrapping without destroying paragraph/dialogue structure."""
-    text = text.replace("\\r\\n", "\\n").replace("\\r", "\\n")
-    paragraphs = re.split(r"\\n\\s*\\n", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    paragraphs = re.split(r"\n\s*\n", text)
     output = []
 
     for paragraph in paragraphs:
-        lines = [re.sub(r"[ \\t]+", " ", line).strip() for line in paragraph.split("\\n")]
+        lines = [re.sub(r"[ \t]+", " ", line).strip() for line in paragraph.split("\n")]
         lines = [line for line in lines if line]
         if not lines:
             continue
@@ -108,9 +108,9 @@ def reflow_source_text(text: str) -> str:
                 # lines. This makes speaker assignment and review easier.
                 rebuilt.append(line)
 
-        output.append("\\n".join(rebuilt).strip())
+        output.append("\n".join(rebuilt).strip())
 
-    return re.sub(r"\\n{3,}", "\\n\\n", "\\n\\n".join(output)).strip()
+    return re.sub(r"\n{3,}", "\n\n", "\n\n".join(output)).strip()
 
 
 def detect_repeated_book_noise(chapter_texts: list[str]) -> dict[str, int]:
