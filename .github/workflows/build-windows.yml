@@ -173,10 +173,10 @@ jobs:
           }
           if (-not $worker) { throw "Bundled Qwen worker script was not found in the frozen package." }
           Write-Host "Testing bundled Qwen worker: $worker"
-          $oneLine = "import sys; sys.path.insert(0, r'$root'); import app.tts.qwen_character_worker; print('BUNDLED_QWEN_WORKER_IMPORT_OK')"
+          $oneLine = "import sys; sys.path.insert(0, sys.argv[1]); import app.tts.qwen_character_worker; print('BUNDLED_QWEN_WORKER_IMPORT_OK')"
           Write-Host "Using CI Python executable: $pythonExe"
           if (-not (Test-Path $pythonExe)) { throw "CI Python executable does not exist: $pythonExe" }
-          $output = & $pythonExe -B -c $oneLine 2>&1
+          $output = & $pythonExe -B -c $oneLine $root 2>&1
           if ($LASTEXITCODE -ne 0) {
             $output | Write-Host
             throw "Bundled Qwen worker import failed with exit code $LASTEXITCODE."
