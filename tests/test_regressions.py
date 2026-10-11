@@ -445,6 +445,7 @@ class RegressionTests(unittest.TestCase):
         source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
         self.assertIn("finished_ok = Signal(str, float)", source)
         self.assertIn('pacing_profile="natural"', source)
+        self.assertNotIn('pacing_profile="off"', source)
         self.assertIn("self.finished_ok.emit(str(self.output), elapsed_seconds)", source)
         self.assertIn("generated in {int(elapsed) // 60}", source)
         self.assertIn("RTF", source)
