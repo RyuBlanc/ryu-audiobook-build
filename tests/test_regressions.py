@@ -188,7 +188,7 @@ class RegressionTests(unittest.TestCase):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         self.assertIn('"design-preview"', provider)
         self.assertIn('best_long_form_clone_kind()', provider)
-                self.assertIn("_generate_design_locked(", worker)
+        self.assertIn("_generate_design_locked(", worker)
         self.assertIn('_create_expression_anchors', worker)
         self.assertIn('EXPRESSION_STYLES', worker)
 
@@ -198,7 +198,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("create_voice_clone_prompt", worker)
         self.assertIn("generate_voice_design", worker)
         self.assertIn("voice_anchors", worker)
-        self.assertIn("--clone-kind", worker)
+        self.assertIn('"neutral": model.create_voice_clone_prompt', worker)
         self.assertIn("recommended_chunk_chars = 800", provider)
         self.assertIn("recommended_chunk_sentences", provider)
 
