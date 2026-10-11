@@ -455,7 +455,8 @@ def server(args) -> int:
                         for index, wav in zip(indexes, wavs):
                             destination = Path(str(batch_outputs[index]))
                             destination.parent.mkdir(parents=True, exist_ok=True)
-                            sf.write(str(destination), wav, sr)                    continue
+                            sf.write(str(destination), wav, sr)
+                    continue
 
                 raise RuntimeError("Batch generation is only supported for Qwen VoiceDesign narration.")
 
