@@ -24,7 +24,7 @@ class GenerationResult:
     chunks_completed: int
 
 
-GENERATION_PIPELINE_VERSION = "2026-10-qwen3-canonical-voice-v5"
+GENERATION_PIPELINE_VERSION = "2026-10-qwen3-story-expression-v6"
 
 @dataclass(frozen=True)
 class ChapterPlan:
@@ -233,7 +233,8 @@ def generate_chapter(
     batch_disabled = False
 
     def validate_and_commit(index: int, output: Path, chunk: str) -> None:
-        pause_ms = pause_after_ms(chunk, pacing_profile)
+        next_text = chunks[index + 1] if index + 1 < len(chunks) else None
+        pause_ms = pause_after_ms(chunk, pacing_profile, next_text=next_text)
         if pause_ms:
             append_silence(output, pause_ms)
 
