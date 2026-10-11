@@ -134,6 +134,7 @@ class GenerationManager:
                     part,
                     max_chars=int(getattr(self.provider, "recommended_chunk_chars", 1400)),
                     max_sentences=int(getattr(self.provider, "recommended_chunk_sentences", 2)),
+                    split_on_expression_change=bool(getattr(self.provider, "split_on_expression_change", False)),
                 ):
                     unit = max(1, len(paced))
                     chapter_units.append(unit)
