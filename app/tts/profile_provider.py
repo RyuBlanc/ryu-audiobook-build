@@ -40,6 +40,7 @@ def provider_from_profile(profile: VoiceProfile):
                     if profile.qwen_anchor_path else None
                 ),
                 qwen_anchor_text=profile.qwen_anchor_text or "",
+                qwen_profile_id=profile.qwen_profile_id or "",
             ),
             profile.voice_id,
         )
