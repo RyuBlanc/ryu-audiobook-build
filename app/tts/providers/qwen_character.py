@@ -21,6 +21,7 @@ from ..qwen_character_runtime import (
     runtime_ready,
     worker_script,
 )
+from ..expression import classify_expression
 
 
 class QwenCharacterProvider(TTSProvider):
@@ -263,6 +264,7 @@ class QwenCharacterProvider(TTSProvider):
             "anchor_path": str(self.qwen_anchor_path.resolve()) if self.qwen_anchor_path else "",
             "anchor_text": self.qwen_anchor_text,
             "longform": self.qwen_mode != "design-preview",
+            "expression_style": classify_expression(text),
         }
         if self.qwen_mode == "clone":
             if not self.reference_audio:
@@ -321,6 +323,7 @@ class QwenCharacterProvider(TTSProvider):
         request = {
             "texts": texts,
             "outputs": outputs,
+            "styles": [classify_expression(text) for text in texts],
             "speaker": self.voice_id,
             "language": self.language,
             "instruct": self.instruct,
