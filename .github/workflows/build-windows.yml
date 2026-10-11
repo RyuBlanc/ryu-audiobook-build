@@ -179,6 +179,35 @@ jobs:
           & $venvPython -m pip install --no-deps qwen-tts==0.1.1
           & $venvPython -c "import importlib.metadata as md; assert md.version('qwen-tts') == '0.1.1'; print('qwen_tts wheel bootstrap OK')"
 
+      - name: Verify bundled Qwen worker import
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exeDir = Join-Path (Get-Location) "dist/Ryu's Audiobook"
+          $roots = @($exeDir, (Join-Path $exeDir '_internal')) | Where-Object { Test-Path $_ }
+          $worker = $null
+          $root = $null
+          foreach ($candidateRoot in $roots) {
+            $candidate = Join-Path $candidateRoot 'app	tsqwen_character_worker.py'
+            if (Test-Path $candidate) {
+              $worker = $candidate
+              $root = $candidateRoot
+              break
+            }
+          }
+          if (-not $worker) { throw "Bundled Qwen worker script was not found in the frozen package." }
+          Write-Host "Testing bundled Qwen worker: $worker"
+          $code = "import sys; sys.path.insert(0, r'$root'); import app.tts.qwen_character_worker; print('BUNDLED_QWEN_WORKER_IMPORT_OK')"
+          $output = & $pythonExe -B -c $code 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            $output | Write-Host
+            throw "Bundled Qwen worker import failed with exit code $LASTEXITCODE."
+          }
+          $output | Write-Host
+          if (-not ($output -match 'BUNDLED_QWEN_WORKER_IMPORT_OK')) {
+            throw 'Bundled Qwen worker import did not report success.'
+          }
+
       - name: Verify frozen application
         shell: pwsh
         run: |
