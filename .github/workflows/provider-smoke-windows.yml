@@ -95,3 +95,28 @@ jobs:
           $env:PYTHONPATH = "${{ github.workspace }}"
           python -c "import inspect; from chatterbox.tts_turbo import ChatterboxTurboTTS; sig=inspect.signature(ChatterboxTurboTTS.from_pretrained); print(sig); assert 'nano' in sig.parameters"
           Write-Host "Pinned Chatterbox Nano API import smoke test PASSED."
+
+  qwen-protocol:
+    name: Qwen expression protocol smoke
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install application dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run Qwen expression protocol smoke
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          PYTHONWARNINGS: ignore
+        run: python -B tests/smoke_qwen_protocol.py
