@@ -345,6 +345,9 @@ class ProjectWorkflow(QMainWindow):
         # generation UI so both views show the same corrected chapter list.
         self._repair_empty_chapters()
         self._repair_text_layout()
+        if self.project.chapters:
+            first = self.project.chapters[0]
+            self.voice.set_preview_source(first.text, first.title)
         self.open_editor()
         self.ensure_generation_page()
         self.select_section("Chapters")
