@@ -134,7 +134,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_chapter_editor_keeps_assignment_labels_small_and_synced(self):
         source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
-        self.assertIn('badge.setFixedHeight(18)', source)
+        self.assertIn("badge.setFixedSize(badge_width, 16)", source)
         self.assertIn('font-size:7px', source)
         self.assertIn('probe.setPosition(end)', source)
         self.assertIn('_update_current_chapter_list_label', source)
@@ -147,7 +147,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("badge.setFixedSize(badge_width, 16)", source)
         self.assertIn('badge.setToolTip("Click to change speaker • Assigned: " + ", ".join(speakers))', source)
         self.assertIn("soft.setAlpha(52)", source)
-        self.assertIn("self.project_title = str(project_title or \"\").strip()", source)
+        self.assertIn("project_title: str | None = None", source)
+        self.assertIn("self.project_title = project_title or \"Untitled Book\"", source)
         self.assertNotIn('text=self.window().windowTitle()', source)
 
     def test_workflow_passes_real_project_title_to_chapter_editor(self):
@@ -222,10 +223,14 @@ class RegressionTests(unittest.TestCase):
             "Report\n"
             "www.asianovel.com\n"
         )
-        cleaned = clean_import_noise(raw)
+        cleaned, removed = clean_import_noise(raw)
         self.assertNotIn("www.asianovel.com", cleaned)
         self.assertIn("A second paragraph begins here.", cleaned)
         self.assertIn("The hero walked toward the door", reflow_source_text(cleaned))
+        self.assertEqual(
+            removed,
+            ["41", "Report", "www.asianovel.com", "41", "Report", "www.asianovel.com"],
+        )
 
     def test_source_reflow_preserves_life_chapter_headings(self):
         from app.documents.parser import reflow_source_text
