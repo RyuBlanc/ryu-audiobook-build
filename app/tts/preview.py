@@ -108,7 +108,7 @@ def _preview_units(
 
     units: list[tuple[str, str | list[str] | None]] = []
     used_chars = 0
-    preview_unit_chars = 420
+    preview_unit_chars = 360
     preview_unit_sentences = 1
     # Short previews stay sentence-sized so a 20-second request does not
     # accidentally trigger a multi-minute synthesis unit.
