@@ -550,6 +550,11 @@ def runtime_environment() -> dict[str, str]:
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["TRANSFORMERS_ATTENTION_IMPLEMENTATION"] = "sdpa"
+    env["TOKENIZERS_PARALLELISM"] = "false"
+    env.setdefault("OMP_NUM_THREADS", "2")
+    env.setdefault("MKL_NUM_THREADS", "2")
+    env.setdefault("OPENBLAS_NUM_THREADS", "2")
+    env["PYTHONUNBUFFERED"] = "1"
     return env
 
 
