@@ -46,6 +46,7 @@ CUSTOM_SPEAKERS = (
 TORCH_VERSION = "2.9.1"
 TORCHAUDIO_VERSION = "2.9.1"
 QWEN_TTS_VERSION = "0.1.1"
+BOOTSTRAP_VERSION = 3
 
 
 def _python_works(path: Path) -> bool:
@@ -267,15 +268,57 @@ def _install_runtime_packages(python: Path, progress=None) -> None:
         progress(f"Offline character runtime ready. {detail[-700:]}")
 
 
+def _runtime_self_test(python: Path) -> tuple[bool, str]:
+    check = (
+        "import sys, torch, torchaudio, qwen_tts; "
+        "print('python=' + sys.version.split()[0]); "
+        "print('torch=' + torch.__version__); "
+        "print('torchaudio=' + torchaudio.__version__); "
+        "print('qwen_tts=' + getattr(qwen_tts, '__version__', 'unknown')); "
+        "print('cuda=' + str(torch.cuda.is_available()))"
+    )
+    returncode, detail = _run_capture([str(python), "-c", check], timeout=180)
+    return returncode == 0, detail[-5000:]
+
+
+def verify_runtime(progress=None) -> str:
+    if not VENV_PYTHON.exists():
+        raise RuntimeError("Qwen private Python runtime is missing.")
+    ok, detail = _runtime_self_test(VENV_PYTHON)
+    if not ok:
+        raise RuntimeError(
+            "Qwen3-TTS runtime is not healthy. Use 'Repair Qwen3-TTS Runtime'. "
+            f"Diagnostic: {detail}"
+        )
+    worker = worker_script()
+    if not worker.exists():
+        raise RuntimeError(f"Qwen worker script is missing: {worker}")
+    code, detail = _run_capture(
+        [str(VENV_PYTHON), "-m", "py_compile", str(worker)],
+        timeout=120,
+    )
+    if code != 0:
+        raise RuntimeError(
+            "Qwen worker script failed its Python self-check. "
+            f"Diagnostic: {detail[-3500:]}"
+        )
+    if progress:
+        progress(f"Qwen runtime healthy • {detail}")
+    return detail
+
+
 def _runtime_version_is_current() -> bool:
     try:
         data = json.loads(MARKER.read_text(encoding="utf-8"))
-        return (
-            data.get("ready") is True
-            and data.get("bootstrap_version") == 2
-            and data.get("qwen_tts") == QWEN_TTS_VERSION
-            and _python_works(VENV_PYTHON)
-        )
+        if (
+            data.get("ready") is not True
+            or data.get("bootstrap_version") != BOOTSTRAP_VERSION
+            or data.get("qwen_tts") != QWEN_TTS_VERSION
+            or not _python_works(VENV_PYTHON)
+        ):
+            return False
+        ok, _detail = _runtime_self_test(VENV_PYTHON)
+        return ok
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return False
 
@@ -404,10 +447,17 @@ def _run(command: list[str], progress=None, timeout: int = 3600) -> None:
         raise RuntimeError(f"Qwen character runtime command failed with exit code {code}.")
 
 
-def install_runtime(progress=None) -> None:
+def install_runtime(progress=None, force_repair: bool = False) -> None:
     RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
 
-    if _runtime_version_is_current():
+    if force_repair:
+        if progress:
+            progress("Repairing Qwen3-TTS isolated runtime • model files will be kept…")
+        MARKER.unlink(missing_ok=True)
+        if VENV_ROOT.exists():
+            shutil.rmtree(VENV_ROOT, ignore_errors=True)
+
+    if _runtime_version_is_current() and not force_repair:
         if progress:
             progress("Qwen3-TTS local runtime is already installed.")
         return
@@ -420,7 +470,7 @@ def install_runtime(progress=None) -> None:
         json.dumps(
             {
                 "ready": True,
-                "bootstrap_version": 2,
+                "bootstrap_version": BOOTSTRAP_VERSION,
                 "python": PYTHON_VERSION,
                 "qwen_tts": QWEN_TTS_VERSION,
                 "torch": TORCH_VERSION,
@@ -431,6 +481,11 @@ def install_runtime(progress=None) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def repair_runtime(progress=None) -> str:
+    install_runtime(progress, force_repair=True)
+    return verify_runtime(progress)
 
 
 def install_model(kind: str, progress=None) -> Path:
