@@ -35,8 +35,8 @@ def main() -> None:
             paths = worker._create_expression_anchors(model, request, root)
         finally:
             worker._set_seed = original_set_seed
-        assert set(paths) == {"neutral", "thoughtful", "warm"}
-        assert len(model.calls) == 3, "Expression references must be generated one at a time."
+        assert set(paths) == {"neutral"}
+        assert len(model.calls) == 1, "Canonical character identity must be generated once."
         assert all(call[0] and not isinstance(call[0], list) for call in model.calls)
         assert classify_expression("Instead of me…then?") == "thoughtful"
         assert reference_style("concerned") == "thoughtful"
