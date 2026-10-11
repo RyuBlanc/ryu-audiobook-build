@@ -8,6 +8,13 @@ import hashlib
 import json
 import sys
 
+from app.tts.expression import (
+    EXPRESSION_STYLES,
+    classify_expression,
+    expression_instruction,
+    expression_temperature,
+)
+
 MODEL_IDS = {
     "custom-0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
     "custom-1.7b": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
@@ -63,21 +70,10 @@ def _is_cuda_oom(exc: BaseException) -> bool:
     )
 
 
-def _voice_design_instruct(request: dict) -> str:
+def _voice_design_instruct(request: dict, style: str | None = None) -> str:
     base = str(request.get("instruct") or "").strip()
-    performance = (
-        "Natural audiobook performance: preserve the exact same speaker identity while following "
-        "punctuation, sentence meaning, dialogue, and scene context. Use subtle pitch movement, "
-        "varied emphasis, gentle breath timing, and appropriate emotional inflection without becoming "
-        "dramatic. Treat an internal ellipsis (…) as a brief natural hesitation before continuing; "
-        "treat an em dash as a small interrupted-thought pause. Let questions, uncertainty, embarrassment, "
-        "quiet amusement, relief, concern, and thoughtful moments affect delivery naturally. "
-        "Allow restrained nonverbal cues such as a soft breath or faint chuckle only when the story context "
-        "supports them. Do not flatten punctuation into a normal sentence and do not overact."
-    )
-    return f"{base}\n{performance}".strip() if base else performance
-
-
+    selected = style or classify_expression(str(request.get("text") or ""))
+    return expression_instruction(base, selected)
 def _generation_kwargs(request: dict) -> dict:
     # Keep VoiceDesign preview and audiobook narration on the same sampling
     # configuration so the preview is a trustworthy representation of the
@@ -136,9 +132,9 @@ def _default_anchor_text(language: str) -> str:
     )
 
 
-def _anchor_path(root: Path, request: dict) -> Path:
+def _anchor_path(root: Path, request: dict, style: str = "neutral") -> Path:
     explicit = str(request.get("anchor_path") or "").strip()
-    if explicit:
+    if explicit and style == "neutral":
         return Path(explicit)
     identity = "|".join(
         [
@@ -147,12 +143,11 @@ def _anchor_path(root: Path, request: dict) -> Path:
             str(request.get("instruct") or ""),
             str(request.get("seed") or ""),
             str(request.get("anchor_text") or ""),
+            style,
         ]
     )
     digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:20]
-    return root / "voice_anchors" / f"qwen-design-{digest}.wav"
-
-
+    return root / "voice_anchors" / f"qwen-design-{style}-{digest}.wav"
 def _generate_custom(model, request: dict, output: Path) -> None:
     import soundfile as sf
 
@@ -234,23 +229,46 @@ def _generate_design_anchor(model, request: dict, anchor: Path) -> str:
     return anchor_text
 
 
-def _prepare_design_clone(model, request: dict, args):
-    # Build the reusable character voice identity once from VoiceDesign, then
-    # switch to the Base model and reuse one VoiceClonePromptItem for every
-    # narration chunk. This prevents per-chunk VoiceDesign timbre drift.
-    import torch
-    from qwen_tts import Qwen3TTSModel
+def _create_expression_anchors(model, request: dict, root: Path) -> dict[str, Path]:
+    import soundfile as sf
 
-    anchor = _anchor_path(Path(args.models_root).resolve(), request)
-    anchor_text = str(request.get("anchor_text") or "").strip() or _default_anchor_text(
-        str(request.get("language") or "English")
+    language = str(request.get("language") or "English")
+    anchor_text = str(request.get("anchor_text") or "").strip() or _default_anchor_text(language)
+    styles = list(EXPRESSION_STYLES.keys())
+    paths = {style: _anchor_path(root, request, style) for style in styles}
+    missing = [style for style, path in paths.items() if not path.exists() or path.stat().st_size < 1024]
+    if not missing:
+        return paths
+
+    print(json.dumps({"progress": f"Building {len(missing)} subtle expression references…"}), flush=True)
+    texts = [anchor_text] * len(missing)
+    languages = [language] * len(missing)
+    instructs = [_voice_design_instruct(request, style) for style in missing]
+    anchor_request = {**request, "max_new_tokens": 768}
+    _set_seed(request.get("seed"))
+    wavs, sr = model.generate_voice_design(
+        text=texts,
+        language=languages,
+        instruct=instructs,
+        **_generation_kwargs(anchor_request),
     )
+    if len(wavs) != len(missing):
+        raise RuntimeError(
+            f"Qwen VoiceDesign returned {len(wavs)} expression anchors for {len(missing)} styles."
+        )
+    for style, wav in zip(missing, wavs):
+        path = paths[style]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        sf.write(str(path), wav, sr)
+    return paths
 
-    if not anchor.exists() or anchor.stat().st_size < 1024:
-        print(json.dumps({"progress": "Creating the fixed VoiceDesign identity anchor…"}), flush=True)
-        anchor_text = _generate_design_anchor(model, request, anchor)
 
-    print(json.dumps({"progress": "VoiceDesign anchor ready • loading Base clone engine for stable identity…"}), flush=True)
+def _prepare_design_clone(model, request: dict, args):
+    import torch
+
+    root = Path(args.models_root).resolve()
+    paths = _create_expression_anchors(model, request, root)
+    print(json.dumps({"progress": "Expression references ready • loading Base clone engine…"}), flush=True)
     del model
     gc.collect()
     if torch.cuda.is_available():
@@ -261,48 +279,42 @@ def _prepare_design_clone(model, request: dict, args):
 
     requested_clone_kind = args.clone_kind
     try:
-        clone_model, clone_device = _load_model(
-            requested_clone_kind,
-            args.backend,
-            Path(args.models_root).resolve(),
-        )
+        clone_model, clone_device = _load_model(requested_clone_kind, args.backend, root)
     except Exception as exc:
-        # VoiceDesign long-form favors the lighter 0.6B Base model when the
-        # larger Base model cannot fit on the GPU. This prevents a silent
-        # switch all the way down to CPU generation.
         if _is_cuda_oom(exc) and str(requested_clone_kind) == "base-1.7b":
             fallback_kind = "base-0.6b"
-            if (Path(args.models_root).resolve() / fallback_kind).exists():
-                print(
-                    json.dumps(
-                        {
-                            "progress": "Base 1.7B exceeded available GPU memory • switching to Base 0.6B for long-form generation"
-                        }
-                    ),
-                    flush=True,
-                )
-                clone_model, clone_device = _load_model(
-                    fallback_kind,
-                    args.backend,
-                    Path(args.models_root).resolve(),
-                )
+            if (root / fallback_kind).exists():
+                print(json.dumps({"progress": "Base 1.7B exceeded available GPU memory • switching to Base 0.6B"}), flush=True)
+                clone_model, clone_device = _load_model(fallback_kind, args.backend, root)
                 args.clone_kind = fallback_kind
             else:
                 raise
         else:
             raise
-    x_vector_only = False
-    prompt = clone_model.create_voice_clone_prompt(
-        ref_audio=str(anchor),
-        ref_text=anchor_text,
-        x_vector_only_mode=x_vector_only,
+
+    anchor_text = str(request.get("anchor_text") or "").strip() or _default_anchor_text(
+        str(request.get("language") or "English")
     )
-    return clone_model, clone_device, prompt, anchor
+    prompts = {
+        style: clone_model.create_voice_clone_prompt(
+            ref_audio=str(path),
+            ref_text=anchor_text,
+            x_vector_only_mode=False,
+        )
+        for style, path in paths.items()
+    }
+    return clone_model, clone_device, prompts, paths
 
 
-def _generate_design_locked(model, prompt, request: dict, output: Path) -> None:
+def _generate_design_locked(model, prompts, request: dict, output: Path) -> None:
     import soundfile as sf
 
+    style = str(request.get("expression_style") or classify_expression(str(request.get("text") or "")))
+    prompt = prompts.get(style) or prompts.get("neutral")
+    if prompt is None:
+        raise RuntimeError(f"No Qwen expression prompt is available for style '{style}'.")
+    temperature = expression_temperature(style)
+    request = {**request, "temperature": temperature, "subtalker_temperature": temperature}
     _set_seed(request.get("seed"))
     wavs, sr = model.generate_voice_clone(
         text=str(request.get("text") or ""),
@@ -311,10 +323,9 @@ def _generate_design_locked(model, prompt, request: dict, output: Path) -> None:
         **_generation_kwargs(request),
     )
     if not wavs:
-        raise RuntimeError("Qwen locked VoiceDesign/Base generation did not return audio.")
+        raise RuntimeError("Qwen expressive VoiceDesign/Base generation did not return audio.")
     output.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(output), wavs[0], sr)
-
 
 def _generate_clone(model, request: dict, output: Path) -> None:
     import soundfile as sf
@@ -354,8 +365,8 @@ def server(args) -> int:
 
     active_task = args.task
     active_kind = args.kind
-    locked_clone_prompt = None
-    locked_anchor = None
+    locked_clone_prompts = None
+    locked_anchors = None
 
     print(
         json.dumps(
@@ -397,50 +408,48 @@ def server(args) -> int:
                     raise RuntimeError("Qwen batch contains empty narration text.")
 
                 if active_task in {"design", "design-preview"}:
-                    if locked_clone_prompt is None:
+                    if locked_clone_prompts is None:
                         print(
                             json.dumps({"progress": "Creating or loading stable VoiceDesign identity…"}),
                             flush=True,
                         )
-                        model, device, locked_clone_prompt, locked_anchor = _prepare_design_clone(
+                        model, device, locked_clone_prompts, locked_anchors = _prepare_design_clone(
                             model, request, args
                         )
                         active_kind = str(args.clone_kind)
-                    print(
-                        json.dumps({
-                            "progress": f"Generating {len(texts)} narration segments in one Qwen batch…"
-                        }),
-                        flush=True,
-                    )
-                    languages = [str(request.get("language") or "English")] * len(texts)
-                    wavs, sr = model.generate_voice_clone(
-                        text=texts,
-                        language=languages,
-                        voice_clone_prompt=locked_clone_prompt,
-                        **_generation_kwargs(request),
-                    )
-                    if len(wavs) != len(texts):
-                        raise RuntimeError(
-                            f"Qwen returned {len(wavs)} outputs for {len(texts)} batch items."
-                        )
+                    print(json.dumps({"progress": f"Generating {len(texts)} narration segments with natural expression…"}), flush=True)
+                    requested_styles = request.get("styles") or [None] * len(texts)
+                    styles = [
+                        str(style) if style else classify_expression(text)
+                        for text, style in zip(texts, requested_styles)
+                    ]
                     import soundfile as sf
-                    for wav, output_path in zip(wavs, batch_outputs):
-                        destination = Path(str(output_path))
-                        destination.parent.mkdir(parents=True, exist_ok=True)
-                        sf.write(str(destination), wav, sr)
-                    print(
-                        json.dumps({
-                            "ok": True,
-                            "outputs": [str(Path(p).resolve()) for p in batch_outputs],
-                            "device": device,
-                            "kind": active_kind,
-                            "task": active_task,
-                            "anchor": str(locked_anchor) if locked_anchor else None,
-                            "voice_lock": True,
-                        }),
-                        flush=True,
-                    )
-                    continue
+                    for style in dict.fromkeys(styles):
+                        indexes = [i for i, item_style in enumerate(styles) if item_style == style]
+                        selected_texts = [texts[i] for i in indexes]
+                        temperature = expression_temperature(style)
+                        batch_request = {
+                            **request,
+                            "temperature": temperature,
+                            "subtalker_temperature": temperature,
+                        }
+                        prompt = locked_clone_prompts.get(style) or locked_clone_prompts.get("neutral")
+                        if prompt is None:
+                            raise RuntimeError(f"No Qwen expression prompt is available for style '{style}'.")
+                        wavs, sr = model.generate_voice_clone(
+                            text=selected_texts,
+                            language=[str(request.get("language") or "English")] * len(selected_texts),
+                            voice_clone_prompt=prompt,
+                            **_generation_kwargs(batch_request),
+                        )
+                        if len(wavs) != len(indexes):
+                            raise RuntimeError(
+                                f"Qwen returned {len(wavs)} outputs for {len(indexes)} {style} batch items."
+                            )
+                        for index, wav in zip(indexes, wavs):
+                            destination = Path(str(batch_outputs[index]))
+                            destination.parent.mkdir(parents=True, exist_ok=True)
+                            sf.write(str(destination), wav, sr)                    continue
 
                 raise RuntimeError("Batch generation is only supported for Qwen VoiceDesign narration.")
 
@@ -452,12 +461,12 @@ def server(args) -> int:
             if active_task == "custom":
                 _generate_custom(model, request, output)
             elif active_task in {"design", "design-preview"}:
-                if locked_clone_prompt is None:
+                if locked_clone_prompts is None:
                     print(
                         json.dumps({"progress": "Creating or loading stable VoiceDesign identity…"}),
                         flush=True,
                     )
-                    model, device, locked_clone_prompt, locked_anchor = _prepare_design_clone(
+                    model, device, locked_clone_prompts, locked_anchors = _prepare_design_clone(
                         model, request, args
                     )
                     active_kind = str(args.clone_kind)
@@ -477,7 +486,7 @@ def server(args) -> int:
                     }),
                     flush=True,
                 )
-                _generate_design_locked(model, locked_clone_prompt, request, output)
+                _generate_design_locked(model, locked_clone_prompts, request, output)
             elif active_task == "clone":
                 _generate_clone(model, request, output)
             else:
@@ -491,8 +500,8 @@ def server(args) -> int:
                         "device": device,
                         "kind": active_kind,
                         "task": active_task,
-                        "anchor": str(locked_anchor) if locked_anchor else None,
-                        "voice_lock": bool(locked_clone_prompt is not None),
+                        "anchor": str(locked_anchors.get("neutral") if locked_anchors else None,
+                        "voice_lock": bool(locked_clone_prompts is not None),
                     }
                 ),
                 flush=True,
@@ -535,7 +544,7 @@ def server(args) -> int:
                             raise RuntimeError(
                                 "The stable VoiceDesign identity could not be restored after GPU memory fallback."
                             )
-                        _generate_design_locked(model, locked_clone_prompt, request, output)
+                        _generate_design_locked(model, locked_clone_prompts, request, output)
                     else:
                         _generate_clone(model, request, output)
                     print(
