@@ -183,7 +183,9 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('"design-preview"', provider)
         self.assertIn('best_long_form_clone_kind()', provider)
         self.assertIn('_prepare_design_clone(model, request, args)', worker)
-        self.assertIn('_generate_design_locked(model, locked_clone_prompt, request, output)', worker)
+        self.assertIn('_generate_design_locked(model, locked_clone_prompts, request, output)', worker)
+        self.assertIn('_create_expression_anchors', worker)
+        self.assertIn('EXPRESSION_STYLES', worker)
 
     def test_qwen_voice_consistency_uses_design_anchor_and_base_prompt(self):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
@@ -283,7 +285,8 @@ class RegressionTests(unittest.TestCase):
         voice_page = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
         self.assertIn('elif active_task in {"design", "design-preview"}:', worker)
         self.assertIn("_prepare_design_clone(model, request, args)", worker)
-        self.assertIn("_generate_design_locked(model, locked_clone_prompt, request, output)", worker)
+        self.assertIn("_generate_design_locked(model, locked_clone_prompts, request, output)", worker)
+        self.assertIn("_create_expression_anchors", worker)
         self.assertIn('qwen_mode="design"', voice_page)
         self.assertIn('best_long_form_clone_kind()', provider)
         self.assertIn('"--clone-kind", clone_kind or best_clone_kind()', provider)
@@ -304,8 +307,22 @@ class RegressionTests(unittest.TestCase):
 
     def test_qwen_preview_and_audiobook_use_same_generation_ceiling(self):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
-        self.assertIn('"max_new_tokens": 1536', worker)
+        self.assertIn('"max_new_tokens": 2048', worker)
         self.assertNotIn('"max_new_tokens": min(int(request.get("max_new_tokens", 2048)), 1024)', worker)
+
+    def test_qwen_expression_styles_are_subtle_and_text_driven(self):
+        expression = Path("app/tts/expression.py").read_text(encoding="utf-8")
+        from app.tts.expression import classify_expression
+        self.assertIn("thoughtful", expression)
+        self.assertIn("warm", expression)
+        self.assertIn("concerned", expression)
+        self.assertEqual(classify_expression("Instead of me…then?"), "thoughtful")
+        self.assertIn(classify_expression("That's amazing! Really!"), {"excited", "thoughtful"})
+
+    def test_internal_ellipsis_creates_a_separate_pacing_unit(self):
+        units = split_for_pacing("Instead of me…then? Maybe later.", max_chars=200, max_sentences=4)
+        self.assertGreaterEqual(len(units), 2)
+        self.assertTrue(units[0].endswith("…"))
 
     def test_timed_preview_uses_target_duration_and_live_progress(self):
         preview = Path("app/tts/preview.py").read_text(encoding="utf-8")
