@@ -34,6 +34,10 @@ class QwenCharacterProvider(TTSProvider):
     # jobs on long novels and made GPU utilization/ETA unnecessarily poor.
     recommended_chunk_chars = 800
     recommended_chunk_sentences = 4
+    # Preserve efficient long units in calm narration, but cut at real shifts
+    # between neutral, thoughtful, warm and concerned styles so each unit can
+    # use the matching stable-identity expression reference.
+    split_on_expression_change = True
     # Conservative startup estimate used only until real chunk timings are available.
     estimated_chars_per_minute = 180.0
     handles_narration_controls = False
