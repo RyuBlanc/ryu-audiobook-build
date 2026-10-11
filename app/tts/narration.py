@@ -107,7 +107,7 @@ def apply_pronunciation_dictionary(text: str, dictionary: list[dict] | None = No
 
     entries.sort(key=lambda pair: len(pair[0]), reverse=True)
     for written, spoken in entries:
-        pattern = re.compile(r"(?<!\\w)" + re.escape(written) + r"(?!\\w)", re.IGNORECASE)
+        pattern = re.compile(r"(?<!\w)" + re.escape(written) + r"(?!\w)", re.IGNORECASE)
         result = pattern.sub(lambda match: spoken, result)
     return result
 
