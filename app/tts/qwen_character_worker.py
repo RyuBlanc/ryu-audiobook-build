@@ -24,7 +24,7 @@ from app.tts.expression import (
     reference_style,
 )
 
-EXPRESSION_BANK_VERSION = "v4"
+EXPRESSION_BANK_VERSION = "v5-canonical-identity"
 
 MODEL_IDS = {
     "custom-0.6b": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
@@ -86,24 +86,9 @@ def _voice_design_instruct(request: dict, style: str | None = None) -> str:
     selected = style or classify_expression(str(request.get("text") or ""))
     return expression_instruction(base, selected)
 def _recommended_max_new_tokens(text: str | None) -> int:
-    # Qwen3-TTS is a 12 Hz acoustic-token model. A fixed 2048-token ceiling
-    # is far too generous for a 10–30 second preview sentence and can produce
-    # long empty tails. Scale the ceiling from the actual text while leaving
-    # a small safety margin for natural pauses and expressive delivery.
     chars = max(1, len(str(text or "")))
-    estimated = int(chars * 1.15)
-    return max(256, min(2304, estimated))
-
-
-def _recommended_max_new_tokens(text: str | None) -> int:
-    # Qwen3-TTS is a 12 Hz codec model. A large fixed ceiling makes short
-    # sentences produce long tails and wastes inference time. A roughly
-    # text-proportional ceiling keeps sentence duration natural while leaving
-    # enough room for pauses and expressive delivery.
-    chars = max(1, len(str(text or "")))
-    estimated = int(chars * 0.95)
-    return max(64, min(1536, estimated))
-
+    estimated = int(chars * 1.10)
+    return max(96, min(2048, estimated))
 
 def _generation_kwargs(request: dict) -> dict:
     defaults = {
@@ -271,34 +256,36 @@ def _create_expression_anchors(model, request: dict, root: Path) -> dict[str, Pa
     import soundfile as sf
 
     language = str(request.get("language") or "English")
-    anchor_text = str(request.get("anchor_text") or "").strip() or _default_anchor_text(language)
-    styles = ["neutral", "thoughtful", "warm"]
-    paths = {style: _anchor_path(root, request, style) for style in styles}
-    missing = [style for style, path in paths.items() if not path.exists() or path.stat().st_size < 1024]
-    if not missing:
-        return paths
-
-    print(
-        json.dumps(
-            {"progress": f"Building {len(missing)} subtle expression references • one at a time for GPU safety…"}
-        ),
-        flush=True,
+    anchor_text = str(request.get("anchor_text") or "").strip() or (
+        "Wait… you mean me? I—I'm not sure. "
+        "Oh, really? That's actually pretty nice. "
+        "Ha… okay, I didn't expect that. "
+        "No, it's fine. Let's take a breath and think about it."
     )
+    path = _anchor_path(root, request, "neutral")
+    if path.exists() and path.stat().st_size >= 1024:
+        return {"neutral": path}
+
+    print(json.dumps({"progress": "Building one canonical expressive character reference…"}), flush=True)
+    _set_seed(request.get("seed"))
     anchor_request = {**request, "max_new_tokens": 768}
-    for style in missing:
-        _set_seed(request.get("seed"))
-        wavs, sr = model.generate_voice_design(
-            text=anchor_text,
-            language=language,
-            instruct=_voice_design_instruct(request, style),
-            **_generation_kwargs(anchor_request),
-        )
-        if not wavs:
-            raise RuntimeError(f"Qwen VoiceDesign did not return a {style} expression reference.")
-        path = paths[style]
-        path.parent.mkdir(parents=True, exist_ok=True)
-        sf.write(str(path), wavs[0], sr)
-    return paths
+    instruct = (
+        f"{_voice_design_instruct(request, 'neutral')} "
+        "Keep one stable character identity throughout: same age, timbre, accent, resonance "
+        "and vocal placement. Natural audiobook performance with a believable range from "
+        "calm to soft uncertainty, gentle amusement and mild excitement. Never theatrical."
+    )
+    wavs, sr = model.generate_voice_design(
+        text=anchor_text,
+        language=language,
+        instruct=instruct,
+        **_generation_kwargs(anchor_request),
+    )
+    if not wavs:
+        raise RuntimeError("Qwen VoiceDesign did not return a canonical character reference.")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(str(path), wavs[0], sr)
+    return {"neutral": path}
 
 
 def _prepare_design_clone(model, request: dict, args):
@@ -347,13 +334,10 @@ def _prepare_design_clone(model, request: dict, args):
 def _generate_design_locked(model, prompts, request: dict, output: Path) -> None:
     import soundfile as sf
 
-    style = str(request.get("expression_style") or classify_expression(str(request.get("text") or "")))
-    prompt_style = reference_style(style)
-    prompt = prompts.get(prompt_style) or prompts.get("neutral")
+    prompt = prompts.get("neutral")
     if prompt is None:
-        raise RuntimeError(f"No Qwen expression prompt is available for style '{style}'.")
-    temperature = expression_temperature(style)
-    request = {**request, "temperature": temperature, "subtalker_temperature": temperature}
+        raise RuntimeError("The canonical Qwen voice identity is not available.")
+    request = {**request, "temperature": 0.86, "subtalker_temperature": 0.86}
     _set_seed(request.get("seed"))
     wavs, sr = model.generate_voice_clone(
         text=str(request.get("text") or ""),
@@ -362,9 +346,10 @@ def _generate_design_locked(model, prompts, request: dict, output: Path) -> None
         **_generation_kwargs(request),
     )
     if not wavs:
-        raise RuntimeError("Qwen expressive VoiceDesign/Base generation did not return audio.")
+        raise RuntimeError("Qwen canonical VoiceDesign/Base generation returned no audio.")
     output.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(output), wavs[0], sr)
+
 
 def _generate_clone(model, request: dict, output: Path) -> None:
     import soundfile as sf
@@ -419,53 +404,76 @@ def server(args) -> int:
         print(json.dumps({"progress": f"Qwen model loaded • {device}"}), flush=True)
 
     def anchor_bank_paths(request: dict) -> dict[str, Path]:
-        return {
-            style: _anchor_path(root, request, style)
-            for style in ("neutral", "thoughtful", "warm")
-        }
+        return {"neutral": _anchor_path(root, request, "neutral")}
 
     def lock_design_identity(request: dict) -> None:
         nonlocal model, device, locked_clone_prompts, locked_anchors, active_kind
         if locked_clone_prompts is not None:
             return
-
         paths = anchor_bank_paths(request)
-        bank_ready = all(path.exists() and path.stat().st_size >= 1024 for path in paths.values())
+        neutral_path = paths["neutral"]
+        ready = neutral_path.exists() and neutral_path.stat().st_size >= 1024
 
-        if bank_ready:
-            print(json.dumps({"progress": "Loading cached character identity • skipping VoiceDesign rebuild…"}), flush=True)
+        if ready:
+            print(json.dumps({"progress": "Loading cached canonical character identity…"}), flush=True)
             clone_kind = args.clone_kind
             try:
                 clone_model, clone_device = _load_model(clone_kind, args.backend, root)
             except Exception as exc:
-                if _is_cuda_oom(exc) and args.backend != "cpu" and clone_kind == "base-1.7b":
+                if _is_cuda_oom(exc) and args.backend != "cpu":
                     clone_kind = "base-0.6b"
                     clone_model, clone_device = _load_model(clone_kind, args.backend, root)
-                elif _is_cuda_oom(exc) and args.backend != "cpu":
-                    clone_model, clone_device = _load_model(clone_kind, "cpu", root)
                 else:
                     raise
             model = clone_model
             device = clone_device
             active_kind = clone_kind
-            anchor_text = str(request.get("anchor_text") or "").strip() or _default_anchor_text(str(request.get("language") or "English"))
+            anchor_text = str(request.get("anchor_text") or "").strip() or _default_anchor_text(
+                str(request.get("language") or "English")
+            )
             locked_clone_prompts = {
-                style: model.create_voice_clone_prompt(
-                    ref_audio=str(path),
+                "neutral": model.create_voice_clone_prompt(
+                    ref_audio=str(neutral_path),
                     ref_text=anchor_text,
                     x_vector_only_mode=False,
                 )
-                for style, path in paths.items()
             }
-            locked_anchors = paths
+            locked_anchors = {"neutral": neutral_path}
             return
 
-        # First-ever use for a profile: build the expression bank once, then
-        # keep the lightweight Base model for all narration requests.
         load_model(args.kind)
-        print(json.dumps({"progress": "Preparing the character expression bank • first use only…"}), flush=True)
-        model, device, locked_clone_prompts, locked_anchors = _prepare_design_clone(model, request, args)
-        active_kind = str(args.clone_kind)
+        print(json.dumps({"progress": "Preparing canonical character identity • first use only…"}), flush=True)
+        neutral_path = _create_expression_anchors(model, request, root)["neutral"]
+        del model
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+
+        clone_kind = str(args.clone_kind)
+        try:
+            model, device = _load_model(clone_kind, args.backend, root)
+        except Exception as exc:
+            if _is_cuda_oom(exc) and args.backend != "cpu":
+                clone_kind = "base-0.6b"
+                model, device = _load_model(clone_kind, args.backend, root)
+            else:
+                raise
+        active_kind = clone_kind
+        anchor_text = str(request.get("anchor_text") or "").strip() or _default_anchor_text(
+            str(request.get("language") or "English")
+        )
+        locked_clone_prompts = {
+            "neutral": model.create_voice_clone_prompt(
+                ref_audio=str(neutral_path),
+                ref_text=anchor_text,
+                x_vector_only_mode=False,
+            )
+        }
+        locked_anchors = {"neutral": neutral_path}
 
     print(
         json.dumps(
