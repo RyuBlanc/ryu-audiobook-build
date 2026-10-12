@@ -384,10 +384,10 @@ class RegressionTests(unittest.TestCase):
     def test_story_pacing_preserves_headings_dialogue_and_attribution(self):
         from app.tts.pacing import is_heading_line
         source = (
-            "The hallway was silent.\\n\\n"
-            "THE DEMON LORD SUMMIT\\n\\n"
-            "The three people sat down.\\n\\n"
-            "“Don't move!” he shouted.\\n"
+            "The hallway was silent.\n\n"
+            "THE DEMON LORD SUMMIT\n\n"
+            "The three people sat down.\n\n"
+            "“Don't move!” he shouted.\n"
             "“Why?” she asked."
         )
         units = split_for_pacing(source, max_chars=800, max_sentences=4)
@@ -434,10 +434,10 @@ class RegressionTests(unittest.TestCase):
             }), encoding="utf-8")
             python.touch()
             worker.touch()
-            with patch.object(runtime, "MARKER", marker), \\
-                 patch.object(runtime, "VENV_PYTHON", python), \\
-                 patch.object(runtime, "worker_script", return_value=worker), \\
-                 patch.object(runtime, "_python_works", side_effect=AssertionError("subprocess check ran")), \\
+            with patch.object(runtime, "MARKER", marker), \
+                 patch.object(runtime, "VENV_PYTHON", python), \
+                 patch.object(runtime, "worker_script", return_value=worker), \
+                 patch.object(runtime, "_python_works", side_effect=AssertionError("subprocess check ran")), \
                  patch.object(runtime, "_runtime_self_test", side_effect=AssertionError("model imports ran")):
                 self.assertTrue(runtime.runtime_ready())
 
@@ -501,14 +501,15 @@ class RegressionTests(unittest.TestCase):
             qwen_anchor_text="A sample sentence.",
             qwen_profile_id="saved-profile-id",
         )
-        page = object.__new__(VoicePage)
-        page.profiles = [saved]
-        class SavedBox:
-            def currentData(self):
-                return saved.name
-        page.saved_profiles = SavedBox()
+        class ProfileLookup:
+            profiles = [saved]
+            class SavedBox:
+                def currentData(self):
+                    return saved.name
+            saved_profiles = SavedBox()
+        page = ProfileLookup()
         self.assertEqual(
-            page._stable_qwen_design_profile_id(
+            VoicePage._stable_qwen_design_profile_id(page,
                 saved.name,
                 saved.qwen_prompt,
                 saved.language,
@@ -546,8 +547,7 @@ class RegressionTests(unittest.TestCase):
             original = voice_profiles.profiles_file
             voice_profiles.profiles_file = lambda: profile_file
             try:
-                page = object.__new__(GenerationPage)
-                class Combo:
+                        class Combo:
                     def currentData(self):
                         return VoiceProfile(
                             name="Current Kousuke",
@@ -558,8 +558,9 @@ class RegressionTests(unittest.TestCase):
                             qwen_seed=12,
                             qwen_profile_id="stale-id",
                         )
-                page.voice_profile = Combo()
-                selected = page._selected_profile()
+                class Selection:
+                    voice_profile = Combo()
+                selected = GenerationPage._selected_profile(Selection())
                 self.assertEqual(selected.qwen_profile_id, "fresh-id")
                 self.assertEqual(selected.qwen_prompt, "Lower mid-range young male voice.")
             finally:
