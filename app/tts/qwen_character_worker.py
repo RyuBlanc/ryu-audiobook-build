@@ -26,11 +26,10 @@ from app.tts.expression import (
 
 EXPRESSION_BANK_VERSION = "v7-single-anchor-stable-identity"
 
-# The Base model can lock speaker identity from an acoustic reference, but does
-# not provide VoiceDesign's per-line natural-language instruction channel.
-# Prepare a tiny, versioned bank so the chosen reference itself carries a
-# restrained delivery shape. These scripts are the exact transcripts supplied
-# to create_voice_clone_prompt.
+# The Base model locks speaker identity from one acoustic reference, but does
+# not expose VoiceDesign's per-line natural-language instruction channel.
+# Emotion changes therefore come from sentence-aware chunking, punctuation,
+# pause design and controlled sampling variation, never a second voice anchor.
 # Use one canonical acoustic reference per saved profile. Generating different
 # VoiceDesign samples independently for each emotion can subtly change timbre
 # or even gender presentation; emotion boundaries and sampling variation must
@@ -490,10 +489,7 @@ def server(args) -> int:
         if ready:
             print(
                 json.dumps({
-                    "progress": (
-                        "Loading cached canonical character identity • "
-                        "reusing neutral/thoughtful/warm/concerned references…"
-                    )
+                    "progress": "Loading the saved canonical character identity…"
                 }),
                 flush=True,
             )
