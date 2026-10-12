@@ -440,6 +440,21 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(custom._auto_select_model)
         self.assertTrue(clone._auto_select_model)
 
+    def test_voice_design_anchor_instruction_preserves_identity_and_mood_range(self):
+        from app.tts.expression import voice_design_anchor_instruction
+        instruction = voice_design_anchor_instruction(
+            "Young adult male anime protagonist, lower-mid pitch and restrained confidence."
+        )
+        self.assertIn("Young adult male anime protagonist", instruction)
+        self.assertIn("Preserve its specified gender presentation", instruction)
+        self.assertIn("pitch range", instruction)
+        self.assertIn("warm, pleasantly surprised energy", instruction)
+        self.assertIn("briefly concerned", instruction)
+        self.assertIn("not four different voices", instruction)
+        worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
+        self.assertIn("voice_design_anchor_instruction(base_description)", worker)
+        self.assertIn('"temperature": temperature', worker)
+
     def test_saved_voice_design_uses_one_shared_anchor_transcript(self):
         from app.tts.expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT
         from app.tts.providers.qwen_character import QwenCharacterProvider
@@ -615,7 +630,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("saved canonical character identity", worker)
         self.assertIn("ready = all(", worker)
         self.assertIn('ANCHOR_STYLES = ("neutral",)', worker)
-        self.assertIn("v7-single-anchor-stable-identity", worker)
+        self.assertIn("v8-emotion-range-anchor", worker)
         self.assertIn('if active_task not in {"design", "design-preview"}:', worker)
         self.assertIn('if vram_gb >= 10.0 and model_installed("base-1.7b")', runtime)
 
