@@ -44,6 +44,8 @@ class GenerationManager:
         bitrate: int | str | None = 256,
         background_audio_path: Path | None = None,
         background_audio_volume: float = 0.18,
+        ambience_audio_path: Path | None = None,
+        ambience_audio_volume: float = 0.10,
         background_audio_fade_in: float = 2.0,
         background_audio_fade_out: float = 3.0,
     ) -> None:
@@ -60,6 +62,8 @@ class GenerationManager:
         self.bitrate = bitrate
         self.background_audio_path = Path(background_audio_path) if background_audio_path else None
         self.background_audio_volume = max(0.0, min(1.0, float(background_audio_volume)))
+        self.ambience_audio_path = Path(ambience_audio_path) if ambience_audio_path else None
+        self.ambience_audio_volume = max(0.0, min(1.0, float(ambience_audio_volume)))
         self.background_audio_fade_in = max(0.0, min(30.0, float(background_audio_fade_in)))
         self.background_audio_fade_out = max(0.0, min(30.0, float(background_audio_fade_out)))
         self.cancel_event = Event()
@@ -261,6 +265,8 @@ class GenerationManager:
                     narration_speed=self.narration_speed,
                     background_audio_path=self.background_audio_path,
                     background_audio_volume=self.background_audio_volume,
+                    ambience_audio_path=self.ambience_audio_path,
+                    ambience_audio_volume=self.ambience_audio_volume,
                     background_audio_fade_in=self.background_audio_fade_in,
                     background_audio_fade_out=self.background_audio_fade_out,
                 )
