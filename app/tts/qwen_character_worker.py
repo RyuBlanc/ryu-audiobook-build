@@ -23,9 +23,10 @@ from app.tts.expression import (
     expression_instruction,
     expression_temperature,
     reference_style,
+    voice_design_anchor_instruction,
 )
 
-EXPRESSION_BANK_VERSION = "v7-single-anchor-stable-identity"
+EXPRESSION_BANK_VERSION = "v8-emotion-range-anchor"
 
 # The Base model locks speaker identity from one acoustic reference, but does
 # not expose VoiceDesign's per-line natural-language instruction channel.
@@ -302,7 +303,9 @@ def _create_expression_anchors(model, request: dict, root: Path) -> dict[str, Pa
     for ordinal, style in enumerate(missing, start=1):
         path = paths[style]
         anchor_text = _expression_anchor_text(request, style)
-        temperature = expression_temperature(style)
+        # A slightly more expressive reference helps the locked Base voice
+        # reproduce a natural range later without changing the chosen identity.
+        temperature = 0.88
         print(
             json.dumps({
                 "progress": (
@@ -320,9 +323,11 @@ def _create_expression_anchors(model, request: dict, root: Path) -> dict[str, Pa
             "temperature": temperature,
             "subtalker_temperature": temperature,
         }
-        instruct = expression_instruction(
-            str(request.get("instruct") or ""),
-            style,
+        base_description = str(request.get("instruct") or "")
+        instruct = (
+            voice_design_anchor_instruction(base_description)
+            if style == "neutral"
+            else expression_instruction(base_description, style)
         )
         wavs, sr = model.generate_voice_design(
             text=anchor_text,
