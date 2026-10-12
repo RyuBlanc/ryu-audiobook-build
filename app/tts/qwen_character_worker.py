@@ -24,19 +24,24 @@ from app.tts.expression import (
     reference_style,
 )
 
-EXPRESSION_BANK_VERSION = "v6-story-expression-anchors"
+EXPRESSION_BANK_VERSION = "v7-single-anchor-stable-identity"
 
 # The Base model can lock speaker identity from an acoustic reference, but does
 # not provide VoiceDesign's per-line natural-language instruction channel.
 # Prepare a tiny, versioned bank so the chosen reference itself carries a
 # restrained delivery shape. These scripts are the exact transcripts supplied
 # to create_voice_clone_prompt.
-ANCHOR_STYLES = ("neutral", "thoughtful", "warm", "concerned")
+# Use one canonical acoustic reference per saved profile. Generating different
+# VoiceDesign samples independently for each emotion can subtly change timbre
+# or even gender presentation; emotion boundaries and sampling variation must
+# not replace the saved character identity.
+ANCHOR_STYLES = ("neutral",)
 ANCHOR_TEXTS = {
-    "neutral": "The room was quiet. I looked toward the doorway and waited.",
-    "thoughtful": "I... I thought I understood. Maybe I was wrong.",
-    "warm": "Oh, really? That's actually wonderful. Heh, I didn't expect that.",
-    "concerned": "Wait—don't go. Something isn't right, and we need to be careful.",
+    "neutral": (
+        "Hello. I thought I understood what was happening. "
+        "Oh, really? That's actually wonderful. "
+        "Wait... something isn't right. Let's think for a moment."
+    ),
 }
 
 
@@ -307,8 +312,8 @@ def _create_expression_anchors(model, request: dict, root: Path) -> dict[str, Pa
         print(
             json.dumps({
                 "progress": (
-                    f"Building expressive voice references • {ordinal}/{len(missing)} "
-                    f"• {style} • first use for this profile"
+                    f"Building the saved character identity • {ordinal}/{len(missing)} "
+                    f"• first use for this profile"
                 )
             }),
             flush=True,
@@ -523,7 +528,7 @@ def server(args) -> int:
         load_model(args.kind)
         print(
             json.dumps({
-                "progress": "Preparing stable character identity • generating missing expression references…"
+                "progress": "Preparing the saved character identity • first use for this profile…"
             }),
             flush=True,
         )
