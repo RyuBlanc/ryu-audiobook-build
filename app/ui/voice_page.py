@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import hashlib
 from dataclasses import replace
 import re
 from pathlib import Path
@@ -1790,6 +1791,52 @@ class VoicePage(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "Voice Import Failed", str(exc))
 
+    def _stable_qwen_design_profile_id(
+        self,
+        name: str,
+        prompt: str,
+        language: str,
+        seed: int,
+        anchor_text: str,
+    ) -> str:
+        """Reuse the saved identity for unchanged settings; derive a stable ID for edits.
+
+        The anchor cache is keyed by this ID. A random ID for every preview
+        would re-design the same character repeatedly and could change its
+        timbre/gender between the Voice Studio and Generate screens.
+        """
+        saved_name = self.saved_profiles.currentData() if hasattr(self, "saved_profiles") else None
+        saved = next(
+            (
+                item for item in self.profiles
+                if item.provider == "qwen-character"
+                and item.qwen_mode == "design"
+                and item.name.casefold() == str(name).casefold()
+            ),
+            None,
+        )
+        if saved and saved.qwen_profile_id and saved.name == saved_name:
+            saved_prompt = (saved.qwen_prompt or saved.notes).replace("Qwen VoiceDesign • ", "")
+            if (
+                saved_prompt.strip() == prompt.strip()
+                and (saved.language or "English") == language
+                and int(saved.qwen_seed or 3101) == int(seed or 3101)
+                and (saved.qwen_anchor_text or anchor_text) == anchor_text
+            ):
+                return saved.qwen_profile_id
+
+        identity = "\\0".join(
+            (
+                str(name).strip().casefold(),
+                str(language).strip().casefold(),
+                str(prompt).strip(),
+                str(int(seed or 3101)),
+                str(anchor_text).strip(),
+                "qwen-design-profile-v2",
+            )
+        )
+        return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+
     def _profile_from_ui(self) -> VoiceProfile | None:
         provider = self.mode.currentData()
         name = self.name.text().strip()
@@ -1832,21 +1879,26 @@ class VoicePage(QWidget):
                 c.lower() if c.isalnum() else "-"
                 for c in design_name
             ).strip("-")[:50]
-            seed = int(self.qwen_design_seed.value())
+            seed = int(self.qwen_design_seed.value()) or 3101
+            language = self.qwen_design_language.currentText()
+            anchor_text = self._qwen_preview_script(12)
+            profile_id = self._stable_qwen_design_profile_id(
+                design_name, prompt, language, seed, anchor_text
+            )
             return VoiceProfile(
                 name=design_name,
                 provider="qwen-character",
                 voice_id=f"design-{safe_id or 'voice'}",
                 model_id="design-1.7b",
                 backend="automatic",
-                language=self.qwen_design_language.currentText(),
+                language=language,
                 notes=f"Qwen VoiceDesign • {prompt}",
                 authorized=True,
                 qwen_mode="design",
                 qwen_prompt=prompt,
-                qwen_seed=seed if seed > 0 else 3101,
-                qwen_anchor_text=self._qwen_preview_script(12),
-                qwen_profile_id=uuid.uuid4().hex,
+                qwen_seed=seed,
+                qwen_anchor_text=anchor_text,
+                qwen_profile_id=profile_id,
             )
 
         if provider == "qwen-clone":
