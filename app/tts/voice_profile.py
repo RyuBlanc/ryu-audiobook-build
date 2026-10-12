@@ -171,6 +171,60 @@ def builtin_voice_profiles() -> list[VoiceProfile]:
     return result + offline_fallbacks
 
 
+def load_saved_profiles() -> list[VoiceProfile]:
+    """Read the persisted profile records only; do not scan installed voice engines."""
+    path = profiles_file()
+    if not path.is_file():
+        return []
+    try:
+        records = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(records, list):
+        return []
+    migrated = False
+    for record in records:
+        if (
+            isinstance(record, dict)
+            and record.get("provider") == "qwen-character"
+            and not record.get("qwen_profile_id")
+        ):
+            record["qwen_profile_id"] = uuid.uuid4().hex
+            migrated = True
+    if migrated:
+        try:
+            # Persist IDs without calling save_profiles(), which scans every
+            # installed engine and is too much work for a simple profile read.
+            path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+    saved: list[VoiceProfile] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        try:
+            saved.append(VoiceProfile(**record))
+        except (TypeError, ValueError):
+            continue
+    return saved
+
+
+def load_saved_profile(name: str) -> VoiceProfile | None:
+    """Read one persisted profile without rebuilding the built-in voice catalogue.
+
+    Pages remain alive while the user switches tabs; reading the saved record
+    directly prevents an older in-memory VoiceDesign description/seed/identity
+    from being used for generation after the profile has been updated.
+    """
+    wanted = str(name or "").strip().casefold()
+    if not wanted:
+        return None
+    return next(
+        (profile for profile in load_saved_profiles() if profile.name.casefold() == wanted),
+        None,
+    )
+
+
 def load_profiles() -> list[VoiceProfile]:
     path = profiles_file()
     saved: list[VoiceProfile] = []

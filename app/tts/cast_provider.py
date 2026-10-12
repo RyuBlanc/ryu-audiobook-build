@@ -92,6 +92,21 @@ class CastAwareProvider(TTSProvider):
                 child_callback(callback)
 
 
+    def request_cancel(self) -> None:
+        """Forward non-blocking cancellation to the active narrator and cast voices."""
+        providers = [self.narrator_provider, *[item[0] for item in self._providers.values()]]
+        seen = set()
+        for provider in providers:
+            if id(provider) in seen:
+                continue
+            seen.add(id(provider))
+            cancel = getattr(provider, "request_cancel", None)
+            if callable(cancel):
+                try:
+                    cancel()
+                except Exception:
+                    pass
+
     def generation_signature(self) -> str:
         payload = {
             "narrator": self.narrator_voice,

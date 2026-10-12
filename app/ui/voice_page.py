@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import hashlib
 from dataclasses import replace
 import re
 from pathlib import Path
@@ -30,6 +31,7 @@ class PassiveScrollComboBox(QComboBox):
 
 from app.tts.profile_provider import provider_from_profile
 from app.tts.preview import build_voice_preview
+from app.tts.expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT
 from app.tts.chatterbox_runtime import runtime_ready, runtime_status
 from app.tts.qwen_character_runtime import (
     runtime_ready as qwen_runtime_ready,
@@ -42,14 +44,14 @@ from app.tts.qwen_character_runtime import (
 from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.voice_profile import (
     VoiceProfile, builtin_voice_profiles, import_reference_audio,
-    load_profiles, save_profiles,
+    load_profiles, load_saved_profiles, save_profiles,
 )
 from app.tts.providers.edge_tts import EdgeTTSProvider
 from app.tts.providers.elevenlabs import ElevenLabsProvider
 
 
 class VoicePreviewWorker(QThread):
-    finished_ok = Signal(str)
+    finished_ok = Signal(str, float)
     failed = Signal(str)
     cancelled = Signal()
     status = Signal(str)
@@ -63,14 +65,55 @@ class VoicePreviewWorker(QThread):
         self.target_seconds = max(1, int(target_seconds))
         self.provider = None
         self.cancel_requested = False
+        self._progress_floor = 0
+        self._preview_started = 0.0
+
+    def _emit_progress(self, value: int) -> int:
+        # Coarse phase progress only: Qwen's Base inference does not expose
+        # token-level completion, so never invent a smooth percentage.
+        self._progress_floor = max(self._progress_floor, min(100, max(0, int(value))))
+        self.progress.emit(self._progress_floor)
+        return self._progress_floor
 
     def _status(self, message: str) -> None:
-        if message:
-            self.status.emit(str(message))
+        if not message:
+            return
+        value = str(message)
+        low = value.casefold()
+        # These are real worker phase boundaries, not estimates of tokens.
+        if "building the saved character identity" in low or "preparing the saved character identity" in low:
+            self._emit_progress(30)
+        elif "loading cached canonical character identity" in low:
+            self._emit_progress(28)
+        elif "expression references ready" in low or "loading base clone engine" in low:
+            self._emit_progress(42)
+        elif "loading qwen model" in low:
+            self._emit_progress(18 if self._progress_floor < 30 else 45)
+        elif "qwen model loaded" in low:
+            self._emit_progress(25 if self._progress_floor < 30 else 50)
+        elif (
+            "generating natural voicedesign" in low
+            or "generating qwen customvoice speech" in low
+            or "generating qwen base clone speech" in low
+        ):
+            self._emit_progress(52)
+        if (
+            ("processing" in low or "generating" in low)
+            and "elapsed" not in low
+            and self._preview_started > 0
+        ):
+            seconds = max(0, int(time.monotonic() - self._preview_started))
+            value += f" • elapsed {seconds // 60}:{seconds % 60:02d}"
+        self.status.emit(value)
 
     def run(self) -> None:
+        # Measure from worker entry so model startup and provider initialization
+        # are included in the final "time taken" displayed to the user.
+        preview_started = time.monotonic()
+        self._preview_started = preview_started
+        self._progress_floor = 0
         try:
-            self.progress.emit(5)
+            self._emit_progress(5)
             self._status(
                 f"[5%] Preparing preview • {self.profile.provider} • "
                 f"{self.profile.qwen_mode if self.profile.provider == 'qwen-character' else self.profile.backend}"
@@ -84,10 +127,9 @@ class VoicePreviewWorker(QThread):
                 self.cancelled.emit()
                 return
 
-            self.progress.emit(10)
+            self._emit_progress(10)
             self._status("[10%] Voice engine ready • preparing preview segments…")
 
-            preview_started = time.monotonic()
             def fmt_seconds(value: float) -> str:
                 seconds = max(0, int(value))
                 return f"{seconds // 60}:{seconds % 60:02d}"
@@ -114,16 +156,18 @@ class VoicePreviewWorker(QThread):
                 else:
                     percent = 10
                     label = "Preparing preview…"
-                self.progress.emit(percent)
-                self._status(f"[{percent}%] {label}")
+                actual_percent = self._emit_progress(percent)
+                self._status(f"[{actual_percent}%] {label}")
 
             build_voice_preview(
                 self.text,
                 self.provider,
                 voice,
                 self.output,
-                narration_speed=1.0,
-                pacing_profile="off",
+                # Preview should represent the default full-generation path,
+                # not the old unpaced flat read.
+                narration_speed=0.90,
+                pacing_profile="natural",
                 max_chars=max(1800, len(self.text) + 1),
                 progress_callback=preview_progress,
                 target_seconds=self.target_seconds,
@@ -133,11 +177,15 @@ class VoicePreviewWorker(QThread):
                 return
             if not self.output.exists() or self.output.stat().st_size < 1024:
                 raise RuntimeError("The voice engine did not produce valid audio.")
-            self.progress.emit(100)
-            self._status("[100%] Preview ready.")
-            self.finished_ok.emit(str(self.output))
+            self._emit_progress(100)
+            elapsed_seconds = max(0.0, time.monotonic() - preview_started)
+            self._status(f"[100%] Preview ready • generated in {fmt_seconds(elapsed_seconds)}")
+            self.finished_ok.emit(str(self.output), elapsed_seconds)
         except Exception as exc:
-            self.failed.emit(str(exc))
+            if self.cancel_requested:
+                self.cancelled.emit()
+            else:
+                self.failed.emit(str(exc))
         finally:
             provider = self.provider
             self.provider = None
@@ -152,10 +200,12 @@ class VoicePreviewWorker(QThread):
         self.cancel_requested = True
         self._status("Stopping preview…")
         provider = self.provider
-        close = getattr(provider, "close", None)
-        if callable(close):
+        cancel = getattr(provider, "request_cancel", None)
+        if callable(cancel):
+            # Must not call close()/wait() in the Qt thread; Qwen model startup
+            # and generation can take minutes on a 4 GB GPU.
             try:
-                close()
+                cancel()
             except Exception:
                 pass
 
@@ -207,6 +257,7 @@ class VoicePage(QWidget):
         self.sapi = SystemSAPIProvider()
         self.sample_path: Path | None = None
         self.last_preview: Path | None = None
+        self.last_preview_elapsed_seconds: float | None = None
         self.preview_worker: VoicePreviewWorker | None = None
         self.character_worker: PremiumCharacterVoiceWorker | None = None
         self.character_previews: list[dict] = []
@@ -1391,7 +1442,10 @@ class VoicePage(QWidget):
         language = profile.language or "Not specified"
         model = profile.model_id or "automatic"
         if profile.provider == "qwen-character" and (profile.qwen_mode or "custom") == "design":
-            model = f"VoiceDesign {profile.model_id or 'design-1.7b'} → Base {best_long_form_clone_kind()} long-form voice lock"
+            model = (
+                f"VoiceDesign {profile.model_id or 'design-1.7b'} "
+                "→ Base model selected in the background for this GPU"
+            )
 
         anchor = "Not used"
         if profile.qwen_anchor_path:
@@ -1613,7 +1667,10 @@ class VoicePage(QWidget):
             self._set_filter_values(qwen_profiles)
             self._refresh_voice_list()
             ready = qwen_runtime_ready()
-            kind = best_custom_kind()
+            # UI status must not start nvidia-smi. Use a conservative fast
+            # filesystem-only choice here; the provider makes the true GPU-aware
+            # choice in its worker thread before generation.
+            kind = best_custom_kind(vram_gb=0.0)
             installed = ready and qwen_model_installed(kind)
             self.source_hint.setText(
                 "Qwen3-TTS CustomVoice • reusable named speakers with local style instructions on the 1.7B path. "
@@ -1655,7 +1712,8 @@ class VoicePage(QWidget):
 
         elif mode == "qwen-clone":
             ready = qwen_runtime_ready()
-            kind = best_clone_kind()
+            # Keep hardware detection out of the Qt event loop.
+            kind = best_clone_kind(vram_gb=0.0)
             installed = ready and qwen_model_installed(kind)
             self.source_hint.setText(
                 "Qwen3-TTS Base • authorized voice cloning from a short local reference recording."
@@ -1784,6 +1842,52 @@ class VoicePage(QWidget):
         except Exception as exc:
             QMessageBox.critical(self, "Voice Import Failed", str(exc))
 
+    def _stable_qwen_design_profile_id(
+        self,
+        name: str,
+        prompt: str,
+        language: str,
+        seed: int,
+        anchor_text: str,
+    ) -> str:
+        """Reuse the saved identity for unchanged settings; derive a stable ID for edits.
+
+        The anchor cache is keyed by this ID. A random ID for every preview
+        would re-design the same character repeatedly and could change its
+        timbre/gender between the Voice Studio and Generate screens.
+        """
+        saved_name = self.saved_profiles.currentData() if hasattr(self, "saved_profiles") else None
+        saved = next(
+            (
+                item for item in load_saved_profiles()
+                if item.provider == "qwen-character"
+                and item.qwen_mode == "design"
+                and item.name.casefold() == str(name).casefold()
+            ),
+            None,
+        )
+        if saved and saved.qwen_profile_id and saved.name == saved_name:
+            saved_prompt = (saved.qwen_prompt or saved.notes).replace("Qwen VoiceDesign • ", "")
+            if (
+                saved_prompt.strip() == prompt.strip()
+                and (saved.language or "English") == language
+                and int(saved.qwen_seed or 3101) == int(seed or 3101)
+                and (saved.qwen_anchor_text or anchor_text) == anchor_text
+            ):
+                return saved.qwen_profile_id
+
+        identity = "\\0".join(
+            (
+                str(name).strip().casefold(),
+                str(language).strip().casefold(),
+                str(prompt).strip(),
+                str(int(seed or 3101)),
+                str(anchor_text).strip(),
+                "qwen-design-profile-v2",
+            )
+        )
+        return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+
     def _profile_from_ui(self) -> VoiceProfile | None:
         provider = self.mode.currentData()
         name = self.name.text().strip()
@@ -1826,21 +1930,26 @@ class VoicePage(QWidget):
                 c.lower() if c.isalnum() else "-"
                 for c in design_name
             ).strip("-")[:50]
-            seed = int(self.qwen_design_seed.value())
+            seed = int(self.qwen_design_seed.value()) or 3101
+            language = self.qwen_design_language.currentText()
+            anchor_text = DEFAULT_VOICE_DESIGN_ANCHOR_TEXT
+            profile_id = self._stable_qwen_design_profile_id(
+                design_name, prompt, language, seed, anchor_text
+            )
             return VoiceProfile(
                 name=design_name,
                 provider="qwen-character",
                 voice_id=f"design-{safe_id or 'voice'}",
                 model_id="design-1.7b",
                 backend="automatic",
-                language=self.qwen_design_language.currentText(),
+                language=language,
                 notes=f"Qwen VoiceDesign • {prompt}",
                 authorized=True,
                 qwen_mode="design",
                 qwen_prompt=prompt,
-                qwen_seed=seed if seed > 0 else 3101,
-                qwen_anchor_text=self._qwen_preview_script(12),
-                qwen_profile_id=uuid.uuid4().hex,
+                qwen_seed=seed,
+                qwen_anchor_text=anchor_text,
+                qwen_profile_id=profile_id,
             )
 
         if provider == "qwen-clone":
@@ -2059,7 +2168,9 @@ class VoicePage(QWidget):
                         "Install the Qwen VoiceDesign model from Models first.",
                     )
                     return
-                base_kind = best_long_form_clone_kind()
+                # This check must remain instant on the UI thread. Actual
+                # model choice is recalculated in the Qwen worker using VRAM.
+                base_kind = best_long_form_clone_kind(vram_gb=0.0)
                 if not qwen_model_installed(base_kind):
                     QMessageBox.warning(
                         self,
@@ -2075,7 +2186,7 @@ class VoicePage(QWidget):
                 )
                 preview_model = f"{kind} • VoiceDesign • stable identity preview"
             elif profile.qwen_mode == "clone":
-                kind = best_clone_kind()
+                kind = best_clone_kind(vram_gb=0.0)
                 if not model_installed(kind):
                     QMessageBox.warning(
                         self,
@@ -2085,7 +2196,7 @@ class VoicePage(QWidget):
                     return
                 preview_model = f"{kind} • Base voice clone"
             else:
-                kind = best_custom_kind()
+                kind = best_custom_kind(vram_gb=0.0)
                 if not model_installed(kind):
                     QMessageBox.warning(
                         self,
@@ -2135,8 +2246,9 @@ class VoicePage(QWidget):
         self.preview_engine_status.setText(message)
         self.status.setText(message)
 
-    def _preview_worker_ok(self, path: str) -> None:
+    def _preview_worker_ok(self, path: str, elapsed_seconds: float = 0.0) -> None:
         self.last_preview = Path(path)
+        self.last_preview_elapsed_seconds = max(0.0, float(elapsed_seconds))
         self.player.stop()
         self.player.setSource(QUrl.fromLocalFile(path))
         self.play_button.setEnabled(True)
@@ -2150,13 +2262,23 @@ class VoicePage(QWidget):
         except (OSError, wave.Error):
             pass
         target = getattr(self, "preview_target_seconds", None)
+        elapsed = self.last_preview_elapsed_seconds or 0.0
+        elapsed_label = f"generated in {int(elapsed) // 60}:{int(elapsed) % 60:02d}"
+        rtf_label = (
+            f" • RTF {elapsed / actual_seconds:.2f}"
+            if actual_seconds is not None and actual_seconds > 0 and elapsed > 0
+            else ""
+        )
         if actual_seconds is not None and target:
             qualifier = "target reached" if actual_seconds + 0.25 >= target else "shorter than target"
             self.preview_engine_status.setText(
-                f"100% • Preview ready • {actual_seconds:.1f}s / {int(target)}s • {qualifier} • press Play"
+                f"100% • Ready • {actual_seconds:.1f}s / {int(target)}s • {qualifier} "
+                f"• {elapsed_label}{rtf_label} • press Play"
             )
         else:
-            self.preview_engine_status.setText("100% • Preview ready • press Play to listen")
+            self.preview_engine_status.setText(
+                f"100% • Preview ready • {elapsed_label}{rtf_label} • press Play"
+            )
         self.status.setText(
             f"Preview ready • {self.preview_provider.text()} • {self.preview_voice.text()}"
         )

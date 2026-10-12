@@ -22,7 +22,7 @@ from ..qwen_character_runtime import (
     verify_runtime,
     worker_script,
 )
-from ..expression import classify_expression
+from ..expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT, classify_expression
 
 
 class QwenCharacterProvider(TTSProvider):
@@ -34,6 +34,10 @@ class QwenCharacterProvider(TTSProvider):
     # jobs on long novels and made GPU utilization/ETA unnecessarily poor.
     recommended_chunk_chars = 800
     recommended_chunk_sentences = 4
+    # Preserve efficient long units in calm narration, but cut at real shifts
+    # between neutral, thoughtful, warm and concerned styles so each unit can
+    # use the matching stable-identity expression reference.
+    split_on_expression_change = True
     # Conservative startup estimate used only until real chunk timings are available.
     estimated_chars_per_minute = 180.0
     handles_narration_controls = False
@@ -61,9 +65,16 @@ class QwenCharacterProvider(TTSProvider):
         self.qwen_mode = (qwen_mode or "custom").casefold()
         self.qwen_seed = qwen_seed
         self.qwen_anchor_path = qwen_anchor_path
-        self.qwen_anchor_text = qwen_anchor_text or ""
+        self.qwen_anchor_text = (
+            qwen_anchor_text
+            or (DEFAULT_VOICE_DESIGN_ANCHOR_TEXT if self.qwen_mode == "design" else "")
+        )
         self.qwen_profile_id = qwen_profile_id or ""
         self.status_callback = None
+        requested_kind = (model_kind or "auto").lower()
+        self._auto_select_model = (
+            requested_kind == "auto" and self.qwen_mode in {"custom", "clone"}
+        )
         self.model_kind = self._resolve_kind(model_kind)
         self.reference_audio = reference_audio
         self.reference_text = reference_text
@@ -79,12 +90,22 @@ class QwenCharacterProvider(TTSProvider):
         if self.qwen_mode == "clone":
             if requested in {"base-0.6b", "base-1.7b"}:
                 return requested
-            return best_clone_kind()
+            return best_clone_kind(vram_gb=0.0)
         if self.qwen_mode in {"design", "design-preview"}:
             return requested if requested == "design-1.7b" else best_voice_design_kind()
         if requested in {"custom-0.6b", "custom-1.7b"}:
             return requested
-        return best_custom_kind()
+        return best_custom_kind(vram_gb=0.0)
+
+    def _ensure_model_kind(self) -> None:
+        """Resolve automatic model/GPU choices outside the Qt main thread."""
+        if not self._auto_select_model:
+            return
+        if self.qwen_mode == "clone":
+            self.model_kind = best_clone_kind()
+        else:
+            self.model_kind = best_custom_kind()
+        self._auto_select_model = False
 
     @property
     def recommended_batch_size(self) -> int:
@@ -102,6 +123,7 @@ class QwenCharacterProvider(TTSProvider):
         return [self.voice_id]
 
     def generation_signature(self) -> str:
+        self._ensure_model_kind()
         reference = ""
         if self.reference_audio and Path(self.reference_audio).exists():
             try:
@@ -145,6 +167,7 @@ class QwenCharacterProvider(TTSProvider):
     def _start_worker(self) -> None:
         if self._worker is not None and self._worker.poll() is None:
             return
+        self._ensure_model_kind()
         if not runtime_ready():
             try:
                 verify_runtime()
@@ -419,6 +442,18 @@ class QwenCharacterProvider(TTSProvider):
             if not path.exists() or path.stat().st_size < 1024:
                 raise RuntimeError(f"Qwen generated an invalid or empty audio file: {path.name}")
         return [Path(output) for output in outputs]
+
+    def request_cancel(self) -> None:
+        """Terminate an active Qwen subprocess without waiting on the calling thread."""
+        worker = self._worker
+        if worker is None or worker.poll() is not None:
+            return
+        try:
+            # Popen.terminate() maps to TerminateProcess on Windows. Do not
+            # wait here: Stop/Cancel is invoked from the main Qt thread.
+            worker.terminate()
+        except (OSError, ProcessLookupError):
+            pass
 
     def close(self) -> None:
         worker = self._worker

@@ -198,7 +198,9 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("create_voice_clone_prompt", worker)
         self.assertIn("generate_voice_design", worker)
         self.assertIn("voice_anchors", worker)
-        self.assertIn('"neutral": model.create_voice_clone_prompt', worker)
+        self.assertIn("locked_clone_prompts[style] = model.create_voice_clone_prompt", worker)
+        self.assertIn("reference_style(style)", worker)
+        self.assertIn("ANCHOR_TEXTS", worker)
         self.assertIn("recommended_chunk_chars = 800", provider)
         self.assertIn("recommended_chunk_sentences", provider)
 
@@ -280,7 +282,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("_prepare_design_clone(", worker)
         self.assertIn("_generate_design_locked(", worker)
         self.assertIn("_create_expression_anchors", worker)
-        self.assertIn('"neutral": model.create_voice_clone_prompt', worker)
+        self.assertIn('prompts[style] = clone_model.create_voice_clone_prompt', worker)
         self.assertIn('"outputs": [str(Path(str(path)).resolve()) for path in batch_outputs]', worker)
         self.assertIn('qwen_mode="design"', voice_page)
         self.assertIn('best_long_form_clone_kind()', provider)
@@ -370,6 +372,138 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(classify_expression("Instead of me…then?"), "thoughtful")
         self.assertIn(classify_expression("That's amazing! Really!"), {"excited", "thoughtful"})
 
+    def test_qwen_expression_styles_map_to_stable_reference_families(self):
+        from app.tts.expression import classify_expression, reference_style
+        self.assertEqual(classify_expression("Maybe I should wait..."), "thoughtful")
+        self.assertEqual(classify_expression("That's wonderful!"), "excited")
+        self.assertEqual(reference_style("curious"), "thoughtful")
+        self.assertEqual(reference_style("excited"), "warm")
+        self.assertEqual(reference_style("sad"), "concerned")
+        self.assertEqual(reference_style("neutral"), "neutral")
+
+    def test_story_pacing_preserves_headings_dialogue_and_attribution(self):
+        from app.tts.pacing import is_heading_line
+        source = (
+            "The hallway was silent.\n\n"
+            "THE DEMON LORD SUMMIT\n\n"
+            "The three people sat down.\n\n"
+            "“Don't move!” he shouted.\n"
+            "“Why?” she asked."
+        )
+        units = split_for_pacing(source, max_chars=800, max_sentences=4)
+        self.assertEqual(units[1], "THE DEMON LORD SUMMIT")
+        self.assertIn("“Don't move!” he shouted.", units)
+        self.assertIn("“Why?” she asked.", units)
+        self.assertTrue(is_heading_line("THE DEMON LORD SUMMIT"))
+        self.assertGreaterEqual(pause_after_ms("THE DEMON LORD SUMMIT"), 700)
+        self.assertGreaterEqual(
+            pause_after_ms("He stepped back.", "natural", next_text="CHAPTER 1"),
+            600,
+        )
+
+    def test_qwen_chunking_splits_only_at_expression_family_changes(self):
+        text = "The hallway was silent. He whispered, ‘Don't move.’ She shouted, ‘Run!’"
+        ordinary = split_for_pacing(text, max_chars=800, max_sentences=4)
+        emotional = split_for_pacing(
+            text,
+            max_chars=800,
+            max_sentences=4,
+            split_on_expression_change=True,
+        )
+        self.assertGreater(len(emotional), len(ordinary))
+        self.assertTrue(any("whispered" in value for value in emotional))
+
+    def test_quoted_dialogue_attribution_stays_with_the_quote(self):
+        from app.tts.pacing import sentence_units
+        units = sentence_units("“Wait!” he said. Then he left.")
+        self.assertEqual(units[0], "“Wait!” he said.")
+        self.assertEqual(units[1], "Then he left.")
+
+    def test_qwen_provider_constructor_does_not_probe_gpu_on_ui_thread(self):
+        from unittest.mock import patch
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+
+        def fast_custom(vram_gb=None):
+            self.assertEqual(vram_gb, 0.0)
+            return "custom-0.6b"
+
+        def fast_clone(vram_gb=None):
+            self.assertEqual(vram_gb, 0.0)
+            return "base-0.6b"
+
+        with patch("app.tts.providers.qwen_character.best_custom_kind", side_effect=fast_custom), \
+             patch("app.tts.providers.qwen_character.best_clone_kind", side_effect=fast_clone):
+            custom = QwenCharacterProvider(voice_id="Ryan", model_kind="auto", qwen_mode="custom")
+            clone = QwenCharacterProvider(voice_id="clone-test", model_kind="auto", qwen_mode="clone")
+        self.assertEqual(custom.model_kind, "custom-0.6b")
+        self.assertEqual(clone.model_kind, "base-0.6b")
+        self.assertTrue(custom._auto_select_model)
+        self.assertTrue(clone._auto_select_model)
+
+    def test_voice_design_anchor_instruction_preserves_identity_and_mood_range(self):
+        from app.tts.expression import voice_design_anchor_instruction
+        instruction = voice_design_anchor_instruction(
+            "Young adult male anime protagonist, lower-mid pitch and restrained confidence."
+        )
+        self.assertIn("Young adult male anime protagonist", instruction)
+        self.assertIn("Preserve its specified gender presentation", instruction)
+        self.assertIn("pitch range", instruction)
+        self.assertIn("warm, pleasantly surprised energy", instruction)
+        self.assertIn("briefly concerned", instruction)
+        self.assertIn("not four different voices", instruction)
+        worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
+        self.assertIn("voice_design_anchor_instruction(base_description)", worker)
+        self.assertIn('"temperature": temperature', worker)
+
+    def test_saved_voice_design_uses_one_shared_anchor_transcript(self):
+        from app.tts.expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+        from app.ui.voice_page import VoicePage
+
+        provider = QwenCharacterProvider(
+            voice_id="design-kousuke",
+            language="English",
+            instruct="Young adult male anime protagonist.",
+            model_kind="design-1.7b",
+            qwen_mode="design",
+            qwen_anchor_text="",
+        )
+        self.assertEqual(provider.qwen_anchor_text, DEFAULT_VOICE_DESIGN_ANCHOR_TEXT)
+        source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
+        self.assertIn("anchor_text = DEFAULT_VOICE_DESIGN_ANCHOR_TEXT", source)
+        self.assertIn("load_saved_profiles()", source)
+
+    def test_qwen_runtime_readiness_is_a_fast_filesystem_gate(self):
+        import app.tts.qwen_character_runtime as runtime
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            marker = root / "runtime.json"
+            python = root / "python.exe"
+            worker = root / "qwen_character_worker.py"
+            marker.write_text(json.dumps({
+                "ready": True,
+                "bootstrap_version": runtime.BOOTSTRAP_VERSION,
+                "qwen_tts": runtime.QWEN_TTS_VERSION,
+            }), encoding="utf-8")
+            python.touch()
+            worker.touch()
+            with patch.object(runtime, "MARKER", marker), \
+                 patch.object(runtime, "VENV_PYTHON", python), \
+                 patch.object(runtime, "worker_script", return_value=worker), \
+                 patch.object(runtime, "_python_works", side_effect=AssertionError("subprocess check ran")), \
+                 patch.object(runtime, "_runtime_self_test", side_effect=AssertionError("model imports ran")):
+                self.assertTrue(runtime.runtime_ready())
+
+    def test_preview_reports_elapsed_time_and_uses_natural_pacing(self):
+        source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
+        self.assertIn("finished_ok = Signal(str, float)", source)
+        self.assertIn('pacing_profile="natural"', source)
+        self.assertNotIn('pacing_profile="off"', source)
+        self.assertIn("self.finished_ok.emit(str(self.output), elapsed_seconds)", source)
+        self.assertIn("generated in {int(elapsed) // 60}", source)
+        self.assertIn("RTF", source)
+
     def test_internal_ellipsis_creates_a_separate_pacing_unit(self):
         units = split_for_pacing("Instead of me…then? Maybe later.", max_chars=200, max_sentences=4)
         self.assertGreaterEqual(len(units), 2)
@@ -405,11 +539,98 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("max_new_tokens", worker)
         self.assertIn("heartbeat=", provider)
 
+    def test_qwen_design_identity_id_is_stable_for_unchanged_saved_description(self):
+        from unittest.mock import patch
+        from app.ui.voice_page import VoicePage
+        from app.tts.voice_profile import VoiceProfile
+
+        saved = VoiceProfile(
+            name="Anime MX Kousuke Takioto!",
+            provider="qwen-character",
+            voice_id="design-anime-mx-kousuke-takioto",
+            model_id="design-1.7b",
+            language="English",
+            qwen_mode="design",
+            qwen_prompt="Young adult male anime protagonist voice.",
+            qwen_seed=3101,
+            qwen_anchor_text="A sample sentence.",
+            qwen_profile_id="saved-profile-id",
+        )
+        class ProfileLookup:
+            class SavedBox:
+                def currentData(self):
+                    return saved.name
+            saved_profiles = SavedBox()
+        page = ProfileLookup()
+        with patch("app.ui.voice_page.load_saved_profiles", return_value=[saved]):
+            self.assertEqual(
+                VoicePage._stable_qwen_design_profile_id(
+                    page,
+                    saved.name,
+                    saved.qwen_prompt,
+                    saved.language,
+                    saved.qwen_seed,
+                    saved.qwen_anchor_text,
+                ),
+                "saved-profile-id",
+            )
+            changed = VoicePage._stable_qwen_design_profile_id(
+                page,
+                saved.name,
+                "Older sounding young adult male protagonist.",
+                saved.language,
+                saved.qwen_seed,
+                saved.qwen_anchor_text,
+            )
+        self.assertNotEqual(changed, "saved-profile-id")
+        self.assertEqual(len(changed), 32)
+
+    def test_generate_tab_reads_latest_persisted_profile(self):
+        import app.tts.voice_profile as voice_profiles
+        from app.ui.generation_page import GenerationPage
+        from app.tts.voice_profile import VoiceProfile
+
+        with tempfile.TemporaryDirectory() as temp:
+            stored = VoiceProfile(
+                name="Current Kousuke",
+                provider="qwen-character",
+                voice_id="design-kousuke",
+                qwen_mode="design",
+                qwen_prompt="Lower mid-range young male voice.",
+                qwen_seed=3101,
+                qwen_profile_id="fresh-id",
+            )
+            profile_file = Path(temp) / "voices.json"
+            profile_file.write_text(json.dumps([stored.__dict__]), encoding="utf-8")
+            original = voice_profiles.profiles_file
+            voice_profiles.profiles_file = lambda: profile_file
+            try:
+                class Combo:
+                    def currentData(self):
+                        return VoiceProfile(
+                            name="Current Kousuke",
+                            provider="qwen-character",
+                            voice_id="design-kousuke",
+                            qwen_mode="design",
+                            qwen_prompt="Old female voice description.",
+                            qwen_seed=12,
+                            qwen_profile_id="stale-id",
+                        )
+                class Selection:
+                    voice_profile = Combo()
+                selected = GenerationPage._selected_profile(Selection())
+                self.assertEqual(selected.qwen_profile_id, "fresh-id")
+                self.assertEqual(selected.qwen_prompt, "Lower mid-range young male voice.")
+            finally:
+                voice_profiles.profiles_file = original
+
     def test_qwen_design_worker_lazy_loads_cached_identity(self):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         runtime = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
-        self.assertIn("cached canonical character identity", worker)
-        self.assertIn("ready = neutral_path.exists()", worker)
+        self.assertIn("saved canonical character identity", worker)
+        self.assertIn("ready = all(", worker)
+        self.assertIn('ANCHOR_STYLES = ("neutral",)', worker)
+        self.assertIn("v8-emotion-range-anchor", worker)
         self.assertIn('if active_task not in {"design", "design-preview"}:', worker)
         self.assertIn('if vram_gb >= 10.0 and model_installed("base-1.7b")', runtime)
 

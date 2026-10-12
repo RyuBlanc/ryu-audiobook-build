@@ -193,6 +193,7 @@ def build_voice_preview(
         root = Path(temp_dir)
         normalized: list[Path] = []
 
+        generated_segments = 0
         for index, (unit, unit_voice) in enumerate(units):
             report("synthesizing", index, total_units)
             raw_path = root / f"{index:03d}.wav"
@@ -203,11 +204,13 @@ def build_voice_preview(
                 provider.synthesize(unit, raw_path, unit_voice)
             if not provider_handles_controls:
                 _apply_speed(raw_path, narration_speed)
-                pause_ms = pause_after_ms(unit, pacing_profile)
+                next_text = units[index + 1][0] if index + 1 < len(units) else None
+                pause_ms = pause_after_ms(unit, pacing_profile, next_text=next_text)
                 if pause_ms:
                     append_silence(raw_path, pause_ms)
             _normalize(raw_path, normalized_path)
             normalized.append(normalized_path)
+            generated_segments += 1
             if unit_voice:
                 voices_used.append(str(unit_voice))
             try:
@@ -230,6 +233,6 @@ def build_voice_preview(
 
     return PreviewResult(
         output_path=output_path,
-        segments=len(units),
+        segments=generated_segments,
         voices_used=tuple(dict.fromkeys(voices_used)),
     )

@@ -2,7 +2,7 @@ name: Build Windows App
 
 on:
   push:
-    branches: [main]
+    branches: [main, fix/voice-preview-responsive-emotion]
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.
