@@ -431,7 +431,7 @@ class RegressionTests(unittest.TestCase):
             self.assertEqual(vram_gb, 0.0)
             return "base-0.6b"
 
-        with patch("app.tts.providers.qwen_character.best_custom_kind", side_effect=fast_custom), \\
+        with patch("app.tts.providers.qwen_character.best_custom_kind", side_effect=fast_custom), \
              patch("app.tts.providers.qwen_character.best_clone_kind", side_effect=fast_clone):
             custom = QwenCharacterProvider(voice_id="Ryan", model_kind="auto", qwen_mode="custom")
             clone = QwenCharacterProvider(voice_id="clone-test", model_kind="auto", qwen_mode="clone")
