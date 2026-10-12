@@ -44,7 +44,7 @@ from app.tts.qwen_character_runtime import (
 from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.voice_profile import (
     VoiceProfile, builtin_voice_profiles, import_reference_audio,
-    load_profiles, save_profiles,
+    load_profiles, load_saved_profiles, save_profiles,
 )
 from app.tts.providers.edge_tts import EdgeTTSProvider
 from app.tts.providers.elevenlabs import ElevenLabsProvider
@@ -1821,7 +1821,7 @@ class VoicePage(QWidget):
         saved_name = self.saved_profiles.currentData() if hasattr(self, "saved_profiles") else None
         saved = next(
             (
-                item for item in self.profiles
+                item for item in load_saved_profiles()
                 if item.provider == "qwen-character"
                 and item.qwen_mode == "design"
                 and item.name.casefold() == str(name).casefold()
