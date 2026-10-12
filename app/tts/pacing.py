@@ -107,7 +107,11 @@ def sentence_units(text: str) -> list[str]:
                 and (j >= len(text) or text[j].isspace())
             ):
                 flush()
-                i = j - 1
+            # The closers have already been appended while looking ahead.
+            # Always advance over them, even when a quoted attribution is
+            # kept in the same unit; otherwise each closing quote is appended
+            # again on the next loop iteration.
+            i = j - 1
 
         i += 1
 
