@@ -525,9 +525,10 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("heartbeat=", provider)
 
     def test_qwen_design_identity_id_is_stable_for_unchanged_saved_description(self):
+        from unittest.mock import patch
         from app.ui.voice_page import VoicePage
         from app.tts.voice_profile import VoiceProfile
-        # Exercise the identity matching contract without constructing the UI.
+
         saved = VoiceProfile(
             name="Anime MX Kousuke Takioto!",
             provider="qwen-character",
@@ -541,30 +542,31 @@ class RegressionTests(unittest.TestCase):
             qwen_profile_id="saved-profile-id",
         )
         class ProfileLookup:
-            profiles = [saved]
             class SavedBox:
                 def currentData(self):
                     return saved.name
             saved_profiles = SavedBox()
         page = ProfileLookup()
-        self.assertEqual(
-            VoicePage._stable_qwen_design_profile_id(page,
+        with patch("app.ui.voice_page.load_saved_profiles", return_value=[saved]):
+            self.assertEqual(
+                VoicePage._stable_qwen_design_profile_id(
+                    page,
+                    saved.name,
+                    saved.qwen_prompt,
+                    saved.language,
+                    saved.qwen_seed,
+                    saved.qwen_anchor_text,
+                ),
+                "saved-profile-id",
+            )
+            changed = VoicePage._stable_qwen_design_profile_id(
+                page,
                 saved.name,
-                saved.qwen_prompt,
+                "Older sounding young adult male protagonist.",
                 saved.language,
                 saved.qwen_seed,
                 saved.qwen_anchor_text,
-            ),
-            "saved-profile-id",
-        )
-        changed = VoicePage._stable_qwen_design_profile_id(
-            page,
-            saved.name,
-            "Older sounding young adult male protagonist.",
-            saved.language,
-            saved.qwen_seed,
-            saved.qwen_anchor_text,
-        )
+            )
         self.assertNotEqual(changed, "saved-profile-id")
         self.assertEqual(len(changed), 32)
 
