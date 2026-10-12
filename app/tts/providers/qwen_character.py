@@ -424,6 +424,18 @@ class QwenCharacterProvider(TTSProvider):
                 raise RuntimeError(f"Qwen generated an invalid or empty audio file: {path.name}")
         return [Path(output) for output in outputs]
 
+    def request_cancel(self) -> None:
+        """Terminate an active Qwen subprocess without waiting on the calling thread."""
+        worker = self._worker
+        if worker is None or worker.poll() is not None:
+            return
+        try:
+            # Popen.terminate() maps to TerminateProcess on Windows. Do not
+            # wait here: Stop/Cancel is invoked from the main Qt thread.
+            worker.terminate()
+        except (OSError, ProcessLookupError):
+            pass
+
     def close(self) -> None:
         worker = self._worker
         self._worker = None
