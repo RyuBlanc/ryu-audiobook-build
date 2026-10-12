@@ -532,6 +532,7 @@ class RegressionTests(unittest.TestCase):
         import app.tts.voice_profile as voice_profiles
         from app.ui.generation_page import GenerationPage
         from app.tts.voice_profile import VoiceProfile
+
         with tempfile.TemporaryDirectory() as temp:
             stored = VoiceProfile(
                 name="Current Kousuke",
@@ -547,7 +548,7 @@ class RegressionTests(unittest.TestCase):
             original = voice_profiles.profiles_file
             voice_profiles.profiles_file = lambda: profile_file
             try:
-                        class Combo:
+                class Combo:
                     def currentData(self):
                         return VoiceProfile(
                             name="Current Kousuke",
