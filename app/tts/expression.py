@@ -3,6 +3,11 @@ from __future__ import annotations
 import re
 
 EXPRESSION_PIPELINE_VERSION = "story-expression-v2"
+DEFAULT_VOICE_DESIGN_ANCHOR_TEXT = (
+    "Hello. I thought I understood what was happening. "
+    "Oh, really? That's actually wonderful. "
+    "Wait... something isn't right. Let's think for a moment."
+)
 
 # The four reference styles preserve one character identity while providing
 # audible differences in delivery. Other labels are mapped to these anchors.
