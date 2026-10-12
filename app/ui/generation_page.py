@@ -1518,10 +1518,16 @@ class GenerationPage(QWidget):
         controls = [
             self.title, self.author, self.voice_profile, self.refresh_voice_profiles,
             self.backend, self.cover_button, self.change_output, self.preview_button,
-            self.start_button, self.resume_button,
+            self.start_button, self.resume_button, self.background_audio_enabled,
+            self.background_audio_path, self.background_audio_browse,
+            self.background_audio_preview, self.background_audio_volume,
+            self.background_audio_fade_in, self.background_audio_fade_out,
         ]
         for control in controls:
             control.setEnabled(not locked)
+        self._toggle_background_audio_controls(
+            self.background_audio_enabled.isChecked() and not locked
+        )
 
     def _repair_empty_chapters_from_source(self) -> bool:
         if not self.project_folder:
