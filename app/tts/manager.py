@@ -88,12 +88,19 @@ class GenerationManager:
     def cancel(self) -> None:
         self.cancel_event.set()
         provider = self.provider
-        close = getattr(provider, "close", None)
-        if callable(close):
+        cancel = getattr(provider, "request_cancel", None)
+        if callable(cancel):
             try:
-                close()
+                cancel()
             except Exception:
                 pass
+            return
+        # Avoid blocking the main window on providers whose close operation
+        # waits for network/process shutdown. The generation thread performs
+        # final cleanup after synthesis unwinds.
+        close = getattr(provider, "close", None)
+        if callable(close):
+            Thread(target=close, name="RyuTTSCancelCleanup", daemon=True).start()
 
     def _run(self, output_path: Path | None, title: str, author: str, cover: Path | None, metadata: dict[str, str]) -> None:
         # This directory is deliberately called working: it is not the user's
