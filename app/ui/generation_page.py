@@ -56,10 +56,45 @@ class VoicePreviewWorker(QThread):
         self.pacing_profile = pacing_profile
         self.dialogue_assignments = list(dialogue_assignments or [])
         self._provider = None
+        self._progress_floor = 0
+        self._preview_started = 0.0
+
+    def _emit_percent(self, value: int) -> int:
+        self._progress_floor = max(self._progress_floor, min(100, max(0, int(value))))
+        self.percent.emit(self._progress_floor)
+        return self._progress_floor
+
+    def _provider_status(self, message: str) -> None:
+        value = str(message or "")
+        low = value.casefold()
+        if "building the saved character identity" in low or "preparing the saved character identity" in low:
+            self._emit_percent(30)
+        elif "loading cached canonical character identity" in low:
+            self._emit_percent(28)
+        elif "expression references ready" in low or "loading base clone engine" in low:
+            self._emit_percent(42)
+        elif "loading qwen model" in low:
+            self._emit_percent(18 if self._progress_floor < 30 else 45)
+        elif "qwen model loaded" in low:
+            self._emit_percent(25 if self._progress_floor < 30 else 50)
+        elif (
+            "generating natural voicedesign" in low
+            or "generating qwen customvoice speech" in low
+            or "generating qwen base clone speech" in low
+        ):
+            self._emit_percent(52)
+        # Keep long inference visibly alive without claiming token-level
+        # percentage that Qwen's local Base interface does not provide.
+        if ("processing" in low or "generating" in low) and "elapsed" not in low and self._preview_started > 0:
+            elapsed = max(0, int(time.monotonic() - self._preview_started))
+            value += f" • elapsed {elapsed // 60}:{elapsed % 60:02d}"
+        self.progress.emit(value)
 
     def run(self) -> None:
+        self._preview_started = time.monotonic()
+        self._progress_floor = 0
         try:
-            self.percent.emit(5)
+            self._emit_percent(5)
             self.progress.emit('[5%] Loading voice engine…')
             provider, voice = provider_from_profile(self.profile)
             self._provider = provider
@@ -67,7 +102,7 @@ class VoicePreviewWorker(QThread):
                 provider.backend = self.backend
             set_status = getattr(provider, "set_status_callback", None)
             if callable(set_status):
-                set_status(lambda message: self.progress.emit(str(message)))
+                set_status(self._provider_status)
 
             if self.project_folder:
                 state = load_state(self.project_folder)
@@ -81,8 +116,11 @@ class VoicePreviewWorker(QThread):
                         narrating_character=state.get('voice_cast_narrating_character'),
                         backend_override=self.backend,
                     )
+                    wrapper_status = getattr(self._provider, "set_status_callback", None)
+                    if callable(wrapper_status):
+                        wrapper_status(self._provider_status)
 
-            self.percent.emit(10)
+            self._emit_percent(10)
             self.progress.emit('[10%] Voice engine ready • preparing preview segments…')
 
             preview_started = time.monotonic()
@@ -112,8 +150,8 @@ class VoicePreviewWorker(QThread):
                 else:
                     percent = 10
                     label = "Preparing preview…"
-                self.percent.emit(percent)
-                self.progress.emit(f'[{percent}%] {label}')
+                actual_percent = self._emit_percent(percent)
+                self.progress.emit(f'[{actual_percent}%] {label}')
 
             result = build_voice_preview(
                 self.text,
@@ -126,7 +164,7 @@ class VoicePreviewWorker(QThread):
                 dialogue_assignments=self.dialogue_assignments,
                 progress_callback=preview_progress,
             )
-            self.percent.emit(100)
+            self._emit_percent(100)
             self.progress.emit('[100%] Preview ready.')
             self.finished_ok.emit(result)
         except Exception as exc:
