@@ -154,6 +154,31 @@ def classify_expression(text: str) -> str:
     return "neutral"
 
 
+def voice_design_anchor_instruction(base_voice_description: str) -> str:
+    """Describe one stable identity with a modest, audible range of story delivery.
+
+    VoiceDesign accepts natural-language instructions. We use that capability
+    once to create the shared reference, then reuse that single reference in
+    Base cloning so per-sentence emotion does not switch to a separately
+    generated voice or change the requested gender/pitch presentation.
+    """
+    base = str(base_voice_description or "").strip()
+    anchor_direction = (
+        "Create one consistent audiobook character voice matching the description above. "
+        "Preserve its specified gender presentation, perceived age, pitch range, timbre, "
+        "resonance, accent, and vocal placement in every sentence; do not raise the pitch "
+        "outside the described range or change into a different-sounding speaker. "
+        "Speak the supplied reference text as one continuous performance with subtle, "
+        "believable delivery changes: begin calm and conversational; let the next sentence "
+        "carry warm, pleasantly surprised energy; make the sentence beginning 'Wait...' "
+        "sound briefly concerned; finish reflective and settled. Keep these changes in "
+        "intonation, emphasis, rhythm, and energy rather than exaggerated acting. "
+        "Do not add words, stage directions, laughter, singing, or dramatic effects. "
+        "This should sound like one character reacting naturally, not four different voices."
+    )
+    return f"{base}\\n{anchor_direction}".strip()
+
+
 def expression_instruction(base_voice_description: str, style: str) -> str:
     base = str(base_voice_description or "").strip()
     style_text = EXPRESSION_STYLES.get(style, EXPRESSION_STYLES["neutral"])
