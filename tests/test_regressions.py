@@ -419,6 +419,45 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(units[0], "“Wait!” he said.")
         self.assertEqual(units[1], "Then he left.")
 
+    def test_qwen_provider_constructor_does_not_probe_gpu_on_ui_thread(self):
+        from unittest.mock import patch
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+
+        def fast_custom(vram_gb=None):
+            self.assertEqual(vram_gb, 0.0)
+            return "custom-0.6b"
+
+        def fast_clone(vram_gb=None):
+            self.assertEqual(vram_gb, 0.0)
+            return "base-0.6b"
+
+        with patch("app.tts.providers.qwen_character.best_custom_kind", side_effect=fast_custom), \\
+             patch("app.tts.providers.qwen_character.best_clone_kind", side_effect=fast_clone):
+            custom = QwenCharacterProvider(voice_id="Ryan", model_kind="auto", qwen_mode="custom")
+            clone = QwenCharacterProvider(voice_id="clone-test", model_kind="auto", qwen_mode="clone")
+        self.assertEqual(custom.model_kind, "custom-0.6b")
+        self.assertEqual(clone.model_kind, "base-0.6b")
+        self.assertTrue(custom._auto_select_model)
+        self.assertTrue(clone._auto_select_model)
+
+    def test_saved_voice_design_uses_one_shared_anchor_transcript(self):
+        from app.tts.expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+        from app.ui.voice_page import VoicePage
+
+        provider = QwenCharacterProvider(
+            voice_id="design-kousuke",
+            language="English",
+            instruct="Young adult male anime protagonist.",
+            model_kind="design-1.7b",
+            qwen_mode="design",
+            qwen_anchor_text="",
+        )
+        self.assertEqual(provider.qwen_anchor_text, DEFAULT_VOICE_DESIGN_ANCHOR_TEXT)
+        source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
+        self.assertIn("anchor_text = DEFAULT_VOICE_DESIGN_ANCHOR_TEXT", source)
+        self.assertIn("load_saved_profiles()", source)
+
     def test_qwen_runtime_readiness_is_a_fast_filesystem_gate(self):
         import app.tts.qwen_character_runtime as runtime
         from unittest.mock import patch
