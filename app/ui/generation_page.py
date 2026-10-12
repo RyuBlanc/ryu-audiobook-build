@@ -12,7 +12,8 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QProgressBar, QPushButton, QVBoxLayout, QWidget, QComboBox, QScrollArea,
-    QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy,
+    QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy, QCheckBox,
+    QDoubleSpinBox, QSpinBox,
 )
 
 from app.chapters.detector import Chapter, detect_chapters
@@ -253,6 +254,11 @@ class GenerationPage(QWidget):
         self.audio_output.setVolume(0.85)
         self.player.setAudioOutput(self.audio_output)
         self.player.positionChanged.connect(self._player_position)
+        self.music_player = QMediaPlayer(self)
+        self.music_audio_output = QAudioOutput(self)
+        self.music_audio_output.setVolume(0.85)
+        self.music_player.setAudioOutput(self.music_audio_output)
+        self.music_player.playbackStateChanged.connect(self._background_music_state_changed)
         self.player.durationChanged.connect(self._player_duration)
 
         self.preview_player = QMediaPlayer(self)
@@ -442,6 +448,69 @@ class GenerationPage(QWidget):
             max(0, self.audio_bitrate.findData(DEFAULT_AUDIO_BITRATE_KBPS))
         )
         settings_form.addRow("Audio quality", self.audio_bitrate)
+
+        # Stage 1: an optional user-supplied/licensed continuous music bed.
+        # The default remains narration-only. Track settings are stored in the
+        # project state and mixed only during final M4B packaging.
+        audio_state = load_state(self.project_folder) if self.project_folder else {}
+        self.background_audio_enabled = QCheckBox("Enable background music")
+        self.background_audio_enabled.setChecked(
+            bool(audio_state.get("background_audio_enabled", False))
+        )
+        settings_form.addRow("Background audio", self.background_audio_enabled)
+
+        music_file_row = QHBoxLayout()
+        self.background_audio_path = QLineEdit(
+            str(audio_state.get("background_audio_path") or "")
+        )
+        self.background_audio_path.setPlaceholderText("Choose a music/ambience audio file…")
+        self.background_audio_browse = QPushButton("Browse…")
+        self.background_audio_browse.clicked.connect(self.choose_background_audio)
+        self.background_audio_preview = QPushButton("▶ Preview Track")
+        self.background_audio_preview.clicked.connect(self.preview_background_audio)
+        music_file_row.addWidget(self.background_audio_path, 1)
+        music_file_row.addWidget(self.background_audio_browse)
+        music_file_row.addWidget(self.background_audio_preview)
+        settings_form.addRow("Music / ambience file", music_file_row)
+
+        self.background_audio_volume = QDoubleSpinBox()
+        self.background_audio_volume.setRange(0.0, 100.0)
+        self.background_audio_volume.setDecimals(0)
+        self.background_audio_volume.setSingleStep(5.0)
+        self.background_audio_volume.setSuffix("%")
+        try:
+            saved_music_volume = float(audio_state.get("background_audio_volume", 0.18))
+        except (TypeError, ValueError):
+            saved_music_volume = 0.18
+        self.background_audio_volume.setValue(max(0.0, min(100.0, saved_music_volume * 100.0)))
+        settings_form.addRow("Background volume", self.background_audio_volume)
+
+        self.background_audio_fade_in = QSpinBox()
+        self.background_audio_fade_in.setRange(0, 30)
+        self.background_audio_fade_in.setSuffix(" sec")
+        self.background_audio_fade_in.setValue(
+            max(0, min(30, int(audio_state.get("background_audio_fade_in", 2) or 0)))
+        )
+        settings_form.addRow("Music fade-in", self.background_audio_fade_in)
+
+        self.background_audio_fade_out = QSpinBox()
+        self.background_audio_fade_out.setRange(0, 30)
+        self.background_audio_fade_out.setSuffix(" sec")
+        self.background_audio_fade_out.setValue(
+            max(0, min(30, int(audio_state.get("background_audio_fade_out", 3) or 0)))
+        )
+        settings_form.addRow("Music fade-out", self.background_audio_fade_out)
+
+        self.background_audio_hint = QLabel(
+            "Local FFmpeg mix • track loops to book length • fades at start/end. "
+            "Keep this low so narration remains clear. Automatic speech ducking is a later stage."
+        )
+        self.background_audio_hint.setWordWrap(True)
+        self.background_audio_hint.setObjectName("muted")
+        settings_form.addRow("", self.background_audio_hint)
+        self.background_audio_enabled.toggled.connect(self._toggle_background_audio_controls)
+        self._toggle_background_audio_controls(self.background_audio_enabled.isChecked())
+
         self.pacing_hint = QLabel(
             "Adds small, sentence-aware pauses after generated narration units. "
             "The original wording is not changed."
@@ -1226,6 +1295,43 @@ class GenerationPage(QWidget):
         if saved:
             return saved
         return value
+
+    def _toggle_background_audio_controls(self, enabled: bool) -> None:
+        for widget in (
+            self.background_audio_volume,
+            self.background_audio_fade_in,
+            self.background_audio_fade_out,
+        ):
+            widget.setEnabled(bool(enabled))
+
+    def choose_background_audio(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Background Music or Ambience",
+            self.background_audio_path.text().strip(),
+            "Audio Files (*.wav *.mp3 *.m4a *.aac *.flac *.ogg *.opus *.wma);;All Files (*.*)",
+        )
+        if path:
+            self.background_audio_path.setText(str(Path(path)))
+            self.status.setText("Background track selected. Enable Background music to include it in the final M4B.")
+
+    def preview_background_audio(self) -> None:
+        value = self.background_audio_path.text().strip()
+        if not value or not Path(value).is_file():
+            self.status.setText("Choose a valid background audio file before previewing it.")
+            return
+        if self.music_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.music_player.pause()
+            return
+        self.music_player.setSource(QUrl.fromLocalFile(str(Path(value).resolve())))
+        self.music_player.play()
+        self.status.setText(f"Previewing background track: {Path(value).name}")
+
+    def _background_music_state_changed(self, state) -> None:
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.background_audio_preview.setText("Ⅱ Pause Track")
+        else:
+            self.background_audio_preview.setText("▶ Preview Track")
 
     def choose_output(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
