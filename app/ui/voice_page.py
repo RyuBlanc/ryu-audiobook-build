@@ -65,17 +65,55 @@ class VoicePreviewWorker(QThread):
         self.target_seconds = max(1, int(target_seconds))
         self.provider = None
         self.cancel_requested = False
+        self._progress_floor = 0
+        self._preview_started = 0.0
+
+    def _emit_progress(self, value: int) -> int:
+        # Coarse phase progress only: Qwen's Base inference does not expose
+        # token-level completion, so never invent a smooth percentage.
+        self._progress_floor = max(self._progress_floor, min(100, max(0, int(value))))
+        self.progress.emit(self._progress_floor)
+        return self._progress_floor
 
     def _status(self, message: str) -> None:
-        if message:
-            self.status.emit(str(message))
+        if not message:
+            return
+        value = str(message)
+        low = value.casefold()
+        # These are real worker phase boundaries, not estimates of tokens.
+        if "building the saved character identity" in low or "preparing the saved character identity" in low:
+            self._emit_progress(30)
+        elif "loading cached canonical character identity" in low:
+            self._emit_progress(28)
+        elif "expression references ready" in low or "loading base clone engine" in low:
+            self._emit_progress(42)
+        elif "loading qwen model" in low:
+            self._emit_progress(18 if self._progress_floor < 30 else 45)
+        elif "qwen model loaded" in low:
+            self._emit_progress(25 if self._progress_floor < 30 else 50)
+        elif (
+            "generating natural voicedesign" in low
+            or "generating qwen customvoice speech" in low
+            or "generating qwen base clone speech" in low
+        ):
+            self._emit_progress(52)
+        if (
+            ("processing" in low or "generating" in low)
+            and "elapsed" not in low
+            and self._preview_started > 0
+        ):
+            seconds = max(0, int(time.monotonic() - self._preview_started))
+            value += f" • elapsed {seconds // 60}:{seconds % 60:02d}"
+        self.status.emit(value)
 
     def run(self) -> None:
         # Measure from worker entry so model startup and provider initialization
         # are included in the final "time taken" displayed to the user.
         preview_started = time.monotonic()
+        self._preview_started = preview_started
+        self._progress_floor = 0
         try:
-            self.progress.emit(5)
+            self._emit_progress(5)
             self._status(
                 f"[5%] Preparing preview • {self.profile.provider} • "
                 f"{self.profile.qwen_mode if self.profile.provider == 'qwen-character' else self.profile.backend}"
@@ -89,7 +127,7 @@ class VoicePreviewWorker(QThread):
                 self.cancelled.emit()
                 return
 
-            self.progress.emit(10)
+            self._emit_progress(10)
             self._status("[10%] Voice engine ready • preparing preview segments…")
 
             def fmt_seconds(value: float) -> str:
@@ -118,8 +156,8 @@ class VoicePreviewWorker(QThread):
                 else:
                     percent = 10
                     label = "Preparing preview…"
-                self.progress.emit(percent)
-                self._status(f"[{percent}%] {label}")
+                actual_percent = self._emit_progress(percent)
+                self._status(f"[{actual_percent}%] {label}")
 
             build_voice_preview(
                 self.text,
@@ -139,7 +177,7 @@ class VoicePreviewWorker(QThread):
                 return
             if not self.output.exists() or self.output.stat().st_size < 1024:
                 raise RuntimeError("The voice engine did not produce valid audio.")
-            self.progress.emit(100)
+            self._emit_progress(100)
             elapsed_seconds = max(0.0, time.monotonic() - preview_started)
             self._status(f"[100%] Preview ready • generated in {fmt_seconds(elapsed_seconds)}")
             self.finished_ok.emit(str(self.output), elapsed_seconds)
