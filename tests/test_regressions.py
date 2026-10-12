@@ -282,7 +282,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("_prepare_design_clone(", worker)
         self.assertIn("_generate_design_locked(", worker)
         self.assertIn("_create_expression_anchors", worker)
-        self.assertIn('"neutral": model.create_voice_clone_prompt', worker)
+        self.assertIn('prompts[style] = clone_model.create_voice_clone_prompt', worker)
         self.assertIn('"outputs": [str(Path(str(path)).resolve()) for path in batch_outputs]', worker)
         self.assertIn('qwen_mode="design"', voice_page)
         self.assertIn('best_long_form_clone_kind()', provider)
@@ -485,13 +485,93 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("max_new_tokens", worker)
         self.assertIn("heartbeat=", provider)
 
+    def test_qwen_design_identity_id_is_stable_for_unchanged_saved_description(self):
+        from app.ui.voice_page import VoicePage
+        from app.tts.voice_profile import VoiceProfile
+        # Exercise the identity matching contract without constructing the UI.
+        saved = VoiceProfile(
+            name="Anime MX Kousuke Takioto!",
+            provider="qwen-character",
+            voice_id="design-anime-mx-kousuke-takioto",
+            model_id="design-1.7b",
+            language="English",
+            qwen_mode="design",
+            qwen_prompt="Young adult male anime protagonist voice.",
+            qwen_seed=3101,
+            qwen_anchor_text="A sample sentence.",
+            qwen_profile_id="saved-profile-id",
+        )
+        page = object.__new__(VoicePage)
+        page.profiles = [saved]
+        class SavedBox:
+            def currentData(self):
+                return saved.name
+        page.saved_profiles = SavedBox()
+        self.assertEqual(
+            page._stable_qwen_design_profile_id(
+                saved.name,
+                saved.qwen_prompt,
+                saved.language,
+                saved.qwen_seed,
+                saved.qwen_anchor_text,
+            ),
+            "saved-profile-id",
+        )
+        changed = page._stable_qwen_design_profile_id(
+            saved.name,
+            "Older sounding young adult male protagonist.",
+            saved.language,
+            saved.qwen_seed,
+            saved.qwen_anchor_text,
+        )
+        self.assertNotEqual(changed, "saved-profile-id")
+        self.assertEqual(len(changed), 32)
+
+    def test_generate_tab_reads_latest_persisted_profile(self):
+        import app.tts.voice_profile as voice_profiles
+        from app.ui.generation_page import GenerationPage
+        from app.tts.voice_profile import VoiceProfile
+        with tempfile.TemporaryDirectory() as temp:
+            stored = VoiceProfile(
+                name="Current Kousuke",
+                provider="qwen-character",
+                voice_id="design-kousuke",
+                qwen_mode="design",
+                qwen_prompt="Lower mid-range young male voice.",
+                qwen_seed=3101,
+                qwen_profile_id="fresh-id",
+            )
+            profile_file = Path(temp) / "voices.json"
+            profile_file.write_text(json.dumps([stored.__dict__]), encoding="utf-8")
+            original = voice_profiles.profiles_file
+            voice_profiles.profiles_file = lambda: profile_file
+            try:
+                page = object.__new__(GenerationPage)
+                class Combo:
+                    def currentData(self):
+                        return VoiceProfile(
+                            name="Current Kousuke",
+                            provider="qwen-character",
+                            voice_id="design-kousuke",
+                            qwen_mode="design",
+                            qwen_prompt="Old female voice description.",
+                            qwen_seed=12,
+                            qwen_profile_id="stale-id",
+                        )
+                page.voice_profile = Combo()
+                selected = page._selected_profile()
+                self.assertEqual(selected.qwen_profile_id, "fresh-id")
+                self.assertEqual(selected.qwen_prompt, "Lower mid-range young male voice.")
+            finally:
+                voice_profiles.profiles_file = original
+
     def test_qwen_design_worker_lazy_loads_cached_identity(self):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         runtime = Path("app/tts/qwen_character_runtime.py").read_text(encoding="utf-8")
-        self.assertIn("cached canonical character identity", worker)
+        self.assertIn("saved canonical character identity", worker)
         self.assertIn("ready = all(", worker)
-        self.assertIn("ANCHOR_STYLES", worker)
-        self.assertIn("v6-story-expression-anchors", worker)
+        self.assertIn('ANCHOR_STYLES = ("neutral",)', worker)
+        self.assertIn("v7-single-anchor-stable-identity", worker)
         self.assertIn('if active_task not in {"design", "design-preview"}:', worker)
         self.assertIn('if vram_gb >= 10.0 and model_installed("base-1.7b")', runtime)
 
