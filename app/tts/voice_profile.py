@@ -182,6 +182,22 @@ def load_saved_profiles() -> list[VoiceProfile]:
         return []
     if not isinstance(records, list):
         return []
+    migrated = False
+    for record in records:
+        if (
+            isinstance(record, dict)
+            and record.get("provider") == "qwen-character"
+            and not record.get("qwen_profile_id")
+        ):
+            record["qwen_profile_id"] = uuid.uuid4().hex
+            migrated = True
+    if migrated:
+        try:
+            # Persist IDs without calling save_profiles(), which scans every
+            # installed engine and is too much work for a simple profile read.
+            path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError:
+            pass
     saved: list[VoiceProfile] = []
     for record in records:
         if not isinstance(record, dict):
