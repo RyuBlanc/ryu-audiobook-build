@@ -660,6 +660,10 @@ def server(args) -> int:
                 raise RuntimeError("Qwen character text is empty.")
 
             if active_task == "custom":
+                print(
+                    json.dumps({"progress": "Generating Qwen CustomVoice speech…"}),
+                    flush=True,
+                )
                 _generate_custom(model, request, output)
             elif active_task in {"design", "design-preview"}:
                 print(
@@ -676,6 +680,10 @@ def server(args) -> int:
                 )
                 _generate_design_locked(model, locked_clone_prompts, request, output)
             elif active_task == "clone":
+                print(
+                    json.dumps({"progress": "Generating Qwen Base clone speech…"}),
+                    flush=True,
+                )
                 _generate_clone(model, request, output)
             else:
                 raise RuntimeError(f"Unsupported Qwen task: {active_task}")
