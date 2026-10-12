@@ -726,8 +726,12 @@ class VoicePage(QWidget):
         self.preview_text = QTextEdit()
         self._preview_text_is_auto = True
         self._preview_source_text = ""
+        # Start with a full target-length demonstration script, then connect
+        # the manual-edit signal. Setting the initial text after connecting
+        # textChanged marked the editor as user-edited, which prevented the
+        # workflow's selected chapter from replacing this short welcome sample.
+        self.preview_text.setPlainText(self._qwen_preview_script(30))
         self.preview_text.textChanged.connect(lambda: setattr(self, "_preview_text_is_auto", False))
-        self.preview_text.setPlainText("Welcome to Ryu's Audiobook. This is a short voice preview.")
         self.preview_text.setMinimumHeight(78)
         self.preview_text.setMaximumHeight(125)
         pv.addWidget(QLabel("Preview text • will be trimmed to the selected preview length"))

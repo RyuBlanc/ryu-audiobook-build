@@ -509,6 +509,22 @@ class RegressionTests(unittest.TestCase):
         self.assertGreaterEqual(len(units), 2)
         self.assertTrue(units[0].endswith("…"))
 
+    def test_voice_preview_initial_text_remains_automatic_for_chapter_source(self):
+        source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
+        init_start = source.index('self.preview_text = QTextEdit()')
+        init_end = source.index('self.preview_text.setMinimumHeight', init_start)
+        initialization = source[init_start:init_end]
+        self.assertIn("self.preview_text.setPlainText(self._qwen_preview_script(30))", initialization)
+        self.assertLess(
+            initialization.index("setPlainText(self._qwen_preview_script(30))"),
+            initialization.index("self.preview_text.textChanged.connect"),
+        )
+        setter_start = source.index("def set_preview_source(")
+        setter_end = source.index("def preview(self)", setter_start)
+        setter = source[setter_start:setter_end]
+        self.assertIn('if getattr(self, "_preview_text_is_auto", True):', setter)
+        self.assertIn('self._preview_text_is_auto = True', setter)
+
     def test_timed_preview_uses_target_duration_and_live_progress(self):
         preview = Path("app/tts/preview.py").read_text(encoding="utf-8")
         voice_page = Path("app/ui/voice_page.py").read_text(encoding="utf-8")

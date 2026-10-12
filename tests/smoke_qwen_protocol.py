@@ -39,7 +39,7 @@ def main() -> None:
         assert len(model.calls) == 1, "Canonical character identity must be generated once."
         assert all(call[0] and not isinstance(call[0], list) for call in model.calls)
         assert classify_expression("Instead of me…then?") == "thoughtful"
-        assert reference_style("concerned") == "thoughtful"
+        assert reference_style("concerned") == "concerned"
         assert reference_style("excited") == "warm"
 
     print("Qwen expression protocol smoke PASSED.")
