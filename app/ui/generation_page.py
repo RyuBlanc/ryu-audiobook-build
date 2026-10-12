@@ -1691,6 +1691,18 @@ class GenerationPage(QWidget):
         if not output:
             self.status.setText("Choose an M4B output.")
             return
+
+        background_audio_path = None
+        if self.background_audio_enabled.isChecked():
+            selected_music = self.background_audio_path.text().strip()
+            if not selected_music or not Path(selected_music).expanduser().is_file():
+                self.status.setText(
+                    "Background music is enabled, but the selected audio file is missing. "
+                    "Choose a valid track or turn background music off."
+                )
+                return
+            background_audio_path = Path(selected_music).expanduser().resolve()
+
         self._save_pronunciations()
         resume_info = inspect_generation_state(self.audio_root, self.chapters)
         state_before_start = load_state(self.project_folder) if self.project_folder else {}
@@ -1730,6 +1742,11 @@ class GenerationPage(QWidget):
                 "narration_speed": float(self.narration_speed.currentData() or 0.90),
                 "pacing_profile": self.pacing_profile.currentData() or "natural",
                 "audio_bitrate": int(self.audio_bitrate.currentData() or DEFAULT_AUDIO_BITRATE_KBPS),
+                "background_audio_enabled": self.background_audio_enabled.isChecked(),
+                "background_audio_path": self.background_audio_path.text().strip(),
+                "background_audio_volume": float(self.background_audio_volume.value()) / 100.0,
+                "background_audio_fade_in": int(self.background_audio_fade_in.value()),
+                "background_audio_fade_out": int(self.background_audio_fade_out.value()),
                 "status": "generating",
             })
             save_state(self.project_folder, state)
@@ -1775,6 +1792,10 @@ class GenerationPage(QWidget):
             pacing_profile=self.pacing_profile.currentData() or "natural",
             metadata=metadata,
             bitrate=int(self.audio_bitrate.currentData() or DEFAULT_AUDIO_BITRATE_KBPS),
+            background_audio_path=background_audio_path,
+            background_audio_volume=float(self.background_audio_volume.value()) / 100.0,
+            background_audio_fade_in=float(self.background_audio_fade_in.value()),
+            background_audio_fade_out=float(self.background_audio_fade_out.value()),
         )
         self.manager.start(
             output,
