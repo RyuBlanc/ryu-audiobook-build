@@ -453,7 +453,7 @@ class GenerationPage(QWidget):
         # The default remains narration-only. Track settings are stored in the
         # project state and mixed only during final M4B packaging.
         audio_state = load_state(self.project_folder) if self.project_folder else {}
-        self.background_audio_enabled = QCheckBox("Enable background music")
+        self.background_audio_enabled = QCheckBox("Enable background music / ambience")
         self.background_audio_enabled.setChecked(
             bool(audio_state.get("background_audio_enabled", False))
         )
@@ -483,7 +483,33 @@ class GenerationPage(QWidget):
         except (TypeError, ValueError):
             saved_music_volume = 0.18
         self.background_audio_volume.setValue(max(0.0, min(100.0, saved_music_volume * 100.0)))
-        settings_form.addRow("Background volume", self.background_audio_volume)
+        settings_form.addRow("Music volume", self.background_audio_volume)
+
+        ambience_file_row = QHBoxLayout()
+        self.ambience_audio_path = QLineEdit(
+            str(audio_state.get("ambience_audio_path") or "")
+        )
+        self.ambience_audio_path.setPlaceholderText("Optional ambience track (forest, rain, city, etc.)…")
+        self.ambience_audio_browse = QPushButton("Browse…")
+        self.ambience_audio_browse.clicked.connect(self.choose_ambience_audio)
+        self.ambience_audio_preview = QPushButton("▶ Preview Ambience")
+        self.ambience_audio_preview.clicked.connect(self.preview_ambience_audio)
+        ambience_file_row.addWidget(self.ambience_audio_path, 1)
+        ambience_file_row.addWidget(self.ambience_audio_browse)
+        ambience_file_row.addWidget(self.ambience_audio_preview)
+        settings_form.addRow("Ambience file", ambience_file_row)
+
+        self.ambience_audio_volume = QDoubleSpinBox()
+        self.ambience_audio_volume.setRange(0.0, 100.0)
+        self.ambience_audio_volume.setDecimals(0)
+        self.ambience_audio_volume.setSingleStep(5.0)
+        self.ambience_audio_volume.setSuffix("%")
+        try:
+            saved_ambience_volume = float(audio_state.get("ambience_audio_volume", 0.10))
+        except (TypeError, ValueError):
+            saved_ambience_volume = 0.10
+        self.ambience_audio_volume.setValue(max(0.0, min(100.0, saved_ambience_volume * 100.0)))
+        settings_form.addRow("Ambience volume", self.ambience_audio_volume)
 
         self.background_audio_fade_in = QSpinBox()
         self.background_audio_fade_in.setRange(0, 30)
@@ -1299,6 +1325,10 @@ class GenerationPage(QWidget):
     def _toggle_background_audio_controls(self, enabled: bool) -> None:
         for widget in (
             self.background_audio_volume,
+            self.ambience_audio_path,
+            self.ambience_audio_browse,
+            self.ambience_audio_preview,
+            self.ambience_audio_volume,
             self.background_audio_fade_in,
             self.background_audio_fade_out,
         ):
@@ -1316,16 +1346,33 @@ class GenerationPage(QWidget):
             self.status.setText("Background track selected. Enable Background music to include it in the final M4B.")
 
     def preview_background_audio(self) -> None:
-        value = self.background_audio_path.text().strip()
+        self._preview_audio_layer(self.background_audio_path, "background music")
+
+    def choose_ambience_audio(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Ambience Track",
+            self.ambience_audio_path.text().strip(),
+            "Audio Files (*.wav *.mp3 *.m4a *.aac *.flac *.ogg *.opus *.wma);;All Files (*.*)",
+        )
+        if path:
+            self.ambience_audio_path.setText(str(Path(path)))
+            self.status.setText("Ambience track selected. Enable background audio to include it in the final M4B.")
+
+    def preview_ambience_audio(self) -> None:
+        self._preview_audio_layer(self.ambience_audio_path, "ambience")
+
+    def _preview_audio_layer(self, field: QLineEdit, label: str) -> None:
+        value = field.text().strip()
         if not value or not Path(value).is_file():
-            self.status.setText("Choose a valid background audio file before previewing it.")
+            self.status.setText(f"Choose a valid {label} audio file before previewing it.")
             return
         if self.music_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.music_player.pause()
             return
         self.music_player.setSource(QUrl.fromLocalFile(str(Path(value).resolve())))
         self.music_player.play()
-        self.status.setText(f"Previewing background track: {Path(value).name}")
+        self.status.setText(f"Previewing {label}: {Path(value).name}")
 
     def _background_music_state_changed(self, state) -> None:
         if state == QMediaPlayer.PlaybackState.PlayingState:
