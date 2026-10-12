@@ -17,6 +17,7 @@ if str(_APPLICATION_ROOT) not in sys.path:
     sys.path.insert(0, str(_APPLICATION_ROOT))
 
 from app.tts.expression import (
+    DEFAULT_VOICE_DESIGN_ANCHOR_TEXT,
     EXPRESSION_STYLES,
     classify_expression,
     expression_instruction,
@@ -35,13 +36,7 @@ EXPRESSION_BANK_VERSION = "v7-single-anchor-stable-identity"
 # or even gender presentation; emotion boundaries and sampling variation must
 # not replace the saved character identity.
 ANCHOR_STYLES = ("neutral",)
-ANCHOR_TEXTS = {
-    "neutral": (
-        "Hello. I thought I understood what was happening. "
-        "Oh, really? That's actually wonderful. "
-        "Wait... something isn't right. Let's think for a moment."
-    ),
-}
+ANCHOR_TEXTS = {"neutral": DEFAULT_VOICE_DESIGN_ANCHOR_TEXT}
 
 
 MODEL_IDS = {
