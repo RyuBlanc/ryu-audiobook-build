@@ -175,13 +175,16 @@ def assemble_m4b(
     narration_speed: float = 1.0,
     background_audio_path: Path | str | None = None,
     background_audio_volume: float = 0.18,
+    ambience_audio_path: Path | str | None = None,
+    ambience_audio_volume: float = 0.10,
     background_audio_fade_in: float = 2.0,
     background_audio_fade_out: float = 3.0,
 ) -> Path:
     """Create one premium M4B containing all chapters and navigation metadata.
 
-    Optional background audio is looped to the narration duration and mixed
-    locally at a user-selected linear gain. It is off unless a path is supplied.
+    Optional music and ambience tracks are independently gained, looped to
+    narration duration, and mixed locally. Both layers are off unless paths
+    are supplied.
     """
     if not chapter_dirs:
         raise ValueError("No chapters were supplied.")
@@ -287,39 +290,59 @@ def assemble_m4b(
         if progress:
             progress(len(chapters), len(chapters), "joined-audio")
 
-        # Stage 1 audio bed: mix an optional user-owned/licensed track only
-        # after narration has been assembled, so the track remains continuous
-        # across chapter boundaries and chapter marker timings stay unchanged.
-        # -stream_loop -1 repeats short music beds; amix duration=first stops
-        # exactly with the narration. This is CPU/FFmpeg work, not GPU work.
-        if background_audio_path:
-            music_path = Path(background_audio_path).expanduser()
-            if not music_path.is_file():
-                raise FileNotFoundError(
-                    f"Background audio file was not found: {music_path}"
-                )
-            music_volume = max(0.0, min(1.0, float(background_audio_volume)))
+        # Stage 1 audio beds: independently mix optional user-owned/licensed
+        # music and ambience only after narration has been assembled. Tracks
+        # therefore remain continuous across chapter boundaries. FFmpeg/CPU
+        # does the work; no GPU memory is needed.
+        audio_layers: list[tuple[str, Path | str | None, float]] = [
+            ("music", background_audio_path, background_audio_volume),
+            ("ambience", ambience_audio_path, ambience_audio_volume),
+        ]
+        active_layers = [
+            (name, Path(path).expanduser(), max(0.0, min(1.0, float(volume))))
+            for name, path, volume in audio_layers
+            if path
+        ]
+        if active_layers:
+            for layer_name, layer_path, _layer_volume in active_layers:
+                if not layer_path.is_file():
+                    raise FileNotFoundError(
+                        f"{layer_name.title()} audio file was not found: {layer_path}"
+                    )
+
             fade_in = max(0.0, min(30.0, float(background_audio_fade_in)))
             fade_out = max(0.0, min(30.0, float(background_audio_fade_out)))
             duration_seconds = narration_duration_ms / 1000.0
             fade_out = min(fade_out, duration_seconds)
             fade_out_start = max(0.0, duration_seconds - fade_out)
-            music_filters = [f"volume={music_volume:.4f}"]
-            if fade_in > 0:
-                music_filters.append(f"afade=t=in:st=0:d={fade_in:.3f}")
-            if fade_out > 0:
-                music_filters.append(
-                    f"afade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f}"
-                )
-            music_filters.append("aresample=44100")
+
+            inputs = ["-i", str(audio_only)]
+            filter_parts = []
+            bed_labels = []
+            for index, (layer_name, layer_path, layer_volume) in enumerate(active_layers, start=1):
+                inputs.extend(["-stream_loop", "-1", "-i", str(layer_path)])
+                label = f"bed{index}"
+                bed_labels.append(f"[{label}]")
+                filters = [f"volume={layer_volume:.4f}"]
+                if fade_in > 0:
+                    filters.append(f"afade=t=in:st=0:d={fade_in:.3f}")
+                if fade_out > 0:
+                    filters.append(
+                        f"afade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f}"
+                    )
+                filters.append("aresample=44100")
+                filter_parts.append(f"[{index}:a]{','.join(filters)}[{label}]")
+
+            input_labels = "[0:a]" + "".join(bed_labels)
+            mix_count = 1 + len(active_layers)
+            filter_parts.append(
+                f"{input_labels}amix=inputs={mix_count}:duration=first:"
+                "dropout_transition=0:normalize=0,alimiter=limit=0.95[out]"
+            )
             mixed_audio = temp_dir / "audiobook-mixed.m4a"
             _run([
-                "-i", str(audio_only),
-                "-stream_loop", "-1", "-i", str(music_path),
-                "-filter_complex",
-                f"[1:a]{','.join(music_filters)}[bed];"
-                "[0:a][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
-                "alimiter=limit=0.95[out]",
+                *inputs,
+                "-filter_complex", ";".join(filter_parts),
                 "-map", "[out]", "-vn", "-t", f"{duration_seconds:.3f}",
                 "-c:a", "aac", "-b:a", audio_bitrate, "-ar", "44100",
                 str(mixed_audio),
