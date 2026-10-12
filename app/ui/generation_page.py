@@ -1325,9 +1325,6 @@ class GenerationPage(QWidget):
     def _toggle_background_audio_controls(self, enabled: bool) -> None:
         for widget in (
             self.background_audio_volume,
-            self.ambience_audio_path,
-            self.ambience_audio_browse,
-            self.ambience_audio_preview,
             self.ambience_audio_volume,
             self.background_audio_fade_in,
             self.background_audio_fade_out,
@@ -1568,6 +1565,8 @@ class GenerationPage(QWidget):
             self.start_button, self.resume_button, self.background_audio_enabled,
             self.background_audio_path, self.background_audio_browse,
             self.background_audio_preview, self.background_audio_volume,
+            self.ambience_audio_path, self.ambience_audio_browse,
+            self.ambience_audio_preview, self.ambience_audio_volume,
             self.background_audio_fade_in, self.background_audio_fade_out,
         ]
         for control in controls:
@@ -1746,15 +1745,26 @@ class GenerationPage(QWidget):
             return
 
         background_audio_path = None
+        ambience_audio_path = None
         if self.background_audio_enabled.isChecked():
             selected_music = self.background_audio_path.text().strip()
-            if not selected_music or not Path(selected_music).expanduser().is_file():
+            selected_ambience = self.ambience_audio_path.text().strip()
+            if not selected_music and not selected_ambience:
                 self.status.setText(
-                    "Background music is enabled, but the selected audio file is missing. "
-                    "Choose a valid track or turn background music off."
+                    "Background audio is enabled, but no music or ambience track is selected. "
+                    "Choose at least one track or turn background audio off."
                 )
                 return
-            background_audio_path = Path(selected_music).expanduser().resolve()
+            for label, value in (("Music", selected_music), ("Ambience", selected_ambience)):
+                if value and not Path(value).expanduser().is_file():
+                    self.status.setText(
+                        f"{label} track was not found: {value}. Choose a valid file or clear that field."
+                    )
+                    return
+            if selected_music:
+                background_audio_path = Path(selected_music).expanduser().resolve()
+            if selected_ambience:
+                ambience_audio_path = Path(selected_ambience).expanduser().resolve()
 
         self._save_pronunciations()
         resume_info = inspect_generation_state(self.audio_root, self.chapters)
@@ -1798,6 +1808,8 @@ class GenerationPage(QWidget):
                 "background_audio_enabled": self.background_audio_enabled.isChecked(),
                 "background_audio_path": self.background_audio_path.text().strip(),
                 "background_audio_volume": float(self.background_audio_volume.value()) / 100.0,
+                "ambience_audio_path": self.ambience_audio_path.text().strip(),
+                "ambience_audio_volume": float(self.ambience_audio_volume.value()) / 100.0,
                 "background_audio_fade_in": int(self.background_audio_fade_in.value()),
                 "background_audio_fade_out": int(self.background_audio_fade_out.value()),
                 "status": "generating",
@@ -1847,6 +1859,8 @@ class GenerationPage(QWidget):
             bitrate=int(self.audio_bitrate.currentData() or DEFAULT_AUDIO_BITRATE_KBPS),
             background_audio_path=background_audio_path,
             background_audio_volume=float(self.background_audio_volume.value()) / 100.0,
+            ambience_audio_path=ambience_audio_path,
+            ambience_audio_volume=float(self.ambience_audio_volume.value()) / 100.0,
             background_audio_fade_in=float(self.background_audio_fade_in.value()),
             background_audio_fade_out=float(self.background_audio_fade_out.value()),
         )
