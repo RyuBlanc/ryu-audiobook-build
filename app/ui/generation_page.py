@@ -25,7 +25,7 @@ from app.core.project import list_projects
 from app.ui.metadata_widgets import HistoryComboBox, GenrePicker
 from app.tts.manager import GenerationManager, GenerationSummary
 from app.tts.profile_provider import provider_from_profile
-from app.tts.voice_profile import load_profiles, VoiceProfile
+from app.tts.voice_profile import load_profiles, load_saved_profile, VoiceProfile
 from app.tts.providers.piper import PiperProvider
 from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.preview import build_voice_preview
@@ -38,6 +38,7 @@ from app.tts.resume import inspect_generation_state
 class VoicePreviewWorker(QThread):
     finished_ok = Signal(object)
     failed = Signal(str)
+    cancelled = Signal()
     progress = Signal(str)
     percent = Signal(int)
 
@@ -64,6 +65,9 @@ class VoicePreviewWorker(QThread):
             self._provider = provider
             if hasattr(provider, 'backend'):
                 provider.backend = self.backend
+            set_status = getattr(provider, "set_status_callback", None)
+            if callable(set_status):
+                set_status(lambda message: self.progress.emit(str(message)))
 
             if self.project_folder:
                 state = load_state(self.project_folder)
@@ -126,7 +130,10 @@ class VoicePreviewWorker(QThread):
             self.progress.emit('[100%] Preview ready.')
             self.finished_ok.emit(result)
         except Exception as exc:
-            self.failed.emit(str(exc))
+            if self.isInterruptionRequested():
+                self.cancelled.emit()
+            else:
+                self.failed.emit(str(exc))
         finally:
             close = getattr(self._provider, 'close', None)
             if callable(close):
@@ -1167,7 +1174,15 @@ class GenerationPage(QWidget):
 
     def _selected_profile(self) -> VoiceProfile | None:
         value = self.voice_profile.currentData()
-        return value if isinstance(value, VoiceProfile) else None
+        if not isinstance(value, VoiceProfile):
+            return None
+        # The Voice page and Generate page live in the same application
+        # session. Always prefer the persisted record when it exists instead
+        # of an older object captured when this page was first opened.
+        saved = load_saved_profile(value.name)
+        if saved and saved.provider == value.provider and saved.voice_id == value.voice_id:
+            return saved
+        return value
 
     def choose_output(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -1252,6 +1267,7 @@ class GenerationPage(QWidget):
         self.preview_worker.percent.connect(self.preview_loading.setValue)
         self.preview_worker.finished_ok.connect(self._preview_worker_ok)
         self.preview_worker.failed.connect(self._preview_worker_failed)
+        self.preview_worker.cancelled.connect(self._preview_worker_cancelled)
         self.preview_worker.finished.connect(self._preview_worker_finished)
 
         self.preview_button.setEnabled(False)
@@ -1313,9 +1329,23 @@ class GenerationPage(QWidget):
         worker = self.preview_worker
         if worker is not None and worker.isRunning():
             worker.requestInterruption()
+            provider = getattr(worker, "_provider", None)
+            cancel = getattr(provider, "request_cancel", None)
+            if callable(cancel):
+                # This is intentionally non-blocking: waiting for Qwen's model
+                # process from the Qt thread caused the Windows "Not Responding"
+                # state while the preview was being cancelled.
+                cancel()
             self.preview_loading.setVisible(False)
             self.preview_activity.setVisible(False)
             self.preview_status.setText('Stopping preview…')
+
+    def _preview_worker_cancelled(self) -> None:
+        self.preview_play_button.setEnabled(False)
+        self.preview_stop_button.setEnabled(False)
+        self.preview_loading.setValue(0)
+        self.preview_status.setText('Preview cancelled.')
+        self.status.setText('Voice preview cancelled.')
 
     def _preview_state_changed(self, state) -> None:
         if state == QMediaPlayer.PlaybackState.PlayingState:
