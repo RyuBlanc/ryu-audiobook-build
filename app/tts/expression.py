@@ -176,7 +176,7 @@ def voice_design_anchor_instruction(base_voice_description: str) -> str:
         "Do not add words, stage directions, laughter, singing, or dramatic effects. "
         "This should sound like one character reacting naturally, not four different voices."
     )
-    return f"{base}\\n{anchor_direction}".strip()
+    return f"{base}\n{anchor_direction}".strip()
 
 
 def expression_instruction(base_voice_description: str, style: str) -> str:
