@@ -31,6 +31,7 @@ class PassiveScrollComboBox(QComboBox):
 
 from app.tts.profile_provider import provider_from_profile
 from app.tts.preview import build_voice_preview
+from app.tts.expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT
 from app.tts.chatterbox_runtime import runtime_ready, runtime_status
 from app.tts.qwen_character_runtime import (
     runtime_ready as qwen_runtime_ready,
@@ -1403,7 +1404,10 @@ class VoicePage(QWidget):
         language = profile.language or "Not specified"
         model = profile.model_id or "automatic"
         if profile.provider == "qwen-character" and (profile.qwen_mode or "custom") == "design":
-            model = f"VoiceDesign {profile.model_id or 'design-1.7b'} → Base {best_long_form_clone_kind()} long-form voice lock"
+            model = (
+                f"VoiceDesign {profile.model_id or 'design-1.7b'} "
+                "→ Base model selected in the background for this GPU"
+            )
 
         anchor = "Not used"
         if profile.qwen_anchor_path:
@@ -1625,7 +1629,10 @@ class VoicePage(QWidget):
             self._set_filter_values(qwen_profiles)
             self._refresh_voice_list()
             ready = qwen_runtime_ready()
-            kind = best_custom_kind()
+            # UI status must not start nvidia-smi. Use a conservative fast
+            # filesystem-only choice here; the provider makes the true GPU-aware
+            # choice in its worker thread before generation.
+            kind = best_custom_kind(vram_gb=0.0)
             installed = ready and qwen_model_installed(kind)
             self.source_hint.setText(
                 "Qwen3-TTS CustomVoice • reusable named speakers with local style instructions on the 1.7B path. "
@@ -1667,7 +1674,8 @@ class VoicePage(QWidget):
 
         elif mode == "qwen-clone":
             ready = qwen_runtime_ready()
-            kind = best_clone_kind()
+            # Keep hardware detection out of the Qt event loop.
+            kind = best_clone_kind(vram_gb=0.0)
             installed = ready and qwen_model_installed(kind)
             self.source_hint.setText(
                 "Qwen3-TTS Base • authorized voice cloning from a short local reference recording."
@@ -1886,7 +1894,7 @@ class VoicePage(QWidget):
             ).strip("-")[:50]
             seed = int(self.qwen_design_seed.value()) or 3101
             language = self.qwen_design_language.currentText()
-            anchor_text = self._qwen_preview_script(12)
+            anchor_text = DEFAULT_VOICE_DESIGN_ANCHOR_TEXT
             profile_id = self._stable_qwen_design_profile_id(
                 design_name, prompt, language, seed, anchor_text
             )
@@ -2122,7 +2130,9 @@ class VoicePage(QWidget):
                         "Install the Qwen VoiceDesign model from Models first.",
                     )
                     return
-                base_kind = best_long_form_clone_kind()
+                # This check must remain instant on the UI thread. Actual
+                # model choice is recalculated in the Qwen worker using VRAM.
+                base_kind = best_long_form_clone_kind(vram_gb=0.0)
                 if not qwen_model_installed(base_kind):
                     QMessageBox.warning(
                         self,
@@ -2138,7 +2148,7 @@ class VoicePage(QWidget):
                 )
                 preview_model = f"{kind} • VoiceDesign • stable identity preview"
             elif profile.qwen_mode == "clone":
-                kind = best_clone_kind()
+                kind = best_clone_kind(vram_gb=0.0)
                 if not model_installed(kind):
                     QMessageBox.warning(
                         self,
@@ -2148,7 +2158,7 @@ class VoicePage(QWidget):
                     return
                 preview_model = f"{kind} • Base voice clone"
             else:
-                kind = best_custom_kind()
+                kind = best_custom_kind(vram_gb=0.0)
                 if not model_installed(kind):
                     QMessageBox.warning(
                         self,
