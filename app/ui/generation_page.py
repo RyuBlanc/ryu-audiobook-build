@@ -25,7 +25,7 @@ from app.core.project import list_projects
 from app.ui.metadata_widgets import HistoryComboBox, GenrePicker
 from app.tts.manager import GenerationManager, GenerationSummary
 from app.tts.profile_provider import provider_from_profile
-from app.tts.voice_profile import load_profiles, load_saved_profile, VoiceProfile
+from app.tts.voice_profile import load_profiles, load_saved_profile, load_saved_profiles, VoiceProfile
 from app.tts.providers.piper import PiperProvider
 from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.preview import build_voice_preview
@@ -1172,6 +1172,11 @@ class GenerationPage(QWidget):
             self.cover = Path(cover)
             self.cover_label.setText(self.cover.name)
 
+    def _current_profiles(self) -> list[VoiceProfile]:
+        """Overlay fresh persisted records onto the in-memory voice catalogue."""
+        saved = {profile.name.casefold(): profile for profile in load_saved_profiles()}
+        return [saved.get(profile.name.casefold(), profile) for profile in self.profiles]
+
     def _selected_profile(self) -> VoiceProfile | None:
         value = self.voice_profile.currentData()
         if not isinstance(value, VoiceProfile):
@@ -1208,7 +1213,7 @@ class GenerationPage(QWidget):
         if not assignments:
             return narrator_provider, narrator_voice
         from app.tts.cast_provider import CastAwareProvider
-        profiles = {profile.name: profile for profile in self.profiles}
+        profiles = {profile.name: profile for profile in self._current_profiles()}
         narrating_character = state.get("voice_cast_narrating_character")
         return CastAwareProvider(
             narrator_provider,
@@ -1258,7 +1263,7 @@ class GenerationPage(QWidget):
             backend = profile.backend
 
         self.preview_worker = VoicePreviewWorker(
-            profile, backend, self.project_folder, self.profiles, pronunciation_dictionary,
+            profile, backend, self.project_folder, self._current_profiles(), pronunciation_dictionary,
             text, output, float(self.narration_speed.currentData() or 0.90),
             self.pacing_profile.currentData() or 'natural',
             dialogue_assignments=getattr(chapter, "dialogue_assignments", []),
