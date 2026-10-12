@@ -1180,7 +1180,7 @@ class GenerationPage(QWidget):
         # session. Always prefer the persisted record when it exists instead
         # of an older object captured when this page was first opened.
         saved = load_saved_profile(value.name)
-        if saved and saved.provider == value.provider and saved.voice_id == value.voice_id:
+        if saved:
             return saved
         return value
 
