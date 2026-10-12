@@ -42,6 +42,10 @@ class GenerationManager:
         pacing_profile: str = "natural",
         metadata: dict[str, str] | None = None,
         bitrate: int | str | None = 256,
+        background_audio_path: Path | None = None,
+        background_audio_volume: float = 0.18,
+        background_audio_fade_in: float = 2.0,
+        background_audio_fade_out: float = 3.0,
     ) -> None:
         self.provider = provider
         self.voice = voice
@@ -54,6 +58,10 @@ class GenerationManager:
         self.pacing_profile = pacing_profile
         self.metadata = metadata or {}
         self.bitrate = bitrate
+        self.background_audio_path = Path(background_audio_path) if background_audio_path else None
+        self.background_audio_volume = max(0.0, min(1.0, float(background_audio_volume)))
+        self.background_audio_fade_in = max(0.0, min(30.0, float(background_audio_fade_in)))
+        self.background_audio_fade_out = max(0.0, min(30.0, float(background_audio_fade_out)))
         self.cancel_event = Event()
         self._thread: Thread | None = None
         self.failed: list[int] = []
@@ -251,6 +259,10 @@ class GenerationManager:
                     progress=lambda done, total, message: self._package_progress(done, total, message),
                     bitrate=self.bitrate,
                     narration_speed=self.narration_speed,
+                    background_audio_path=self.background_audio_path,
+                    background_audio_volume=self.background_audio_volume,
+                    background_audio_fade_in=self.background_audio_fade_in,
+                    background_audio_fade_out=self.background_audio_fade_out,
                 )
                 self._emit(len(self.chapters), len(self.chapters), 1, "m4b-complete")
                 # Only delete intermediate files after the final M4B has been
