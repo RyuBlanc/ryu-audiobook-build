@@ -143,7 +143,10 @@ class VoicePreviewWorker(QThread):
             self._status(f"[100%] Preview ready • generated in {fmt_seconds(elapsed_seconds)}")
             self.finished_ok.emit(str(self.output), elapsed_seconds)
         except Exception as exc:
-            self.failed.emit(str(exc))
+            if self.cancel_requested:
+                self.cancelled.emit()
+            else:
+                self.failed.emit(str(exc))
         finally:
             provider = self.provider
             self.provider = None
@@ -158,10 +161,12 @@ class VoicePreviewWorker(QThread):
         self.cancel_requested = True
         self._status("Stopping preview…")
         provider = self.provider
-        close = getattr(provider, "close", None)
-        if callable(close):
+        cancel = getattr(provider, "request_cancel", None)
+        if callable(cancel):
+            # Must not call close()/wait() in the Qt thread; Qwen model startup
+            # and generation can take minutes on a 4 GB GPU.
             try:
-                close()
+                cancel()
             except Exception:
                 pass
 
