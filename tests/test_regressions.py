@@ -518,7 +518,8 @@ class RegressionTests(unittest.TestCase):
             ),
             "saved-profile-id",
         )
-        changed = page._stable_qwen_design_profile_id(
+        changed = VoicePage._stable_qwen_design_profile_id(
+            page,
             saved.name,
             "Older sounding young adult male protagonist.",
             saved.language,
