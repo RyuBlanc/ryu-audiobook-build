@@ -833,6 +833,48 @@ class RegressionTests(unittest.TestCase):
             self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
             self.assertEqual(DEFAULT_AUDIO_BITRATE_KBPS, 256)
 
+    def test_m4b_can_mix_a_continuous_background_track(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapter_dirs = []
+            for number in (1, 2):
+                chapter_dir = root / f"{number:03d}_Chapter_{number}"
+                _write_wav(chapter_dir / "chunks" / "00001.wav", 3.0)
+                chapter_dirs.append(chapter_dir)
+
+            music = root / "licensed-music.wav"
+            _write_wav(music, 1.0)
+            output = root / "mixed-book.m4b"
+            progress = []
+            result = assemble_m4b(
+                chapter_dirs,
+                output,
+                "Mixed Test Book",
+                chapter_titles=["Chapter 1", "Chapter 2"],
+                progress=lambda done, total, message: progress.append(message),
+                background_audio_path=music,
+                background_audio_volume=0.12,
+                background_audio_fade_in=0.5,
+                background_audio_fade_out=0.5,
+            )
+            self.assertEqual(result, output)
+            self.assertTrue(output.exists())
+            self.assertGreater(output.stat().st_size, 1024)
+            self.assertIn("mixed-background-audio", progress)
+            self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
+
+    def test_background_audio_controls_are_optional_and_project_persisted(self):
+        ui = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
+        assembler = Path("app/audio/assembler.py").read_text(encoding="utf-8")
+        self.assertIn('QCheckBox("Enable background music")', ui)
+        self.assertIn("def preview_background_audio(self)", ui)
+        self.assertIn('"background_audio_enabled": self.background_audio_enabled.isChecked()', ui)
+        self.assertIn("background_audio_path=background_audio_path", ui)
+        self.assertIn("background_audio_path=self.background_audio_path", manager)
+        self.assertIn('"-stream_loop", "-1", "-i", str(music_path)', assembler)
+        self.assertIn("amix=inputs=2:duration=first", assembler)
+
     def test_audio_bitrate_range_is_enforced(self):
         from app.audio.assembler import normalize_audio_bitrate
         self.assertEqual(normalize_audio_bitrate(None), "256k")
