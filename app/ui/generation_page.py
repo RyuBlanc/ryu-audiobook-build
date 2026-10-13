@@ -6,7 +6,7 @@ import re
 import time
 import tempfile
 
-from PySide6.QtCore import QObject, Signal, QUrl, QTimer, QThread
+from PySide6.QtCore import QObject, Signal, QUrl, QTimer, QThread, QSettings
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
@@ -24,6 +24,7 @@ from app.documents.parser import extract_text
 from app.core.state import load_state, save_state
 from app.core.project import list_projects
 from app.ui.metadata_widgets import HistoryComboBox, GenrePicker
+from app.ui.audio_visualizer import AudioVisualizer
 from app.tts.manager import GenerationManager, GenerationSummary
 from app.tts.profile_provider import provider_from_profile
 from app.tts.voice_profile import load_profiles, load_saved_profile, load_saved_profiles, VoiceProfile
@@ -248,6 +249,10 @@ class GenerationPage(QWidget):
         self._eta_last_time: float | None = None
         self._eta_warmup_samples = 0
         self._eta_rates: list[float] = []
+        self.motion_settings = QSettings("RyuBlanc", "Ryu's Audiobook")
+        self._reduce_motion_enabled = bool(
+            self.motion_settings.value("ui/reduce_motion", False, type=bool)
+        )
 
         self.player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
@@ -693,7 +698,7 @@ class GenerationPage(QWidget):
         self.play_button.setEnabled(False)
         self.play_button.clicked.connect(self.play_result)
         self.stop_button = QPushButton("■  Stop")
-        self.stop_button.clicked.connect(self.player.stop)
+        self.stop_button.clicked.connect(self.stop_result)
         self.open_button = QPushButton("Open Folder")
         self.open_button.setEnabled(False)
         self.open_button.clicked.connect(self.open_result_folder)
@@ -701,6 +706,24 @@ class GenerationPage(QWidget):
         result_actions.addWidget(self.stop_button)
         result_actions.addWidget(self.open_button)
         result_layout.addLayout(result_actions)
+
+        visualizer_row = QHBoxLayout()
+        self.audio_visualizer = AudioVisualizer()
+        self.audio_visualizer.set_reduced_motion(self._reduce_motion_enabled)
+        visualizer_row.addWidget(self.audio_visualizer, 1)
+        self.reduce_motion_toggle = QCheckBox("Reduce motion")
+        self.reduce_motion_toggle.setChecked(self._reduce_motion_enabled)
+        self.reduce_motion_toggle.setToolTip(
+            "Use a static waveform while listening. This also saves a little CPU time."
+        )
+        self.reduce_motion_toggle.toggled.connect(self._set_reduce_motion)
+        visualizer_row.addWidget(self.reduce_motion_toggle)
+        result_layout.addLayout(visualizer_row)
+        # Connect after playback controls and visualizer exist so an early
+        # media-state notification cannot reach a partially initialized page.
+        self.player.playbackStateChanged.connect(self._player_playback_state_changed)
+        self._player_playback_state_changed(self.player.playbackState())
+
         self.result_time = QLabel("0:00 / 0:00")
         result_layout.addWidget(self.result_time)
         root.addWidget(result_box)
@@ -2194,6 +2217,27 @@ class GenerationPage(QWidget):
         self._refresh_resume_state()
         self._refresh_readiness()
 
+    def _set_reduce_motion(self, enabled: bool) -> None:
+        self._reduce_motion_enabled = bool(enabled)
+        self.motion_settings.setValue("ui/reduce_motion", self._reduce_motion_enabled)
+        self.audio_visualizer.set_reduced_motion(self._reduce_motion_enabled)
+
+    def _player_playback_state_changed(self, state) -> None:
+        is_playing = state == QMediaPlayer.PlaybackState.PlayingState
+        if hasattr(self, "audio_visualizer"):
+            self.audio_visualizer.set_playing(is_playing)
+        if is_playing:
+            self.play_button.setText("Ⅱ  Pause")
+        elif state == QMediaPlayer.PlaybackState.PausedState:
+            self.play_button.setText("▶  Resume")
+        else:
+            self.play_button.setText("▶  Play Audiobook")
+
+    def stop_result(self) -> None:
+        self.player.stop()
+        self.play_button.setText("▶  Play Audiobook")
+        self.audio_visualizer.set_playing(False)
+
     def play_result(self) -> None:
         path = Path(self.output.text().strip())
         if not path.exists():
@@ -2203,10 +2247,8 @@ class GenerationPage(QWidget):
             self.player.setSource(QUrl.fromLocalFile(str(path)))
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.player.pause()
-            self.play_button.setText("▶  Play Audiobook")
         else:
             self.player.play()
-            self.play_button.setText("Ⅱ  Pause")
 
     def open_result_folder(self) -> None:
         path = Path(self.output.text().strip())
