@@ -811,11 +811,12 @@ class RegressionTests(unittest.TestCase):
                 vp.voices_root = original_root
 
     def test_audiobook_visualizer_is_lightweight_and_motion_aware(self):
+        from PySide6.QtWidgets import QWidget
         from app.ui.audio_visualizer import AudioVisualizer
 
         visualizer_source = Path("app/ui/audio_visualizer.py").read_text(encoding="utf-8")
         generation_source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
-        self.assertTrue(issubclass(AudioVisualizer, __import__("PySide6.QtWidgets", fromlist=["QWidget"]).QWidget))
+        self.assertTrue(issubclass(AudioVisualizer, QWidget))
         self.assertIn("self._timer.setInterval(40)", visualizer_source)
         self.assertIn("self._playing and not self._reduced_motion and self.isVisible()", visualizer_source)
         self.assertIn("self._timer.stop()", visualizer_source)
