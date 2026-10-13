@@ -960,6 +960,42 @@ class RegressionTests(unittest.TestCase):
             self.assertGreaterEqual(_duration_ms(output), 7000)
             self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
 
+    def test_manual_music_still_gets_chapter_transition_cues(self):
+        from app.audio.assembler import _duration_ms
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapter_dir = root / "001_Manual_Chapter"
+            _write_wav(chapter_dir / "chunks" / "00001.wav", 3.0)
+            (chapter_dir / "narration.json").write_text(
+                json.dumps({
+                    "title": "Manual Chapter",
+                    "narration_text": "The story continues into the next room.",
+                }),
+                encoding="utf-8",
+            )
+            music = root / "continuous-music.wav"
+            _write_wav(music, 1.0)
+            progress = []
+            output = root / "manual-with-cue.m4b"
+            result = assemble_m4b(
+                [chapter_dir],
+                output,
+                "Manual Mode Cue Test",
+                chapter_titles=["Manual Chapter"],
+                progress=lambda done, total, message: progress.append(message),
+                background_audio_mode="manual",
+                background_audio_path=music,
+                background_audio_volume=0.18,
+                chapter_transition_sound=True,
+                background_audio_fade_in=0.3,
+                background_audio_fade_out=0.3,
+            )
+            self.assertEqual(result, output)
+            self.assertIn("mixed-background-audio", progress)
+            self.assertGreaterEqual(_duration_ms(output), 3500)
+            self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
+
     def test_audio_bitrate_range_is_enforced(self):
         from app.audio.assembler import normalize_audio_bitrate
         self.assertEqual(normalize_audio_bitrate(None), "256k")
