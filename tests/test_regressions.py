@@ -463,7 +463,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("self._clear_saved_profile_selection()", handler)
         self.assertIn('self.name.setText(f"Qwen VoiceDesign • {preset_name}")', handler)
         self.assertIn('self.profile_badge.setText(f"Unsaved draft • {preset_name}")', handler)
-        self.assertIn("save it as a separate profile", handler)
+        self.assertIn("Preview this new voice, then save", handler)
+        self.assertIn("it as a separate profile", handler)
         self.assertIn("the previously saved voice is unchanged", handler)
 
     def test_saved_voice_design_uses_one_shared_anchor_transcript(self):
