@@ -888,6 +888,32 @@ class VoicePage(QWidget):
         if value:
             self.qwen_design_prompt.setPlainText(value)
 
+        # Selecting a new preset creates a separate unsaved VoiceDesign draft.
+        # Clear the old saved-profile selection to prevent its identity anchor
+        # or profile name from appearing active for the new prompt.
+        if not hasattr(self, "saved_profiles"):
+            return
+        selected_name = str(self.saved_profiles.currentData() or "")
+        if selected_name:
+            self._clear_saved_profile_selection()
+
+        preset_name = str(self.qwen_design_preset.currentText() or "").strip()
+        if preset_name and preset_name != "Custom voice description":
+            self.name.setText(f"Qwen VoiceDesign • {preset_name}")
+            if hasattr(self, "profile_badge"):
+                self.profile_badge.setText(f"Unsaved draft • {preset_name}")
+        elif preset_name == "Custom voice description":
+            if not self.name.text().strip() or self.name.text().strip() == selected_name:
+                self.name.setText("Qwen VoiceDesign • Custom Description")
+            if hasattr(self, "profile_badge"):
+                self.profile_badge.setText("Unsaved VoiceDesign draft")
+
+        if hasattr(self, "status"):
+            self.status.setText(
+                f"Preset '{preset_name}' selected. Preview this new voice, then save "
+                "it as a separate profile; the previously saved voice is unchanged."
+            )
+
     def _refresh_online_catalog(self) -> None:
         if self.mode.currentData() == "elevenlabs":
             self._refresh_premium_catalog()
