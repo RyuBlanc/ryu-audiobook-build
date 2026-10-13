@@ -459,6 +459,44 @@ class GenerationPage(QWidget):
         )
         settings_form.addRow("Background audio", self.background_audio_enabled)
 
+        self.background_audio_mode = QComboBox()
+        self.background_audio_mode.addItem("Automatic • chapter-aware music", "auto")
+        self.background_audio_mode.addItem("Manual • use my own tracks", "manual")
+        saved_audio_mode = str(audio_state.get("background_audio_mode") or "auto")
+        saved_mode_index = self.background_audio_mode.findData(saved_audio_mode)
+        self.background_audio_mode.setCurrentIndex(max(0, saved_mode_index))
+        self.background_audio_mode.currentIndexChanged.connect(
+            lambda *_: self._toggle_background_audio_controls(
+                self.background_audio_enabled.isChecked()
+            )
+        )
+        settings_form.addRow("Music mode", self.background_audio_mode)
+
+        self.auto_music_style = QComboBox()
+        for label, value in (
+            ("Auto-detect from each chapter", "auto"),
+            ("Fantasy / Adventure", "fantasy"),
+            ("Mystery / Suspense", "mystery"),
+            ("Romance / Warm", "romance"),
+            ("Dark / Horror", "dark"),
+            ("Action / Adventure", "action"),
+            ("Calm / Reflective", "calm"),
+        ):
+            self.auto_music_style.addItem(label, value)
+        saved_style_index = self.auto_music_style.findData(
+            str(audio_state.get("auto_music_style") or "auto")
+        )
+        self.auto_music_style.setCurrentIndex(max(0, saved_style_index))
+        settings_form.addRow("Automatic music style", self.auto_music_style)
+
+        self.chapter_transition_sound = QCheckBox(
+            "Add a short transition sound at every chapter"
+        )
+        self.chapter_transition_sound.setChecked(
+            bool(audio_state.get("chapter_transition_sound", True))
+        )
+        settings_form.addRow("", self.chapter_transition_sound)
+
         music_file_row = QHBoxLayout()
         self.background_audio_path = QLineEdit(
             str(audio_state.get("background_audio_path") or "")
@@ -528,8 +566,10 @@ class GenerationPage(QWidget):
         settings_form.addRow("Music fade-out", self.background_audio_fade_out)
 
         self.background_audio_hint = QLabel(
-            "Local FFmpeg mix • track loops to book length • fades at start/end. "
-            "Keep this low so narration remains clear. Automatic speech ducking is a later stage."
+            "Automatic mode creates a quiet local theme for each chapter and can add a "
+            "short transition cue at chapter starts. Choose a fixed style or let it detect "
+            "mood from the chapter text. Manual mode uses the music/ambience files below. "
+            "Narration stays the main focus; speech-aware ducking is a later stage."
         )
         self.background_audio_hint.setWordWrap(True)
         self.background_audio_hint.setObjectName("muted")
@@ -1323,13 +1363,25 @@ class GenerationPage(QWidget):
         return value
 
     def _toggle_background_audio_controls(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        auto_mode = enabled and self.background_audio_mode.currentData() == "auto"
+        manual_mode = enabled and self.background_audio_mode.currentData() == "manual"
+        self.background_audio_mode.setEnabled(enabled)
+        self.auto_music_style.setEnabled(auto_mode)
+        self.chapter_transition_sound.setEnabled(auto_mode)
         for widget in (
+            self.background_audio_path,
+            self.background_audio_browse,
+            self.background_audio_preview,
+            self.ambience_audio_path,
+            self.ambience_audio_browse,
+            self.ambience_audio_preview,
             self.background_audio_volume,
             self.ambience_audio_volume,
-            self.background_audio_fade_in,
-            self.background_audio_fade_out,
         ):
-            widget.setEnabled(bool(enabled))
+            widget.setEnabled(manual_mode)
+        for widget in (self.background_audio_fade_in, self.background_audio_fade_out):
+            widget.setEnabled(enabled)
 
     def choose_background_audio(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
