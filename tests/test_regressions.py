@@ -810,6 +810,21 @@ class RegressionTests(unittest.TestCase):
             finally:
                 vp.voices_root = original_root
 
+    def test_audiobook_visualizer_is_lightweight_and_motion_aware(self):
+        from app.ui.audio_visualizer import AudioVisualizer
+
+        visualizer_source = Path("app/ui/audio_visualizer.py").read_text(encoding="utf-8")
+        generation_source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        self.assertTrue(issubclass(AudioVisualizer, __import__("PySide6.QtWidgets", fromlist=["QWidget"]).QWidget))
+        self.assertIn("self._timer.setInterval(40)", visualizer_source)
+        self.assertIn("self._playing and not self._reduced_motion and self.isVisible()", visualizer_source)
+        self.assertIn("self._timer.stop()", visualizer_source)
+        self.assertIn("no images, shaders, OpenGL, audio capture, or background", visualizer_source)
+        self.assertIn("QSettings(\"RyuBlanc\", \"Ryu's Audiobook\")", generation_source)
+        self.assertIn("self.player.playbackStateChanged.connect(self._player_playback_state_changed)", generation_source)
+        self.assertIn('QCheckBox("Reduce motion")', generation_source)
+        self.assertIn('self.motion_settings.setValue("ui/reduce_motion", self._reduce_motion_enabled)', generation_source)
+
     def test_voice_preview_runs_in_a_worker_thread(self):
         from app.ui.voice_page import VoicePreviewWorker
         from PySide6.QtCore import QThread
