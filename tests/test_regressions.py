@@ -455,6 +455,16 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("voice_design_anchor_instruction(base_description)", worker)
         self.assertIn('"temperature": temperature', worker)
 
+    def test_changing_qwen_preset_clears_old_saved_voice_selection(self):
+        source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
+        start = source.index("    def _qwen_design_preset_changed(self) -> None:")
+        end = source.index("    def _refresh_online_catalog(self)", start)
+        handler = source[start:end]
+        self.assertIn("self._clear_saved_profile_selection()", handler)
+        self.assertIn('self.name.setText(f"Qwen VoiceDesign • {preset_name}")', handler)
+        self.assertIn('self.profile_badge.setText(f"Unsaved draft • {preset_name}")', handler)
+        self.assertIn("save it as a separate profile", handler)
+
     def test_saved_voice_design_uses_one_shared_anchor_transcript(self):
         from app.tts.expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT
         from app.tts.providers.qwen_character import QwenCharacterProvider
