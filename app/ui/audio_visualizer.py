@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 
@@ -21,7 +21,7 @@ class AudioVisualizer(QWidget):
         self._reduced_motion = False
         self._phase = 0.0
         self._timer = QTimer(self)
-        self._timer.setTimerType(Qt.TimerType.PreciseTimer)
+        self._timer.setTimerType(Qt.TimerType.CoarseTimer)
         self._timer.setInterval(40)  # 25 fps is smooth without a continuous 60 fps repaint.
         self._timer.timeout.connect(self._advance)
         self.setMinimumHeight(70)
@@ -97,7 +97,7 @@ class AudioVisualizer(QWidget):
         )
 
         dot = QColor("#e64970" if self._playing else "#5e5661")
-        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setPen(QPen(Qt.PenStyle.NoPen))
         painter.setBrush(dot)
         painter.drawEllipse(bounds.right() - 17, bounds.top() + 10, 5, 5)
 
@@ -115,6 +115,7 @@ class AudioVisualizer(QWidget):
         gradient.setColorAt(0.48, QColor("#d52b55"))
         gradient.setColorAt(0.78, QColor("#a72a67"))
         gradient.setColorAt(1.0, QColor("#6b285d"))
+        bar_brush = QBrush(gradient)
 
         for index in range(count):
             position = index / max(1, count - 1)
@@ -142,6 +143,6 @@ class AudioVisualizer(QWidget):
                 min(2.5, bar_width / 2),
                 min(2.5, bar_width / 2),
             )
-            painter.fillPath(bar, gradient)
+            painter.fillPath(bar, bar_brush)
 
         painter.end()
