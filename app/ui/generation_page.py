@@ -462,7 +462,14 @@ class GenerationPage(QWidget):
         self.background_audio_mode = QComboBox()
         self.background_audio_mode.addItem("Automatic • chapter-aware music", "auto")
         self.background_audio_mode.addItem("Manual • use my own tracks", "manual")
-        saved_audio_mode = str(audio_state.get("background_audio_mode") or "auto")
+        legacy_has_manual_tracks = bool(
+            str(audio_state.get("background_audio_path") or "").strip()
+            or str(audio_state.get("ambience_audio_path") or "").strip()
+        )
+        saved_audio_mode = str(
+            audio_state.get("background_audio_mode")
+            or ("manual" if legacy_has_manual_tracks else "auto")
+        )
         saved_mode_index = self.background_audio_mode.findData(saved_audio_mode)
         self.background_audio_mode.setCurrentIndex(max(0, saved_mode_index))
         self.background_audio_mode.currentIndexChanged.connect(
@@ -490,7 +497,7 @@ class GenerationPage(QWidget):
         settings_form.addRow("Automatic music style", self.auto_music_style)
 
         self.chapter_transition_sound = QCheckBox(
-            "Add a short transition sound at every chapter"
+            "Add a short transition sound at every chapter (generated locally)"
         )
         self.chapter_transition_sound.setChecked(
             bool(audio_state.get("chapter_transition_sound", True))
@@ -1368,7 +1375,7 @@ class GenerationPage(QWidget):
         manual_mode = enabled and self.background_audio_mode.currentData() == "manual"
         self.background_audio_mode.setEnabled(enabled)
         self.auto_music_style.setEnabled(auto_mode)
-        self.chapter_transition_sound.setEnabled(auto_mode)
+        self.chapter_transition_sound.setEnabled(enabled)
         for widget in (
             self.background_audio_path,
             self.background_audio_browse,
