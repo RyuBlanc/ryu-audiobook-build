@@ -259,7 +259,6 @@ class GenerationPage(QWidget):
         self.audio_output.setVolume(0.85)
         self.player.setAudioOutput(self.audio_output)
         self.player.positionChanged.connect(self._player_position)
-        self.player.playbackStateChanged.connect(self._player_playback_state_changed)
         self.music_player = QMediaPlayer(self)
         self.music_audio_output = QAudioOutput(self)
         self.music_audio_output.setVolume(0.85)
@@ -720,6 +719,10 @@ class GenerationPage(QWidget):
         self.reduce_motion_toggle.toggled.connect(self._set_reduce_motion)
         visualizer_row.addWidget(self.reduce_motion_toggle)
         result_layout.addLayout(visualizer_row)
+        # Connect after playback controls and visualizer exist so an early
+        # media-state notification cannot reach a partially initialized page.
+        self.player.playbackStateChanged.connect(self._player_playback_state_changed)
+        self._player_playback_state_changed(self.player.playbackState())
 
         self.result_time = QLabel("0:00 / 0:00")
         result_layout.addWidget(self.result_time)
