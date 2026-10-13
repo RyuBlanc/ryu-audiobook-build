@@ -12,7 +12,8 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QProgressBar, QPushButton, QVBoxLayout, QWidget, QComboBox, QScrollArea,
-    QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy,
+    QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy, QCheckBox,
+    QDoubleSpinBox, QSpinBox,
 )
 
 from app.chapters.detector import Chapter, detect_chapters
@@ -253,6 +254,11 @@ class GenerationPage(QWidget):
         self.audio_output.setVolume(0.85)
         self.player.setAudioOutput(self.audio_output)
         self.player.positionChanged.connect(self._player_position)
+        self.music_player = QMediaPlayer(self)
+        self.music_audio_output = QAudioOutput(self)
+        self.music_audio_output.setVolume(0.85)
+        self.music_player.setAudioOutput(self.music_audio_output)
+        self.music_player.playbackStateChanged.connect(self._background_music_state_changed)
         self.player.durationChanged.connect(self._player_duration)
 
         self.preview_player = QMediaPlayer(self)
@@ -442,6 +448,142 @@ class GenerationPage(QWidget):
             max(0, self.audio_bitrate.findData(DEFAULT_AUDIO_BITRATE_KBPS))
         )
         settings_form.addRow("Audio quality", self.audio_bitrate)
+
+        # Stage 1: an optional user-supplied/licensed continuous music bed.
+        # The default remains narration-only. Track settings are stored in the
+        # project state and mixed only during final M4B packaging.
+        audio_state = load_state(self.project_folder) if self.project_folder else {}
+        self.background_audio_enabled = QCheckBox("Enable background music / ambience")
+        self.background_audio_enabled.setChecked(
+            bool(audio_state.get("background_audio_enabled", False))
+        )
+        settings_form.addRow("Background audio", self.background_audio_enabled)
+
+        self.background_audio_mode = QComboBox()
+        self.background_audio_mode.addItem("Automatic • chapter-aware music", "auto")
+        self.background_audio_mode.addItem("Manual • use my own tracks", "manual")
+        legacy_has_manual_tracks = bool(
+            str(audio_state.get("background_audio_path") or "").strip()
+            or str(audio_state.get("ambience_audio_path") or "").strip()
+        )
+        saved_audio_mode = str(
+            audio_state.get("background_audio_mode")
+            or ("manual" if legacy_has_manual_tracks else "auto")
+        )
+        saved_mode_index = self.background_audio_mode.findData(saved_audio_mode)
+        self.background_audio_mode.setCurrentIndex(max(0, saved_mode_index))
+        self.background_audio_mode.currentIndexChanged.connect(
+            lambda *_: self._toggle_background_audio_controls(
+                self.background_audio_enabled.isChecked()
+            )
+        )
+        settings_form.addRow("Music mode", self.background_audio_mode)
+
+        self.auto_music_style = QComboBox()
+        for label, value in (
+            ("Auto-detect from each chapter", "auto"),
+            ("Fantasy / Adventure", "fantasy"),
+            ("Mystery / Suspense", "mystery"),
+            ("Romance / Warm", "romance"),
+            ("Dark / Horror", "dark"),
+            ("Action / Adventure", "action"),
+            ("Calm / Reflective", "calm"),
+        ):
+            self.auto_music_style.addItem(label, value)
+        saved_style_index = self.auto_music_style.findData(
+            str(audio_state.get("auto_music_style") or "auto")
+        )
+        self.auto_music_style.setCurrentIndex(max(0, saved_style_index))
+        settings_form.addRow("Automatic music style", self.auto_music_style)
+
+        self.chapter_transition_sound = QCheckBox(
+            "Add a short transition sound at every chapter (generated locally)"
+        )
+        self.chapter_transition_sound.setChecked(
+            bool(audio_state.get("chapter_transition_sound", True))
+        )
+        settings_form.addRow("", self.chapter_transition_sound)
+
+        music_file_row = QHBoxLayout()
+        self.background_audio_path = QLineEdit(
+            str(audio_state.get("background_audio_path") or "")
+        )
+        self.background_audio_path.setPlaceholderText("Choose a music/ambience audio file…")
+        self.background_audio_browse = QPushButton("Browse…")
+        self.background_audio_browse.clicked.connect(self.choose_background_audio)
+        self.background_audio_preview = QPushButton("▶ Preview Track")
+        self.background_audio_preview.clicked.connect(self.preview_background_audio)
+        music_file_row.addWidget(self.background_audio_path, 1)
+        music_file_row.addWidget(self.background_audio_browse)
+        music_file_row.addWidget(self.background_audio_preview)
+        settings_form.addRow("Music / ambience file", music_file_row)
+
+        self.background_audio_volume = QDoubleSpinBox()
+        self.background_audio_volume.setRange(0.0, 100.0)
+        self.background_audio_volume.setDecimals(0)
+        self.background_audio_volume.setSingleStep(5.0)
+        self.background_audio_volume.setSuffix("%")
+        try:
+            saved_music_volume = float(audio_state.get("background_audio_volume", 0.18))
+        except (TypeError, ValueError):
+            saved_music_volume = 0.18
+        self.background_audio_volume.setValue(max(0.0, min(100.0, saved_music_volume * 100.0)))
+        settings_form.addRow("Music volume", self.background_audio_volume)
+
+        ambience_file_row = QHBoxLayout()
+        self.ambience_audio_path = QLineEdit(
+            str(audio_state.get("ambience_audio_path") or "")
+        )
+        self.ambience_audio_path.setPlaceholderText("Optional ambience track (forest, rain, city, etc.)…")
+        self.ambience_audio_browse = QPushButton("Browse…")
+        self.ambience_audio_browse.clicked.connect(self.choose_ambience_audio)
+        self.ambience_audio_preview = QPushButton("▶ Preview Ambience")
+        self.ambience_audio_preview.clicked.connect(self.preview_ambience_audio)
+        ambience_file_row.addWidget(self.ambience_audio_path, 1)
+        ambience_file_row.addWidget(self.ambience_audio_browse)
+        ambience_file_row.addWidget(self.ambience_audio_preview)
+        settings_form.addRow("Ambience file", ambience_file_row)
+
+        self.ambience_audio_volume = QDoubleSpinBox()
+        self.ambience_audio_volume.setRange(0.0, 100.0)
+        self.ambience_audio_volume.setDecimals(0)
+        self.ambience_audio_volume.setSingleStep(5.0)
+        self.ambience_audio_volume.setSuffix("%")
+        try:
+            saved_ambience_volume = float(audio_state.get("ambience_audio_volume", 0.10))
+        except (TypeError, ValueError):
+            saved_ambience_volume = 0.10
+        self.ambience_audio_volume.setValue(max(0.0, min(100.0, saved_ambience_volume * 100.0)))
+        settings_form.addRow("Ambience volume", self.ambience_audio_volume)
+
+        self.background_audio_fade_in = QSpinBox()
+        self.background_audio_fade_in.setRange(0, 30)
+        self.background_audio_fade_in.setSuffix(" sec")
+        self.background_audio_fade_in.setValue(
+            max(0, min(30, int(audio_state.get("background_audio_fade_in", 2) or 0)))
+        )
+        settings_form.addRow("Music fade-in", self.background_audio_fade_in)
+
+        self.background_audio_fade_out = QSpinBox()
+        self.background_audio_fade_out.setRange(0, 30)
+        self.background_audio_fade_out.setSuffix(" sec")
+        self.background_audio_fade_out.setValue(
+            max(0, min(30, int(audio_state.get("background_audio_fade_out", 3) or 0)))
+        )
+        settings_form.addRow("Music fade-out", self.background_audio_fade_out)
+
+        self.background_audio_hint = QLabel(
+            "Automatic mode creates a quiet local theme for each chapter and can add a "
+            "short transition cue at chapter starts. Choose a fixed style or let it detect "
+            "mood from the chapter text. Manual mode uses the music/ambience files below. "
+            "Narration stays the main focus; speech-aware ducking is a later stage."
+        )
+        self.background_audio_hint.setWordWrap(True)
+        self.background_audio_hint.setObjectName("muted")
+        settings_form.addRow("", self.background_audio_hint)
+        self.background_audio_enabled.toggled.connect(self._toggle_background_audio_controls)
+        self._toggle_background_audio_controls(self.background_audio_enabled.isChecked())
+
         self.pacing_hint = QLabel(
             "Adds small, sentence-aware pauses after generated narration units. "
             "The original wording is not changed."
@@ -1227,6 +1369,73 @@ class GenerationPage(QWidget):
             return saved
         return value
 
+    def _toggle_background_audio_controls(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        auto_mode = enabled and self.background_audio_mode.currentData() == "auto"
+        manual_mode = enabled and self.background_audio_mode.currentData() == "manual"
+        self.background_audio_mode.setEnabled(enabled)
+        self.auto_music_style.setEnabled(auto_mode)
+        self.chapter_transition_sound.setEnabled(enabled)
+        for widget in (
+            self.background_audio_path,
+            self.background_audio_browse,
+            self.background_audio_preview,
+            self.ambience_audio_path,
+            self.ambience_audio_browse,
+            self.ambience_audio_preview,
+            self.background_audio_volume,
+            self.ambience_audio_volume,
+        ):
+            widget.setEnabled(manual_mode)
+        for widget in (self.background_audio_fade_in, self.background_audio_fade_out):
+            widget.setEnabled(enabled)
+
+    def choose_background_audio(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Background Music or Ambience",
+            self.background_audio_path.text().strip(),
+            "Audio Files (*.wav *.mp3 *.m4a *.aac *.flac *.ogg *.opus *.wma);;All Files (*.*)",
+        )
+        if path:
+            self.background_audio_path.setText(str(Path(path)))
+            self.status.setText("Background track selected. Enable Background music to include it in the final M4B.")
+
+    def preview_background_audio(self) -> None:
+        self._preview_audio_layer(self.background_audio_path, "background music")
+
+    def choose_ambience_audio(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Ambience Track",
+            self.ambience_audio_path.text().strip(),
+            "Audio Files (*.wav *.mp3 *.m4a *.aac *.flac *.ogg *.opus *.wma);;All Files (*.*)",
+        )
+        if path:
+            self.ambience_audio_path.setText(str(Path(path)))
+            self.status.setText("Ambience track selected. Enable background audio to include it in the final M4B.")
+
+    def preview_ambience_audio(self) -> None:
+        self._preview_audio_layer(self.ambience_audio_path, "ambience")
+
+    def _preview_audio_layer(self, field: QLineEdit, label: str) -> None:
+        value = field.text().strip()
+        if not value or not Path(value).is_file():
+            self.status.setText(f"Choose a valid {label} audio file before previewing it.")
+            return
+        if self.music_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.music_player.pause()
+            return
+        self.music_player.setSource(QUrl.fromLocalFile(str(Path(value).resolve())))
+        self.music_player.play()
+        self.status.setText(f"Previewing {label}: {Path(value).name}")
+
+    def _background_music_state_changed(self, state) -> None:
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self.background_audio_preview.setText("Ⅱ Pause Track")
+        else:
+            self.background_audio_preview.setText("▶ Preview Track")
+
     def choose_output(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
             self, "Save M4B", str(self._default_output() or ""),
@@ -1412,10 +1621,19 @@ class GenerationPage(QWidget):
         controls = [
             self.title, self.author, self.voice_profile, self.refresh_voice_profiles,
             self.backend, self.cover_button, self.change_output, self.preview_button,
-            self.start_button, self.resume_button,
+            self.start_button, self.resume_button, self.background_audio_enabled,
+            self.background_audio_mode, self.auto_music_style, self.chapter_transition_sound,
+            self.background_audio_path, self.background_audio_browse,
+            self.background_audio_preview, self.background_audio_volume,
+            self.ambience_audio_path, self.ambience_audio_browse,
+            self.ambience_audio_preview, self.ambience_audio_volume,
+            self.background_audio_fade_in, self.background_audio_fade_out,
         ]
         for control in controls:
             control.setEnabled(not locked)
+        self._toggle_background_audio_controls(
+            self.background_audio_enabled.isChecked() and not locked
+        )
 
     def _repair_empty_chapters_from_source(self) -> bool:
         if not self.project_folder:
@@ -1585,6 +1803,37 @@ class GenerationPage(QWidget):
         if not output:
             self.status.setText("Choose an M4B output.")
             return
+
+        background_audio_path = None
+        ambience_audio_path = None
+        background_audio_mode = "off"
+        auto_music_style = str(self.auto_music_style.currentData() or "auto")
+        chapter_transition_sound = bool(self.chapter_transition_sound.isChecked())
+        if self.background_audio_enabled.isChecked():
+            background_audio_mode = str(self.background_audio_mode.currentData() or "auto")
+            if background_audio_mode == "manual":
+                selected_music = self.background_audio_path.text().strip()
+                selected_ambience = self.ambience_audio_path.text().strip()
+                if not selected_music and not selected_ambience:
+                    self.status.setText(
+                        "Manual background audio is enabled, but no music or ambience track is selected. "
+                        "Choose at least one track or switch to Automatic mode."
+                    )
+                    return
+                for label, value in (("Music", selected_music), ("Ambience", selected_ambience)):
+                    if value and not Path(value).expanduser().is_file():
+                        self.status.setText(
+                            f"{label} track was not found: {value}. Choose a valid file or clear that field."
+                        )
+                        return
+                if selected_music:
+                    background_audio_path = Path(selected_music).expanduser().resolve()
+                if selected_ambience:
+                    ambience_audio_path = Path(selected_ambience).expanduser().resolve()
+            elif background_audio_mode != "auto":
+                self.status.setText("Choose Automatic or Manual background audio, or turn it off.")
+                return
+
         self._save_pronunciations()
         resume_info = inspect_generation_state(self.audio_root, self.chapters)
         state_before_start = load_state(self.project_folder) if self.project_folder else {}
@@ -1624,6 +1873,16 @@ class GenerationPage(QWidget):
                 "narration_speed": float(self.narration_speed.currentData() or 0.90),
                 "pacing_profile": self.pacing_profile.currentData() or "natural",
                 "audio_bitrate": int(self.audio_bitrate.currentData() or DEFAULT_AUDIO_BITRATE_KBPS),
+                "background_audio_enabled": self.background_audio_enabled.isChecked(),
+                "background_audio_mode": str(self.background_audio_mode.currentData() or "auto"),
+                "auto_music_style": str(self.auto_music_style.currentData() or "auto"),
+                "chapter_transition_sound": self.chapter_transition_sound.isChecked(),
+                "background_audio_path": self.background_audio_path.text().strip(),
+                "background_audio_volume": float(self.background_audio_volume.value()) / 100.0,
+                "ambience_audio_path": self.ambience_audio_path.text().strip(),
+                "ambience_audio_volume": float(self.ambience_audio_volume.value()) / 100.0,
+                "background_audio_fade_in": int(self.background_audio_fade_in.value()),
+                "background_audio_fade_out": int(self.background_audio_fade_out.value()),
                 "status": "generating",
             })
             save_state(self.project_folder, state)
@@ -1669,6 +1928,15 @@ class GenerationPage(QWidget):
             pacing_profile=self.pacing_profile.currentData() or "natural",
             metadata=metadata,
             bitrate=int(self.audio_bitrate.currentData() or DEFAULT_AUDIO_BITRATE_KBPS),
+            background_audio_path=background_audio_path,
+            background_audio_volume=float(self.background_audio_volume.value()) / 100.0,
+            ambience_audio_path=ambience_audio_path,
+            ambience_audio_volume=float(self.ambience_audio_volume.value()) / 100.0,
+            background_audio_fade_in=float(self.background_audio_fade_in.value()),
+            background_audio_fade_out=float(self.background_audio_fade_out.value()),
+            background_audio_mode=background_audio_mode,
+            auto_music_style=auto_music_style,
+            chapter_transition_sound=chapter_transition_sound,
         )
         self.manager.start(
             output,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -173,11 +174,21 @@ def assemble_m4b(
     progress=None,
     bitrate: int | str | None = None,
     narration_speed: float = 1.0,
+    background_audio_path: Path | str | None = None,
+    background_audio_volume: float = 0.18,
+    ambience_audio_path: Path | str | None = None,
+    ambience_audio_volume: float = 0.10,
+    background_audio_fade_in: float = 2.0,
+    background_audio_fade_out: float = 3.0,
+    background_audio_mode: str = "manual",
+    auto_music_style: str = "auto",
+    chapter_transition_sound: bool = False,
 ) -> Path:
     """Create one premium M4B containing all chapters and navigation metadata.
 
-    ``bitrate`` is AAC bitrate in kbps and is constrained to 128–320 kbps.
-    The default is 256 kbps for a premium audiobook export.
+    Optional music and ambience tracks are independently gained, looped to
+    narration duration, and mixed locally. Both layers are off unless paths
+    are supplied.
     """
     if not chapter_dirs:
         raise ValueError("No chapters were supplied.")
@@ -208,8 +219,174 @@ def assemble_m4b(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path = output_path.with_suffix(".m4b")
 
+    effective_audio_mode = str(background_audio_mode or "manual").strip().casefold()
+    if effective_audio_mode not in {"off", "auto", "manual"}:
+        raise ValueError(f"Unsupported background audio mode: {background_audio_mode}")
+
     with tempfile.TemporaryDirectory(prefix="ryu-m4b-") as temp:
         temp_dir = Path(temp)
+
+        # Automatic mode creates small, loopable sound beds offline and applies
+        # them chapter-by-chapter. The transition cue is prepended to every
+        # chapter file before its chapter marker is written, so chapter skips
+        # land on the cue and the bed can change with each chapter's mood.
+        if effective_audio_mode == "auto":
+            from app.audio.sound_design import (
+                detect_chapter_mood,
+                synthesize_chapter_transition,
+                synthesize_music_bed,
+            )
+
+            music_cache: dict[str, Path] = {}
+            cue_cache: dict[str, Path] = {}
+            processed_chapters: list[Path] = []
+            for index, (chapter_file, chapter_dir, chapter_title) in enumerate(
+                zip(chapters, chapter_dirs, names), start=1
+            ):
+                narration_text = ""
+                narration_meta = chapter_dir / "narration.json"
+                try:
+                    payload = json.loads(narration_meta.read_text(encoding="utf-8"))
+                    narration_text = str(payload.get("narration_text") or "")
+                    chapter_title = str(payload.get("title") or chapter_title)
+                except (OSError, ValueError, TypeError):
+                    pass
+
+                mood = detect_chapter_mood(chapter_title, narration_text, auto_music_style)
+                if mood not in music_cache:
+                    music_cache[mood] = synthesize_music_bed(
+                        temp_dir / f"auto-music-{mood}.wav", mood
+                    )
+                bed_path = music_cache[mood]
+                cue_path = None
+                if chapter_transition_sound:
+                    if mood not in cue_cache:
+                        cue_cache[mood] = synthesize_chapter_transition(
+                            temp_dir / f"chapter-transition-{mood}.wav", mood
+                        )
+                    cue_path = cue_cache[mood]
+
+                base_duration_ms = _duration_ms(chapter_file)
+                duration_seconds = max(0.1, base_duration_ms / 1000.0)
+                fade_in = min(30.0, max(0.0, float(background_audio_fade_in)))
+                fade_out = min(30.0, max(0.0, float(background_audio_fade_out)))
+                fade_in = min(fade_in, duration_seconds)
+                fade_out = min(fade_out, duration_seconds)
+                fade_out_start = max(0.0, duration_seconds - fade_out)
+                music_gain = max(0.0, min(1.0, float(background_audio_volume)))
+
+                mixed_chapter = temp_dir / f"auto-chapter-{index:05d}.m4a"
+                if cue_path:
+                    inputs = [
+                        "-i", str(cue_path),
+                        "-i", str(chapter_file),
+                        "-stream_loop", "-1", "-i", str(bed_path),
+                    ]
+                    filters = [
+                        "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo,volume=0.22[cue]",
+                        "[1:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[narr]",
+                        (
+                            f"[2:a]volume={music_gain:.4f},aresample=44100,"
+                            "aformat=sample_rates=44100:channel_layouts=stereo,"
+                            f"afade=t=in:st=0:d={fade_in:.3f},"
+                            f"afade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f}[bed]"
+                        ),
+                        "[narr][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[mixed]",
+                        "[cue][mixed]concat=n=2:v=0:a=1[out]",
+                    ]
+                    cue_duration_ms = _duration_ms(cue_path)
+                else:
+                    inputs = [
+                        "-i", str(chapter_file),
+                        "-stream_loop", "-1", "-i", str(bed_path),
+                    ]
+                    filters = [
+                        "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[narr]",
+                        (
+                            f"[1:a]volume={music_gain:.4f},aresample=44100,"
+                            "aformat=sample_rates=44100:channel_layouts=stereo,"
+                            f"afade=t=in:st=0:d={fade_in:.3f},"
+                            f"afade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f}[bed]"
+                        ),
+                        "[narr][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[out]",
+                    ]
+                    cue_duration_ms = 0
+
+                _run([
+                    *inputs,
+                    "-filter_complex", ";".join(filters),
+                    "-map", "[out]", "-vn",
+                    "-c:a", "aac", "-b:a", audio_bitrate, "-ar", "44100",
+                    str(mixed_chapter),
+                ])
+                if not mixed_chapter.exists() or mixed_chapter.stat().st_size == 0:
+                    raise RuntimeError(
+                        f"Could not mix automatic background audio for chapter {index}."
+                    )
+                expected_duration = base_duration_ms + cue_duration_ms
+                if abs(_duration_ms(mixed_chapter) - expected_duration) > 1500:
+                    raise RuntimeError(
+                        f"Automatic sound design changed chapter {index} duration unexpectedly."
+                    )
+                processed_chapters.append(mixed_chapter)
+
+                if progress:
+                    progress(index, len(chapters), "automatic-chapter-sound-design")
+
+            chapters = processed_chapters
+
+        elif effective_audio_mode == "manual" and chapter_transition_sound:
+            # Manual music/ambience is mixed as one continuous bed later, but
+            # chapter cues are still inserted before the chapter markers are
+            # calculated so the reader hears a clear transition at every skip.
+            from app.audio.sound_design import (
+                detect_chapter_mood,
+                synthesize_chapter_transition,
+            )
+
+            cue_cache: dict[str, Path] = {}
+            cued_chapters: list[Path] = []
+            for index, (chapter_file, chapter_dir, chapter_title) in enumerate(
+                zip(chapters, chapter_dirs, names), start=1
+            ):
+                narration_text = ""
+                narration_meta = chapter_dir / "narration.json"
+                try:
+                    payload = json.loads(narration_meta.read_text(encoding="utf-8"))
+                    narration_text = str(payload.get("narration_text") or "")
+                    chapter_title = str(payload.get("title") or chapter_title)
+                except (OSError, ValueError, TypeError):
+                    pass
+                mood = detect_chapter_mood(chapter_title, narration_text, auto_music_style)
+                if mood not in cue_cache:
+                    cue_cache[mood] = synthesize_chapter_transition(
+                        temp_dir / f"chapter-transition-{mood}.wav", mood
+                    )
+                cue_path = cue_cache[mood]
+                base_duration_ms = _duration_ms(chapter_file)
+                cue_duration_ms = _duration_ms(cue_path)
+                cued_chapter = temp_dir / f"manual-chapter-{index:05d}.m4a"
+                _run([
+                    "-i", str(cue_path),
+                    "-i", str(chapter_file),
+                    "-filter_complex",
+                    "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[cue];"
+                    "[1:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[narr];"
+                    "[cue][narr]concat=n=2:v=0:a=1[out]",
+                    "-map", "[out]", "-vn",
+                    "-c:a", "aac", "-b:a", audio_bitrate, "-ar", "44100",
+                    str(cued_chapter),
+                ])
+                if not cued_chapter.exists() or cued_chapter.stat().st_size == 0:
+                    raise RuntimeError(
+                        f"Could not add the chapter transition cue to chapter {index}."
+                    )
+                if abs(_duration_ms(cued_chapter) - base_duration_ms - cue_duration_ms) > 1500:
+                    raise RuntimeError(
+                        f"Adding the chapter transition cue changed chapter {index} duration unexpectedly."
+                    )
+                cued_chapters.append(cued_chapter)
+            chapters = cued_chapters
 
         concat = temp_dir / "chapters.txt"
         concat_lines = ["ffconcat version 1.0"]
@@ -277,10 +454,78 @@ def assemble_m4b(
         ])
         if not audio_only.exists() or audio_only.stat().st_size == 0:
             raise RuntimeError("FFmpeg created no intermediate audiobook audio.")
-        if _duration_ms(audio_only) <= 0:
+        narration_duration_ms = _duration_ms(audio_only)
+        if narration_duration_ms <= 0:
             raise RuntimeError("FFmpeg created an intermediate audiobook with no audio duration.")
         if progress:
             progress(len(chapters), len(chapters), "joined-audio")
+
+        # Stage 1 audio beds: independently mix optional user-owned/licensed
+        # music and ambience only after narration has been assembled. Tracks
+        # therefore remain continuous across chapter boundaries. FFmpeg/CPU
+        # does the work; no GPU memory is needed.
+        audio_layers: list[tuple[str, Path | str | None, float]] = [
+            ("music", background_audio_path, background_audio_volume),
+            ("ambience", ambience_audio_path, ambience_audio_volume),
+        ]
+        active_layers = [
+            (name, Path(path).expanduser(), max(0.0, min(1.0, float(volume))))
+            for name, path, volume in audio_layers
+            if path
+        ]
+        if active_layers and effective_audio_mode == "manual":
+            for layer_name, layer_path, _layer_volume in active_layers:
+                if not layer_path.is_file():
+                    raise FileNotFoundError(
+                        f"{layer_name.title()} audio file was not found: {layer_path}"
+                    )
+
+            fade_in = max(0.0, min(30.0, float(background_audio_fade_in)))
+            fade_out = max(0.0, min(30.0, float(background_audio_fade_out)))
+            duration_seconds = narration_duration_ms / 1000.0
+            fade_out = min(fade_out, duration_seconds)
+            fade_out_start = max(0.0, duration_seconds - fade_out)
+
+            inputs = ["-i", str(audio_only)]
+            filter_parts = []
+            bed_labels = []
+            for index, (layer_name, layer_path, layer_volume) in enumerate(active_layers, start=1):
+                inputs.extend(["-stream_loop", "-1", "-i", str(layer_path)])
+                label = f"bed{index}"
+                bed_labels.append(f"[{label}]")
+                filters = [f"volume={layer_volume:.4f}"]
+                if fade_in > 0:
+                    filters.append(f"afade=t=in:st=0:d={fade_in:.3f}")
+                if fade_out > 0:
+                    filters.append(
+                        f"afade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f}"
+                    )
+                filters.append("aresample=44100")
+                filter_parts.append(f"[{index}:a]{','.join(filters)}[{label}]")
+
+            input_labels = "[0:a]" + "".join(bed_labels)
+            mix_count = 1 + len(active_layers)
+            filter_parts.append(
+                f"{input_labels}amix=inputs={mix_count}:duration=first:"
+                "dropout_transition=0:normalize=0,alimiter=limit=0.95[out]"
+            )
+            mixed_audio = temp_dir / "audiobook-mixed.m4a"
+            _run([
+                *inputs,
+                "-filter_complex", ";".join(filter_parts),
+                "-map", "[out]", "-vn", "-t", f"{duration_seconds:.3f}",
+                "-c:a", "aac", "-b:a", audio_bitrate, "-ar", "44100",
+                str(mixed_audio),
+            ])
+            if not mixed_audio.exists() or mixed_audio.stat().st_size == 0:
+                raise RuntimeError("FFmpeg did not create the mixed audiobook audio.")
+            if abs(_duration_ms(mixed_audio) - narration_duration_ms) > 1500:
+                raise RuntimeError(
+                    "Mixed audiobook duration differs from narration by more than 1.5 seconds."
+                )
+            audio_only = mixed_audio
+            if progress:
+                progress(len(chapters), len(chapters), "mixed-background-audio")
 
         base_m4b = temp_dir / "audiobook-base.m4b"
         args = [

@@ -833,6 +833,169 @@ class RegressionTests(unittest.TestCase):
             self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
             self.assertEqual(DEFAULT_AUDIO_BITRATE_KBPS, 256)
 
+    def test_m4b_can_mix_a_continuous_background_track(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapter_dirs = []
+            for number in (1, 2):
+                chapter_dir = root / f"{number:03d}_Chapter_{number}"
+                _write_wav(chapter_dir / "chunks" / "00001.wav", 3.0)
+                chapter_dirs.append(chapter_dir)
+
+            music = root / "licensed-music.wav"
+            ambience = root / "licensed-rain-ambience.wav"
+            _write_wav(music, 1.0)
+            _write_wav(ambience, 1.5)
+            output = root / "mixed-book.m4b"
+            progress = []
+            result = assemble_m4b(
+                chapter_dirs,
+                output,
+                "Mixed Test Book",
+                chapter_titles=["Chapter 1", "Chapter 2"],
+                progress=lambda done, total, message: progress.append(message),
+                background_audio_path=music,
+                background_audio_volume=0.12,
+                ambience_audio_path=ambience,
+                ambience_audio_volume=0.06,
+                background_audio_fade_in=0.5,
+                background_audio_fade_out=0.5,
+            )
+            self.assertEqual(result, output)
+            self.assertTrue(output.exists())
+            self.assertGreater(output.stat().st_size, 1024)
+            self.assertIn("mixed-background-audio", progress)
+            self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
+
+    def test_background_audio_controls_are_optional_and_project_persisted(self):
+        ui = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
+        assembler = Path("app/audio/assembler.py").read_text(encoding="utf-8")
+        self.assertIn('QCheckBox("Enable background music / ambience")', ui)
+        self.assertIn('self.background_audio_mode.addItem("Automatic • chapter-aware music", "auto")', ui)
+        self.assertIn('self.background_audio_mode.addItem("Manual • use my own tracks", "manual")', ui)
+        self.assertIn("def preview_background_audio(self)", ui)
+        self.assertIn("def preview_ambience_audio(self)", ui)
+        self.assertIn("detect", ui)
+        self.assertIn("chapter text", ui)
+        self.assertIn('"background_audio_enabled": self.background_audio_enabled.isChecked()', ui)
+        self.assertIn('"ambience_audio_path": self.ambience_audio_path.text().strip()', ui)
+        self.assertIn("background_audio_path=background_audio_path", ui)
+        self.assertIn("ambience_audio_path=ambience_audio_path", ui)
+        self.assertIn("background_audio_path=self.background_audio_path", manager)
+        self.assertIn("ambience_audio_path=self.ambience_audio_path", manager)
+        self.assertIn('inputs.extend(["-stream_loop", "-1", "-i", str(layer_path)])', assembler)
+        self.assertIn("amix=inputs={mix_count}:duration=first", assembler)
+        self.assertIn('if effective_audio_mode == "auto":', assembler)
+        self.assertIn("synthesize_chapter_transition", assembler)
+        self.assertIn("automatic-chapter-sound-design", assembler)
+
+    def test_generated_music_and_transition_cues_are_local_wav_files(self):
+        import wave
+        from app.audio.sound_design import (
+            detect_chapter_mood,
+            synthesize_chapter_transition,
+            synthesize_music_bed,
+        )
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fantasy = synthesize_music_bed(root / "fantasy.wav", "fantasy")
+            mystery = synthesize_music_bed(root / "mystery.wav", "mystery")
+            cue = synthesize_chapter_transition(root / "chapter-cue.wav", "fantasy")
+            with wave.open(str(fantasy), "rb") as wav:
+                self.assertEqual(wav.getnchannels(), 2)
+                self.assertEqual(wav.getframerate(), 22050)
+                self.assertAlmostEqual(wav.getnframes() / wav.getframerate(), 16.0, delta=0.1)
+            with wave.open(str(cue), "rb") as wav:
+                self.assertEqual(wav.getnchannels(), 2)
+                self.assertGreater(wav.getnframes(), 0)
+                self.assertLess(wav.getnframes() / wav.getframerate(), 1.5)
+            self.assertNotEqual(fantasy.read_bytes(), mystery.read_bytes())
+
+        self.assertEqual(detect_chapter_mood("A Secret Revealed", "A strange hidden clue appeared."), "mystery")
+        self.assertEqual(detect_chapter_mood("The Confession", "She blushed and confessed her love."), "romance")
+        self.assertEqual(detect_chapter_mood("The Battlefield", "Swords clashed in the battle."), "action")
+        self.assertEqual(detect_chapter_mood("A New Quest", "A wizard cast a magic spell."), "fantasy")
+
+    def test_auto_music_and_transition_cue_are_added_per_chapter(self):
+        from app.audio.assembler import _duration_ms
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapter_dirs = []
+            for number, title, narration in (
+                (1, "The Hidden Clue", "A hidden clue changed everything."),
+                (2, "The Final Battle", "The warriors charged into battle."),
+            ):
+                chapter_dir = root / f"{number:03d}_{title.replace(' ', '_')}"
+                _write_wav(chapter_dir / "chunks" / "00001.wav", 3.0)
+                (chapter_dir / "narration.json").write_text(
+                    json.dumps({"title": title, "narration_text": narration}),
+                    encoding="utf-8",
+                )
+                chapter_dirs.append(chapter_dir)
+
+            progress = []
+            output = root / "automatic-sound-design.m4b"
+            result = assemble_m4b(
+                chapter_dirs,
+                output,
+                "Automatic Sound Design Test",
+                chapter_titles=["The Hidden Clue", "The Final Battle"],
+                progress=lambda done, total, message: progress.append(message),
+                background_audio_mode="auto",
+                auto_music_style="auto",
+                background_audio_volume=0.30,
+                background_audio_fade_in=0.4,
+                background_audio_fade_out=0.4,
+                chapter_transition_sound=True,
+            )
+            self.assertEqual(result, output)
+            self.assertTrue(output.exists())
+            self.assertGreater(output.stat().st_size, 1024)
+            self.assertIn("automatic-chapter-sound-design", progress)
+            # Six seconds of speech plus one short cue at the start of each
+            # chapter; allow for AAC encoder padding and container time-base rounding.
+            self.assertGreaterEqual(_duration_ms(output), 7000)
+            self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
+
+    def test_manual_music_still_gets_chapter_transition_cues(self):
+        from app.audio.assembler import _duration_ms
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapter_dir = root / "001_Manual_Chapter"
+            _write_wav(chapter_dir / "chunks" / "00001.wav", 3.0)
+            (chapter_dir / "narration.json").write_text(
+                json.dumps({
+                    "title": "Manual Chapter",
+                    "narration_text": "The story continues into the next room.",
+                }),
+                encoding="utf-8",
+            )
+            music = root / "continuous-music.wav"
+            _write_wav(music, 1.0)
+            progress = []
+            output = root / "manual-with-cue.m4b"
+            result = assemble_m4b(
+                [chapter_dir],
+                output,
+                "Manual Mode Cue Test",
+                chapter_titles=["Manual Chapter"],
+                progress=lambda done, total, message: progress.append(message),
+                background_audio_mode="manual",
+                background_audio_path=music,
+                background_audio_volume=0.18,
+                chapter_transition_sound=True,
+                background_audio_fade_in=0.3,
+                background_audio_fade_out=0.3,
+            )
+            self.assertEqual(result, output)
+            self.assertIn("mixed-background-audio", progress)
+            self.assertGreaterEqual(_duration_ms(output), 3500)
+            self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
+
     def test_audio_bitrate_range_is_enforced(self):
         from app.audio.assembler import normalize_audio_bitrate
         self.assertEqual(normalize_audio_bitrate(None), "256k")
@@ -1086,6 +1249,39 @@ Page 12
         self.assertIn('"He looked at me,"', result.narration_text)
         self.assertIn("she said.", result.narration_text)
         self.assertNotIn("Page 12", result.narration_text)
+
+    def test_chapter_heading_is_not_joined_to_first_narration_sentence(self):
+        source = (
+            "Chapter 1 Prologue\n"
+            "Erotic video games—eroge—are, for the most part, chock-full of things to ridicule.\n"
+            "And there are plenty of reasons to lampoon them, too.\n"
+            "Let's start with the protagonist's family, shall we?"
+        )
+        prepared = prepare_for_narration(source)
+        self.assertTrue(prepared.narration_text.startswith("Chapter 1 Prologue\n"))
+        self.assertNotIn("Chapter 1 Prologue Erotic video games", prepared.narration_text)
+
+        units = split_for_pacing(prepared.narration_text, max_chars=800, max_sentences=4)
+        self.assertEqual(units[0], "Chapter 1 Prologue")
+        self.assertTrue(units[1].startswith("Erotic video games—eroge—are"))
+        self.assertNotIn("Chapter 1 Prologue", units[1])
+        self.assertGreaterEqual(pause_after_ms(units[0], "natural", next_text=units[1]), 600)
+
+    def test_all_caps_and_section_headings_remain_separate_narration_units(self):
+        source = (
+            "The room went quiet.\n"
+            "THE DEMON LORD SUMMIT\n"
+            "A moment later, the doors opened.\n"
+            "Part 2 — The Next Journey\n"
+            "Everyone turned around."
+        )
+        prepared = prepare_for_narration(source)
+        units = split_for_pacing(prepared.narration_text, max_chars=800, max_sentences=4)
+        self.assertIn("THE DEMON LORD SUMMIT", units)
+        self.assertIn("Part 2 — The Next Journey", units)
+        for heading in ("THE DEMON LORD SUMMIT", "Part 2 — The Next Journey"):
+            self.assertEqual(units.count(heading), 1)
+            self.assertGreaterEqual(pause_after_ms(heading), 700)
 
     def test_natural_pacing_splits_story_into_sentence_units(self):
         text = "The door opened. Issei looked inside. Rias smiled."

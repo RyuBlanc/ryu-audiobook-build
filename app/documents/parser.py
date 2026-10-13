@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
+from app.tts.pacing import is_heading_line
+
 
 @dataclass
 class ExtractedBook:
@@ -87,8 +89,15 @@ def reflow_source_text(text: str) -> str:
                 starts_structural = line.startswith(
                     ("“", "‘", '"', "'", "—", "–", "-", "•", "*")
                 )
-                structural = starts_structural or _is_chapter_heading_like(line)
-                previous_is_heading = _is_chapter_heading_like(previous)
+                structural = (
+                    starts_structural
+                    or _is_chapter_heading_like(line)
+                    or is_heading_line(line)
+                )
+                previous_is_heading = (
+                    _is_chapter_heading_like(previous)
+                    or is_heading_line(previous)
+                )
 
                 # A chapter heading is always a hard source boundary. Never
                 # merge its body line into the heading even when the heading
