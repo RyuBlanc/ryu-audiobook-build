@@ -1221,7 +1221,7 @@ Page 12
             "Let's start with the protagonist's family, shall we?"
         )
         prepared = prepare_for_narration(source)
-        self.assertTrue(prepared.narration_text.startswith("Chapter 1 Prologue\\n"))
+        self.assertTrue(prepared.narration_text.startswith("Chapter 1 Prologue\n"))
         self.assertNotIn("Chapter 1 Prologue Erotic video games", prepared.narration_text)
 
         units = split_for_pacing(prepared.narration_text, max_chars=800, max_sentences=4)
@@ -1232,10 +1232,10 @@ Page 12
 
     def test_all_caps_and_section_headings_remain_separate_narration_units(self):
         source = (
-            "The room went quiet.\\n"
-            "THE DEMON LORD SUMMIT\\n"
-            "A moment later, the doors opened.\\n"
-            "Part 2 — The Next Journey\\n"
+            "The room went quiet.\n"
+            "THE DEMON LORD SUMMIT\n"
+            "A moment later, the doors opened.\n"
+            "Part 2 — The Next Journey\n"
             "Everyone turned around."
         )
         prepared = prepare_for_narration(source)
