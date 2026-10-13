@@ -48,6 +48,9 @@ class GenerationManager:
         ambience_audio_volume: float = 0.10,
         background_audio_fade_in: float = 2.0,
         background_audio_fade_out: float = 3.0,
+        background_audio_mode: str = "manual",
+        auto_music_style: str = "auto",
+        chapter_transition_sound: bool = False,
     ) -> None:
         self.provider = provider
         self.voice = voice
@@ -66,6 +69,9 @@ class GenerationManager:
         self.ambience_audio_volume = max(0.0, min(1.0, float(ambience_audio_volume)))
         self.background_audio_fade_in = max(0.0, min(30.0, float(background_audio_fade_in)))
         self.background_audio_fade_out = max(0.0, min(30.0, float(background_audio_fade_out)))
+        self.background_audio_mode = str(background_audio_mode or "manual").casefold()
+        self.auto_music_style = str(auto_music_style or "auto")
+        self.chapter_transition_sound = bool(chapter_transition_sound)
         self.cancel_event = Event()
         self._thread: Thread | None = None
         self.failed: list[int] = []
@@ -269,6 +275,9 @@ class GenerationManager:
                     ambience_audio_volume=self.ambience_audio_volume,
                     background_audio_fade_in=self.background_audio_fade_in,
                     background_audio_fade_out=self.background_audio_fade_out,
+                    background_audio_mode=self.background_audio_mode,
+                    auto_music_style=self.auto_music_style,
+                    chapter_transition_sound=self.chapter_transition_sound,
                 )
                 self._emit(len(self.chapters), len(self.chapters), 1, "m4b-complete")
                 # Only delete intermediate files after the final M4B has been
