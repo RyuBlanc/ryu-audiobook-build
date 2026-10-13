@@ -1137,6 +1137,39 @@ Page 12
         self.assertIn("she said.", result.narration_text)
         self.assertNotIn("Page 12", result.narration_text)
 
+    def test_chapter_heading_is_not_joined_to_first_narration_sentence(self):
+        source = (
+            "Chapter 1 Prologue\n"
+            "Erotic video games—eroge—are, for the most part, chock-full of things to ridicule.\n"
+            "And there are plenty of reasons to lampoon them, too.\n"
+            "Let's start with the protagonist's family, shall we?"
+        )
+        prepared = prepare_for_narration(source)
+        self.assertTrue(prepared.narration_text.startswith("Chapter 1 Prologue\\n"))
+        self.assertNotIn("Chapter 1 Prologue Erotic video games", prepared.narration_text)
+
+        units = split_for_pacing(prepared.narration_text, max_chars=800, max_sentences=4)
+        self.assertEqual(units[0], "Chapter 1 Prologue")
+        self.assertTrue(units[1].startswith("Erotic video games—eroge—are"))
+        self.assertNotIn("Chapter 1 Prologue", units[1])
+        self.assertGreaterEqual(pause_after_ms(units[0], "natural", next_text=units[1]), 600)
+
+    def test_all_caps_and_section_headings_remain_separate_narration_units(self):
+        source = (
+            "The room went quiet.\\n"
+            "THE DEMON LORD SUMMIT\\n"
+            "A moment later, the doors opened.\\n"
+            "Part 2 — The Next Journey\\n"
+            "Everyone turned around."
+        )
+        prepared = prepare_for_narration(source)
+        units = split_for_pacing(prepared.narration_text, max_chars=800, max_sentences=4)
+        self.assertIn("THE DEMON LORD SUMMIT", units)
+        self.assertIn("Part 2 — The Next Journey", units)
+        for heading in ("THE DEMON LORD SUMMIT", "Part 2 — The Next Journey"):
+            self.assertEqual(units.count(heading), 1)
+            self.assertGreaterEqual(pause_after_ms(heading), 700)
+
     def test_natural_pacing_splits_story_into_sentence_units(self):
         text = "The door opened. Issei looked inside. Rias smiled."
         chunks = split_for_pacing(text, max_chars=200, max_sentences=2)
