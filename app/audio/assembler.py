@@ -335,6 +335,59 @@ def assemble_m4b(
 
             chapters = processed_chapters
 
+        elif effective_audio_mode == "manual" and chapter_transition_sound:
+            # Manual music/ambience is mixed as one continuous bed later, but
+            # chapter cues are still inserted before the chapter markers are
+            # calculated so the reader hears a clear transition at every skip.
+            from app.audio.sound_design import (
+                detect_chapter_mood,
+                synthesize_chapter_transition,
+            )
+
+            cue_cache: dict[str, Path] = {}
+            cued_chapters: list[Path] = []
+            for index, (chapter_file, chapter_dir, chapter_title) in enumerate(
+                zip(chapters, chapter_dirs, names), start=1
+            ):
+                narration_text = ""
+                narration_meta = chapter_dir / "narration.json"
+                try:
+                    payload = json.loads(narration_meta.read_text(encoding="utf-8"))
+                    narration_text = str(payload.get("narration_text") or "")
+                    chapter_title = str(payload.get("title") or chapter_title)
+                except (OSError, ValueError, TypeError):
+                    pass
+                mood = detect_chapter_mood(chapter_title, narration_text, auto_music_style)
+                if mood not in cue_cache:
+                    cue_cache[mood] = synthesize_chapter_transition(
+                        temp_dir / f"chapter-transition-{mood}.wav", mood
+                    )
+                cue_path = cue_cache[mood]
+                base_duration_ms = _duration_ms(chapter_file)
+                cue_duration_ms = _duration_ms(cue_path)
+                cued_chapter = temp_dir / f"manual-chapter-{index:05d}.m4a"
+                _run([
+                    "-i", str(cue_path),
+                    "-i", str(chapter_file),
+                    "-filter_complex",
+                    "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[cue];"
+                    "[1:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[narr];"
+                    "[cue][narr]concat=n=2:v=0:a=1[out]",
+                    "-map", "[out]", "-vn",
+                    "-c:a", "aac", "-b:a", audio_bitrate, "-ar", "44100",
+                    str(cued_chapter),
+                ])
+                if not cued_chapter.exists() or cued_chapter.stat().st_size == 0:
+                    raise RuntimeError(
+                        f"Could not add the chapter transition cue to chapter {index}."
+                    )
+                if abs(_duration_ms(cued_chapter) - base_duration_ms - cue_duration_ms) > 1500:
+                    raise RuntimeError(
+                        f"Adding the chapter transition cue changed chapter {index} duration unexpectedly."
+                    )
+                cued_chapters.append(cued_chapter)
+            chapters = cued_chapters
+
         concat = temp_dir / "chapters.txt"
         concat_lines = ["ffconcat version 1.0"]
         durations: list[int] = []
