@@ -1615,6 +1615,7 @@ class GenerationPage(QWidget):
             self.title, self.author, self.voice_profile, self.refresh_voice_profiles,
             self.backend, self.cover_button, self.change_output, self.preview_button,
             self.start_button, self.resume_button, self.background_audio_enabled,
+            self.background_audio_mode, self.auto_music_style, self.chapter_transition_sound,
             self.background_audio_path, self.background_audio_browse,
             self.background_audio_preview, self.background_audio_volume,
             self.ambience_audio_path, self.ambience_audio_browse,
@@ -1798,25 +1799,33 @@ class GenerationPage(QWidget):
 
         background_audio_path = None
         ambience_audio_path = None
+        background_audio_mode = "off"
+        auto_music_style = str(self.auto_music_style.currentData() or "auto")
+        chapter_transition_sound = bool(self.chapter_transition_sound.isChecked())
         if self.background_audio_enabled.isChecked():
-            selected_music = self.background_audio_path.text().strip()
-            selected_ambience = self.ambience_audio_path.text().strip()
-            if not selected_music and not selected_ambience:
-                self.status.setText(
-                    "Background audio is enabled, but no music or ambience track is selected. "
-                    "Choose at least one track or turn background audio off."
-                )
-                return
-            for label, value in (("Music", selected_music), ("Ambience", selected_ambience)):
-                if value and not Path(value).expanduser().is_file():
+            background_audio_mode = str(self.background_audio_mode.currentData() or "auto")
+            if background_audio_mode == "manual":
+                selected_music = self.background_audio_path.text().strip()
+                selected_ambience = self.ambience_audio_path.text().strip()
+                if not selected_music and not selected_ambience:
                     self.status.setText(
-                        f"{label} track was not found: {value}. Choose a valid file or clear that field."
+                        "Manual background audio is enabled, but no music or ambience track is selected. "
+                        "Choose at least one track or switch to Automatic mode."
                     )
                     return
-            if selected_music:
-                background_audio_path = Path(selected_music).expanduser().resolve()
-            if selected_ambience:
-                ambience_audio_path = Path(selected_ambience).expanduser().resolve()
+                for label, value in (("Music", selected_music), ("Ambience", selected_ambience)):
+                    if value and not Path(value).expanduser().is_file():
+                        self.status.setText(
+                            f"{label} track was not found: {value}. Choose a valid file or clear that field."
+                        )
+                        return
+                if selected_music:
+                    background_audio_path = Path(selected_music).expanduser().resolve()
+                if selected_ambience:
+                    ambience_audio_path = Path(selected_ambience).expanduser().resolve()
+            elif background_audio_mode != "auto":
+                self.status.setText("Choose Automatic or Manual background audio, or turn it off.")
+                return
 
         self._save_pronunciations()
         resume_info = inspect_generation_state(self.audio_root, self.chapters)
@@ -1858,6 +1867,9 @@ class GenerationPage(QWidget):
                 "pacing_profile": self.pacing_profile.currentData() or "natural",
                 "audio_bitrate": int(self.audio_bitrate.currentData() or DEFAULT_AUDIO_BITRATE_KBPS),
                 "background_audio_enabled": self.background_audio_enabled.isChecked(),
+                "background_audio_mode": str(self.background_audio_mode.currentData() or "auto"),
+                "auto_music_style": str(self.auto_music_style.currentData() or "auto"),
+                "chapter_transition_sound": self.chapter_transition_sound.isChecked(),
                 "background_audio_path": self.background_audio_path.text().strip(),
                 "background_audio_volume": float(self.background_audio_volume.value()) / 100.0,
                 "ambience_audio_path": self.ambience_audio_path.text().strip(),
@@ -1915,6 +1927,9 @@ class GenerationPage(QWidget):
             ambience_audio_volume=float(self.ambience_audio_volume.value()) / 100.0,
             background_audio_fade_in=float(self.background_audio_fade_in.value()),
             background_audio_fade_out=float(self.background_audio_fade_out.value()),
+            background_audio_mode=background_audio_mode,
+            auto_music_style=auto_music_style,
+            chapter_transition_sound=chapter_transition_sound,
         )
         self.manager.start(
             output,
