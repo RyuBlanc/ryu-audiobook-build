@@ -5,6 +5,7 @@ import re
 import unicodedata
 
 from app.documents.parser import clean_text, remove_page_noise
+from app.tts.pacing import is_heading_line
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,15 @@ def _join_wrapped_lines(text: str) -> str:
             continue
 
         previous = output[-1]
+        # A short standalone heading is not a wrapped sentence. Protect both
+        # sides of heading boundaries before the generic PDF line-wrap rules:
+        # otherwise "Chapter 1 Prologue" is merged into the opening sentence
+        # and the heading-aware TTS splitter can no longer recover it.
+        if is_heading_line(previous) or is_heading_line(line):
+            output.append(line)
+            i += 1
+            continue
+
         # Preserve explicit dialogue/paragraph boundaries.
         if (
             previous.endswith(('"', "”", "’", "'", ".", "!", "?", ":", ";", "…", "—"))
