@@ -11,7 +11,7 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QProgressBar, QPushButton, QVBoxLayout, QWidget, QComboBox, QScrollArea,
+    QPushButton, QVBoxLayout, QWidget, QComboBox, QScrollArea,
     QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy, QCheckBox,
     QDoubleSpinBox, QSpinBox,
 )
@@ -24,6 +24,7 @@ from app.documents.parser import extract_text
 from app.core.state import load_state, save_state
 from app.core.project import list_projects
 from app.ui.metadata_widgets import HistoryComboBox, GenrePicker
+from app.ui.motion import SmoothProgressBar
 from app.ui.audio_visualizer import AudioVisualizer
 from app.tts.manager import GenerationManager, GenerationSummary
 from app.tts.profile_provider import provider_from_profile
@@ -688,14 +689,14 @@ class GenerationPage(QWidget):
         preview_time_row.addWidget(self.preview_time)
         preview_layout.addLayout(preview_time_row)
 
-        self.preview_loading = QProgressBar()
+        self.preview_loading = SmoothProgressBar()
         self.preview_loading.setRange(0, 100)
         self.preview_loading.setValue(0)
         self.preview_loading.setTextVisible(True)
         self.preview_loading.setFixedHeight(14)
         self.preview_loading.setVisible(False)
         preview_layout.addWidget(self.preview_loading)
-        self.preview_activity = QProgressBar()
+        self.preview_activity = SmoothProgressBar()
         self.preview_activity.setRange(0, 0)
         self.preview_activity.setTextVisible(False)
         self.preview_activity.setFixedHeight(4)
@@ -706,7 +707,7 @@ class GenerationPage(QWidget):
 
         progress_box = QGroupBox("Generation")
         progress_layout = QVBoxLayout(progress_box)
-        self.progress = QProgressBar()
+        self.progress = SmoothProgressBar()
         progress_layout.addWidget(self.progress)
         stats = QHBoxLayout()
         self.stage = QLabel("Ready")
