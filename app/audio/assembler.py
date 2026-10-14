@@ -346,10 +346,10 @@ def assemble_m4b(
 
             chapters = processed_chapters
 
-        elif effective_audio_mode == "manual" and chapter_transition_sound:
-            # Manual music/ambience is mixed as one continuous bed later, but
-            # chapter cues are still inserted before the chapter markers are
-            # calculated so the reader hears a clear transition at every skip.
+        elif effective_audio_mode in {"manual", "off"} and chapter_transition_sound:
+            # Manual/off modes place chapter cues before chapter markers.
+            # In off mode, this keeps the chapter separator independently
+            # usable without enabling a music or ambience bed.
             from app.audio.sound_design import (
                 detect_chapter_mood,
                 synthesize_chapter_transition,
