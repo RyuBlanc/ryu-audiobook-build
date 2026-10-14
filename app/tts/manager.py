@@ -51,6 +51,8 @@ class GenerationManager:
         background_audio_mode: str = "manual",
         auto_music_style: str = "auto",
         chapter_transition_sound: bool = False,
+        story_effects_enabled: bool = False,
+        story_effect_volume: float = 0.22,
     ) -> None:
         self.provider = provider
         self.voice = voice
@@ -72,6 +74,8 @@ class GenerationManager:
         self.background_audio_mode = str(background_audio_mode or "manual").casefold()
         self.auto_music_style = str(auto_music_style or "auto")
         self.chapter_transition_sound = bool(chapter_transition_sound)
+        self.story_effects_enabled = bool(story_effects_enabled)
+        self.story_effect_volume = max(0.0, min(0.50, float(story_effect_volume)))
         self.cancel_event = Event()
         self._thread: Thread | None = None
         self.failed: list[int] = []
@@ -278,6 +282,8 @@ class GenerationManager:
                     background_audio_mode=self.background_audio_mode,
                     auto_music_style=self.auto_music_style,
                     chapter_transition_sound=self.chapter_transition_sound,
+                    story_effects_enabled=self.story_effects_enabled,
+                    story_effect_volume=self.story_effect_volume,
                 )
                 self._emit(len(self.chapters), len(self.chapters), 1, "m4b-complete")
                 # Only delete intermediate files after the final M4B has been
