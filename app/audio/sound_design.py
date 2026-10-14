@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-"""Small, offline procedural music beds and chapter transition cues.
+"""Local, deterministic soundtrack recipes for Ryu's Audiobook.
 
-These sounds are synthesized from simple oscillators; the app ships no music
-recordings and requires no network/GPU. They are deliberately low-key beds,
-not a replacement for a licensed cinematic score. Users can still choose
-their own tracks in Manual mode.
+The catalogue is recipe-based, not 1,000 bundled recordings: combinations of
+six story moods, eight sound textures, seven tempos and three harmonic arcs
+produce 1,008 repeatable music variations. Tracks are generated only when
+needed and require neither a network connection nor a GPU.
 """
 
 from array import array
+import hashlib
 import math
 from pathlib import Path
 import re
@@ -17,61 +18,44 @@ import wave
 
 
 SAMPLE_RATE = 22050
-BED_SECONDS = 16.0
 TRANSITION_SECONDS = 0.92
 
-# Integer-Hz notes keep the oscillator phases periodic across a loop. The
-# gentle pad and slow four-note motif distinguish themes without fighting
-# narration. Frequencies are approximate musical pitches by design.
-THEMES: dict[str, dict[str, tuple[int, ...]]] = {
-    "fantasy": {
-        "pad": (110, 147, 175, 220, 262),
-        "melody": (330, 392, 440, 392),
-    },
-    "mystery": {
-        "pad": (98, 123, 147, 185, 220),
-        "melody": (247, 294, 220, 247),
-    },
-    "romance": {
-        "pad": (110, 139, 165, 220, 277),
-        "melody": (330, 370, 330, 294),
-    },
-    "dark": {
-        "pad": (82, 98, 123, 147, 196),
-        "melody": (220, 247, 196, 185),
-    },
-    "action": {
-        "pad": (98, 147, 196, 247, 294),
-        "melody": (392, 330, 392, 494),
-    },
-    "calm": {
-        "pad": (130, 164, 196, 246, 294),
-        "melody": (330, 294, 246, 294),
-    },
+THEMES: dict[str, dict[str, object]] = {
+    "fantasy": {"root": 50, "scale": (0, 2, 4, 5, 7, 9, 11), "melody": (0, 2, 4, 2, 5, 4, 2, 1, 0, 2, 4, 6, 5, 4, 2, 0)},
+    "mystery": {"root": 45, "scale": (0, 2, 3, 5, 7, 8, 10), "melody": (0, 2, 5, 4, 2, 1, 3, 2, 0, 3, 5, 4, 1, 2, 0, 0)},
+    "romance": {"root": 48, "scale": (0, 2, 4, 5, 7, 9, 11), "melody": (0, 2, 4, 6, 5, 4, 2, 1, 0, 2, 4, 5, 4, 2, 1, 0)},
+    "dark": {"root": 38, "scale": (0, 2, 3, 5, 7, 8, 10), "melody": (0, 3, 5, 4, 2, 3, 1, 0, 0, 2, 4, 3, 1, 2, 0, 0)},
+    "action": {"root": 43, "scale": (0, 2, 4, 5, 7, 9, 10), "melody": (0, 4, 2, 5, 4, 6, 5, 2, 0, 2, 4, 6, 5, 4, 2, 0)},
+    "calm": {"root": 48, "scale": (0, 2, 4, 5, 7, 9, 11), "melody": (0, 2, 4, 2, 1, 2, 4, 5, 4, 2, 1, 0, 2, 4, 2, 0)},
 }
 
 STYLE_ALIASES = {
-    "auto": "auto",
-    "automatic": "auto",
-    "fantasy": "fantasy",
-    "fantasy / adventure": "fantasy",
-    "fantasy adventure": "fantasy",
-    "mystery": "mystery",
-    "mystery / suspense": "mystery",
-    "mystery suspense": "mystery",
-    "romance": "romance",
-    "romance / warm": "romance",
-    "romance warm": "romance",
-    "dark": "dark",
-    "dark / horror": "dark",
-    "dark horror": "dark",
-    "action": "action",
-    "action / adventure": "action",
-    "action adventure": "action",
-    "calm": "calm",
-    "calm / reflective": "calm",
-    "calm reflective": "calm",
+    "auto": "auto", "automatic": "auto",
+    "fantasy": "fantasy", "fantasy / adventure": "fantasy", "fantasy adventure": "fantasy",
+    "mystery": "mystery", "mystery / suspense": "mystery", "mystery suspense": "mystery",
+    "romance": "romance", "romance / warm": "romance", "romance warm": "romance",
+    "dark": "dark", "dark / horror": "dark", "dark horror": "dark",
+    "action": "action", "action / adventure": "action", "action adventure": "action",
+    "calm": "calm", "calm / reflective": "calm", "calm reflective": "calm",
 }
+
+# Eight deliberately distinct timbral envelopes/partials, seven tempo choices,
+# and three related chord progressions per story mood.
+TEXTURES: tuple[dict[str, object], ...] = (
+    {"name": "Warm cinematic pad", "harmonics": (1.0, 0.24, 0.08, 0.025), "envelope": "pad", "pad": 0.13, "lead": 0.030},
+    {"name": "Soft plucked strings", "harmonics": (1.0, 0.48, 0.22, 0.08), "envelope": "pluck", "pad": 0.085, "lead": 0.050},
+    {"name": "Glass bells", "harmonics": (1.0, 0.72, 0.42, 0.20, 0.08), "envelope": "bell", "pad": 0.070, "lead": 0.042},
+    {"name": "Cinematic strings", "harmonics": (1.0, 0.32, 0.19, 0.11, 0.06), "envelope": "bow", "pad": 0.12, "lead": 0.034},
+    {"name": "Harp-like arpeggio", "harmonics": (1.0, 0.54, 0.26, 0.10), "envelope": "pluck", "pad": 0.075, "lead": 0.047},
+    {"name": "Soft piano tone", "harmonics": (1.0, 0.38, 0.20, 0.095, 0.035), "envelope": "piano", "pad": 0.095, "lead": 0.041},
+    {"name": "Warm organ", "harmonics": (1.0, 0.47, 0.23, 0.12, 0.06), "envelope": "organ", "pad": 0.12, "lead": 0.031},
+    {"name": "Airy atmospheric tone", "harmonics": (1.0, 0.16, 0.06, 0.02), "envelope": "air", "pad": 0.13, "lead": 0.028},
+)
+TEMPOS = (54, 60, 66, 72, 78, 84, 90)
+PROGRESSIONS = ((0, 4, 5, 3), (0, 5, 3, 4), (0, 3, 4, 0))
+VARIATIONS_PER_MOOD = len(TEXTURES) * len(TEMPOS) * len(PROGRESSIONS)
+MUSIC_CATALOGUE_SIZE = len(THEMES) * VARIATIONS_PER_MOOD  # exactly 1,008
+MOOD_ORDER = tuple(THEMES)
 
 
 def normalize_music_style(style: str | None) -> str:
@@ -80,7 +64,7 @@ def normalize_music_style(style: str | None) -> str:
 
 
 def detect_chapter_mood(title: str, text: str, selected_style: str = "auto") -> str:
-    """Choose a stable music bed from a manual style or chapter's story cues."""
+    """Select a coherent, stable music mood from strong story-language cues."""
     requested = normalize_music_style(selected_style)
     if requested != "auto":
         return requested
@@ -100,6 +84,37 @@ def detect_chapter_mood(title: str, text: str, selected_style: str = "auto") -> 
     return "fantasy"
 
 
+def select_music_variation(title: str, text: str, mood: str) -> int:
+    """Choose a reproducible variation within the selected mood, never randomly."""
+    chosen = normalize_music_style(mood)
+    if chosen == "auto":
+        chosen = detect_chapter_mood(title, text)
+    seed_text = f"{chosen}\0{title.strip()}\0{str(text or '')[:4096]}".encode("utf-8", errors="replace")
+    digest = hashlib.blake2b(seed_text, digest_size=8).digest()
+    return int.from_bytes(digest, "big") % VARIATIONS_PER_MOOD
+
+
+def music_variation_info(mood: str, variation_index: int) -> dict[str, object]:
+    """Describe one of 1,008 deterministic, locally generated recipes."""
+    chosen = normalize_music_style(mood)
+    if chosen == "auto":
+        chosen = "fantasy"
+    local_index = int(variation_index) % VARIATIONS_PER_MOOD
+    texture_index = local_index % len(TEXTURES)
+    tempo_index = (local_index // len(TEXTURES)) % len(TEMPOS)
+    progression_index = (local_index // (len(TEXTURES) * len(TEMPOS))) % len(PROGRESSIONS)
+    global_id = MOOD_ORDER.index(chosen) * VARIATIONS_PER_MOOD + local_index + 1
+    return {
+        "id": global_id,
+        "mood": chosen,
+        "variation_index": local_index,
+        "texture": TEXTURES[texture_index]["name"],
+        "tempo_bpm": TEMPOS[tempo_index],
+        "harmony": progression_index + 1,
+        "catalogue_size": MUSIC_CATALOGUE_SIZE,
+    }
+
+
 def _write_stereo_pcm(path: Path, samples: array) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     if sys.byteorder != "little":
@@ -112,47 +127,135 @@ def _write_stereo_pcm(path: Path, samples: array) -> Path:
     return path
 
 
-def synthesize_music_bed(path: Path | str, mood: str = "fantasy") -> Path:
-    """Write a quiet, loopable 16-second ambient music bed as a local WAV."""
+def _midi_hz(midi_note: int) -> float:
+    return 440.0 * (2.0 ** ((float(midi_note) - 69.0) / 12.0))
+
+
+def _scale_note(root: int, scale: tuple[int, ...], degree: int) -> int:
+    octave, index = divmod(int(degree), len(scale))
+    return root + scale[index] + octave * 12
+
+
+def _pad_value(t: float, frequencies: tuple[float, ...]) -> float:
+    # Four quiet chord tones with fixed weights; no random note selection.
+    return (
+        0.43 * math.sin(2.0 * math.pi * frequencies[0] * t)
+        + 0.27 * math.sin(2.0 * math.pi * frequencies[1] * t)
+        + 0.20 * math.sin(2.0 * math.pi * frequencies[2] * t)
+        + 0.10 * math.sin(2.0 * math.pi * frequencies[3] * t)
+    )
+
+
+def synthesize_music_bed(
+    path: Path | str,
+    mood: str = "fantasy",
+    variation_index: int = 0,
+) -> Path:
+    """Create a looping, mood-matched BGM from a deterministic catalogue recipe.
+
+    The same mood/index always produces the same theme. There are 168 recipes
+    in each of six mood families: 8 timbres × 7 tempos × 3 harmonic arcs.
+    """
     target = Path(path)
     chosen = normalize_music_style(mood)
     if chosen == "auto":
         chosen = "fantasy"
     theme = THEMES[chosen]
-    pads = theme["pad"]
-    melody = theme["melody"]
-    frame_count = int(SAMPLE_RATE * BED_SECONDS)
-    frames_per_note = frame_count // len(melody)
-    samples = array("h")
+    local_index = int(variation_index) % VARIATIONS_PER_MOOD
+    texture_index = local_index % len(TEXTURES)
+    tempo_index = (local_index // len(TEXTURES)) % len(TEMPOS)
+    progression_index = (local_index // (len(TEXTURES) * len(TEMPOS))) % len(PROGRESSIONS)
+    texture = TEXTURES[texture_index]
+    scale = theme["scale"]
+    root = int(theme["root"])
+    motif = theme["melody"]
+    progression = PROGRESSIONS[progression_index]
+    tempo = TEMPOS[tempo_index]
+    frames_per_beat = max(1, round(SAMPLE_RATE * 60.0 / tempo))
+    frames_per_bar = frames_per_beat * 4
+    frame_count = frames_per_beat * 16
+    duration = frame_count / SAMPLE_RATE
+    harmonics = tuple(float(x) for x in texture["harmonics"])
 
+    chord_notes: list[tuple[float, float, float, float]] = []
+    melody_frequencies: list[float] = []
+    for bar in range(4):
+        degree = progression[bar]
+        chord_root = _scale_note(root, scale, degree)
+        third = _scale_note(root, scale, degree + 2)
+        fifth = _scale_note(root, scale, degree + 4)
+        chord_notes.append((
+            _midi_hz(chord_root - 12),
+            _midi_hz(chord_root),
+            _midi_hz(third),
+            _midi_hz(fifth),
+        ))
+    for beat in range(16):
+        bar = beat // 4
+        degree = progression[bar] + motif[beat]
+        melody_frequencies.append(_midi_hz(_scale_note(root + 24, scale, degree)))
+
+    samples = array("h")
+    sample_scale = 32767.0
     for index in range(frame_count):
         t = index / SAMPLE_RATE
-        note_index = min(len(melody) - 1, index // frames_per_note)
-        within_note = (index % frames_per_note) / SAMPLE_RATE
-        note_duration = frames_per_note / SAMPLE_RATE
-        attack = min(1.0, within_note / 0.45)
-        release = min(1.0, max(0.0, (note_duration - within_note) / 0.70))
-        note_envelope = attack * release
+        beat_index = (index // frames_per_beat) % 16
+        bar_index = beat_index // 4
+        local_beat = (index % frames_per_beat) / frames_per_beat
+        current_pad = _pad_value(t, chord_notes[bar_index])
 
-        # Slow modulation periods divide the complete loop, so the end joins
-        # the beginning smoothly when FFmpeg repeats the bed.
-        breathe = 0.78 + 0.12 * math.sin(2.0 * math.pi * t / 8.0)
-        pulse = 0.91 + 0.05 * math.sin(2.0 * math.pi * t / 4.0)
-        pad = sum(
-            math.sin(2.0 * math.pi * frequency * t) / (1.0 + slot * 0.55)
-            for slot, frequency in enumerate(pads)
-        ) / 3.1
-        lead_frequency = melody[note_index]
-        lead = (
-            math.sin(2.0 * math.pi * lead_frequency * t)
-            + 0.22 * math.sin(2.0 * math.pi * (lead_frequency * 2) * t)
-        ) * note_envelope
-        # Quiet by default: users control the final background bed level in UI.
-        value = (pad * breathe * pulse * 0.055) + (lead * 0.018)
-        left = max(-0.90, min(0.90, value))
-        right = max(-0.90, min(0.90, value * 0.96))
-        samples.append(int(left * 32767))
-        samples.append(int(right * 32767))
+        # Blend the first ~140 ms of a new bar with the previous chord to
+        # avoid hard harmonic edges. This is deterministic and cheap.
+        bar_frame = index % frames_per_bar
+        blend_frames = max(1, int(SAMPLE_RATE * 0.14))
+        if bar_frame < blend_frames:
+            previous_bar = (bar_index - 1) % 4
+            alpha = bar_frame / blend_frames
+            previous_pad = _pad_value(t, chord_notes[previous_bar])
+            pad = previous_pad * (1.0 - alpha) + current_pad * alpha
+        else:
+            pad = current_pad
+
+        lead_frequency = melody_frequencies[beat_index]
+        lead = 0.0
+        for harmonic_number, weight in enumerate(harmonics, start=1):
+            if weight > 0.003:
+                lead += weight * math.sin(2.0 * math.pi * lead_frequency * harmonic_number * t)
+        envelope = str(texture["envelope"])
+        attack = min(1.0, local_beat / (0.09 if envelope in {"pad", "bow", "organ", "air"} else 0.025))
+        release = min(1.0, (1.0 - local_beat) / (0.20 if envelope in {"pad", "bow", "organ", "air"} else 0.13))
+        if envelope == "pluck":
+            sustain = math.exp(-3.2 * local_beat)
+        elif envelope == "bell":
+            sustain = math.exp(-2.6 * local_beat)
+        elif envelope == "piano":
+            sustain = 0.36 + 0.64 * math.exp(-2.0 * local_beat)
+        elif envelope == "bow":
+            sustain = 0.45 + 0.55 * min(1.0, local_beat / 0.22)
+        elif envelope == "air":
+            sustain = 0.88 + 0.12 * math.sin(math.pi * local_beat)
+        else:
+            sustain = 1.0
+        lead *= attack * release * sustain
+
+        value = pad * float(texture["pad"]) + lead * float(texture["lead"])
+        # Soft master ceiling leaves headroom for narration and SFX in the mix.
+        left = max(-0.72, min(0.72, value))
+        right = max(-0.72, min(0.72, value * 0.985))
+        samples.append(int(left * sample_scale))
+        samples.append(int(right * sample_scale))
+
+    # Tiny edge fades guard against a click at a loop boundary without adding
+    # a noticeable silence each time the short bed is repeated by FFmpeg.
+    fade_frames = min(int(SAMPLE_RATE * 0.025), frame_count // 8)
+    for frame in range(fade_frames):
+        gain_in = frame / max(1, fade_frames)
+        gain_out = (fade_frames - frame - 1) / max(1, fade_frames)
+        samples[frame * 2] = int(samples[frame * 2] * gain_in)
+        samples[frame * 2 + 1] = int(samples[frame * 2 + 1] * gain_in)
+        out_index = (frame_count - fade_frames + frame) * 2
+        samples[out_index] = int(samples[out_index] * gain_out)
+        samples[out_index + 1] = int(samples[out_index + 1] * gain_out)
 
     return _write_stereo_pcm(target, samples)
 
@@ -161,32 +264,39 @@ def synthesize_chapter_transition(
     path: Path | str,
     mood: str = "fantasy",
     duration_seconds: float = TRANSITION_SECONDS,
+    variation_index: int = 0,
 ) -> Path:
-    """Write a soft, short rising chime to separate chapters."""
+    """Create a short, quiet, mood-matched chapter transition chime."""
     target = Path(path)
     chosen = normalize_music_style(mood)
     if chosen == "auto":
         chosen = "fantasy"
-    melody = THEMES[chosen]["melody"]
+    theme = THEMES[chosen]
+    scale = theme["scale"]
+    root = int(theme["root"])
+    local_index = int(variation_index) % VARIATIONS_PER_MOOD
+    progression_index = (local_index // (len(TEXTURES) * len(TEMPOS))) % len(PROGRESSIONS)
+    progression = PROGRESSIONS[progression_index]
+    texture_index = local_index % len(TEXTURES)
+    texture = TEXTURES[texture_index]
+    base = _midi_hz(_scale_note(root + 24, scale, progression[0]))
+    upper = _midi_hz(_scale_note(root + 24, scale, progression[0] + 2))
     duration = max(0.45, min(2.0, float(duration_seconds)))
     frame_count = int(SAMPLE_RATE * duration)
     samples = array("h")
-
     for index in range(frame_count):
         t = index / SAMPLE_RATE
         progress = min(0.999999, t / duration)
         attack = min(1.0, t / 0.025)
         release = min(1.0, max(0.0, (duration - t) / 0.12))
         decay = math.exp(-4.8 * progress)
-        fundamental = melody[0] + (melody[2] - melody[0]) * progress
+        fundamental = base + (upper - base) * progress
         tone = (
             math.sin(2.0 * math.pi * fundamental * t)
-            + 0.38 * math.sin(2.0 * math.pi * (fundamental * 1.5) * t)
-            + 0.16 * math.sin(2.0 * math.pi * (fundamental * 2.0) * t)
+            + 0.32 * math.sin(2.0 * math.pi * fundamental * 2.0 * t)
+            + 0.12 * math.sin(2.0 * math.pi * fundamental * 3.0 * t)
         )
-        value = tone * attack * release * decay * 0.12
-        value = max(-0.6, min(0.6, value))
-        samples.append(int(value * 32767))
-        samples.append(int(value * 0.98 * 32767))
-
+        value = tone * attack * release * decay * 0.105
+        samples.append(int(max(-0.5, min(0.5, value)) * 32767))
+        samples.append(int(max(-0.5, min(0.5, value * 0.98)) * 32767))
     return _write_stereo_pcm(target, samples)
