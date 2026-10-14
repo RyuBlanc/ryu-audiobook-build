@@ -1431,7 +1431,7 @@ class GenerationPage(QWidget):
         manual_mode = enabled and self.background_audio_mode.currentData() == "manual"
         self.background_audio_mode.setEnabled(enabled)
         self.auto_music_style.setEnabled(auto_mode)
-        self.chapter_transition_sound.setEnabled(enabled)
+        # Chapter transitions are independently selectable, including with BGM off.
         for widget in (
             self.background_audio_path,
             self.background_audio_browse,
