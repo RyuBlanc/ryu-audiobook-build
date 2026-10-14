@@ -4,7 +4,9 @@ import math
 
 from PySide6.QtCore import QRectF, QTimer, Qt
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QLabel, QWidget
+from PySide6.QtWidgets import QWidget
+
+from app.ui.motion import reduced_motion_enabled
 
 
 class FrostedLoadingOverlay(QWidget):
@@ -43,8 +45,10 @@ class FrostedLoadingOverlay(QWidget):
         self.raise_()
         self.show()
         self.setFocus(Qt.FocusReason.OtherFocusReason)
-        if not self._timer.isActive():
+        if not reduced_motion_enabled() and not self._timer.isActive():
             self._timer.start()
+        elif reduced_motion_enabled():
+            self._timer.stop()
         self.update()
 
     def set_detail(self, detail: str) -> None:
