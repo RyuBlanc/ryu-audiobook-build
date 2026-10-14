@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -31,6 +31,33 @@ from app.ui.voice_page import VoicePage
 from app.ui.hardware_page import HardwarePage
 from app.ui.models_page import ModelsPage
 from app.ui.voice_cast_page import VoiceCastPage
+from app.ui.loading_overlay import FrostedLoadingOverlay
+
+
+class ImportBookWorker(QThread):
+    """Extract and detect chapters away from the UI thread."""
+
+    completed = Signal(object)
+    failed = Signal(str)
+    status = Signal(str)
+
+    def __init__(self, source_path: Path) -> None:
+        super().__init__()
+        self.source_path = Path(source_path)
+
+    def run(self) -> None:
+        try:
+            self.status.emit("Extracting text from the source book…")
+            book = extract_text(self.source_path)
+            self.status.emit("Finding chapter and section boundaries…")
+            chapters = detect_chapters(book.text)
+            if not chapters:
+                raise RuntimeError("No readable chapters were found in this file.")
+            self.status.emit("Saving the local audiobook project…")
+            project = create_project(book.title, self.source_path, chapters)
+            self.completed.emit(project)
+        except Exception as exc:
+            self.failed.emit(str(exc))
 
 
 class ProjectWorkflow(QMainWindow):
@@ -41,6 +68,7 @@ class ProjectWorkflow(QMainWindow):
         self.setWindowTitle("Ryu's Audiobook")
         self.resize(1440, 900)
         self.project: Project | None = None
+        self._import_worker: ImportBookWorker | None = None
 
         shell = QWidget()
         shell_layout = QVBoxLayout(shell)
@@ -106,6 +134,8 @@ class ProjectWorkflow(QMainWindow):
         shell_layout.addLayout(body, 1)
 
         self.setCentralWidget(shell)
+        self.loading_overlay = FrostedLoadingOverlay(shell)
+        self.loading_overlay.setGeometry(shell.rect())
 
         self.library = LibraryPage(self.open_project)
         self.import_page = ImportPage(self.handle_import)
@@ -132,6 +162,8 @@ class ProjectWorkflow(QMainWindow):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._refresh_project_label()
+        if hasattr(self, "loading_overlay") and self.centralWidget():
+            self.loading_overlay.setGeometry(self.centralWidget().rect())
 
     def _set_project_title(self, title: str) -> None:
         self._project_title_full = title or "No book open"
@@ -190,14 +222,33 @@ class ProjectWorkflow(QMainWindow):
                 return
 
     def handle_import(self, path: Path) -> None:
-        try:
-            book = extract_text(path)
-            chapters = detect_chapters(book.text)
-            self.project = create_project(book.title, path, chapters)
-            self._set_project_title(book.title)
-            self.open_editor()
-        except Exception as exc:
-            QMessageBox.critical(self, "Import Failed", str(exc))
+        if self._import_worker is not None and self._import_worker.isRunning():
+            return
+        self.loading_overlay.show_loading(
+            "Importing your book",
+            "Reading the source file, finding chapters and preparing your local project…",
+        )
+        worker = ImportBookWorker(path)
+        self._import_worker = worker
+        worker.status.connect(self.loading_overlay.set_detail)
+        worker.completed.connect(self._import_completed)
+        worker.failed.connect(self._import_failed)
+        worker.finished.connect(self._import_worker_finished)
+        worker.start()
+
+    def _import_completed(self, project: Project) -> None:
+        self.loading_overlay.dismiss()
+        self.project = project
+        self._set_project_title(project.title)
+        self.open_editor()
+
+    def _import_failed(self, message: str) -> None:
+        self.loading_overlay.dismiss()
+        QMessageBox.critical(self, "Import Failed", message)
+
+    def _import_worker_finished(self) -> None:
+        # Keep the QThread alive until Qt confirms its worker loop has ended.
+        self._import_worker = None
 
     def open_editor(self) -> None:
         if not self.project:
