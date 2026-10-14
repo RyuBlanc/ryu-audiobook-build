@@ -86,7 +86,7 @@ class ProjectWorkflow(QMainWindow):
         brand = QLabel("RYU'S AUDIOBOOK")
         brand.setObjectName("brand")
         brand_col.addWidget(brand)
-        subtitle = QLabel(f"Local audiobook studio • {full_version()}")
+        subtitle = QLabel(f"Offline audio studio • Obsidian / Ember • {full_version()}")
         subtitle.setObjectName("muted")
         brand_col.addWidget(subtitle)
         header.addLayout(brand_col)
