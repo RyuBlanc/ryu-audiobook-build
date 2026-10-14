@@ -521,10 +521,6 @@ class GenerationPage(QWidget):
             "Effects are added only for clear action/environment phrases in the chapter text. "
             "The detector avoids broad emotion keywords and limits repeated cues."
         )
-        self.story_effects_enabled.toggled.connect(
-            self.story_effect_volume.setEnabled
-        )
-        self.story_effect_volume.setEnabled(self.story_effects_enabled.isChecked())
         settings_form.addRow("Story sound design", self.story_effects_enabled)
 
         self.story_effect_volume = QDoubleSpinBox()
@@ -540,6 +536,8 @@ class GenerationPage(QWidget):
             max(0.0, min(50.0, saved_sfx_volume * 100.0))
         )
         settings_form.addRow("Sound-effect volume", self.story_effect_volume)
+        self.story_effects_enabled.toggled.connect(self.story_effect_volume.setEnabled)
+        self.story_effect_volume.setEnabled(self.story_effects_enabled.isChecked())
 
         music_file_row = QHBoxLayout()
         self.background_audio_path = QLineEdit(
