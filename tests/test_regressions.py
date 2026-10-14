@@ -1016,6 +1016,42 @@ class RegressionTests(unittest.TestCase):
             self.assertGreaterEqual(_duration_ms(output), 7000)
             self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
 
+    def test_chapter_transition_sound_is_available_when_bgm_is_off(self):
+        from app.audio.assembler import _duration_ms
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapter_dir = root / "001_Transition_Only"
+            _write_wav(chapter_dir / "chunks" / "00001.wav", 3.0)
+            (chapter_dir / "narration.json").write_text(
+                json.dumps({
+                    "title": "Transition Only",
+                    "narration_text": "The story starts here.",
+                }),
+                encoding="utf-8",
+            )
+            output = root / "transition-only.m4b"
+            result = assemble_m4b(
+                [chapter_dir],
+                output,
+                "Transition Cue Without Music",
+                chapter_titles=["Transition Only"],
+                background_audio_mode="off",
+                chapter_transition_sound=True,
+            )
+            self.assertEqual(result, output)
+            self.assertTrue(output.exists())
+            # The chapter's short cue should precede narration even when no
+            # music or ambience track is enabled.
+            self.assertGreater(_duration_ms(output), 3600)
+            self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
+
+    def test_chapter_transition_control_is_independent_of_background_audio_toggle(self):
+        ui = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        assembler = Path("app/audio/assembler.py").read_text(encoding="utf-8")
+        self.assertIn("Chapter transitions are independently selectable, including with BGM off.", ui)
+        self.assertIn('elif effective_audio_mode in {"manual", "off"} and chapter_transition_sound:', assembler)
+
     def test_story_events_detect_clear_actions_but_not_metaphors(self):
         from app.audio.story_events import detect_story_events
 
