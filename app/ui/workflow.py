@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal, QEasingCurve, QPropertyAnimation
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QStackedWidget,
+    QGraphicsOpacityEffect,
 )
 
 from app.chapters.detector import Chapter, detect_chapters
@@ -32,6 +33,7 @@ from app.ui.hardware_page import HardwarePage
 from app.ui.models_page import ModelsPage
 from app.ui.voice_cast_page import VoiceCastPage
 from app.ui.loading_overlay import FrostedLoadingOverlay
+from app.ui.motion import reduced_motion_enabled
 
 
 class ImportBookWorker(QThread):
@@ -69,6 +71,8 @@ class ProjectWorkflow(QMainWindow):
         self.resize(1440, 900)
         self.project: Project | None = None
         self._import_worker: ImportBookWorker | None = None
+        self._page_animation: QPropertyAnimation | None = None
+        self._page_animation_widget: QWidget | None = None
 
         shell = QWidget()
         shell_layout = QVBoxLayout(shell)
@@ -178,25 +182,60 @@ class ProjectWorkflow(QMainWindow):
         self.project_label.setText(text)
         self.project_label.setToolTip(title)
 
+    def _show_page(self, widget: QWidget) -> None:
+        """Use a short page fade unless the user has reduced-motion enabled."""
+        if not widget:
+            return
+        if self._page_animation is not None:
+            self._page_animation.stop()
+            if self._page_animation_widget is not None:
+                self._page_animation_widget.setGraphicsEffect(None)
+            self._page_animation = None
+            self._page_animation_widget = None
+
+        self.stack.setCurrentWidget(widget)
+        if reduced_motion_enabled() or not widget.isVisible():
+            return
+
+        effect = QGraphicsOpacityEffect(widget)
+        effect.setOpacity(0.0)
+        widget.setGraphicsEffect(effect)
+        animation = QPropertyAnimation(effect, b"opacity", self)
+        animation.setDuration(135)
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        animation.setStartValue(0.0)
+        animation.setEndValue(1.0)
+        self._page_animation = animation
+        self._page_animation_widget = widget
+
+        def finish() -> None:
+            if self._page_animation is animation:
+                widget.setGraphicsEffect(None)
+                self._page_animation = None
+                self._page_animation_widget = None
+
+        animation.finished.connect(finish)
+        animation.start()
+
     def _sidebar_changed(self, row: int) -> None:
         if row < 0:
             return
         name = self.sidebar.item(row).data(32)
 
         if name == "Library":
-            self.stack.setCurrentWidget(self.library)
+            self._show_page(self.library)
         elif name == "Import":
-            self.stack.setCurrentWidget(self.import_page)
+            self._show_page(self.import_page)
         elif name == "Chapters":
             if self.editor:
-                self.stack.setCurrentWidget(self.editor)
+                self._show_page(self.editor)
             else:
-                self.stack.setCurrentWidget(self.import_page)
+                self._show_page(self.import_page)
         elif name == "Voice & Narration":
-            self.stack.setCurrentWidget(self.voice)
+            self._show_page(self.voice)
         elif name == "Voice Cast":
             self.voice_cast.refresh_profiles()
-            self.stack.setCurrentWidget(self.voice_cast)
+            self._show_page(self.voice_cast)
         elif name == "Generate":
             if self.project:
                 if self.generation:
@@ -207,13 +246,13 @@ class ProjectWorkflow(QMainWindow):
                 else:
                     self.ensure_generation_page()
             if self.generation:
-                self.stack.setCurrentWidget(self.generation)
+                self._show_page(self.generation)
             else:
-                self.stack.setCurrentWidget(self.import_page)
+                self._show_page(self.import_page)
         elif name == "Models":
-            self.stack.setCurrentWidget(self.stack.widget(4))
+            self._show_page(self.stack.widget(4))
         elif name == "Hardware":
-            self.stack.setCurrentWidget(self.stack.widget(5))
+            self._show_page(self.stack.widget(5))
 
     def select_section(self, name: str) -> None:
         for i in range(self.sidebar.count()):
