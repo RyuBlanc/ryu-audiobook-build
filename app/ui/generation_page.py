@@ -565,7 +565,7 @@ class GenerationPage(QWidget):
         except (TypeError, ValueError):
             saved_music_volume = 0.18
         self.background_audio_volume.setValue(max(0.0, min(100.0, saved_music_volume * 100.0)))
-        settings_form.addRow("Music volume", self.background_audio_volume)
+        settings_form.addRow("BGM volume", self.background_audio_volume)
 
         ambience_file_row = QHBoxLayout()
         self.ambience_audio_path = QLineEdit(
@@ -1440,7 +1440,7 @@ class GenerationPage(QWidget):
         # four disabled rows on screen. The rows return when Manual is selected.
         for widget, visible in (
             (self.music_file_container, manual_mode),
-            (self.background_audio_volume, manual_mode),
+            (self.background_audio_volume, auto_mode or manual_mode),
             (self.ambience_file_container, manual_mode),
             (self.ambience_audio_volume, manual_mode),
         ):
@@ -1452,10 +1452,10 @@ class GenerationPage(QWidget):
             self.ambience_audio_path,
             self.ambience_audio_browse,
             self.ambience_audio_preview,
-            self.background_audio_volume,
             self.ambience_audio_volume,
         ):
             widget.setEnabled(manual_mode)
+        self.background_audio_volume.setEnabled(auto_mode or manual_mode)
         for widget in (self.background_audio_fade_in, self.background_audio_fade_out):
             widget.setEnabled(enabled)
 
