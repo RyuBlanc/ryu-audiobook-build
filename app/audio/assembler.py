@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
+import wave
 import re
 import subprocess
 import tempfile
@@ -183,6 +185,8 @@ def assemble_m4b(
     background_audio_mode: str = "manual",
     auto_music_style: str = "auto",
     chapter_transition_sound: bool = False,
+    story_effects_enabled: bool = False,
+    story_effect_volume: float = 0.18,
 ) -> Path:
     """Create one premium M4B containing all chapters and navigation metadata.
 
@@ -233,12 +237,13 @@ def assemble_m4b(
         if effective_audio_mode == "auto":
             from app.audio.sound_design import (
                 detect_chapter_mood,
+                select_music_variation,
                 synthesize_chapter_transition,
                 synthesize_music_bed,
             )
 
-            music_cache: dict[str, Path] = {}
-            cue_cache: dict[str, Path] = {}
+            music_cache: dict[tuple[str, int], Path] = {}
+            cue_cache: dict[tuple[str, int], Path] = {}
             processed_chapters: list[Path] = []
             for index, (chapter_file, chapter_dir, chapter_title) in enumerate(
                 zip(chapters, chapter_dirs, names), start=1
@@ -253,18 +258,24 @@ def assemble_m4b(
                     pass
 
                 mood = detect_chapter_mood(chapter_title, narration_text, auto_music_style)
-                if mood not in music_cache:
-                    music_cache[mood] = synthesize_music_bed(
-                        temp_dir / f"auto-music-{mood}.wav", mood
+                variation = select_music_variation(chapter_title, narration_text, mood)
+                cache_key = (mood, variation)
+                if cache_key not in music_cache:
+                    music_cache[cache_key] = synthesize_music_bed(
+                        temp_dir / f"auto-music-{mood}-{variation:03d}.wav",
+                        mood,
+                        variation_index=variation,
                     )
-                bed_path = music_cache[mood]
+                bed_path = music_cache[cache_key]
                 cue_path = None
                 if chapter_transition_sound:
-                    if mood not in cue_cache:
-                        cue_cache[mood] = synthesize_chapter_transition(
-                            temp_dir / f"chapter-transition-{mood}.wav", mood
+                    if cache_key not in cue_cache:
+                        cue_cache[cache_key] = synthesize_chapter_transition(
+                            temp_dir / f"chapter-transition-{mood}-{variation:03d}.wav",
+                            mood,
+                            variation_index=variation,
                         )
-                    cue_path = cue_cache[mood]
+                    cue_path = cue_cache[cache_key]
 
                 base_duration_ms = _duration_ms(chapter_file)
                 duration_seconds = max(0.1, base_duration_ms / 1000.0)
