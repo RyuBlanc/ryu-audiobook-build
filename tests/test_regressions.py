@@ -813,6 +813,7 @@ class RegressionTests(unittest.TestCase):
     def test_audiobook_visualizer_is_lightweight_and_motion_aware(self):
         from PySide6.QtWidgets import QProgressBar, QWidget
         from app.ui.audio_visualizer import AudioVisualizer
+        from app.ui.motion import SmoothProgressBar
 
         visualizer_source = Path("app/ui/audio_visualizer.py").read_text(encoding="utf-8")
         generation_source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
@@ -829,6 +830,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_global_motion_system_uses_low_cost_animations_and_cached_blur(self):
         from PySide6.QtCore import QThread
+        from PySide6.QtWidgets import QProgressBar, QWidget
         from app.ui.motion import SmoothProgressBar
         from app.ui.loading_overlay import FrostedLoadingOverlay
         from app.ui.workflow import ImportBookWorker
@@ -838,8 +840,8 @@ class RegressionTests(unittest.TestCase):
         workflow_source = Path("app/ui/workflow.py").read_text(encoding="utf-8")
         main_source = Path("app/main.py").read_text(encoding="utf-8")
 
-        self.assertTrue(issubclass(SmoothProgressBar, __import__("PySide6.QtWidgets", fromlist=["QProgressBar"]).QProgressBar))
-        self.assertTrue(issubclass(FrostedLoadingOverlay, __import__("PySide6.QtWidgets", fromlist=["QWidget"]).QWidget))
+        self.assertTrue(issubclass(SmoothProgressBar, QProgressBar))
+        self.assertTrue(issubclass(FrostedLoadingOverlay, QWidget))
         self.assertTrue(issubclass(ImportBookWorker, QThread))
         self.assertIn("self._busy_timer.setInterval(65)", motion_source)
         self.assertIn("animation.setDuration(180)", motion_source)
