@@ -2272,6 +2272,10 @@ class GenerationPage(QWidget):
         self._reduce_motion_enabled = bool(enabled)
         self.motion_settings.setValue("ui/reduce_motion", self._reduce_motion_enabled)
         self.audio_visualizer.set_reduced_motion(self._reduce_motion_enabled)
+        # Apply the saved preference to every progress indicator in this page,
+        # not just the finished-audiobook visualizer.
+        for progress_bar in self.findChildren(SmoothProgressBar):
+            progress_bar.set_reduced_motion(self._reduce_motion_enabled)
 
     def _player_playback_state_changed(self, state) -> None:
         is_playing = state == QMediaPlayer.PlaybackState.PlayingState
