@@ -434,6 +434,7 @@ def assemble_m4b(
                     if chapter_transition_sound else 0
                 )
                 cursor_ms = 0.0
+                chapter_duration_ms = _duration_ms(chapter_file)
                 pending: list[tuple[int, object, int]] = []
                 last_kind_ms: dict[str, int] = {}
                 accepted_starts: list[int] = []
@@ -459,7 +460,7 @@ def assemble_m4b(
                     for event in detect_story_events(chunk_text):
                         if len(pending) >= MAX_EVENTS_PER_CHAPTER:
                             break
-                        fraction = max(0.0, min(1.0, event.char_start / max(1, len(chunk_text)))
+                        fraction = max(0.0, min(1.0, event.char_start / max(1, len(chunk_text))))
                         text_position_ms = cursor_ms + fraction * chunk_duration_ms
                         # Small pre-roll lets an effect lead the written action
                         # slightly, rather than sounding like an afterthought.
@@ -467,7 +468,6 @@ def assemble_m4b(
                             0,
                             transition_offset_ms + int(text_position_ms) - 110,
                         )
-                        chapter_duration_ms = _duration_ms(chapter_file)
                         if event_time_ms >= chapter_duration_ms:
                             continue
 
