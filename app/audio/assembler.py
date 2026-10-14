@@ -346,10 +346,10 @@ def assemble_m4b(
 
             chapters = processed_chapters
 
-        elif effective_audio_mode in {"manual", "off"} and chapter_transition_sound:
-            # Manual/off modes place chapter cues before chapter markers.
-            # In off mode, this keeps the chapter separator independently
-            # usable without enabling a music or ambience bed.
+        elif effective_audio_mode == "manual" and chapter_transition_sound:
+            # Manual music/ambience is mixed as one continuous bed later, but
+            # chapter cues are still inserted before the chapter markers are
+            # calculated so the reader hears a clear transition at every skip.
             from app.audio.sound_design import (
                 detect_chapter_mood,
                 synthesize_chapter_transition,
@@ -431,7 +431,8 @@ def assemble_m4b(
                 # Manual mode. Add that exact intentional lead-in to cue times.
                 transition_offset_ms = (
                     int(TRANSITION_SECONDS * 1000)
-                    if chapter_transition_sound else 0
+                    if chapter_transition_sound and effective_audio_mode in {"auto", "manual"}
+                    else 0
                 )
                 cursor_ms = 0.0
                 chapter_duration_ms = _duration_ms(chapter_file)
@@ -439,8 +440,6 @@ def assemble_m4b(
                 last_kind_ms: dict[str, int] = {}
                 accepted_starts: list[int] = []
                 event_serial = 0
-                narration_speed_safe = max(0.5, min(2.0, float(narration_speed)))
-
                 for chunk_info in manifest_chunks:
                     chunk_text = str(chunk_info.get("text") or "")
                     if not chunk_text.strip():
@@ -449,10 +448,13 @@ def assemble_m4b(
                     chunk_wav = chapter_dir / "chunks" / Path(chunk_name).name
                     try:
                         with wave.open(str(chunk_wav), "rb") as wav_file:
+                            # The WAV already reflects the provider's actual
+                            # speed setting and pacing silence. Do not scale it
+                            # a second time; the observed file duration is the
+                            # best cheap timeline basis available offline.
                             chunk_duration_ms = (
                                 wav_file.getnframes() * 1000.0
                                 / max(1, wav_file.getframerate())
-                                / narration_speed_safe
                             )
                     except (OSError, wave.Error):
                         continue

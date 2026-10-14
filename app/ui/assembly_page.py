@@ -4,9 +4,10 @@ from pathlib import Path
 import time
 
 from PySide6.QtCore import QThread, Signal, QTimer
-from PySide6.QtWidgets import QFileDialog, QFormLayout, QLabel, QPushButton, QVBoxLayout, QWidget, QLineEdit, QProgressBar
+from PySide6.QtWidgets import QFileDialog, QFormLayout, QLabel, QPushButton, QVBoxLayout, QWidget, QLineEdit
 
 from app.audio.assembler import assemble_m4b
+from app.ui.motion import SmoothProgressBar
 
 
 class AssemblyWorker(QThread):
@@ -62,11 +63,11 @@ class AssemblyPage(QWidget):
         layout.addWidget(output_button)
         layout.addWidget(self.output)
 
-        self.progress = QProgressBar()
+        self.progress = SmoothProgressBar()
         self.progress.setRange(0, 1)
         self.progress.setValue(0)
         layout.addWidget(self.progress)
-        self.activity = QProgressBar()
+        self.activity = SmoothProgressBar()
         self.activity.setRange(0, 0)
         self.activity.setTextVisible(False)
         self.activity.setFixedHeight(4)

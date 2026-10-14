@@ -60,7 +60,7 @@ EVENT_PROFILES = {
 # Require clear, audible actions rather than broad emotion words or loose keywords.
 _RULES = (
     ("running_footsteps", 0.96, (
-        r"\b(?:ran|running|sprinted|sprinting|dashed|bolted|raced)\s+(?:quickly\s+|straight\s+|back\s+|forward\s+)?(?:across|down|up|through|toward|towards|past|along|around)\s+(?:the\s+|a\s+|an\s+|his\s+|her\s+|their\s+)?(?:hall(?:way)?|corridor|stairs?|street|road|path|field|forest|room|yard|garden|bridge|alley|passage|platform|courtyard|doorway|beach|ground|floor|tunnel)\b",
+        r"\b(?:ran|running|sprinted|sprinting|dashed|bolted|raced)\s+(?:quickly\s+|straight\s+|back\s+|forward\s+)?(?:across|down|up|through|toward|towards|to|into|onto|past|along|around)\s+(?:the\s+|a\s+|an\s+|his\s+|her\s+|their\s+)?(?:hall(?:way)?|corridor|stairs?|street|road|path|field|forest|room|yard|garden|bridge|alley|passage|platform|courtyard|doorway|door|gate|entrance|exit|beach|ground|floor|tunnel)\b",
         r"\b(?:broke|burst)\s+into\s+a\s+run\b",
         r"\b(?:running|sprinting)\s+footsteps?\b",
         r"\bfootsteps?\s+(?:pounded|thudded|raced|sprinted|approached|receded)\b",

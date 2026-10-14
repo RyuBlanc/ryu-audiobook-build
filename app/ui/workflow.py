@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal, QEasingCurve, QPropertyAnimation
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QStackedWidget,
+    QGraphicsOpacityEffect,
 )
 
 from app.chapters.detector import Chapter, detect_chapters
@@ -31,6 +32,58 @@ from app.ui.voice_page import VoicePage
 from app.ui.hardware_page import HardwarePage
 from app.ui.models_page import ModelsPage
 from app.ui.voice_cast_page import VoiceCastPage
+from app.ui.loading_overlay import FrostedLoadingOverlay
+from app.ui.motion import reduced_motion_enabled
+
+
+class ImportBookWorker(QThread):
+    """Extract and detect chapters away from the UI thread."""
+
+    completed = Signal(object)
+    failed = Signal(str)
+    status = Signal(str)
+
+    def __init__(self, source_path: Path) -> None:
+        super().__init__()
+        self.source_path = Path(source_path)
+
+    def run(self) -> None:
+        try:
+            self.status.emit("Extracting text from the source book…")
+            book = extract_text(self.source_path)
+            self.status.emit("Finding chapter and section boundaries…")
+            chapters = detect_chapters(book.text)
+            if not chapters:
+                raise RuntimeError("No readable chapters were found in this file.")
+            self.status.emit("Saving the local audiobook project…")
+            project = create_project(book.title, self.source_path, chapters)
+            self.completed.emit(project)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
+class RedetectChaptersWorker(QThread):
+    """Re-read a project's original source and detect chapters off the UI thread."""
+
+    completed = Signal(object)
+    failed = Signal(str)
+    status = Signal(str)
+
+    def __init__(self, source_path: Path) -> None:
+        super().__init__()
+        self.source_path = Path(source_path)
+
+    def run(self) -> None:
+        try:
+            self.status.emit("Re-reading the original source file…")
+            book = extract_text(self.source_path)
+            self.status.emit("Re-detecting chapter and section boundaries…")
+            chapters = detect_chapters(book.text)
+            if not chapters:
+                raise RuntimeError("No readable chapters were detected.")
+            self.completed.emit(chapters)
+        except Exception as exc:
+            self.failed.emit(str(exc))
 
 
 class ProjectWorkflow(QMainWindow):
@@ -41,6 +94,10 @@ class ProjectWorkflow(QMainWindow):
         self.setWindowTitle("Ryu's Audiobook")
         self.resize(1440, 900)
         self.project: Project | None = None
+        self._import_worker: ImportBookWorker | None = None
+        self._redetect_worker: RedetectChaptersWorker | None = None
+        self._page_animation: QPropertyAnimation | None = None
+        self._page_animation_widget: QWidget | None = None
 
         shell = QWidget()
         shell_layout = QVBoxLayout(shell)
@@ -54,7 +111,7 @@ class ProjectWorkflow(QMainWindow):
         brand = QLabel("RYU'S AUDIOBOOK")
         brand.setObjectName("brand")
         brand_col.addWidget(brand)
-        subtitle = QLabel(f"Local audiobook studio • {full_version()}")
+        subtitle = QLabel(f"Offline audio studio • Obsidian / Ember • {full_version()}")
         subtitle.setObjectName("muted")
         brand_col.addWidget(subtitle)
         header.addLayout(brand_col)
@@ -106,6 +163,8 @@ class ProjectWorkflow(QMainWindow):
         shell_layout.addLayout(body, 1)
 
         self.setCentralWidget(shell)
+        self.loading_overlay = FrostedLoadingOverlay(shell)
+        self.loading_overlay.setGeometry(shell.rect())
 
         self.library = LibraryPage(self.open_project)
         self.import_page = ImportPage(self.handle_import)
@@ -132,6 +191,8 @@ class ProjectWorkflow(QMainWindow):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._refresh_project_label()
+        if hasattr(self, "loading_overlay") and self.centralWidget():
+            self.loading_overlay.setGeometry(self.centralWidget().rect())
 
     def _set_project_title(self, title: str) -> None:
         self._project_title_full = title or "No book open"
@@ -146,25 +207,60 @@ class ProjectWorkflow(QMainWindow):
         self.project_label.setText(text)
         self.project_label.setToolTip(title)
 
+    def _show_page(self, widget: QWidget) -> None:
+        """Use a short page fade unless the user has reduced-motion enabled."""
+        if not widget:
+            return
+        if self._page_animation is not None:
+            self._page_animation.stop()
+            if self._page_animation_widget is not None:
+                self._page_animation_widget.setGraphicsEffect(None)
+            self._page_animation = None
+            self._page_animation_widget = None
+
+        self.stack.setCurrentWidget(widget)
+        if reduced_motion_enabled() or not widget.isVisible():
+            return
+
+        effect = QGraphicsOpacityEffect(widget)
+        effect.setOpacity(0.0)
+        widget.setGraphicsEffect(effect)
+        animation = QPropertyAnimation(effect, b"opacity", self)
+        animation.setDuration(135)
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        animation.setStartValue(0.0)
+        animation.setEndValue(1.0)
+        self._page_animation = animation
+        self._page_animation_widget = widget
+
+        def finish() -> None:
+            if self._page_animation is animation:
+                widget.setGraphicsEffect(None)
+                self._page_animation = None
+                self._page_animation_widget = None
+
+        animation.finished.connect(finish)
+        animation.start()
+
     def _sidebar_changed(self, row: int) -> None:
         if row < 0:
             return
         name = self.sidebar.item(row).data(32)
 
         if name == "Library":
-            self.stack.setCurrentWidget(self.library)
+            self._show_page(self.library)
         elif name == "Import":
-            self.stack.setCurrentWidget(self.import_page)
+            self._show_page(self.import_page)
         elif name == "Chapters":
             if self.editor:
-                self.stack.setCurrentWidget(self.editor)
+                self._show_page(self.editor)
             else:
-                self.stack.setCurrentWidget(self.import_page)
+                self._show_page(self.import_page)
         elif name == "Voice & Narration":
-            self.stack.setCurrentWidget(self.voice)
+            self._show_page(self.voice)
         elif name == "Voice Cast":
             self.voice_cast.refresh_profiles()
-            self.stack.setCurrentWidget(self.voice_cast)
+            self._show_page(self.voice_cast)
         elif name == "Generate":
             if self.project:
                 if self.generation:
@@ -175,13 +271,13 @@ class ProjectWorkflow(QMainWindow):
                 else:
                     self.ensure_generation_page()
             if self.generation:
-                self.stack.setCurrentWidget(self.generation)
+                self._show_page(self.generation)
             else:
-                self.stack.setCurrentWidget(self.import_page)
+                self._show_page(self.import_page)
         elif name == "Models":
-            self.stack.setCurrentWidget(self.stack.widget(4))
+            self._show_page(self.stack.widget(4))
         elif name == "Hardware":
-            self.stack.setCurrentWidget(self.stack.widget(5))
+            self._show_page(self.stack.widget(5))
 
     def select_section(self, name: str) -> None:
         for i in range(self.sidebar.count()):
@@ -190,14 +286,33 @@ class ProjectWorkflow(QMainWindow):
                 return
 
     def handle_import(self, path: Path) -> None:
-        try:
-            book = extract_text(path)
-            chapters = detect_chapters(book.text)
-            self.project = create_project(book.title, path, chapters)
-            self._set_project_title(book.title)
-            self.open_editor()
-        except Exception as exc:
-            QMessageBox.critical(self, "Import Failed", str(exc))
+        if self._import_worker is not None and self._import_worker.isRunning():
+            return
+        self.loading_overlay.show_loading(
+            "Importing your book",
+            "Reading the source file, finding chapters and preparing your local project…",
+        )
+        worker = ImportBookWorker(path)
+        self._import_worker = worker
+        worker.status.connect(self.loading_overlay.set_detail)
+        worker.completed.connect(self._import_completed)
+        worker.failed.connect(self._import_failed)
+        worker.finished.connect(self._import_worker_finished)
+        worker.start()
+
+    def _import_completed(self, project: Project) -> None:
+        self.loading_overlay.dismiss()
+        self.project = project
+        self._set_project_title(project.title)
+        self.open_editor()
+
+    def _import_failed(self, message: str) -> None:
+        self.loading_overlay.dismiss()
+        QMessageBox.critical(self, "Import Failed", message)
+
+    def _import_worker_finished(self) -> None:
+        # Keep the QThread alive until Qt confirms its worker loop has ended.
+        self._import_worker = None
 
     def open_editor(self) -> None:
         if not self.project:
@@ -222,11 +337,26 @@ class ProjectWorkflow(QMainWindow):
         if not self.project or not self.project.source_path or not self.project.source_path.exists():
             QMessageBox.warning(self, "Re-detect Chapters", "The original source file is not available.")
             return
+        if self._redetect_worker is not None and self._redetect_worker.isRunning():
+            return
+
+        self.loading_overlay.show_loading(
+            "Rebuilding chapter map",
+            "Re-reading the original book and identifying chapter boundaries…",
+        )
+        worker = RedetectChaptersWorker(self.project.source_path)
+        self._redetect_worker = worker
+        worker.status.connect(self.loading_overlay.set_detail)
+        worker.completed.connect(self._redetect_completed)
+        worker.failed.connect(self._redetect_failed)
+        worker.finished.connect(self._redetect_worker_finished)
+        worker.start()
+
+    def _redetect_completed(self, chapters: list[Chapter]) -> None:
+        self.loading_overlay.dismiss()
+        if not self.project:
+            return
         try:
-            book = extract_text(self.project.source_path)
-            chapters = detect_chapters(book.text)
-            if not chapters:
-                raise RuntimeError("No readable chapters were detected.")
             self.project.chapters = chapters
             self.project.save()
             self.library.refresh()
@@ -234,6 +364,14 @@ class ProjectWorkflow(QMainWindow):
             self.ensure_generation_page()
         except Exception as exc:
             QMessageBox.critical(self, "Re-detect Chapters Failed", str(exc))
+
+    def _redetect_failed(self, message: str) -> None:
+        self.loading_overlay.dismiss()
+        QMessageBox.critical(self, "Re-detect Chapters Failed", message)
+
+    def _redetect_worker_finished(self) -> None:
+        # Hold the worker until Qt confirms it has stopped.
+        self._redetect_worker = None
 
     def rename_project(self, title: str) -> None:
         if not self.project or not title.strip():

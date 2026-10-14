@@ -11,7 +11,7 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QProgressBar, QPushButton, QVBoxLayout, QWidget, QComboBox, QScrollArea,
+    QPushButton, QVBoxLayout, QWidget, QComboBox, QScrollArea,
     QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy, QCheckBox,
     QDoubleSpinBox, QSpinBox,
 )
@@ -24,6 +24,7 @@ from app.documents.parser import extract_text
 from app.core.state import load_state, save_state
 from app.core.project import list_projects
 from app.ui.metadata_widgets import HistoryComboBox, GenrePicker
+from app.ui.motion import SmoothProgressBar
 from app.ui.audio_visualizer import AudioVisualizer
 from app.tts.manager import GenerationManager, GenerationSummary
 from app.tts.profile_provider import provider_from_profile
@@ -411,6 +412,7 @@ class GenerationPage(QWidget):
 
         settings = QGroupBox("Audio settings")
         settings_form = QFormLayout(settings)
+        self._background_audio_form = settings_form
 
         voice_row = QHBoxLayout()
         self.voice_profile = QComboBox()
@@ -519,10 +521,6 @@ class GenerationPage(QWidget):
             "Effects are added only for clear action/environment phrases in the chapter text. "
             "The detector avoids broad emotion keywords and limits repeated cues."
         )
-        self.story_effects_enabled.toggled.connect(
-            self.story_effect_volume.setEnabled
-        )
-        self.story_effect_volume.setEnabled(self.story_effects_enabled.isChecked())
         settings_form.addRow("Story sound design", self.story_effects_enabled)
 
         self.story_effect_volume = QDoubleSpinBox()
@@ -538,6 +536,8 @@ class GenerationPage(QWidget):
             max(0.0, min(50.0, saved_sfx_volume * 100.0))
         )
         settings_form.addRow("Sound-effect volume", self.story_effect_volume)
+        self.story_effects_enabled.toggled.connect(self.story_effect_volume.setEnabled)
+        self.story_effect_volume.setEnabled(self.story_effects_enabled.isChecked())
 
         music_file_row = QHBoxLayout()
         self.background_audio_path = QLineEdit(
@@ -551,7 +551,9 @@ class GenerationPage(QWidget):
         music_file_row.addWidget(self.background_audio_path, 1)
         music_file_row.addWidget(self.background_audio_browse)
         music_file_row.addWidget(self.background_audio_preview)
-        settings_form.addRow("Music / ambience file", music_file_row)
+        self.music_file_container = QWidget()
+        self.music_file_container.setLayout(music_file_row)
+        settings_form.addRow("Music / ambience file", self.music_file_container)
 
         self.background_audio_volume = QDoubleSpinBox()
         self.background_audio_volume.setRange(0.0, 100.0)
@@ -563,7 +565,7 @@ class GenerationPage(QWidget):
         except (TypeError, ValueError):
             saved_music_volume = 0.18
         self.background_audio_volume.setValue(max(0.0, min(100.0, saved_music_volume * 100.0)))
-        settings_form.addRow("Music volume", self.background_audio_volume)
+        settings_form.addRow("BGM volume", self.background_audio_volume)
 
         ambience_file_row = QHBoxLayout()
         self.ambience_audio_path = QLineEdit(
@@ -577,7 +579,9 @@ class GenerationPage(QWidget):
         ambience_file_row.addWidget(self.ambience_audio_path, 1)
         ambience_file_row.addWidget(self.ambience_audio_browse)
         ambience_file_row.addWidget(self.ambience_audio_preview)
-        settings_form.addRow("Ambience file", ambience_file_row)
+        self.ambience_file_container = QWidget()
+        self.ambience_file_container.setLayout(ambience_file_row)
+        settings_form.addRow("Ambience file", self.ambience_file_container)
 
         self.ambience_audio_volume = QDoubleSpinBox()
         self.ambience_audio_volume.setRange(0.0, 100.0)
@@ -608,13 +612,17 @@ class GenerationPage(QWidget):
         settings_form.addRow("Music fade-out", self.background_audio_fade_out)
 
         self.background_audio_hint = QLabel(
+            "Automatic: chapter-matched local BGM with optional story effects. "
+            "Manual: use your own music or ambience. Effects stay beneath narration."
+        )
+        self.background_audio_hint.setToolTip(
             "Automatic mode selects from 1,008 deterministic local BGM recipes "
-            "(6 moods × 8 timbres × 7 tempos × 3 harmony patterns) and creates only the "
-            "variations this book needs—no 1,000-file download or random track shuffling. "
-            "Story-aware effects use explicit phrases and are timed to generated text chunks. "
-            "Manual mode uses your own licensed music/ambience files. Story sound effects "
-            "can be enabled independently of music and ambience. Effects remain quiet under "
-            "narration; review the final mix because text-based timing is approximate."
+            "(6 moods × 8 timbres × 7 tempos × 3 harmony patterns), generating only "
+            "the variations the book needs rather than downloading 1,000 files or "
+            "shuffling random tracks. Mood detection uses chapter text; sound effects "
+            "are placed from explicit text cues and approximate audio timing. Manual "
+            "mode uses music/ambience files you have permission to use. Story effects "
+            "can be enabled independently. Review the final mix before publishing."
         )
         self.background_audio_hint.setWordWrap(True)
         self.background_audio_hint.setObjectName("muted")
@@ -688,14 +696,14 @@ class GenerationPage(QWidget):
         preview_time_row.addWidget(self.preview_time)
         preview_layout.addLayout(preview_time_row)
 
-        self.preview_loading = QProgressBar()
+        self.preview_loading = SmoothProgressBar()
         self.preview_loading.setRange(0, 100)
         self.preview_loading.setValue(0)
         self.preview_loading.setTextVisible(True)
         self.preview_loading.setFixedHeight(14)
         self.preview_loading.setVisible(False)
         preview_layout.addWidget(self.preview_loading)
-        self.preview_activity = QProgressBar()
+        self.preview_activity = SmoothProgressBar()
         self.preview_activity.setRange(0, 0)
         self.preview_activity.setTextVisible(False)
         self.preview_activity.setFixedHeight(4)
@@ -706,7 +714,7 @@ class GenerationPage(QWidget):
 
         progress_box = QGroupBox("Generation")
         progress_layout = QVBoxLayout(progress_box)
-        self.progress = QProgressBar()
+        self.progress = SmoothProgressBar()
         progress_layout.addWidget(self.progress)
         stats = QHBoxLayout()
         self.stage = QLabel("Ready")
@@ -1431,7 +1439,16 @@ class GenerationPage(QWidget):
         manual_mode = enabled and self.background_audio_mode.currentData() == "manual"
         self.background_audio_mode.setEnabled(enabled)
         self.auto_music_style.setEnabled(auto_mode)
-        # Chapter transitions are independently selectable, including with BGM off.
+        self.chapter_transition_sound.setEnabled(enabled)
+        # Hide manual track rows entirely in Automatic mode instead of leaving
+        # four disabled rows on screen. The rows return when Manual is selected.
+        for widget, visible in (
+            (self.music_file_container, manual_mode),
+            (self.background_audio_volume, auto_mode or manual_mode),
+            (self.ambience_file_container, manual_mode),
+            (self.ambience_audio_volume, manual_mode),
+        ):
+            self._background_audio_form.setRowVisible(widget, visible)
         for widget in (
             self.background_audio_path,
             self.background_audio_browse,
@@ -1439,10 +1456,10 @@ class GenerationPage(QWidget):
             self.ambience_audio_path,
             self.ambience_audio_browse,
             self.ambience_audio_preview,
-            self.background_audio_volume,
             self.ambience_audio_volume,
         ):
             widget.setEnabled(manual_mode)
+        self.background_audio_volume.setEnabled(auto_mode or manual_mode)
         for widget in (self.background_audio_fade_in, self.background_audio_fade_out):
             widget.setEnabled(enabled)
 
@@ -2256,9 +2273,16 @@ class GenerationPage(QWidget):
         self._refresh_readiness()
 
     def _set_reduce_motion(self, enabled: bool) -> None:
+        from PySide6.QtWidgets import QApplication
+
         self._reduce_motion_enabled = bool(enabled)
         self.motion_settings.setValue("ui/reduce_motion", self._reduce_motion_enabled)
         self.audio_visualizer.set_reduced_motion(self._reduce_motion_enabled)
+        # Apply globally, including Voice & Narration and standalone M4B
+        # assembly pages that may already exist in the application session.
+        for widget in QApplication.allWidgets():
+            if isinstance(widget, SmoothProgressBar):
+                widget.set_reduced_motion(self._reduce_motion_enabled)
 
     def _player_playback_state_changed(self, state) -> None:
         is_playing = state == QMediaPlayer.PlaybackState.PlayingState
