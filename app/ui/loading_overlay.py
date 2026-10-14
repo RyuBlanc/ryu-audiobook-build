@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QRectF, QTimer, Qt
+from PySide6.QtCore import QEvent, QRectF, QTimer, Qt
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
@@ -21,6 +21,7 @@ class FrostedLoadingOverlay(QWidget):
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self._host = parent
+        self._host.installEventFilter(self)
         self._blurred = QPixmap()
         self._title = "Preparing your audiobook"
         self._detail = "Please wait while the local studio prepares the next step…"
@@ -91,11 +92,23 @@ class FrostedLoadingOverlay(QWidget):
         self._phase = (self._phase + 0.24) % (2.0 * math.pi)
         self.update()
 
+    def eventFilter(self, watched, event) -> bool:
+        # Keep the overlay covering the shell while it resizes. Reuse the
+        # cached snapshot instead of taking another screenshot or recalculating
+        # the blur during live resizing.
+        if (
+            watched is self._host
+            and event.type() == QEvent.Type.Resize
+            and self.isVisible()
+        ):
+            self.setGeometry(self._host.rect())
+            self.update()
+        return super().eventFilter(watched, event)
+
     def resizeEvent(self, event) -> None:  # noqa: N802 - Qt event name
         super().resizeEvent(event)
-        if self.isVisible():
-            self.setGeometry(self._host.rect())
-            self._capture_frosted_snapshot()
+        # paintEvent smoothly scales the cached frosted snapshot to the new
+        # bounds. Capture is intentionally limited to show_loading().
 
     def hideEvent(self, event) -> None:  # noqa: N802 - Qt event name
         self._timer.stop()
