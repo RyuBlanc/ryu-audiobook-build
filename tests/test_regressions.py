@@ -811,12 +811,13 @@ class RegressionTests(unittest.TestCase):
                 vp.voices_root = original_root
 
     def test_audiobook_visualizer_is_lightweight_and_motion_aware(self):
-        from PySide6.QtWidgets import QWidget
+        from PySide6.QtWidgets import QProgressBar, QWidget
         from app.ui.audio_visualizer import AudioVisualizer
 
         visualizer_source = Path("app/ui/audio_visualizer.py").read_text(encoding="utf-8")
         generation_source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
         self.assertTrue(issubclass(AudioVisualizer, QWidget))
+        self.assertTrue(issubclass(SmoothProgressBar, QProgressBar))
         self.assertIn("self._timer.setInterval(40)", visualizer_source)
         self.assertIn("self._playing and not self._reduced_motion and self.isVisible()", visualizer_source)
         self.assertIn("self._timer.stop()", visualizer_source)
@@ -825,6 +826,42 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("self.player.playbackStateChanged.connect(self._player_playback_state_changed)", generation_source)
         self.assertIn('QCheckBox("Reduce motion")', generation_source)
         self.assertIn('self.motion_settings.setValue("ui/reduce_motion", self._reduce_motion_enabled)', generation_source)
+
+    def test_global_motion_system_uses_low_cost_animations_and_cached_blur(self):
+        from PySide6.QtCore import QThread
+        from app.ui.motion import SmoothProgressBar
+        from app.ui.loading_overlay import FrostedLoadingOverlay
+        from app.ui.workflow import ImportBookWorker
+
+        motion_source = Path("app/ui/motion.py").read_text(encoding="utf-8")
+        overlay_source = Path("app/ui/loading_overlay.py").read_text(encoding="utf-8")
+        workflow_source = Path("app/ui/workflow.py").read_text(encoding="utf-8")
+        main_source = Path("app/main.py").read_text(encoding="utf-8")
+
+        self.assertTrue(issubclass(SmoothProgressBar, __import__("PySide6.QtWidgets", fromlist=["QProgressBar"]).QProgressBar))
+        self.assertTrue(issubclass(FrostedLoadingOverlay, __import__("PySide6.QtWidgets", fromlist=["QWidget"]).QWidget))
+        self.assertTrue(issubclass(ImportBookWorker, QThread))
+        self.assertIn("self._busy_timer.setInterval(65)", motion_source)
+        self.assertIn("animation.setDuration(180)", motion_source)
+        self.assertIn("self._timer.setInterval(55)", overlay_source)
+        self.assertIn("size.width() // 14", overlay_source)
+        self.assertIn("self._capture_frosted_snapshot()", overlay_source)
+        self.assertIn("self.loading_overlay.show_loading(", workflow_source)
+        self.assertIn("worker.start()", workflow_source)
+        self.assertIn("animation.setDuration(135)", workflow_source)
+        self.assertIn("QListWidget#sidebar::item:selected", main_source)
+        self.assertIn("stop:0 #84142e", main_source)
+
+    def test_automatic_music_hides_manual_track_rows(self):
+        ui = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        self.assertIn("self._background_audio_form.setRowVisible(widget, visible)", ui)
+        self.assertIn("(self.music_file_container, manual_mode)", ui)
+        self.assertIn("(self.ambience_file_container, manual_mode)", ui)
+        self.assertIn("story_effects_enabled.toggled.connect(self.story_effect_volume.setEnabled)", ui)
+        self.assertLess(
+            ui.index("self.story_effect_volume = QDoubleSpinBox()"),
+            ui.index("self.story_effects_enabled.toggled.connect(self.story_effect_volume.setEnabled)"),
+        )
 
     def test_voice_preview_runs_in_a_worker_thread(self):
         from app.ui.voice_page import VoicePreviewWorker
