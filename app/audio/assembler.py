@@ -402,7 +402,7 @@ def assemble_m4b(
         # Story-aware SFX are aligned to the source text inside each generated
         # chunk. Only explicit phrases trigger effects; cues are volume-limited,
         # de-duplicated, and bounded per chapter to avoid an over-produced mix.
-        if story_effects_enabled and effective_audio_mode in {"auto", "manual"}:
+        if story_effects_enabled:
             from app.audio.sound_design import TRANSITION_SECONDS
             from app.audio.story_events import (
                 EVENT_PROFILES,
