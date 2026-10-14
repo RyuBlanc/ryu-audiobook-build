@@ -16,7 +16,7 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QInputDialog, QFormLayout, QGroupBox, QHBoxLayout,
     QLabel, QLineEdit, QMessageBox, QPushButton, QScrollArea, QTextEdit, QSpinBox,
-    QProgressBar, QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget,
 )
 
 
@@ -29,6 +29,7 @@ class PassiveScrollComboBox(QComboBox):
         else:
             event.ignore()
 
+from app.ui.motion import SmoothProgressBar
 from app.tts.profile_provider import provider_from_profile
 from app.tts.preview import build_voice_preview
 from app.tts.expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT
@@ -747,12 +748,12 @@ class VoicePage(QWidget):
         self.preview_engine_status = QLabel("Ready")
         self.preview_engine_status.setObjectName("muted")
         self.preview_engine_status.setWordWrap(True)
-        self.preview_percent_bar = QProgressBar()
+        self.preview_percent_bar = SmoothProgressBar()
         self.preview_percent_bar.setRange(0, 100)
         self.preview_percent_bar.setValue(0)
         self.preview_percent_bar.setTextVisible(True)
         self.preview_percent_bar.setFixedHeight(8)
-        self.preview_activity_bar = QProgressBar()
+        self.preview_activity_bar = SmoothProgressBar()
         self.preview_activity_bar.setRange(0, 0)
         self.preview_activity_bar.setTextVisible(False)
         self.preview_activity_bar.setFixedHeight(4)
