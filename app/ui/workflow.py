@@ -62,6 +62,30 @@ class ImportBookWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class RedetectChaptersWorker(QThread):
+    """Re-read a project's original source and detect chapters off the UI thread."""
+
+    completed = Signal(object)
+    failed = Signal(str)
+    status = Signal(str)
+
+    def __init__(self, source_path: Path) -> None:
+        super().__init__()
+        self.source_path = Path(source_path)
+
+    def run(self) -> None:
+        try:
+            self.status.emit("Re-reading the original source file…")
+            book = extract_text(self.source_path)
+            self.status.emit("Re-detecting chapter and section boundaries…")
+            chapters = detect_chapters(book.text)
+            if not chapters:
+                raise RuntimeError("No readable chapters were detected.")
+            self.completed.emit(chapters)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class ProjectWorkflow(QMainWindow):
     """Main studio shell inspired by modern audiobook creation workflows."""
 
@@ -71,6 +95,7 @@ class ProjectWorkflow(QMainWindow):
         self.resize(1440, 900)
         self.project: Project | None = None
         self._import_worker: ImportBookWorker | None = None
+        self._redetect_worker: RedetectChaptersWorker | None = None
         self._page_animation: QPropertyAnimation | None = None
         self._page_animation_widget: QWidget | None = None
 
@@ -312,11 +337,26 @@ class ProjectWorkflow(QMainWindow):
         if not self.project or not self.project.source_path or not self.project.source_path.exists():
             QMessageBox.warning(self, "Re-detect Chapters", "The original source file is not available.")
             return
+        if self._redetect_worker is not None and self._redetect_worker.isRunning():
+            return
+
+        self.loading_overlay.show_loading(
+            "Rebuilding chapter map",
+            "Re-reading the original book and identifying chapter boundaries…",
+        )
+        worker = RedetectChaptersWorker(self.project.source_path)
+        self._redetect_worker = worker
+        worker.status.connect(self.loading_overlay.set_detail)
+        worker.completed.connect(self._redetect_completed)
+        worker.failed.connect(self._redetect_failed)
+        worker.finished.connect(self._redetect_worker_finished)
+        worker.start()
+
+    def _redetect_completed(self, chapters: list[Chapter]) -> None:
+        self.loading_overlay.dismiss()
+        if not self.project:
+            return
         try:
-            book = extract_text(self.project.source_path)
-            chapters = detect_chapters(book.text)
-            if not chapters:
-                raise RuntimeError("No readable chapters were detected.")
             self.project.chapters = chapters
             self.project.save()
             self.library.refresh()
@@ -324,6 +364,14 @@ class ProjectWorkflow(QMainWindow):
             self.ensure_generation_page()
         except Exception as exc:
             QMessageBox.critical(self, "Re-detect Chapters Failed", str(exc))
+
+    def _redetect_failed(self, message: str) -> None:
+        self.loading_overlay.dismiss()
+        QMessageBox.critical(self, "Re-detect Chapters Failed", message)
+
+    def _redetect_worker_finished(self) -> None:
+        # Hold the worker until Qt confirms it has stopped.
+        self._redetect_worker = None
 
     def rename_project(self, title: str) -> None:
         if not self.project or not title.strip():
