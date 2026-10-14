@@ -612,13 +612,17 @@ class GenerationPage(QWidget):
         settings_form.addRow("Music fade-out", self.background_audio_fade_out)
 
         self.background_audio_hint = QLabel(
+            "Automatic: chapter-matched local BGM with optional story effects. "
+            "Manual: use your own music or ambience. Effects stay beneath narration."
+        )
+        self.background_audio_hint.setToolTip(
             "Automatic mode selects from 1,008 deterministic local BGM recipes "
-            "(6 moods × 8 timbres × 7 tempos × 3 harmony patterns) and creates only the "
-            "variations this book needs—no 1,000-file download or random track shuffling. "
-            "Story-aware effects use explicit phrases and are timed to generated text chunks. "
-            "Manual mode uses your own licensed music/ambience files. Story sound effects "
-            "can be enabled independently of music and ambience. Effects remain quiet under "
-            "narration; review the final mix because text-based timing is approximate."
+            "(6 moods × 8 timbres × 7 tempos × 3 harmony patterns), generating only "
+            "the variations the book needs rather than downloading 1,000 files or "
+            "shuffling random tracks. Mood detection uses chapter text; sound effects "
+            "are placed from explicit text cues and approximate audio timing. Manual "
+            "mode uses music/ambience files you have permission to use. Story effects "
+            "can be enabled independently. Review the final mix before publishing."
         )
         self.background_audio_hint.setWordWrap(True)
         self.background_audio_hint.setObjectName("muted")
