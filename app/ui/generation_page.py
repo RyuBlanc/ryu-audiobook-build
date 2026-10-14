@@ -509,6 +509,37 @@ class GenerationPage(QWidget):
         )
         settings_form.addRow("", self.chapter_transition_sound)
 
+        self.story_effects_enabled = QCheckBox(
+            "Add story-aware sound effects (footsteps, doors, weather, impacts, magic, etc.)"
+        )
+        self.story_effects_enabled.setChecked(
+            bool(audio_state.get("story_effects_enabled", True))
+        )
+        self.story_effects_enabled.setToolTip(
+            "Effects are added only for clear action/environment phrases in the chapter text. "
+            "The detector avoids broad emotion keywords and limits repeated cues."
+        )
+        self.story_effects_enabled.toggled.connect(
+            lambda *_: self._toggle_background_audio_controls(
+                self.background_audio_enabled.isChecked()
+            )
+        )
+        settings_form.addRow("Story sound design", self.story_effects_enabled)
+
+        self.story_effect_volume = QDoubleSpinBox()
+        self.story_effect_volume.setRange(0.0, 50.0)
+        self.story_effect_volume.setDecimals(0)
+        self.story_effect_volume.setSingleStep(2.0)
+        self.story_effect_volume.setSuffix("%")
+        try:
+            saved_sfx_volume = float(audio_state.get("story_effect_volume", 0.22))
+        except (TypeError, ValueError):
+            saved_sfx_volume = 0.22
+        self.story_effect_volume.setValue(
+            max(0.0, min(50.0, saved_sfx_volume * 100.0))
+        )
+        settings_form.addRow("Sound-effect volume", self.story_effect_volume)
+
         music_file_row = QHBoxLayout()
         self.background_audio_path = QLineEdit(
             str(audio_state.get("background_audio_path") or "")
@@ -578,10 +609,12 @@ class GenerationPage(QWidget):
         settings_form.addRow("Music fade-out", self.background_audio_fade_out)
 
         self.background_audio_hint = QLabel(
-            "Automatic mode creates a quiet local theme for each chapter and can add a "
-            "short transition cue at chapter starts. Choose a fixed style or let it detect "
-            "mood from the chapter text. Manual mode uses the music/ambience files below. "
-            "Narration stays the main focus; speech-aware ducking is a later stage."
+            "Automatic mode selects from 1,008 deterministic local BGM recipes "
+            "(6 moods × 8 timbres × 7 tempos × 3 harmony patterns) and creates only the "
+            "variations this book needs—no 1,000-file download or random track shuffling. "
+            "Story-aware effects use explicit phrases and are timed to generated text chunks. "
+            "Manual mode uses your own licensed music/ambience files. Effects remain quiet "
+            "under narration; review the final mix because text-based timing is approximate."
         )
         self.background_audio_hint.setWordWrap(True)
         self.background_audio_hint.setObjectName("muted")
@@ -1399,6 +1432,10 @@ class GenerationPage(QWidget):
         self.background_audio_mode.setEnabled(enabled)
         self.auto_music_style.setEnabled(auto_mode)
         self.chapter_transition_sound.setEnabled(enabled)
+        self.story_effects_enabled.setEnabled(enabled)
+        self.story_effect_volume.setEnabled(
+            enabled and self.story_effects_enabled.isChecked()
+        )
         for widget in (
             self.background_audio_path,
             self.background_audio_browse,
@@ -1646,6 +1683,7 @@ class GenerationPage(QWidget):
             self.backend, self.cover_button, self.change_output, self.preview_button,
             self.start_button, self.resume_button, self.background_audio_enabled,
             self.background_audio_mode, self.auto_music_style, self.chapter_transition_sound,
+            self.story_effects_enabled, self.story_effect_volume,
             self.background_audio_path, self.background_audio_browse,
             self.background_audio_preview, self.background_audio_volume,
             self.ambience_audio_path, self.ambience_audio_browse,
@@ -1900,6 +1938,8 @@ class GenerationPage(QWidget):
                 "background_audio_mode": str(self.background_audio_mode.currentData() or "auto"),
                 "auto_music_style": str(self.auto_music_style.currentData() or "auto"),
                 "chapter_transition_sound": self.chapter_transition_sound.isChecked(),
+                "story_effects_enabled": self.story_effects_enabled.isChecked(),
+                "story_effect_volume": float(self.story_effect_volume.value()) / 100.0,
                 "background_audio_path": self.background_audio_path.text().strip(),
                 "background_audio_volume": float(self.background_audio_volume.value()) / 100.0,
                 "ambience_audio_path": self.ambience_audio_path.text().strip(),
@@ -1960,6 +2000,11 @@ class GenerationPage(QWidget):
             background_audio_mode=background_audio_mode,
             auto_music_style=auto_music_style,
             chapter_transition_sound=chapter_transition_sound,
+            story_effects_enabled=(
+                self.story_effects_enabled.isChecked()
+                and background_audio_mode in {"auto", "manual"}
+            ),
+            story_effect_volume=float(self.story_effect_volume.value()) / 100.0,
         )
         self.manager.start(
             output,
