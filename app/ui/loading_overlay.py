@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QRectF, QTimer, Qt
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QLabel, QWidget
 
@@ -66,10 +66,9 @@ class FrostedLoadingOverlay(QWidget):
             snapshot = self._host.grab()
             # Downscale strongly, then smooth-scale back. This is a cached
             # frosted-glass approximation and keeps the cost to show-time only.
-            low_size = size / 14
             low = snapshot.scaled(
-                max(1, int(low_size.width())),
-                max(1, int(low_size.height())),
+                max(1, size.width() // 14),
+                max(1, size.height() // 14),
                 Qt.AspectRatioMode.IgnoreAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
@@ -120,7 +119,7 @@ class FrostedLoadingOverlay(QWidget):
         card_width = min(520, max(300, bounds.width() - 40))
         card_height = 208
         card = QPainterPath()
-        card_rect = Qt.QRectF(
+        card_rect = QRectF(
             (bounds.width() - card_width) / 2,
             (bounds.height() - card_height) / 2,
             card_width,
