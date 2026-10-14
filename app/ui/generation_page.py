@@ -412,6 +412,7 @@ class GenerationPage(QWidget):
 
         settings = QGroupBox("Audio settings")
         settings_form = QFormLayout(settings)
+        self._background_audio_form = settings_form
 
         voice_row = QHBoxLayout()
         self.voice_profile = QComboBox()
@@ -552,7 +553,9 @@ class GenerationPage(QWidget):
         music_file_row.addWidget(self.background_audio_path, 1)
         music_file_row.addWidget(self.background_audio_browse)
         music_file_row.addWidget(self.background_audio_preview)
-        settings_form.addRow("Music / ambience file", music_file_row)
+        self.music_file_container = QWidget()
+        self.music_file_container.setLayout(music_file_row)
+        settings_form.addRow("Music / ambience file", self.music_file_container)
 
         self.background_audio_volume = QDoubleSpinBox()
         self.background_audio_volume.setRange(0.0, 100.0)
@@ -578,7 +581,9 @@ class GenerationPage(QWidget):
         ambience_file_row.addWidget(self.ambience_audio_path, 1)
         ambience_file_row.addWidget(self.ambience_audio_browse)
         ambience_file_row.addWidget(self.ambience_audio_preview)
-        settings_form.addRow("Ambience file", ambience_file_row)
+        self.ambience_file_container = QWidget()
+        self.ambience_file_container.setLayout(ambience_file_row)
+        settings_form.addRow("Ambience file", self.ambience_file_container)
 
         self.ambience_audio_volume = QDoubleSpinBox()
         self.ambience_audio_volume.setRange(0.0, 100.0)
@@ -1433,6 +1438,15 @@ class GenerationPage(QWidget):
         self.background_audio_mode.setEnabled(enabled)
         self.auto_music_style.setEnabled(auto_mode)
         self.chapter_transition_sound.setEnabled(enabled)
+        # Hide manual track rows entirely in Automatic mode instead of leaving
+        # four disabled rows on screen. The rows return when Manual is selected.
+        for widget, visible in (
+            (self.music_file_container, manual_mode),
+            (self.background_audio_volume, manual_mode),
+            (self.ambience_file_container, manual_mode),
+            (self.ambience_audio_volume, manual_mode),
+        ):
+            self._background_audio_form.setRowVisible(widget, visible)
         for widget in (
             self.background_audio_path,
             self.background_audio_browse,
