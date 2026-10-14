@@ -146,6 +146,25 @@ def prepare_chapter_plan(
             f"Chapter {chapter.number} \"{chapter.title}\" contains no readable text to synthesize."
         )
 
+    # Persist a text-to-WAV manifest even when compatible chunks are reused.
+    # Story-aware sound cues use each generated unit's real audio duration and
+    # its source-text position rather than guessing from whole-chapter length.
+    chunk_manifest = {
+        "version": 1,
+        "chapter": chapter.number,
+        "title": chapter.title,
+        "narration_speed": float(narration_speed),
+        "pacing_profile": str(pacing_profile),
+        "chunks": [
+            {"index": index + 1, "file": f"{index + 1:05d}.wav", "text": item[0]}
+            for index, item in enumerate(chunks_with_voices)
+        ],
+    }
+    (chapter_dir / "chunk_manifest.json").write_text(
+        json.dumps(chunk_manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
     configure_narration = getattr(provider, "configure_narration", None)
     if callable(configure_narration):
         configure_narration(narration_speed, pacing_profile)

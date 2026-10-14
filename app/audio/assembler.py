@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
+import wave
 import re
 import subprocess
 import tempfile
@@ -183,6 +185,8 @@ def assemble_m4b(
     background_audio_mode: str = "manual",
     auto_music_style: str = "auto",
     chapter_transition_sound: bool = False,
+    story_effects_enabled: bool = False,
+    story_effect_volume: float = 0.18,
 ) -> Path:
     """Create one premium M4B containing all chapters and navigation metadata.
 
@@ -233,12 +237,13 @@ def assemble_m4b(
         if effective_audio_mode == "auto":
             from app.audio.sound_design import (
                 detect_chapter_mood,
+                select_music_variation,
                 synthesize_chapter_transition,
                 synthesize_music_bed,
             )
 
-            music_cache: dict[str, Path] = {}
-            cue_cache: dict[str, Path] = {}
+            music_cache: dict[tuple[str, int], Path] = {}
+            cue_cache: dict[tuple[str, int], Path] = {}
             processed_chapters: list[Path] = []
             for index, (chapter_file, chapter_dir, chapter_title) in enumerate(
                 zip(chapters, chapter_dirs, names), start=1
@@ -253,18 +258,24 @@ def assemble_m4b(
                     pass
 
                 mood = detect_chapter_mood(chapter_title, narration_text, auto_music_style)
-                if mood not in music_cache:
-                    music_cache[mood] = synthesize_music_bed(
-                        temp_dir / f"auto-music-{mood}.wav", mood
+                variation = select_music_variation(chapter_title, narration_text, mood)
+                cache_key = (mood, variation)
+                if cache_key not in music_cache:
+                    music_cache[cache_key] = synthesize_music_bed(
+                        temp_dir / f"auto-music-{mood}-{variation:03d}.wav",
+                        mood,
+                        variation_index=variation,
                     )
-                bed_path = music_cache[mood]
+                bed_path = music_cache[cache_key]
                 cue_path = None
                 if chapter_transition_sound:
-                    if mood not in cue_cache:
-                        cue_cache[mood] = synthesize_chapter_transition(
-                            temp_dir / f"chapter-transition-{mood}.wav", mood
+                    if cache_key not in cue_cache:
+                        cue_cache[cache_key] = synthesize_chapter_transition(
+                            temp_dir / f"chapter-transition-{mood}-{variation:03d}.wav",
+                            mood,
+                            variation_index=variation,
                         )
-                    cue_path = cue_cache[mood]
+                    cue_path = cue_cache[cache_key]
 
                 base_duration_ms = _duration_ms(chapter_file)
                 duration_seconds = max(0.1, base_duration_ms / 1000.0)
@@ -387,6 +398,166 @@ def assemble_m4b(
                     )
                 cued_chapters.append(cued_chapter)
             chapters = cued_chapters
+
+        # Story-aware SFX are aligned to the source text inside each generated
+        # chunk. Only explicit phrases trigger effects; cues are volume-limited,
+        # de-duplicated, and bounded per chapter to avoid an over-produced mix.
+        if story_effects_enabled:
+            from app.audio.sound_design import TRANSITION_SECONDS
+            from app.audio.story_events import (
+                EVENT_PROFILES,
+                MAX_EVENTS_PER_CHAPTER,
+                detect_story_events,
+                synthesize_story_effect,
+            )
+
+            effect_cache: dict[tuple[str, int], Path] = {}
+            mixed_chapters: list[Path] = []
+            master_sfx_volume = max(0.0, min(0.50, float(story_effect_volume)))
+            for chapter_index, (chapter_file, chapter_dir) in enumerate(
+                zip(chapters, chapter_dirs), start=1
+            ):
+                manifest_path = chapter_dir / "chunk_manifest.json"
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    manifest_chunks = manifest.get("chunks") or []
+                except (OSError, ValueError, TypeError):
+                    manifest_chunks = []
+                if not manifest_chunks or master_sfx_volume <= 0.0:
+                    mixed_chapters.append(chapter_file)
+                    continue
+
+                # The chapter transition is already prepended by Automatic or
+                # Manual mode. Add that exact intentional lead-in to cue times.
+                transition_offset_ms = (
+                    int(TRANSITION_SECONDS * 1000)
+                    if chapter_transition_sound else 0
+                )
+                cursor_ms = 0.0
+                chapter_duration_ms = _duration_ms(chapter_file)
+                pending: list[tuple[int, object, int]] = []
+                last_kind_ms: dict[str, int] = {}
+                accepted_starts: list[int] = []
+                event_serial = 0
+                narration_speed_safe = max(0.5, min(2.0, float(narration_speed)))
+
+                for chunk_info in manifest_chunks:
+                    chunk_text = str(chunk_info.get("text") or "")
+                    if not chunk_text.strip():
+                        continue
+                    chunk_name = str(chunk_info.get("file") or "")
+                    chunk_wav = chapter_dir / "chunks" / Path(chunk_name).name
+                    try:
+                        with wave.open(str(chunk_wav), "rb") as wav_file:
+                            chunk_duration_ms = (
+                                wav_file.getnframes() * 1000.0
+                                / max(1, wav_file.getframerate())
+                                / narration_speed_safe
+                            )
+                    except (OSError, wave.Error):
+                        continue
+
+                    for event in detect_story_events(chunk_text):
+                        if len(pending) >= MAX_EVENTS_PER_CHAPTER:
+                            break
+                        fraction = max(0.0, min(1.0, event.char_start / max(1, len(chunk_text))))
+                        text_position_ms = cursor_ms + fraction * chunk_duration_ms
+                        # Small pre-roll lets an effect lead the written action
+                        # slightly, rather than sounding like an afterthought.
+                        event_time_ms = max(
+                            0,
+                            transition_offset_ms + int(text_position_ms) - 110,
+                        )
+                        if event_time_ms >= chapter_duration_ms:
+                            continue
+
+                        previous = last_kind_ms.get(event.kind)
+                        cooldown_ms = (
+                            6500 if event.category == "ambience"
+                            else 3500 if event.category == "body"
+                            else 2200
+                        )
+                        if previous is not None and event_time_ms - previous < cooldown_ms:
+                            continue
+                        if any(abs(event_time_ms - old) < 480 for old in accepted_starts):
+                            continue
+
+                        seed_payload = (
+                            f"{chapter_dir.name}|{chapter_index}|{event.kind}|"
+                            f"{event_serial}|{chunk_text[:120]}"
+                        ).encode("utf-8", errors="replace")
+                        seed = int.from_bytes(
+                            hashlib.blake2b(seed_payload, digest_size=4).digest(),
+                            "big",
+                        ) % 8
+                        pending.append((event_time_ms, event, seed))
+                        last_kind_ms[event.kind] = event_time_ms
+                        accepted_starts.append(event_time_ms)
+                        event_serial += 1
+                    cursor_ms += chunk_duration_ms
+                    if len(pending) >= MAX_EVENTS_PER_CHAPTER:
+                        break
+
+                if not pending:
+                    mixed_chapters.append(chapter_file)
+                    if progress:
+                        progress(chapter_index, len(chapters), "story-effects-no-matching-cues")
+                    continue
+
+                effect_inputs: list[str] = []
+                effect_filters: list[str] = [
+                    "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[base]"
+                ]
+                mix_labels = "[base]"
+                for effect_index, (delay_ms, event, seed) in enumerate(pending, start=1):
+                    event_kind = str(event.kind)
+                    cache_key = (event_kind, seed)
+                    if cache_key not in effect_cache:
+                        effect_path = temp_dir / f"story-sfx-{event_kind}-{seed}.wav"
+                        effect_cache[cache_key] = synthesize_story_effect(
+                            effect_path, event_kind, variant_seed=seed
+                        )
+                    effect_path = effect_cache[cache_key]
+                    effect_inputs.extend(["-i", str(effect_path)])
+                    gain = max(
+                        0.0,
+                        min(1.0, master_sfx_volume * float(event.mix_gain)),
+                    )
+                    label = f"fx{effect_index}"
+                    effect_filters.append(
+                        f"[{effect_index}:a]aresample=44100,"
+                        "aformat=sample_rates=44100:channel_layouts=stereo,"
+                        f"volume={gain:.4f},adelay={delay_ms}|{delay_ms}[{label}]"
+                    )
+                    mix_labels += f"[{label}]"
+
+                effect_filters.append(
+                    f"{mix_labels}amix=inputs={len(pending) + 1}:duration=first:"
+                    "dropout_transition=0:normalize=0,alimiter=limit=0.93[out]"
+                )
+                mixed_chapter = temp_dir / f"story-mix-chapter-{chapter_index:05d}.m4a"
+                original_duration_ms = _duration_ms(chapter_file)
+                _run([
+                    "-i", str(chapter_file),
+                    *effect_inputs,
+                    "-filter_complex", ";".join(effect_filters),
+                    "-map", "[out]", "-vn",
+                    "-t", f"{original_duration_ms / 1000.0:.3f}",
+                    "-c:a", "aac", "-b:a", audio_bitrate, "-ar", "44100",
+                    str(mixed_chapter),
+                ])
+                if not mixed_chapter.exists() or mixed_chapter.stat().st_size == 0:
+                    raise RuntimeError(
+                        f"Story-aware sound-effect mix failed for chapter {chapter_index}."
+                    )
+                if abs(_duration_ms(mixed_chapter) - original_duration_ms) > 1500:
+                    raise RuntimeError(
+                        f"Story effects changed chapter {chapter_index} duration unexpectedly."
+                    )
+                mixed_chapters.append(mixed_chapter)
+                if progress:
+                    progress(chapter_index, len(chapters), "story-effects-mixed")
+            chapters = mixed_chapters
 
         concat = temp_dir / "chapters.txt"
         concat_lines = ["ffconcat version 1.0"]

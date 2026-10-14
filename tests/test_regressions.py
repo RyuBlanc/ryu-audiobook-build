@@ -921,7 +921,12 @@ class RegressionTests(unittest.TestCase):
     def test_generated_music_and_transition_cues_are_local_wav_files(self):
         import wave
         from app.audio.sound_design import (
+            MUSIC_CATALOGUE_SIZE,
+            TEMPOS,
+            VARIATIONS_PER_MOOD,
             detect_chapter_mood,
+            music_variation_info,
+            select_music_variation,
             synthesize_chapter_transition,
             synthesize_music_bed,
         )
@@ -934,7 +939,12 @@ class RegressionTests(unittest.TestCase):
             with wave.open(str(fantasy), "rb") as wav:
                 self.assertEqual(wav.getnchannels(), 2)
                 self.assertEqual(wav.getframerate(), 22050)
-                self.assertAlmostEqual(wav.getnframes() / wav.getframerate(), 16.0, delta=0.1)
+                # One 16-beat loop: its length varies with the selected tempo.
+                self.assertAlmostEqual(
+                    wav.getnframes() / wav.getframerate(),
+                    16.0 * 60.0 / TEMPOS[0],
+                    delta=0.1,
+                )
             with wave.open(str(cue), "rb") as wav:
                 self.assertEqual(wav.getnchannels(), 2)
                 self.assertGreater(wav.getnframes(), 0)
@@ -945,6 +955,24 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(detect_chapter_mood("The Confession", "She blushed and confessed her love."), "romance")
         self.assertEqual(detect_chapter_mood("The Battlefield", "Swords clashed in the battle."), "action")
         self.assertEqual(detect_chapter_mood("A New Quest", "A wizard cast a magic spell."), "fantasy")
+        self.assertEqual(MUSIC_CATALOGUE_SIZE, 1008)
+        self.assertEqual(VARIATIONS_PER_MOOD, 168)
+
+        # Every recipe has its own stable catalogue ID; selection is repeatable
+        # for the same story context rather than random per generation.
+        ids = {
+            music_variation_info(mood, variation)["id"]
+            for mood in ("fantasy", "mystery", "romance", "dark", "action", "calm")
+            for variation in range(VARIATIONS_PER_MOOD)
+        }
+        self.assertEqual(len(ids), MUSIC_CATALOGUE_SIZE)
+        self.assertEqual(min(ids), 1)
+        self.assertEqual(max(ids), MUSIC_CATALOGUE_SIZE)
+        chosen = select_music_variation("The Hidden Door", "He ran down the corridor.", "mystery")
+        self.assertEqual(
+            chosen,
+            select_music_variation("The Hidden Door", "He ran down the corridor.", "mystery"),
+        )
 
     def test_auto_music_and_transition_cue_are_added_per_chapter(self):
         from app.audio.assembler import _duration_ms
@@ -987,6 +1015,105 @@ class RegressionTests(unittest.TestCase):
             # chapter; allow for AAC encoder padding and container time-base rounding.
             self.assertGreaterEqual(_duration_ms(output), 7000)
             self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
+
+    def test_story_events_detect_clear_actions_but_not_metaphors(self):
+        from app.audio.story_events import detect_story_events
+
+        action = detect_story_events(
+            "He ran down the corridor. The door slammed shut behind him."
+        )
+        self.assertIn("running_footsteps", [event.kind for event in action])
+        self.assertIn("door_slam", [event.kind for event in action])
+
+        weather = detect_story_events("Rain poured against the roof as thunder rumbled.")
+        self.assertIn("rain", [event.kind for event in weather])
+        self.assertIn("thunder", [event.kind for event in weather])
+
+        metaphor = detect_story_events("She was running out of time and running out of patience.")
+        self.assertNotIn("running_footsteps", [event.kind for event in metaphor])
+
+    def test_synthesized_story_effect_is_valid_local_audio(self):
+        import wave
+        from app.audio.story_events import EVENT_PROFILES, synthesize_story_effect
+
+        with tempfile.TemporaryDirectory() as temp:
+            output = synthesize_story_effect(
+                Path(temp) / "running.wav", "running_footsteps", variant_seed=7
+            )
+            self.assertTrue(output.exists())
+            with wave.open(str(output), "rb") as wav:
+                self.assertEqual(wav.getnchannels(), 2)
+                self.assertEqual(wav.getframerate(), 22050)
+                self.assertAlmostEqual(
+                    wav.getnframes() / wav.getframerate(),
+                    EVENT_PROFILES["running_footsteps"].duration,
+                    delta=0.1,
+                )
+            first = output.read_bytes()
+            repeated = synthesize_story_effect(
+                Path(temp) / "running-repeat.wav", "running_footsteps", variant_seed=7
+            )
+            self.assertEqual(first, repeated.read_bytes())
+
+    def test_story_effects_mix_without_background_music_and_preserve_duration(self):
+        from app.audio.assembler import _duration_ms
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapter_dirs = []
+            stories = (
+                (
+                    "The Corridor",
+                    "He ran down the corridor. The door slammed shut behind him.",
+                ),
+                (
+                    "Storm",
+                    "Rain poured against the roof as thunder rumbled in the distance.",
+                ),
+            )
+            for number, (title, text) in enumerate(stories, start=1):
+                chapter_dir = root / f"{number:03d}_{title.replace(' ', '_')}"
+                chunk_path = chapter_dir / "chunks" / "00001.wav"
+                _write_wav(chunk_path, 3.0)
+                (chapter_dir / "chunk_manifest.json").write_text(
+                    json.dumps({
+                        "version": 1,
+                        "chapter": number,
+                        "title": title,
+                        "chunks": [{"index": 1, "file": "00001.wav", "text": text}],
+                    }),
+                    encoding="utf-8",
+                )
+                chapter_dirs.append(chapter_dir)
+
+            progress = []
+            output = root / "story-effects-only.m4b"
+            result = assemble_m4b(
+                chapter_dirs,
+                output,
+                "Story Effects Only Test",
+                chapter_titles=["The Corridor", "Storm"],
+                progress=lambda done, total, message: progress.append(message),
+                background_audio_mode="off",
+                story_effects_enabled=True,
+                story_effect_volume=0.20,
+            )
+            self.assertEqual(result, output)
+            self.assertTrue(output.exists())
+            self.assertIn("story-effects-mixed", progress)
+            # Effects are overlaid in-place; they must not extend the book.
+            self.assertAlmostEqual(_duration_ms(output) / 1000.0, 6.0, delta=0.20)
+            self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
+
+    def test_story_effect_controls_are_independent_of_background_music(self):
+        ui = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
+        assembler = Path("app/audio/assembler.py").read_text(encoding="utf-8")
+        self.assertIn('self.story_effects_enabled = QCheckBox(', ui)
+        self.assertIn('self.story_effects_enabled.toggled.connect(', ui)
+        self.assertIn('story_effects_enabled=self.story_effects_enabled.isChecked()', ui)
+        self.assertIn('story_effects_enabled: bool = False', manager)
+        self.assertIn('if story_effects_enabled:', assembler)
 
     def test_manual_music_still_gets_chapter_transition_cues(self):
         from app.audio.assembler import _duration_ms
