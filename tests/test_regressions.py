@@ -833,7 +833,7 @@ class RegressionTests(unittest.TestCase):
         from PySide6.QtWidgets import QProgressBar, QWidget
         from app.ui.motion import SmoothProgressBar
         from app.ui.loading_overlay import FrostedLoadingOverlay
-        from app.ui.workflow import ImportBookWorker
+        from app.ui.workflow import ImportBookWorker, RedetectChaptersWorker
 
         motion_source = Path("app/ui/motion.py").read_text(encoding="utf-8")
         overlay_source = Path("app/ui/loading_overlay.py").read_text(encoding="utf-8")
@@ -843,12 +843,17 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(issubclass(SmoothProgressBar, QProgressBar))
         self.assertTrue(issubclass(FrostedLoadingOverlay, QWidget))
         self.assertTrue(issubclass(ImportBookWorker, QThread))
+        self.assertTrue(issubclass(RedetectChaptersWorker, QThread))
         self.assertIn("self._busy_timer.setInterval(65)", motion_source)
         self.assertIn("animation.setDuration(180)", motion_source)
         self.assertIn("self._timer.setInterval(55)", overlay_source)
         self.assertIn("size.width() // 14", overlay_source)
         self.assertIn("self._capture_frosted_snapshot()", overlay_source)
+        resize_start = overlay_source.index("    def resizeEvent(self, event)")
+        resize_end = overlay_source.index("    def paintEvent(self, event)", resize_start)
+        self.assertNotIn("_capture_frosted_snapshot()", overlay_source[resize_start:resize_end])
         self.assertIn("self.loading_overlay.show_loading(", workflow_source)
+        self.assertIn("self._redetect_worker = worker", workflow_source)
         self.assertIn("worker.start()", workflow_source)
         self.assertIn("animation.setDuration(135)", workflow_source)
         self.assertIn("QListWidget#sidebar::item:selected", main_source)
@@ -858,7 +863,10 @@ class RegressionTests(unittest.TestCase):
         ui = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
         self.assertIn("self._background_audio_form.setRowVisible(widget, visible)", ui)
         self.assertIn("(self.music_file_container, manual_mode)", ui)
+        self.assertIn("(self.background_audio_volume, auto_mode or manual_mode)", ui)
         self.assertIn("(self.ambience_file_container, manual_mode)", ui)
+        self.assertIn('settings_form.addRow("BGM volume", self.background_audio_volume)', ui)
+        self.assertIn("self.background_audio_volume.setEnabled(auto_mode or manual_mode)", ui)
         self.assertIn("story_effects_enabled.toggled.connect(self.story_effect_volume.setEnabled)", ui)
         self.assertLess(
             ui.index("self.story_effect_volume = QDoubleSpinBox()"),
