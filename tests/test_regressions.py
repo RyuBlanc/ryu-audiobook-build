@@ -132,11 +132,14 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(clone.qwen_mode, "clone")
         self.assertEqual(clone.reference_text, "Hello there.")
 
-    def test_chapter_editor_keeps_assignment_labels_small_and_synced(self):
+    def test_chapter_editor_uses_non_obstructive_colour_highlights_and_hover_tooltips(self):
         source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
-        self.assertIn("badge.setFixedSize(badge_width, 16)", source)
-        self.assertIn('font-size:7px', source)
-        self.assertIn('probe.setPosition(end)', source)
+        self.assertIn("self.text.viewport().installEventFilter(self)", source)
+        self.assertIn("QToolTip.showText", source)
+        self.assertIn("self._assignment_hover_items.append((start, end, tuple(speakers)))", source)
+        self.assertIn("selection.format = fmt", source)
+        self.assertNotIn("badge.setFixedSize(badge_width, 16)", source)
+        self.assertNotIn('font-size:7px', source)
         self.assertIn('_update_current_chapter_list_label', source)
         self.assertIn('self.title.textChanged.connect(self._update_current_chapter_list_label)', source)
 
@@ -144,9 +147,10 @@ class RegressionTests(unittest.TestCase):
         source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
         self.assertIn("self.text.setViewportMargins(82, 0, 0, 0)", source)
         self.assertIn('assignment_manager_button = QPushButton("Assignments")', source)
-        self.assertIn("badge.setFixedSize(badge_width, 16)", source)
-        self.assertIn('badge.setToolTip("Click to change speaker • Assigned: " + ", ".join(speakers))', source)
         self.assertIn("soft.setAlpha(52)", source)
+        self.assertIn("QEvent.Type.MouseMove", source)
+        self.assertIn("self.text.cursorForPosition(point)", source)
+        self.assertNotIn('QPushButton(display_name, self.text.viewport())', source)
         self.assertIn("project_title: str | None = None", source)
         self.assertIn('self.project_title = str(project_title or "").strip()', source)
         self.assertNotIn('text=self.window().windowTitle()', source)
@@ -697,12 +701,33 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn('form.addRow("Series number"', generation)
         self.assertNotIn('form.addRow("Description"', generation)
 
-    def test_assignment_badges_follow_scroll_and_can_edit_assignment(self):
+    def test_assignment_speaker_labels_are_hover_only_and_do_not_cover_text(self):
         source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
-        self.assertIn('QPushButton(display_name, self.text.viewport())', source)
-        self.assertIn("_edit_assignment_badge", source)
-        self.assertIn("viewport_rect.top()", source)
-        self.assertIn("badge.hide()", source)
+        self.assertIn("self.text.viewport().installEventFilter(self)", source)
+        self.assertIn("Assigned speaker:", source)
+        self.assertIn("QToolTip.hideText()", source)
+        self.assertNotIn('QPushButton(display_name, self.text.viewport())', source)
+        self.assertNotIn("viewport_rect.top()", source)
+
+    def test_hardware_benchmark_passes_voice_as_voice_not_model_path(self):
+        source = Path("app/ui/hardware_page.py").read_text(encoding="utf-8")
+        self.assertIn("PiperProvider(backend=self.backend)", source)
+        self.assertIn("voice=self.voice", source)
+        self.assertIn('else "automatic" if backend == "automatic"', source)
+        self.assertNotIn("PiperProvider(self.voice, backend=self.backend)", source)
+
+    def test_pdf_extraction_guard_flags_sparse_long_documents(self):
+        from app.documents.parser import pdf_extraction_quality_warning
+        warning = pdf_extraction_quality_warning(301, 497)
+        self.assertIsNotNone(warning)
+        self.assertIn("301-page PDF", warning)
+        self.assertIsNone(pdf_extraction_quality_warning(301, 5000))
+        self.assertIsNone(pdf_extraction_quality_warning(12, 100))
+
+    def test_import_worker_checks_chapter_word_coverage(self):
+        source = Path("app/ui/workflow.py").read_text(encoding="utf-8")
+        self.assertIn("chapter_words < int(source_words * 0.90)", source)
+        self.assertIn("Chapter detection retained only", source)
 
     def test_generation_surfaces_provider_device_status(self):
         manager = Path("app/tts/manager.py").read_text(encoding="utf-8")

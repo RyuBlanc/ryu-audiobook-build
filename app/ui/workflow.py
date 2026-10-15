@@ -55,6 +55,15 @@ class ImportBookWorker(QThread):
             chapters = detect_chapters(book.text)
             if not chapters:
                 raise RuntimeError("No readable chapters were found in this file.")
+            source_words = len(book.text.split())
+            chapter_words = sum(len(chapter.text.split()) for chapter in chapters)
+            if source_words >= 1000 and chapter_words < int(source_words * 0.90):
+                raise RuntimeError(
+                    "Chapter detection retained only "
+                    f"{chapter_words:,} of {source_words:,} extracted words. "
+                    "Import was stopped to protect the book from losing content. "
+                    "Review the source text and chapter boundaries, then retry."
+                )
             self.status.emit("Saving the local audiobook project…")
             project = create_project(book.title, self.source_path, chapters)
             self.completed.emit(project)
