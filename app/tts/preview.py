@@ -19,6 +19,8 @@ class PreviewResult:
     output_path: Path
     segments: int
     voices_used: tuple[str, ...]
+    # Exact text represented by synthesized segments; used to align preview SFX.
+    source_text: str = ""
 
 
 def _run_ffmpeg(args: list[str]) -> None:
@@ -194,6 +196,7 @@ def build_voice_preview(
         normalized: list[Path] = []
 
         generated_segments = 0
+        generated_text: list[str] = []
         for index, (unit, unit_voice) in enumerate(units):
             report("synthesizing", index, total_units)
             raw_path = root / f"{index:03d}.wav"
@@ -210,6 +213,7 @@ def build_voice_preview(
                     append_silence(raw_path, pause_ms)
             _normalize(raw_path, normalized_path)
             normalized.append(normalized_path)
+            generated_text.append(unit)
             generated_segments += 1
             if unit_voice:
                 voices_used.append(str(unit_voice))
@@ -235,4 +239,5 @@ def build_voice_preview(
         output_path=output_path,
         segments=generated_segments,
         voices_used=tuple(dict.fromkeys(voices_used)),
+        source_text="\n".join(generated_text),
     )
