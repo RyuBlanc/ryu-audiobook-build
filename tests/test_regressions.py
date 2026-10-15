@@ -729,6 +729,19 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("chapter_words < int(source_words * 0.90)", source)
         self.assertIn("Chapter detection retained only", source)
 
+    def test_models_page_groups_installs_and_supports_selected_component_removal(self):
+        source = Path("app/ui/models_page.py").read_text(encoding="utf-8")
+        self.assertIn('QGroupBox("Installed components")', source)
+        self.assertIn('QGroupBox("Offline narration voices")', source)
+        self.assertIn('QGroupBox("Character voices & voice cloning")', source)
+        self.assertIn("Uninstall selected component", source)
+        self.assertIn('component_id.startswith("piper:")', source)
+        self.assertIn('component_id.startswith("qwen-model:")', source)
+        self.assertIn('component_id == "qwen-runtime"', source)
+        self.assertIn("Refusing to remove a path outside the selected component root", source)
+        self.assertIn("generated audiobooks", source)
+        self.assertIn("QWEN_VENV_ROOT", source)
+
     def test_generation_surfaces_provider_device_status(self):
         manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
         generation = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
