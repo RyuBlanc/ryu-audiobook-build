@@ -209,7 +209,7 @@ def pdf_extraction_quality_warning(page_count: int, word_count: int) -> str | No
     """Return a blocking diagnostic for suspiciously sparse long-PDF extraction."""
     pages = max(0, int(page_count))
     words = max(0, int(word_count))
-    if pages >= 30 and words < max(300, pages * 8):
+    if pages >= 30 and words < max(500, pages * 25):
         return (
             f"PDF text extraction appears incomplete: only {words:,} words were extracted "
             f"from a {pages:,}-page PDF. Import was stopped to avoid creating a partial "

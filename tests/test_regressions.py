@@ -721,7 +721,8 @@ class RegressionTests(unittest.TestCase):
         warning = pdf_extraction_quality_warning(301, 497)
         self.assertIsNotNone(warning)
         self.assertIn("301-page PDF", warning)
-        self.assertIsNone(pdf_extraction_quality_warning(301, 5000))
+        self.assertIsNotNone(pdf_extraction_quality_warning(301, 5000))
+        self.assertIsNone(pdf_extraction_quality_warning(301, 10000))
         self.assertIsNone(pdf_extraction_quality_warning(12, 100))
 
     def test_import_worker_checks_chapter_word_coverage(self):
