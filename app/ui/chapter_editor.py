@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QItemSelectionModel, QTimer, QThread, Signal, Qt, QPoint
-from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
+from pathlib import Path
+
+from PySide6.QtCore import QEvent, QItemSelectionModel, QTimer, QThread, Signal, Qt, QPoint, QSize
+from PySide6.QtGui import QColor, QIcon, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
@@ -94,10 +96,19 @@ class ChapterEditorPage(QWidget):
         self.title.setMaximumHeight(55)
         self.text = QTextEdit()
         self._loading_fields = False
-        self._assignment_plus = QPushButton("＋", self.text.viewport())
+        self._assignment_plus = QPushButton("", self.text.viewport())
         self._assignment_plus.setObjectName("assignmentPlus")
+        dragon_plus_path = Path(__file__).resolve().parents[2] / "assets" / "dragon_cross.svg"
+        if dragon_plus_path.is_file():
+            self._assignment_plus.setIcon(QIcon(str(dragon_plus_path)))
+            self._assignment_plus.setIconSize(QSize(21, 21))
+        else:
+            self._assignment_plus.setText("⊕")
+        self._assignment_plus.setStyleSheet(
+            "QPushButton#assignmentPlus { background: transparent; border: 0; padding: 0; }"
+        )
         self.text.setViewportMargins(82, 0, 0, 0)
-        self._assignment_plus.setFixedSize(24, 24)
+        self._assignment_plus.setFixedSize(26, 26)
         self._assignment_plus.setToolTip("Assign this sentence to a character")
         self._assignment_plus.hide()
         self._assignment_plus.clicked.connect(self._open_inline_assignment_dialog)
