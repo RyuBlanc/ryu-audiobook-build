@@ -1013,7 +1013,10 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('inputs.extend(["-stream_loop", "-1", "-i", str(layer_path)])', assembler)
         self.assertIn("amix=inputs={mix_count}:duration=first", assembler)
         self.assertIn('if effective_audio_mode == "auto":', assembler)
-        self.assertIn("synthesize_chapter_transition", assembler)
+        self.assertIn("synthesize_page_turn", assembler)
+        self.assertIn("synthesize_audiobook_ending", assembler)
+        self.assertIn("auto_music_variation", assembler)
+        self.assertIn("sidechaincompress=", assembler)
         self.assertIn("automatic-chapter-sound-design", assembler)
 
     def test_generated_music_and_transition_cues_are_local_wav_files(self):
@@ -1025,8 +1028,10 @@ class RegressionTests(unittest.TestCase):
             detect_chapter_mood,
             music_variation_info,
             select_music_variation,
+            synthesize_audiobook_ending,
             synthesize_chapter_transition,
             synthesize_music_bed,
+            synthesize_page_turn,
         )
 
         with tempfile.TemporaryDirectory() as temp:
@@ -1034,6 +1039,8 @@ class RegressionTests(unittest.TestCase):
             fantasy = synthesize_music_bed(root / "fantasy.wav", "fantasy")
             mystery = synthesize_music_bed(root / "mystery.wav", "mystery")
             cue = synthesize_chapter_transition(root / "chapter-cue.wav", "fantasy")
+            page_turn = synthesize_page_turn(root / "page-turn.wav", variation_index=7)
+            ending = synthesize_audiobook_ending(root / "book-ending.wav", "fantasy", variation_index=7)
             with wave.open(str(fantasy), "rb") as wav:
                 self.assertEqual(wav.getnchannels(), 2)
                 self.assertEqual(wav.getframerate(), 22050)
@@ -1047,6 +1054,13 @@ class RegressionTests(unittest.TestCase):
                 self.assertEqual(wav.getnchannels(), 2)
                 self.assertGreater(wav.getnframes(), 0)
                 self.assertLess(wav.getnframes() / wav.getframerate(), 1.5)
+            with wave.open(str(page_turn), "rb") as wav:
+                self.assertEqual(wav.getnchannels(), 2)
+                self.assertAlmostEqual(wav.getnframes() / wav.getframerate(), 0.62, delta=0.02)
+            with wave.open(str(ending), "rb") as wav:
+                self.assertEqual(wav.getnchannels(), 2)
+                self.assertAlmostEqual(wav.getnframes() / wav.getframerate(), 2.65, delta=0.05)
+            self.assertNotEqual(page_turn.read_bytes(), ending.read_bytes())
             self.assertNotEqual(fantasy.read_bytes(), mystery.read_bytes())
 
         self.assertEqual(detect_chapter_mood("A Secret Revealed", "A strange hidden clue appeared."), "mystery")
