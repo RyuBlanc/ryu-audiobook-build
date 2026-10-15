@@ -709,6 +709,13 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn('QPushButton(display_name, self.text.viewport())', source)
         self.assertNotIn("viewport_rect.top()", source)
 
+    def test_generation_estimate_is_labelled_as_listening_duration(self):
+        source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        self.assertIn("Estimated listening length:", source)
+        self.assertIn("This is not the time required to generate it.", source)
+        self.assertIn('self.elapsed.setText("Elapsed:', source)
+        self.assertIn('self.remaining.setText("Remaining:', source)
+
     def test_hardware_benchmark_passes_voice_as_voice_not_model_path(self):
         source = Path("app/ui/hardware_page.py").read_text(encoding="utf-8")
         self.assertIn("PiperProvider(backend=self.backend)", source)

@@ -1360,7 +1360,13 @@ class GenerationPage(QWidget):
         self.chapter_count.setText(f"Chapters: {len(self.chapters)}")
         self.word_count.setText(f"Words: {words:,}")
         self.duration_estimate.setText(
-            f"Estimated length: {minutes // 60}h {minutes % 60:02d}m at {speed:.2f}× narration speed"
+            f"Estimated listening length: {minutes // 60}h {minutes % 60:02d}m "
+            f"at {speed:.2f}× narration speed"
+        )
+        self.duration_estimate.setToolTip(
+            "Estimated duration of the finished narration at the selected playback speed. "
+            "This is not the time required to generate it. Generation elapsed time, "
+            "remaining time and observed throughput are shown in the Generation section."
         )
 
     def _default_output(self) -> Path | None:
