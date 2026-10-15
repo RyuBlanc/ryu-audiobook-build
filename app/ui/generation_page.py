@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 import json
 import re
 import time
@@ -34,7 +35,7 @@ from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.preview import build_voice_preview
 from app.tts.readiness import build_generation_readiness
 from app.tts.chatterbox_runtime import runtime_ready
-from app.audio.assembler import DEFAULT_AUDIO_BITRATE_KBPS
+from app.audio.assembler import DEFAULT_AUDIO_BITRATE_KBPS, _duration_ms
 from app.tts.resume import inspect_generation_state
 
 
@@ -46,7 +47,8 @@ class VoicePreviewWorker(QThread):
     percent = Signal(int)
 
     def __init__(self, profile, backend, project_folder, profiles, pronunciation_dictionary,
-                 text, output, narration_speed, pacing_profile, dialogue_assignments=None):
+                 text, output, narration_speed, pacing_profile, dialogue_assignments=None,
+                 target_seconds: float | None = 30.0, mix_settings: dict | None = None):
         super().__init__()
         self.profile = profile
         self.backend = backend
@@ -58,6 +60,8 @@ class VoicePreviewWorker(QThread):
         self.narration_speed = narration_speed
         self.pacing_profile = pacing_profile
         self.dialogue_assignments = list(dialogue_assignments or [])
+        self.target_seconds = max(0.0, float(target_seconds or 0.0))
+        self.mix_settings = dict(mix_settings or {})
         self._provider = None
         self._progress_floor = 0
         self._preview_started = 0.0
@@ -166,7 +170,34 @@ class VoicePreviewWorker(QThread):
                 pacing_profile=self.pacing_profile,
                 dialogue_assignments=self.dialogue_assignments,
                 progress_callback=preview_progress,
+                target_seconds=self.target_seconds,
             )
+            if self.mix_settings.get("enabled"):
+                self._emit_percent(91)
+                self.progress.emit("[91%] Mixing selected BGM, narration ducking and story effects…")
+                from app.audio.preview_mixer import mix_voice_preview
+                mixed_output = self.output.with_name(f"{self.output.stem}_full_mix.wav")
+                mix_voice_preview(
+                    result.output_path,
+                    mixed_output,
+                    result.source_text,
+                    background_enabled=bool(self.mix_settings.get("background_enabled", False)),
+                    background_mode=str(self.mix_settings.get("background_mode") or "auto"),
+                    music_style=str(self.mix_settings.get("music_style") or "auto"),
+                    music_variation_id=self.mix_settings.get("music_variation_id"),
+                    background_audio_path=self.mix_settings.get("background_audio_path"),
+                    ambience_audio_path=self.mix_settings.get("ambience_audio_path"),
+                    music_volume=float(self.mix_settings.get("music_volume", 0.12)),
+                    ambience_volume=float(self.mix_settings.get("ambience_volume", 0.06)),
+                    story_effects_enabled=bool(self.mix_settings.get("story_effects_enabled", True)),
+                    story_effect_volume=float(self.mix_settings.get("story_effect_volume", 0.12)),
+                    chapter_transition_sound=bool(self.mix_settings.get("chapter_transition_sound", True)),
+                    is_first_chapter=bool(self.mix_settings.get("is_first_chapter", True)),
+                    is_last_chapter=bool(self.mix_settings.get("is_last_chapter", False)),
+                )
+                from dataclasses import replace
+                result = replace(result, output_path=mixed_output)
+                self._emit_percent(98)
             self._emit_percent(100)
             self.progress.emit('[100%] Preview ready.')
             self.finished_ok.emit(result)
@@ -250,6 +281,10 @@ class GenerationPage(QWidget):
         self._eta_last_time: float | None = None
         self._eta_warmup_samples = 0
         self._eta_rates: list[float] = []
+        self._estimated_listening_seconds = 0.0
+        self._estimated_generation_seconds = 0.0
+        self._active_calibration_key: str | None = None
+        self._calibration_factor = 2.45
         self.motion_settings = QSettings("RyuBlanc", "Ryu's Audiobook")
         self._reduce_motion_enabled = bool(
             self.motion_settings.value("ui/reduce_motion", False, type=bool)
@@ -675,6 +710,23 @@ class GenerationPage(QWidget):
         preview_source_row.addWidget(self.preview_chapter, 1)
         preview_layout.addLayout(preview_source_row)
 
+        preview_options_row = QHBoxLayout()
+        preview_options_row.addWidget(QLabel("Preview length"))
+        self.preview_duration = QComboBox()
+        for seconds in (15, 30, 60):
+            self.preview_duration.addItem(f"{seconds} seconds", seconds)
+        self.preview_duration.setCurrentIndex(1)
+        preview_options_row.addWidget(self.preview_duration)
+        self.preview_mix_enabled = QCheckBox("Include selected BGM, story effects and chapter/end cues")
+        self.preview_mix_enabled.setChecked(bool(audio_state.get("preview_include_sound_design", True)))
+        self.preview_mix_enabled.setToolTip(
+            "When enabled, the generated sample auditions narration with the selected "
+            "background music/ambience, ducking, story effects and any page-turn or final-book cue. "
+            "Turn it off for a dry voice-only comparison."
+        )
+        preview_options_row.addWidget(self.preview_mix_enabled, 1)
+        preview_layout.addLayout(preview_options_row)
+
         preview_actions = QHBoxLayout()
         self.preview_button = QPushButton("▶  Generate Voice Preview")
         self.preview_button.clicked.connect(self.preview)
@@ -690,7 +742,7 @@ class GenerationPage(QWidget):
         preview_layout.addLayout(preview_actions)
 
         preview_time_row = QHBoxLayout()
-        self.preview_status = QLabel("Generate a preview to listen to the selected voice.")
+        self.preview_status = QLabel("Generate a 15/30/60-second preview; optionally include the current soundtrack and effects.")
         self.preview_time = QLabel("0:00 / 0:00")
         preview_time_row.addWidget(self.preview_status, 1)
         preview_time_row.addWidget(self.preview_time)
