@@ -2202,6 +2202,8 @@ class GenerationPage(QWidget):
                 "background_audio_enabled": self.background_audio_enabled.isChecked(),
                 "background_audio_mode": str(self.background_audio_mode.currentData() or "auto"),
                 "auto_music_style": str(self.auto_music_style.currentData() or "auto"),
+                "auto_music_variation_id": int(self.bgm_variation.currentData() or 0),
+                "preview_include_sound_design": self.preview_mix_enabled.isChecked(),
                 "chapter_transition_sound": self.chapter_transition_sound.isChecked(),
                 "story_effects_enabled": self.story_effects_enabled.isChecked(),
                 "story_effect_volume": float(self.story_effect_volume.value()) / 100.0,
@@ -2226,6 +2228,8 @@ class GenerationPage(QWidget):
         self._eta_last_time = time.monotonic()
         self.generation_phase = "synthesis"
         self.started_at = time.monotonic()
+        self._active_calibration_key = self._generation_calibration_key()
+        self._update_overview()
         self.timer.start(1000)
         self._set_generation_locked(True)
         self.cancel_button.setEnabled(True)
@@ -2247,6 +2251,7 @@ class GenerationPage(QWidget):
             "year": self.year.text().strip(),
             "genre": self.genre.value(),
         }
+        selected_bgm_id = int(self.bgm_variation.currentData() or 0)
         self.manager = GenerationManager(
             provider, voice, self.chapters, self.audio_root,
             on_progress=lambda *args: self.signals.progress.emit(*args),
@@ -2264,6 +2269,7 @@ class GenerationPage(QWidget):
             background_audio_fade_out=float(self.background_audio_fade_out.value()),
             background_audio_mode=background_audio_mode,
             auto_music_style=auto_music_style,
+            auto_music_variation=selected_bgm_id if selected_bgm_id > 0 else None,
             chapter_transition_sound=chapter_transition_sound,
             story_effects_enabled=self.story_effects_enabled.isChecked(),
             story_effect_volume=float(self.story_effect_volume.value()) / 100.0,
@@ -2303,14 +2309,21 @@ class GenerationPage(QWidget):
             self.last_progress_value = completed_work
             self.initial_progress_value = completed_work
             baseline_rate = None
+            # Start with the persisted end-to-end estimate for this voice/settings
+            # signature. Live chunk measurements refine it as this book progresses.
             try:
-                provider = self.manager.provider if self.manager else None
-                estimated_cpm = float(getattr(provider, "estimated_chars_per_minute", 0) or 0)
-                if estimated_cpm > 0:
-                    baseline_rate = estimated_cpm / 60.0
+                if self._estimated_generation_seconds > 0:
+                    self._eta_ema_sec_per_unit = (
+                        self._estimated_generation_seconds / max(1, work_total)
+                    )
+                else:
+                    provider = self.manager.provider if self.manager else None
+                    estimated_cpm = float(getattr(provider, "estimated_chars_per_minute", 0) or 0)
+                    if estimated_cpm > 0:
+                        baseline_rate = estimated_cpm / 60.0
+                    self._eta_ema_sec_per_unit = (1.0 / baseline_rate) if baseline_rate else None
             except Exception:
-                baseline_rate = None
-            self._eta_ema_sec_per_unit = (1.0 / baseline_rate) if baseline_rate else None
+                self._eta_ema_sec_per_unit = None
             self._eta_warmup_samples = 0
             self._eta_rates = []
             self._eta_last_work = completed_work
@@ -2485,12 +2498,42 @@ class GenerationPage(QWidget):
             save_state(self.project_folder, state)
 
         if summary.output_path:
+            calibration_summary = ""
+            try:
+                if self.started_at is not None and summary.output_path.is_file():
+                    elapsed_seconds = max(1.0, time.monotonic() - self.started_at)
+                    listening_seconds = max(1.0, _duration_ms(summary.output_path) / 1000.0)
+                    words = max(1, sum(len(chapter.text.split()) for chapter in self.chapters))
+                    actual_factor = max(0.4, min(20.0, elapsed_seconds / listening_seconds))
+                    seconds_per_word = max(0.05, min(5.0, listening_seconds / words))
+                    key = self._active_calibration_key or self._generation_calibration_key()
+                    old_factor = self.motion_settings.value(f"{key}/realtime_factor", None)
+                    old_word_rate = self.motion_settings.value(f"{key}/seconds_per_word", None)
+                    old_samples = int(self.motion_settings.value(f"{key}/samples", 0) or 0)
+                    if old_factor is not None and old_samples > 0:
+                        actual_factor = 0.35 * actual_factor + 0.65 * float(old_factor)
+                    if old_word_rate is not None and old_samples > 0:
+                        seconds_per_word = 0.35 * seconds_per_word + 0.65 * float(old_word_rate)
+                    self.motion_settings.setValue(f"{key}/realtime_factor", actual_factor)
+                    self.motion_settings.setValue(f"{key}/seconds_per_word", seconds_per_word)
+                    self.motion_settings.setValue(f"{key}/samples", old_samples + 1)
+                    self.motion_settings.sync()
+                    self._update_overview()
+                    calibration_summary = (
+                        f" Timing calibration updated: {elapsed_seconds / 60.0:.1f} min processing / "
+                        f"{listening_seconds / 60.0:.1f} min listening."
+                    )
+            except Exception as exc:
+                calibration_summary = f" Timing calibration could not be saved ({exc})."
             self.progress.setValue(self.progress.maximum())
             self.stage.setText("Audiobook ready")
             self.result_label.setText(f"✓ Finished M4B\n{summary.output_path}")
             self.play_button.setEnabled(True)
             self.open_button.setEnabled(True)
-            self.status.setText("Audiobook created successfully. Intermediate generation audio has been cleaned.")
+            self.status.setText(
+                "Audiobook created successfully. Intermediate generation audio has been cleaned."
+                + calibration_summary
+            )
         elif summary.packaging_failed:
             self.stage.setText("M4B packaging failed")
             error = f"\n\nPackaging error: {summary.packaging_error}" if summary.packaging_error else ""
