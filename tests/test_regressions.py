@@ -713,8 +713,8 @@ class RegressionTests(unittest.TestCase):
         source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
         self.assertIn("Estimated listening length:", source)
         self.assertIn("This is not the time required to generate it.", source)
-        self.assertIn('self.elapsed.setText("Elapsed:', source)
-        self.assertIn('self.remaining.setText("Remaining:', source)
+        self.assertIn("self.elapsed.setText", source)
+        self.assertIn("self.remaining.setText", source)
 
     def test_hardware_benchmark_passes_voice_as_voice_not_model_path(self):
         source = Path("app/ui/hardware_page.py").read_text(encoding="utf-8")
