@@ -181,6 +181,28 @@ def _probe_audio_bitrate_kbps(path: Path) -> int:
     return int(match.group(1))
 
 
+def _selected_music_recipe(
+    title: str,
+    text: str,
+    style: str,
+    selected_catalogue_id: int | None,
+) -> tuple[str, int]:
+    """Resolve a 1-based catalogue ID, or choose a stable chapter-matched recipe."""
+    from app.audio.sound_design import (
+        MUSIC_CATALOGUE_SIZE, MOOD_ORDER, VARIATIONS_PER_MOOD,
+        detect_chapter_mood, select_music_variation,
+    )
+    try:
+        selected_id = int(selected_catalogue_id or 0)
+    except (TypeError, ValueError):
+        selected_id = 0
+    if 1 <= selected_id <= MUSIC_CATALOGUE_SIZE:
+        mood_index, variation_index = divmod(selected_id - 1, VARIATIONS_PER_MOOD)
+        return MOOD_ORDER[mood_index], variation_index
+    mood = detect_chapter_mood(title, text, style)
+    return mood, select_music_variation(title, text, mood)
+
+
 def assemble_m4b(
     chapter_dirs: list[Path],
     output_path: Path,
@@ -269,11 +291,8 @@ def assemble_m4b(
                     chapter_title = str(payload.get("title") or chapter_title)
                 except (OSError, ValueError, TypeError):
                     pass
-                mood = detect_chapter_mood(chapter_title, narration_text, auto_music_style)
-                variation = (
-                    select_music_variation(chapter_title, narration_text, mood)
-                    if auto_music_variation is None
-                    else int(auto_music_variation) % VARIATIONS_PER_MOOD
+                mood, variation = _selected_music_recipe(
+                    chapter_title, narration_text, auto_music_style, auto_music_variation
                 )
                 cache_key = (mood, variation)
                 if cache_key not in music_cache:
@@ -362,11 +381,8 @@ def assemble_m4b(
                     chapter_title = str(payload.get("title") or chapter_title)
                 except (OSError, ValueError, TypeError):
                     pass
-                mood = detect_chapter_mood(chapter_title, narration_text, auto_music_style)
-                variation = (
-                    select_music_variation(chapter_title, narration_text, mood)
-                    if auto_music_variation is None
-                    else int(auto_music_variation) % VARIATIONS_PER_MOOD
+                mood, variation = _selected_music_recipe(
+                    chapter_title, narration_text, auto_music_style, auto_music_variation
                 )
                 current_audio = chapter_file
                 if index > 1:
