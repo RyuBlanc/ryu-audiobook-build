@@ -538,8 +538,42 @@ class GenerationPage(QWidget):
         self.auto_music_style.setCurrentIndex(max(0, saved_style_index))
         settings_form.addRow("Automatic music style", self.auto_music_style)
 
+        # Metadata for all 1,008 recipes is cheap; audio is synthesized only on
+        # demand when previewing or generating. This keeps the app fully offline.
+        from app.audio.sound_design import MOOD_ORDER, VARIATIONS_PER_MOOD, music_variation_info
+        self.bgm_variation = QComboBox()
+        self.bgm_variation.setObjectName("bgmCatalogue")
+        self.bgm_variation.setMinimumContentsLength(28)
+        self.bgm_variation.setToolTip(
+            "Choose from 1,008 deterministic local soundtrack recipes. "
+            "Preview the selected recipe before generating the audiobook."
+        )
+        self.bgm_variation.addItem("Auto • match each chapter to its story mood", 0)
+        for mood in MOOD_ORDER:
+            for variation_index in range(VARIATIONS_PER_MOOD):
+                info = music_variation_info(mood, variation_index)
+                self.bgm_variation.addItem(
+                    f"#{int(info['id']):04d} • {mood.title()} • {info['texture']} • "
+                    f"{info['tempo_bpm']} BPM • Harmony {info['harmony']}",
+                    int(info["id"]),
+                )
+        try:
+            saved_bgm_id = int(audio_state.get("auto_music_variation_id", 0) or 0)
+        except (TypeError, ValueError):
+            saved_bgm_id = 0
+        self.bgm_variation.setCurrentIndex(max(0, self.bgm_variation.findData(saved_bgm_id)))
+        music_catalogue_row = QHBoxLayout()
+        music_catalogue_row.addWidget(self.bgm_variation, 1)
+        self.music_catalogue_preview = QPushButton("▶ Preview selected BGM")
+        self.music_catalogue_preview.clicked.connect(self.preview_catalogue_music)
+        music_catalogue_row.addWidget(self.music_catalogue_preview)
+        self.music_catalogue_container = QWidget()
+        self.music_catalogue_container.setLayout(music_catalogue_row)
+        settings_form.addRow("BGM catalogue (1,008 recipes)", self.music_catalogue_container)
+        self._catalogue_preview_path: Path | None = None
+
         self.chapter_transition_sound = QCheckBox(
-            "Add a short transition sound at every chapter (generated locally)"
+            "Page-turn between chapters + separate audiobook ending"
         )
         self.chapter_transition_sound.setChecked(
             bool(audio_state.get("chapter_transition_sound", True))
@@ -1497,6 +1531,8 @@ class GenerationPage(QWidget):
         manual_mode = enabled and self.background_audio_mode.currentData() == "manual"
         self.background_audio_mode.setEnabled(enabled)
         self.auto_music_style.setEnabled(auto_mode)
+        self.bgm_variation.setEnabled(auto_mode)
+        self.music_catalogue_preview.setEnabled(auto_mode)
         self.chapter_transition_sound.setEnabled(enabled)
         # Hide manual track rows entirely in Automatic mode instead of leaving
         # four disabled rows on screen. The rows return when Manual is selected.
@@ -1505,6 +1541,7 @@ class GenerationPage(QWidget):
             (self.background_audio_volume, auto_mode or manual_mode),
             (self.ambience_file_container, manual_mode),
             (self.ambience_audio_volume, manual_mode),
+            (self.music_catalogue_container, auto_mode),
         ):
             self._background_audio_form.setRowVisible(widget, visible)
         for widget in (
@@ -1531,6 +1568,45 @@ class GenerationPage(QWidget):
         if path:
             self.background_audio_path.setText(str(Path(path)))
             self.status.setText("Background track selected. Enable Background music to include it in the final M4B.")
+
+    def preview_catalogue_music(self) -> None:
+        if self.music_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            current = self.music_player.source().toLocalFile()
+            if self._catalogue_preview_path and current == str(self._catalogue_preview_path):
+                self.music_player.pause()
+                return
+        index = self.preview_chapter.currentIndex()
+        chapter = self.chapters[index] if 0 <= index < len(self.chapters) else None
+        selected_id = int(self.bgm_variation.currentData() or 0)
+        from app.audio.sound_design import (
+            MOOD_ORDER, VARIATIONS_PER_MOOD, detect_chapter_mood,
+            select_music_variation, synthesize_music_bed,
+        )
+        if selected_id > 0:
+            mood_index, variation = divmod(selected_id - 1, VARIATIONS_PER_MOOD)
+            mood = MOOD_ORDER[mood_index]
+        else:
+            title = chapter.title if chapter else self.title.text().strip()
+            text = chapter.text if chapter else ""
+            mood = detect_chapter_mood(title, text, str(self.auto_music_style.currentData() or "auto"))
+            variation = select_music_variation(title, text, mood)
+        cache = Path(tempfile.gettempdir()) / "ryu_audiobook_bgm_previews"
+        cache.mkdir(parents=True, exist_ok=True)
+        preview_path = cache / f"catalogue-{mood}-{variation:03d}.wav"
+        try:
+            self.status.setText(f"Preparing BGM preview • {mood.title()} • recipe #{selected_id or variation + 1}…")
+            if not preview_path.is_file() or preview_path.stat().st_size < 1024:
+                synthesize_music_bed(preview_path, mood, variation_index=variation)
+            self._catalogue_preview_path = preview_path
+            self.music_player.stop()
+            self.music_player.setSource(QUrl.fromLocalFile(str(preview_path.resolve())))
+            self.music_player.play()
+            self.status.setText(
+                f"Previewing BGM • {mood.title()} • recipe #{selected_id or variation + 1}. "
+                "Use Voice Preview to hear the track beneath narration."
+            )
+        except Exception as exc:
+            self.status.setText(f"BGM preview failed: {exc}")
 
     def preview_background_audio(self) -> None:
         self._preview_audio_layer(self.background_audio_path, "background music")
@@ -1562,10 +1638,14 @@ class GenerationPage(QWidget):
         self.status.setText(f"Previewing {label}: {Path(value).name}")
 
     def _background_music_state_changed(self, state) -> None:
-        if state == QMediaPlayer.PlaybackState.PlayingState:
-            self.background_audio_preview.setText("Ⅱ Pause Track")
-        else:
-            self.background_audio_preview.setText("▶ Preview Track")
+        playing = state == QMediaPlayer.PlaybackState.PlayingState
+        if hasattr(self, "background_audio_preview"):
+            self.background_audio_preview.setText("Ⅱ Pause Track" if playing else "▶ Preview Track")
+        if hasattr(self, "music_catalogue_preview"):
+            current = self.music_player.source().toLocalFile()
+            catalogue = str(self._catalogue_preview_path) if self._catalogue_preview_path else ""
+            if catalogue and current == catalogue:
+                self.music_catalogue_preview.setText("Ⅱ Pause BGM" if playing else "▶ Preview selected BGM")
 
     def choose_output(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
