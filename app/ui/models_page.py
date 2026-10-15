@@ -434,11 +434,21 @@ class ModelsPage(QWidget):
         else:
             add_component("Piper — no local voice installed")
 
-        if KokoroProvider.assets_available():
+        # Only files in the user Models folder are removable here. A bundled
+        # Kokoro pack ships inside the application and must not offer an uninstall
+        # button that appears to succeed but cannot remove the bundled assets.
+        local_kokoro_root = models_root() / "kokoro"
+        local_kokoro_installed = (
+            local_kokoro_root.exists()
+            and any(path.is_file() for path in local_kokoro_root.rglob("*"))
+        )
+        if local_kokoro_installed:
             add_component(
-                f"Kokoro 82M — Installed • {len(KokoroProvider().voices())} voices available",
+                f"Kokoro 82M — User-installed • {len(KokoroProvider().voices())} voices available",
                 "kokoro",
             )
+        elif KokoroProvider.assets_available():
+            add_component("Kokoro 82M — Bundled with application (not individually removable)")
         else:
             add_component("Kokoro 82M — Not installed")
 

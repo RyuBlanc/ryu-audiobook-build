@@ -749,6 +749,9 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("Refusing to remove a path outside the selected component root", source)
         self.assertIn("generated audiobooks", source)
         self.assertIn("QWEN_VENV_ROOT", source)
+        self.assertIn('local_kokoro_root = models_root() / "kokoro"', source)
+        self.assertIn("Kokoro 82M — Bundled with application (not individually removable)", source)
+        self.assertIn("local_kokoro_installed", source)
 
     def test_generation_surfaces_provider_device_status(self):
         manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
