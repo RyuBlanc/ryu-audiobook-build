@@ -1720,11 +1720,31 @@ class GenerationPage(QWidget):
         if backend == 'automatic':
             backend = profile.backend
 
+        preview_seconds = int(self.preview_duration.currentData() or 30)
+        selected_bgm_id = int(self.bgm_variation.currentData() or 0)
+        mix_settings = {
+            "enabled": self.preview_mix_enabled.isChecked(),
+            "background_enabled": self.background_audio_enabled.isChecked(),
+            "background_mode": str(self.background_audio_mode.currentData() or "auto"),
+            "music_style": str(self.auto_music_style.currentData() or "auto"),
+            "music_variation_id": selected_bgm_id or None,
+            "background_audio_path": self.background_audio_path.text().strip(),
+            "ambience_audio_path": self.ambience_audio_path.text().strip(),
+            "music_volume": float(self.background_audio_volume.value()) / 100.0,
+            "ambience_volume": float(self.ambience_audio_volume.value()) / 100.0,
+            "story_effects_enabled": self.story_effects_enabled.isChecked(),
+            "story_effect_volume": float(self.story_effect_volume.value()) / 100.0,
+            "chapter_transition_sound": self.chapter_transition_sound.isChecked(),
+            "is_first_chapter": index == 0,
+            "is_last_chapter": index == len(self.chapters) - 1,
+        }
         self.preview_worker = VoicePreviewWorker(
             profile, backend, self.project_folder, self._current_profiles(), pronunciation_dictionary,
             text, output, float(self.narration_speed.currentData() or 0.90),
             self.pacing_profile.currentData() or 'natural',
             dialogue_assignments=getattr(chapter, "dialogue_assignments", []),
+            target_seconds=preview_seconds,
+            mix_settings=mix_settings,
         )
         self.preview_worker.progress.connect(self._preview_worker_progress)
         self.preview_worker.percent.connect(self.preview_loading.setValue)
@@ -1756,11 +1776,14 @@ class GenerationPage(QWidget):
         self.preview_play_button.setText('▶  Play Preview')
         voice_summary = ', '.join(result.voices_used) if result.voices_used else 'Narrator'
         self.preview_loading.setValue(100)
+        mix_label = " • Full soundtrack mix" if self.preview_mix_enabled.isChecked() else " • Dry voice"
         self.preview_status.setText(
-            f'100% • Preview ready • {result.segments} narration segment(s) • Voices: {voice_summary}'
+            f'100% • Preview ready{mix_label} • {result.segments} narration segment(s) • Voices: {voice_summary}'
         )
         self.status.setText(
-            'Preview generated from the current pronunciation, voice cast, speed and pacing settings.'
+            "Preview generated with the current voice, pronunciation, pacing and selected sound design."
+            if self.preview_mix_enabled.isChecked()
+            else "Dry voice preview generated with the current voice and narration settings."
         )
 
     def _preview_worker_failed(self, message: str) -> None:
