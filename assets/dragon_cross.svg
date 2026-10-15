@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<defs>
+  <linearGradient id="dragon" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff596f"/><stop offset=".55" stop-color="#c41e43"/><stop offset="1" stop-color="#67152e"/></linearGradient>
+</defs>
+<circle cx="31" cy="33" r="27" fill="#130d16" stroke="#da3556" stroke-width="3"/>
+<path d="M13 30 7 17 21 22 25 10 33 24 28 31 19 34Z" fill="url(#dragon)" stroke="#ff8a9a" stroke-width="1.5" stroke-linejoin="round"/>
+<path d="M29 36 37 28 44 30 50 25 47 35 40 37 36 44 29 42 25 48 23 41Z" fill="url(#dragon)" stroke="#ff8a9a" stroke-width="1.5" stroke-linejoin="round"/>
+<path d="M33 31 37 25 42 25 46 20 49 27 45 32 38 33Z" fill="url(#dragon)" stroke="#ff8a9a" stroke-width="1.5" stroke-linejoin="round"/>
+<path d="M26 37 18 43 15 50 23 46 29 43" fill="none" stroke="#e4415f" stroke-width="3" stroke-linecap="round"/>
+<circle cx="42" cy="28" r="1.4" fill="#ffe7a5"/>
+<circle cx="49" cy="13" r="10" fill="#d72d4d" stroke="#ffe7ee" stroke-width="2"/>
+<path d="M49 7v12M43 13h12" stroke="#fff5f8" stroke-width="2.6" stroke-linecap="round"/>
+</svg>
