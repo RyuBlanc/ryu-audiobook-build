@@ -11,6 +11,7 @@ needed and require neither a network connection nor a GPU.
 from array import array
 import hashlib
 import math
+import random
 from pathlib import Path
 import re
 import sys
@@ -18,7 +19,9 @@ import wave
 
 
 SAMPLE_RATE = 22050
-TRANSITION_SECONDS = 0.92
+PAGE_TURN_SECONDS = 0.62
+ENDING_SECONDS = 2.65
+TRANSITION_SECONDS = PAGE_TURN_SECONDS  # compatibility alias
 
 THEMES: dict[str, dict[str, object]] = {
     "fantasy": {"root": 50, "scale": (0, 2, 4, 5, 7, 9, 11), "melody": (0, 2, 4, 2, 5, 4, 2, 1, 0, 2, 4, 6, 5, 4, 2, 0)},
@@ -202,7 +205,10 @@ def synthesize_music_bed(
         beat_index = (index // frames_per_beat) % 16
         bar_index = beat_index // 4
         local_beat = (index % frames_per_beat) / frames_per_beat
-        current_pad = _pad_value(t, chord_notes[bar_index])
+        current_chord = chord_notes[bar_index]
+        current_pad = _pad_value(t, current_chord)
+        detuned_chord = tuple(freq * 1.003 for freq in current_chord)
+        current_pad = current_pad * 0.82 + _pad_value(t, detuned_chord) * 0.18
 
         # Blend the first ~140 ms of a new bar with the previous chord to
         # avoid hard harmonic edges. This is deterministic and cheap.
@@ -211,7 +217,11 @@ def synthesize_music_bed(
         if bar_frame < blend_frames:
             previous_bar = (bar_index - 1) % 4
             alpha = bar_frame / blend_frames
-            previous_pad = _pad_value(t, chord_notes[previous_bar])
+            previous_chord = chord_notes[previous_bar]
+            previous_pad = (
+                _pad_value(t, previous_chord) * 0.82
+                + _pad_value(t, tuple(freq * 1.003 for freq in previous_chord)) * 0.18
+            )
             pad = previous_pad * (1.0 - alpha) + current_pad * alpha
         else:
             pad = current_pad
@@ -238,7 +248,22 @@ def synthesize_music_bed(
             sustain = 1.0
         lead *= attack * release * sustain
 
-        value = pad * float(texture["pad"]) + lead * float(texture["lead"])
+        arp_patterns = (
+            (0, 2, 4, 2), (0, 3, 4, 1), (0, 2, 5, 3), (0, 4, 2, 5),
+        )
+        arp_degree = progression[bar_index] + arp_patterns[texture_index % len(arp_patterns)][beat_index % 4]
+        arp_frequency = _midi_hz(_scale_note(root + 12, scale, arp_degree))
+        arp_envelope = math.exp(-4.3 * local_beat) * min(1.0, local_beat / 0.018 if local_beat else 0.0)
+        arp = math.sin(2.0 * math.pi * arp_frequency * t) * arp_envelope
+        bass_frequency = current_chord[0]
+        bass_pulse = math.sin(2.0 * math.pi * bass_frequency * t) * (0.78 + 0.22 * math.sin(2.0 * math.pi * t / 3.2))
+        arp_gain = (0.060, 0.095, 0.052, 0.040, 0.100, 0.074, 0.035, 0.024)[texture_index]
+        value = (
+            pad * float(texture["pad"]) * 1.48
+            + lead * float(texture["lead"]) * 1.45
+            + arp * arp_gain
+            + bass_pulse * 0.038
+        )
         # Soft master ceiling leaves headroom for narration and SFX in the mix.
         left = max(-0.72, min(0.72, value))
         right = max(-0.72, min(0.72, value * 0.985))
@@ -299,4 +324,82 @@ def synthesize_chapter_transition(
         value = tone * attack * release * decay * 0.105
         samples.append(int(max(-0.5, min(0.5, value)) * 32767))
         samples.append(int(max(-0.5, min(0.5, value * 0.98)) * 32767))
+    return _write_stereo_pcm(target, samples)
+
+
+
+def synthesize_page_turn(path: Path | str, variation_index: int = 0) -> Path:
+    """Generate a short, soft paper-flutter/page-turn cue for chapter boundaries."""
+    target = Path(path)
+    duration = PAGE_TURN_SECONDS
+    frame_count = max(1, int(SAMPLE_RATE * duration))
+    rng = random.Random(f"ryu-page-turn:{int(variation_index) % 168}")
+    samples = array("h")
+    low_noise = 0.0
+    mid_noise = 0.0
+    for index in range(frame_count):
+        t = index / SAMPLE_RATE
+        pos = t / duration
+        noise = rng.uniform(-1.0, 1.0)
+        low_noise = low_noise * 0.91 + noise * 0.09
+        mid_noise = mid_noise * 0.58 + noise * 0.42
+        sweep = max(0.0, math.sin(math.pi * pos)) ** 0.82
+        flutter = 0.58 + 0.22 * math.sin(2.0 * math.pi * (13.0 + (variation_index % 5)) * t)
+        grain = noise * (0.018 if index % 997 < 3 else 0.0)
+        value = sweep * flutter * (low_noise * 0.48 + mid_noise * 0.16) + grain
+        value *= min(1.0, t / 0.045) * min(1.0, max(0.0, (duration - t) / 0.09)) * 0.30
+        value = max(-0.35, min(0.35, value))
+        sample = int(value * 32767.0)
+        samples.append(sample)
+        samples.append(int(sample * 0.94))
+    return _write_stereo_pcm(target, samples)
+
+
+def synthesize_audiobook_ending(
+    path: Path | str,
+    mood: str = "fantasy",
+    variation_index: int = 0,
+    duration_seconds: float = ENDING_SECONDS,
+) -> Path:
+    """Generate a resolving end cue; unlike a chapter turn, it closes the book."""
+    target = Path(path)
+    chosen = normalize_music_style(mood)
+    if chosen == "auto":
+        chosen = "fantasy"
+    theme = THEMES[chosen]
+    scale = theme["scale"]
+    root = int(theme["root"])
+    local = int(variation_index) % VARIATIONS_PER_MOOD
+    duration = max(1.8, min(4.0, float(duration_seconds)))
+    frame_count = max(1, int(SAMPLE_RATE * duration))
+    notes = (
+        _midi_hz(_scale_note(root + 12, scale, 0)),
+        _midi_hz(_scale_note(root + 12, scale, 4)),
+        _midi_hz(_scale_note(root + 24, scale, 0)),
+    )
+    boundaries = (0.0, 0.38, 0.63, 1.0)
+    samples = array("h")
+    phase_shift = (local % 7) * 0.006
+    for index in range(frame_count):
+        t = index / SAMPLE_RATE
+        pos = t / duration
+        segment = 0 if pos < boundaries[1] else 1 if pos < boundaries[2] else 2
+        segment_end = boundaries[segment + 1] * duration
+        local_t = max(0.0, t - boundaries[segment] * duration)
+        note = notes[segment]
+        attack = min(1.0, local_t / (0.10 if segment < 2 else 0.18))
+        release_window = 0.48 if segment == 2 else 0.12
+        envelope = attack * min(1.0, max(0.0, (segment_end - t) / release_window))
+        if segment == 2:
+            envelope = attack * min(1.0, max(0.0, (duration - t) / 0.48))
+        fade = min(1.0, t / 0.04) * min(1.0, max(0.0, (duration - t) / 0.48))
+        fundamental = math.sin(2.0 * math.pi * note * (t + phase_shift))
+        octave = math.sin(2.0 * math.pi * note * 2.0 * (t + phase_shift)) * 0.22
+        fifth_harmonic = math.sin(2.0 * math.pi * note * 1.5 * (t + phase_shift)) * 0.07
+        shimmer = math.sin(2.0 * math.pi * (note * 2.01) * t) * 0.025 * (1.0 - pos)
+        value = (fundamental * 0.48 + octave + fifth_harmonic + shimmer) * envelope * fade * 0.13
+        value = max(-0.40, min(0.40, value))
+        sample = int(value * 32767.0)
+        samples.append(sample)
+        samples.append(int(sample * 0.97))
     return _write_stereo_pcm(target, samples)

@@ -50,6 +50,7 @@ class GenerationManager:
         background_audio_fade_out: float = 3.0,
         background_audio_mode: str = "manual",
         auto_music_style: str = "auto",
+        auto_music_variation: int | None = None,
         chapter_transition_sound: bool = False,
         story_effects_enabled: bool = False,
         story_effect_volume: float = 0.22,
@@ -73,6 +74,7 @@ class GenerationManager:
         self.background_audio_fade_out = max(0.0, min(30.0, float(background_audio_fade_out)))
         self.background_audio_mode = str(background_audio_mode or "manual").casefold()
         self.auto_music_style = str(auto_music_style or "auto")
+        self.auto_music_variation = None if auto_music_variation is None else int(auto_music_variation)
         self.chapter_transition_sound = bool(chapter_transition_sound)
         self.story_effects_enabled = bool(story_effects_enabled)
         self.story_effect_volume = max(0.0, min(0.50, float(story_effect_volume)))
@@ -281,6 +283,7 @@ class GenerationManager:
                     background_audio_fade_out=self.background_audio_fade_out,
                     background_audio_mode=self.background_audio_mode,
                     auto_music_style=self.auto_music_style,
+                    auto_music_variation=self.auto_music_variation,
                     chapter_transition_sound=self.chapter_transition_sound,
                     story_effects_enabled=self.story_effects_enabled,
                     story_effect_volume=self.story_effect_volume,

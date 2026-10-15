@@ -63,6 +63,22 @@ def _run(args: list[str]) -> None:
         raise RuntimeError(f"FFmpeg packaging command failed.\nCommand: {command}\n{detail}")
 
 
+def _concat_audio_files(first: Path, second: Path, output: Path, bitrate: str) -> Path:
+    """Join two audio files in order while preserving the chapter timeline."""
+    _run([
+        "-i", str(first), "-i", str(second),
+        "-filter_complex",
+        "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[a0];"
+        "[1:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[a1];"
+        "[a0][a1]concat=n=2:v=0:a=1[out]",
+        "-map", "[out]", "-vn", "-c:a", "aac", "-b:a", bitrate,
+        "-ar", "44100", str(output),
+    ])
+    if not output.exists() or output.stat().st_size < 1024:
+        raise RuntimeError(f"Could not join audio cue into {output.name}.")
+    return output
+
+
 def sorted_chunks(chapter_dir: Path) -> list[Path]:
     return sorted((chapter_dir / "chunks").glob("*.wav"))
 
@@ -184,6 +200,7 @@ def assemble_m4b(
     background_audio_fade_out: float = 3.0,
     background_audio_mode: str = "manual",
     auto_music_style: str = "auto",
+    auto_music_variation: int | None = None,
     chapter_transition_sound: bool = False,
     story_effects_enabled: bool = False,
     story_effect_volume: float = 0.18,
@@ -230,173 +247,148 @@ def assemble_m4b(
     with tempfile.TemporaryDirectory(prefix="ryu-m4b-") as temp:
         temp_dir = Path(temp)
 
-        # Automatic mode creates small, loopable sound beds offline and applies
-        # them chapter-by-chapter. The transition cue is prepended to every
-        # chapter file before its chapter marker is written, so chapter skips
-        # land on the cue and the bed can change with each chapter's mood.
+        # Automatic mode selects a stable chapter mood and a previewable recipe.
+        # Music ducks beneath speech; transitions are kept separate from music.
         if effective_audio_mode == "auto":
             from app.audio.sound_design import (
-                detect_chapter_mood,
-                select_music_variation,
-                synthesize_chapter_transition,
-                synthesize_music_bed,
+                ENDING_SECONDS, PAGE_TURN_SECONDS, VARIATIONS_PER_MOOD,
+                detect_chapter_mood, select_music_variation,
+                synthesize_audiobook_ending, synthesize_music_bed, synthesize_page_turn,
             )
-
             music_cache: dict[tuple[str, int], Path] = {}
-            cue_cache: dict[tuple[str, int], Path] = {}
+            ending_cache: dict[tuple[str, int], Path] = {}
+            page_turn_cache: dict[int, Path] = {}
             processed_chapters: list[Path] = []
             for index, (chapter_file, chapter_dir, chapter_title) in enumerate(
                 zip(chapters, chapter_dirs, names), start=1
             ):
                 narration_text = ""
-                narration_meta = chapter_dir / "narration.json"
                 try:
-                    payload = json.loads(narration_meta.read_text(encoding="utf-8"))
+                    payload = json.loads((chapter_dir / "narration.json").read_text(encoding="utf-8"))
                     narration_text = str(payload.get("narration_text") or "")
                     chapter_title = str(payload.get("title") or chapter_title)
                 except (OSError, ValueError, TypeError):
                     pass
-
                 mood = detect_chapter_mood(chapter_title, narration_text, auto_music_style)
-                variation = select_music_variation(chapter_title, narration_text, mood)
+                variation = (
+                    select_music_variation(chapter_title, narration_text, mood)
+                    if auto_music_variation is None
+                    else int(auto_music_variation) % VARIATIONS_PER_MOOD
+                )
                 cache_key = (mood, variation)
                 if cache_key not in music_cache:
                     music_cache[cache_key] = synthesize_music_bed(
                         temp_dir / f"auto-music-{mood}-{variation:03d}.wav",
-                        mood,
-                        variation_index=variation,
+                        mood, variation_index=variation,
                     )
-                bed_path = music_cache[cache_key]
-                cue_path = None
-                if chapter_transition_sound:
-                    if cache_key not in cue_cache:
-                        cue_cache[cache_key] = synthesize_chapter_transition(
-                            temp_dir / f"chapter-transition-{mood}-{variation:03d}.wav",
-                            mood,
+
+                current_audio = chapter_file
+                # No page-turn before the opening chapter. A separate resolving
+                # cue is appended after the last chapter instead of another turn.
+                if chapter_transition_sound and index > 1:
+                    if variation not in page_turn_cache:
+                        page_turn_cache[variation] = synthesize_page_turn(
+                            temp_dir / f"page-turn-{variation:03d}.wav",
                             variation_index=variation,
                         )
-                    cue_path = cue_cache[cache_key]
+                    prefixed = temp_dir / f"auto-prefix-{index:05d}.m4a"
+                    _concat_audio_files(page_turn_cache[variation], current_audio, prefixed, audio_bitrate)
+                    current_audio = prefixed
 
-                base_duration_ms = _duration_ms(chapter_file)
+                base_duration_ms = _duration_ms(current_audio)
                 duration_seconds = max(0.1, base_duration_ms / 1000.0)
-                fade_in = min(30.0, max(0.0, float(background_audio_fade_in)))
+                fade_in = min(30.0, max(0.0, float(background_audio_fade_in),))
                 fade_out = min(30.0, max(0.0, float(background_audio_fade_out)))
                 fade_in = min(fade_in, duration_seconds)
                 fade_out = min(fade_out, duration_seconds)
                 fade_out_start = max(0.0, duration_seconds - fade_out)
                 music_gain = max(0.0, min(1.0, float(background_audio_volume)))
-
                 mixed_chapter = temp_dir / f"auto-chapter-{index:05d}.m4a"
-                if cue_path:
-                    inputs = [
-                        "-i", str(cue_path),
-                        "-i", str(chapter_file),
-                        "-stream_loop", "-1", "-i", str(bed_path),
-                    ]
-                    filters = [
-                        "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo,volume=0.22[cue]",
-                        "[1:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[narr]",
-                        (
-                            f"[2:a]volume={music_gain:.4f},aresample=44100,"
-                            "aformat=sample_rates=44100:channel_layouts=stereo,"
-                            f"afade=t=in:st=0:d={fade_in:.3f},"
-                            f"afade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f}[bed]"
-                        ),
-                        "[narr][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[mixed]",
-                        "[cue][mixed]concat=n=2:v=0:a=1[out]",
-                    ]
-                    cue_duration_ms = _duration_ms(cue_path)
-                else:
-                    inputs = [
-                        "-i", str(chapter_file),
-                        "-stream_loop", "-1", "-i", str(bed_path),
-                    ]
-                    filters = [
-                        "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[narr]",
-                        (
-                            f"[1:a]volume={music_gain:.4f},aresample=44100,"
-                            "aformat=sample_rates=44100:channel_layouts=stereo,"
-                            f"afade=t=in:st=0:d={fade_in:.3f},"
-                            f"afade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f}[bed]"
-                        ),
-                        "[narr][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[out]",
-                    ]
-                    cue_duration_ms = 0
-
+                filters = [
+                    "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[narr]",
+                    (
+                        f"[1:a]volume={music_gain:.4f},aresample=44100,"
+                        "aformat=sample_rates=44100:channel_layouts=stereo,"
+                        f"afade=t=in:st=0:d={fade_in:.3f},"
+                        f"afade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f}[bed]"
+                    ),
+                    "[bed][narr]sidechaincompress=threshold=0.025:ratio=7:attack=22:release=420:makeup=1[ducked]",
+                    "[narr][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[out]",
+                ]
                 _run([
-                    *inputs,
-                    "-filter_complex", ";".join(filters),
-                    "-map", "[out]", "-vn",
-                    "-c:a", "aac", "-b:a", audio_bitrate, "-ar", "44100",
-                    str(mixed_chapter),
+                    "-i", str(current_audio), "-stream_loop", "-1", "-i", str(music_cache[cache_key]),
+                    "-filter_complex", ";".join(filters), "-map", "[out]", "-vn",
+                    "-t", f"{duration_seconds:.3f}", "-c:a", "aac", "-b:a", audio_bitrate,
+                    "-ar", "44100", str(mixed_chapter),
                 ])
                 if not mixed_chapter.exists() or mixed_chapter.stat().st_size == 0:
-                    raise RuntimeError(
-                        f"Could not mix automatic background audio for chapter {index}."
-                    )
-                expected_duration = base_duration_ms + cue_duration_ms
-                if abs(_duration_ms(mixed_chapter) - expected_duration) > 1500:
-                    raise RuntimeError(
-                        f"Automatic sound design changed chapter {index} duration unexpectedly."
-                    )
-                processed_chapters.append(mixed_chapter)
-
+                    raise RuntimeError(f"Could not mix automatic background audio for chapter {index}.")
+                final_chapter = mixed_chapter
+                expected_duration_ms = base_duration_ms
+                if chapter_transition_sound and index == len(chapters):
+                    if cache_key not in ending_cache:
+                        ending_cache[cache_key] = synthesize_audiobook_ending(
+                            temp_dir / f"audiobook-ending-{mood}-{variation:03d}.wav",
+                            mood, variation_index=variation,
+                        )
+                    ended = temp_dir / f"auto-ending-{index:05d}.m4a"
+                    _concat_audio_files(final_chapter, ending_cache[cache_key], ended, audio_bitrate)
+                    final_chapter = ended
+                    expected_duration_ms += int(ENDING_SECONDS * 1000)
+                if abs(_duration_ms(final_chapter) - expected_duration_ms) > 1800:
+                    raise RuntimeError(f"Automatic sound design changed chapter {index} duration unexpectedly.")
+                processed_chapters.append(final_chapter)
                 if progress:
                     progress(index, len(chapters), "automatic-chapter-sound-design")
-
             chapters = processed_chapters
 
         elif effective_audio_mode == "manual" and chapter_transition_sound:
-            # Manual music/ambience is mixed as one continuous bed later, but
-            # chapter cues are still inserted before the chapter markers are
-            # calculated so the reader hears a clear transition at every skip.
+            # Manual music/ambience stays continuous. Book turns are inserted at
+            # chapter boundaries and the closing cue is appended to the final chapter.
             from app.audio.sound_design import (
-                detect_chapter_mood,
-                synthesize_chapter_transition,
+                ENDING_SECONDS, VARIATIONS_PER_MOOD, detect_chapter_mood,
+                select_music_variation, synthesize_audiobook_ending, synthesize_page_turn,
             )
-
-            cue_cache: dict[str, Path] = {}
+            page_turn_cache: dict[int, Path] = {}
+            ending_cache: dict[tuple[str, int], Path] = {}
             cued_chapters: list[Path] = []
             for index, (chapter_file, chapter_dir, chapter_title) in enumerate(
                 zip(chapters, chapter_dirs, names), start=1
             ):
                 narration_text = ""
-                narration_meta = chapter_dir / "narration.json"
                 try:
-                    payload = json.loads(narration_meta.read_text(encoding="utf-8"))
+                    payload = json.loads((chapter_dir / "narration.json").read_text(encoding="utf-8"))
                     narration_text = str(payload.get("narration_text") or "")
                     chapter_title = str(payload.get("title") or chapter_title)
                 except (OSError, ValueError, TypeError):
                     pass
                 mood = detect_chapter_mood(chapter_title, narration_text, auto_music_style)
-                if mood not in cue_cache:
-                    cue_cache[mood] = synthesize_chapter_transition(
-                        temp_dir / f"chapter-transition-{mood}.wav", mood
-                    )
-                cue_path = cue_cache[mood]
-                base_duration_ms = _duration_ms(chapter_file)
-                cue_duration_ms = _duration_ms(cue_path)
-                cued_chapter = temp_dir / f"manual-chapter-{index:05d}.m4a"
-                _run([
-                    "-i", str(cue_path),
-                    "-i", str(chapter_file),
-                    "-filter_complex",
-                    "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[cue];"
-                    "[1:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[narr];"
-                    "[cue][narr]concat=n=2:v=0:a=1[out]",
-                    "-map", "[out]", "-vn",
-                    "-c:a", "aac", "-b:a", audio_bitrate, "-ar", "44100",
-                    str(cued_chapter),
-                ])
-                if not cued_chapter.exists() or cued_chapter.stat().st_size == 0:
-                    raise RuntimeError(
-                        f"Could not add the chapter transition cue to chapter {index}."
-                    )
-                if abs(_duration_ms(cued_chapter) - base_duration_ms - cue_duration_ms) > 1500:
-                    raise RuntimeError(
-                        f"Adding the chapter transition cue changed chapter {index} duration unexpectedly."
-                    )
-                cued_chapters.append(cued_chapter)
+                variation = (
+                    select_music_variation(chapter_title, narration_text, mood)
+                    if auto_music_variation is None
+                    else int(auto_music_variation) % VARIATIONS_PER_MOOD
+                )
+                current_audio = chapter_file
+                if index > 1:
+                    if variation not in page_turn_cache:
+                        page_turn_cache[variation] = synthesize_page_turn(
+                            temp_dir / f"page-turn-{variation:03d}.wav",
+                            variation_index=variation,
+                        )
+                    prefixed = temp_dir / f"manual-prefix-{index:05d}.m4a"
+                    _concat_audio_files(page_turn_cache[variation], current_audio, prefixed, audio_bitrate)
+                    current_audio = prefixed
+                if index == len(chapters):
+                    ending_key = (mood, variation)
+                    if ending_key not in ending_cache:
+                        ending_cache[ending_key] = synthesize_audiobook_ending(
+                            temp_dir / f"audiobook-ending-{mood}-{variation:03d}.wav",
+                            mood, variation_index=variation,
+                        )
+                    ended = temp_dir / f"manual-ending-{index:05d}.m4a"
+                    _concat_audio_files(current_audio, ending_cache[ending_key], ended, audio_bitrate)
+                    current_audio = ended
+                cued_chapters.append(current_audio)
             chapters = cued_chapters
 
         # Story-aware SFX are aligned to the source text inside each generated
@@ -429,9 +421,12 @@ def assemble_m4b(
 
                 # The chapter transition is already prepended by Automatic or
                 # Manual mode. Add that exact intentional lead-in to cue times.
+                from app.audio.sound_design import PAGE_TURN_SECONDS
                 transition_offset_ms = (
-                    int(TRANSITION_SECONDS * 1000)
-                    if chapter_transition_sound and effective_audio_mode in {"auto", "manual"}
+                    int(PAGE_TURN_SECONDS * 1000)
+                    if chapter_transition_sound
+                    and effective_audio_mode in {"auto", "manual"}
+                    and chapter_index > 1
                     else 0
                 )
                 cursor_ms = 0.0
@@ -662,10 +657,17 @@ def assemble_m4b(
             inputs = ["-i", str(audio_only)]
             filter_parts = []
             bed_labels = []
+            split_outputs = "[narr_mix]" + "".join(
+                f"[speech_sc{index}]" for index in range(1, len(active_layers) + 1)
+            )
+            filter_parts.append(
+                f"[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo,"
+                f"asplit={1 + len(active_layers)}{split_outputs}"
+            )
             for index, (layer_name, layer_path, layer_volume) in enumerate(active_layers, start=1):
                 inputs.extend(["-stream_loop", "-1", "-i", str(layer_path)])
-                label = f"bed{index}"
-                bed_labels.append(f"[{label}]")
+                raw_label = f"bedraw{index}"
+                duck_label = f"bed{index}"
                 filters = [f"volume={layer_volume:.4f}"]
                 if fade_in > 0:
                     filters.append(f"afade=t=in:st=0:d={fade_in:.3f}")
@@ -674,9 +676,15 @@ def assemble_m4b(
                         f"afade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f}"
                     )
                 filters.append("aresample=44100")
-                filter_parts.append(f"[{index}:a]{','.join(filters)}[{label}]")
+                filter_parts.append(f"[{index}:a]{','.join(filters)}[{raw_label}]")
+                filter_parts.append(
+                    f"[{raw_label}][speech_sc{index}]sidechaincompress="
+                    "threshold=0.025:ratio=7:attack=22:release=420:makeup=1"
+                    f"[{duck_label}]"
+                )
+                bed_labels.append(f"[{duck_label}]")
 
-            input_labels = "[0:a]" + "".join(bed_labels)
+            input_labels = "[narr_mix]" + "".join(bed_labels)
             mix_count = 1 + len(active_layers)
             filter_parts.append(
                 f"{input_labels}amix=inputs={mix_count}:duration=first:"
