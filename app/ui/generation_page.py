@@ -367,6 +367,10 @@ class GenerationPage(QWidget):
         overview_layout.addWidget(self.chapter_count)
         overview_layout.addWidget(self.word_count)
         overview_layout.addWidget(self.duration_estimate)
+        self.generation_estimate = QLabel()
+        self.generation_estimate.setWordWrap(True)
+        self.generation_estimate.setObjectName("muted")
+        overview_layout.addWidget(self.generation_estimate)
         overview_layout.addStretch(1)
         root.addWidget(overview)
         self._update_overview()
@@ -697,6 +701,18 @@ class GenerationPage(QWidget):
         self.background_audio_hint.setObjectName("muted")
         settings_form.addRow("", self.background_audio_hint)
         self.background_audio_enabled.toggled.connect(self._toggle_background_audio_controls)
+        self.background_audio_enabled.toggled.connect(self._update_overview)
+        self.background_audio_mode.currentIndexChanged.connect(self._update_overview)
+        self.auto_music_style.currentIndexChanged.connect(self._update_overview)
+        self.bgm_variation.currentIndexChanged.connect(self._update_overview)
+        self.chapter_transition_sound.toggled.connect(self._update_overview)
+        self.story_effects_enabled.toggled.connect(self._update_overview)
+        self.story_effect_volume.valueChanged.connect(self._update_overview)
+        self.background_audio_volume.valueChanged.connect(self._update_overview)
+        self.ambience_audio_volume.valueChanged.connect(self._update_overview)
+        self.narration_speed.currentIndexChanged.connect(self._update_overview)
+        self.pacing_profile.currentIndexChanged.connect(self._update_overview)
+        self.voice_profile.currentIndexChanged.connect(self._update_overview)
         self._toggle_background_audio_controls(self.background_audio_enabled.isChecked())
 
         self.pacing_hint = QLabel(
@@ -1441,19 +1457,69 @@ class GenerationPage(QWidget):
     def _update_overview(self) -> None:
         words = sum(len(ch.text.split()) for ch in self.chapters)
         speed = float(self.narration_speed.currentData() or 0.90) if hasattr(self, "narration_speed") else 0.90
-        effective_wpm = max(60.0, 150.0 * speed)
-        minutes = max(1, round(words / effective_wpm))
+        effective_wpm = max(60.0, 170.0 * speed)
+        listening_seconds = words * 60.0 / effective_wpm
+        if hasattr(self, "motion_settings") and hasattr(self, "voice_profile"):
+            try:
+                key = self._generation_calibration_key()
+                observed_seconds_per_word = float(
+                    self.motion_settings.value(f"{key}/seconds_per_word", 0.0) or 0.0
+                )
+                if observed_seconds_per_word > 0:
+                    listening_seconds = words * observed_seconds_per_word
+            except (TypeError, ValueError, AttributeError):
+                pass
+        # Include the actual transition/end cues in the duration estimate when
+        # this book is configured to add them.
+        if (
+            hasattr(self, "background_audio_enabled")
+            and self.background_audio_enabled.isChecked()
+            and hasattr(self, "chapter_transition_sound")
+            and self.chapter_transition_sound.isChecked()
+            and self.background_audio_mode.currentData() in {"auto", "manual"}
+            and len(self.chapters) > 0
+        ):
+            from app.audio.sound_design import ENDING_SECONDS, PAGE_TURN_SECONDS
+            listening_seconds += max(0, len(self.chapters) - 1) * PAGE_TURN_SECONDS + ENDING_SECONDS
+        self._estimated_listening_seconds = max(0.0, listening_seconds)
+        listening_minutes = max(1, round(self._estimated_listening_seconds / 60.0))
         self.chapter_count.setText(f"Chapters: {len(self.chapters)}")
         self.word_count.setText(f"Words: {words:,}")
         self.duration_estimate.setText(
-            f"Estimated listening length: {minutes // 60}h {minutes % 60:02d}m "
+            f"Estimated listening length: {listening_minutes // 60}h {listening_minutes % 60:02d}m "
             f"at {speed:.2f}× narration speed"
         )
         self.duration_estimate.setToolTip(
-            "Estimated duration of the finished narration at the selected playback speed. "
-            "This is not the time required to generate it. Generation elapsed time, "
-            "remaining time and observed throughput are shown in the Generation section."
+            "Finished audiobook duration. This estimate learns actual seconds-per-word from "
+            "completed books using the same voice and settings and includes enabled chapter/end cues."
         )
+        factor = self._calibration_factor
+        samples = 0
+        try:
+            key = self._generation_calibration_key()
+            stored_factor = self.motion_settings.value(f"{key}/realtime_factor", None)
+            if stored_factor is not None and float(stored_factor) > 0:
+                factor = max(0.4, min(20.0, float(stored_factor)))
+                samples = int(self.motion_settings.value(f"{key}/samples", 0) or 0)
+        except (TypeError, ValueError, AttributeError):
+            pass
+        self._estimated_generation_seconds = self._estimated_listening_seconds * factor
+        processing_minutes = max(1, round(self._estimated_generation_seconds / 60.0))
+        confidence = (
+            f"learned from {samples} completed export(s)"
+            if samples > 0
+            else "initial estimate from your observed 18:55 processing / 7:43 audio run"
+        )
+        if hasattr(self, "generation_estimate"):
+            self.generation_estimate.setText(
+                f"Estimated generation time: about {processing_minutes // 60}h {processing_minutes % 60:02d}m "
+                f"({factor:.2f}× listening duration; {confidence})"
+            )
+            self.generation_estimate.setToolTip(
+                "Includes voice synthesis, sound design and M4B packaging. The estimate starts from "
+                "your last observed ~2.45× real-time run, then learns a separate timing ratio and "
+                "listening duration for this voice/backend/speed/pacing/soundtrack configuration on this PC."
+            )
 
     def _default_output(self) -> Path | None:
         if not self.project_folder:
@@ -1524,6 +1590,31 @@ class GenerationPage(QWidget):
         if saved:
             return saved
         return value
+
+    def _generation_calibration_key(self) -> str:
+        profile = self._selected_profile()
+        recipe = {
+            "profile": getattr(profile, "name", "unselected"),
+            "provider": getattr(profile, "provider", "unknown"),
+            "voice": getattr(profile, "voice_id", "default"),
+            "backend": self.backend.currentData() if hasattr(self, "backend") else "automatic",
+            "speed": float(self.narration_speed.currentData() or 1.0) if hasattr(self, "narration_speed") else 1.0,
+            "pacing": self.pacing_profile.currentData() if hasattr(self, "pacing_profile") else "natural",
+            "bgm_enabled": self.background_audio_enabled.isChecked() if hasattr(self, "background_audio_enabled") else False,
+            "bgm_mode": self.background_audio_mode.currentData() if hasattr(self, "background_audio_mode") else "off",
+            "bgm_style": self.auto_music_style.currentData() if hasattr(self, "auto_music_style") else "auto",
+            "bgm_recipe": self.bgm_variation.currentData() if hasattr(self, "bgm_variation") else 0,
+            "bgm_file": self.background_audio_path.text().strip() if hasattr(self, "background_audio_path") else "",
+            "ambience_file": self.ambience_audio_path.text().strip() if hasattr(self, "ambience_audio_path") else "",
+            "bgm_volume": float(self.background_audio_volume.value()) if hasattr(self, "background_audio_volume") else 18.0,
+            "ambience_volume": float(self.ambience_audio_volume.value()) if hasattr(self, "ambience_audio_volume") else 10.0,
+            "story_effects": self.story_effects_enabled.isChecked() if hasattr(self, "story_effects_enabled") else False,
+            "story_effect_volume": float(self.story_effect_volume.value()) if hasattr(self, "story_effect_volume") else 22.0,
+            "chapter_cues": self.chapter_transition_sound.isChecked() if hasattr(self, "chapter_transition_sound") else False,
+        }
+        signature = json.dumps(recipe, sort_keys=True, ensure_ascii=True)
+        digest = hashlib.sha256(signature.encode("utf-8")).hexdigest()[:24]
+        return f"generation/calibration/{digest}"
 
     def _toggle_background_audio_controls(self, enabled: bool) -> None:
         enabled = bool(enabled)
