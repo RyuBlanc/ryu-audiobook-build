@@ -533,12 +533,14 @@ class GenerationPage(QWidget):
         self.auto_music_style = QComboBox()
         for label, value in (
             ("Auto-detect from each chapter", "auto"),
-            ("Fantasy / Adventure", "fantasy"),
-            ("Mystery / Suspense", "mystery"),
-            ("Romance / Warm", "romance"),
-            ("Dark / Horror", "dark"),
-            ("Action / Adventure", "action"),
-            ("Calm / Reflective", "calm"),
+            ("Epic Anime Fantasy", "fantasy"),
+            ("Cinematic Mystery / Suspense", "mystery"),
+            ("Emotional Cinematic Drama", "romance"),
+            ("Dark Supernatural Tension", "dark"),
+            ("Heroic Anime Battle", "action"),
+            ("Adventure Journey / Exploration", "calm"),
+            ("High-Energy Anime Rock", "anime-rock"),
+            ("Futuristic Sword-Fantasy / Sci-Fi", "sci-fi"),
         ):
             self.auto_music_style.addItem(label, value)
         saved_style_index = self.auto_music_style.findData(
@@ -1532,8 +1534,22 @@ class GenerationPage(QWidget):
             and self.chapter_transition_sound.isChecked()
             and len(self.chapters) > 0
         ):
-            from app.audio.sound_design import ENDING_SECONDS, PAGE_TURN_SECONDS
-            listening_seconds += max(0, len(self.chapters) - 1) * PAGE_TURN_SECONDS + ENDING_SECONDS
+            from app.audio.sound_design import ENDING_SECONDS, OPENING_SECONDS, PAGE_TURN_SECONDS
+            listening_seconds += OPENING_SECONDS + max(0, len(self.chapters) - 1) * PAGE_TURN_SECONDS + ENDING_SECONDS
+            if str(self.sound_cue_style.currentData() or "classic-book") == "custom":
+                for path_field, times_used, default_seconds in (
+                    (self.opening_cue_path, 1, OPENING_SECONDS),
+                    (self.page_turn_cue_path, max(0, len(self.chapters) - 1), PAGE_TURN_SECONDS),
+                    (self.ending_cue_path, 1, ENDING_SECONDS),
+                ):
+                    try:
+                        custom_path = Path(path_field.text().strip()).expanduser()
+                        if custom_path.is_file():
+                            listening_seconds += times_used * (
+                                _duration_ms(custom_path) / 1000.0 - default_seconds
+                            )
+                    except Exception:
+                        pass
         self._estimated_listening_seconds = max(0.0, listening_seconds)
         listening_minutes = max(1, round(self._estimated_listening_seconds / 60.0))
         self.chapter_count.setText(f"Chapters: {len(self.chapters)}")
@@ -1665,6 +1681,10 @@ class GenerationPage(QWidget):
             "story_effects": self.story_effects_enabled.isChecked() if hasattr(self, "story_effects_enabled") else False,
             "story_effect_volume": float(self.story_effect_volume.value()) if hasattr(self, "story_effect_volume") else 22.0,
             "chapter_cues": self.chapter_transition_sound.isChecked() if hasattr(self, "chapter_transition_sound") else False,
+            "cue_style": self.sound_cue_style.currentData() if hasattr(self, "sound_cue_style") else "classic-book",
+            "opening_cue_path": self.opening_cue_path.text().strip() if hasattr(self, "opening_cue_path") else "",
+            "page_turn_cue_path": self.page_turn_cue_path.text().strip() if hasattr(self, "page_turn_cue_path") else "",
+            "ending_cue_path": self.ending_cue_path.text().strip() if hasattr(self, "ending_cue_path") else "",
         }
         signature = json.dumps(recipe, sort_keys=True, ensure_ascii=True)
         digest = hashlib.sha256(signature.encode("utf-8")).hexdigest()[:24]
