@@ -797,26 +797,42 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn('("Assign Selected Dialogue"', source)
 
 
-    def test_generation_has_1008_bgm_catalogue_and_full_mix_preview_option(self):
+    def test_generation_has_1344_cinematic_catalogue_and_linked_cue_controls(self):
         ui = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
         mixer = Path("app/audio/preview_mixer.py").read_text(encoding="utf-8")
-        self.assertIn('settings_form.addRow("BGM catalogue (1,008 recipes)", self.music_catalogue_container)', ui)
+        sound_design = Path("app/audio/sound_design.py").read_text(encoding="utf-8")
+        self.assertIn('settings_form.addRow("BGM catalogue (1,344 cinematic arrangements)", self.music_catalogue_container)', ui)
         self.assertIn('self.music_catalogue_preview.clicked.connect(self.preview_catalogue_music)', ui)
-        self.assertIn('QCheckBox("Include selected BGM, story effects and chapter/end cues")', ui)
+        self.assertIn('self.preview_opening_cue.clicked.connect(lambda: self.preview_cue("opening"))', ui)
+        self.assertIn('self.preview_page_cue.clicked.connect(lambda: self.preview_cue("page"))', ui)
+        self.assertIn('self.preview_ending_cue.clicked.connect(lambda: self.preview_cue("ending"))', ui)
+        self.assertIn('settings_form.addRow("Linked book cue set", self.sound_cue_style)', ui)
         self.assertIn('target_seconds=preview_seconds', ui)
         self.assertIn('mix_voice_preview(', ui)
         self.assertIn('sidechaincompress=', mixer)
+        self.assertIn('synthesize_opening_cue', mixer)
         self.assertIn('synthesize_audiobook_ending', mixer)
         self.assertIn('synthesize_page_turn', mixer)
+        self.assertIn('MUSIC_CATALOGUE_SIZE = len(THEMES) * VARIATIONS_PER_MOOD  # 1,344', sound_design)
+        self.assertNotIn('Harmony {info[\'harmony\']}', ui)
+        self.assertIn('dragon_four_winged.png', Path("build.py").read_text(encoding="utf-8"))
+        self.assertIn('dragon_cross.png', Path("app/ui/chapter_editor.py").read_text(encoding="utf-8"))
 
     def test_explicit_music_catalogue_id_is_mapped_without_changing_mood(self):
         from app.audio.assembler import _selected_music_recipe
-        from app.audio.sound_design import MOOD_ORDER, VARIATIONS_PER_MOOD
+        from app.audio.sound_design import (
+            MUSIC_CATALOGUE_SIZE, MOOD_ORDER, VARIATIONS_PER_MOOD, music_variation_info,
+        )
         mood, variation = _selected_music_recipe("Ignored chapter", "Ignored text", "auto", 1)
         self.assertEqual((mood, variation), (MOOD_ORDER[0], 0))
         last_id = len(MOOD_ORDER) * VARIATIONS_PER_MOOD
         mood, variation = _selected_music_recipe("Ignored chapter", "Ignored text", "auto", last_id)
         self.assertEqual((mood, variation), (MOOD_ORDER[-1], VARIATIONS_PER_MOOD - 1))
+        self.assertEqual(MUSIC_CATALOGUE_SIZE, 1344)
+        info = music_variation_info(MOOD_ORDER[0], 0)
+        self.assertIn("arrangement", info)
+        self.assertNotIn("harmony", info)
+        self.assertEqual(len(MOOD_ORDER), 8))
 
 
     def test_preview_mixer_generates_selected_bgm_with_page_turn_and_book_ending(self):
@@ -881,8 +897,9 @@ class RegressionTests(unittest.TestCase):
                 chapter_transition_sound=True,
             )
             duration = _duration_ms(output)
-            self.assertGreaterEqual(duration, 4800)
-            self.assertLessEqual(duration, 5600)
+            # Opening + narration + page turn + narration + book closing.
+            self.assertGreaterEqual(duration, 6000)
+            self.assertLessEqual(duration, 7000)
 
     def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
         from app.tts.pacing import pause_after_ms
@@ -1128,7 +1145,9 @@ class RegressionTests(unittest.TestCase):
     def test_generated_music_and_transition_cues_are_local_wav_files(self):
         import wave
         from app.audio.sound_design import (
+            CUE_STYLE_LABELS,
             MUSIC_CATALOGUE_SIZE,
+            OPENING_SECONDS,
             TEMPOS,
             VARIATIONS_PER_MOOD,
             detect_chapter_mood,
@@ -1137,6 +1156,7 @@ class RegressionTests(unittest.TestCase):
             synthesize_audiobook_ending,
             synthesize_chapter_transition,
             synthesize_music_bed,
+            synthesize_opening_cue,
             synthesize_page_turn,
         )
 
@@ -1145,8 +1165,10 @@ class RegressionTests(unittest.TestCase):
             fantasy = synthesize_music_bed(root / "fantasy.wav", "fantasy")
             mystery = synthesize_music_bed(root / "mystery.wav", "mystery")
             cue = synthesize_chapter_transition(root / "chapter-cue.wav", "fantasy")
-            page_turn = synthesize_page_turn(root / "page-turn.wav", variation_index=7)
-            ending = synthesize_audiobook_ending(root / "book-ending.wav", "fantasy", variation_index=7)
+            opening = synthesize_opening_cue(root / "book-opening.wav", cue_style="classic-book")
+            page_turn = synthesize_page_turn(root / "page-turn.wav", variation_index=7, cue_style="classic-book")
+            magic_page = synthesize_page_turn(root / "magic-page.wav", variation_index=7, cue_style="magical-tome")
+            ending = synthesize_audiobook_ending(root / "book-ending.wav", "fantasy", variation_index=7, cue_style="classic-book")
             with wave.open(str(fantasy), "rb") as wav:
                 self.assertEqual(wav.getnchannels(), 2)
                 self.assertEqual(wav.getframerate(), 22050)
@@ -1160,27 +1182,33 @@ class RegressionTests(unittest.TestCase):
                 self.assertEqual(wav.getnchannels(), 2)
                 self.assertGreater(wav.getnframes(), 0)
                 self.assertLess(wav.getnframes() / wav.getframerate(), 1.5)
+            with wave.open(str(opening), "rb") as wav:
+                self.assertEqual(wav.getnchannels(), 2)
+                self.assertAlmostEqual(wav.getnframes() / wav.getframerate(), OPENING_SECONDS, delta=0.03)
             with wave.open(str(page_turn), "rb") as wav:
                 self.assertEqual(wav.getnchannels(), 2)
                 self.assertAlmostEqual(wav.getnframes() / wav.getframerate(), 0.62, delta=0.02)
             with wave.open(str(ending), "rb") as wav:
                 self.assertEqual(wav.getnchannels(), 2)
                 self.assertAlmostEqual(wav.getnframes() / wav.getframerate(), 2.65, delta=0.05)
+            self.assertNotEqual(opening.read_bytes(), page_turn.read_bytes())
+            self.assertNotEqual(page_turn.read_bytes(), magic_page.read_bytes())
             self.assertNotEqual(page_turn.read_bytes(), ending.read_bytes())
             self.assertNotEqual(fantasy.read_bytes(), mystery.read_bytes())
+            self.assertIn("custom", CUE_STYLE_LABELS)
 
         self.assertEqual(detect_chapter_mood("A Secret Revealed", "A strange hidden clue appeared."), "mystery")
         self.assertEqual(detect_chapter_mood("The Confession", "She blushed and confessed her love."), "romance")
         self.assertEqual(detect_chapter_mood("The Battlefield", "Swords clashed in the battle."), "action")
         self.assertEqual(detect_chapter_mood("A New Quest", "A wizard cast a magic spell."), "fantasy")
-        self.assertEqual(MUSIC_CATALOGUE_SIZE, 1008)
+        self.assertEqual(MUSIC_CATALOGUE_SIZE, 1344)
         self.assertEqual(VARIATIONS_PER_MOOD, 168)
 
         # Every recipe has its own stable catalogue ID; selection is repeatable
         # for the same story context rather than random per generation.
         ids = {
             music_variation_info(mood, variation)["id"]
-            for mood in ("fantasy", "mystery", "romance", "dark", "action", "calm")
+            for mood in MOOD_ORDER
             for variation in range(VARIATIONS_PER_MOOD)
         }
         self.assertEqual(len(ids), MUSIC_CATALOGUE_SIZE)
