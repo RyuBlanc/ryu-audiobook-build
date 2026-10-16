@@ -194,6 +194,10 @@ class VoicePreviewWorker(QThread):
                     chapter_transition_sound=bool(self.mix_settings.get("chapter_transition_sound", True)),
                     is_first_chapter=bool(self.mix_settings.get("is_first_chapter", True)),
                     is_last_chapter=bool(self.mix_settings.get("is_last_chapter", False)),
+                    sound_cue_style=str(self.mix_settings.get("sound_cue_style") or "classic-book"),
+                    opening_cue_path=self.mix_settings.get("opening_cue_path"),
+                    page_turn_cue_path=self.mix_settings.get("page_turn_cue_path"),
+                    ending_cue_path=self.mix_settings.get("ending_cue_path"),
                 )
                 from dataclasses import replace
                 result = replace(result, output_path=mixed_output)
