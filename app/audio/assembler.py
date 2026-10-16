@@ -203,6 +203,45 @@ def _selected_music_recipe(
     return mood, select_music_variation(title, text, mood)
 
 
+def _resolve_cue_audio(
+    temp_dir: Path,
+    kind: str,
+    cue_style: str,
+    variation_index: int,
+    mood: str,
+    custom_path: Path | str | None,
+) -> Path:
+    """Return a selected user sound or synthesize the requested linked cue."""
+    from app.audio.sound_design import (
+        normalize_cue_style,
+        synthesize_audiobook_ending,
+        synthesize_opening_cue,
+        synthesize_page_turn,
+    )
+    style = normalize_cue_style(cue_style)
+    if style == "custom" and custom_path:
+        candidate = Path(custom_path).expanduser()
+        if candidate.is_file():
+            return candidate.resolve()
+    # A missing custom slot falls back to the physical book cue, not silence.
+    generated_style = "classic-book" if style == "custom" else style
+    safe_style = re.sub(r"[^a-z0-9_-]+", "-", generated_style.casefold())
+    output = temp_dir / f"cue-{kind}-{safe_style}-{int(variation_index) % 168:03d}.wav"
+    if kind == "opening":
+        return synthesize_opening_cue(
+            output, variation_index=variation_index, cue_style=generated_style
+        )
+    if kind == "page":
+        return synthesize_page_turn(
+            output, variation_index=variation_index, cue_style=generated_style
+        )
+    if kind == "ending":
+        return synthesize_audiobook_ending(
+            output, mood=mood, variation_index=variation_index, cue_style=generated_style
+        )
+    raise ValueError(f"Unknown sound cue kind: {kind}")
+
+
 def assemble_m4b(
     chapter_dirs: list[Path],
     output_path: Path,
@@ -226,6 +265,10 @@ def assemble_m4b(
     chapter_transition_sound: bool = False,
     story_effects_enabled: bool = False,
     story_effect_volume: float = 0.18,
+    sound_cue_style: str = "classic-book",
+    opening_cue_path: Path | str | None = None,
+    page_turn_cue_path: Path | str | None = None,
+    ending_cue_path: Path | str | None = None,
 ) -> Path:
     """Create one premium M4B containing all chapters and navigation metadata.
 
@@ -266,6 +309,9 @@ def assemble_m4b(
     if effective_audio_mode not in {"off", "auto", "manual"}:
         raise ValueError(f"Unsupported background audio mode: {background_audio_mode}")
 
+    # Actual duration of each inserted cue is used to keep story-effect timing
+    # aligned, including user-selected custom opening/page/closing audio.
+    cue_offset_by_chapter: dict[int, int] = {}
     with tempfile.TemporaryDirectory(prefix="ryu-m4b-") as temp:
         temp_dir = Path(temp)
 
@@ -302,17 +348,26 @@ def assemble_m4b(
                     )
 
                 current_audio = chapter_file
-                # No page-turn before the opening chapter. A separate resolving
-                # cue is appended after the last chapter instead of another turn.
-                if chapter_transition_sound and index > 1:
-                    if variation not in page_turn_cache:
-                        page_turn_cache[variation] = synthesize_page_turn(
-                            temp_dir / f"page-turn-{variation:03d}.wav",
-                            variation_index=variation,
+                # One linked cue set: book opening for chapter one, physical page
+                # flip before every following chapter, and a distinct closing at EOF.
+                if chapter_transition_sound:
+                    if index == 1:
+                        cue = _resolve_cue_audio(
+                            temp_dir, "opening", sound_cue_style, variation, mood, opening_cue_path
                         )
-                    prefixed = temp_dir / f"auto-prefix-{index:05d}.m4a"
-                    _concat_audio_files(page_turn_cache[variation], current_audio, prefixed, audio_bitrate)
-                    current_audio = prefixed
+                        prefixed = temp_dir / f"auto-opening-{index:05d}.m4a"
+                        cue_offset_by_chapter[index] = _duration_ms(cue)
+                        _concat_audio_files(cue, current_audio, prefixed, audio_bitrate)
+                        current_audio = prefixed
+                    else:
+                        if variation not in page_turn_cache:
+                            page_turn_cache[variation] = _resolve_cue_audio(
+                                temp_dir, "page", sound_cue_style, variation, mood, page_turn_cue_path
+                            )
+                        prefixed = temp_dir / f"auto-prefix-{index:05d}.m4a"
+                        cue_offset_by_chapter[index] = _duration_ms(page_turn_cache[variation])
+                        _concat_audio_files(page_turn_cache[variation], current_audio, prefixed, audio_bitrate)
+                        current_audio = prefixed
 
                 base_duration_ms = _duration_ms(current_audio)
                 duration_seconds = max(0.1, base_duration_ms / 1000.0)
@@ -346,14 +401,13 @@ def assemble_m4b(
                 expected_duration_ms = base_duration_ms
                 if chapter_transition_sound and index == len(chapters):
                     if cache_key not in ending_cache:
-                        ending_cache[cache_key] = synthesize_audiobook_ending(
-                            temp_dir / f"audiobook-ending-{mood}-{variation:03d}.wav",
-                            mood, variation_index=variation,
+                        ending_cache[cache_key] = _resolve_cue_audio(
+                            temp_dir, "ending", sound_cue_style, variation, mood, ending_cue_path
                         )
                     ended = temp_dir / f"auto-ending-{index:05d}.m4a"
                     _concat_audio_files(final_chapter, ending_cache[cache_key], ended, audio_bitrate)
                     final_chapter = ended
-                    expected_duration_ms += int(ENDING_SECONDS * 1000)
+                    expected_duration_ms += _duration_ms(ending_cache[cache_key])
                 if abs(_duration_ms(final_chapter) - expected_duration_ms) > 1800:
                     raise RuntimeError(f"Automatic sound design changed chapter {index} duration unexpectedly.")
                 processed_chapters.append(final_chapter)
@@ -385,21 +439,27 @@ def assemble_m4b(
                     chapter_title, narration_text, auto_music_style, auto_music_variation
                 )
                 current_audio = chapter_file
-                if index > 1:
-                    if variation not in page_turn_cache:
-                        page_turn_cache[variation] = synthesize_page_turn(
-                            temp_dir / f"page-turn-{variation:03d}.wav",
-                            variation_index=variation,
-                        )
+                if index == 1:
+                    opening = _resolve_cue_audio(
+                        temp_dir, "opening", sound_cue_style, variation, mood, opening_cue_path
+                    )
+                    opened = temp_dir / f"manual-opening-{index:05d}.m4a"
+                    cue_offset_by_chapter[index] = _duration_ms(opening)
+                    _concat_audio_files(opening, current_audio, opened, audio_bitrate)
+                    current_audio = opened
+                else:
+                    cue = _resolve_cue_audio(
+                        temp_dir, "page", sound_cue_style, variation, mood, page_turn_cue_path
+                    )
                     prefixed = temp_dir / f"manual-prefix-{index:05d}.m4a"
-                    _concat_audio_files(page_turn_cache[variation], current_audio, prefixed, audio_bitrate)
+                    cue_offset_by_chapter[index] = _duration_ms(cue)
+                    _concat_audio_files(cue, current_audio, prefixed, audio_bitrate)
                     current_audio = prefixed
                 if index == len(chapters):
                     ending_key = (mood, variation)
                     if ending_key not in ending_cache:
-                        ending_cache[ending_key] = synthesize_audiobook_ending(
-                            temp_dir / f"audiobook-ending-{mood}-{variation:03d}.wav",
-                            mood, variation_index=variation,
+                        ending_cache[ending_key] = _resolve_cue_audio(
+                            temp_dir, "ending", sound_cue_style, variation, mood, ending_cue_path
                         )
                     ended = temp_dir / f"manual-ending-{index:05d}.m4a"
                     _concat_audio_files(current_audio, ending_cache[ending_key], ended, audio_bitrate)
@@ -434,21 +494,27 @@ def assemble_m4b(
                 except (TypeError, ValueError):
                     variation = 0
                 current_audio = chapter_file
-                if index > 1:
-                    if variation not in page_turn_cache:
-                        page_turn_cache[variation] = synthesize_page_turn(
-                            temp_dir / f"off-page-turn-{variation:03d}.wav",
-                            variation_index=variation,
-                        )
+                if index == 1:
+                    opening = _resolve_cue_audio(
+                        temp_dir, "opening", sound_cue_style, variation, mood, opening_cue_path
+                    )
+                    opened = temp_dir / f"off-opening-{index:05d}.m4a"
+                    cue_offset_by_chapter[index] = _duration_ms(opening)
+                    _concat_audio_files(opening, current_audio, opened, audio_bitrate)
+                    current_audio = opened
+                else:
+                    cue = _resolve_cue_audio(
+                        temp_dir, "page", sound_cue_style, variation, mood, page_turn_cue_path
+                    )
                     prefixed = temp_dir / f"off-prefix-{index:05d}.m4a"
-                    _concat_audio_files(page_turn_cache[variation], current_audio, prefixed, audio_bitrate)
+                    cue_offset_by_chapter[index] = _duration_ms(cue)
+                    _concat_audio_files(cue, current_audio, prefixed, audio_bitrate)
                     current_audio = prefixed
                 if index == len(chapters):
                     ending_key = (mood, variation)
                     if ending_key not in ending_cache:
-                        ending_cache[ending_key] = synthesize_audiobook_ending(
-                            temp_dir / f"off-ending-{mood}-{variation:03d}.wav",
-                            mood, variation_index=variation,
+                        ending_cache[ending_key] = _resolve_cue_audio(
+                            temp_dir, "ending", sound_cue_style, variation, mood, ending_cue_path
                         )
                     ended = temp_dir / f"off-ending-chapter-{index:05d}.m4a"
                     _concat_audio_files(current_audio, ending_cache[ending_key], ended, audio_bitrate)
@@ -484,16 +550,9 @@ def assemble_m4b(
                     mixed_chapters.append(chapter_file)
                     continue
 
-                # The chapter transition is already prepended by Automatic or
-                # Manual mode. Add that exact intentional lead-in to cue times.
-                from app.audio.sound_design import PAGE_TURN_SECONDS
-                transition_offset_ms = (
-                    int(PAGE_TURN_SECONDS * 1000)
-                    if chapter_transition_sound
-                    and effective_audio_mode in {"auto", "manual", "off"}
-                    and chapter_index > 1
-                    else 0
-                )
+                # Account for the real selected opening/page audio so effect
+                # cues remain aligned when the user chooses longer custom sounds.
+                transition_offset_ms = cue_offset_by_chapter.get(chapter_index, 0)
                 cursor_ms = 0.0
                 chapter_duration_ms = _duration_ms(chapter_file)
                 pending: list[tuple[int, object, int]] = []
