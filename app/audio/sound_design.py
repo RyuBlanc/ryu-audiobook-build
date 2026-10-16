@@ -103,7 +103,9 @@ def music_variation_info(mood: str, variation_index: int) -> dict[str, object]:
     texture_index = local_index % len(TEXTURES)
     tempo_index = (local_index // len(TEXTURES)) % len(TEMPOS)
     progression_index = (local_index // (len(TEXTURES) * len(TEMPOS))) % len(PROGRESSIONS)
-    global_id = MOOD_ORDER.index(chosen) * VARIATIONS_PER_MOOD + local_index + 1
+    # Derive the position from the authoritative theme mapping directly.
+    # This avoids a missing-global failure in frozen/legacy module loaders.
+    global_id = tuple(THEMES).index(chosen) * VARIATIONS_PER_MOOD + local_index + 1
     return {
         "id": global_id,
         "mood": chosen,
