@@ -205,14 +205,33 @@ def extract_text(path: Path) -> ExtractedBook:
     return ExtractedBook(title=path.stem, source_path=path, text=clean_text(text))
 
 
+def pdf_extraction_quality_warning(page_count: int, word_count: int) -> str | None:
+    """Return a blocking diagnostic for suspiciously sparse long-PDF extraction."""
+    pages = max(0, int(page_count))
+    words = max(0, int(word_count))
+    if pages >= 30 and words < max(500, pages * 25):
+        return (
+            f"PDF text extraction appears incomplete: only {words:,} words were extracted "
+            f"from a {pages:,}-page PDF. Import was stopped to avoid creating a partial "
+            "audiobook. Check that the PDF has a searchable text layer, run OCR on the "
+            "source if needed, or import an EPUB/TXT version. Your source file was not changed."
+        )
+    return None
+
+
 def _extract_pdf(path: Path) -> str:
     import fitz
 
     pages = []
     with fitz.open(path) as document:
+        page_count = len(document)
         for page in document:
             pages.append(page.get_text("text"))
-    return "\n\n".join(pages)
+    text = "\n\n".join(pages)
+    warning = pdf_extraction_quality_warning(page_count, len(text.split()))
+    if warning:
+        raise ValueError(warning)
+    return text
 
 
 def _extract_epub(path: Path) -> str:

@@ -18,7 +18,8 @@ class _BenchmarkThread(QThread):
 
     def run(self):
         result = benchmark_provider(
-            PiperProvider(self.voice, backend=self.backend),
+            PiperProvider(backend=self.backend),
+            voice=self.voice,
             backend=self.backend,
         )
         if result.success:
@@ -82,7 +83,11 @@ class HardwarePage(QWidget):
             self.result.setText("Install a Piper voice first from the Models page.")
             return
         backend = self.backend_combo.currentData() or "automatic"
-        provider_backend = "cuda" if backend == "NVIDIA CUDA" else "cpu"
+        provider_backend = (
+            "cuda" if backend == "NVIDIA CUDA"
+            else "automatic" if backend == "automatic"
+            else "cpu"
+        )
         self.benchmark_button.setEnabled(False)
         self.result.setText("Verifying selected backend in the background…")
         self.benchmark_thread = _BenchmarkThread(provider_backend, voices[0].stem)

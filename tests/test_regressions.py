@@ -132,11 +132,14 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(clone.qwen_mode, "clone")
         self.assertEqual(clone.reference_text, "Hello there.")
 
-    def test_chapter_editor_keeps_assignment_labels_small_and_synced(self):
+    def test_chapter_editor_uses_non_obstructive_colour_highlights_and_hover_tooltips(self):
         source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
-        self.assertIn("badge.setFixedSize(badge_width, 16)", source)
-        self.assertIn('font-size:7px', source)
-        self.assertIn('probe.setPosition(end)', source)
+        self.assertIn("self.text.viewport().installEventFilter(self)", source)
+        self.assertIn("QToolTip.showText", source)
+        self.assertIn("self._assignment_hover_items.append((start, end, tuple(speakers)))", source)
+        self.assertIn("selection.format = fmt", source)
+        self.assertNotIn("badge.setFixedSize(badge_width, 16)", source)
+        self.assertNotIn('font-size:7px', source)
         self.assertIn('_update_current_chapter_list_label', source)
         self.assertIn('self.title.textChanged.connect(self._update_current_chapter_list_label)', source)
 
@@ -144,9 +147,10 @@ class RegressionTests(unittest.TestCase):
         source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
         self.assertIn("self.text.setViewportMargins(82, 0, 0, 0)", source)
         self.assertIn('assignment_manager_button = QPushButton("Assignments")', source)
-        self.assertIn("badge.setFixedSize(badge_width, 16)", source)
-        self.assertIn('badge.setToolTip("Click to change speaker • Assigned: " + ", ".join(speakers))', source)
         self.assertIn("soft.setAlpha(52)", source)
+        self.assertIn("QEvent.Type.MouseMove", source)
+        self.assertIn("self.text.cursorForPosition(point)", source)
+        self.assertNotIn('QPushButton(display_name, self.text.viewport())', source)
         self.assertIn("project_title: str | None = None", source)
         self.assertIn('self.project_title = str(project_title or "").strip()', source)
         self.assertNotIn('text=self.window().windowTitle()', source)
@@ -326,7 +330,8 @@ class RegressionTests(unittest.TestCase):
         source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
         workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
         self.assertIn("def refresh_chapter_sources", source)
-        self.assertIn("self.generation.refresh_chapter_sources()", workflow)
+        self.assertIn("page.refresh_chapter_sources", workflow)
+        self.assertIn("def _refresh_generation_context", workflow)
 
     def test_qwen_profiles_have_unique_cache_identity(self):
         from app.tts.voice_profile import VoiceProfile, save_profiles, load_profiles
@@ -678,6 +683,23 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("self.close()", source)
         self.assertIn("heartbeat=", source)
 
+    def test_generate_navigation_opens_selected_library_project_and_handles_empty_library(self):
+        workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
+        self.assertIn("self.sidebar.itemClicked.connect(self._sidebar_item_clicked)", workflow)
+        self.assertIn("def _sidebar_item_clicked", workflow)
+        self.assertIn("def _refresh_generation_context", workflow)
+        nav_start = workflow.index("def _sidebar_changed")
+        section = workflow[nav_start:workflow.index('elif name == "Models":', nav_start)]
+        self.assertIn("if not self.project:", section)
+        self.assertIn("selected_projects = self.library._selected_projects()", section)
+        self.assertIn("self.open_project(selected_projects[0])", section)
+        self.assertIn("self.sidebar.blockSignals(True)", section)
+        self.assertIn('"Open a book first"', section)
+        self.assertIn("QTimer.singleShot(75, self._refresh_generation_context)", section)
+        self.assertLess(section.index("self._show_page(self.generation)"), section.index("QTimer.singleShot"))
+        self.assertIn("Generate page could not be opened", section)
+        self.assertIn("except Exception as exc:", section)
+
     def test_chapter_autosave_does_not_rebuild_generation_page(self):
         workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
         editor = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
@@ -697,12 +719,63 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn('form.addRow("Series number"', generation)
         self.assertNotIn('form.addRow("Description"', generation)
 
-    def test_assignment_badges_follow_scroll_and_can_edit_assignment(self):
+    def test_assignment_speaker_labels_are_hover_only_and_do_not_cover_text(self):
         source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
-        self.assertIn('QPushButton(display_name, self.text.viewport())', source)
-        self.assertIn("_edit_assignment_badge", source)
-        self.assertIn("viewport_rect.top()", source)
-        self.assertIn("badge.hide()", source)
+        self.assertIn("self.text.viewport().installEventFilter(self)", source)
+        self.assertIn("Assigned speaker:", source)
+        self.assertIn("QToolTip.hideText()", source)
+        self.assertNotIn('QPushButton(display_name, self.text.viewport())', source)
+        self.assertNotIn("viewport_rect.top()", source)
+
+    def test_generation_estimate_is_labelled_as_listening_duration(self):
+        source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        self.assertIn("Estimated listening length:", source)
+        self.assertIn("This is not the time required to generate it.", source)
+        self.assertIn("Estimated generation time: about", source)
+        self.assertIn("_generation_calibration_key", source)
+        self.assertIn("self._calibration_factor = 2.45", source)
+        self.assertIn("self._active_calibration_is_resume = bool(is_resume)", source)
+        self.assertIn("not self._active_calibration_is_resume", source)
+        self.assertIn("self.motion_settings.setValue(f\"{key}/realtime_factor\", actual_factor)", source)
+        self.assertIn("self.elapsed.setText", source)
+        self.assertIn("self.remaining.setText", source)
+
+    def test_hardware_benchmark_passes_voice_as_voice_not_model_path(self):
+        source = Path("app/ui/hardware_page.py").read_text(encoding="utf-8")
+        self.assertIn("PiperProvider(backend=self.backend)", source)
+        self.assertIn("voice=self.voice", source)
+        self.assertIn('else "automatic" if backend == "automatic"', source)
+        self.assertNotIn("PiperProvider(self.voice, backend=self.backend)", source)
+
+    def test_pdf_extraction_guard_flags_sparse_long_documents(self):
+        from app.documents.parser import pdf_extraction_quality_warning
+        warning = pdf_extraction_quality_warning(301, 497)
+        self.assertIsNotNone(warning)
+        self.assertIn("301-page PDF", warning)
+        self.assertIsNotNone(pdf_extraction_quality_warning(301, 5000))
+        self.assertIsNone(pdf_extraction_quality_warning(301, 10000))
+        self.assertIsNone(pdf_extraction_quality_warning(12, 100))
+
+    def test_import_worker_checks_chapter_word_coverage(self):
+        source = Path("app/ui/workflow.py").read_text(encoding="utf-8")
+        self.assertIn("chapter_words < int(source_words * 0.90)", source)
+        self.assertIn("Chapter detection retained only", source)
+
+    def test_models_page_groups_installs_and_supports_selected_component_removal(self):
+        source = Path("app/ui/models_page.py").read_text(encoding="utf-8")
+        self.assertIn('QGroupBox("Installed components")', source)
+        self.assertIn('QGroupBox("Offline narration voices")', source)
+        self.assertIn('QGroupBox("Character voices & voice cloning")', source)
+        self.assertIn("Uninstall selected component", source)
+        self.assertIn('component_id.startswith("piper:")', source)
+        self.assertIn('component_id.startswith("qwen-model:")', source)
+        self.assertIn('component_id == "qwen-runtime"', source)
+        self.assertIn("Refusing to remove a path outside the selected component root", source)
+        self.assertIn("generated audiobooks", source)
+        self.assertIn("QWEN_VENV_ROOT", source)
+        self.assertIn('local_kokoro_root = models_root() / "kokoro"', source)
+        self.assertIn("Kokoro 82M — Bundled with application (not individually removable)", source)
+        self.assertIn("local_kokoro_installed", source)
 
     def test_generation_surfaces_provider_device_status(self):
         manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
@@ -727,14 +800,140 @@ class RegressionTests(unittest.TestCase):
 
     def test_chapter_editor_uses_inline_sentence_assignment_ui(self):
         source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
-        self.assertIn('QPushButton("＋", self.text.viewport())', source)
+        self.assertIn('QPushButton("", self.text.viewport())', source)
+        self.assertIn('dragon_cross.png', source)
+        self.assertNotIn('dragon_cross.svg', source)
+        self.assertIn('dragon_cross.png', source)
+        self.assertIn('setIconSize(QSize(21, 21))', source)
         self.assertIn("_open_inline_assignment_dialog", source)
         self.assertIn("_selection_sentence_span", source)
-        self.assertIn('setToolTip("Click to change speaker • Assigned: " + ", ".join(speakers))', source)
+        self.assertIn("QToolTip.showText", source)
+        self.assertIn('"Assigned speaker: " + ", ".join(speakers)', source)
+        self.assertNotIn('QPushButton(display_name, self.text.viewport())', source)
         self.assertIn("setExtraSelections", source)
         self.assertNotIn("Quick Assign Speaker", source)
         self.assertNotIn("_update_quick_assign_button", source)
         self.assertNotIn('("Assign Selected Dialogue"', source)
+
+
+    def test_generation_has_1344_cinematic_catalogue_and_linked_cue_controls(self):
+        ui = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        mixer = Path("app/audio/preview_mixer.py").read_text(encoding="utf-8")
+        sound_design = Path("app/audio/sound_design.py").read_text(encoding="utf-8")
+        self.assertIn('settings_form.addRow("BGM catalogue (1,344 cinematic arrangements)", self.music_catalogue_container)', ui)
+        self.assertIn('self.music_catalogue_preview.clicked.connect(self.preview_catalogue_music)', ui)
+        self.assertIn('self.preview_opening_cue.clicked.connect(lambda: self.preview_cue("opening"))', ui)
+        self.assertIn('self.preview_page_cue.clicked.connect(lambda: self.preview_cue("page"))', ui)
+        self.assertIn('self.preview_ending_cue.clicked.connect(lambda: self.preview_cue("ending"))', ui)
+        self.assertIn('settings_form.addRow("Linked book cue set", self.sound_cue_style)', ui)
+        self.assertIn('target_seconds=preview_seconds', ui)
+        self.assertIn('mix_voice_preview(', ui)
+        self.assertIn('sidechaincompress=', mixer)
+        self.assertIn('synthesize_opening_cue', mixer)
+        self.assertIn('synthesize_audiobook_ending', mixer)
+        self.assertIn('synthesize_page_turn', mixer)
+        self.assertIn('MUSIC_CATALOGUE_SIZE = len(THEMES) * VARIATIONS_PER_MOOD  # 1,344', sound_design)
+        self.assertNotIn('Harmony {info[\'harmony\']}', ui)
+        build_source = Path("build.py").read_text(encoding="utf-8")
+        cursor_source = Path("app/main.py").read_text(encoding="utf-8")
+        editor_source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
+        self.assertIn('dragon_four_winged.png', build_source)
+        self.assertIn('dragon_cursor.png', cursor_source)
+        self.assertIn('dragon_cross.png', editor_source)
+        self.assertNotIn('dragon_cursor.svg', cursor_source)
+        self.assertNotIn('dragon_cross.svg', editor_source)
+        self.assertNotIn('DRAGON_CURSOR_SVG', build_source)
+        self.assertNotIn('DRAGON_CROSS_SVG', build_source)
+
+    def test_explicit_music_catalogue_id_is_mapped_without_changing_mood(self):
+        from app.audio.assembler import _selected_music_recipe
+        from app.audio.sound_design import (
+            MUSIC_CATALOGUE_SIZE, MOOD_ORDER, VARIATIONS_PER_MOOD, music_variation_info,
+        )
+        mood, variation = _selected_music_recipe("Ignored chapter", "Ignored text", "auto", 1)
+        self.assertEqual((mood, variation), (MOOD_ORDER[0], 0))
+        last_id = len(MOOD_ORDER) * VARIATIONS_PER_MOOD
+        mood, variation = _selected_music_recipe("Ignored chapter", "Ignored text", "auto", last_id)
+        self.assertEqual((mood, variation), (MOOD_ORDER[-1], VARIATIONS_PER_MOOD - 1))
+        self.assertEqual(MUSIC_CATALOGUE_SIZE, 1344)
+        info = music_variation_info(MOOD_ORDER[0], 0)
+        self.assertIn("arrangement", info)
+        self.assertNotIn("harmony", info)
+        self.assertEqual(len(MOOD_ORDER), 8)
+
+
+    def test_preview_mixer_generates_selected_bgm_with_page_turn_and_book_ending(self):
+        import wave
+        from app.audio.preview_mixer import mix_voice_preview
+        from app.audio.assembler import _duration_ms
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            voice = root / "voice.wav"
+            _write_wav(voice, 1.5)
+            output = root / "voice-plus-story-sound.wav"
+            result = mix_voice_preview(
+                voice,
+                output,
+                "The sword clashed against the shield. The battle was over.",
+                background_enabled=True,
+                background_mode="auto",
+                music_style="fantasy",
+                music_variation_id=1,
+                music_volume=0.08,
+                story_effects_enabled=False,
+                chapter_transition_sound=True,
+                is_first_chapter=False,
+                is_last_chapter=True,
+            )
+            # The mixer returns a resolved Windows path; compare the written
+            # destination rather than path casing/8.3 aliases on the CI runner.
+            self.assertTrue(Path(result).is_file())
+            self.assertTrue(output.is_file())
+            with wave.open(str(output), "rb") as wav:
+                self.assertEqual(wav.getnchannels(), 2)
+                self.assertEqual(wav.getframerate(), 44100)
+            # Page turn + 1.5s voice + the distinct book-ending cadence.
+            self.assertGreaterEqual(_duration_ms(output), 4500)
+            self.assertLessEqual(_duration_ms(output), 5200)
+
+    def test_chapter_and_finale_cues_work_when_background_music_is_off(self):
+        from app.audio.assembler import _duration_ms
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapters = []
+            for number in (1, 2):
+                folder = root / f"{number:03d}_Chapter_{number}"
+                _write_wav(folder / "chunks" / "00001.wav", 1.0)
+                (folder / "narration.json").write_text(
+                    json.dumps({
+                        "title": f"Chapter {number}",
+                        "narration_text": "The story continues.",
+                    }),
+                    encoding="utf-8",
+                )
+                chapters.append(folder)
+            output = root / "chapter-cues-without-bgm.m4b"
+            assemble_m4b(
+                chapters,
+                output,
+                "Cues without BGM",
+                chapter_titles=["Chapter 1", "Chapter 2"],
+                background_audio_mode="off",
+                chapter_transition_sound=True,
+            )
+            duration = _duration_ms(output)
+            # Opening + narration + page turn + narration + book closing.
+            self.assertGreaterEqual(duration, 6000)
+            self.assertLessEqual(duration, 7000)
+
+    def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
+        from app.tts.pacing import pause_after_ms
+        self.assertGreaterEqual(pause_after_ms("That is the end.", "natural"), 280)
+        self.assertGreater(pause_after_ms("That is the end?", "natural"), pause_after_ms("That is the end.", "natural"))
+        self.assertGreater(pause_after_ms("That is the end.", "relaxed"), pause_after_ms("That is the end.", "natural"))
+        self.assertEqual(pause_after_ms("That is the end.", "off"), 0)
 
     def test_cast_provider_keeps_qwen_long_form_chunk_settings(self):
         source = Path("app/tts/cast_provider.py").read_text(encoding="utf-8")
@@ -962,20 +1161,31 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('inputs.extend(["-stream_loop", "-1", "-i", str(layer_path)])', assembler)
         self.assertIn("amix=inputs={mix_count}:duration=first", assembler)
         self.assertIn('if effective_audio_mode == "auto":', assembler)
-        self.assertIn("synthesize_chapter_transition", assembler)
+        self.assertIn("synthesize_page_turn", assembler)
+        self.assertIn("synthesize_audiobook_ending", assembler)
+        self.assertIn("auto_music_variation", assembler)
+        self.assertIn("_selected_music_recipe", assembler)
+        self.assertIn("sidechaincompress=", assembler)
         self.assertIn("automatic-chapter-sound-design", assembler)
+        self.assertIn('elif effective_audio_mode == "off" and chapter_transition_sound:', assembler)
 
     def test_generated_music_and_transition_cues_are_local_wav_files(self):
         import wave
         from app.audio.sound_design import (
+            CUE_STYLE_LABELS,
             MUSIC_CATALOGUE_SIZE,
+            MOOD_ORDER,
+            OPENING_SECONDS,
             TEMPOS,
             VARIATIONS_PER_MOOD,
             detect_chapter_mood,
             music_variation_info,
             select_music_variation,
+            synthesize_audiobook_ending,
             synthesize_chapter_transition,
             synthesize_music_bed,
+            synthesize_opening_cue,
+            synthesize_page_turn,
         )
 
         with tempfile.TemporaryDirectory() as temp:
@@ -983,6 +1193,10 @@ class RegressionTests(unittest.TestCase):
             fantasy = synthesize_music_bed(root / "fantasy.wav", "fantasy")
             mystery = synthesize_music_bed(root / "mystery.wav", "mystery")
             cue = synthesize_chapter_transition(root / "chapter-cue.wav", "fantasy")
+            opening = synthesize_opening_cue(root / "book-opening.wav", cue_style="classic-book")
+            page_turn = synthesize_page_turn(root / "page-turn.wav", variation_index=7, cue_style="classic-book")
+            magic_page = synthesize_page_turn(root / "magic-page.wav", variation_index=7, cue_style="magical-tome")
+            ending = synthesize_audiobook_ending(root / "book-ending.wav", "fantasy", variation_index=7, cue_style="classic-book")
             with wave.open(str(fantasy), "rb") as wav:
                 self.assertEqual(wav.getnchannels(), 2)
                 self.assertEqual(wav.getframerate(), 22050)
@@ -996,20 +1210,33 @@ class RegressionTests(unittest.TestCase):
                 self.assertEqual(wav.getnchannels(), 2)
                 self.assertGreater(wav.getnframes(), 0)
                 self.assertLess(wav.getnframes() / wav.getframerate(), 1.5)
+            with wave.open(str(opening), "rb") as wav:
+                self.assertEqual(wav.getnchannels(), 2)
+                self.assertAlmostEqual(wav.getnframes() / wav.getframerate(), OPENING_SECONDS, delta=0.03)
+            with wave.open(str(page_turn), "rb") as wav:
+                self.assertEqual(wav.getnchannels(), 2)
+                self.assertAlmostEqual(wav.getnframes() / wav.getframerate(), 0.62, delta=0.02)
+            with wave.open(str(ending), "rb") as wav:
+                self.assertEqual(wav.getnchannels(), 2)
+                self.assertAlmostEqual(wav.getnframes() / wav.getframerate(), 2.65, delta=0.05)
+            self.assertNotEqual(opening.read_bytes(), page_turn.read_bytes())
+            self.assertNotEqual(page_turn.read_bytes(), magic_page.read_bytes())
+            self.assertNotEqual(page_turn.read_bytes(), ending.read_bytes())
             self.assertNotEqual(fantasy.read_bytes(), mystery.read_bytes())
+            self.assertIn("custom", CUE_STYLE_LABELS)
 
         self.assertEqual(detect_chapter_mood("A Secret Revealed", "A strange hidden clue appeared."), "mystery")
         self.assertEqual(detect_chapter_mood("The Confession", "She blushed and confessed her love."), "romance")
         self.assertEqual(detect_chapter_mood("The Battlefield", "Swords clashed in the battle."), "action")
         self.assertEqual(detect_chapter_mood("A New Quest", "A wizard cast a magic spell."), "fantasy")
-        self.assertEqual(MUSIC_CATALOGUE_SIZE, 1008)
+        self.assertEqual(MUSIC_CATALOGUE_SIZE, 1344)
         self.assertEqual(VARIATIONS_PER_MOOD, 168)
 
         # Every recipe has its own stable catalogue ID; selection is repeatable
         # for the same story context rather than random per generation.
         ids = {
             music_variation_info(mood, variation)["id"]
-            for mood in ("fantasy", "mystery", "romance", "dark", "action", "calm")
+            for mood in MOOD_ORDER
             for variation in range(VARIATIONS_PER_MOOD)
         }
         self.assertEqual(len(ids), MUSIC_CATALOGUE_SIZE)

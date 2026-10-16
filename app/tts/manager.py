@@ -50,9 +50,14 @@ class GenerationManager:
         background_audio_fade_out: float = 3.0,
         background_audio_mode: str = "manual",
         auto_music_style: str = "auto",
+        auto_music_variation: int | None = None,
         chapter_transition_sound: bool = False,
         story_effects_enabled: bool = False,
         story_effect_volume: float = 0.22,
+        sound_cue_style: str = "classic-book",
+        opening_cue_path: Path | None = None,
+        page_turn_cue_path: Path | None = None,
+        ending_cue_path: Path | None = None,
     ) -> None:
         self.provider = provider
         self.voice = voice
@@ -73,9 +78,14 @@ class GenerationManager:
         self.background_audio_fade_out = max(0.0, min(30.0, float(background_audio_fade_out)))
         self.background_audio_mode = str(background_audio_mode or "manual").casefold()
         self.auto_music_style = str(auto_music_style or "auto")
+        self.auto_music_variation = None if auto_music_variation is None else int(auto_music_variation)
         self.chapter_transition_sound = bool(chapter_transition_sound)
         self.story_effects_enabled = bool(story_effects_enabled)
         self.story_effect_volume = max(0.0, min(0.50, float(story_effect_volume)))
+        self.sound_cue_style = str(sound_cue_style or "classic-book")
+        self.opening_cue_path = Path(opening_cue_path) if opening_cue_path else None
+        self.page_turn_cue_path = Path(page_turn_cue_path) if page_turn_cue_path else None
+        self.ending_cue_path = Path(ending_cue_path) if ending_cue_path else None
         self.cancel_event = Event()
         self._thread: Thread | None = None
         self.failed: list[int] = []
@@ -281,9 +291,14 @@ class GenerationManager:
                     background_audio_fade_out=self.background_audio_fade_out,
                     background_audio_mode=self.background_audio_mode,
                     auto_music_style=self.auto_music_style,
+                    auto_music_variation=self.auto_music_variation,
                     chapter_transition_sound=self.chapter_transition_sound,
                     story_effects_enabled=self.story_effects_enabled,
                     story_effect_volume=self.story_effect_volume,
+                    sound_cue_style=self.sound_cue_style,
+                    opening_cue_path=self.opening_cue_path,
+                    page_turn_cue_path=self.page_turn_cue_path,
+                    ending_cue_path=self.ending_cue_path,
                 )
                 self._emit(len(self.chapters), len(self.chapters), 1, "m4b-complete")
                 # Only delete intermediate files after the final M4B has been

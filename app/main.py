@@ -3,7 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QCursor, QIcon, QPixmap
 from PySide6.QtWidgets import QApplication
 
 from app.core.paths import ensure_roots
@@ -261,6 +262,17 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setStyleSheet(APP_STYLE)
+    # Small transparent four-winged crimson dragon cursor. The hotspot is
+    # placed at the nose so clicking and text selection remain predictable.
+    dragon_cursor_path = asset_path("dragon_cursor.png")
+    if dragon_cursor_path.is_file():
+        cursor_pixmap = QPixmap(str(dragon_cursor_path))
+        if not cursor_pixmap.isNull():
+            cursor_pixmap = cursor_pixmap.scaled(
+                30, 30, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            app.setOverrideCursor(QCursor(cursor_pixmap, 21, 13))
     icon_path = asset_path("ryu_audiobook_logo.png")
     app_icon = QIcon(str(icon_path)) if icon_path.exists() else QIcon()
     app.setWindowIcon(app_icon)

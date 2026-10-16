@@ -2,7 +2,11 @@ name: Build Windows App
 
 on:
   push:
-    branches: [main, fix/voice-preview-responsive-emotion, feature/background-audio-mvp]
+    branches:
+      - main
+      - fix/voice-preview-responsive-emotion
+      - feature/background-audio-mvp
+      - fix/import-qa-speaker-hover-hardware
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.
@@ -305,6 +309,29 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      - name: Remove older Windows build runs and artifacts
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runs = gh api --paginate "/repos/$env:REPOSITORY/actions/runs?per_page=100" --jq '.workflow_runs[] | select(.name == "Build Windows App") | [.id,.status,.created_at] | @tsv'
+          foreach ($line in $runs) {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            $parts = $line -split "	"
+            $runId = $parts[0]
+            $status = $parts[1]
+            if ($runId -eq $env:CURRENT_RUN_ID) { continue }
+            if ($status -in @('in_progress','queued','waiting','requested','pending')) { continue }
+            Write-Host "Removing old Windows build run $runId ($status) and its artifact."
+            gh api --method DELETE "/repos/$env:REPOSITORY/actions/runs/$runId" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Could not remove old workflow run $runId." }
+          }
+          Write-Host "Only the newly uploaded Windows build is retained."
+
       - name: Publish verified installer release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: pwsh
@@ -312,4 +339,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "v0.3.7-build-${{ github.run_number }}"
-          gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, the Obsidian/Ember dragon-tech interface, cached frosted loading, smooth low-power progress and page transitions, a global Reduce Motion preference, 1,008 deterministic local BGM recipes, optional text-aware story sound effects, chapter transition cues, Qwen VoiceDesign preset isolation, Audiobook AI smoke validation, Chatterbox runtime validation, and installer verification. The BGM catalogue is recipe-generated locally; sound-effect placement is text-based and should be reviewed before publication." --target $env:GITHUB_SHA
+          gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, the Obsidian/Ember dragon-tech interface, cached frosted loading, smooth low-power progress and page transitions, a global Reduce Motion preference, 1,344 original cinematic/anime-inspired BGM arrangements, linked book opening/page-turn/closing cue sets, optional text-aware story sound effects, Qwen VoiceDesign preset isolation, Audiobook AI smoke validation, Chatterbox runtime validation, and installer verification. The BGM catalogue is recipe-generated locally; sound-effect placement is text-based and should be reviewed before publication." --target $env:GITHUB_SHA

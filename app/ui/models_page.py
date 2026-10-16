@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import urllib.request
@@ -11,14 +12,15 @@ try:
 except ImportError:
     certifi = None
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QListWidget,
-    QPushButton, QMessageBox, QInputDialog
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox, QScrollArea,
+    QFrame, QLabel, QListWidget, QListWidgetItem, QPushButton, QMessageBox,
+    QInputDialog
 )
 
 from app.core.paths import models_root, ensure_roots
-from app.tts.chatterbox_runtime import install_runtime, runtime_status
+from app.tts.chatterbox_runtime import install_runtime, runtime_status, RUNTIME_DIR as CHATTERBOX_RUNTIME_DIR
 from app.tts.model_registry import BUILTIN_CATALOG, installed_models, mark_installed
 from app.tts.providers.piper import PiperProvider
 from app.tts.providers.kokoro import KokoroProvider
@@ -30,6 +32,13 @@ from app.tts.qwen_character_runtime import (
     best_clone_kind,
     best_voice_design_kind,
     repair_runtime as repair_qwen_runtime,
+    MODEL_DIRS as QWEN_MODEL_DIRS,
+    RUNTIME_ROOT as QWEN_RUNTIME_ROOT,
+    PYTHON_ROOT as QWEN_PYTHON_ROOT,
+    VENV_ROOT as QWEN_VENV_ROOT,
+    MARKER as QWEN_MARKER,
+    INSTALLER_PATH as QWEN_INSTALLER_PATH,
+    INSTALLER_LOG as QWEN_INSTALLER_LOG,
 )
 from app.ai.model_runtime import brain_root, install_runtime as install_audiobook_ai, recommended_model, installed as audiobook_ai_installed, self_test as test_audiobook_ai
 
@@ -219,6 +228,92 @@ class ChatterboxInstallWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class UninstallComponentWorker(QThread):
+    """Remove one explicitly selected, app-managed local component."""
+
+    finished_ok = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, component_id: str):
+        super().__init__()
+        self.component_id = str(component_id)
+
+    @staticmethod
+    def _remove_path(target: Path, allowed_root: Path) -> None:
+        root = Path(allowed_root).resolve()
+        candidate = Path(target).resolve()
+        # Do not delete the root itself, follow paths outside it, or touch
+        # any user's Library/Voices/Audiobooks folders.
+        if candidate == root or root not in candidate.parents:
+            raise RuntimeError(
+                f"Refusing to remove a path outside the selected component root: {target}"
+            )
+        if candidate.is_dir():
+            shutil.rmtree(candidate)
+        elif candidate.exists():
+            candidate.unlink()
+
+    def run(self) -> None:
+        try:
+            component_id = self.component_id
+            root = models_root()
+
+            if component_id.startswith("piper:"):
+                relative_name = component_id.split(":", 1)[1]
+                piper_root = root / "piper"
+                candidate = (piper_root / relative_name).resolve()
+                if piper_root.resolve() not in candidate.parents or candidate.suffix.lower() != ".onnx":
+                    raise RuntimeError("Invalid Piper voice selection.")
+                if not candidate.is_file():
+                    raise RuntimeError("That user-installed Piper voice is no longer present.")
+                self._remove_path(candidate, piper_root)
+                sidecar = candidate.with_suffix(candidate.suffix + ".json")
+                if sidecar.exists():
+                    self._remove_path(sidecar, piper_root)
+                mark_installed(
+                    "piper",
+                    piper_root.exists() and any(piper_root.rglob("*.onnx")),
+                )
+
+            elif component_id == "kokoro":
+                self._remove_path(root / "kokoro", root)
+                mark_installed("kokoro", False)
+
+            elif component_id == "chatterbox-runtime":
+                self._remove_path(CHATTERBOX_RUNTIME_DIR, root)
+                mark_installed("chatterbox", False)
+                mark_installed("chatterbox-multilingual", False)
+
+            elif component_id.startswith("qwen-model:"):
+                kind = component_id.split(":", 1)[1]
+                if kind not in QWEN_MODEL_DIRS:
+                    raise RuntimeError("Unknown Qwen model selection.")
+                self._remove_path(QWEN_MODEL_DIRS[kind], QWEN_RUNTIME_ROOT)
+
+            elif component_id == "qwen-runtime":
+                # Preserve downloaded model folders, Hugging Face cache and
+                # generated voice anchors; remove only the isolated Python runtime.
+                for target in (
+                    QWEN_VENV_ROOT,
+                    QWEN_PYTHON_ROOT,
+                    QWEN_MARKER,
+                    QWEN_INSTALLER_PATH,
+                    QWEN_INSTALLER_LOG,
+                ):
+                    if target.exists():
+                        self._remove_path(target, QWEN_RUNTIME_ROOT)
+
+            elif component_id == "audiobook-ai":
+                self._remove_path(root / "audiobook-ai", root)
+
+            else:
+                raise RuntimeError("The selected item is not a removable installed component.")
+
+            self.finished_ok.emit(component_id)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class ModelsPage(QWidget):
     def __init__(self):
         super().__init__()
@@ -230,17 +325,44 @@ class ModelsPage(QWidget):
         self.qwen_repair_worker: QwenRepairWorker | None = None
         self.qwen_cache_worker: QwenCacheResetWorker | None = None
         self.audiobook_ai_worker: AudiobookAIInstallWorker | None = None
+        self.uninstall_worker: UninstallComponentWorker | None = None
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("<h2>Local TTS Models</h2>"))
-        layout.addWidget(QLabel(
-            "Models stay on this PC. Kokoro provides a larger natural-voice catalogue for offline audiobook generation; Piper remains the lightweight fallback."
-        ))
+        layout.setContentsMargins(18, 16, 18, 14)
+        layout.setSpacing(10)
+        layout.addWidget(QLabel("<h2>Models & Voice Engines</h2>"))
+        intro = QLabel(
+            "Manage local narration voices and optional AI engines in one place. "
+            "Removing a component keeps your books, generated audiobooks, voice profiles, "
+            "and project settings. Models may need to be reinstalled before their profiles can be used again."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
 
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(2, 2, 8, 2)
+        content_layout.setSpacing(12)
+
+        installed_group = QGroupBox("Installed components")
+        installed_layout = QVBoxLayout(installed_group)
         self.list = QListWidget()
-        layout.addWidget(self.list)
+        self.list.setMaximumHeight(205)
+        self.list.setToolTip("Select one installed, app-managed component to uninstall.")
+        self.list.currentItemChanged.connect(self._update_uninstall_button)
+        installed_layout.addWidget(self.list)
+        installed_actions = QHBoxLayout()
+        self.uninstall_button = QPushButton("Uninstall selected component")
+        self.uninstall_button.setEnabled(False)
+        self.uninstall_button.clicked.connect(self.uninstall_selected_component)
+        installed_actions.addWidget(self.uninstall_button)
+        installed_actions.addStretch(1)
+        installed_layout.addLayout(installed_actions)
+        content_layout.addWidget(installed_group)
 
-        row = QHBoxLayout()
         self.install_kokoro = QPushButton("Download Natural Voices")
         self.install_piper = QPushButton("Download Piper Voice")
         self.install_chatterbox = QPushButton("Install / Repair Custom Voice Engine")
@@ -249,17 +371,32 @@ class ModelsPage(QWidget):
         self.reset_qwen_cache = QPushButton("Reset Qwen Voice Cache")
         self.install_audiobook_ai = QPushButton("Install Audiobook AI")
         self.refresh_button = QPushButton("Refresh")
-        row.addWidget(self.install_kokoro)
-        row.addWidget(self.install_piper)
-        row.addWidget(self.install_chatterbox)
-        row.addWidget(self.install_qwen_character)
-        row.addWidget(self.repair_qwen)
-        row.addWidget(self.reset_qwen_cache)
-        row.addWidget(self.install_audiobook_ai)
-        row.addWidget(self.refresh_button)
-        layout.addLayout(row)
 
+        voice_group = QGroupBox("Offline narration voices")
+        voice_grid = QGridLayout(voice_group)
+        voice_grid.addWidget(self.install_kokoro, 0, 0)
+        voice_grid.addWidget(self.install_piper, 0, 1)
+        content_layout.addWidget(voice_group)
+
+        character_group = QGroupBox("Character voices & voice cloning")
+        character_grid = QGridLayout(character_group)
+        character_grid.addWidget(self.install_qwen_character, 0, 0)
+        character_grid.addWidget(self.install_chatterbox, 0, 1)
+        character_grid.addWidget(self.repair_qwen, 1, 0)
+        character_grid.addWidget(self.reset_qwen_cache, 1, 1)
+        content_layout.addWidget(character_group)
+
+        ai_group = QGroupBox("Book analysis")
+        ai_grid = QGridLayout(ai_group)
+        ai_grid.addWidget(self.install_audiobook_ai, 0, 0)
+        ai_grid.addWidget(self.refresh_button, 0, 1)
+        content_layout.addWidget(ai_group)
+        content_layout.addStretch(1)
+
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
         self.status = QLabel("Ready")
+        self.status.setWordWrap(True)
         layout.addWidget(self.status)
 
         self.install_kokoro.clicked.connect(self.download_kokoro)
@@ -272,44 +409,126 @@ class ModelsPage(QWidget):
         self.refresh_button.clicked.connect(self.refresh)
         self.refresh()
 
+
     def refresh(self) -> None:
         self.list.clear()
-        installed = {m.model_id for m in installed_models()}
-        for spec in BUILTIN_CATALOG:
-            state = "Installed" if spec.model_id in installed else "Not installed"
-            clone = " • Voice cloning" if spec.voice_cloning else ""
-            self.list.addItem(f"{spec.display_name} — {state}{clone}")
 
-        kokoro_voices = KokoroProvider().voices()
-        if "kokoro" in installed:
-            self.list.addItem(f"Kokoro voices available: {len(kokoro_voices)}")
+        def add_component(label: str, component_id: str | None = None) -> None:
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, component_id)
+            if component_id is None:
+                item.setToolTip("This item is bundled, not installed separately, or not currently removable.")
+            self.list.addItem(item)
 
-        self.list.addItem(f"Custom voice runtime: {runtime_status()}")
-        qwen_status = []
-        if qwen_model_installed("custom-1.7b"):
-            qwen_status.append("CustomVoice 1.7B")
-        elif qwen_model_installed("custom-0.6b"):
-            qwen_status.append("CustomVoice 0.6B")
-        if qwen_model_installed("design-1.7b"):
-            qwen_status.append("VoiceDesign 1.7B")
-        if qwen_model_installed("base-1.7b"):
-            qwen_status.append("Clone Base 1.7B")
-        elif qwen_model_installed("base-0.6b"):
-            qwen_status.append("Clone Base 0.6B")
-        self.list.addItem(
-            "Qwen3-TTS Voice Studio: " + (", ".join(qwen_status) if qwen_status else "Not installed")
+        piper_root = models_root() / "piper"
+        user_voices = [
+            voice for voice in PiperProvider.model_paths()
+            if piper_root.resolve() in voice.resolve().parents
+        ]
+        if user_voices:
+            for voice in user_voices:
+                relative = voice.resolve().relative_to(piper_root.resolve()).as_posix()
+                add_component(f"Piper voice • {voice.stem} — Installed", f"piper:{relative}")
+        elif PiperProvider.model_paths():
+            add_component("Piper voice — bundled with the application (managed by installer)")
+        else:
+            add_component("Piper — no local voice installed")
+
+        # Only files in the user Models folder are removable here. A bundled
+        # Kokoro pack ships inside the application and must not offer an uninstall
+        # button that appears to succeed but cannot remove the bundled assets.
+        local_kokoro_root = models_root() / "kokoro"
+        local_kokoro_installed = (
+            local_kokoro_root.exists()
+            and any(path.is_file() for path in local_kokoro_root.rglob("*"))
         )
+        if local_kokoro_installed:
+            add_component(
+                f"Kokoro 82M — User-installed • {len(KokoroProvider().voices())} voices available",
+                "kokoro",
+            )
+        elif KokoroProvider.assets_available():
+            add_component("Kokoro 82M — Bundled with application (not individually removable)")
+        else:
+            add_component("Kokoro 82M — Not installed")
 
-        model_id, filename, size = recommended_model()
-        ai_state = "Installed" if audiobook_ai_installed() else "Not installed"
-        size_gb = size / (1024 ** 3)
-        self.list.addItem(f"Audiobook AI: {ai_state} • {model_id} • ~{size_gb:.1f} GB model")
-        voices = PiperProvider.model_paths()
-        if voices:
-            self.list.addItem("")
-            self.list.addItem("Installed Piper voices:")
-            for voice in voices:
-                self.list.addItem(f"  • {voice.stem}")
+        chat_status = runtime_status()
+        if CHATTERBOX_RUNTIME_DIR.exists():
+            add_component(f"Chatterbox voice engine — {chat_status}", "chatterbox-runtime")
+        else:
+            add_component(f"Chatterbox voice engine — {chat_status}")
+
+        qwen_labels = {
+            "custom-0.6b": "CustomVoice 0.6B",
+            "custom-1.7b": "CustomVoice 1.7B",
+            "design-1.7b": "VoiceDesign 1.7B",
+            "base-0.6b": "Voice Clone Base 0.6B",
+            "base-1.7b": "Voice Clone Base 1.7B",
+        }
+        any_qwen_model = False
+        for kind in QWEN_MODEL_DIRS:
+            if qwen_model_installed(kind):
+                any_qwen_model = True
+                add_component(
+                    f"Qwen3-TTS • {qwen_labels.get(kind, kind)} — Installed",
+                    f"qwen-model:{kind}",
+                )
+        if not any_qwen_model:
+            add_component("Qwen3-TTS Voice Studio — no model installed")
+
+        if QWEN_VENV_ROOT.exists() or QWEN_PYTHON_ROOT.exists():
+            add_component("Qwen3-TTS Python runtime — Installed", "qwen-runtime")
+        else:
+            add_component("Qwen3-TTS Python runtime — Not installed")
+
+        ai_root = models_root() / "audiobook-ai"
+        if ai_root.exists() and any(ai_root.iterdir()):
+            add_component("Audiobook AI — runtime/model files installed", "audiobook-ai")
+        else:
+            add_component("Audiobook AI — Not installed")
+
+        self._update_uninstall_button()
+
+    def _update_uninstall_button(self, *_args) -> None:
+        item = self.list.currentItem() if hasattr(self, "list") else None
+        component_id = item.data(Qt.ItemDataRole.UserRole) if item else None
+        running = bool(self.uninstall_worker and self.uninstall_worker.isRunning())
+        if hasattr(self, "uninstall_button"):
+            self.uninstall_button.setEnabled(bool(component_id) and not running)
+
+    def uninstall_selected_component(self) -> None:
+        item = self.list.currentItem()
+        component_id = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if not component_id:
+            self.status.setText("Select an installed, removable component first.")
+            return
+        answer = QMessageBox.question(
+            self,
+            "Uninstall selected component",
+            f"Remove {item.text()}?\n\n"
+            "Only the selected app-managed component will be removed. The Library, source books, "
+            "generated audiobooks, projects, voice profiles, and settings will be kept. "
+            "If another profile uses this model, reinstall it before generating with that profile.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.uninstall_button.setEnabled(False)
+        self.status.setText(f"Uninstalling {item.text()}…")
+        self.uninstall_worker = UninstallComponentWorker(str(component_id))
+        self.uninstall_worker.finished_ok.connect(self._uninstall_component_ok)
+        self.uninstall_worker.failed.connect(self._uninstall_component_failed)
+        self.uninstall_worker.finished.connect(self._update_uninstall_button)
+        self.uninstall_worker.start()
+
+    def _uninstall_component_ok(self, component_id: str) -> None:
+        self.refresh()
+        self.status.setText(f"Removed component: {component_id}")
+        self._update_uninstall_button()
+
+    def _uninstall_component_failed(self, message: str) -> None:
+        self.status.setText("Uninstall failed. Unrelated files were not intentionally removed.")
+        QMessageBox.warning(self, "Uninstall failed", message)
+        self._update_uninstall_button()
 
     def download_kokoro(self) -> None:
         if KokoroProvider.assets_available():

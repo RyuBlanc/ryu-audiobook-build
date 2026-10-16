@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, Signal, QEasingCurve, QPropertyAnimation
+from PySide6.QtCore import Qt, QThread, Signal, QEasingCurve, QPropertyAnimation, QTimer
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -55,6 +55,15 @@ class ImportBookWorker(QThread):
             chapters = detect_chapters(book.text)
             if not chapters:
                 raise RuntimeError("No readable chapters were found in this file.")
+            source_words = len(book.text.split())
+            chapter_words = sum(len(chapter.text.split()) for chapter in chapters)
+            if source_words >= 1000 and chapter_words < int(source_words * 0.90):
+                raise RuntimeError(
+                    "Chapter detection retained only "
+                    f"{chapter_words:,} of {source_words:,} extracted words. "
+                    "Import was stopped to protect the book from losing content. "
+                    "Review the source text and chapter boundaries, then retry."
+                )
             self.status.emit("Saving the local audiobook project…")
             project = create_project(book.title, self.source_path, chapters)
             self.completed.emit(project)
@@ -155,6 +164,9 @@ class ProjectWorkflow(QMainWindow):
             self.sidebar.addItem(item)
 
         self.sidebar.currentRowChanged.connect(self._sidebar_changed)
+        # Clicking the already-selected row does not emit currentRowChanged.
+        # Keep navigation reliable if another workflow action changed the stack.
+        self.sidebar.itemClicked.connect(self._sidebar_item_clicked)
         body.addWidget(self.sidebar)
 
         self.stack = QStackedWidget()
@@ -242,10 +254,64 @@ class ProjectWorkflow(QMainWindow):
         animation.finished.connect(finish)
         animation.start()
 
-    def _sidebar_changed(self, row: int) -> None:
+    def _sidebar_item_clicked(self, item: QListWidgetItem) -> None:
+        """Recover navigation when the clicked row is already selected."""
+        row = self.sidebar.row(item)
         if row < 0:
             return
-        name = self.sidebar.item(row).data(32)
+        name = str(item.data(32) or "")
+        if name == "Generate":
+            expected = self.generation if self.project else self.import_page
+        elif name == "Library":
+            expected = self.library
+        elif name == "Import":
+            expected = self.import_page
+        elif name == "Chapters":
+            expected = self.editor or self.import_page
+        elif name == "Voice & Narration":
+            expected = self.voice
+        elif name == "Voice Cast":
+            expected = self.voice_cast
+        elif name == "Models":
+            expected = self.stack.widget(4)
+        elif name == "Hardware":
+            expected = self.stack.widget(5)
+        else:
+            return
+        # If currentRowChanged already navigated, do not repeat or refresh twice.
+        if expected is None or self.stack.currentWidget() is not expected:
+            self._sidebar_changed(row)
+
+    def _refresh_generation_context(self) -> None:
+        """Refresh book-dependent fields after the Generate page is already visible."""
+        if not self.project or not self.generation:
+            return
+        page = self.generation
+        page.chapters = self.project.chapters
+        problems: list[str] = []
+        for label, callback in (
+            ("voice profiles", page._refresh_voice_profiles),
+            ("voice cast", page._load_voice_cast_summary),
+            ("chapter sources", page.refresh_chapter_sources),
+        ):
+            try:
+                callback()
+            except Exception as exc:
+                # A stale optional widget/profile must not block navigation.
+                problems.append(f"{label}: {exc}")
+        if problems and hasattr(page, "status"):
+            page.status.setText(
+                "Generate opened, but some details could not be refreshed. "
+                + " | ".join(problems)
+            )
+
+    def _sidebar_changed(self, row: int) -> None:
+        if row < 0 or row >= self.sidebar.count():
+            return
+        item = self.sidebar.item(row)
+        if item is None:
+            return
+        name = item.data(32)
 
         if name == "Library":
             self._show_page(self.library)
@@ -259,21 +325,62 @@ class ProjectWorkflow(QMainWindow):
         elif name == "Voice & Narration":
             self._show_page(self.voice)
         elif name == "Voice Cast":
-            self.voice_cast.refresh_profiles()
+            try:
+                self.voice_cast.refresh_profiles()
+            except Exception:
+                pass
             self._show_page(self.voice_cast)
         elif name == "Generate":
-            if self.project:
-                if self.generation:
-                    self.generation.chapters = self.project.chapters
-                    self.generation._refresh_voice_profiles()
-                    self.generation._load_voice_cast_summary()
-                    self.generation.refresh_chapter_sources()
-                else:
+            try:
+                if not self.project:
+                    # The Library can show a selected book without making it the
+                    # active project. Generate should promote that selected project
+                    # automatically instead of bouncing back to the Library.
+                    selected_projects = self.library._selected_projects()
+                    if selected_projects:
+                        self.open_project(selected_projects[0])
+                        # open_project selects Chapters for editing. Restore the
+                        # Generate row without emitting a nested navigation event;
+                        # this handler will show the generation page below.
+                        generate_row = next(
+                            (
+                                index for index in range(self.sidebar.count())
+                                if self.sidebar.item(index).data(32) == "Generate"
+                            ),
+                            -1,
+                        )
+                        if generate_row >= 0:
+                            self.sidebar.blockSignals(True)
+                            try:
+                                self.sidebar.setCurrentRow(generate_row)
+                            finally:
+                                self.sidebar.blockSignals(False)
+                    if not self.project:
+                        self._show_page(self.library)
+                        QMessageBox.information(
+                            self,
+                            "Open a book first",
+                            "Generate needs an audiobook project. Select a book in Library "
+                            "or import a new book, then select Generate again.",
+                        )
+                        return
+                if self.generation is None:
                     self.ensure_generation_page()
-            if self.generation:
+                if self.generation is None:
+                    raise RuntimeError("The Generate page could not be initialized.")
                 self._show_page(self.generation)
-            else:
+                # Do not run disk/profile/readiness refreshes before showing the page;
+                # this was able to leave the previous page visible if a refresh failed.
+                QTimer.singleShot(75, self._refresh_generation_context)
+            except Exception as exc:
                 self._show_page(self.import_page)
+                QMessageBox.critical(
+                    self,
+                    "Generate page could not be opened",
+                    "Ryu's Audiobook could not open the Generate page.\n\n"
+                    f"Details: {type(exc).__name__}: {exc}\n\n"
+                    "Your imported book and saved chapter text have not been deleted.",
+                )
         elif name == "Models":
             self._show_page(self.stack.widget(4))
         elif name == "Hardware":

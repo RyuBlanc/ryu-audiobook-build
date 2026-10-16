@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
 import json
 import re
 import time
@@ -34,7 +35,7 @@ from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.preview import build_voice_preview
 from app.tts.readiness import build_generation_readiness
 from app.tts.chatterbox_runtime import runtime_ready
-from app.audio.assembler import DEFAULT_AUDIO_BITRATE_KBPS
+from app.audio.assembler import DEFAULT_AUDIO_BITRATE_KBPS, _duration_ms
 from app.tts.resume import inspect_generation_state
 
 
@@ -46,7 +47,8 @@ class VoicePreviewWorker(QThread):
     percent = Signal(int)
 
     def __init__(self, profile, backend, project_folder, profiles, pronunciation_dictionary,
-                 text, output, narration_speed, pacing_profile, dialogue_assignments=None):
+                 text, output, narration_speed, pacing_profile, dialogue_assignments=None,
+                 target_seconds: float | None = 30.0, mix_settings: dict | None = None):
         super().__init__()
         self.profile = profile
         self.backend = backend
@@ -58,6 +60,8 @@ class VoicePreviewWorker(QThread):
         self.narration_speed = narration_speed
         self.pacing_profile = pacing_profile
         self.dialogue_assignments = list(dialogue_assignments or [])
+        self.target_seconds = max(0.0, float(target_seconds or 0.0))
+        self.mix_settings = dict(mix_settings or {})
         self._provider = None
         self._progress_floor = 0
         self._preview_started = 0.0
@@ -166,7 +170,38 @@ class VoicePreviewWorker(QThread):
                 pacing_profile=self.pacing_profile,
                 dialogue_assignments=self.dialogue_assignments,
                 progress_callback=preview_progress,
+                target_seconds=self.target_seconds,
             )
+            if self.mix_settings.get("enabled"):
+                self._emit_percent(91)
+                self.progress.emit("[91%] Mixing selected BGM, narration ducking and story effects…")
+                from app.audio.preview_mixer import mix_voice_preview
+                mixed_output = self.output.with_name(f"{self.output.stem}_full_mix.wav")
+                mix_voice_preview(
+                    result.output_path,
+                    mixed_output,
+                    result.source_text,
+                    background_enabled=bool(self.mix_settings.get("background_enabled", False)),
+                    background_mode=str(self.mix_settings.get("background_mode") or "auto"),
+                    music_style=str(self.mix_settings.get("music_style") or "auto"),
+                    music_variation_id=self.mix_settings.get("music_variation_id"),
+                    background_audio_path=self.mix_settings.get("background_audio_path"),
+                    ambience_audio_path=self.mix_settings.get("ambience_audio_path"),
+                    music_volume=float(self.mix_settings.get("music_volume", 0.12)),
+                    ambience_volume=float(self.mix_settings.get("ambience_volume", 0.06)),
+                    story_effects_enabled=bool(self.mix_settings.get("story_effects_enabled", True)),
+                    story_effect_volume=float(self.mix_settings.get("story_effect_volume", 0.12)),
+                    chapter_transition_sound=bool(self.mix_settings.get("chapter_transition_sound", True)),
+                    is_first_chapter=bool(self.mix_settings.get("is_first_chapter", True)),
+                    is_last_chapter=bool(self.mix_settings.get("is_last_chapter", False)),
+                    sound_cue_style=str(self.mix_settings.get("sound_cue_style") or "classic-book"),
+                    opening_cue_path=self.mix_settings.get("opening_cue_path"),
+                    page_turn_cue_path=self.mix_settings.get("page_turn_cue_path"),
+                    ending_cue_path=self.mix_settings.get("ending_cue_path"),
+                )
+                from dataclasses import replace
+                result = replace(result, output_path=mixed_output)
+                self._emit_percent(98)
             self._emit_percent(100)
             self.progress.emit('[100%] Preview ready.')
             self.finished_ok.emit(result)
@@ -250,6 +285,11 @@ class GenerationPage(QWidget):
         self._eta_last_time: float | None = None
         self._eta_warmup_samples = 0
         self._eta_rates: list[float] = []
+        self._estimated_listening_seconds = 0.0
+        self._estimated_generation_seconds = 0.0
+        self._active_calibration_key: str | None = None
+        self._active_calibration_is_resume = False
+        self._calibration_factor = 2.45
         self.motion_settings = QSettings("RyuBlanc", "Ryu's Audiobook")
         self._reduce_motion_enabled = bool(
             self.motion_settings.value("ui/reduce_motion", False, type=bool)
@@ -332,6 +372,10 @@ class GenerationPage(QWidget):
         overview_layout.addWidget(self.chapter_count)
         overview_layout.addWidget(self.word_count)
         overview_layout.addWidget(self.duration_estimate)
+        self.generation_estimate = QLabel()
+        self.generation_estimate.setWordWrap(True)
+        self.generation_estimate.setObjectName("muted")
+        overview_layout.addWidget(self.generation_estimate)
         overview_layout.addStretch(1)
         root.addWidget(overview)
         self._update_overview()
@@ -489,12 +533,14 @@ class GenerationPage(QWidget):
         self.auto_music_style = QComboBox()
         for label, value in (
             ("Auto-detect from each chapter", "auto"),
-            ("Fantasy / Adventure", "fantasy"),
-            ("Mystery / Suspense", "mystery"),
-            ("Romance / Warm", "romance"),
-            ("Dark / Horror", "dark"),
-            ("Action / Adventure", "action"),
-            ("Calm / Reflective", "calm"),
+            ("Epic Anime Fantasy", "fantasy"),
+            ("Cinematic Mystery / Suspense", "mystery"),
+            ("Emotional Cinematic Drama", "romance"),
+            ("Dark Supernatural Tension", "dark"),
+            ("Heroic Anime Battle", "action"),
+            ("Adventure Journey / Exploration", "calm"),
+            ("High-Energy Anime Rock", "anime-rock"),
+            ("Futuristic Sword-Fantasy / Sci-Fi", "sci-fi"),
         ):
             self.auto_music_style.addItem(label, value)
         saved_style_index = self.auto_music_style.findData(
@@ -503,13 +549,95 @@ class GenerationPage(QWidget):
         self.auto_music_style.setCurrentIndex(max(0, saved_style_index))
         settings_form.addRow("Automatic music style", self.auto_music_style)
 
+        # Original rhythmic cinematic arrangements replace the old harmony-pad
+        # catalogue. Tracks are synthesized only when previewed or exported.
+        self.bgm_variation = QComboBox()
+        self.bgm_variation.setObjectName("bgmCatalogue")
+        self.bgm_variation.setMinimumContentsLength(28)
+        self.bgm_variation.setToolTip(
+            "Choose from 1,344 original cinematic/anime-inspired arrangements: "
+            "driving bass, ostinatos, hybrid percussion, cinematic strings and leads. "
+            "No existing film/anime score is copied; tracks render locally."
+        )
+        self.bgm_variation.addItem("Auto • match each chapter to its story mood", 0)
+        for mood in MOOD_ORDER:
+            for variation_index in range(VARIATIONS_PER_MOOD):
+                info = music_variation_info(mood, variation_index)
+                self.bgm_variation.addItem(
+                    f"#{int(info['id']):04d} • {info['style']} • {info['texture']} • "
+                    f"{info['tempo_bpm']} BPM • {info['arrangement']}",
+                    int(info["id"]),
+                )
+        try:
+            saved_bgm_id = int(audio_state.get("auto_music_variation_id", 0) or 0)
+        except (TypeError, ValueError):
+            saved_bgm_id = 0
+        self.bgm_variation.setCurrentIndex(max(0, self.bgm_variation.findData(saved_bgm_id)))
+        music_catalogue_row = QHBoxLayout()
+        music_catalogue_row.addWidget(self.bgm_variation, 1)
+        self.music_catalogue_preview = QPushButton("▶ Preview selected BGM")
+        self.music_catalogue_preview.clicked.connect(self.preview_catalogue_music)
+        music_catalogue_row.addWidget(self.music_catalogue_preview)
+        self.music_catalogue_container = QWidget()
+        self.music_catalogue_container.setLayout(music_catalogue_row)
+        settings_form.addRow("BGM catalogue (1,344 cinematic arrangements)", self.music_catalogue_container)
+        self._catalogue_preview_path: Path | None = None
+
+        # One cue set keeps opening, page turns and the final close stylistically linked.
         self.chapter_transition_sound = QCheckBox(
-            "Add a short transition sound at every chapter (generated locally)"
+            "Enable linked book opening, chapter page-turns and final book closing"
         )
         self.chapter_transition_sound.setChecked(
             bool(audio_state.get("chapter_transition_sound", True))
         )
         settings_form.addRow("", self.chapter_transition_sound)
+
+        self.sound_cue_style = QComboBox()
+        self.sound_cue_style.setObjectName("soundCueStyle")
+        for cue_id, cue_label in CUE_STYLE_LABELS.items():
+            self.sound_cue_style.addItem(cue_label, cue_id)
+        saved_cue_style = str(audio_state.get("sound_cue_style") or "classic-book")
+        self.sound_cue_style.setCurrentIndex(max(0, self.sound_cue_style.findData(saved_cue_style)))
+        settings_form.addRow("Linked book cue set", self.sound_cue_style)
+
+        cue_preview_row = QHBoxLayout()
+        self.preview_opening_cue = QPushButton("▶ Preview opening")
+        self.preview_opening_cue.clicked.connect(lambda: self.preview_cue("opening"))
+        cue_preview_row.addWidget(self.preview_opening_cue)
+        self.preview_page_cue = QPushButton("▶ Preview next chapter")
+        self.preview_page_cue.clicked.connect(lambda: self.preview_cue("page"))
+        cue_preview_row.addWidget(self.preview_page_cue)
+        self.preview_ending_cue = QPushButton("▶ Preview book closing")
+        self.preview_ending_cue.clicked.connect(lambda: self.preview_cue("ending"))
+        cue_preview_row.addWidget(self.preview_ending_cue)
+        settings_form.addRow("Audition book cues", cue_preview_row)
+
+        custom_cues_layout = QVBoxLayout()
+        custom_cues_layout.setContentsMargins(0, 0, 0, 0)
+        custom_cues_layout.setSpacing(5)
+        self.opening_cue_path = QLineEdit(str(audio_state.get("opening_cue_path") or ""))
+        self.opening_cue_path.setPlaceholderText("Optional custom book-opening audio…")
+        self.page_turn_cue_path = QLineEdit(str(audio_state.get("page_turn_cue_path") or ""))
+        self.page_turn_cue_path.setPlaceholderText("Optional custom chapter page-turn audio…")
+        self.ending_cue_path = QLineEdit(str(audio_state.get("ending_cue_path") or ""))
+        self.ending_cue_path.setPlaceholderText("Optional custom book-closing audio…")
+        self._cue_path_fields = {
+            "opening": self.opening_cue_path,
+            "page": self.page_turn_cue_path,
+            "ending": self.ending_cue_path,
+        }
+        for kind, field in self._cue_path_fields.items():
+            row = QHBoxLayout()
+            row.addWidget(field, 1)
+            browse = QPushButton("Browse…")
+            browse.clicked.connect(lambda _checked=False, cue_kind=kind: self.choose_cue_audio(cue_kind))
+            row.addWidget(browse)
+            custom_cues_layout.addLayout(row)
+        self.custom_cues_container = QWidget()
+        self.custom_cues_container.setLayout(custom_cues_layout)
+        settings_form.addRow("Custom opening / flip / closing audio", self.custom_cues_container)
+        self.sound_cue_style.currentIndexChanged.connect(self._toggle_custom_cue_fields)
+        self._toggle_custom_cue_fields()
 
         self.story_effects_enabled = QCheckBox(
             "Add story-aware sound effects (footsteps, doors, weather, impacts, magic, etc.)"
@@ -616,18 +744,33 @@ class GenerationPage(QWidget):
             "Manual: use your own music or ambience. Effects stay beneath narration."
         )
         self.background_audio_hint.setToolTip(
-            "Automatic mode selects from 1,008 deterministic local BGM recipes "
-            "(6 moods × 8 timbres × 7 tempos × 3 harmony patterns), generating only "
-            "the variations the book needs rather than downloading 1,000 files or "
-            "shuffling random tracks. Mood detection uses chapter text; sound effects "
-            "are placed from explicit text cues and approximate audio timing. Manual "
-            "mode uses music/ambience files you have permission to use. Story effects "
-            "can be enabled independently. Review the final mix before publishing."
+            "Automatic mode selects from 1,344 original local cinematic arrangements "
+            "(8 story styles × 8 rhythmic textures × 7 tempos × 3 rhythmic arrangements). "
+            "These use bass movement, ostinatos, percussion, strings and melodic leads "
+            "instead of the retired quiet harmony-pad recipe. Tracks render only as needed. "
+            "The linked cue set adds an opening, chapter page turns and a different closing; "
+            "choose a preset or supply your own three recordings. Use only music/ambience "
+            "you have permission to use and review the final mix before publishing."
         )
         self.background_audio_hint.setWordWrap(True)
         self.background_audio_hint.setObjectName("muted")
         settings_form.addRow("", self.background_audio_hint)
         self.background_audio_enabled.toggled.connect(self._toggle_background_audio_controls)
+        self.background_audio_enabled.toggled.connect(self._update_overview)
+        self.background_audio_mode.currentIndexChanged.connect(self._update_overview)
+        self.auto_music_style.currentIndexChanged.connect(self._update_overview)
+        self.bgm_variation.currentIndexChanged.connect(self._update_overview)
+        self.chapter_transition_sound.toggled.connect(self._update_overview)
+        self.sound_cue_style.currentIndexChanged.connect(self._update_overview)
+        for cue_path_field in self._cue_path_fields.values():
+            cue_path_field.textChanged.connect(self._update_overview)
+        self.story_effects_enabled.toggled.connect(self._update_overview)
+        self.story_effect_volume.valueChanged.connect(self._update_overview)
+        self.background_audio_volume.valueChanged.connect(self._update_overview)
+        self.ambience_audio_volume.valueChanged.connect(self._update_overview)
+        self.narration_speed.currentIndexChanged.connect(self._update_overview)
+        self.pacing_profile.currentIndexChanged.connect(self._update_overview)
+        self.voice_profile.currentIndexChanged.connect(self._update_overview)
         self._toggle_background_audio_controls(self.background_audio_enabled.isChecked())
 
         self.pacing_hint = QLabel(
@@ -675,6 +818,23 @@ class GenerationPage(QWidget):
         preview_source_row.addWidget(self.preview_chapter, 1)
         preview_layout.addLayout(preview_source_row)
 
+        preview_options_row = QHBoxLayout()
+        preview_options_row.addWidget(QLabel("Preview length"))
+        self.preview_duration = QComboBox()
+        for seconds in (15, 30, 60):
+            self.preview_duration.addItem(f"{seconds} seconds", seconds)
+        self.preview_duration.setCurrentIndex(1)
+        preview_options_row.addWidget(self.preview_duration)
+        self.preview_mix_enabled = QCheckBox("Include selected BGM, story effects and chapter/end cues")
+        self.preview_mix_enabled.setChecked(bool(audio_state.get("preview_include_sound_design", True)))
+        self.preview_mix_enabled.setToolTip(
+            "When enabled, the generated sample auditions narration with the selected "
+            "background music/ambience, ducking, story effects and any page-turn or final-book cue. "
+            "Turn it off for a dry voice-only comparison."
+        )
+        preview_options_row.addWidget(self.preview_mix_enabled, 1)
+        preview_layout.addLayout(preview_options_row)
+
         preview_actions = QHBoxLayout()
         self.preview_button = QPushButton("▶  Generate Voice Preview")
         self.preview_button.clicked.connect(self.preview)
@@ -690,7 +850,7 @@ class GenerationPage(QWidget):
         preview_layout.addLayout(preview_actions)
 
         preview_time_row = QHBoxLayout()
-        self.preview_status = QLabel("Generate a preview to listen to the selected voice.")
+        self.preview_status = QLabel("Generate a 15/30/60-second preview; optionally include the current soundtrack and effects.")
         self.preview_time = QLabel("0:00 / 0:00")
         preview_time_row.addWidget(self.preview_status, 1)
         preview_time_row.addWidget(self.preview_time)
@@ -1355,13 +1515,81 @@ class GenerationPage(QWidget):
     def _update_overview(self) -> None:
         words = sum(len(ch.text.split()) for ch in self.chapters)
         speed = float(self.narration_speed.currentData() or 0.90) if hasattr(self, "narration_speed") else 0.90
-        effective_wpm = max(60.0, 150.0 * speed)
-        minutes = max(1, round(words / effective_wpm))
+        effective_wpm = max(60.0, 170.0 * speed)
+        listening_seconds = words * 60.0 / effective_wpm
+        if hasattr(self, "motion_settings") and hasattr(self, "voice_profile"):
+            try:
+                key = self._generation_calibration_key()
+                observed_seconds_per_word = float(
+                    self.motion_settings.value(f"{key}/seconds_per_word", 0.0) or 0.0
+                )
+                if observed_seconds_per_word > 0:
+                    listening_seconds = words * observed_seconds_per_word
+            except (TypeError, ValueError, AttributeError):
+                pass
+        # Include the actual transition/end cues in the duration estimate when
+        # this book is configured to add them.
+        if (
+            hasattr(self, "chapter_transition_sound")
+            and self.chapter_transition_sound.isChecked()
+            and len(self.chapters) > 0
+        ):
+            from app.audio.sound_design import ENDING_SECONDS, OPENING_SECONDS, PAGE_TURN_SECONDS
+            listening_seconds += OPENING_SECONDS + max(0, len(self.chapters) - 1) * PAGE_TURN_SECONDS + ENDING_SECONDS
+            if str(self.sound_cue_style.currentData() or "classic-book") == "custom":
+                for path_field, times_used, default_seconds in (
+                    (self.opening_cue_path, 1, OPENING_SECONDS),
+                    (self.page_turn_cue_path, max(0, len(self.chapters) - 1), PAGE_TURN_SECONDS),
+                    (self.ending_cue_path, 1, ENDING_SECONDS),
+                ):
+                    try:
+                        custom_path = Path(path_field.text().strip()).expanduser()
+                        if custom_path.is_file():
+                            listening_seconds += times_used * (
+                                _duration_ms(custom_path) / 1000.0 - default_seconds
+                            )
+                    except Exception:
+                        pass
+        self._estimated_listening_seconds = max(0.0, listening_seconds)
+        listening_minutes = max(1, round(self._estimated_listening_seconds / 60.0))
         self.chapter_count.setText(f"Chapters: {len(self.chapters)}")
         self.word_count.setText(f"Words: {words:,}")
         self.duration_estimate.setText(
-            f"Estimated length: {minutes // 60}h {minutes % 60:02d}m at {speed:.2f}× narration speed"
+            f"Estimated listening length: {listening_minutes // 60}h {listening_minutes % 60:02d}m "
+            f"at {speed:.2f}× narration speed"
         )
+        self.duration_estimate.setToolTip(
+            "Estimated duration of the finished narration at the selected playback speed. "
+            "This is not the time required to generate it. This estimate learns actual seconds-per-word "
+            "from completed books using the same voice and settings and includes enabled chapter/end cues."
+        )
+        factor = self._calibration_factor
+        samples = 0
+        try:
+            key = self._generation_calibration_key()
+            stored_factor = self.motion_settings.value(f"{key}/realtime_factor", None)
+            if stored_factor is not None and float(stored_factor) > 0:
+                factor = max(0.4, min(20.0, float(stored_factor)))
+                samples = int(self.motion_settings.value(f"{key}/samples", 0) or 0)
+        except (TypeError, ValueError, AttributeError):
+            pass
+        self._estimated_generation_seconds = self._estimated_listening_seconds * factor
+        processing_minutes = max(1, round(self._estimated_generation_seconds / 60.0))
+        confidence = (
+            f"learned from {samples} completed export(s)"
+            if samples > 0
+            else "initial estimate from your observed 18:55 processing / 7:43 audio run"
+        )
+        if hasattr(self, "generation_estimate"):
+            self.generation_estimate.setText(
+                f"Estimated generation time: about {processing_minutes // 60}h {processing_minutes % 60:02d}m "
+                f"({factor:.2f}× listening duration; {confidence})"
+            )
+            self.generation_estimate.setToolTip(
+                "Includes voice synthesis, sound design and M4B packaging. The estimate starts from "
+                "your last observed ~2.45× real-time run, then learns a separate timing ratio and "
+                "listening duration for this voice/backend/speed/pacing/soundtrack configuration on this PC."
+            )
 
     def _default_output(self) -> Path | None:
         if not self.project_folder:
@@ -1433,13 +1661,44 @@ class GenerationPage(QWidget):
             return saved
         return value
 
+    def _generation_calibration_key(self) -> str:
+        profile = self._selected_profile()
+        recipe = {
+            "profile": getattr(profile, "name", "unselected"),
+            "provider": getattr(profile, "provider", "unknown"),
+            "voice": getattr(profile, "voice_id", "default"),
+            "backend": self.backend.currentData() if hasattr(self, "backend") else "automatic",
+            "speed": float(self.narration_speed.currentData() or 1.0) if hasattr(self, "narration_speed") else 1.0,
+            "pacing": self.pacing_profile.currentData() if hasattr(self, "pacing_profile") else "natural",
+            "bgm_enabled": self.background_audio_enabled.isChecked() if hasattr(self, "background_audio_enabled") else False,
+            "bgm_mode": self.background_audio_mode.currentData() if hasattr(self, "background_audio_mode") else "off",
+            "bgm_style": self.auto_music_style.currentData() if hasattr(self, "auto_music_style") else "auto",
+            "bgm_recipe": self.bgm_variation.currentData() if hasattr(self, "bgm_variation") else 0,
+            "bgm_file": self.background_audio_path.text().strip() if hasattr(self, "background_audio_path") else "",
+            "ambience_file": self.ambience_audio_path.text().strip() if hasattr(self, "ambience_audio_path") else "",
+            "bgm_volume": float(self.background_audio_volume.value()) if hasattr(self, "background_audio_volume") else 18.0,
+            "ambience_volume": float(self.ambience_audio_volume.value()) if hasattr(self, "ambience_audio_volume") else 10.0,
+            "story_effects": self.story_effects_enabled.isChecked() if hasattr(self, "story_effects_enabled") else False,
+            "story_effect_volume": float(self.story_effect_volume.value()) if hasattr(self, "story_effect_volume") else 22.0,
+            "chapter_cues": self.chapter_transition_sound.isChecked() if hasattr(self, "chapter_transition_sound") else False,
+            "cue_style": self.sound_cue_style.currentData() if hasattr(self, "sound_cue_style") else "classic-book",
+            "opening_cue_path": self.opening_cue_path.text().strip() if hasattr(self, "opening_cue_path") else "",
+            "page_turn_cue_path": self.page_turn_cue_path.text().strip() if hasattr(self, "page_turn_cue_path") else "",
+            "ending_cue_path": self.ending_cue_path.text().strip() if hasattr(self, "ending_cue_path") else "",
+        }
+        signature = json.dumps(recipe, sort_keys=True, ensure_ascii=True)
+        digest = hashlib.sha256(signature.encode("utf-8")).hexdigest()[:24]
+        return f"generation/calibration/{digest}"
+
     def _toggle_background_audio_controls(self, enabled: bool) -> None:
         enabled = bool(enabled)
         auto_mode = enabled and self.background_audio_mode.currentData() == "auto"
         manual_mode = enabled and self.background_audio_mode.currentData() == "manual"
         self.background_audio_mode.setEnabled(enabled)
         self.auto_music_style.setEnabled(auto_mode)
-        self.chapter_transition_sound.setEnabled(enabled)
+        self.bgm_variation.setEnabled(auto_mode)
+        self.music_catalogue_preview.setEnabled(auto_mode)
+        # Book cue controls stay enabled even when background music is turned off.
         # Hide manual track rows entirely in Automatic mode instead of leaving
         # four disabled rows on screen. The rows return when Manual is selected.
         for widget, visible in (
@@ -1447,6 +1706,7 @@ class GenerationPage(QWidget):
             (self.background_audio_volume, auto_mode or manual_mode),
             (self.ambience_file_container, manual_mode),
             (self.ambience_audio_volume, manual_mode),
+            (self.music_catalogue_container, auto_mode),
         ):
             self._background_audio_form.setRowVisible(widget, visible)
         for widget in (
@@ -1473,6 +1733,135 @@ class GenerationPage(QWidget):
         if path:
             self.background_audio_path.setText(str(Path(path)))
             self.status.setText("Background track selected. Enable Background music to include it in the final M4B.")
+
+    def _toggle_custom_cue_fields(self, *_args) -> None:
+        self.custom_cues_container.setVisible(
+            str(self.sound_cue_style.currentData() or "classic-book") == "custom"
+        )
+
+    def choose_cue_audio(self, kind: str) -> None:
+        field = self._cue_path_fields.get(kind)
+        if field is None:
+            self.status.setText(f"Unknown sound cue: {kind}")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"Select custom {kind} cue",
+            field.text().strip(),
+            "Audio Files (*.wav *.mp3 *.m4a *.aac *.flac *.ogg *.opus *.wma);;All Files (*.*)",
+        )
+        if path:
+            field.setText(str(Path(path).expanduser()))
+            self.status.setText(f"Custom {kind} cue selected. Preview it before generation.")
+
+    def preview_cue(self, kind: str) -> None:
+        from app.audio.sound_design import (
+            CUE_STYLE_LABELS,
+            VARIATIONS_PER_MOOD,
+            detect_chapter_mood,
+            select_music_variation,
+            synthesize_audiobook_ending,
+            synthesize_opening_cue,
+            synthesize_page_turn,
+        )
+        if kind not in {"opening", "page", "ending"}:
+            self.status.setText(f"Unknown sound cue: {kind}")
+            return
+        style = str(self.sound_cue_style.currentData() or "classic-book")
+        field = self._cue_path_fields[kind]
+        candidate = Path(field.text().strip()).expanduser() if field.text().strip() else None
+        if style == "custom" and candidate and candidate.is_file():
+            cue = candidate.resolve()
+        else:
+            selected_id = int(self.bgm_variation.currentData() or 0)
+            if selected_id > 0:
+                variant = (selected_id - 1) % VARIATIONS_PER_MOOD
+            else:
+                # In Auto mode, audition the variant selected for the relevant
+                # book chapter so this standalone sound matches the final export.
+                if kind == "opening":
+                    chapter_index = 0
+                elif kind == "ending":
+                    chapter_index = max(0, len(self.chapters) - 1)
+                else:
+                    chapter_index = max(1, self.preview_chapter.currentIndex())
+                    chapter_index = min(chapter_index, max(0, len(self.chapters) - 1))
+                chapter = self.chapters[chapter_index] if self.chapters else None
+                title = chapter.title if chapter else self.title.text().strip()
+                text = chapter.text if chapter else ""
+                mood = detect_chapter_mood(
+                    title, text, str(self.auto_music_style.currentData() or "auto")
+                )
+                variant = select_music_variation(title, text, mood)
+            generated_style = "classic-book" if style == "custom" else style
+            safe_style = re.sub(r"[^a-z0-9_-]+", "-", generated_style.casefold())
+            cue = (
+                Path(tempfile.gettempdir())
+                / f"ryu_audiobook_cue_preview_{kind}_{safe_style}_{variant:03d}.wav"
+            )
+            try:
+                if kind == "opening":
+                    synthesize_opening_cue(cue, variation_index=variant, cue_style=generated_style)
+                elif kind == "page":
+                    synthesize_page_turn(cue, variation_index=variant, cue_style=generated_style)
+                else:
+                    synthesize_audiobook_ending(cue, variation_index=variant, cue_style=generated_style)
+            except Exception as exc:
+                self.status.setText(f"Could not prepare the {kind} cue preview: {exc}")
+                return
+        if not cue.is_file():
+            self.status.setText(f"No audio was found for the {kind} cue.")
+            return
+        self.music_player.stop()
+        self.music_player.setSource(QUrl.fromLocalFile(str(cue.resolve())))
+        self.music_player.play()
+        cue_names = {
+            "opening": "book opening",
+            "page": "next-chapter page turn",
+            "ending": "book closing",
+        }
+        self.status.setText(
+            f"Previewing {cue_names[kind]} • preset: {CUE_STYLE_LABELS.get(style, style)}"
+        )
+
+    def preview_catalogue_music(self) -> None:
+        if self.music_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            current = self.music_player.source().toLocalFile()
+            if self._catalogue_preview_path and current == str(self._catalogue_preview_path):
+                self.music_player.pause()
+                return
+        index = self.preview_chapter.currentIndex()
+        chapter = self.chapters[index] if 0 <= index < len(self.chapters) else None
+        selected_id = int(self.bgm_variation.currentData() or 0)
+        from app.audio.sound_design import (
+            MOOD_ORDER, VARIATIONS_PER_MOOD, detect_chapter_mood,
+            select_music_variation, synthesize_music_bed,
+        )
+        if selected_id > 0:
+            mood_index, variation = divmod(selected_id - 1, VARIATIONS_PER_MOOD)
+            mood = MOOD_ORDER[mood_index]
+        else:
+            title = chapter.title if chapter else self.title.text().strip()
+            text = chapter.text if chapter else ""
+            mood = detect_chapter_mood(title, text, str(self.auto_music_style.currentData() or "auto"))
+            variation = select_music_variation(title, text, mood)
+        cache = Path(tempfile.gettempdir()) / "ryu_audiobook_bgm_previews"
+        cache.mkdir(parents=True, exist_ok=True)
+        preview_path = cache / f"catalogue-{mood}-{variation:03d}.wav"
+        try:
+            self.status.setText(f"Preparing BGM preview • {mood.title()} • recipe #{selected_id or variation + 1}…")
+            if not preview_path.is_file() or preview_path.stat().st_size < 1024:
+                synthesize_music_bed(preview_path, mood, variation_index=variation)
+            self._catalogue_preview_path = preview_path
+            self.music_player.stop()
+            self.music_player.setSource(QUrl.fromLocalFile(str(preview_path.resolve())))
+            self.music_player.play()
+            self.status.setText(
+                f"Previewing BGM • {mood.title()} • recipe #{selected_id or variation + 1}. "
+                "Use Voice Preview to hear the track beneath narration."
+            )
+        except Exception as exc:
+            self.status.setText(f"BGM preview failed: {exc}")
 
     def preview_background_audio(self) -> None:
         self._preview_audio_layer(self.background_audio_path, "background music")
@@ -1504,10 +1893,14 @@ class GenerationPage(QWidget):
         self.status.setText(f"Previewing {label}: {Path(value).name}")
 
     def _background_music_state_changed(self, state) -> None:
-        if state == QMediaPlayer.PlaybackState.PlayingState:
-            self.background_audio_preview.setText("Ⅱ Pause Track")
-        else:
-            self.background_audio_preview.setText("▶ Preview Track")
+        playing = state == QMediaPlayer.PlaybackState.PlayingState
+        if hasattr(self, "background_audio_preview"):
+            self.background_audio_preview.setText("Ⅱ Pause Track" if playing else "▶ Preview Track")
+        if hasattr(self, "music_catalogue_preview"):
+            current = self.music_player.source().toLocalFile()
+            catalogue = str(self._catalogue_preview_path) if self._catalogue_preview_path else ""
+            if catalogue and current == catalogue:
+                self.music_catalogue_preview.setText("Ⅱ Pause BGM" if playing else "▶ Preview selected BGM")
 
     def choose_output(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -1582,11 +1975,35 @@ class GenerationPage(QWidget):
         if backend == 'automatic':
             backend = profile.backend
 
+        preview_seconds = int(self.preview_duration.currentData() or 30)
+        selected_bgm_id = int(self.bgm_variation.currentData() or 0)
+        mix_settings = {
+            "enabled": self.preview_mix_enabled.isChecked(),
+            "background_enabled": True,
+            "background_mode": str(self.background_audio_mode.currentData() or "auto"),
+            "music_style": str(self.auto_music_style.currentData() or "auto"),
+            "music_variation_id": selected_bgm_id or None,
+            "background_audio_path": self.background_audio_path.text().strip(),
+            "ambience_audio_path": self.ambience_audio_path.text().strip(),
+            "music_volume": float(self.background_audio_volume.value()) / 100.0,
+            "ambience_volume": float(self.ambience_audio_volume.value()) / 100.0,
+            "story_effects_enabled": self.story_effects_enabled.isChecked(),
+            "story_effect_volume": float(self.story_effect_volume.value()) / 100.0,
+            "chapter_transition_sound": self.chapter_transition_sound.isChecked(),
+            "is_first_chapter": index == 0,
+            "is_last_chapter": index == len(self.chapters) - 1,
+            "sound_cue_style": str(self.sound_cue_style.currentData() or "classic-book"),
+            "opening_cue_path": self.opening_cue_path.text().strip(),
+            "page_turn_cue_path": self.page_turn_cue_path.text().strip(),
+            "ending_cue_path": self.ending_cue_path.text().strip(),
+        }
         self.preview_worker = VoicePreviewWorker(
             profile, backend, self.project_folder, self._current_profiles(), pronunciation_dictionary,
             text, output, float(self.narration_speed.currentData() or 0.90),
             self.pacing_profile.currentData() or 'natural',
             dialogue_assignments=getattr(chapter, "dialogue_assignments", []),
+            target_seconds=preview_seconds,
+            mix_settings=mix_settings,
         )
         self.preview_worker.progress.connect(self._preview_worker_progress)
         self.preview_worker.percent.connect(self.preview_loading.setValue)
@@ -1618,11 +2035,14 @@ class GenerationPage(QWidget):
         self.preview_play_button.setText('▶  Play Preview')
         voice_summary = ', '.join(result.voices_used) if result.voices_used else 'Narrator'
         self.preview_loading.setValue(100)
+        mix_label = " • Full soundtrack mix" if self.preview_mix_enabled.isChecked() else " • Dry voice"
         self.preview_status.setText(
-            f'100% • Preview ready • {result.segments} narration segment(s) • Voices: {voice_summary}'
+            f'100% • Preview ready{mix_label} • {result.segments} narration segment(s) • Voices: {voice_summary}'
         )
         self.status.setText(
-            'Preview generated from the current pronunciation, voice cast, speed and pacing settings.'
+            "Preview generated with the current voice, pronunciation, pacing and selected sound design."
+            if self.preview_mix_enabled.isChecked()
+            else "Dry voice preview generated with the current voice and narration settings."
         )
 
     def _preview_worker_failed(self, message: str) -> None:
@@ -1883,6 +2303,10 @@ class GenerationPage(QWidget):
         background_audio_mode = "off"
         auto_music_style = str(self.auto_music_style.currentData() or "auto")
         chapter_transition_sound = bool(self.chapter_transition_sound.isChecked())
+        sound_cue_style = str(self.sound_cue_style.currentData() or "classic-book")
+        opening_cue_path = self.opening_cue_path.text().strip() or None
+        page_turn_cue_path = self.page_turn_cue_path.text().strip() or None
+        ending_cue_path = self.ending_cue_path.text().strip() or None
         if self.background_audio_enabled.isChecked():
             background_audio_mode = str(self.background_audio_mode.currentData() or "auto")
             if background_audio_mode == "manual":
@@ -1950,7 +2374,13 @@ class GenerationPage(QWidget):
                 "background_audio_enabled": self.background_audio_enabled.isChecked(),
                 "background_audio_mode": str(self.background_audio_mode.currentData() or "auto"),
                 "auto_music_style": str(self.auto_music_style.currentData() or "auto"),
+                "auto_music_variation_id": int(self.bgm_variation.currentData() or 0),
+                "preview_include_sound_design": self.preview_mix_enabled.isChecked(),
                 "chapter_transition_sound": self.chapter_transition_sound.isChecked(),
+                "sound_cue_style": str(self.sound_cue_style.currentData() or "classic-book"),
+                "opening_cue_path": self.opening_cue_path.text().strip(),
+                "page_turn_cue_path": self.page_turn_cue_path.text().strip(),
+                "ending_cue_path": self.ending_cue_path.text().strip(),
                 "story_effects_enabled": self.story_effects_enabled.isChecked(),
                 "story_effect_volume": float(self.story_effect_volume.value()) / 100.0,
                 "background_audio_path": self.background_audio_path.text().strip(),
@@ -1974,6 +2404,9 @@ class GenerationPage(QWidget):
         self._eta_last_time = time.monotonic()
         self.generation_phase = "synthesis"
         self.started_at = time.monotonic()
+        self._active_calibration_key = self._generation_calibration_key()
+        self._active_calibration_is_resume = bool(is_resume)
+        self._update_overview()
         self.timer.start(1000)
         self._set_generation_locked(True)
         self.cancel_button.setEnabled(True)
@@ -1995,6 +2428,7 @@ class GenerationPage(QWidget):
             "year": self.year.text().strip(),
             "genre": self.genre.value(),
         }
+        selected_bgm_id = int(self.bgm_variation.currentData() or 0)
         self.manager = GenerationManager(
             provider, voice, self.chapters, self.audio_root,
             on_progress=lambda *args: self.signals.progress.emit(*args),
@@ -2012,9 +2446,14 @@ class GenerationPage(QWidget):
             background_audio_fade_out=float(self.background_audio_fade_out.value()),
             background_audio_mode=background_audio_mode,
             auto_music_style=auto_music_style,
+            auto_music_variation=selected_bgm_id if selected_bgm_id > 0 else None,
             chapter_transition_sound=chapter_transition_sound,
             story_effects_enabled=self.story_effects_enabled.isChecked(),
             story_effect_volume=float(self.story_effect_volume.value()) / 100.0,
+            sound_cue_style=sound_cue_style,
+            opening_cue_path=Path(opening_cue_path) if opening_cue_path else None,
+            page_turn_cue_path=Path(page_turn_cue_path) if page_turn_cue_path else None,
+            ending_cue_path=Path(ending_cue_path) if ending_cue_path else None,
         )
         self.manager.start(
             output,
@@ -2051,14 +2490,21 @@ class GenerationPage(QWidget):
             self.last_progress_value = completed_work
             self.initial_progress_value = completed_work
             baseline_rate = None
+            # Start with the persisted end-to-end estimate for this voice/settings
+            # signature. Live chunk measurements refine it as this book progresses.
             try:
-                provider = self.manager.provider if self.manager else None
-                estimated_cpm = float(getattr(provider, "estimated_chars_per_minute", 0) or 0)
-                if estimated_cpm > 0:
-                    baseline_rate = estimated_cpm / 60.0
+                if self._estimated_generation_seconds > 0:
+                    self._eta_ema_sec_per_unit = (
+                        self._estimated_generation_seconds / max(1, work_total)
+                    )
+                else:
+                    provider = self.manager.provider if self.manager else None
+                    estimated_cpm = float(getattr(provider, "estimated_chars_per_minute", 0) or 0)
+                    if estimated_cpm > 0:
+                        baseline_rate = estimated_cpm / 60.0
+                    self._eta_ema_sec_per_unit = (1.0 / baseline_rate) if baseline_rate else None
             except Exception:
-                baseline_rate = None
-            self._eta_ema_sec_per_unit = (1.0 / baseline_rate) if baseline_rate else None
+                self._eta_ema_sec_per_unit = None
             self._eta_warmup_samples = 0
             self._eta_rates = []
             self._eta_last_work = completed_work
@@ -2233,12 +2679,46 @@ class GenerationPage(QWidget):
             save_state(self.project_folder, state)
 
         if summary.output_path:
+            calibration_summary = ""
+            try:
+                if (
+                    not self._active_calibration_is_resume
+                    and self.started_at is not None
+                    and summary.output_path.is_file()
+                ):
+                    elapsed_seconds = max(1.0, time.monotonic() - self.started_at)
+                    listening_seconds = max(1.0, _duration_ms(summary.output_path) / 1000.0)
+                    words = max(1, sum(len(chapter.text.split()) for chapter in self.chapters))
+                    actual_factor = max(0.4, min(20.0, elapsed_seconds / listening_seconds))
+                    seconds_per_word = max(0.05, min(5.0, listening_seconds / words))
+                    key = self._active_calibration_key or self._generation_calibration_key()
+                    old_factor = self.motion_settings.value(f"{key}/realtime_factor", None)
+                    old_word_rate = self.motion_settings.value(f"{key}/seconds_per_word", None)
+                    old_samples = int(self.motion_settings.value(f"{key}/samples", 0) or 0)
+                    if old_factor is not None and old_samples > 0:
+                        actual_factor = 0.35 * actual_factor + 0.65 * float(old_factor)
+                    if old_word_rate is not None and old_samples > 0:
+                        seconds_per_word = 0.35 * seconds_per_word + 0.65 * float(old_word_rate)
+                    self.motion_settings.setValue(f"{key}/realtime_factor", actual_factor)
+                    self.motion_settings.setValue(f"{key}/seconds_per_word", seconds_per_word)
+                    self.motion_settings.setValue(f"{key}/samples", old_samples + 1)
+                    self.motion_settings.sync()
+                    self._update_overview()
+                    calibration_summary = (
+                        f" Timing calibration updated: {elapsed_seconds / 60.0:.1f} min processing / "
+                        f"{listening_seconds / 60.0:.1f} min listening."
+                    )
+            except Exception as exc:
+                calibration_summary = f" Timing calibration could not be saved ({exc})."
             self.progress.setValue(self.progress.maximum())
             self.stage.setText("Audiobook ready")
             self.result_label.setText(f"✓ Finished M4B\n{summary.output_path}")
             self.play_button.setEnabled(True)
             self.open_button.setEnabled(True)
-            self.status.setText("Audiobook created successfully. Intermediate generation audio has been cleaned.")
+            self.status.setText(
+                "Audiobook created successfully. Intermediate generation audio has been cleaned."
+                + calibration_summary
+            )
         elif summary.packaging_failed:
             self.stage.setText("M4B packaging failed")
             error = f"\n\nPackaging error: {summary.packaging_error}" if summary.packaging_error else ""

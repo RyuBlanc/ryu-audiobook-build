@@ -74,6 +74,9 @@ ASSETS = ROOT / "assets"
 LOGO_SVG = ASSETS / "ryu_audiobook_logo.svg"
 LOGO_PNG = ASSETS / "ryu_audiobook_logo.png"
 LOGO_ICO = ASSETS / "ryu_audiobook_logo.ico"
+DRAGON_MASTER_PNG = ASSETS / "dragon_four_winged.png"
+DRAGON_CROSS_PNG = ASSETS / "dragon_cross.png"
+DRAGON_CURSOR_PNG = ASSETS / "dragon_cursor.png"
 
 
 def build_logo_assets() -> None:
@@ -111,6 +114,20 @@ def build_logo_assets() -> None:
             raise RuntimeError("Generated application PNG is unexpectedly small.")
         if LOGO_ICO.stat().st_size < 1024:
             raise RuntimeError("Generated application icon is unexpectedly small.")
+
+        # Use the supplied four-winged dragon artwork, not a replacement SVG.
+        # It is already transparent and cursor-sized; copying it preserves the
+        # silhouette and wing outline without redrawing or cropping it.
+        if not DRAGON_MASTER_PNG.is_file():
+            raise RuntimeError(f"Missing supplied dragon artwork: {DRAGON_MASTER_PNG}")
+        for output_png in (DRAGON_CROSS_PNG, DRAGON_CURSOR_PNG):
+            with Image.open(DRAGON_MASTER_PNG) as source:
+                dragon_image = source.convert("RGBA")
+                if dragon_image.width < 24 or dragon_image.height < 24:
+                    raise RuntimeError("Supplied four-winged dragon artwork is too small.")
+                dragon_image.save(output_png, format="PNG", optimize=True)
+            if output_png.stat().st_size < 512:
+                raise RuntimeError(f"Generated dragon UI asset is unexpectedly small: {output_png}")
     finally:
         if QGuiApplication.instance() is qt_app:
             qt_app.quit()
@@ -163,6 +180,7 @@ args = [
     "--hidden-import=PySide6.QtGui",
     "--hidden-import=PySide6.QtWidgets",
     "--hidden-import=PySide6.QtMultimedia",
+    "--hidden-import=PySide6.QtSvg",
     "--hidden-import=piper",
     "--hidden-import=onnxruntime",
     "--hidden-import=kokoro_onnx",
@@ -172,6 +190,8 @@ args = [
     f"--additional-hooks-dir={HOOKS}",
     f"--add-data={ROOT / "requirements-voice-cloning.txt"};.",
     f"--add-data={LOGO_PNG};assets",
+    f"--add-data={DRAGON_CROSS_PNG};assets",
+    f"--add-data={DRAGON_CURSOR_PNG};assets",
     f"--add-data={ROOT / "app" / "tts" / "chatterbox_worker.py"};app/tts",
     f"--add-data={ROOT / "app" / "tts" / "expression.py"};app/tts",
     f"--add-data={ROOT / "app" / "tts" / "qwen_character_worker.py"};app/tts",

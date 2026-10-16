@@ -25,6 +25,11 @@ def settings_root() -> Path:
     return app_root() / "Settings"
 
 
+def soundtracks_root() -> Path:
+    """Local cache and previews for the generated soundtrack catalogue."""
+    return app_root() / "Soundtracks"
+
+
 def ensure_roots() -> None:
     for path in (
         library_root(),
@@ -32,5 +37,6 @@ def ensure_roots() -> None:
         models_root(),
         audiobooks_root(),
         settings_root(),
+        soundtracks_root(),
     ):
         path.mkdir(parents=True, exist_ok=True)
