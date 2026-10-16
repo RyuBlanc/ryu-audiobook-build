@@ -682,6 +682,19 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("self.close()", source)
         self.assertIn("heartbeat=", source)
 
+    def test_generate_navigation_shows_page_before_refresh_and_handles_missing_project(self):
+        workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
+        self.assertIn("self.sidebar.itemClicked.connect(self._sidebar_item_clicked)", workflow)
+        self.assertIn("def _sidebar_item_clicked", workflow)
+        self.assertIn("def _refresh_generation_context", workflow)
+        section = workflow[workflow.index('elif name == "Generate":'):workflow.index('elif name == "Models":')]
+        self.assertIn("if not self.project:", section)
+        self.assertIn('"Open a book first"', section)
+        self.assertIn("QTimer.singleShot(75, self._refresh_generation_context)", section)
+        self.assertLess(section.index("self._show_page(self.generation)"), section.index("QTimer.singleShot"))
+        self.assertIn("Generate page could not be opened", section)
+        self.assertIn("except Exception as exc:", section)
+
     def test_chapter_autosave_does_not_rebuild_generation_page(self):
         workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
         editor = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
