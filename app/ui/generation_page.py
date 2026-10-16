@@ -543,23 +543,23 @@ class GenerationPage(QWidget):
         self.auto_music_style.setCurrentIndex(max(0, saved_style_index))
         settings_form.addRow("Automatic music style", self.auto_music_style)
 
-        # Metadata for all 1,008 recipes is cheap; audio is synthesized only on
-        # demand when previewing or generating. This keeps the app fully offline.
-        from app.audio.sound_design import MOOD_ORDER, VARIATIONS_PER_MOOD, music_variation_info
+        # Original rhythmic cinematic arrangements replace the old harmony-pad
+        # catalogue. Tracks are synthesized only when previewed or exported.
         self.bgm_variation = QComboBox()
         self.bgm_variation.setObjectName("bgmCatalogue")
         self.bgm_variation.setMinimumContentsLength(28)
         self.bgm_variation.setToolTip(
-            "Choose from 1,008 deterministic local soundtrack recipes. "
-            "Preview the selected recipe before generating the audiobook."
+            "Choose from 1,344 original cinematic/anime-inspired arrangements: "
+            "driving bass, ostinatos, hybrid percussion, cinematic strings and leads. "
+            "No existing film/anime score is copied; tracks render locally."
         )
         self.bgm_variation.addItem("Auto • match each chapter to its story mood", 0)
         for mood in MOOD_ORDER:
             for variation_index in range(VARIATIONS_PER_MOOD):
                 info = music_variation_info(mood, variation_index)
                 self.bgm_variation.addItem(
-                    f"#{int(info['id']):04d} • {mood.title()} • {info['texture']} • "
-                    f"{info['tempo_bpm']} BPM • Harmony {info['harmony']}",
+                    f"#{int(info['id']):04d} • {info['style']} • {info['texture']} • "
+                    f"{info['tempo_bpm']} BPM • {info['arrangement']}",
                     int(info["id"]),
                 )
         try:
@@ -574,16 +574,64 @@ class GenerationPage(QWidget):
         music_catalogue_row.addWidget(self.music_catalogue_preview)
         self.music_catalogue_container = QWidget()
         self.music_catalogue_container.setLayout(music_catalogue_row)
-        settings_form.addRow("BGM catalogue (1,008 recipes)", self.music_catalogue_container)
+        settings_form.addRow("BGM catalogue (1,344 cinematic arrangements)", self.music_catalogue_container)
         self._catalogue_preview_path: Path | None = None
 
+        # One cue set keeps opening, page turns and the final close stylistically linked.
         self.chapter_transition_sound = QCheckBox(
-            "Page-turn between chapters + separate audiobook ending"
+            "Enable linked book opening, chapter page-turns and final book closing"
         )
         self.chapter_transition_sound.setChecked(
             bool(audio_state.get("chapter_transition_sound", True))
         )
         settings_form.addRow("", self.chapter_transition_sound)
+
+        self.sound_cue_style = QComboBox()
+        self.sound_cue_style.setObjectName("soundCueStyle")
+        for cue_id, cue_label in CUE_STYLE_LABELS.items():
+            self.sound_cue_style.addItem(cue_label, cue_id)
+        saved_cue_style = str(audio_state.get("sound_cue_style") or "classic-book")
+        self.sound_cue_style.setCurrentIndex(max(0, self.sound_cue_style.findData(saved_cue_style)))
+        settings_form.addRow("Linked book cue set", self.sound_cue_style)
+
+        cue_preview_row = QHBoxLayout()
+        self.preview_opening_cue = QPushButton("▶ Preview opening")
+        self.preview_opening_cue.clicked.connect(lambda: self.preview_cue("opening"))
+        cue_preview_row.addWidget(self.preview_opening_cue)
+        self.preview_page_cue = QPushButton("▶ Preview next chapter")
+        self.preview_page_cue.clicked.connect(lambda: self.preview_cue("page"))
+        cue_preview_row.addWidget(self.preview_page_cue)
+        self.preview_ending_cue = QPushButton("▶ Preview book closing")
+        self.preview_ending_cue.clicked.connect(lambda: self.preview_cue("ending"))
+        cue_preview_row.addWidget(self.preview_ending_cue)
+        settings_form.addRow("Audition book cues", cue_preview_row)
+
+        custom_cues_layout = QVBoxLayout()
+        custom_cues_layout.setContentsMargins(0, 0, 0, 0)
+        custom_cues_layout.setSpacing(5)
+        self.opening_cue_path = QLineEdit(str(audio_state.get("opening_cue_path") or ""))
+        self.opening_cue_path.setPlaceholderText("Optional custom book-opening audio…")
+        self.page_turn_cue_path = QLineEdit(str(audio_state.get("page_turn_cue_path") or ""))
+        self.page_turn_cue_path.setPlaceholderText("Optional custom chapter page-turn audio…")
+        self.ending_cue_path = QLineEdit(str(audio_state.get("ending_cue_path") or ""))
+        self.ending_cue_path.setPlaceholderText("Optional custom book-closing audio…")
+        self._cue_path_fields = {
+            "opening": self.opening_cue_path,
+            "page": self.page_turn_cue_path,
+            "ending": self.ending_cue_path,
+        }
+        for kind, field in self._cue_path_fields.items():
+            row = QHBoxLayout()
+            row.addWidget(field, 1)
+            browse = QPushButton("Browse…")
+            browse.clicked.connect(lambda _checked=False, cue_kind=kind: self.choose_cue_audio(cue_kind))
+            row.addWidget(browse)
+            custom_cues_layout.addLayout(row)
+        self.custom_cues_container = QWidget()
+        self.custom_cues_container.setLayout(custom_cues_layout)
+        settings_form.addRow("Custom opening / flip / closing audio", self.custom_cues_container)
+        self.sound_cue_style.currentIndexChanged.connect(self._toggle_custom_cue_fields)
+        self._toggle_custom_cue_fields()
 
         self.story_effects_enabled = QCheckBox(
             "Add story-aware sound effects (footsteps, doors, weather, impacts, magic, etc.)"
@@ -690,13 +738,13 @@ class GenerationPage(QWidget):
             "Manual: use your own music or ambience. Effects stay beneath narration."
         )
         self.background_audio_hint.setToolTip(
-            "Automatic mode selects from 1,008 deterministic local BGM recipes "
-            "(6 moods × 8 timbres × 7 tempos × 3 harmony patterns), generating only "
-            "the variations the book needs rather than downloading 1,000 files or "
-            "shuffling random tracks. Mood detection uses chapter text; sound effects "
-            "are placed from explicit text cues and approximate audio timing. Manual "
-            "mode uses music/ambience files you have permission to use. Story effects "
-            "can be enabled independently. Review the final mix before publishing."
+            "Automatic mode selects from 1,344 original local cinematic arrangements "
+            "(8 story styles × 8 rhythmic textures × 7 tempos × 3 rhythmic arrangements). "
+            "These use bass movement, ostinatos, percussion, strings and melodic leads "
+            "instead of the retired quiet harmony-pad recipe. Tracks render only as needed. "
+            "The linked cue set adds an opening, chapter page turns and a different closing; "
+            "choose a preset or supply your own three recordings. Use only music/ambience "
+            "you have permission to use and review the final mix before publishing."
         )
         self.background_audio_hint.setWordWrap(True)
         self.background_audio_hint.setObjectName("muted")
@@ -707,6 +755,9 @@ class GenerationPage(QWidget):
         self.auto_music_style.currentIndexChanged.connect(self._update_overview)
         self.bgm_variation.currentIndexChanged.connect(self._update_overview)
         self.chapter_transition_sound.toggled.connect(self._update_overview)
+        self.sound_cue_style.currentIndexChanged.connect(self._update_overview)
+        for cue_path_field in self._cue_path_fields.values():
+            cue_path_field.textChanged.connect(self._update_overview)
         self.story_effects_enabled.toggled.connect(self._update_overview)
         self.story_effect_volume.valueChanged.connect(self._update_overview)
         self.background_audio_volume.valueChanged.connect(self._update_overview)
