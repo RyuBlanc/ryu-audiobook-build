@@ -330,7 +330,8 @@ class RegressionTests(unittest.TestCase):
         source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
         workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
         self.assertIn("def refresh_chapter_sources", source)
-        self.assertIn("self.generation.refresh_chapter_sources()", workflow)
+        self.assertIn("page.refresh_chapter_sources", workflow)
+        self.assertIn("def _refresh_generation_context", workflow)
 
     def test_qwen_profiles_have_unique_cache_identity(self):
         from app.tts.voice_profile import VoiceProfile, save_profiles, load_profiles
@@ -687,7 +688,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("self.sidebar.itemClicked.connect(self._sidebar_item_clicked)", workflow)
         self.assertIn("def _sidebar_item_clicked", workflow)
         self.assertIn("def _refresh_generation_context", workflow)
-        section = workflow[workflow.index('elif name == "Generate":'):workflow.index('elif name == "Models":')]
+        nav_start = workflow.index("def _sidebar_changed")
+        section = workflow[nav_start:workflow.index('elif name == "Models":', nav_start)]
         self.assertIn("if not self.project:", section)
         self.assertIn('"Open a book first"', section)
         self.assertIn("QTimer.singleShot(75, self._refresh_generation_context)", section)
