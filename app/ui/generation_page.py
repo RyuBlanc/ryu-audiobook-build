@@ -1714,6 +1714,74 @@ class GenerationPage(QWidget):
             self.background_audio_path.setText(str(Path(path)))
             self.status.setText("Background track selected. Enable Background music to include it in the final M4B.")
 
+    def _toggle_custom_cue_fields(self, *_args) -> None:
+        self.custom_cues_container.setVisible(
+            str(self.sound_cue_style.currentData() or "classic-book") == "custom"
+        )
+
+    def choose_cue_audio(self, kind: str) -> None:
+        field = self._cue_path_fields.get(kind)
+        if field is None:
+            self.status.setText(f"Unknown sound cue: {kind}")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"Select custom {kind} cue",
+            field.text().strip(),
+            "Audio Files (*.wav *.mp3 *.m4a *.aac *.flac *.ogg *.opus *.wma);;All Files (*.*)",
+        )
+        if path:
+            field.setText(str(Path(path).expanduser()))
+            self.status.setText(f"Custom {kind} cue selected. Preview it before generation.")
+
+    def preview_cue(self, kind: str) -> None:
+        if kind not in {"opening", "page", "ending"}:
+            self.status.setText(f"Unknown sound cue: {kind}")
+            return
+        style = str(self.sound_cue_style.currentData() or "classic-book")
+        field = self._cue_path_fields[kind]
+        candidate = Path(field.text().strip()).expanduser() if field.text().strip() else None
+        if style == "custom" and candidate and candidate.is_file():
+            cue = candidate.resolve()
+        else:
+            from app.audio.sound_design import (
+                synthesize_audiobook_ending,
+                synthesize_opening_cue,
+                synthesize_page_turn,
+            )
+            selected_id = int(self.bgm_variation.currentData() or 0)
+            variant = max(0, selected_id - 1) % VARIATIONS_PER_MOOD
+            generated_style = "classic-book" if style == "custom" else style
+            safe_style = re.sub(r"[^a-z0-9_-]+", "-", generated_style.casefold())
+            cue = (
+                Path(tempfile.gettempdir())
+                / f"ryu_audiobook_cue_preview_{kind}_{safe_style}_{variant:03d}.wav"
+            )
+            try:
+                if kind == "opening":
+                    synthesize_opening_cue(cue, variation_index=variant, cue_style=generated_style)
+                elif kind == "page":
+                    synthesize_page_turn(cue, variation_index=variant, cue_style=generated_style)
+                else:
+                    synthesize_audiobook_ending(cue, variation_index=variant, cue_style=generated_style)
+            except Exception as exc:
+                self.status.setText(f"Could not prepare the {kind} cue preview: {exc}")
+                return
+        if not cue.is_file():
+            self.status.setText(f"No audio was found for the {kind} cue.")
+            return
+        self.music_player.stop()
+        self.music_player.setSource(QUrl.fromLocalFile(str(cue.resolve())))
+        self.music_player.play()
+        cue_names = {
+            "opening": "book opening",
+            "page": "next-chapter page turn",
+            "ending": "book closing",
+        }
+        self.status.setText(
+            f"Previewing {cue_names[kind]} • preset: {CUE_STYLE_LABELS.get(style, style)}"
+        )
+
     def preview_catalogue_music(self) -> None:
         if self.music_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             current = self.music_player.source().toLocalFile()
