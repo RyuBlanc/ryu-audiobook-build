@@ -1755,6 +1755,13 @@ class GenerationPage(QWidget):
             self.status.setText(f"Custom {kind} cue selected. Preview it before generation.")
 
     def preview_cue(self, kind: str) -> None:
+        from app.audio.sound_design import (
+            CUE_STYLE_LABELS,
+            VARIATIONS_PER_MOOD,
+            synthesize_audiobook_ending,
+            synthesize_opening_cue,
+            synthesize_page_turn,
+        )
         if kind not in {"opening", "page", "ending"}:
             self.status.setText(f"Unknown sound cue: {kind}")
             return
@@ -1764,11 +1771,6 @@ class GenerationPage(QWidget):
         if style == "custom" and candidate and candidate.is_file():
             cue = candidate.resolve()
         else:
-            from app.audio.sound_design import (
-                synthesize_audiobook_ending,
-                synthesize_opening_cue,
-                synthesize_page_turn,
-            )
             selected_id = int(self.bgm_variation.currentData() or 0)
             variant = max(0, selected_id - 1) % VARIATIONS_PER_MOOD
             generated_style = "classic-book" if style == "custom" else style
