@@ -713,6 +713,9 @@ class RegressionTests(unittest.TestCase):
         source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
         self.assertIn("Estimated listening length:", source)
         self.assertIn("This is not the time required to generate it.", source)
+        self.assertIn("Estimated generation time: about", source)
+        self.assertIn("_generation_calibration_key", source)
+        self.assertIn("self.motion_settings.setValue(f\"{key}/realtime_factor\", actual_factor)", source)
         self.assertIn("self.elapsed.setText", source)
         self.assertIn("self.remaining.setText", source)
 
@@ -776,7 +779,9 @@ class RegressionTests(unittest.TestCase):
 
     def test_chapter_editor_uses_inline_sentence_assignment_ui(self):
         source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
-        self.assertIn('QPushButton("＋", self.text.viewport())', source)
+        self.assertIn('QPushButton("", self.text.viewport())', source)
+        self.assertIn('dragon_cross.svg', source)
+        self.assertIn('setIconSize(QSize(21, 21))', source)
         self.assertIn("_open_inline_assignment_dialog", source)
         self.assertIn("_selection_sentence_span", source)
         self.assertIn("QToolTip.showText", source)
@@ -786,6 +791,35 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn("Quick Assign Speaker", source)
         self.assertNotIn("_update_quick_assign_button", source)
         self.assertNotIn('("Assign Selected Dialogue"', source)
+
+
+    def test_generation_has_1008_bgm_catalogue_and_full_mix_preview_option(self):
+        ui = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        mixer = Path("app/audio/preview_mixer.py").read_text(encoding="utf-8")
+        self.assertIn('settings_form.addRow("BGM catalogue (1,008 recipes)", self.music_catalogue_container)', ui)
+        self.assertIn('self.music_catalogue_preview.clicked.connect(self.preview_catalogue_music)', ui)
+        self.assertIn('QCheckBox("Include selected BGM, story effects and chapter/end cues")', ui)
+        self.assertIn('target_seconds=preview_seconds', ui)
+        self.assertIn('mix_voice_preview(', ui)
+        self.assertIn('sidechaincompress=', mixer)
+        self.assertIn('synthesize_audiobook_ending', mixer)
+        self.assertIn('synthesize_page_turn', mixer)
+
+    def test_explicit_music_catalogue_id_is_mapped_without_changing_mood(self):
+        from app.audio.assembler import _selected_music_recipe
+        from app.audio.sound_design import MOOD_ORDER, VARIATIONS_PER_MOOD
+        mood, variation = _selected_music_recipe("Ignored chapter", "Ignored text", "auto", 1)
+        self.assertEqual((mood, variation), (MOOD_ORDER[0], 0))
+        last_id = len(MOOD_ORDER) * VARIATIONS_PER_MOOD
+        mood, variation = _selected_music_recipe("Ignored chapter", "Ignored text", "auto", last_id)
+        self.assertEqual((mood, variation), (MOOD_ORDER[-1], VARIATIONS_PER_MOOD - 1))
+
+    def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
+        from app.tts.pacing import pause_after_ms
+        self.assertGreaterEqual(pause_after_ms("That is the end.", "natural"), 280)
+        self.assertGreater(pause_after_ms("That is the end?", "natural"), pause_after_ms("That is the end.", "natural"))
+        self.assertGreater(pause_after_ms("That is the end.", "relaxed"), pause_after_ms("That is the end.", "natural"))
+        self.assertEqual(pause_after_ms("That is the end.", "off"), 0)
 
     def test_cast_provider_keeps_qwen_long_form_chunk_settings(self):
         source = Path("app/tts/cast_provider.py").read_text(encoding="utf-8")
@@ -1016,8 +1050,10 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("synthesize_page_turn", assembler)
         self.assertIn("synthesize_audiobook_ending", assembler)
         self.assertIn("auto_music_variation", assembler)
+        self.assertIn("_selected_music_recipe", assembler)
         self.assertIn("sidechaincompress=", assembler)
         self.assertIn("automatic-chapter-sound-design", assembler)
+        self.assertIn('elif effective_audio_mode == "off" and chapter_transition_sound:', assembler)
 
     def test_generated_music_and_transition_cues_are_local_wav_files(self):
         import wave

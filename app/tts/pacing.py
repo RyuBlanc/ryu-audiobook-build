@@ -337,7 +337,7 @@ def pause_after_ms(
     elif next_text and _starts_dialogue(next_text):
         # A new spoken turn deserves a little breathing room, but not a
         # theatrical pause between quick exchanges.
-        base = max(base, 310)
+        base = max(base, 380)
 
     base += _PROFILE_EXTRA_PAUSE_MS.get(profile, 0)
     return max(50, base)

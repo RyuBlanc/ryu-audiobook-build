@@ -407,6 +407,55 @@ def assemble_m4b(
                 cued_chapters.append(current_audio)
             chapters = cued_chapters
 
+        elif effective_audio_mode == "off" and chapter_transition_sound:
+            # Page turns and a true book-ending cue are independent of the BGM
+            # toggle, so a listener can choose narration + chapter sounds only.
+            from app.audio.sound_design import (
+                detect_chapter_mood, synthesize_audiobook_ending, synthesize_page_turn,
+            )
+            page_turn_cache: dict[int, Path] = {}
+            ending_cache: dict[tuple[str, int], Path] = {}
+            cued_chapters: list[Path] = []
+            for index, (chapter_file, chapter_dir, chapter_title) in enumerate(
+                zip(chapters, chapter_dirs, names), start=1
+            ):
+                narration_text = ""
+                try:
+                    payload = json.loads((chapter_dir / "narration.json").read_text(encoding="utf-8"))
+                    narration_text = str(payload.get("narration_text") or "")
+                    chapter_title = str(payload.get("title") or chapter_title)
+                except (OSError, ValueError, TypeError):
+                    pass
+                mood = detect_chapter_mood(chapter_title, narration_text, auto_music_style)
+                try:
+                    _selected_mood, variation = _selected_music_recipe(
+                        chapter_title, narration_text, auto_music_style, auto_music_variation
+                    )
+                except (TypeError, ValueError):
+                    variation = 0
+                current_audio = chapter_file
+                if index > 1:
+                    if variation not in page_turn_cache:
+                        page_turn_cache[variation] = synthesize_page_turn(
+                            temp_dir / f"off-page-turn-{variation:03d}.wav",
+                            variation_index=variation,
+                        )
+                    prefixed = temp_dir / f"off-prefix-{index:05d}.m4a"
+                    _concat_audio_files(page_turn_cache[variation], current_audio, prefixed, audio_bitrate)
+                    current_audio = prefixed
+                if index == len(chapters):
+                    ending_key = (mood, variation)
+                    if ending_key not in ending_cache:
+                        ending_cache[ending_key] = synthesize_audiobook_ending(
+                            temp_dir / f"off-ending-{mood}-{variation:03d}.wav",
+                            mood, variation_index=variation,
+                        )
+                    ended = temp_dir / f"off-ending-chapter-{index:05d}.m4a"
+                    _concat_audio_files(current_audio, ending_cache[ending_key], ended, audio_bitrate)
+                    current_audio = ended
+                cued_chapters.append(current_audio)
+            chapters = cued_chapters
+
         # Story-aware SFX are aligned to the source text inside each generated
         # chunk. Only explicit phrases trigger effects; cues are volume-limited,
         # de-duplicated, and bounded per chapter to avoid an over-produced mix.
@@ -441,7 +490,7 @@ def assemble_m4b(
                 transition_offset_ms = (
                     int(PAGE_TURN_SECONDS * 1000)
                     if chapter_transition_sound
-                    and effective_audio_mode in {"auto", "manual"}
+                    and effective_audio_mode in {"auto", "manual", "off"}
                     and chapter_index > 1
                     else 0
                 )

@@ -1472,11 +1472,8 @@ class GenerationPage(QWidget):
         # Include the actual transition/end cues in the duration estimate when
         # this book is configured to add them.
         if (
-            hasattr(self, "background_audio_enabled")
-            and self.background_audio_enabled.isChecked()
-            and hasattr(self, "chapter_transition_sound")
+            hasattr(self, "chapter_transition_sound")
             and self.chapter_transition_sound.isChecked()
-            and self.background_audio_mode.currentData() in {"auto", "manual"}
             and len(self.chapters) > 0
         ):
             from app.audio.sound_design import ENDING_SECONDS, PAGE_TURN_SECONDS
@@ -1490,8 +1487,9 @@ class GenerationPage(QWidget):
             f"at {speed:.2f}× narration speed"
         )
         self.duration_estimate.setToolTip(
-            "Finished audiobook duration. This estimate learns actual seconds-per-word from "
-            "completed books using the same voice and settings and includes enabled chapter/end cues."
+            "Estimated duration of the finished narration at the selected playback speed. "
+            "This is not the time required to generate it. This estimate learns actual seconds-per-word "
+            "from completed books using the same voice and settings and includes enabled chapter/end cues."
         )
         factor = self._calibration_factor
         samples = 0
@@ -1815,7 +1813,7 @@ class GenerationPage(QWidget):
         selected_bgm_id = int(self.bgm_variation.currentData() or 0)
         mix_settings = {
             "enabled": self.preview_mix_enabled.isChecked(),
-            "background_enabled": self.background_audio_enabled.isChecked(),
+            "background_enabled": True,
             "background_mode": str(self.background_audio_mode.currentData() or "auto"),
             "music_style": str(self.auto_music_style.currentData() or "auto"),
             "music_variation_id": selected_bgm_id or None,
