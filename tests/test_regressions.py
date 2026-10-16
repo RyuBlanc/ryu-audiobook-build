@@ -683,7 +683,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("self.close()", source)
         self.assertIn("heartbeat=", source)
 
-    def test_generate_navigation_shows_page_before_refresh_and_handles_missing_project(self):
+    def test_generate_navigation_opens_selected_library_project_and_handles_empty_library(self):
         workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
         self.assertIn("self.sidebar.itemClicked.connect(self._sidebar_item_clicked)", workflow)
         self.assertIn("def _sidebar_item_clicked", workflow)
@@ -691,6 +691,9 @@ class RegressionTests(unittest.TestCase):
         nav_start = workflow.index("def _sidebar_changed")
         section = workflow[nav_start:workflow.index('elif name == "Models":', nav_start)]
         self.assertIn("if not self.project:", section)
+        self.assertIn("selected_projects = self.library._selected_projects()", section)
+        self.assertIn("self.open_project(selected_projects[0])", section)
+        self.assertIn("self.sidebar.blockSignals(True)", section)
         self.assertIn('"Open a book first"', section)
         self.assertIn("QTimer.singleShot(75, self._refresh_generation_context)", section)
         self.assertLess(section.index("self._show_page(self.generation)"), section.index("QTimer.singleShot"))

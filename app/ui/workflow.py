@@ -331,18 +331,39 @@ class ProjectWorkflow(QMainWindow):
                 pass
             self._show_page(self.voice_cast)
         elif name == "Generate":
-            if not self.project:
-                # Do not silently bounce to Import when Generate is clicked with
-                # no active book. Explain the prerequisite and keep navigation usable.
-                self._show_page(self.library)
-                QMessageBox.information(
-                    self,
-                    "Open a book first",
-                    "Generate needs an active audiobook project. Open a book from the Library, "
-                    "or import a new book, then select Generate again.",
-                )
-                return
             try:
+                if not self.project:
+                    # The Library can show a selected book without making it the
+                    # active project. Generate should promote that selected project
+                    # automatically instead of bouncing back to the Library.
+                    selected_projects = self.library._selected_projects()
+                    if selected_projects:
+                        self.open_project(selected_projects[0])
+                        # open_project selects Chapters for editing. Restore the
+                        # Generate row without emitting a nested navigation event;
+                        # this handler will show the generation page below.
+                        generate_row = next(
+                            (
+                                index for index in range(self.sidebar.count())
+                                if self.sidebar.item(index).data(32) == "Generate"
+                            ),
+                            -1,
+                        )
+                        if generate_row >= 0:
+                            self.sidebar.blockSignals(True)
+                            try:
+                                self.sidebar.setCurrentRow(generate_row)
+                            finally:
+                                self.sidebar.blockSignals(False)
+                    if not self.project:
+                        self._show_page(self.library)
+                        QMessageBox.information(
+                            self,
+                            "Open a book first",
+                            "Generate needs an audiobook project. Select a book in Library "
+                            "or import a new book, then select Generate again.",
+                        )
+                        return
                 if self.generation is None:
                     self.ensure_generation_page()
                 if self.generation is None:
