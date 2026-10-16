@@ -832,7 +832,7 @@ class RegressionTests(unittest.TestCase):
         info = music_variation_info(MOOD_ORDER[0], 0)
         self.assertIn("arrangement", info)
         self.assertNotIn("harmony", info)
-        self.assertEqual(len(MOOD_ORDER), 8))
+        self.assertEqual(len(MOOD_ORDER), 8)
 
 
     def test_preview_mixer_generates_selected_bgm_with_page_turn_and_book_ending(self):
