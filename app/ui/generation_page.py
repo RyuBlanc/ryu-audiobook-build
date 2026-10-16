@@ -1758,6 +1758,8 @@ class GenerationPage(QWidget):
         from app.audio.sound_design import (
             CUE_STYLE_LABELS,
             VARIATIONS_PER_MOOD,
+            detect_chapter_mood,
+            select_music_variation,
             synthesize_audiobook_ending,
             synthesize_opening_cue,
             synthesize_page_turn,
@@ -1772,7 +1774,25 @@ class GenerationPage(QWidget):
             cue = candidate.resolve()
         else:
             selected_id = int(self.bgm_variation.currentData() or 0)
-            variant = max(0, selected_id - 1) % VARIATIONS_PER_MOOD
+            if selected_id > 0:
+                variant = (selected_id - 1) % VARIATIONS_PER_MOOD
+            else:
+                # In Auto mode, audition the variant selected for the relevant
+                # book chapter so this standalone sound matches the final export.
+                if kind == "opening":
+                    chapter_index = 0
+                elif kind == "ending":
+                    chapter_index = max(0, len(self.chapters) - 1)
+                else:
+                    chapter_index = max(1, self.preview_chapter.currentIndex())
+                    chapter_index = min(chapter_index, max(0, len(self.chapters) - 1))
+                chapter = self.chapters[chapter_index] if self.chapters else None
+                title = chapter.title if chapter else self.title.text().strip()
+                text = chapter.text if chapter else ""
+                mood = detect_chapter_mood(
+                    title, text, str(self.auto_music_style.currentData() or "auto")
+                )
+                variant = select_music_variation(title, text, mood)
             generated_style = "classic-book" if style == "custom" else style
             safe_style = re.sub(r"[^a-z0-9_-]+", "-", generated_style.casefold())
             cue = (
