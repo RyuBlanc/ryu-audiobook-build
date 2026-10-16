@@ -74,6 +74,10 @@ ASSETS = ROOT / "assets"
 LOGO_SVG = ASSETS / "ryu_audiobook_logo.svg"
 LOGO_PNG = ASSETS / "ryu_audiobook_logo.png"
 LOGO_ICO = ASSETS / "ryu_audiobook_logo.ico"
+DRAGON_CROSS_SVG = ASSETS / "dragon_cross.svg"
+DRAGON_CROSS_PNG = ASSETS / "dragon_cross.png"
+DRAGON_CURSOR_SVG = ASSETS / "dragon_cursor.svg"
+DRAGON_CURSOR_PNG = ASSETS / "dragon_cursor.png"
 
 
 def build_logo_assets() -> None:
@@ -111,6 +115,27 @@ def build_logo_assets() -> None:
             raise RuntimeError("Generated application PNG is unexpectedly small.")
         if LOGO_ICO.stat().st_size < 1024:
             raise RuntimeError("Generated application icon is unexpectedly small.")
+
+        for source_svg, output_png, size in (
+            (DRAGON_CROSS_SVG, DRAGON_CROSS_PNG, 256),
+            (DRAGON_CURSOR_SVG, DRAGON_CURSOR_PNG, 256),
+        ):
+            if not source_svg.is_file():
+                raise RuntimeError(f"Missing dragon UI asset: {source_svg}")
+            dragon_renderer = QSvgRenderer(str(source_svg))
+            if not dragon_renderer.isValid():
+                raise RuntimeError(f"Invalid dragon UI asset: {source_svg}")
+            dragon_image = QImage(size, size, QImage.Format_RGBA8888)
+            dragon_image.fill(Qt.transparent)
+            dragon_painter = QPainter(dragon_image)
+            try:
+                dragon_renderer.render(dragon_painter)
+            finally:
+                dragon_painter.end()
+            if not dragon_image.save(str(output_png), "PNG"):
+                raise RuntimeError(f"Could not rasterize dragon UI asset: {output_png}")
+            if output_png.stat().st_size < 512:
+                raise RuntimeError(f"Generated dragon UI asset is unexpectedly small: {output_png}")
     finally:
         if QGuiApplication.instance() is qt_app:
             qt_app.quit()
@@ -173,8 +198,10 @@ args = [
     f"--additional-hooks-dir={HOOKS}",
     f"--add-data={ROOT / "requirements-voice-cloning.txt"};.",
     f"--add-data={LOGO_PNG};assets",
-    f"--add-data={ASSETS / "dragon_cross.svg"};assets",
-    f"--add-data={ASSETS / "dragon_cursor.svg"};assets",
+    f"--add-data={DRAGON_CROSS_PNG};assets",
+    f"--add-data={DRAGON_CURSOR_PNG};assets",
+    f"--add-data={DRAGON_CROSS_SVG};assets",
+    f"--add-data={DRAGON_CURSOR_SVG};assets",
     f"--add-data={ROOT / "app" / "tts" / "chatterbox_worker.py"};app/tts",
     f"--add-data={ROOT / "app" / "tts" / "expression.py"};app/tts",
     f"--add-data={ROOT / "app" / "tts" / "qwen_character_worker.py"};app/tts",

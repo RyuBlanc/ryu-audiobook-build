@@ -264,7 +264,9 @@ def main() -> int:
     app.setStyleSheet(APP_STYLE)
     # Small transparent four-winged crimson dragon cursor. The hotspot is
     # placed at the nose so clicking and text selection remain predictable.
-    dragon_cursor_path = asset_path("dragon_cursor.svg")
+    dragon_cursor_path = asset_path("dragon_cursor.png")
+    if not dragon_cursor_path.is_file():
+        dragon_cursor_path = asset_path("dragon_cursor.svg")
     if dragon_cursor_path.is_file():
         cursor_pixmap = QPixmap(str(dragon_cursor_path))
         if not cursor_pixmap.isNull():
