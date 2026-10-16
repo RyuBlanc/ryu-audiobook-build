@@ -1678,7 +1678,7 @@ class GenerationPage(QWidget):
         self.auto_music_style.setEnabled(auto_mode)
         self.bgm_variation.setEnabled(auto_mode)
         self.music_catalogue_preview.setEnabled(auto_mode)
-        self.chapter_transition_sound.setEnabled(enabled)
+        # Book cue controls stay enabled even when background music is turned off.
         # Hide manual track rows entirely in Automatic mode instead of leaving
         # four disabled rows on screen. The rows return when Manual is selected.
         for widget, visible in (
@@ -1950,6 +1950,10 @@ class GenerationPage(QWidget):
             "chapter_transition_sound": self.chapter_transition_sound.isChecked(),
             "is_first_chapter": index == 0,
             "is_last_chapter": index == len(self.chapters) - 1,
+            "sound_cue_style": str(self.sound_cue_style.currentData() or "classic-book"),
+            "opening_cue_path": self.opening_cue_path.text().strip(),
+            "page_turn_cue_path": self.page_turn_cue_path.text().strip(),
+            "ending_cue_path": self.ending_cue_path.text().strip(),
         }
         self.preview_worker = VoicePreviewWorker(
             profile, backend, self.project_folder, self._current_profiles(), pronunciation_dictionary,
@@ -2257,6 +2261,10 @@ class GenerationPage(QWidget):
         background_audio_mode = "off"
         auto_music_style = str(self.auto_music_style.currentData() or "auto")
         chapter_transition_sound = bool(self.chapter_transition_sound.isChecked())
+        sound_cue_style = str(self.sound_cue_style.currentData() or "classic-book")
+        opening_cue_path = self.opening_cue_path.text().strip() or None
+        page_turn_cue_path = self.page_turn_cue_path.text().strip() or None
+        ending_cue_path = self.ending_cue_path.text().strip() or None
         if self.background_audio_enabled.isChecked():
             background_audio_mode = str(self.background_audio_mode.currentData() or "auto")
             if background_audio_mode == "manual":
@@ -2327,6 +2335,10 @@ class GenerationPage(QWidget):
                 "auto_music_variation_id": int(self.bgm_variation.currentData() or 0),
                 "preview_include_sound_design": self.preview_mix_enabled.isChecked(),
                 "chapter_transition_sound": self.chapter_transition_sound.isChecked(),
+                "sound_cue_style": str(self.sound_cue_style.currentData() or "classic-book"),
+                "opening_cue_path": self.opening_cue_path.text().strip(),
+                "page_turn_cue_path": self.page_turn_cue_path.text().strip(),
+                "ending_cue_path": self.ending_cue_path.text().strip(),
                 "story_effects_enabled": self.story_effects_enabled.isChecked(),
                 "story_effect_volume": float(self.story_effect_volume.value()) / 100.0,
                 "background_audio_path": self.background_audio_path.text().strip(),
@@ -2396,6 +2408,10 @@ class GenerationPage(QWidget):
             chapter_transition_sound=chapter_transition_sound,
             story_effects_enabled=self.story_effects_enabled.isChecked(),
             story_effect_volume=float(self.story_effect_volume.value()) / 100.0,
+            sound_cue_style=sound_cue_style,
+            opening_cue_path=Path(opening_cue_path) if opening_cue_path else None,
+            page_turn_cue_path=Path(page_turn_cue_path) if page_turn_cue_path else None,
+            ending_cue_path=Path(ending_cue_path) if ending_cue_path else None,
         )
         self.manager.start(
             output,
