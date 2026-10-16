@@ -60,6 +60,10 @@ def mix_voice_preview(
     chapter_transition_sound: bool = True,
     is_first_chapter: bool = True,
     is_last_chapter: bool = False,
+    sound_cue_style: str = "classic-book",
+    opening_cue_path: str | Path | None = None,
+    page_turn_cue_path: str | Path | None = None,
+    ending_cue_path: str | Path | None = None,
 ) -> Path:
     """Mix the selected preview voice with the same offline sound design used by M4B export.
 
@@ -74,8 +78,10 @@ def mix_voice_preview(
         VARIATIONS_PER_MOOD,
         detect_chapter_mood,
         select_music_variation,
+        normalize_cue_style,
         synthesize_audiobook_ending,
         synthesize_music_bed,
+        synthesize_opening_cue,
         synthesize_page_turn,
     )
     from app.audio.story_events import (
@@ -115,16 +121,45 @@ def mix_voice_preview(
         temp = Path(tmp)
         voice_for_mix = voice_path
         prefix_seconds = 0.0
+        cue_style = normalize_cue_style(sound_cue_style)
 
-        if chapter_transition_sound and not is_first_chapter:
-            page_turn = synthesize_page_turn(
-                temp / "preview-page-turn.wav",
-                variation_index=selected_variation,
-            )
-            prefixed_voice = temp / "preview-with-page-turn.wav"
-            _join_audio(page_turn, voice_for_mix, prefixed_voice)
+        def selected_cue(kind: str, custom_path: str | Path | None) -> Path:
+            candidate = Path(custom_path).expanduser() if custom_path else None
+            if cue_style == "custom" and candidate and candidate.is_file():
+                return candidate.resolve()
+            generated_style = "classic-book" if cue_style == "custom" else cue_style
+            if kind == "opening":
+                return synthesize_opening_cue(
+                    temp / "preview-opening-cue.wav",
+                    variation_index=selected_variation,
+                    cue_style=generated_style,
+                )
+            if kind == "page":
+                return synthesize_page_turn(
+                    temp / "preview-page-turn.wav",
+                    variation_index=selected_variation,
+                    cue_style=generated_style,
+                )
+            if kind == "ending":
+                return synthesize_audiobook_ending(
+                    temp / "preview-book-ending.wav",
+                    mood,
+                    variation_index=selected_variation,
+                    cue_style=generated_style,
+                    duration_seconds=ENDING_SECONDS,
+                )
+            raise ValueError(f"Unknown book cue type: {kind}")
+
+        if chapter_transition_sound:
+            if is_first_chapter:
+                cue = selected_cue("opening", opening_cue_path)
+                prefixed_voice = temp / "preview-with-book-opening.wav"
+            else:
+                cue = selected_cue("page", page_turn_cue_path)
+                prefixed_voice = temp / "preview-with-page-turn.wav"
+            _join_audio(cue, voice_for_mix, prefixed_voice)
             voice_for_mix = prefixed_voice
-            prefix_seconds = _duration_seconds(page_turn)
+            prefix_seconds = _duration_seconds(cue)
 
         voice_duration = max(0.05, _duration_seconds(voice_for_mix))
         layers: list[tuple[Path, float, str]] = []
@@ -230,12 +265,7 @@ def mix_voice_preview(
 
         final_path = mixed_path
         if chapter_transition_sound and is_last_chapter:
-            ending = synthesize_audiobook_ending(
-                temp / "preview-book-ending.wav",
-                mood,
-                variation_index=selected_variation,
-                duration_seconds=ENDING_SECONDS,
-            )
+            ending = selected_cue("ending", ending_cue_path)
             closed_path = temp / "preview-with-book-ending.wav"
             _join_audio(final_path, ending, closed_path)
             final_path = closed_path
