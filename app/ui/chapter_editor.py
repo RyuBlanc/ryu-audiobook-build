@@ -100,8 +100,6 @@ class ChapterEditorPage(QWidget):
         self._assignment_plus.setObjectName("assignmentPlus")
         dragon_assets = Path(__file__).resolve().parents[2] / "assets"
         dragon_plus_path = dragon_assets / "dragon_cross.png"
-        if not dragon_plus_path.is_file():
-            dragon_plus_path = dragon_assets / "dragon_cross.svg"
         if dragon_plus_path.is_file():
             self._assignment_plus.setIcon(QIcon(str(dragon_plus_path)))
             self._assignment_plus.setIconSize(QSize(21, 21))

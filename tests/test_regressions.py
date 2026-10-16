@@ -815,8 +815,16 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('synthesize_page_turn', mixer)
         self.assertIn('MUSIC_CATALOGUE_SIZE = len(THEMES) * VARIATIONS_PER_MOOD  # 1,344', sound_design)
         self.assertNotIn('Harmony {info[\'harmony\']}', ui)
-        self.assertIn('dragon_four_winged.png', Path("build.py").read_text(encoding="utf-8"))
-        self.assertIn('dragon_cross.png', Path("app/ui/chapter_editor.py").read_text(encoding="utf-8"))
+        build_source = Path("build.py").read_text(encoding="utf-8")
+        cursor_source = Path("app/main.py").read_text(encoding="utf-8")
+        editor_source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
+        self.assertIn('dragon_four_winged.png', build_source)
+        self.assertIn('dragon_cursor.png', cursor_source)
+        self.assertIn('dragon_cross.png', editor_source)
+        self.assertNotIn('dragon_cursor.svg', cursor_source)
+        self.assertNotIn('dragon_cross.svg', editor_source)
+        self.assertNotIn('DRAGON_CURSOR_SVG', build_source)
+        self.assertNotIn('DRAGON_CROSS_SVG', build_source)
 
     def test_explicit_music_catalogue_id_is_mapped_without_changing_mood(self):
         from app.audio.assembler import _selected_music_recipe

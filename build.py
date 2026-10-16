@@ -75,9 +75,7 @@ LOGO_SVG = ASSETS / "ryu_audiobook_logo.svg"
 LOGO_PNG = ASSETS / "ryu_audiobook_logo.png"
 LOGO_ICO = ASSETS / "ryu_audiobook_logo.ico"
 DRAGON_MASTER_PNG = ASSETS / "dragon_four_winged.png"
-DRAGON_CROSS_SVG = ASSETS / "dragon_cross.svg"
 DRAGON_CROSS_PNG = ASSETS / "dragon_cross.png"
-DRAGON_CURSOR_SVG = ASSETS / "dragon_cursor.svg"
 DRAGON_CURSOR_PNG = ASSETS / "dragon_cursor.png"
 
 
@@ -194,8 +192,6 @@ args = [
     f"--add-data={LOGO_PNG};assets",
     f"--add-data={DRAGON_CROSS_PNG};assets",
     f"--add-data={DRAGON_CURSOR_PNG};assets",
-    f"--add-data={DRAGON_CROSS_SVG};assets",
-    f"--add-data={DRAGON_CURSOR_SVG};assets",
     f"--add-data={ROOT / "app" / "tts" / "chatterbox_worker.py"};app/tts",
     f"--add-data={ROOT / "app" / "tts" / "expression.py"};app/tts",
     f"--add-data={ROOT / "app" / "tts" / "qwen_character_worker.py"};app/tts",
