@@ -1147,6 +1147,7 @@ class RegressionTests(unittest.TestCase):
         from app.audio.sound_design import (
             CUE_STYLE_LABELS,
             MUSIC_CATALOGUE_SIZE,
+            MOOD_ORDER,
             OPENING_SECONDS,
             TEMPOS,
             VARIATIONS_PER_MOOD,
