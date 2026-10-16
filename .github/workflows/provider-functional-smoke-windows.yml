@@ -2,7 +2,7 @@ name: Provider Functional Smoke
 
 on:
   push:
-    branches: [main]
+    branches: [main, qa/voice-runtime-smoke]
   workflow_dispatch:
 
 permissions:
