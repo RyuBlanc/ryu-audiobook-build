@@ -284,6 +284,7 @@ class GenerationPage(QWidget):
         self._estimated_listening_seconds = 0.0
         self._estimated_generation_seconds = 0.0
         self._active_calibration_key: str | None = None
+        self._active_calibration_is_resume = False
         self._calibration_factor = 2.45
         self.motion_settings = QSettings("RyuBlanc", "Ryu's Audiobook")
         self._reduce_motion_enabled = bool(
@@ -2227,6 +2228,7 @@ class GenerationPage(QWidget):
         self.generation_phase = "synthesis"
         self.started_at = time.monotonic()
         self._active_calibration_key = self._generation_calibration_key()
+        self._active_calibration_is_resume = bool(is_resume)
         self._update_overview()
         self.timer.start(1000)
         self._set_generation_locked(True)
@@ -2498,7 +2500,11 @@ class GenerationPage(QWidget):
         if summary.output_path:
             calibration_summary = ""
             try:
-                if self.started_at is not None and summary.output_path.is_file():
+                if (
+                    not self._active_calibration_is_resume
+                    and self.started_at is not None
+                    and summary.output_path.is_file()
+                ):
                     elapsed_seconds = max(1.0, time.monotonic() - self.started_at)
                     listening_seconds = max(1.0, _duration_ms(summary.output_path) / 1000.0)
                     words = max(1, sum(len(chapter.text.split()) for chapter in self.chapters))

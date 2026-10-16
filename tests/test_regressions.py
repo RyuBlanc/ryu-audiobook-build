@@ -716,6 +716,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("Estimated generation time: about", source)
         self.assertIn("_generation_calibration_key", source)
         self.assertIn("self._calibration_factor = 2.45", source)
+        self.assertIn("self._active_calibration_is_resume = bool(is_resume)", source)
+        self.assertIn("not self._active_calibration_is_resume", source)
         self.assertIn("self.motion_settings.setValue(f\"{key}/realtime_factor\", actual_factor)", source)
         self.assertIn("self.elapsed.setText", source)
         self.assertIn("self.remaining.setText", source)
@@ -815,6 +817,70 @@ class RegressionTests(unittest.TestCase):
         last_id = len(MOOD_ORDER) * VARIATIONS_PER_MOOD
         mood, variation = _selected_music_recipe("Ignored chapter", "Ignored text", "auto", last_id)
         self.assertEqual((mood, variation), (MOOD_ORDER[-1], VARIATIONS_PER_MOOD - 1))
+
+
+    def test_preview_mixer_generates_selected_bgm_with_page_turn_and_book_ending(self):
+        import wave
+        from app.audio.preview_mixer import mix_voice_preview
+        from app.audio.assembler import _duration_ms
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            voice = root / "voice.wav"
+            _write_wav(voice, 1.5)
+            output = root / "voice-plus-story-sound.wav"
+            result = mix_voice_preview(
+                voice,
+                output,
+                "The sword clashed against the shield. The battle was over.",
+                background_enabled=True,
+                background_mode="auto",
+                music_style="fantasy",
+                music_variation_id=1,
+                music_volume=0.08,
+                story_effects_enabled=False,
+                chapter_transition_sound=True,
+                is_first_chapter=False,
+                is_last_chapter=True,
+            )
+            self.assertEqual(result, output)
+            self.assertTrue(output.is_file())
+            with wave.open(str(output), "rb") as wav:
+                self.assertEqual(wav.getnchannels(), 2)
+                self.assertEqual(wav.getframerate(), 44100)
+            # Page turn + 1.5s voice + the distinct book-ending cadence.
+            self.assertGreaterEqual(_duration_ms(output), 4500)
+            self.assertLessEqual(_duration_ms(output), 5200)
+
+    def test_chapter_and_finale_cues_work_when_background_music_is_off(self):
+        from app.audio.assembler import _duration_ms
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapters = []
+            for number in (1, 2):
+                folder = root / f"{number:03d}_Chapter_{number}"
+                _write_wav(folder / "chunks" / "00001.wav", 1.0)
+                (folder / "narration.json").write_text(
+                    json.dumps({
+                        "title": f"Chapter {number}",
+                        "narration_text": "The story continues.",
+                    }),
+                    encoding="utf-8",
+                )
+                chapters.append(folder)
+            output = root / "chapter-cues-without-bgm.m4b"
+            assemble_m4b(
+                chapters,
+                output,
+                "Cues without BGM",
+                chapter_titles=["Chapter 1", "Chapter 2"],
+                background_audio_mode="off",
+                chapter_transition_sound=True,
+            )
+            duration = _duration_ms(output)
+            self.assertGreaterEqual(duration, 4800)
+            self.assertLessEqual(duration, 5600)
 
     def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
         from app.tts.pacing import pause_after_ms
