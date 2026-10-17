@@ -980,13 +980,10 @@ class ProjectWorkflow(QMainWindow):
         sound_content_layout = QVBoxLayout(sound_content)
         sound_content_layout.setContentsMargins(2, 2, 8, 8)
         sound_content_layout.setSpacing(12)
-        for section in (
-            generation_page.audio_settings_box,
-            generation_page.opening_cue_box,
-            generation_page.transition_cue_box,
-        ):
-            generation_page.content_root_layout.removeWidget(section)
-            sound_content_layout.addWidget(section)
+        # Cue cards are already part of Audio settings. Keep them nested there
+        # so the settings form does not retain an empty placeholder row.
+        generation_page.content_root_layout.removeWidget(generation_page.audio_settings_box)
+        sound_content_layout.addWidget(generation_page.audio_settings_box)
         sound_content_layout.addStretch(1)
         sound_scroll.setWidget(sound_content)
         sound_layout.addWidget(sound_scroll, 1)
