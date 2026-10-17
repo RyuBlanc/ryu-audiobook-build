@@ -15,12 +15,26 @@ import app.audio.sound_design as sound_design
 from app.audio.sound_design import MOOD_ORDER, THEMES, music_variation_info
 from app.chapters.detector import Chapter
 from app.ui.generation_page import GenerationPage
+from app.ui.voice_page import PREVIEW_DURATION_OPTIONS
+from app.ui.workflow import _import_book_icon
+from app.version import BUILD_NUMBER, full_version
 
 
 class GeneratePageSmokeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_build_label_comes_from_bundled_build_metadata(self) -> None:
+        self.assertEqual(full_version(), f"v0.3.7 • Build {BUILD_NUMBER}")
+
+    def test_import_controls_use_the_audiobook_mark(self) -> None:
+        icon = _import_book_icon()
+        self.assertFalse(icon.isNull(), "Import controls must not fall back to a generic plus icon.")
+
+    def test_voice_preview_still_supports_up_to_one_minute(self) -> None:
+        self.assertEqual(PREVIEW_DURATION_OPTIONS, (10, 20, 30, 45, 60))
+        self.assertEqual(PREVIEW_DURATION_OPTIONS.index(30), 2)  # 30 seconds remains the default.
 
     def test_mood_catalogue_constant_is_available(self) -> None:
         self.assertEqual(MOOD_ORDER, tuple(THEMES))
@@ -46,6 +60,18 @@ class GeneratePageSmokeTests(unittest.TestCase):
             )
             try:
                 self.assertEqual(page.title.text(), "Generate Page Smoke Test")
+                # Keep the full narration preview controls present and independent
+                # from full-book generation.
+                self.assertIn("Preview", page.preview_button.text())
+                self.assertIn("Play", page.preview_play_button.text())
+                self.assertIn("Stop", page.preview_stop_button.text())
+                self.assertEqual(page.preview_loading.maximum(), 100)
+                self.assertEqual(
+                    [page.audio_bitrate.itemData(i) for i in range(page.audio_bitrate.count())],
+                    [128, 160, 192, 224, 256, 288, 320],
+                )
+                self.assertTrue(page.chapter_transition_sound.isChecked())
+                self.assertTrue(page.story_effects_enabled.isChecked())
                 # These are the same refresh operations the sidebar performs
                 # when the Generate section is selected for an open book.
                 page._refresh_voice_profiles()
