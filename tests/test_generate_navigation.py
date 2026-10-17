@@ -14,13 +14,17 @@ from PySide6.QtWidgets import QApplication
 
 from app.chapters.detector import Chapter
 from app.core.project import Project
-from app.ui.workflow import ProjectWorkflow
+from app.ui.workflow import ProjectWorkflow, _import_book_icon
 
 
 class GenerateNavigationSmokeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_branded_import_icon_resource_is_loadable(self) -> None:
+        icon = _import_book_icon()
+        self.assertFalse(icon.isNull(), "The branded Import control must have a packaged logo resource.")
 
     def _project(self, folder: Path) -> Project:
         folder.mkdir(parents=True, exist_ok=True)
@@ -59,6 +63,9 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                 self.assertTrue(page.title.isVisible(), "The book metadata form must be visible.")
                 self.assertTrue(page.preview_button.isVisible(), "Voice preview controls must be visible.")
                 self.assertTrue(page.start_button.isVisible(), "Audiobook generation controls must be visible.")
+                self.assertTrue(page.preview_opening_cue.isVisible(), "Opening-cue preview must be present.")
+                self.assertTrue(page.preview_page_cue.isVisible(), "Chapter-turn preview must be present.")
+                self.assertTrue(page.preview_ending_cue.isVisible(), "Book-closing preview must be present.")
                 self.assertEqual(page.title.text(), project.title)
             finally:
                 workflow.close()
