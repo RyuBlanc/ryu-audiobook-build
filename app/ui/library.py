@@ -56,7 +56,7 @@ def project_matches(project, query: str, status_filter: str) -> bool:
         parts.extend(str(value) for value in profiles if isinstance(value, (str, int, float)))
     searchable = " ".join(parts).casefold()
     normalized_filter = (status_filter or "All").strip().casefold()
-    if normalized_filter == "active" and status not in {"In Progress", "Ready"}:
+    if normalized_filter == "active" and status != "In Progress":
         return False
     if normalized_filter == "completed" and status != "Completed":
         return False
