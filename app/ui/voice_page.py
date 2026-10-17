@@ -1995,6 +1995,28 @@ class VoicePage(QWidget):
                 self.status.setText("Confirm that you have permission to use this voice reference.")
                 return None
             clone_name = name or self.sample_path.stem
+            # Reuse the identity namespace of a saved clone when previewing or
+            # updating it. Generating a fresh UUID on every UI read invalidates
+            # cached reference conditioning and can make a saved custom voice
+            # appear to change between preview and audiobook generation.
+            selected_name = str(self.saved_profiles.currentData() or "")
+            existing_clone = next(
+                (
+                    p for p in self.profiles
+                    if p.provider == "qwen-character"
+                    and (p.qwen_mode or "custom") == "clone"
+                    and p.name.casefold() in {selected_name.casefold(), clone_name.casefold()}
+                    and p.sample_path
+                    and Path(p.sample_path).expanduser().resolve()
+                    == self.sample_path.expanduser().resolve()
+                ),
+                None,
+            )
+            profile_id = (
+                existing_clone.qwen_profile_id
+                if existing_clone and existing_clone.qwen_profile_id
+                else uuid.uuid4().hex
+            )
             return VoiceProfile(
                 name=clone_name,
                 provider="qwen-character",
@@ -2006,7 +2028,7 @@ class VoicePage(QWidget):
                 authorized=True,
                 qwen_mode="clone",
                 reference_text=self.qwen_reference_text.text().strip(),
-                qwen_profile_id=uuid.uuid4().hex,
+                qwen_profile_id=profile_id,
             )
 
         if provider == "offline-neural":
