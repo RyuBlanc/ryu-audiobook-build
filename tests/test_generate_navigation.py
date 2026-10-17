@@ -194,6 +194,36 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                 workflow.deleteLater()
                 self.app.processEvents()
 
+    def test_generate_recovers_when_cached_page_is_unregistered(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-stale-generate-page-") as temp:
+            workflow = ProjectWorkflow()
+            project = self._project(Path(temp) / "sample-project")
+            try:
+                workflow.show()
+                workflow.open_project(project)
+                self.app.processEvents()
+                stale_page = workflow.generation
+                self.assertIsNotNone(stale_page)
+
+                # Simulate a page removed by a save/rename/rebuild path while
+                # the workflow still holds its cached Python reference.
+                workflow.stack.removeWidget(stale_page)
+                workflow.generation = stale_page
+                workflow._generation_index = -1
+
+                workflow.select_section("Generate")
+                self.app.processEvents()
+
+                self.assertIsNotNone(workflow.generation)
+                self.assertIsNot(workflow.generation, stale_page)
+                self.assertGreaterEqual(workflow.stack.indexOf(workflow.generation), 0)
+                self.assertIs(workflow.stack.currentWidget(), workflow.generation)
+                self.assertTrue(workflow.generation.start_button.isVisible())
+            finally:
+                workflow.close()
+                workflow.deleteLater()
+                self.app.processEvents()
+
     def test_generate_remains_available_if_optional_studio_mount_fails(self):
         with tempfile.TemporaryDirectory(prefix="ryu-generate-optional-studio-") as temp:
             workflow = ProjectWorkflow()
