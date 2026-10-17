@@ -213,16 +213,6 @@
     },
     {
       "type": "cue",
-      "category": "page",
-      "bundle_path": "cues/page/page-turn-inventory.wav",
-      "title": "Turn Page",
-      "author": "artisticdude (submitted by Ogrebane)",
-      "source_url": "https://opengameart.org/content/inventory-sound-effects",
-      "license": "CC-BY 3.0 (also offered under CC-BY-SA/GPL)",
-      "license_note": "Attribution required under CC-BY 3.0: Inventory Sound Effects by artisticdude, submitted by Ogrebane; created for Summoning Wars."
-    },
-    {
-      "type": "cue",
       "category": "ending",
       "bundle_path": "cues/ending/book-closing.mp3",
       "title": "Book Closing",

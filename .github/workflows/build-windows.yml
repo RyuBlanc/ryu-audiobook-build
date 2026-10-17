@@ -207,18 +207,7 @@ jobs:
             Copy-Item -Force $bookClose $closeOut
           }
 
-          $inventoryZip = Join-Path $tmpCueRoot 'inventory_sound_effects.zip'
-          curl.exe -L --fail --retry 2 --silent --show-error -A 'RyuAudiobookStarterAudio/1.0' -o $inventoryZip 'https://opengameart.org/sites/default/files/inventory_sound_effects.zip'
-          if ($LASTEXITCODE -eq 0 -and (Test-Path $inventoryZip)) {
-            $inventoryExtract = Join-Path $tmpCueRoot 'inventory-extracted'
-            Expand-Archive -Force $inventoryZip $inventoryExtract
-            $inventoryPage = Get-ChildItem $inventoryExtract -Recurse -File -Filter '*.wav' | Where-Object { $_.Name -match '(?i)(turn.?page|page.?turn)' } | Select-Object -First 1
-            if ($inventoryPage) {
-              $inventoryOut = Join-Path $starterRoot 'cues\page\page-turn-inventory.wav'
-              New-Item -ItemType Directory -Force -Path (Split-Path -Parent $inventoryOut) | Out-Null
-              Copy-Item -Force $inventoryPage.FullName $inventoryOut
-            }
-          }
+          # Real page-turn variations were downloaded above from CC0 FreeSound sources.
           foreach ($kind in @('opening','page','ending')) {
             $folder = Join-Path $starterRoot ("cues\" + $kind)
             $count = @(Get-ChildItem $folder -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension.ToLowerInvariant() -in @('.wav','.mp3','.ogg','.flac') }).Count

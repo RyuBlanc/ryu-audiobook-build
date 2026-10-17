@@ -36,13 +36,6 @@ BOOK SOUNDS — CC0 1.0 Universal
 - Book Manipulations (opening/closing excerpts) — timothyd4y:
   https://freesound.org/people/timothyd4y/sounds/478743/
 
-BOOK SOUNDS — CC-BY 3.0 (attribution required)
-- Inventory Sound Effects — artisticdude, submitted by Ogrebane; created for
-  Summoning Wars:
-  https://opengameart.org/content/inventory-sound-effects
-  Required credit: "Inventory Sound Effects" by artisticdude, submitted by
-  Ogrebane, licensed under CC-BY 3.0.
-
 Each audio entry has a manifest source URL and license note. During packaging,
 the workflow downloads source files and validates that the required real BGM
 and the opening, page-turn and closing categories are available. Some sources
