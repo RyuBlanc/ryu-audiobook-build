@@ -51,8 +51,8 @@ class RegressionTests(unittest.TestCase):
             number=1,
             title="Speaker tag regression",
             text=(
-                'Akeno Himejima said, “You are late.”\\n'
-                'Rias Gremory replied, “I know.”\\n'
+                'Akeno Himejima said, “You are late.”\n'
+                'Rias Gremory replied, “I know.”\n'
                 'Akeno Himejima said, “Then let us go.”'
             ),
         )
@@ -71,7 +71,7 @@ class RegressionTests(unittest.TestCase):
         chapter = Chapter(
             number=1,
             title="Unicode speaker label",
-            text='リアス: 「遅いわね。」\\nアーシア: 「ごめんなさい。」',
+            text='リアス: 「遅いわね。」\nアーシア: 「ごめんなさい。」',
         )
         analysis = analyze_book([chapter])
         names = {item.name for item in analysis.characters}
@@ -79,6 +79,9 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("リアス", names)
         self.assertIn("アーシア", names)
         self.assertEqual(analysis.dialogue_total, 2)
+        by_name = {item.name: item for item in analysis.characters}
+        self.assertEqual(by_name["リアス"].dialogue_count, 1)
+        self.assertEqual(by_name["アーシア"].dialogue_count, 1)
 
     def test_pronunciation_candidates_reject_ordinary_english(self):
         self.assertTrue(is_common_english_phrase("All"))

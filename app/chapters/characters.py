@@ -302,7 +302,7 @@ def _speaker_near_quote(
     for pattern in (
         rf"{name_phrase}\s*(?:{SPEAKER_VERBS})\b\s*[,;:]?\s*$",
         rf"(?:{SPEAKER_VERBS})\s+{name_phrase}\s*$",
-        rf"{name_phrase}\s*[:—–-]\s*$",
+        rf"{name_phrase}\s*[:：—–-]\s*$",
     ):
         matches = list(re.finditer(pattern, before, re.I | re.S))
         if matches:
