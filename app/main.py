@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QCursor, QIcon, QPixmap
 from PySide6.QtWidgets import QApplication
 
@@ -420,7 +420,12 @@ def main() -> int:
     ensure_roots()
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    app.setProperty("_ryuDarkStylesheet", APP_STYLE)
     app.setStyleSheet(APP_STYLE)
+    saved_theme = str(QSettings("RyuBlanc", "Ryu's Audiobook").value("ui/theme", "dark")).lower()
+    if saved_theme == "light":
+        from app.ui.settings_page import apply_application_theme
+        apply_application_theme(app, "light")
     # Small transparent four-winged crimson dragon cursor. The hotspot is
     # placed at the nose so clicking and text selection remain predictable.
     dragon_cursor_path = asset_path("dragon_cursor.png")

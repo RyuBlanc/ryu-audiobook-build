@@ -331,9 +331,9 @@ class GenerationPage(QWidget):
         outer.setContentsMargins(12, 10, 12, 10)
         outer.setSpacing(8)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.content_scroll = QScrollArea()
+        self.content_scroll.setWidgetResizable(True)
+        self.content_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         content = QWidget()
         root = QVBoxLayout(content)
         root.setContentsMargins(6, 4, 6, 12)
@@ -392,6 +392,7 @@ class GenerationPage(QWidget):
         root.addWidget(cast_box)
 
         pronunciation_box = QGroupBox("Pronunciation Dictionary")
+        pronunciation_box.setObjectName("pronunciationDictionarySection")
         pronunciation_layout = QVBoxLayout(pronunciation_box)
         pronunciation_hint = QLabel(
             "Add words or names the voice should pronounce differently. "
@@ -459,6 +460,7 @@ class GenerationPage(QWidget):
         root.addWidget(pronunciation_box)
 
         settings = QGroupBox("Audio settings")
+        settings.setObjectName("audioSettingsSection")
         settings_form = QFormLayout(settings)
         self._background_audio_form = settings_form
 
@@ -940,6 +942,7 @@ class GenerationPage(QWidget):
         root.addWidget(preview_box)
 
         progress_box = QGroupBox("Generation")
+        progress_box.setObjectName("generationProgressSection")
         progress_layout = QVBoxLayout(progress_box)
         self.progress = SmoothProgressBar()
         progress_layout.addWidget(self.progress)
@@ -1030,8 +1033,8 @@ class GenerationPage(QWidget):
         actions.addWidget(self.cancel_button)
         root.addLayout(actions)
 
-        scroll.setWidget(content)
-        outer.addWidget(scroll, 1)
+        self.content_scroll.setWidget(content)
+        outer.addWidget(self.content_scroll, 1)
 
         self.status = QLabel("Ready")
         self.status.setWordWrap(True)
@@ -1056,6 +1059,22 @@ class GenerationPage(QWidget):
         self._set_default_output()
         self._refresh_resume_state()
         self._refresh_readiness()
+
+    def focus_section(self, section: str) -> bool:
+        """Scroll the existing production UI to a real feature section."""
+        targets = {
+            "pronunciation": "pronunciationDictionarySection",
+            "sound": "audioSettingsSection",
+            "generate": "generationProgressSection",
+        }
+        object_name = targets.get(str(section or "").strip().lower())
+        if not object_name:
+            return False
+        target = self.findChild(QGroupBox, object_name)
+        if target is None or not hasattr(self, "content_scroll"):
+            return False
+        self.content_scroll.ensureWidgetVisible(target, 0, 18)
+        return True
 
     def _add_pronunciation_row(self, written="", spoken="", enabled=True, source="manual"):
         from PySide6.QtCore import Qt

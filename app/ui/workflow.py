@@ -37,6 +37,9 @@ from app.ui.voice_page import VoicePage
 from app.ui.hardware_page import HardwarePage
 from app.ui.models_page import ModelsPage
 from app.ui.voice_cast_page import VoiceCastPage
+from app.ui.audiobooks_page import AudiobooksPage
+from app.ui.history_page import HistoryPage
+from app.ui.settings_page import SettingsPage
 from app.ui.loading_overlay import FrostedLoadingOverlay
 from app.ui.motion import reduced_motion_enabled
 
@@ -187,9 +190,14 @@ class ProjectWorkflow(QMainWindow):
             "Chapters": "Chapter Studio",
             "Voice & Narration": "Voice Studio",
             "Voice Cast": "Character Studio",
+            "Pronunciation": "Pronunciation Studio",
+            "Sound Design": "Sound Design Studio",
             "Generate": "Production Studio",
+            "Audiobooks": "Audiobooks",
+            "History": "Generation History",
             "Models": "Models Center",
             "Hardware": "Performance Center",
+            "Settings": "Settings",
         }
 
         def add_nav_group(label: str, entries: list[tuple[str, str, str]]) -> None:
@@ -221,11 +229,18 @@ class ProjectWorkflow(QMainWindow):
             ("Chapters", "Chapter Studio", "☷"),
             ("Voice & Narration", "Voice Studio", "◉"),
             ("Voice Cast", "Character Studio", "♙"),
+            ("Pronunciation", "Pronunciation Studio", "Aa"),
         ])
-        add_nav_group("Production", [("Generate", "Production Studio", "▶")])
+        add_nav_group("Production", [
+            ("Sound Design", "Sound Design Studio", "♫"),
+            ("Generate", "Production Studio", "▶"),
+            ("Audiobooks", "Audiobooks", "▷"),
+            ("History", "Generation History", "↻"),
+        ])
         add_nav_group("System", [
             ("Models", "Models Center", "◆"),
             ("Hardware", "Performance Center", "⚙"),
+            ("Settings", "Settings", "⚙"),
         ])
 
         self.sidebar.currentRowChanged.connect(self._sidebar_changed)
@@ -330,6 +345,15 @@ class ProjectWorkflow(QMainWindow):
         self.stack.addWidget(self.models_page)
         self.hardware_page = HardwarePage()
         self.stack.addWidget(self.hardware_page)
+        self.audiobooks_page = AudiobooksPage(self.open_project)
+        self.stack.addWidget(self.audiobooks_page)
+        self.history_page = HistoryPage(
+            on_open_project=self.open_project,
+            on_open_generation=lambda: self.select_section("Generate"),
+        )
+        self.stack.addWidget(self.history_page)
+        self.settings_page = SettingsPage(self._settings_saved)
+        self.stack.addWidget(self.settings_page)
 
         self.editor: ChapterEditorPage | None = None
         self.generation: GenerationPage | None = None
@@ -338,6 +362,13 @@ class ProjectWorkflow(QMainWindow):
 
         # Row 0 is the non-selectable HOME heading; Library is the first destination.
         self.sidebar.setCurrentRow(1)
+
+    def _settings_saved(self, reduce_motion: bool) -> None:
+        """Apply saved UI preferences to an already-open generation page."""
+        if self.generation is not None and self.stack.indexOf(self.generation) >= 0:
+            setter = getattr(self.generation, "_set_reduce_motion", None)
+            if callable(setter):
+                setter(bool(reduce_motion))
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -393,12 +424,41 @@ class ProjectWorkflow(QMainWindow):
         self.library.search.setText(query)
 
     def _update_page_chrome(self, widget: QWidget) -> None:
+        # Pronunciation and Sound Design are focused views into the same real
+        # per-book production workspace, not duplicate/mock implementations.
+        selected = ""
+        current_item = self.sidebar.currentItem() if hasattr(self, "sidebar") else None
+        if current_item is not None:
+            selected = str(current_item.data(32) or "")
+        focused_chrome = {
+            "Pronunciation": (
+                "Pronunciation Studio",
+                "Correct names and terms, audition changes, and save per-book overrides.",
+            ),
+            "Sound Design": (
+                "Sound Design Studio",
+                "Configure real local BGM, chapter cues, mixing levels, and transitions.",
+            ),
+            "Generate": (
+                "Production Studio",
+                "Preview, generate, recover, and assemble your audiobook.",
+            ),
+        }
+        if widget is self.generation and selected in focused_chrome:
+            heading, subtitle = focused_chrome[selected]
+            self.page_heading.setText(heading)
+            self.page_subheading.setText(subtitle)
+            return
+
         pages = [
             (self.dashboard, "Dashboard", "A live summary of your local audiobook workspace."),
             (self.library, "Library", "Your local audiobook projects and ongoing work."),
             (self.import_page, "Import", "Bring a source book into your local workflow."),
             (self.voice, "Voice & Narration", "Choose, configure, and preview the narrator."),
             (self.voice_cast, "Voice Cast", "Review dialogue and assign character voices."),
+            (self.audiobooks_page, "Audiobooks", "Listen to finished local audiobook files in the app."),
+            (self.history_page, "History", "Review real project and generation status from local files."),
+            (self.settings_page, "Settings", "Manage appearance, local folders, and diagnostics."),
         ]
         if self.editor is not None:
             pages.append((self.editor, "Chapters", "Review and edit your book chapter by chapter."))
@@ -500,14 +560,27 @@ class ProjectWorkflow(QMainWindow):
             expected = self.voice
         elif name == "Voice Cast":
             expected = self.voice_cast
+        elif name in {"Pronunciation", "Sound Design"}:
+            expected = self.generation if self.project else self.import_page
+        elif name == "Audiobooks":
+            expected = self.audiobooks_page
+        elif name == "History":
+            expected = self.history_page
+        elif name == "Settings":
+            expected = self.settings_page
         elif name == "Models":
             expected = self.models_page
         elif name == "Hardware":
             expected = self.hardware_page
         else:
             return
-        # If currentRowChanged already navigated, do not repeat or refresh twice.
-        if expected is None or self.stack.currentWidget() is not expected:
+        # Alias views must also re-run when already selected so their focus target
+        # is restored after navigation from another page or a stale stacked widget.
+        if (
+            expected is None
+            or self.stack.currentWidget() is not expected
+            or name in {"Pronunciation", "Sound Design"}
+        ):
             self._sidebar_changed(row)
 
     def _refresh_generation_context(self) -> None:
@@ -535,6 +608,48 @@ class ProjectWorkflow(QMainWindow):
                 + " | ".join(problems)
             )
 
+    def _open_generation_feature(self, feature: str) -> None:
+        """Open a focused section of the current project's real Production Studio."""
+        key = "Pronunciation" if feature == "pronunciation" else "Sound Design"
+        if not self.project:
+            selected_projects = self.library._selected_projects()
+            if selected_projects:
+                self.open_project(selected_projects[0])
+                # open_project navigates to Chapters; restore the requested destination
+                # without triggering a nested page change.
+                for index in range(self.sidebar.count()):
+                    if self.sidebar.item(index).data(32) == key:
+                        self.sidebar.blockSignals(True)
+                        try:
+                            self.sidebar.setCurrentRow(index)
+                        finally:
+                            self.sidebar.blockSignals(False)
+                        break
+            else:
+                self._show_page(self.library)
+                QMessageBox.information(
+                    self,
+                    "Open a book first",
+                    f"{key} uses book-specific settings. Select a book in Library or import one, then open {key}.",
+                )
+                return
+        if not self.project:
+            return
+        if (
+            self.generation is None
+            or self.stack.indexOf(self.generation) < 0
+            or self.generation.project_folder != self.project.folder
+        ):
+            self.ensure_generation_page()
+        if self.generation is None:
+            return
+        self._show_page(self.generation)
+        QTimer.singleShot(
+            90,
+            lambda page=self.generation, section=feature:
+                page.focus_section(section) if page and self.stack.indexOf(page) >= 0 else None,
+        )
+
     def _sidebar_changed(self, row: int) -> None:
         if row < 0 or row >= self.sidebar.count():
             return
@@ -560,9 +675,22 @@ class ProjectWorkflow(QMainWindow):
         elif name == "Voice Cast":
             try:
                 self.voice_cast.refresh_profiles()
-            except Exception:
-                pass
+            except Exception as exc:
+                self._log_ui_failure("Refresh Voice Cast profiles", exc)
             self._show_page(self.voice_cast)
+        elif name == "Pronunciation":
+            self._open_generation_feature("pronunciation")
+        elif name == "Sound Design":
+            self._open_generation_feature("sound")
+        elif name == "Audiobooks":
+            self.audiobooks_page.refresh()
+            self._show_page(self.audiobooks_page)
+        elif name == "History":
+            self.history_page.refresh()
+            self._show_page(self.history_page)
+        elif name == "Settings":
+            self.settings_page.refresh()
+            self._show_page(self.settings_page)
         elif name == "Generate":
             try:
                 if not self.project:

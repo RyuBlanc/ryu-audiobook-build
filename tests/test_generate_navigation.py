@@ -42,7 +42,8 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
             self.assertEqual(
                 page_keys,
                 ["Dashboard", "Library", "Import", "Chapters", "Voice & Narration",
-                 "Voice Cast", "Generate", "Models", "Hardware"],
+                 "Voice Cast", "Pronunciation", "Sound Design", "Generate", "Audiobooks",
+                 "History", "Models", "Hardware", "Settings"],
             )
             group_labels = [
                 workflow.sidebar.item(i).text()
@@ -75,6 +76,23 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
         )
         project.save()
         return project
+
+    def test_reference_destinations_are_real_pages_and_refresh(self) -> None:
+        workflow = ProjectWorkflow()
+        try:
+            self.assertIsNotNone(workflow.audiobooks_page)
+            self.assertIsNotNone(workflow.history_page)
+            self.assertIsNotNone(workflow.settings_page)
+
+            workflow.select_section("Audiobooks")
+            self.assertIs(workflow.stack.currentWidget(), workflow.audiobooks_page)
+            workflow.select_section("History")
+            self.assertIs(workflow.stack.currentWidget(), workflow.history_page)
+            workflow.select_section("Settings")
+            self.assertIs(workflow.stack.currentWidget(), workflow.settings_page)
+        finally:
+            workflow.close()
+            workflow.deleteLater()
 
     def test_generate_page_constructs_and_is_visible_for_an_open_book(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ryu-generate-navigation-") as temp:
