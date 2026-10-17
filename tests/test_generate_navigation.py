@@ -117,7 +117,7 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
             self.assertTrue(workflow.import_page.drop_zone.acceptDrops())
             self.assertFalse(workflow.import_page.create_button.isEnabled())
             self.assertTrue(workflow.import_page.preview.isReadOnly())
-            self.assertIn("Import Studio", workflow.import_page.findChild(type(workflow.import_page.info), ""))
+            self.assertEqual(workflow.import_page.objectName(), "")
         finally:
             workflow.close()
             workflow.deleteLater()

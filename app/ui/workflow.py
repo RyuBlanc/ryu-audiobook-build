@@ -486,7 +486,9 @@ class ProjectWorkflow(QMainWindow):
         if row < 0:
             return
         name = str(item.data(32) or "")
-        if name == "Generate":
+        if name == "Dashboard":
+            expected = self.dashboard
+        elif name == "Generate":
             expected = self.generation if self.project else self.import_page
         elif name == "Library":
             expected = self.library
