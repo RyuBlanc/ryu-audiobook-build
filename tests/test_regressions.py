@@ -684,6 +684,12 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("self.close()", source)
         self.assertIn("heartbeat=", source)
 
+    def test_build_label_comes_from_bundled_build_metadata(self):
+        from app.build_info import BUILD_NUMBER
+        from app.version import full_version
+
+        self.assertEqual(full_version(), f"v0.3.7 • Build {BUILD_NUMBER}")
+
     def test_import_controls_use_the_audiobook_brand_mark(self):
         source = Path("app/ui/workflow.py").read_text(encoding="utf-8")
         self.assertIn("def _import_book_icon()", source)
