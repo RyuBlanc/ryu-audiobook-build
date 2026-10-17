@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 # Set Qt's headless platform before importing any Qt modules in CI.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -67,6 +68,32 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                 self.assertTrue(page.preview_page_cue.isVisible(), "Chapter-turn preview must be present.")
                 self.assertTrue(page.preview_ending_cue.isVisible(), "Book-closing preview must be present.")
                 self.assertEqual(page.title.text(), project.title)
+            finally:
+                workflow.close()
+                workflow.deleteLater()
+                self.app.processEvents()
+
+    def test_failed_generate_refresh_preserves_a_live_page_for_the_same_book(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ryu-generate-transaction-") as temp:
+            workflow = ProjectWorkflow()
+            project = self._project(Path(temp) / "sample-project")
+            try:
+                workflow.show()
+                workflow.open_project(project)
+                page = workflow.generation
+                self.assertIsNotNone(page)
+                workflow.stack.setCurrentWidget(page)
+
+                with patch(
+                    "app.ui.workflow.GenerationPage",
+                    side_effect=RuntimeError("simulated page-construction failure"),
+                ):
+                    workflow.ensure_generation_page()
+
+                self.assertIs(workflow.generation, page)
+                self.assertGreaterEqual(workflow.stack.indexOf(page), 0)
+                self.assertIs(workflow.stack.currentWidget(), page)
+                self.assertIn("Generate refresh failed", page.status.text())
             finally:
                 workflow.close()
                 workflow.deleteLater()
