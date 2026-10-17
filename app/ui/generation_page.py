@@ -11,7 +11,7 @@ from PySide6.QtCore import QObject, Signal, QUrl, QTimer, QThread, QSettings
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+    QFileDialog, QInputDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QVBoxLayout, QWidget, QComboBox, QScrollArea,
     QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy, QCheckBox,
     QDoubleSpinBox, QSpinBox,
@@ -37,7 +37,10 @@ from app.tts.readiness import build_generation_readiness
 from app.tts.chatterbox_runtime import runtime_ready
 from app.audio.assembler import DEFAULT_AUDIO_BITRATE_KBPS, _duration_ms
 from app.tts.resume import inspect_generation_state
-from app.audio.sound_design import CUE_STYLE_LABELS, MOOD_ORDER, VARIATIONS_PER_MOOD, music_variation_info
+from app.audio.library import (
+    AUDIO_SOURCE_LINKS, CUE_KIND_LABELS, MUSIC_CATEGORIES, ensure_audio_library,
+    import_audio_files, list_cue_tracks, list_music_tracks, resolve_cue_track, resolve_music_track,
+)
 
 
 class VoicePreviewWorker(QThread):
@@ -552,54 +555,63 @@ class GenerationPage(QWidget):
 
         # Original rhythmic cinematic arrangements replace the old harmony-pad
         # catalogue. Tracks are synthesized only when previewed or exported.
+        ensure_audio_library()
         self.bgm_variation = QComboBox()
-        self.bgm_variation.setObjectName("bgmCatalogue")
+        self.bgm_variation.setObjectName("realBgmCatalogue")
         self.bgm_variation.setMinimumContentsLength(28)
         self.bgm_variation.setToolTip(
-            "Choose from 1,344 original cinematic/anime-inspired arrangements: "
-            "driving bass, ostinatos, hybrid percussion, cinematic strings and leads. "
-            "No existing film/anime score is copied; tracks render locally."
+            "Real audio files only. Auto mode selects a track from your local library "
+            "based on each chapter's mood. Add multiple tracks per category for variety."
         )
-        self.bgm_variation.addItem("Auto • match each chapter to its story mood", 0)
-        for mood in MOOD_ORDER:
-            for variation_index in range(VARIATIONS_PER_MOOD):
-                info = music_variation_info(mood, variation_index)
-                self.bgm_variation.addItem(
-                    f"#{int(info['id']):04d} • {info['style']} • {info['texture']} • "
-                    f"{info['tempo_bpm']} BPM • {info['arrangement']}",
-                    int(info["id"]),
-                )
-        try:
-            saved_bgm_id = int(audio_state.get("auto_music_variation_id", 0) or 0)
-        except (TypeError, ValueError):
-            saved_bgm_id = 0
-        self.bgm_variation.setCurrentIndex(max(0, self.bgm_variation.findData(saved_bgm_id)))
+        self.bgm_variation.addItem("Auto • match each chapter to a real track", "auto")
+        for track in list_music_tracks():
+            self.bgm_variation.addItem(
+                f"{track.category_label} • {track.path.name}",
+                str(track.path),
+            )
+        saved_track_path = str(audio_state.get("auto_music_track_path") or "")
+        saved_track_index = self.bgm_variation.findData(saved_track_path)
+        self.bgm_variation.setCurrentIndex(saved_track_index if saved_track_index >= 0 else 0)
+
         music_catalogue_row = QHBoxLayout()
         music_catalogue_row.addWidget(self.bgm_variation, 1)
         self.music_catalogue_preview = QPushButton("▶ Preview selected BGM")
         self.music_catalogue_preview.clicked.connect(self.preview_catalogue_music)
         music_catalogue_row.addWidget(self.music_catalogue_preview)
+        self.music_import_button = QPushButton("Import tracks…")
+        self.music_import_button.clicked.connect(self.import_music_tracks)
+        music_catalogue_row.addWidget(self.music_import_button)
+        self.music_sources_button = QPushButton("Find tracks online…")
+        self.music_sources_button.clicked.connect(lambda: self.open_audio_sources("music"))
+        music_catalogue_row.addWidget(self.music_sources_button)
         self.music_catalogue_container = QWidget()
         self.music_catalogue_container.setLayout(music_catalogue_row)
-        settings_form.addRow("BGM catalogue (1,344 cinematic arrangements)", self.music_catalogue_container)
+        settings_form.addRow("Real BGM catalogue", self.music_catalogue_container)
         self._catalogue_preview_path: Path | None = None
+        self.music_catalogue_hint = QLabel(
+            "Import licensed tracks into story categories. Auto chooses a real, mood-matched file; "
+            "if no track is installed, narration stays clean rather than using synthetic music."
+        )
+        self.music_catalogue_hint.setObjectName("muted")
+        settings_form.addRow("", self.music_catalogue_hint)
 
-        # One cue set keeps opening, page turns and the final close stylistically linked.
         self.chapter_transition_sound = QCheckBox(
-            "Enable linked book opening, chapter page-turns and final book closing"
+            "Add real book-opening, chapter-turn and book-closing sounds"
         )
         self.chapter_transition_sound.setChecked(
             bool(audio_state.get("chapter_transition_sound", True))
         )
+        self.chapter_transition_sound.setToolTip(
+            "Use imported real audio clips. Leave a cue field blank to rotate through "
+            "the relevant local library folder."
+        )
         settings_form.addRow("", self.chapter_transition_sound)
 
+        # Compatibility field for older saved project state. Generated cue
+        # presets are removed from the user interface and export path.
         self.sound_cue_style = QComboBox()
-        self.sound_cue_style.setObjectName("soundCueStyle")
-        for cue_id, cue_label in CUE_STYLE_LABELS.items():
-            self.sound_cue_style.addItem(cue_label, cue_id)
-        saved_cue_style = str(audio_state.get("sound_cue_style") or "classic-book")
-        self.sound_cue_style.setCurrentIndex(max(0, self.sound_cue_style.findData(saved_cue_style)))
-        settings_form.addRow("Linked book cue set", self.sound_cue_style)
+        self.sound_cue_style.addItem("Local audio library (real sounds only)", "library")
+        self.sound_cue_style.hide()
 
         cue_preview_row = QHBoxLayout()
         self.preview_opening_cue = QPushButton("▶ Preview opening")
@@ -617,11 +629,17 @@ class GenerationPage(QWidget):
         custom_cues_layout.setContentsMargins(0, 0, 0, 0)
         custom_cues_layout.setSpacing(5)
         self.opening_cue_path = QLineEdit(str(audio_state.get("opening_cue_path") or ""))
-        self.opening_cue_path.setPlaceholderText("Optional custom book-opening audio…")
+        self.opening_cue_path.setPlaceholderText(
+            "Optional opening clip • blank = auto-rotate library"
+        )
         self.page_turn_cue_path = QLineEdit(str(audio_state.get("page_turn_cue_path") or ""))
-        self.page_turn_cue_path.setPlaceholderText("Optional custom chapter page-turn audio…")
+        self.page_turn_cue_path.setPlaceholderText(
+            "Optional chapter-turn clip • blank = auto-rotate library"
+        )
         self.ending_cue_path = QLineEdit(str(audio_state.get("ending_cue_path") or ""))
-        self.ending_cue_path.setPlaceholderText("Optional custom book-closing audio…")
+        self.ending_cue_path.setPlaceholderText(
+            "Optional closing clip • blank = auto-rotate library"
+        )
         self._cue_path_fields = {
             "opening": self.opening_cue_path,
             "page": self.page_turn_cue_path,
@@ -631,13 +649,47 @@ class GenerationPage(QWidget):
             row = QHBoxLayout()
             row.addWidget(field, 1)
             browse = QPushButton("Browse…")
-            browse.clicked.connect(lambda _checked=False, cue_kind=kind: self.choose_cue_audio(cue_kind))
+            browse.setToolTip("Use one specific local sound file")
+            browse.clicked.connect(
+                lambda _checked=False, cue_kind=kind: self.choose_cue_audio(cue_kind)
+            )
             row.addWidget(browse)
+            library_button = QPushButton("Library…")
+            library_button.setToolTip("Choose one of the imported real sounds")
+            library_button.clicked.connect(
+                lambda _checked=False, cue_kind=kind: self.choose_from_cue_library(cue_kind)
+            )
+            row.addWidget(library_button)
+            import_button = QPushButton("Import…")
+            import_button.setToolTip("Add licensed files to this cue library")
+            import_button.clicked.connect(
+                lambda _checked=False, cue_kind=kind: self.import_cue_audio(cue_kind)
+            )
+            row.addWidget(import_button)
+            clear_button = QPushButton("Auto")
+            clear_button.setToolTip("Clear the override and rotate through this cue library")
+            clear_button.clicked.connect(
+                lambda _checked=False, cue_kind=kind: self.clear_cue_audio_path(cue_kind)
+            )
+            row.addWidget(clear_button)
             custom_cues_layout.addLayout(row)
         self.custom_cues_container = QWidget()
         self.custom_cues_container.setLayout(custom_cues_layout)
-        settings_form.addRow("Custom opening / flip / closing audio", self.custom_cues_container)
-        self.sound_cue_style.currentIndexChanged.connect(self._toggle_custom_cue_fields)
+        settings_form.addRow("Real audiobook cue files", self.custom_cues_container)
+
+        cue_source_row = QHBoxLayout()
+        self.cue_sources_button = QPushButton("Find book sounds online…")
+        self.cue_sources_button.clicked.connect(lambda: self.open_audio_sources("cue"))
+        cue_source_row.addWidget(self.cue_sources_button)
+        self.cue_library_hint = QLabel(
+            "Add multiple clips to each library for rotation. Opening, page-turn and closing "
+            "sounds stay separate; no generated placeholder cues are used."
+        )
+        self.cue_library_hint.setObjectName("muted")
+        cue_source_row.addWidget(self.cue_library_hint, 1)
+        cue_source_container = QWidget()
+        cue_source_container.setLayout(cue_source_row)
+        settings_form.addRow("", cue_source_container)
         self._toggle_custom_cue_fields()
 
         self.story_effects_enabled = QCheckBox(
@@ -1674,7 +1726,7 @@ class GenerationPage(QWidget):
             "bgm_enabled": self.background_audio_enabled.isChecked() if hasattr(self, "background_audio_enabled") else False,
             "bgm_mode": self.background_audio_mode.currentData() if hasattr(self, "background_audio_mode") else "off",
             "bgm_style": self.auto_music_style.currentData() if hasattr(self, "auto_music_style") else "auto",
-            "bgm_recipe": self.bgm_variation.currentData() if hasattr(self, "bgm_variation") else 0,
+            "bgm_track": self.bgm_variation.currentData() if hasattr(self, "bgm_variation") else "auto",
             "bgm_file": self.background_audio_path.text().strip() if hasattr(self, "background_audio_path") else "",
             "ambience_file": self.ambience_audio_path.text().strip() if hasattr(self, "ambience_audio_path") else "",
             "bgm_volume": float(self.background_audio_volume.value()) if hasattr(self, "background_audio_volume") else 18.0,
@@ -1702,6 +1754,7 @@ class GenerationPage(QWidget):
         # Book cue controls stay enabled even when background music is turned off.
         # Hide manual track rows entirely in Automatic mode instead of leaving
         # four disabled rows on screen. The rows return when Manual is selected.
+        self.music_catalogue_hint.setVisible(auto_mode)
         for widget, visible in (
             (self.music_file_container, manual_mode),
             (self.background_audio_volume, auto_mode or manual_mode),
@@ -1724,6 +1777,141 @@ class GenerationPage(QWidget):
         for widget in (self.background_audio_fade_in, self.background_audio_fade_out):
             widget.setEnabled(enabled)
 
+    def _refresh_bgm_catalogue(self, preferred_path: str | None = None) -> None:
+        current = str(preferred_path or self.bgm_variation.currentData() or "auto")
+        self.bgm_variation.blockSignals(True)
+        self.bgm_variation.clear()
+        self.bgm_variation.addItem("Auto • match each chapter to a real track", "auto")
+        for track in list_music_tracks():
+            self.bgm_variation.addItem(
+                f"{track.category_label} • {track.path.name}",
+                str(track.path),
+            )
+        index = self.bgm_variation.findData(current)
+        self.bgm_variation.setCurrentIndex(index if index >= 0 else 0)
+        self.bgm_variation.blockSignals(False)
+
+    def import_music_tracks(self) -> None:
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Import licensed BGM / audiobook music",
+            "",
+            "Audio Files (*.wav *.mp3 *.m4a *.aac *.flac *.ogg *.opus *.wma);;All Files (*.*)",
+        )
+        if not files:
+            return
+        labels = [label for _key, label in MUSIC_CATEGORIES]
+        preferred = labels.index("Universal / low-distraction narration bed")
+        selected_label, ok = QInputDialog.getItem(
+            self,
+            "Categorize imported music",
+            "Choose the main story mood for these files:",
+            labels,
+            preferred,
+            False,
+        )
+        if not ok:
+            return
+        category = next(key for key, label in MUSIC_CATEGORIES if label == selected_label)
+        license_note, _ = QInputDialog.getText(
+            self,
+            "Source and license note",
+            "Optional source URL / license note (saved locally beside the track):",
+        )
+        added = import_audio_files(
+            files,
+            target_kind="music",
+            category=category,
+            license_note=license_note,
+        )
+        self._refresh_bgm_catalogue("auto")
+        self.status.setText(
+            f"Imported {len(added)} real BGM track(s) into {selected_label}. "
+            "Auto mode can now match these tracks to chapter moods."
+        )
+
+    def open_audio_sources(self, group: str = "both") -> None:
+        valid = [
+            source for source in AUDIO_SOURCE_LINKS
+            if group == "both" or source["group"] in {group, "both"}
+        ]
+        if not valid:
+            return
+        labels = [source["label"] for source in valid]
+        selected, ok = QInputDialog.getItem(
+            self,
+            "Find licensed audiobook audio",
+            "Choose a source to open in your browser:",
+            labels,
+            0,
+            False,
+        )
+        if not ok:
+            return
+        source = next(item for item in valid if item["label"] == selected)
+        QDesktopServices.openUrl(QUrl(source["url"]))
+        self.status.setText(
+            "Source opened. Review the track's current license, download the files you choose, "
+            "then import them into the matching local category."
+        )
+
+    def import_cue_audio(self, kind: str) -> None:
+        if kind not in self._cue_path_fields:
+            self.status.setText(f"Unknown cue type: {kind}")
+            return
+        files, _ = QFileDialog.getOpenFileNames(
+            self,
+            f"Import licensed {CUE_KIND_LABELS.get(kind, kind)} clips",
+            "",
+            "Audio Files (*.wav *.mp3 *.m4a *.aac *.flac *.ogg *.opus *.wma);;All Files (*.*)",
+        )
+        if not files:
+            return
+        license_note, _ = QInputDialog.getText(
+            self,
+            "Source and license note",
+            "Optional source URL / license note (saved locally beside these clips):",
+        )
+        added = import_audio_files(
+            files,
+            target_kind=kind,
+            license_note=license_note,
+        )
+        self._cue_path_fields[kind].clear()
+        self.status.setText(
+            f"Imported {len(added)} real {kind} cue(s). "
+            "Leave this field blank to rotate through the library or choose a specific file."
+        )
+
+    def choose_from_cue_library(self, kind: str) -> None:
+        tracks = list_cue_tracks(kind)
+        if not tracks:
+            self.status.setText(
+                f"No {kind} cues are installed. Import licensed clips or use Find book sounds online…"
+            )
+            return
+        labels = [f"{path.name} — {path.parent.name}" for path in tracks]
+        selected, ok = QInputDialog.getItem(
+            self,
+            f"Choose {CUE_KIND_LABELS.get(kind, kind)}",
+            "Select one real local audio file:",
+            labels,
+            0,
+            False,
+        )
+        if ok:
+            chosen = tracks[labels.index(selected)]
+            self._cue_path_fields[kind].setText(str(chosen))
+            self.status.setText(f"Selected real cue: {chosen.name}")
+
+    def clear_cue_audio_path(self, kind: str) -> None:
+        field = self._cue_path_fields.get(kind)
+        if field is not None:
+            field.clear()
+            self.status.setText(
+                f"{kind.title()} cue will auto-rotate through its imported library."
+            )
+
     def choose_background_audio(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -1736,9 +1924,9 @@ class GenerationPage(QWidget):
             self.status.setText("Background track selected. Enable Background music to include it in the final M4B.")
 
     def _toggle_custom_cue_fields(self, *_args) -> None:
-        self.custom_cues_container.setVisible(
-            str(self.sound_cue_style.currentData() or "classic-book") == "custom"
-        )
+        # The library is always available. A blank path means auto-rotate
+        # through real local files for that cue role.
+        self.custom_cues_container.setVisible(True)
 
     def choose_cue_audio(self, kind: str) -> None:
         field = self._cue_path_fields.get(kind)
@@ -1747,83 +1935,39 @@ class GenerationPage(QWidget):
             return
         path, _ = QFileDialog.getOpenFileName(
             self,
-            f"Select custom {kind} cue",
+            f"Select a specific {kind} sound",
             field.text().strip(),
             "Audio Files (*.wav *.mp3 *.m4a *.aac *.flac *.ogg *.opus *.wma);;All Files (*.*)",
         )
         if path:
             field.setText(str(Path(path).expanduser()))
-            self.status.setText(f"Custom {kind} cue selected. Preview it before generation.")
+            self.status.setText(f"Selected real {kind} sound: {Path(path).name}")
 
     def preview_cue(self, kind: str) -> None:
-        from app.audio.sound_design import (
-            CUE_STYLE_LABELS,
-            VARIATIONS_PER_MOOD,
-            detect_chapter_mood,
-            select_music_variation,
-            synthesize_audiobook_ending,
-            synthesize_opening_cue,
-            synthesize_page_turn,
-        )
-        if kind not in {"opening", "page", "ending"}:
+        if kind not in self._cue_path_fields:
             self.status.setText(f"Unknown sound cue: {kind}")
             return
-        style = str(self.sound_cue_style.currentData() or "classic-book")
-        field = self._cue_path_fields[kind]
-        candidate = Path(field.text().strip()).expanduser() if field.text().strip() else None
-        if style == "custom" and candidate and candidate.is_file():
-            cue = candidate.resolve()
-        else:
-            selected_id = int(self.bgm_variation.currentData() or 0)
-            if selected_id > 0:
-                variant = (selected_id - 1) % VARIATIONS_PER_MOOD
-            else:
-                # In Auto mode, audition the variant selected for the relevant
-                # book chapter so this standalone sound matches the final export.
-                if kind == "opening":
-                    chapter_index = 0
-                elif kind == "ending":
-                    chapter_index = max(0, len(self.chapters) - 1)
-                else:
-                    chapter_index = max(1, self.preview_chapter.currentIndex())
-                    chapter_index = min(chapter_index, max(0, len(self.chapters) - 1))
-                chapter = self.chapters[chapter_index] if self.chapters else None
-                title = chapter.title if chapter else self.title.text().strip()
-                text = chapter.text if chapter else ""
-                mood = detect_chapter_mood(
-                    title, text, str(self.auto_music_style.currentData() or "auto")
-                )
-                variant = select_music_variation(title, text, mood)
-            generated_style = "classic-book" if style == "custom" else style
-            safe_style = re.sub(r"[^a-z0-9_-]+", "-", generated_style.casefold())
-            cue = (
-                Path(tempfile.gettempdir())
-                / f"ryu_audiobook_cue_preview_{kind}_{safe_style}_{variant:03d}.wav"
+        selected = self._cue_path_fields[kind].text().strip() or None
+        index = self.preview_chapter.currentIndex()
+        chapter = self.chapters[index] if 0 <= index < len(self.chapters) else None
+        title = chapter.title if chapter else self.title.text().strip()
+        text = chapter.text if chapter else ""
+        cue = resolve_cue_track(
+            kind,
+            selected_path=selected,
+            seed_text=f"{kind}|{title}|{text}|{index}",
+        )
+        if cue is None or not cue.is_file():
+            self.status.setText(
+                f"No real {kind} sound is installed. Import licensed clips with Import… "
+                "or use Find book sounds online…"
             )
-            try:
-                if kind == "opening":
-                    synthesize_opening_cue(cue, variation_index=variant, cue_style=generated_style)
-                elif kind == "page":
-                    synthesize_page_turn(cue, variation_index=variant, cue_style=generated_style)
-                else:
-                    synthesize_audiobook_ending(cue, variation_index=variant, cue_style=generated_style)
-            except Exception as exc:
-                self.status.setText(f"Could not prepare the {kind} cue preview: {exc}")
-                return
-        if not cue.is_file():
-            self.status.setText(f"No audio was found for the {kind} cue.")
             return
         self.music_player.stop()
         self.music_player.setSource(QUrl.fromLocalFile(str(cue.resolve())))
         self.music_player.play()
-        cue_names = {
-            "opening": "book opening",
-            "page": "next-chapter page turn",
-            "ending": "book closing",
-        }
-        self.status.setText(
-            f"Previewing {cue_names[kind]} • preset: {CUE_STYLE_LABELS.get(style, style)}"
-        )
+        label = CUE_KIND_LABELS.get(kind, kind)
+        self.status.setText(f"Previewing real {label.lower()}: {cue.name}")
 
     def preview_catalogue_music(self) -> None:
         if self.music_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
@@ -1833,36 +1977,35 @@ class GenerationPage(QWidget):
                 return
         index = self.preview_chapter.currentIndex()
         chapter = self.chapters[index] if 0 <= index < len(self.chapters) else None
-        selected_id = int(self.bgm_variation.currentData() or 0)
-        from app.audio.sound_design import (
-            MOOD_ORDER, VARIATIONS_PER_MOOD, detect_chapter_mood,
-            select_music_variation, synthesize_music_bed,
+        title = chapter.title if chapter else self.title.text().strip()
+        text = chapter.text if chapter else ""
+        from app.audio.sound_design import detect_chapter_mood
+        mood = detect_chapter_mood(
+            title,
+            text,
+            str(self.auto_music_style.currentData() or "auto"),
         )
-        if selected_id > 0:
-            mood_index, variation = divmod(selected_id - 1, VARIATIONS_PER_MOOD)
-            mood = MOOD_ORDER[mood_index]
-        else:
-            title = chapter.title if chapter else self.title.text().strip()
-            text = chapter.text if chapter else ""
-            mood = detect_chapter_mood(title, text, str(self.auto_music_style.currentData() or "auto"))
-            variation = select_music_variation(title, text, mood)
-        cache = Path(tempfile.gettempdir()) / "ryu_audiobook_bgm_previews"
-        cache.mkdir(parents=True, exist_ok=True)
-        preview_path = cache / f"catalogue-{mood}-{variation:03d}.wav"
-        try:
-            self.status.setText(f"Preparing BGM preview • {mood.title()} • recipe #{selected_id or variation + 1}…")
-            if not preview_path.is_file() or preview_path.stat().st_size < 1024:
-                synthesize_music_bed(preview_path, mood, variation_index=variation)
-            self._catalogue_preview_path = preview_path
-            self.music_player.stop()
-            self.music_player.setSource(QUrl.fromLocalFile(str(preview_path.resolve())))
-            self.music_player.play()
+        selected_value = str(self.bgm_variation.currentData() or "auto")
+        selected_track = None if selected_value == "auto" else selected_value
+        track = resolve_music_track(
+            mood,
+            selected_track=selected_track,
+            seed_text=f"{title}|{text}|{index}",
+        )
+        if track is None or not track.is_file():
             self.status.setText(
-                f"Previewing BGM • {mood.title()} • recipe #{selected_id or variation + 1}. "
-                "Use Voice Preview to hear the track beneath narration."
+                f"No real BGM track is installed for {mood}. Use Import tracks… or Find tracks online… "
+                "to add audio you are licensed to use."
             )
-        except Exception as exc:
-            self.status.setText(f"BGM preview failed: {exc}")
+            return
+        self._catalogue_preview_path = track.resolve()
+        self.music_player.stop()
+        self.music_player.setSource(QUrl.fromLocalFile(str(track.resolve())))
+        self.music_player.play()
+        self.status.setText(
+            f"Previewing real BGM • {mood.title()} • {track.name}. "
+            "Use Voice Preview to hear this track beneath narration."
+        )
 
     def preview_background_audio(self) -> None:
         self._preview_audio_layer(self.background_audio_path, "background music")
@@ -1977,13 +2120,13 @@ class GenerationPage(QWidget):
             backend = profile.backend
 
         preview_seconds = int(self.preview_duration.currentData() or 30)
-        selected_bgm_id = int(self.bgm_variation.currentData() or 0)
+        selected_bgm_path_value = str(self.bgm_variation.currentData() or "auto")
         mix_settings = {
             "enabled": self.preview_mix_enabled.isChecked(),
             "background_enabled": True,
             "background_mode": str(self.background_audio_mode.currentData() or "auto"),
             "music_style": str(self.auto_music_style.currentData() or "auto"),
-            "music_variation_id": selected_bgm_id or None,
+            "music_variation_id": None if selected_bgm_path_value == "auto" else selected_bgm_path_value,
             "background_audio_path": self.background_audio_path.text().strip(),
             "ambience_audio_path": self.ambience_audio_path.text().strip(),
             "music_volume": float(self.background_audio_volume.value()) / 100.0,
@@ -1993,7 +2136,7 @@ class GenerationPage(QWidget):
             "chapter_transition_sound": self.chapter_transition_sound.isChecked(),
             "is_first_chapter": index == 0,
             "is_last_chapter": index == len(self.chapters) - 1,
-            "sound_cue_style": str(self.sound_cue_style.currentData() or "classic-book"),
+            "sound_cue_style": "library",
             "opening_cue_path": self.opening_cue_path.text().strip(),
             "page_turn_cue_path": self.page_turn_cue_path.text().strip(),
             "ending_cue_path": self.ending_cue_path.text().strip(),
@@ -2304,7 +2447,7 @@ class GenerationPage(QWidget):
         background_audio_mode = "off"
         auto_music_style = str(self.auto_music_style.currentData() or "auto")
         chapter_transition_sound = bool(self.chapter_transition_sound.isChecked())
-        sound_cue_style = str(self.sound_cue_style.currentData() or "classic-book")
+        sound_cue_style = "library"
         opening_cue_path = self.opening_cue_path.text().strip() or None
         page_turn_cue_path = self.page_turn_cue_path.text().strip() or None
         ending_cue_path = self.ending_cue_path.text().strip() or None
@@ -2375,10 +2518,10 @@ class GenerationPage(QWidget):
                 "background_audio_enabled": self.background_audio_enabled.isChecked(),
                 "background_audio_mode": str(self.background_audio_mode.currentData() or "auto"),
                 "auto_music_style": str(self.auto_music_style.currentData() or "auto"),
-                "auto_music_variation_id": int(self.bgm_variation.currentData() or 0),
+                "auto_music_track_path": str(self.bgm_variation.currentData() or "auto") if str(self.bgm_variation.currentData() or "auto") != "auto" else "",
                 "preview_include_sound_design": self.preview_mix_enabled.isChecked(),
                 "chapter_transition_sound": self.chapter_transition_sound.isChecked(),
-                "sound_cue_style": str(self.sound_cue_style.currentData() or "classic-book"),
+                "sound_cue_style": "library",
                 "opening_cue_path": self.opening_cue_path.text().strip(),
                 "page_turn_cue_path": self.page_turn_cue_path.text().strip(),
                 "ending_cue_path": self.ending_cue_path.text().strip(),
@@ -2429,7 +2572,7 @@ class GenerationPage(QWidget):
             "year": self.year.text().strip(),
             "genre": self.genre.value(),
         }
-        selected_bgm_id = int(self.bgm_variation.currentData() or 0)
+        selected_bgm_path_value = str(self.bgm_variation.currentData() or "auto")
         self.manager = GenerationManager(
             provider, voice, self.chapters, self.audio_root,
             on_progress=lambda *args: self.signals.progress.emit(*args),
@@ -2447,7 +2590,7 @@ class GenerationPage(QWidget):
             background_audio_fade_out=float(self.background_audio_fade_out.value()),
             background_audio_mode=background_audio_mode,
             auto_music_style=auto_music_style,
-            auto_music_variation=selected_bgm_id if selected_bgm_id > 0 else None,
+            auto_music_variation=None if selected_bgm_path_value == "auto" else selected_bgm_path_value,
             chapter_transition_sound=chapter_transition_sound,
             story_effects_enabled=self.story_effects_enabled.isChecked(),
             story_effect_volume=float(self.story_effect_volume.value()) / 100.0,

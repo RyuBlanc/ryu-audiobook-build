@@ -833,34 +833,62 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn('("Assign Selected Dialogue"', source)
 
 
-    def test_generation_has_1344_cinematic_catalogue_and_linked_cue_controls(self):
+    def test_generation_uses_real_audio_library_and_book_cue_controls(self):
         ui = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        library = Path("app/audio/library.py").read_text(encoding="utf-8")
+        assembler = Path("app/audio/assembler.py").read_text(encoding="utf-8")
         mixer = Path("app/audio/preview_mixer.py").read_text(encoding="utf-8")
-        sound_design = Path("app/audio/sound_design.py").read_text(encoding="utf-8")
-        self.assertIn('settings_form.addRow("BGM catalogue (1,344 cinematic arrangements)", self.music_catalogue_container)', ui)
-        self.assertIn('self.music_catalogue_preview.clicked.connect(self.preview_catalogue_music)', ui)
-        self.assertIn('self.preview_opening_cue.clicked.connect(lambda: self.preview_cue("opening"))', ui)
-        self.assertIn('self.preview_page_cue.clicked.connect(lambda: self.preview_cue("page"))', ui)
-        self.assertIn('self.preview_ending_cue.clicked.connect(lambda: self.preview_cue("ending"))', ui)
-        self.assertIn('settings_form.addRow("Linked book cue set", self.sound_cue_style)', ui)
-        self.assertIn('target_seconds=preview_seconds', ui)
-        self.assertIn('mix_voice_preview(', ui)
-        self.assertIn('sidechaincompress=', mixer)
-        self.assertIn('synthesize_opening_cue', mixer)
-        self.assertIn('synthesize_audiobook_ending', mixer)
-        self.assertIn('synthesize_page_turn', mixer)
-        self.assertIn('MUSIC_CATALOGUE_SIZE = len(THEMES) * VARIATIONS_PER_MOOD  # 1,344', sound_design)
-        self.assertNotIn('Harmony {info[\'harmony\']}', ui)
-        build_source = Path("build.py").read_text(encoding="utf-8")
-        cursor_source = Path("app/main.py").read_text(encoding="utf-8")
-        editor_source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
-        self.assertIn('dragon_four_winged.png', build_source)
-        self.assertIn('dragon_cursor.png', cursor_source)
-        self.assertIn('dragon_cross.png', editor_source)
-        self.assertNotIn('dragon_cursor.svg', cursor_source)
-        self.assertNotIn('dragon_cross.svg', editor_source)
-        self.assertNotIn('DRAGON_CURSOR_SVG', build_source)
-        self.assertNotIn('DRAGON_CROSS_SVG', build_source)
+        self.assertIn("Real BGM catalogue", ui)
+        self.assertIn("Import tracks…", ui)
+        self.assertIn("Find tracks online…", ui)
+        self.assertIn("import_music_tracks", ui)
+        self.assertIn("import_cue_audio", ui)
+        self.assertIn("choose_from_cue_library", ui)
+        self.assertIn("AUDIO_SOURCE_LINKS", library)
+        self.assertIn("resolve_music_track", assembler)
+        self.assertIn("resolve_cue_track", assembler)
+        self.assertIn("resolve_music_track", mixer)
+        self.assertNotIn("synthesize_music_bed(", assembler)
+        self.assertNotIn("synthesize_opening_cue(", assembler)
+        self.assertNotIn("CUE_STYLE_LABELS", ui)
+        self.assertNotIn("BGM catalogue (1,344 cinematic arrangements)", ui)
+
+    def test_real_audio_library_imports_by_category_and_rotates_cues(self):
+        from unittest.mock import patch
+        from app.audio.library import (
+            import_audio_files, list_music_tracks, list_cue_tracks,
+            resolve_music_track, resolve_cue_track, license_note_for,
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            library_root = root / "Audio Library"
+            source_music = root / "cinematic-fantasy.mp3"
+            source_music.write_bytes(b"fake audio bytes for library-import unit test")
+            source_page = root / "hardcover-page-turn.wav"
+            source_page.write_bytes(b"fake cue bytes for library-import unit test")
+            source_ending = root / "soft-book-close.wav"
+            source_ending.write_bytes(b"fake ending bytes for library-import unit test")
+            with patch("app.audio.library.audio_library_root", return_value=library_root):
+                added_music = import_audio_files(
+                    [source_music], target_kind="music", category="fantasy",
+                    license_note="Pixabay URL and current license checked by user",
+                )
+                added_page = import_audio_files([source_page], target_kind="page")
+                added_ending = import_audio_files([source_ending], target_kind="ending")
+                self.assertEqual(len(added_music), 1)
+                self.assertEqual(len(added_page), 1)
+                self.assertEqual(len(added_ending), 1)
+                tracks = list_music_tracks()
+                self.assertEqual(len(tracks), 1)
+                self.assertEqual(tracks[0].category, "fantasy")
+                self.assertIn("Pixabay URL", license_note_for(tracks[0].path))
+                self.assertEqual(
+                    resolve_music_track("fantasy", seed_text="chapter 1"),
+                    added_music[0],
+                )
+                self.assertEqual(len(list_cue_tracks("page")), 1)
+                self.assertEqual(resolve_cue_track("page", seed_text="chapter 2"), added_page[0])
+                self.assertEqual(resolve_cue_track("ending", seed_text="book end"), added_ending[0])
 
     def test_explicit_music_catalogue_id_is_mapped_without_changing_mood(self):
         from app.audio.assembler import _selected_music_recipe
@@ -879,46 +907,64 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(len(MOOD_ORDER), 8)
 
 
-    def test_preview_mixer_generates_selected_bgm_with_page_turn_and_book_ending(self):
+    def test_preview_mixer_uses_real_bgm_page_turn_and_book_ending(self):
+        from unittest.mock import patch
         import wave
+        from app.audio.library import import_audio_files
         from app.audio.preview_mixer import mix_voice_preview
         from app.audio.assembler import _duration_ms
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
+            library_root = root / "Audio Library"
             voice = root / "voice.wav"
             _write_wav(voice, 1.5)
-            output = root / "voice-plus-story-sound.wav"
-            result = mix_voice_preview(
-                voice,
-                output,
-                "The sword clashed against the shield. The battle was over.",
-                background_enabled=True,
-                background_mode="auto",
-                music_style="fantasy",
-                music_variation_id=1,
-                music_volume=0.08,
-                story_effects_enabled=False,
-                chapter_transition_sound=True,
-                is_first_chapter=False,
-                is_last_chapter=True,
-            )
-            # The mixer returns a resolved Windows path; compare the written
-            # destination rather than path casing/8.3 aliases on the CI runner.
-            self.assertTrue(Path(result).is_file())
-            self.assertTrue(output.is_file())
-            with wave.open(str(output), "rb") as wav:
-                self.assertEqual(wav.getnchannels(), 2)
-                self.assertEqual(wav.getframerate(), 44100)
-            # Page turn + 1.5s voice + the distinct book-ending cadence.
-            self.assertGreaterEqual(_duration_ms(output), 4500)
-            self.assertLessEqual(_duration_ms(output), 5200)
+            music = root / "actual-bgm.wav"
+            _write_wav(music, 1.5)
+            page = root / "hardcover-page-turn.wav"
+            _write_wav(page, 0.55)
+            ending = root / "book-closing.wav"
+            _write_wav(ending, 2.65)
+            with patch("app.audio.library.audio_library_root", return_value=library_root):
+                import_audio_files([music], target_kind="music", category="fantasy", license_note="test license")
+                import_audio_files([page], target_kind="page")
+                import_audio_files([ending], target_kind="ending")
+                output = root / "voice-plus-real-audio.wav"
+                result = mix_voice_preview(
+                    voice,
+                    output,
+                    "The sword clashed against the shield. The battle was over.",
+                    background_enabled=True,
+                    background_mode="auto",
+                    music_style="fantasy",
+                    music_volume=0.08,
+                    story_effects_enabled=False,
+                    chapter_transition_sound=True,
+                    is_first_chapter=False,
+                    is_last_chapter=True,
+                )
+                self.assertTrue(Path(result).is_file())
+                self.assertTrue(output.is_file())
+                with wave.open(str(output), "rb") as wav:
+                    self.assertEqual(wav.getnchannels(), 2)
+                    self.assertEqual(wav.getframerate(), 44100)
+                self.assertGreaterEqual(_duration_ms(output), 4500)
+                self.assertLessEqual(_duration_ms(output), 5200)
 
-    def test_chapter_and_finale_cues_work_when_background_music_is_off(self):
+    def test_chapter_and_finale_real_cues_work_when_background_music_is_off(self):
+        from unittest.mock import patch
+        from app.audio.library import import_audio_files
         from app.audio.assembler import _duration_ms
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
+            library_root = root / "Audio Library"
+            opening = root / "real-book-opening.wav"
+            page = root / "real-page-turn.wav"
+            ending = root / "real-book-ending.wav"
+            _write_wav(opening, 1.18)
+            _write_wav(page, 0.62)
+            _write_wav(ending, 2.65)
             chapters = []
             for number in (1, 2):
                 folder = root / f"{number:03d}_Chapter_{number}"
@@ -932,16 +978,19 @@ class RegressionTests(unittest.TestCase):
                 )
                 chapters.append(folder)
             output = root / "chapter-cues-without-bgm.m4b"
-            assemble_m4b(
-                chapters,
-                output,
-                "Cues without BGM",
-                chapter_titles=["Chapter 1", "Chapter 2"],
-                background_audio_mode="off",
-                chapter_transition_sound=True,
-            )
+            with patch("app.audio.library.audio_library_root", return_value=library_root):
+                import_audio_files([opening], target_kind="opening")
+                import_audio_files([page], target_kind="page")
+                import_audio_files([ending], target_kind="ending")
+                assemble_m4b(
+                    chapters,
+                    output,
+                    "Cues without BGM",
+                    chapter_titles=["Chapter 1", "Chapter 2"],
+                    background_audio_mode="off",
+                    chapter_transition_sound=True,
+                )
             duration = _duration_ms(output)
-            # Opening + narration + page turn + narration + book closing.
             self.assertGreaterEqual(duration, 6000)
             self.assertLessEqual(duration, 7000)
 
@@ -1178,98 +1227,56 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('inputs.extend(["-stream_loop", "-1", "-i", str(layer_path)])', assembler)
         self.assertIn("amix=inputs={mix_count}:duration=first", assembler)
         self.assertIn('if effective_audio_mode == "auto":', assembler)
-        self.assertIn("synthesize_page_turn", assembler)
-        self.assertIn("synthesize_audiobook_ending", assembler)
+        self.assertIn("resolve_cue_track", assembler)
+        self.assertIn("resolve_music_track", assembler)
+        self.assertNotIn("synthesize_page_turn(", assembler)
+        self.assertNotIn("synthesize_audiobook_ending(", assembler)
         self.assertIn("auto_music_variation", assembler)
         self.assertIn("_selected_music_recipe", assembler)
         self.assertIn("sidechaincompress=", assembler)
-        self.assertIn("automatic-chapter-sound-design", assembler)
-        self.assertIn('elif effective_audio_mode == "off" and chapter_transition_sound:', assembler)
+        self.assertIn("automatic-real-audio-design", assembler)
+        self.assertIn('elif effective_audio_mode in {"manual", "off"} and chapter_transition_sound:', assembler)
 
-    def test_generated_music_and_transition_cues_are_local_wav_files(self):
-        import wave
-        from app.audio.sound_design import (
-            CUE_STYLE_LABELS,
-            MUSIC_CATALOGUE_SIZE,
-            MOOD_ORDER,
-            OPENING_SECONDS,
-            TEMPOS,
-            VARIATIONS_PER_MOOD,
-            detect_chapter_mood,
-            music_variation_info,
-            select_music_variation,
-            synthesize_audiobook_ending,
-            synthesize_chapter_transition,
-            synthesize_music_bed,
-            synthesize_opening_cue,
-            synthesize_page_turn,
-        )
+    def test_audiobook_audio_categories_and_mood_detection(self):
+        from app.audio.sound_design import detect_chapter_mood
+        from app.audio.library import MUSIC_CATEGORIES, CUE_KINDS, AUDIO_SOURCE_LINKS
 
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            fantasy = synthesize_music_bed(root / "fantasy.wav", "fantasy")
-            mystery = synthesize_music_bed(root / "mystery.wav", "mystery")
-            cue = synthesize_chapter_transition(root / "chapter-cue.wav", "fantasy")
-            opening = synthesize_opening_cue(root / "book-opening.wav", cue_style="classic-book")
-            page_turn = synthesize_page_turn(root / "page-turn.wav", variation_index=7, cue_style="classic-book")
-            magic_page = synthesize_page_turn(root / "magic-page.wav", variation_index=7, cue_style="magical-tome")
-            ending = synthesize_audiobook_ending(root / "book-ending.wav", "fantasy", variation_index=7, cue_style="classic-book")
-            with wave.open(str(fantasy), "rb") as wav:
-                self.assertEqual(wav.getnchannels(), 2)
-                self.assertEqual(wav.getframerate(), 22050)
-                # One 16-beat loop: its length varies with the selected tempo.
-                self.assertAlmostEqual(
-                    wav.getnframes() / wav.getframerate(),
-                    16.0 * 60.0 / TEMPOS[0],
-                    delta=0.1,
-                )
-            with wave.open(str(cue), "rb") as wav:
-                self.assertEqual(wav.getnchannels(), 2)
-                self.assertGreater(wav.getnframes(), 0)
-                self.assertLess(wav.getnframes() / wav.getframerate(), 1.5)
-            with wave.open(str(opening), "rb") as wav:
-                self.assertEqual(wav.getnchannels(), 2)
-                self.assertAlmostEqual(wav.getnframes() / wav.getframerate(), OPENING_SECONDS, delta=0.03)
-            with wave.open(str(page_turn), "rb") as wav:
-                self.assertEqual(wav.getnchannels(), 2)
-                self.assertAlmostEqual(wav.getnframes() / wav.getframerate(), 0.62, delta=0.02)
-            with wave.open(str(ending), "rb") as wav:
-                self.assertEqual(wav.getnchannels(), 2)
-                self.assertAlmostEqual(wav.getnframes() / wav.getframerate(), 2.65, delta=0.05)
-            self.assertNotEqual(opening.read_bytes(), page_turn.read_bytes())
-            self.assertNotEqual(page_turn.read_bytes(), magic_page.read_bytes())
-            self.assertNotEqual(page_turn.read_bytes(), ending.read_bytes())
-            self.assertNotEqual(fantasy.read_bytes(), mystery.read_bytes())
-            self.assertIn("custom", CUE_STYLE_LABELS)
-
+        category_ids = [key for key, _label in MUSIC_CATEGORIES]
+        cue_ids = [key for key, _label in CUE_KINDS]
+        self.assertIn("fantasy", category_ids)
+        self.assertIn("action", category_ids)
+        self.assertIn("mystery", category_ids)
+        self.assertIn("horror", category_ids)
+        self.assertIn("romance", category_ids)
+        self.assertIn("sci-fi", category_ids)
+        self.assertIn("calm", category_ids)
+        self.assertEqual(cue_ids, ["opening", "page", "ending"])
+        self.assertTrue(any("sounddino.com/en/effects/audiobooks-music" in item["url"] for item in AUDIO_SOURCE_LINKS))
+        self.assertTrue(any("storyblocks.com/audio/search/flip-book" in item["url"] for item in AUDIO_SOURCE_LINKS))
+        self.assertTrue(any("pixabay.com/sound-effects/search/book-page-turn" in item["url"] for item in AUDIO_SOURCE_LINKS))
         self.assertEqual(detect_chapter_mood("A Secret Revealed", "A strange hidden clue appeared."), "mystery")
         self.assertEqual(detect_chapter_mood("The Confession", "She blushed and confessed her love."), "romance")
         self.assertEqual(detect_chapter_mood("The Battlefield", "Swords clashed in the battle."), "action")
         self.assertEqual(detect_chapter_mood("A New Quest", "A wizard cast a magic spell."), "fantasy")
-        self.assertEqual(MUSIC_CATALOGUE_SIZE, 1344)
-        self.assertEqual(VARIATIONS_PER_MOOD, 168)
 
-        # Every recipe has its own stable catalogue ID; selection is repeatable
-        # for the same story context rather than random per generation.
-        ids = {
-            music_variation_info(mood, variation)["id"]
-            for mood in MOOD_ORDER
-            for variation in range(VARIATIONS_PER_MOOD)
-        }
-        self.assertEqual(len(ids), MUSIC_CATALOGUE_SIZE)
-        self.assertEqual(min(ids), 1)
-        self.assertEqual(max(ids), MUSIC_CATALOGUE_SIZE)
-        chosen = select_music_variation("The Hidden Door", "He ran down the corridor.", "mystery")
-        self.assertEqual(
-            chosen,
-            select_music_variation("The Hidden Door", "He ran down the corridor.", "mystery"),
-        )
-
-    def test_auto_music_and_transition_cue_are_added_per_chapter(self):
+    def test_auto_music_and_transition_cue_use_imported_real_audio_per_chapter(self):
+        from unittest.mock import patch
+        from app.audio.library import import_audio_files
         from app.audio.assembler import _duration_ms
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
+            library_root = root / "Audio Library"
+            music_mystery = root / "mystery-bed.wav"
+            music_action = root / "battle-bed.wav"
+            opening = root / "hardcover-open.wav"
+            page_turn = root / "physical-page-turn.wav"
+            ending = root / "hardcover-close.wav"
+            for path, duration in (
+                (music_mystery, 2.0), (music_action, 2.0),
+                (opening, 1.18), (page_turn, 0.62), (ending, 2.65),
+            ):
+                _write_wav(path, duration)
             chapter_dirs = []
             for number, title, narration in (
                 (1, "The Hidden Clue", "A hidden clue changed everything."),
@@ -1285,26 +1292,33 @@ class RegressionTests(unittest.TestCase):
 
             progress = []
             output = root / "automatic-sound-design.m4b"
-            result = assemble_m4b(
-                chapter_dirs,
-                output,
-                "Automatic Sound Design Test",
-                chapter_titles=["The Hidden Clue", "The Final Battle"],
-                progress=lambda done, total, message: progress.append(message),
-                background_audio_mode="auto",
-                auto_music_style="auto",
-                background_audio_volume=0.30,
-                background_audio_fade_in=0.4,
-                background_audio_fade_out=0.4,
-                chapter_transition_sound=True,
-            )
+            with patch("app.audio.library.audio_library_root", return_value=library_root):
+                import_audio_files([music_mystery], target_kind="music", category="mystery")
+                import_audio_files([music_action], target_kind="music", category="action")
+                import_audio_files([opening], target_kind="opening")
+                import_audio_files([page_turn], target_kind="page")
+                import_audio_files([ending], target_kind="ending")
+                result = assemble_m4b(
+                    chapter_dirs,
+                    output,
+                    "Automatic Sound Design Test",
+                    chapter_titles=["The Hidden Clue", "The Final Battle"],
+                    progress=lambda done, total, message: progress.append(message),
+                    background_audio_mode="auto",
+                    auto_music_style="auto",
+                    background_audio_volume=0.30,
+                    background_audio_fade_in=0.4,
+                    background_audio_fade_out=0.4,
+                    chapter_transition_sound=True,
+                )
             self.assertEqual(result, output)
             self.assertTrue(output.exists())
             self.assertGreater(output.stat().st_size, 1024)
-            self.assertIn("automatic-chapter-sound-design", progress)
-            # Six seconds of speech plus one short cue at the start of each
+            self.assertIn("automatic-real-audio-design", progress)
+            # Six seconds of speech plus opening, page-turn and closing cues
             # chapter; allow for AAC encoder padding and container time-base rounding.
-            self.assertGreaterEqual(_duration_ms(output), 7000)
+            self.assertGreaterEqual(_duration_ms(output), 10000)
+            self.assertLessEqual(_duration_ms(output), 11000)
             self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
 
     def test_story_events_detect_clear_actions_but_not_metaphors(self):
