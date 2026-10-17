@@ -149,7 +149,7 @@ class ProjectWorkflow(QMainWindow):
         self.import_book_icon = _import_book_icon()
         sidebar_panel = QWidget()
         sidebar_panel.setObjectName("studioSidebar")
-        sidebar_panel.setFixedWidth(252)
+        sidebar_panel.setFixedWidth(276)
         side_layout = QVBoxLayout(sidebar_panel)
         side_layout.setContentsMargins(14, 18, 14, 16)
         side_layout.setSpacing(12)
@@ -308,6 +308,32 @@ class ProjectWorkflow(QMainWindow):
         header.addWidget(self.new_book_button)
         main_layout.addLayout(header)
 
+        # Persistent workflow rail mirrors the approved Dragon Studio prototype.
+        # These buttons route into the existing pages; they are not demo-only tabs.
+        self.workflow_step_buttons: dict[str, QPushButton] = {}
+        workflow_rail = QWidget()
+        workflow_rail.setObjectName("workflowRail")
+        workflow_rail_layout = QHBoxLayout(workflow_rail)
+        workflow_rail_layout.setContentsMargins(22, 9, 22, 10)
+        workflow_rail_layout.setSpacing(8)
+        for number, key, label in (
+            ("01", "Import", "Import Book"),
+            ("02", "Chapters", "Edit Chapters"),
+            ("03", "Voice & Narration", "Voice Studio"),
+            ("04", "Sound Design", "Sound Design"),
+            ("05", "Generate", "Production"),
+            ("06", "Audiobooks", "Listen"),
+        ):
+            button = QPushButton(f"{number}  ·  {label}")
+            button.setObjectName("workflowStep")
+            button.setCheckable(True)
+            button.setMinimumHeight(36)
+            button.setToolTip(f"Open {label}")
+            button.clicked.connect(lambda _checked=False, target=key: self.select_section(target))
+            self.workflow_step_buttons[key] = button
+            workflow_rail_layout.addWidget(button, 1)
+        main_layout.addWidget(workflow_rail)
+
         body = QHBoxLayout()
         body.setContentsMargins(22, 6, 22, 16)
         body.setSpacing(10)
@@ -423,7 +449,25 @@ class ProjectWorkflow(QMainWindow):
         self._show_page(self.library)
         self.library.search.setText(query)
 
+    def _sync_workflow_steps(self) -> None:
+        current_item = self.sidebar.currentItem() if hasattr(self, "sidebar") else None
+        current_key = str(current_item.data(32) or "") if current_item is not None else ""
+        stage_for_key = {
+            "Import": "Import",
+            "Chapters": "Chapters",
+            "Voice & Narration": "Voice & Narration",
+            "Voice Cast": "Voice & Narration",
+            "Pronunciation": "Voice & Narration",
+            "Sound Design": "Sound Design",
+            "Generate": "Generate",
+            "Audiobooks": "Audiobooks",
+        }
+        active = stage_for_key.get(current_key)
+        for key, button in getattr(self, "workflow_step_buttons", {}).items():
+            button.setChecked(key == active)
+
     def _update_page_chrome(self, widget: QWidget) -> None:
+        self._sync_workflow_steps()
         # Pronunciation and Sound Design are focused views into the same real
         # per-book production workspace, not duplicate/mock implementations.
         selected = ""
@@ -499,6 +543,7 @@ class ProjectWorkflow(QMainWindow):
             self._page_animation_widget = None
 
         self.stack.setCurrentWidget(widget)
+        self._sync_workflow_steps()
         if self.stack.currentWidget() is not widget:
             raise RuntimeError(
                 f"Navigation did not activate {type(widget).__name__}."

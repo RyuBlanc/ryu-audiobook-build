@@ -414,6 +414,33 @@ QToolButton:hover {
     background: #181D28;
     border-color: #D4375D;
 }
+QWidget#workflowRail {
+    background: #0F131A;
+    border-bottom: 1px solid #282E38;
+}
+QPushButton#workflowStep {
+    background: #141821;
+    color: #A5ACB8;
+    border: 1px solid #282E38;
+    border-radius: 12px;
+    padding: 8px 12px;
+    min-height: 18px;
+    font-size: 9pt;
+    font-weight: 600;
+}
+QPushButton#workflowStep:hover {
+    color: #F5F5F6;
+    background: #1B1822;
+    border-color: #684052;
+}
+QPushButton#workflowStep:checked {
+    color: #FFFFFF;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #31121F, stop:1 #1B1723);
+    border: 1px solid #B21F3F;
+}
+QPushButton#workflowStep:focus {
+    border: 1px solid #D4375D;
+}
 """
 
 def main() -> int:

@@ -94,6 +94,23 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
             workflow.close()
             workflow.deleteLater()
 
+    def test_prototype_workflow_rail_routes_to_real_pages(self) -> None:
+        workflow = ProjectWorkflow()
+        try:
+            self.assertEqual(
+                list(workflow.workflow_step_buttons),
+                ["Import", "Chapters", "Voice & Narration", "Sound Design", "Generate", "Audiobooks"],
+            )
+            workflow.select_section("Import")
+            self.assertTrue(workflow.workflow_step_buttons["Import"].isChecked())
+            self.assertIs(workflow.stack.currentWidget(), workflow.import_page)
+            workflow.select_section("Audiobooks")
+            self.assertTrue(workflow.workflow_step_buttons["Audiobooks"].isChecked())
+            self.assertIs(workflow.stack.currentWidget(), workflow.audiobooks_page)
+        finally:
+            workflow.close()
+            workflow.deleteLater()
+
     def test_generate_page_constructs_and_is_visible_for_an_open_book(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ryu-generate-navigation-") as temp:
             root = Path(temp)
