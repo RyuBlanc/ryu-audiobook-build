@@ -43,7 +43,7 @@ from app.ui.motion import reduced_motion_enabled
 def _import_book_icon() -> QIcon:
     """Use the Ryu audiobook brand mark instead of a generic plus symbol."""
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
-    for filename in ("ryu_audiobook_logo.png", "ryu_audiobook_logo.svg"):
+    for filename in ("ryu_audiobook_logo.svg", "ryu_audiobook_logo.png", "ryu_audiobook_logo.jpg"):
         path = base / "assets" / filename
         if path.is_file():
             icon = QIcon(str(path))
@@ -313,7 +313,8 @@ class ProjectWorkflow(QMainWindow):
         self._generation_index = -1
         self._editor_index = -1
 
-        self.sidebar.setCurrentRow(0)
+        # Row 0 is the non-selectable HOME heading; Library is the first destination.
+        self.sidebar.setCurrentRow(1)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

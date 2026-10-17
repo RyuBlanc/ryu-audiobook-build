@@ -51,6 +51,7 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
             ]
             self.assertEqual(group_labels, ["HOME", "PROJECT", "PRODUCTION", "SYSTEM"])
             self.assertEqual(workflow.page_heading.text(), "Audiobook Library")
+            self.assertEqual(workflow.sidebar.currentItem().data(32), "Library")
             self.assertIsNotNone(workflow.global_search)
             self.assertIsNotNone(workflow.project_mini_title)
         finally:
