@@ -808,6 +808,16 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('close = getattr(provider, "close", None)', manager)
         self.assertIn("if self.cancel_event.is_set():", manager)
 
+    def test_generation_pause_resumes_at_safe_chapter_boundaries(self):
+        manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
+        generation = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        self.assertIn("def pause(self) -> None:", manager)
+        self.assertIn("def resume(self) -> None:", manager)
+        self.assertIn("self._wait_if_paused(index + 1, len(self.chapters))", manager)
+        self.assertIn('message.startswith("paused:")', generation)
+        self.assertIn("def toggle_generation_pause(self) -> None:", generation)
+        self.assertIn('"paused"}', generation)
+
     def test_project_title_is_propagated_to_generation_and_editor(self):
         workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
         generation = Path("app/ui/generation_page.py").read_text(encoding="utf-8")

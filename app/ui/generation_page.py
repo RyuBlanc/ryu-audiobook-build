@@ -1049,10 +1049,15 @@ class GenerationPage(QWidget):
         self.resume_button = QPushButton("Resume / Retry")
         self.resume_button.setVisible(False)
         self.resume_button.clicked.connect(self.start)
+        self.pause_button = QPushButton("Pause")
+        self.pause_button.setObjectName("generationPauseButton")
+        self.pause_button.setEnabled(False)
+        self.pause_button.clicked.connect(self.toggle_generation_pause)
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setEnabled(False)
         actions.addWidget(self.start_button)
         actions.addWidget(self.resume_button)
+        actions.addWidget(self.pause_button)
         actions.addWidget(self.cancel_button)
         root.addLayout(actions)
 
@@ -2422,7 +2427,7 @@ class GenerationPage(QWidget):
         resumable = (
             info.resume_available
             or bool(state.get("failed_chapters"))
-            or status in {"failed", "cancelled", "generating"}
+            or status in {"failed", "cancelled", "generating", "paused"}
         )
 
         # A fully completed book should not advertise a resume action unless
@@ -2655,6 +2660,8 @@ class GenerationPage(QWidget):
         self.timer.start(1000)
         self._set_generation_locked(True)
         self.cancel_button.setEnabled(True)
+        self.pause_button.setEnabled(True)
+        self.pause_button.setText("Pause")
         self.play_button.setEnabled(False)
         self.open_button.setEnabled(False)
         self.result_label.setText("Generating chapters and packaging the final M4B…")
@@ -2708,12 +2715,40 @@ class GenerationPage(QWidget):
             metadata=metadata,
         )
 
+    def toggle_generation_pause(self) -> None:
+        if not self.manager:
+            return
+        if self.manager.pause_event.is_set():
+            self.manager.resume()
+            self.pause_button.setText("Pause")
+            self.status.setText("Resume requested. Generation will continue from the chapter checkpoint.")
+            if self.project_folder:
+                state = load_state(self.project_folder)
+                state["status"] = "generating"
+                save_state(self.project_folder, state)
+        else:
+            self.manager.pause()
+            self.pause_button.setText("Resume")
+            self.status.setText("Pause requested. The current chapter will finish before generation pauses.")
+
     def cancel(self) -> None:
         if self.manager:
             self.manager.cancel()
+            self.pause_button.setEnabled(False)
             self.status.setText("Stopping generation and releasing the voice engine…")
 
     def update_progress(self, chapter: int, total: int, done: int, message: str) -> None:
+        if message.startswith("paused:"):
+            note = message.split(":", 1)[1].strip()
+            self.status.setText(note)
+            self.stage.setText("Generation paused at a chapter checkpoint")
+            self.remaining.setText("Remaining: paused at checkpoint")
+            self.pause_button.setText("Resume")
+            if self.project_folder:
+                state = load_state(self.project_folder)
+                state["status"] = "paused"
+                save_state(self.project_folder, state)
+            return
         if message.startswith("provider:"):
             self.status.setText(message.split(":", 1)[1].strip())
             self.stage.setText(
@@ -2916,6 +2951,8 @@ class GenerationPage(QWidget):
         self.generation_phase = "idle"
         self._set_generation_locked(False)
         self.cancel_button.setEnabled(False)
+        self.pause_button.setEnabled(False)
+        self.pause_button.setText("Pause")
         if self.project_folder:
             state = load_state(self.project_folder)
             state["status"] = "completed" if summary.output_path else ("failed" if (summary.chapters_failed or summary.packaging_failed) else "cancelled")

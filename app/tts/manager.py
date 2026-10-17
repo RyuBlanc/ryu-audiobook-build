@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread, Event
+import time
 from typing import Callable
 import shutil
 
@@ -93,6 +94,7 @@ class GenerationManager:
         self.page_turn_cue_path = Path(page_turn_cue_path) if page_turn_cue_path else None
         self.ending_cue_path = Path(ending_cue_path) if ending_cue_path else None
         self.cancel_event = Event()
+        self.pause_event = Event()
         self._thread: Thread | None = None
         self.failed: list[int] = []
         self.failure_details: dict[int, str] = {}
@@ -113,6 +115,7 @@ class GenerationManager:
         if self._thread and self._thread.is_alive():
             raise RuntimeError("Generation is already running.")
         self.cancel_event.clear()
+        self.pause_event.clear()
         effective_metadata = dict(self.metadata)
         if metadata:
             effective_metadata.update(metadata)
@@ -123,8 +126,32 @@ class GenerationManager:
         )
         self._thread.start()
 
+    def pause(self) -> None:
+        """Pause at the next safe chapter boundary; never interrupt an audio chunk."""
+        if self._thread and self._thread.is_alive():
+            self.pause_event.set()
+
+    def resume(self) -> None:
+        """Continue a generation paused at a chapter boundary."""
+        self.pause_event.clear()
+
+    def _wait_if_paused(self, chapter: int, total: int) -> bool:
+        notified = False
+        while self.pause_event.is_set() and not self.cancel_event.is_set():
+            if not notified:
+                self._emit(
+                    chapter,
+                    total,
+                    0,
+                    "paused:Generation paused at a chapter checkpoint. Resume to continue.",
+                )
+                notified = True
+            time.sleep(0.15)
+        return self.cancel_event.is_set()
+
     def cancel(self) -> None:
         self.cancel_event.set()
+        self.pause_event.clear()
         provider = self.provider
         cancel = getattr(provider, "request_cancel", None)
         if callable(cancel):
@@ -196,6 +223,9 @@ class GenerationManager:
         packaging_error = None
 
         for index, chapter in enumerate(self.chapters):
+            if self._wait_if_paused(index + 1, len(self.chapters)):
+                cancelled = True
+                break
             if self.cancel_event.is_set():
                 cancelled = True
                 break
@@ -267,6 +297,9 @@ class GenerationManager:
                             "Skipped because the online voice service is unreachable."
                         )
                     break
+
+        if not cancelled and self._wait_if_paused(len(self.chapters), len(self.chapters)):
+            cancelled = True
 
         final_output = None
         if not cancelled and not self.failed and completed == len(self.chapters) and output_path:
