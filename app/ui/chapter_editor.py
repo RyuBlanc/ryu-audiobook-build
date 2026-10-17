@@ -99,17 +99,26 @@ class ChapterEditorPage(QWidget):
         self._assignment_plus = QPushButton("", self.text.viewport())
         self._assignment_plus.setObjectName("assignmentPlus")
         dragon_assets = Path(__file__).resolve().parents[2] / "assets"
-        dragon_plus_path = dragon_assets / "dragon_cross.png"
+        # Use the supplied master PNG so this control preserves the actual
+        # four-winged dragon silhouette. The circle is a UI treatment around
+        # that artwork, not a separately redrawn approximation.
+        dragon_plus_path = dragon_assets / "dragon_four_winged.png"
         if dragon_plus_path.is_file():
             self._assignment_plus.setIcon(QIcon(str(dragon_plus_path)))
-            self._assignment_plus.setIconSize(QSize(21, 21))
+            self._assignment_plus.setIconSize(QSize(22, 22))
         else:
             self._assignment_plus.setText("⊕")
         self._assignment_plus.setStyleSheet(
-            "QPushButton#assignmentPlus { background: transparent; border: 0; padding: 0; }"
+            "QPushButton#assignmentPlus {"
+            " background: #170a11; border: 1px solid #9f2b4b;"
+            " border-radius: 14px; padding: 1px;"
+            "}"
+            "QPushButton#assignmentPlus:hover {"
+            " background: #321020; border: 1px solid #ed526e;"
+            "}"
         )
         self.text.setViewportMargins(82, 0, 0, 0)
-        self._assignment_plus.setFixedSize(26, 26)
+        self._assignment_plus.setFixedSize(28, 28)
         self._assignment_plus.setToolTip("Assign this sentence to a character")
         self._assignment_plus.hide()
         self._assignment_plus.clicked.connect(self._open_inline_assignment_dialog)
