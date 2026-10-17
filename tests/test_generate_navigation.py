@@ -127,6 +127,25 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
             workflow.close()
             workflow.deleteLater()
 
+    def test_generate_without_active_book_routes_to_library_with_guidance(self) -> None:
+        workflow = ProjectWorkflow()
+        try:
+            self.assertIsNone(workflow.project)
+            workflow.select_section("Generate")
+            self.app.processEvents()
+
+            self.assertIs(
+                workflow.stack.currentWidget(),
+                workflow.library,
+                "Generate without an active project should guide the user to Library, not crash or show a stale page.",
+            )
+            self.assertIn("Select a book in Library", workflow.page_subheading.text())
+            self.assertIsNone(workflow.generation)
+        finally:
+            workflow.close()
+            workflow.deleteLater()
+            self.app.processEvents()
+
     def test_generate_page_constructs_and_is_visible_for_an_open_book(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ryu-generate-navigation-") as temp:
             root = Path(temp)
