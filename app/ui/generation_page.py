@@ -627,52 +627,66 @@ class GenerationPage(QWidget):
 
         custom_cues_layout = QVBoxLayout()
         custom_cues_layout.setContentsMargins(0, 0, 0, 0)
-        custom_cues_layout.setSpacing(5)
+        custom_cues_layout.setSpacing(8)
         self.opening_cue_path = QLineEdit(str(audio_state.get("opening_cue_path") or ""))
-        self.opening_cue_path.setPlaceholderText(
-            "Optional opening clip • blank = auto-rotate library"
-        )
+        self.opening_cue_path.setPlaceholderText("No opening sound selected • Auto library is active")
         self.page_turn_cue_path = QLineEdit(str(audio_state.get("page_turn_cue_path") or ""))
-        self.page_turn_cue_path.setPlaceholderText(
-            "Optional chapter-turn clip • blank = auto-rotate library"
-        )
+        self.page_turn_cue_path.setPlaceholderText("Optional chapter-turn clip • blank = auto-rotate library")
         self.ending_cue_path = QLineEdit(str(audio_state.get("ending_cue_path") or ""))
-        self.ending_cue_path.setPlaceholderText(
-            "Optional closing clip • blank = auto-rotate library"
-        )
+        self.ending_cue_path.setPlaceholderText("Optional closing clip • blank = auto-rotate library")
         self._cue_path_fields = {
             "opening": self.opening_cue_path,
             "page": self.page_turn_cue_path,
             "ending": self.ending_cue_path,
         }
-        for kind, field in self._cue_path_fields.items():
+
+        opening_card = QGroupBox("Book opening")
+        opening_card_layout = QVBoxLayout(opening_card)
+        opening_card_layout.setContentsMargins(10, 10, 10, 10)
+        opening_card_layout.setSpacing(6)
+        opening_card_layout.addWidget(QLabel("Choose a real opening sound, preview it, or use Auto to rotate the opening library."))
+        opening_controls = QHBoxLayout()
+        opening_controls.addWidget(self.opening_cue_path, 1)
+        self.opening_cue_preview_button = QPushButton("▶ Preview")
+        self.opening_cue_preview_button.clicked.connect(lambda: self.preview_cue("opening"))
+        opening_controls.addWidget(self.opening_cue_preview_button)
+        opening_browse = QPushButton("Import from PC…")
+        opening_browse.clicked.connect(lambda: self.import_cue_audio("opening"))
+        opening_controls.addWidget(opening_browse)
+        opening_library = QPushButton("Library…")
+        opening_library.clicked.connect(lambda: self.choose_from_cue_library("opening"))
+        opening_controls.addWidget(opening_library)
+        opening_auto = QPushButton("Auto")
+        opening_auto.setToolTip("Clear the selected file and choose from the opening library automatically.")
+        opening_auto.clicked.connect(lambda: self.clear_cue_audio_path("opening"))
+        opening_controls.addWidget(opening_auto)
+        opening_card_layout.addLayout(opening_controls)
+        custom_cues_layout.addWidget(opening_card)
+
+        other_cues_card = QGroupBox("Chapter transition and book closing")
+        other_cues_layout = QVBoxLayout(other_cues_card)
+        other_cues_layout.setContentsMargins(10, 10, 10, 10)
+        other_cues_layout.setSpacing(5)
+        for kind, field in (("page", self.page_turn_cue_path), ("ending", self.ending_cue_path)):
             row = QHBoxLayout()
             row.addWidget(field, 1)
             browse = QPushButton("Browse…")
             browse.setToolTip("Use one specific local sound file")
-            browse.clicked.connect(
-                lambda _checked=False, cue_kind=kind: self.choose_cue_audio(cue_kind)
-            )
+            browse.clicked.connect(lambda _checked=False, cue_kind=kind: self.choose_cue_audio(cue_kind))
             row.addWidget(browse)
             library_button = QPushButton("Library…")
             library_button.setToolTip("Choose one of the imported real sounds")
-            library_button.clicked.connect(
-                lambda _checked=False, cue_kind=kind: self.choose_from_cue_library(cue_kind)
-            )
+            library_button.clicked.connect(lambda _checked=False, cue_kind=kind: self.choose_from_cue_library(cue_kind))
             row.addWidget(library_button)
             import_button = QPushButton("Import…")
-            import_button.setToolTip("Add licensed files to this cue library")
-            import_button.clicked.connect(
-                lambda _checked=False, cue_kind=kind: self.import_cue_audio(cue_kind)
-            )
+            import_button.clicked.connect(lambda _checked=False, cue_kind=kind: self.import_cue_audio(cue_kind))
             row.addWidget(import_button)
             clear_button = QPushButton("Auto")
             clear_button.setToolTip("Clear the override and rotate through this cue library")
-            clear_button.clicked.connect(
-                lambda _checked=False, cue_kind=kind: self.clear_cue_audio_path(cue_kind)
-            )
+            clear_button.clicked.connect(lambda _checked=False, cue_kind=kind: self.clear_cue_audio_path(cue_kind))
             row.addWidget(clear_button)
-            custom_cues_layout.addLayout(row)
+            other_cues_layout.addLayout(row)
+        custom_cues_layout.addWidget(other_cues_card)
         self.custom_cues_container = QWidget()
         self.custom_cues_container.setLayout(custom_cues_layout)
         settings_form.addRow("Real audiobook cue files", self.custom_cues_container)
@@ -1947,6 +1961,20 @@ class GenerationPage(QWidget):
         if kind not in self._cue_path_fields:
             self.status.setText(f"Unknown sound cue: {kind}")
             return
+        # The opening preview button is a true play/pause toggle for the
+        # currently selected cue, using the shared in-app audio player.
+        if kind == "opening":
+            current = self.music_player.source().toLocalFile()
+            if current and self.music_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                self.music_player.pause()
+                self.opening_cue_preview_button.setText("▶ Preview")
+                self.status.setText("Opening sound preview paused.")
+                return
+            if current and self.music_player.playbackState() == QMediaPlayer.PlaybackState.PausedState:
+                self.music_player.play()
+                self.opening_cue_preview_button.setText("Ⅱ Pause")
+                self.status.setText("Resumed opening sound preview.")
+                return
         selected = self._cue_path_fields[kind].text().strip() or None
         index = self.preview_chapter.currentIndex()
         chapter = self.chapters[index] if 0 <= index < len(self.chapters) else None
@@ -1966,6 +1994,8 @@ class GenerationPage(QWidget):
         self.music_player.stop()
         self.music_player.setSource(QUrl.fromLocalFile(str(cue.resolve())))
         self.music_player.play()
+        if kind == "opening":
+            self.opening_cue_preview_button.setText("Ⅱ Pause")
         label = CUE_KIND_LABELS.get(kind, kind)
         self.status.setText(f"Previewing real {label.lower()}: {cue.name}")
 
