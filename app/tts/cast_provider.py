@@ -126,6 +126,14 @@ class CastAwareProvider(TTSProvider):
                     self.profiles[k].qwen_anchor_path,
                     self.profiles[k].qwen_anchor_text,
                     self.profiles[k].reference_text,
+                    # Voice identity and synthesis controls must participate in
+                    # the generation signature so edits to a saved custom voice
+                    # cannot silently reuse audio rendered with its old profile.
+                    self.profiles[k].qwen_profile_id,
+                    self.profiles[k].authorized,
+                    self.profiles[k].exaggeration,
+                    self.profiles[k].cfg_weight,
+                    self.profiles[k].style_preset,
                 )
                 for k in self.assignments if k in self.profiles
             ),

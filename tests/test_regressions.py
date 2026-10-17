@@ -1798,6 +1798,42 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(len(dialogue_parts), 1)
         self.assertEqual(dialogue_parts[0][1], ["Voice A", "Voice B"])
 
+    def test_cast_signature_changes_when_saved_qwen_identity_changes(self):
+        from app.tts.cast_provider import CastAwareProvider
+        from app.tts.voice_profile import VoiceProfile
+
+        class DummyNarrator:
+            def synthesize(self, text, output_path, voice=None):
+                return output_path
+
+        def make_cast(profile_id):
+            profile = VoiceProfile(
+                name="Saved Custom Voice",
+                provider="qwen-character",
+                voice_id="Ryan",
+                model_id="base-0.6b",
+                language="English",
+                authorized=True,
+                qwen_mode="clone",
+                sample_path="reference.wav",
+                reference_text="Hello there.",
+                qwen_profile_id=profile_id,
+            )
+            return CastAwareProvider(
+                DummyNarrator(),
+                "Narrator",
+                profiles={profile.name: profile},
+                assignments={"Rias": profile.name},
+            )
+
+        old_cast = make_cast("old-profile-id")
+        new_cast = make_cast("new-profile-id")
+        self.assertNotEqual(
+            old_cast.generation_signature(),
+            new_cast.generation_signature(),
+            "Changing a saved custom voice identity must invalidate resumable audio chunks.",
+        )
+
     def test_light_novel_dialogue_discovers_characters(self):
         text = """Life.0
 Issei Hyoudou—that’s my name, but my friends and family just call me Issei.
