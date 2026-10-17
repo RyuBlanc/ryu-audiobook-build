@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 
-from PySide6.QtCore import Qt, QThread, Signal, QEasingCurve, QPropertyAnimation
-from PySide6.QtGui import QFontMetrics
+from PySide6.QtCore import Qt, QThread, Signal, QEasingCurve, QPropertyAnimation, QSize
+from PySide6.QtGui import QFontMetrics, QIcon
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QSizePolicy,
@@ -34,6 +35,19 @@ from app.ui.models_page import ModelsPage
 from app.ui.voice_cast_page import VoiceCastPage
 from app.ui.loading_overlay import FrostedLoadingOverlay
 from app.ui.motion import reduced_motion_enabled
+
+
+def _import_book_icon() -> QIcon:
+    """Use Ryu's audiobook mark for Import controls instead of a generic plus."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
+    # The PNG is bundled into frozen builds; SVG remains available in the source tree.
+    for filename in ("ryu_audiobook_logo.png", "ryu_audiobook_logo.svg"):
+        path = base / "assets" / filename
+        if path.is_file():
+            icon = QIcon(str(path))
+            if not icon.isNull():
+                return icon
+    return QIcon()
 
 
 class ImportBookWorker(QThread):
@@ -124,8 +138,11 @@ class ProjectWorkflow(QMainWindow):
         self.project_label.setToolTip("No book open")
         header.addWidget(self.project_label, 1)
 
-        self.new_book_button = QPushButton("+  Import Book")
+        self.import_book_icon = _import_book_icon()
+        self.new_book_button = QPushButton("Import Book")
         self.new_book_button.setObjectName("primary")
+        self.new_book_button.setIcon(self.import_book_icon)
+        self.new_book_button.setIconSize(QSize(20, 20))
         self.new_book_button.clicked.connect(lambda: self.select_section("Import"))
         header.addWidget(self.new_book_button)
         shell_layout.addLayout(header)
@@ -138,10 +155,11 @@ class ProjectWorkflow(QMainWindow):
         self.sidebar.setObjectName("sidebar")
         self.sidebar.setFixedWidth(190)
         self.sidebar.setSpacing(4)
+        self.sidebar.setIconSize(QSize(20, 20))
 
         sections = [
             ("Library", "⌂"),
-            ("Import", "+"),
+            ("Import", ""),
             ("Chapters", "☷"),
             ("Voice & Narration", "◉"),
             ("Voice Cast", "♙"),
@@ -150,7 +168,11 @@ class ProjectWorkflow(QMainWindow):
             ("Hardware", "⚙"),
         ]
         for name, icon in sections:
-            item = QListWidgetItem(f"  {icon}   {name}")
+            if name == "Import":
+                item = QListWidgetItem(f"   {name}")
+                item.setIcon(self.import_book_icon)
+            else:
+                item = QListWidgetItem(f"  {icon}   {name}")
             item.setData(32, name)
             self.sidebar.addItem(item)
 
