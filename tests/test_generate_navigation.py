@@ -180,6 +180,7 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
             workflow = ProjectWorkflow()
             project = self._project(Path(temp) / "sample-project")
             try:
+                workflow.show()
                 with patch.object(
                     workflow,
                     "_install_generation_feature_pages",
