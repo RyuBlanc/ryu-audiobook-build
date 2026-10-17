@@ -2152,7 +2152,7 @@ class VoicePage(QWidget):
         # Supply enough source text to reach the requested duration. The
         # preview renderer stops on actual audio duration, so this is only a
         # safety margin rather than a fixed word-count target.
-        max_words = max(24, int(seconds * 4.5))
+        max_words = max(24, int(seconds * 14.0))
         if len(words) <= max_words:
             return text.strip()
         shortened = " ".join(words[:max_words]).strip()

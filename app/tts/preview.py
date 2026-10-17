@@ -154,7 +154,7 @@ def build_voice_preview(
         # The previous 12 chars/sec source budget caused a 30-second
         # preview to contain only a few seconds of audio. Give the preview
         # enough sentence-complete source text to reach the requested target.
-        target_chars = int(float(target_seconds) * 40.0)
+        target_chars = int(float(target_seconds) * 80.0)
         effective_max_chars = max(
             360,
             min(int(max_chars), max(target_chars, 360)),
