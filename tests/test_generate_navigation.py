@@ -111,6 +111,18 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                 workflow.deleteLater()
                 self.app.processEvents()
 
+    def test_import_preview_page_constructs_and_drop_zone_is_enabled(self) -> None:
+        workflow = ProjectWorkflow()
+        try:
+            self.assertTrue(workflow.import_page.drop_zone.acceptDrops())
+            self.assertFalse(workflow.import_page.create_button.isEnabled())
+            self.assertTrue(workflow.import_page.preview.isReadOnly())
+            self.assertIn("Import Studio", workflow.import_page.findChild(type(workflow.import_page.info), ""))
+        finally:
+            workflow.close()
+            workflow.deleteLater()
+            self.app.processEvents()
+
     def test_dashboard_is_backed_by_local_project_library(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ryu-dashboard-") as temp:
             workflow = ProjectWorkflow()
@@ -125,6 +137,19 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                 workflow.close()
                 workflow.deleteLater()
                 self.app.processEvents()
+
+    def test_library_supports_grid_and_list_views(self) -> None:
+        workflow = ProjectWorkflow()
+        try:
+            self.assertEqual(workflow.library.list.viewMode(), workflow.library.list.ViewMode.IconMode)
+            workflow.library.set_view_mode("list")
+            self.assertEqual(workflow.library.list.viewMode(), workflow.library.list.ViewMode.ListMode)
+            workflow.library.set_view_mode("grid")
+            self.assertEqual(workflow.library.list.viewMode(), workflow.library.list.ViewMode.IconMode)
+        finally:
+            workflow.close()
+            workflow.deleteLater()
+            self.app.processEvents()
 
     def test_failed_generate_refresh_preserves_a_live_page_for_the_same_book(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ryu-generate-transaction-") as temp:

@@ -272,6 +272,57 @@ QWidget#sidebarDivider {
     background: #282E38;
     max-height: 1px;
 }
+QFrame#importDropZone {
+    background: #141821;
+    border: 1px dashed #353C49;
+    border-radius: 18px;
+}
+QFrame#importDropZone[dragging="true"] {
+    background: #28121C;
+    border: 2px solid #D4375D;
+}
+QLabel#dropTitle {
+    color: #F5F5F6;
+    font-size: 15pt;
+    font-weight: 700;
+}
+QLabel#importDropIcon {
+    color: #D6B06A;
+    background: #28121C;
+    border: 1px solid #6F1023;
+    border-radius: 25px;
+    font-size: 22pt;
+    min-width: 48px;
+    max-width: 48px;
+    min-height: 48px;
+    max-height: 48px;
+}
+QLabel#formatTag {
+    color: #D6B06A;
+    background: #181D28;
+    border: 1px solid #282E38;
+    border-radius: 7px;
+    padding: 5px 9px;
+    font-size: 8pt;
+    font-weight: 700;
+}
+QListWidget#libraryCollection {
+    background: transparent;
+    border: 0;
+    padding: 4px;
+}
+QListWidget#libraryCollection::item {
+    background: #141821;
+    color: #F5F5F6;
+    border: 1px solid #282E38;
+    border-radius: 12px;
+    padding: 10px;
+    margin: 3px;
+}
+QListWidget#libraryCollection::item:selected {
+    background: #28121C;
+    border: 1px solid #D4375D;
+}
 QWidget#dashboardMetric {
     background: #141821;
     border: 1px solid #282E38;

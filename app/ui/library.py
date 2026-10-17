@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QUrl, QSize, Qt
+from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QLabel, QListWidget, QListWidgetItem, QPushButton, QHBoxLayout,
     QVBoxLayout, QWidget, QMessageBox, QLineEdit, QComboBox, QGroupBox,
@@ -47,23 +47,44 @@ def project_matches(project, query: str, status_filter: str) -> bool:
 
 
 class LibraryPage(QWidget):
-    def __init__(self, on_open=None) -> None:
+    def __init__(self, on_open=None, on_import=None) -> None:
         super().__init__()
         self.on_open = on_open
+        self.on_import = on_import
         self.projects = []
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(22, 22, 22, 22)
-        layout.setSpacing(12)
+        layout.setContentsMargins(4, 6, 4, 6)
+        layout.setSpacing(14)
 
         header = QHBoxLayout()
         title_col = QVBoxLayout()
-        title_col.addWidget(QLabel("<h1>My Audiobooks</h1>"))
-        self.subtitle = QLabel("Your local audiobook projects, generated books and resumable work.")
+        title_col.setSpacing(3)
+        eyebrow = QLabel("YOUR LOCAL COLLECTION")
+        eyebrow.setObjectName("brandEdition")
+        title_col.addWidget(eyebrow)
+        title = QLabel("Audiobook Library")
+        title.setObjectName("pageHeading")
+        title_col.addWidget(title)
+        self.subtitle = QLabel("Manage imported books, production projects, and completed audiobooks.")
         self.subtitle.setObjectName("muted")
         self.subtitle.setWordWrap(True)
         title_col.addWidget(self.subtitle)
         header.addLayout(title_col, 1)
+
+        self.grid_button = QPushButton("Grid View")
+        self.grid_button.setCheckable(True)
+        self.grid_button.setChecked(True)
+        self.grid_button.clicked.connect(lambda: self.set_view_mode("grid"))
+        header.addWidget(self.grid_button)
+        self.list_button = QPushButton("List View")
+        self.list_button.setCheckable(True)
+        self.list_button.clicked.connect(lambda: self.set_view_mode("list"))
+        header.addWidget(self.list_button)
+        self.import_button = QPushButton("Import Book")
+        self.import_button.setObjectName("primary")
+        self.import_button.clicked.connect(self._import_book)
+        header.addWidget(self.import_button)
         layout.addLayout(header)
 
         filters = QHBoxLayout()
@@ -80,20 +101,31 @@ class LibraryPage(QWidget):
         filters.addWidget(self.status_filter)
         layout.addLayout(filters)
 
-        stats = QHBoxLayout()
-        self.total_label = QLabel("Books: 0")
-        self.completed_label = QLabel("Completed: 0")
-        self.in_progress_label = QLabel("In progress: 0")
-        stats.addWidget(self.total_label)
-        stats.addWidget(self.completed_label)
-        stats.addWidget(self.in_progress_label)
-        stats.addStretch(1)
-        layout.addLayout(stats)
+        stats_box = QGroupBox("Collection Summary")
+        stats = QHBoxLayout(stats_box)
+        self.total_label = QLabel("Local projects  ·  0")
+        self.completed_label = QLabel("Completed  ·  0")
+        self.in_progress_label = QLabel("In progress  ·  0")
+        self.attention_label = QLabel("Needs attention  ·  0")
+        for label in (self.total_label, self.completed_label, self.in_progress_label, self.attention_label):
+            label.setObjectName("stat")
+            stats.addWidget(label)
+        layout.addWidget(stats_box)
 
         body = QHBoxLayout()
 
         self.list = QListWidget()
+        self.list.setObjectName("libraryCollection")
         self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.list.setViewMode(QListWidget.ViewMode.IconMode)
+        self.list.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.list.setMovement(QListWidget.Movement.Static)
+        self.list.setWrapping(True)
+        self.list.setUniformItemSizes(True)
+        self.list.setIconSize(QSize(82, 104))
+        self.list.setGridSize(QSize(178, 192))
+        self.list.setSpacing(8)
+        self.list.itemDoubleClicked.connect(lambda _item: self.open_selected())
         self.list.currentRowChanged.connect(self.show_selected_details)
         body.addWidget(self.list, 3)
 
@@ -136,28 +168,40 @@ class LibraryPage(QWidget):
 
         self.list.blockSignals(True)
         self.list.clear()
+        self._visible_projects = visible
         for project in visible:
-            status, output = project_status(project)
+            status, _output = project_status(project)
             marker = {
                 "Completed": "✓",
                 "In Progress": "▶",
-                "Needs Attention": "⚠",
-                "Ready": "●",
+                "Needs Attention": "!",
+                "Ready": "•",
                 "Imported": "○",
             }.get(status, "•")
-            self.list.addItem(
-                QListWidgetItem(
-                    f"{marker}  {project.title}  ·  {status}  ·  "
-                    f"{len(project.chapters)} chapter(s)"
-                )
+            item = QListWidgetItem(
+                f"{project.title}\n{marker} {status}\n{len(project.chapters)} chapter(s)"
             )
+            item.setData(Qt.ItemDataRole.UserRole, str(project.folder))
+            state = load_state(project.folder)
+            cover_path = Path(str(state.get("cover_path") or "")).expanduser()
+            if cover_path.is_file():
+                item.setIcon(QIcon(str(cover_path)))
+            else:
+                brand_path = Path(__file__).resolve().parents[2] / "assets" / "ryu_audiobook_logo.svg"
+                if brand_path.is_file():
+                    item.setIcon(QIcon(str(brand_path)))
+            item.setSizeHint(QSize(170, 188))
+            item.setToolTip(f"{project.title}\n{status}\n{project.folder}")
+            self.list.addItem(item)
         self.list.blockSignals(False)
 
         completed = sum(project_status(project)[0] == "Completed" for project in self.projects)
         in_progress = sum(project_status(project)[0] == "In Progress" for project in self.projects)
-        self.total_label.setText(f"Books: {len(self.projects)}")
-        self.completed_label.setText(f"Completed: {completed}")
-        self.in_progress_label.setText(f"In progress: {in_progress}")
+        attention = sum(project_status(project)[0] == "Needs Attention" for project in self.projects)
+        self.total_label.setText(f"Local projects  ·  {len(self.projects)}")
+        self.completed_label.setText(f"Completed  ·  {completed}")
+        self.in_progress_label.setText(f"In progress  ·  {in_progress}")
+        self.attention_label.setText(f"Needs attention  ·  {attention}")
         self.subtitle.setText(
             f"{len(visible)} book(s) shown • completed books remain available from the local library."
         )
@@ -166,7 +210,28 @@ class LibraryPage(QWidget):
             self.list.setCurrentRow(0)
         else:
             self.details.setText("No books match the current search/filter.")
-        self._visible_projects = visible
+        self.list.setViewMode(
+            QListWidget.ViewMode.IconMode if self.grid_button.isChecked()
+            else QListWidget.ViewMode.ListMode
+        )
+
+    def set_view_mode(self, mode: str) -> None:
+        grid = str(mode).casefold() == "grid"
+        self.grid_button.setChecked(grid)
+        self.list_button.setChecked(not grid)
+        self.list.setViewMode(
+            QListWidget.ViewMode.IconMode if grid else QListWidget.ViewMode.ListMode
+        )
+        if grid:
+            self.list.setIconSize(QSize(82, 104))
+            self.list.setGridSize(QSize(178, 192))
+        else:
+            self.list.setIconSize(QSize(42, 54))
+            self.list.setGridSize(QSize())
+
+    def _import_book(self) -> None:
+        if self.on_import:
+            self.on_import()
 
     def show_selected_details(self, row: int) -> None:
         visible = getattr(self, "_visible_projects", [])

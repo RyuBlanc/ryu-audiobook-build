@@ -60,16 +60,26 @@ class ImportBookWorker(QThread):
     failed = Signal(str)
     status = Signal(str)
 
-    def __init__(self, source_path: Path) -> None:
+    def __init__(self, source_path: Path, book=None, chapters=None) -> None:
         super().__init__()
         self.source_path = Path(source_path)
+        self.book = book
+        self.chapters = list(chapters) if chapters is not None else None
 
     def run(self) -> None:
         try:
-            self.status.emit("Extracting text from the source book…")
-            book = extract_text(self.source_path)
-            self.status.emit("Finding chapter and section boundaries…")
-            chapters = detect_chapters(book.text)
+            if self.book is None or self.chapters is None:
+                self.status.emit("Extracting text from the source book…")
+                book = extract_text(self.source_path)
+                self.status.emit("Finding chapter and section boundaries…")
+                chapters = detect_chapters(book.text)
+            else:
+                # Import Studio already parsed this book in the background.
+                # Reuse that exact extraction rather than blocking the app by
+                # parsing large EPUB/PDF files a second time.
+                book = self.book
+                chapters = self.chapters
+                self.status.emit("Verifying the extracted text and chapter map…")
             if not chapters:
                 raise RuntimeError("No readable chapters were found in this file.")
             source_words = len(book.text.split())
@@ -624,14 +634,14 @@ class ProjectWorkflow(QMainWindow):
                 self.sidebar.setCurrentRow(i)
                 return
 
-    def handle_import(self, path: Path) -> None:
+    def handle_import(self, path: Path, book=None, chapters=None) -> None:
         if self._import_worker is not None and self._import_worker.isRunning():
             return
         self.loading_overlay.show_loading(
             "Importing your book",
             "Reading the source file, finding chapters and preparing your local project…",
         )
-        worker = ImportBookWorker(path)
+        worker = ImportBookWorker(path, book=book, chapters=chapters)
         self._import_worker = worker
         worker.status.connect(self.loading_overlay.set_detail)
         worker.completed.connect(self._import_completed)
@@ -643,6 +653,8 @@ class ProjectWorkflow(QMainWindow):
         self.loading_overlay.dismiss()
         self.project = project
         self._set_project_title(project.title)
+        self.library.refresh()
+        self.dashboard.refresh()
         self.open_editor()
 
     def _import_failed(self, message: str) -> None:
@@ -719,6 +731,7 @@ class ProjectWorkflow(QMainWindow):
         self.project.save()
         self._set_project_title(self.project.title)
         self.library.refresh()
+        self.dashboard.refresh()
         if self.editor:
             self.editor.project_title = self.project.title
         if self.generation:
