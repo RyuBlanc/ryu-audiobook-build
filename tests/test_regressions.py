@@ -733,6 +733,11 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("DEFAULT_AUDIO_BITRATE_KBPS", generation)
         self.assertIn('audio_state.get("audio_bitrate")', generation)
 
+    def test_startup_applies_saved_settings_in_both_themes(self):
+        source = Path("app/main.py").read_text(encoding="utf-8")
+        self.assertIn("apply_application_theme(app, saved_theme)", source)
+        self.assertNotIn('if saved_theme == "light":', source)
+
     def test_settings_accent_and_interface_scale_are_applied(self):
         settings = Path("app/ui/settings_page.py").read_text(encoding="utf-8")
         self.assertIn('self.settings.setValue("ui/accent"', settings)

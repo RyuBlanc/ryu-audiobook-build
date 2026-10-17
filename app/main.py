@@ -502,9 +502,11 @@ def main() -> int:
     app.setProperty("_ryuDarkStylesheet", APP_STYLE)
     app.setStyleSheet(APP_STYLE)
     saved_theme = str(QSettings("RyuBlanc", "Ryu's Audiobook").value("ui/theme", "dark")).lower()
-    if saved_theme == "light":
-        from app.ui.settings_page import apply_application_theme
-        apply_application_theme(app, "light")
+    from app.ui.settings_page import apply_application_theme
+    # Apply the saved theme, accent and interface scale on every launch,
+    # including dark mode. The preference helper reads the remaining values
+    # from the same local QSettings store.
+    apply_application_theme(app, saved_theme)
     # Small transparent four-winged crimson dragon cursor. The hotspot is
     # placed at the nose so clicking and text selection remain predictable.
     dragon_cursor_path = asset_path("dragon_cursor.png")
