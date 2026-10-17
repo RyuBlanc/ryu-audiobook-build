@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-17-starter-pack-v1",
+  "version": "2026-10-17-starter-pack-v2",
   "tracks": [
     {
       "type": "music",
@@ -230,6 +230,96 @@
       "source_url": "https://freesound.org/people/timothyd4y/sounds/478743/",
       "license": "CC0 1.0 Universal",
       "license_note": "CC0; short closing excerpt made from the source book-handling recording."
+    },
+    {
+      "type": "music",
+      "category": "emotional",
+      "bundle_path": "music/emotional/Aftermath.mp3",
+      "title": "Aftermath",
+      "author": "Indieteur",
+      "source_url": "https://opengameart.org/content/aftermath",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication. Classical orchestral aftermath / reflective emotional scene."
+    },
+    {
+      "type": "music",
+      "category": "fantasy",
+      "bundle_path": "music/fantasy/hero_reprise.ogg",
+      "title": "Hero's Reprise",
+      "author": "nene",
+      "source_url": "https://opengameart.org/content/heros-reprise",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication. Orchestral hero / fantasy reprise."
+    },
+    {
+      "type": "music",
+      "category": "sci-fi",
+      "bundle_path": "music/sci-fi/subspace.mp3",
+      "title": "Subspace",
+      "author": "vitalezzz",
+      "source_url": "https://opengameart.org/content/subspace",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication. Electronic and orchestral sci-fi ambience."
+    },
+    {
+      "type": "music",
+      "category": "sci-fi",
+      "bundle_path": "music/sci-fi/subspace_loop.mp3",
+      "title": "Subspace (Loop)",
+      "author": "vitalezzz",
+      "source_url": "https://opengameart.org/content/subspace",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication. Looping electronic / orchestral sci-fi bed."
+    },
+    {
+      "type": "music",
+      "category": "horror",
+      "bundle_path": "music/horror/Sector.mp3",
+      "title": "Sector",
+      "author": "SRG774",
+      "source_url": "https://opengameart.org/content/dark-sci-fi-audio-pack",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication. Mysterious ambient alien theme."
+    },
+    {
+      "type": "music",
+      "category": "mystery",
+      "bundle_path": "music/mystery/Airy.mp3",
+      "title": "Airy",
+      "author": "SRG774",
+      "source_url": "https://opengameart.org/content/dark-sci-fi-audio-pack",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication. Weightless eerie ambience."
+    },
+    {
+      "type": "music",
+      "category": "sci-fi",
+      "bundle_path": "music/sci-fi/Pulse.mp3",
+      "title": "Pulse",
+      "author": "SRG774",
+      "source_url": "https://opengameart.org/content/dark-sci-fi-audio-pack",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication. Subtle rhythmic alien pulse."
+    },
+    {
+      "type": "music",
+      "category": "action",
+      "bundle_path": "music/action/Urgent.mp3",
+      "title": "Urgent",
+      "author": "SRG774",
+      "source_url": "https://opengameart.org/content/dark-sci-fi-audio-pack",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication. Driving urgent pulse for high-stakes scenes."
+    },
+    {
+      "type": "music",
+      "category": "adventure",
+      "bundle_path": "music/adventure/01_-_it_is_dangerous_to_be_lonely_without_a_sword.ogg",
+      "title": "It Is Dangerous to Be Lonely Without a Sword",
+      "author": "Ragnar Random",
+      "source_url": "https://opengameart.org/content/orchestral-and-world-music-pack",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication. Orchestral / world-music adventure cue."
     }
   ]
 }

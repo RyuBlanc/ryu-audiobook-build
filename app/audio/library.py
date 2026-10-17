@@ -48,6 +48,11 @@ AUDIO_SOURCE_LINKS=(
  {"label":"OpenGameArt — CC0 fantasy song pack","url":"https://opengameart.org/content/fantasy-song-pack-volume-1","group":"music"},
  {"label":"OpenGameArt — CC0 music collection","url":"https://opengameart.org/content/good-cc0-music","group":"music"},
  {"label":"Freesound — book and page-turn recordings","url":"https://freesound.org/search/?q=book+page+turn","group":"cue"},
+ {"label":"OpenGameArt — Dark Sci-Fi Audio Pack (CC0)","url":"https://opengameart.org/content/dark-sci-fi-audio-pack","group":"music"},
+ {"label":"OpenGameArt — Subspace (CC0)","url":"https://opengameart.org/content/subspace","group":"music"},
+ {"label":"OpenGameArt — Aftermath (CC0)","url":"https://opengameart.org/content/aftermath","group":"music"},
+ {"label":"OpenGameArt — Hero's Reprise (CC0)","url":"https://opengameart.org/content/heros-reprise","group":"music"},
+ {"label":"OpenGameArt — Orchestral and World Music Pack (CC0)","url":"https://opengameart.org/content/orchestral-and-world-music-pack","group":"music"},
 )
 @dataclass(frozen=True)
 class AudioTrack:

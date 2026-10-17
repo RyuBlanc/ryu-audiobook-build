@@ -41,3 +41,18 @@ the workflow downloads source files and validates that the required real BGM
 and the opening, page-turn and closing categories are available. Some sources
 may omit a public preview or change availability; additional files can be
 imported from Generate > Real audiobook cue files.
+
+
+EXPANDED STARTER MUSIC — CC0
+- Aftermath — Indieteur (reflective orchestral): https://opengameart.org/content/aftermath
+- Hero's Reprise — nene (orchestral fantasy): https://opengameart.org/content/heros-reprise
+- Subspace / Subspace Loop — vitalezzz (sci-fi): https://opengameart.org/content/subspace
+- Dark Sci-Fi Audio Pack — SRG774 (Sector, Airy, Pulse, Urgent):
+  https://opengameart.org/content/dark-sci-fi-audio-pack
+- Orchestral and World Music Pack — Ragnar Random:
+  https://opengameart.org/content/orchestral-and-world-music-pack
+  Track: It Is Dangerous to Be Lonely Without a Sword.
+
+Supplemental tracks are only packaged if the source URL returns a valid
+audio file that passes the size check. If a URL changes, that individual item
+is skipped; the local library can import replacements later.

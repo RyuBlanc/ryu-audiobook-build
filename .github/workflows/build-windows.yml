@@ -127,7 +127,17 @@ jobs:
             @{ Rel='music\action\hard_battle_1_bpm170.mp3'; Url='https://opengameart.org/sites/default/files/hard_battle_1_bpm170.mp3'; Min=50000 },
             @{ Rel='music\action\pop_boss_battle.mp3'; Url='https://opengameart.org/sites/default/files/pop_boss_battle.mp3'; Min=50000 },
             @{ Rel='music\action\boss-battle-theme.mp3'; Url='https://opengameart.org/sites/default/files/CleytonRX%20-%20Battle%20RPG%20Theme.mp3'; Min=100000 },
-            @{ Rel='music\sci-fi\safe_space_loop.flac'; Url='https://opengameart.org/sites/default/files/safe_space_loop.flac'; Min=100000 }
+            @{ Rel='music\sci-fi\safe_space_loop.flac'; Url='https://opengameart.org/sites/default/files/safe_space_loop.flac'; Min=100000 },
+            # Supplemental CC0 mood tracks; unavailable sources are skipped.
+            @{ Rel='music\emotional\Aftermath.mp3'; Url='https://opengameart.org/sites/default/files/Aftermath.mp3'; Min=50000 },
+            @{ Rel='music\fantasy\hero_reprise.ogg'; Url='https://opengameart.org/sites/default/files/hero_reprise.ogg'; Min=50000 },
+            @{ Rel='music\sci-fi\subspace.mp3'; Url='https://opengameart.org/sites/default/files/subspace.mp3'; Min=100000 },
+            @{ Rel='music\sci-fi\subspace_loop.mp3'; Url='https://opengameart.org/sites/default/files/subspace_loop.mp3'; Min=100000 },
+            @{ Rel='music\horror\Sector.mp3'; Url='https://opengameart.org/sites/default/files/Sector.mp3'; Min=30000 },
+            @{ Rel='music\mystery\Airy.mp3'; Url='https://opengameart.org/sites/default/files/Airy.mp3'; Min=30000 },
+            @{ Rel='music\sci-fi\Pulse.mp3'; Url='https://opengameart.org/sites/default/files/Pulse.mp3'; Min=30000 },
+            @{ Rel='music\action\Urgent.mp3'; Url='https://opengameart.org/sites/default/files/Urgent.mp3'; Min=30000 },
+            @{ Rel='music\adventure\01_-_it_is_dangerous_to_be_lonely_without_a_sword.ogg'; Url='https://opengameart.org/sites/default/files/01_-_it_is_dangerous_to_be_lonely_without_a_sword.ogg'; Min=30000 }
           )
           foreach ($item in $musicItems) {
             $target = Join-Path $starterRoot $item.Rel
@@ -145,7 +155,8 @@ jobs:
           }
           $bundledMusic = @(Get-ChildItem (Join-Path $starterRoot 'music') -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Extension.ToLowerInvariant() -in @('.mp3','.ogg','.flac') })
           if ($bundledMusic.Count -lt 14) { throw "Expected at least 14 real starter BGM tracks; found $($bundledMusic.Count)." }
-          Write-Host "Downloaded $($bundledMusic.Count) real starter BGM tracks."
+          $musicCategories = @(Get-ChildItem (Join-Path $starterRoot 'music') -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+          Write-Host "Downloaded $($bundledMusic.Count) real starter BGM tracks across categories: $($musicCategories -join ', ')."
 
           Write-Host '=== Download physical-book sound-effect starter cues ==='
           function Get-FreesoundPreview {
