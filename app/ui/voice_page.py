@@ -51,6 +51,10 @@ from app.tts.providers.edge_tts import EdgeTTSProvider
 from app.tts.providers.elevenlabs import ElevenLabsProvider
 
 
+# Keep the requested 1-minute preview option available. 30 seconds remains default.
+PREVIEW_DURATION_OPTIONS = (10, 20, 30, 45, 60)
+
+
 class VoicePreviewWorker(QThread):
     finished_ok = Signal(str, float)
     failed = Signal(str)
@@ -741,7 +745,7 @@ class VoicePage(QWidget):
         settings = QHBoxLayout()
         settings.addWidget(QLabel("Preview length"))
         self.preview_duration = QComboBox()
-        for seconds in (10, 20, 30):
+        for seconds in PREVIEW_DURATION_OPTIONS:
             self.preview_duration.addItem(f"{seconds} seconds", seconds)
         self.preview_duration.setCurrentIndex(2)
         settings.addWidget(self.preview_duration)
