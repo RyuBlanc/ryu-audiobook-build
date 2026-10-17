@@ -802,14 +802,117 @@ class VoicePage(QWidget):
         root.addWidget(self.status)
         root.addStretch(1)
 
-        scroll.setWidget(content)
+        # Recompose the existing four functional sections into the approved
+        # HTML-guided workflow. All original controls stay alive; guided mode
+        # only hides the inactive step and never discards unsaved selections.
+        for widget in (source, library_config_box, profile_box, preview_box, self.status):
+            root.removeWidget(widget)
+        while root.count():
+            root.takeAt(0)
+        library_config_box.layout().removeWidget(self.neural_box)
+
+        source.setTitle("1  •  Voice Library")
+        library_config_box.setTitle("2  •  Configure Voice")
+        profile_box.setTitle("3  •  Voice Profile")
+        preview_box.setTitle("4  •  Preview & Assign")
+
+        self.voice_step_pages = []
+        step_specs = [
+            ("Voice Library", [source, self.neural_box]),
+            ("Configure", [library_config_box]),
+            ("Voice Profile", [profile_box]),
+            ("Preview & Assign", [preview_box]),
+        ]
+        step_content = QWidget()
+        step_root = QVBoxLayout(step_content)
+        step_root.setContentsMargins(0, 2, 4, 18)
+        step_root.setSpacing(14)
+        for index, (_label, widgets) in enumerate(step_specs):
+            page = QWidget()
+            page.setObjectName(f"voiceStepPage{index + 1}")
+            page_layout = QVBoxLayout(page)
+            page_layout.setContentsMargins(0, 0, 0, 0)
+            page_layout.setSpacing(14)
+            for widget in widgets:
+                page_layout.addWidget(widget)
+            page_layout.addStretch(1)
+            self.voice_step_pages.append(page)
+            step_root.addWidget(page)
+
+        self.voice_step_index = 0
+        step_nav = QHBoxLayout()
+        step_nav.setSpacing(8)
+        self.voice_step_buttons = []
+        for index, (label, _widgets) in enumerate(step_specs):
+            button = QPushButton(f"{index + 1:02d}  {label}")
+            button.setCheckable(True)
+            button.setToolTip(f"Open Voice Studio step {index + 1}: {label}")
+            button.clicked.connect(
+                lambda checked=False, step=index: self._set_voice_step(step)
+            )
+            self.voice_step_buttons.append(button)
+            step_nav.addWidget(button, 1)
+        self.show_all_steps_button = QPushButton("Show All Steps")
+        self.show_all_steps_button.setCheckable(True)
+        self.show_all_steps_button.setChecked(False)
+        self.show_all_steps_button.setToolTip(
+            "Toggle between the guided single-step workflow and the full Voice Studio page."
+        )
+        self.show_all_steps_button.toggled.connect(self._apply_voice_step_visibility)
+        step_nav.addWidget(self.show_all_steps_button)
+        outer.addLayout(step_nav)
+
+        step_footer = QHBoxLayout()
+        self.voice_step_back_button = QPushButton("← Back")
+        self.voice_step_back_button.clicked.connect(
+            lambda: self._set_voice_step(self.voice_step_index - 1)
+        )
+        self.voice_step_continue_button = QPushButton("Continue →")
+        self.voice_step_continue_button.setObjectName("primary")
+        self.voice_step_continue_button.clicked.connect(
+            lambda: self._set_voice_step(self.voice_step_index + 1)
+        )
+        step_footer.addWidget(self.voice_step_back_button)
+        step_footer.addStretch(1)
+        step_footer.addWidget(self.voice_step_continue_button)
+        step_root.addLayout(step_footer)
+
+        self.voice_scroll = scroll
+        scroll.setWidget(step_content)
         outer.addWidget(scroll, 1)
+        self._apply_voice_step_visibility()
 
         self._populate_sapi_voices()
         self._update_profile_details(None)
         self.refresh_profiles()
         self._refresh_offline_catalog()
         self.update_mode()
+
+    def _set_voice_step(self, index: int) -> None:
+        """Select a Voice Studio step without rebuilding or losing its controls."""
+        self.voice_step_index = max(0, min(3, int(index)))
+        self._apply_voice_step_visibility()
+        if not self.show_all_steps_button.isChecked():
+            self.voice_scroll.ensureWidgetVisible(
+                self.voice_step_pages[self.voice_step_index]
+            )
+
+    def _apply_voice_step_visibility(self, _checked: bool | None = None) -> None:
+        """Keep the guided and all-steps views backed by the same live widgets."""
+        show_all = self.show_all_steps_button.isChecked()
+        for index, page in enumerate(self.voice_step_pages):
+            page.setVisible(show_all or index == self.voice_step_index)
+        for index, button in enumerate(self.voice_step_buttons):
+            button.setChecked(index == self.voice_step_index)
+            button.setObjectName("primary" if index == self.voice_step_index else "secondary")
+            button.style().unpolish(button)
+            button.style().polish(button)
+        self.show_all_steps_button.setText("Guided Mode" if show_all else "Show All Steps")
+        self.voice_step_back_button.setEnabled(self.voice_step_index > 0)
+        self.voice_step_continue_button.setEnabled(self.voice_step_index < 3)
+        self.voice_step_continue_button.setText(
+            "Preview & Assign →" if self.voice_step_index == 2 else "Continue →"
+        )
 
     @staticmethod
     def _voice_gender(profile: VoiceProfile) -> str:

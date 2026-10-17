@@ -678,6 +678,34 @@ class RegressionTests(unittest.TestCase):
         self.assertNotEqual(changed, "saved-profile-id")
         self.assertEqual(len(changed), 32)
 
+    def test_voice_studio_guided_steps_and_show_all_mode(self):
+        from app.ui.voice_page import VoicePage
+
+        page = VoicePage()
+        try:
+            self.assertEqual(len(page.voice_step_pages), 4)
+            self.assertEqual(page.voice_step_index, 0)
+            self.assertFalse(page.show_all_steps_button.isChecked())
+            self.assertFalse(page.voice_step_pages[0].isHidden())
+            self.assertTrue(all(item.isHidden() for item in page.voice_step_pages[1:]))
+
+            page._set_voice_step(2)
+            self.assertEqual(page.voice_step_index, 2)
+            self.assertTrue(page.voice_step_pages[0].isHidden())
+            self.assertFalse(page.voice_step_pages[2].isHidden())
+            self.assertTrue(page.voice_step_back_button.isEnabled())
+            self.assertTrue(page.voice_step_continue_button.isEnabled())
+
+            page.show_all_steps_button.setChecked(True)
+            self.assertTrue(all(not item.isHidden() for item in page.voice_step_pages))
+            page.show_all_steps_button.setChecked(False)
+            self.assertFalse(page.voice_step_pages[2].isHidden())
+            self.assertTrue(page.voice_step_pages[0].isHidden())
+            self.assertEqual(page.show_all_steps_button.text(), "Show All Steps")
+        finally:
+            page.close()
+            page.deleteLater()
+
     def test_generate_tab_reads_latest_persisted_profile(self):
         import app.tts.voice_profile as voice_profiles
         from app.ui.generation_page import GenerationPage
