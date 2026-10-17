@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from datetime import datetime
+import json
 import sys
 import traceback
 
@@ -12,8 +13,10 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QLabel,
     QLineEdit,
+    QComboBox,
     QMainWindow,
     QMessageBox,
+    QInputDialog,
     QPushButton,
     QSlider,
     QVBoxLayout,
@@ -971,6 +974,36 @@ class ProjectWorkflow(QMainWindow):
         sound_subtitle.setObjectName("muted")
         sound_subtitle.setWordWrap(True)
         sound_layout.addWidget(sound_subtitle)
+
+        # Reusable local sound presets mirror the HTML's Save preset / Apply to book
+        # controls. Presets contain settings only; imported audio remains in its
+        # existing local library and is never copied to a cloud service.
+        preset_toolbar = QHBoxLayout()
+        preset_toolbar.setSpacing(8)
+        preset_toolbar.addWidget(QLabel("Sound preset"))
+        self.sound_preset_combo = QComboBox()
+        self.sound_preset_combo.setObjectName("soundPresetSelector")
+        self.sound_preset_combo.setMinimumWidth(220)
+        preset_toolbar.addWidget(self.sound_preset_combo, 1)
+        self.sound_preset_save_button = QPushButton("Save preset")
+        self.sound_preset_save_button.setObjectName("soundPresetSave")
+        self.sound_preset_save_button.clicked.connect(self._save_sound_preset)
+        preset_toolbar.addWidget(self.sound_preset_save_button)
+        self.sound_preset_apply_button = QPushButton("Apply to book")
+        self.sound_preset_apply_button.setObjectName("soundPresetApply")
+        self.sound_preset_apply_button.clicked.connect(self._apply_sound_preset)
+        preset_toolbar.addWidget(self.sound_preset_apply_button)
+        self.sound_preset_delete_button = QPushButton("Delete preset")
+        self.sound_preset_delete_button.setObjectName("soundPresetDelete")
+        self.sound_preset_delete_button.clicked.connect(self._delete_sound_preset)
+        preset_toolbar.addWidget(self.sound_preset_delete_button)
+        sound_layout.addLayout(preset_toolbar)
+        self.sound_preset_status = QLabel("Presets are stored locally on this PC.")
+        self.sound_preset_status.setObjectName("muted")
+        self.sound_preset_status.setWordWrap(True)
+        sound_layout.addWidget(self.sound_preset_status)
+        self._refresh_sound_preset_list()
+
         sound_scroll = QScrollArea()
         sound_scroll.setWidgetResizable(True)
         sound_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -986,6 +1019,148 @@ class ProjectWorkflow(QMainWindow):
         sound_scroll.setWidget(sound_content)
         sound_layout.addWidget(sound_scroll, 1)
         self.stack.addWidget(self.sound_design_page)
+
+    @staticmethod
+    def _sound_preset_settings(page: GenerationPage) -> dict:
+        """Capture supported sound controls as portable, local preset values."""
+        return {
+            "background_audio_enabled": page.background_audio_enabled.isChecked(),
+            "background_audio_mode": str(page.background_audio_mode.currentData() or "auto"),
+            "auto_music_style": str(page.auto_music_style.currentData() or "auto"),
+            "auto_music_track_path": (
+                str(page.bgm_variation.currentData() or "")
+                if str(page.bgm_variation.currentData() or "auto") != "auto" else ""
+            ),
+            "chapter_transition_sound": page.chapter_transition_sound.isChecked(),
+            "story_effects_enabled": page.story_effects_enabled.isChecked(),
+            "story_effect_volume": float(page.story_effect_volume.value()) / 100.0,
+            "background_audio_path": page.background_audio_path.text().strip(),
+            "background_audio_volume": float(page.background_audio_volume.value()) / 100.0,
+            "ambience_audio_path": page.ambience_audio_path.text().strip(),
+            "ambience_audio_volume": float(page.ambience_audio_volume.value()) / 100.0,
+            "background_audio_fade_in": int(page.background_audio_fade_in.value()),
+            "background_audio_fade_out": int(page.background_audio_fade_out.value()),
+            "opening_cue_path": page.opening_cue_path.text().strip(),
+            "page_turn_cue_path": page.page_turn_cue_path.text().strip(),
+            "ending_cue_path": page.ending_cue_path.text().strip(),
+            "audio_bitrate": int(page.audio_bitrate.currentData() or 256),
+        }
+
+    @staticmethod
+    def _sound_preset_store() -> QSettings:
+        return QSettings("RyuBlanc", "Ryu's Audiobook")
+
+    def _load_sound_presets(self) -> list[dict]:
+        raw = self._sound_preset_store().value("sound/presets", "[]")
+        try:
+            parsed = json.loads(str(raw)) if isinstance(raw, str) else raw
+        except (TypeError, ValueError, json.JSONDecodeError):
+            parsed = []
+        return [
+            item for item in parsed
+            if isinstance(item, dict) and str(item.get("name") or "").strip()
+            and isinstance(item.get("settings"), dict)
+        ] if isinstance(parsed, list) else []
+
+    def _write_sound_presets(self, presets: list[dict]) -> None:
+        settings = self._sound_preset_store()
+        settings.setValue("sound/presets", json.dumps(presets, ensure_ascii=False))
+        settings.sync()
+
+    def _refresh_sound_preset_list(self, selected_name: str | None = None) -> None:
+        combo = getattr(self, "sound_preset_combo", None)
+        if combo is None:
+            return
+        presets = self._load_sound_presets()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("Choose a saved preset…", "")
+        for preset in presets:
+            combo.addItem(str(preset["name"]), str(preset["name"]))
+        target = selected_name or ""
+        index = combo.findData(target)
+        combo.setCurrentIndex(max(0, index))
+        combo.blockSignals(False)
+        enabled = bool(presets)
+        self.sound_preset_apply_button.setEnabled(enabled)
+        self.sound_preset_delete_button.setEnabled(enabled and bool(combo.currentData()))
+
+    def _save_sound_preset(self) -> None:
+        if self.generation is None or self.project is None:
+            self.sound_preset_status.setText("Open a book before saving its sound settings as a preset.")
+            return
+        current = self.sound_preset_combo.currentData()
+        default_name = str(current or f"{self.project.title} sound")
+        name, accepted = QInputDialog.getText(
+            self, "Save sound preset", "Preset name:", text=default_name
+        )
+        name = name.strip()
+        if not accepted or not name:
+            return
+        presets = self._load_sound_presets()
+        settings = self._sound_preset_settings(self.generation)
+        found = next((p for p in presets if str(p["name"]).casefold() == name.casefold()), None)
+        if found is not None:
+            found["name"] = name
+            found["settings"] = settings
+        else:
+            presets.append({"name": name, "settings": settings})
+        self._write_sound_presets(presets)
+        self._refresh_sound_preset_list(name)
+        self.sound_preset_status.setText(f"Saved “{name}” locally. Use Apply to book to save it to the open project.")
+
+    def _apply_sound_preset(self) -> None:
+        if self.generation is None or self.project is None:
+            self.sound_preset_status.setText("Open a book before applying a sound preset.")
+            return
+        name = str(self.sound_preset_combo.currentData() or "")
+        preset = next((p for p in self._load_sound_presets() if str(p["name"]) == name), None)
+        if not preset:
+            self.sound_preset_status.setText("Choose a saved sound preset first.")
+            return
+        values = dict(preset["settings"])
+        page = self.generation
+        def set_combo(combo, value) -> None:
+            index = combo.findData(value)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+        for key, value in (
+            ("background_audio_enabled", values.get("background_audio_enabled", False)),
+            ("chapter_transition_sound", values.get("chapter_transition_sound", True)),
+            ("story_effects_enabled", values.get("story_effects_enabled", True)),
+        ):
+            getattr(page, key).setChecked(bool(value))
+        set_combo(page.background_audio_mode, values.get("background_audio_mode", "auto"))
+        set_combo(page.auto_music_style, values.get("auto_music_style", "auto"))
+        track_path = str(values.get("auto_music_track_path") or "")
+        set_combo(page.bgm_variation, track_path or "auto")
+        set_combo(page.audio_bitrate, int(values.get("audio_bitrate", 256)))
+        page.story_effect_volume.setValue(float(values.get("story_effect_volume", 0.22)) * 100.0)
+        page.background_audio_volume.setValue(float(values.get("background_audio_volume", 0.25)) * 100.0)
+        page.ambience_audio_volume.setValue(float(values.get("ambience_audio_volume", 0.10)) * 100.0)
+        page.background_audio_path.setText(str(values.get("background_audio_path") or ""))
+        page.ambience_audio_path.setText(str(values.get("ambience_audio_path") or ""))
+        page.background_audio_fade_in.setValue(int(values.get("background_audio_fade_in", 2)))
+        page.background_audio_fade_out.setValue(int(values.get("background_audio_fade_out", 3)))
+        page.opening_cue_path.setText(str(values.get("opening_cue_path") or ""))
+        page.page_turn_cue_path.setText(str(values.get("page_turn_cue_path") or ""))
+        page.ending_cue_path.setText(str(values.get("ending_cue_path") or ""))
+        page._toggle_background_audio_controls(page.background_audio_enabled.isChecked())
+        state = load_state(self.project.folder)
+        state.update(values)
+        save_state(self.project.folder, state)
+        page.status.setText(f"Sound preset “{name}” applied and saved to this book.")
+        self.sound_preset_status.setText(f"Applied “{name}” to {self.project.title} and saved the project settings.")
+
+    def _delete_sound_preset(self) -> None:
+        name = str(self.sound_preset_combo.currentData() or "")
+        if not name:
+            self.sound_preset_status.setText("Choose a saved preset to delete.")
+            return
+        presets = [p for p in self._load_sound_presets() if str(p["name"]) != name]
+        self._write_sound_presets(presets)
+        self._refresh_sound_preset_list()
+        self.sound_preset_status.setText(f"Deleted local sound preset “{name}”.")
 
     def _sidebar_changed(self, row: int) -> None:
         if row < 0 or row >= self.sidebar.count():
