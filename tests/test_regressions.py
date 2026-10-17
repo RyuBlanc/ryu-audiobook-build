@@ -44,6 +44,42 @@ def _write_wav(path: Path, seconds: float = 0.05) -> None:
 
 
 class RegressionTests(unittest.TestCase):
+    def test_character_detection_recovers_explicit_speaker_tags(self):
+        from app.chapters.detector import Chapter
+
+        chapter = Chapter(
+            number=1,
+            title="Speaker tag regression",
+            text=(
+                'Akeno Himejima said, “You are late.”\\n'
+                'Rias Gremory replied, “I know.”\\n'
+                'Akeno Himejima said, “Then let us go.”'
+            ),
+        )
+        analysis = analyze_book([chapter])
+        by_name = {item.name: item for item in analysis.characters}
+
+        self.assertEqual(analysis.dialogue_total, 3)
+        self.assertIn("Akeno Himejima", by_name)
+        self.assertIn("Rias Gremory", by_name)
+        self.assertEqual(by_name["Akeno Himejima"].dialogue_count, 2)
+        self.assertEqual(by_name["Rias Gremory"].dialogue_count, 1)
+
+    def test_character_detection_accepts_unicode_speaker_labels(self):
+        from app.chapters.detector import Chapter
+
+        chapter = Chapter(
+            number=1,
+            title="Unicode speaker label",
+            text='リアス: 「遅いわね。」\\nアーシア: 「ごめんなさい。」',
+        )
+        analysis = analyze_book([chapter])
+        names = {item.name for item in analysis.characters}
+
+        self.assertIn("リアス", names)
+        self.assertIn("アーシア", names)
+        self.assertEqual(analysis.dialogue_total, 2)
+
     def test_pronunciation_candidates_reject_ordinary_english(self):
         self.assertTrue(is_common_english_phrase("All"))
         self.assertTrue(is_common_english_phrase("Confirmed"))

@@ -39,6 +39,8 @@ SPEAKER_VERBS = (
 )
 
 NAME_TOKEN = r"[A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30}\b"
+# Unicode-aware token for explicit speaker labels, including Japanese/Korean scripts.
+SPEAKER_NAME_TOKEN = r"([^\W\d_][\w'’.-]*(?:\s+[^\W\d_][\w'’.-]*){0,2})"
 
 NAME_STOPWORDS = {
     "The","A","An","I","Im","I'm","I’m","Ive","I've","I’ve","Id","I'd","I’d","Ill","I'll","I’ll",
@@ -68,6 +70,8 @@ def analyze_book(chapters: list[Chapter]) -> CharacterAnalysis:
     text = _clean_analysis_text(text)
     narrator_name = _detect_first_person_narrator(text)
     candidates = _discover_candidates(text)
+    # Explicit speech tags are stronger evidence than generic proper nouns.
+    candidates.update(_discover_explicit_speakers(text))
     canonical, aliases = _canonicalize_candidates(candidates)
 
     records: dict[str, Character] = {
@@ -235,6 +239,27 @@ def _discover_candidates(text: str) -> set[str]:
     return candidates
 
 
+def _discover_explicit_speakers(text: str) -> set[str]:
+    """Extract names only from explicit speech-tag/label structures."""
+    candidates: set[str] = set()
+    patterns = (
+        # Name: "dialogue" / Name： 「dialogue」
+        rf"(?m)^\s*{SPEAKER_NAME_TOKEN}\s*[:：]\s*[“\"「『]",
+        # "dialogue," Name said / 「dialogue」 Name replied
+        rf"[”\"」』]\s*,?\s*{SPEAKER_NAME_TOKEN}\s+(?:{SPEAKER_VERBS})\b",
+        # Name said, "dialogue" (including a comma after the speech verb)
+        rf"(?:^|[\n\r.!?。！？]\s*|[,;:]\s*){SPEAKER_NAME_TOKEN}\s+(?:{SPEAKER_VERBS})\b\s*[,;:]?",
+        # "dialogue," said Name
+        rf"[”\"」』]\s*,?\s*(?:{SPEAKER_VERBS})\s+{SPEAKER_NAME_TOKEN}\b",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, re.I):
+            name = _clean_name(match.group(1))
+            if _is_plausible_name(name):
+                candidates.add(name)
+    return candidates
+
+
 def _canonicalize_candidates(candidates: set[str]) -> tuple[list[str], dict[str, set[str]]]:
     ordered = sorted(candidates, key=lambda x: (-len(x.split()), -len(x), x.casefold()))
     canonical: list[str] = []
@@ -272,10 +297,10 @@ def _speaker_near_quote(
 ) -> tuple[str | None, float]:
     before = text[max(0, start - 650):start]
     after = text[end:min(len(text), end + 500)]
-    name_phrase = rf"({NAME_TOKEN}(?:\s+{NAME_TOKEN}){{0,2}})"
+    name_phrase = SPEAKER_NAME_TOKEN
 
     for pattern in (
-        rf"{name_phrase}\s*(?:{SPEAKER_VERBS})\b\s*$",
+        rf"{name_phrase}\s*(?:{SPEAKER_VERBS})\b\s*[,;:]?\s*$",
         rf"(?:{SPEAKER_VERBS})\s+{name_phrase}\s*$",
         rf"{name_phrase}\s*[:—–-]\s*$",
     ):
@@ -466,6 +491,6 @@ def _is_plausible_name(value: str) -> bool:
         return False
     if len(value) <= 12 and value.replace("-", "").replace("’", "").isupper():
         return False
-    if not all(re.match(r"^[A-ZÀ-ÖØ-Þ]", word) for word in words):
+    if not all(word and (word[0].isupper() or not word[0].isascii()) for word in words):
         return False
     return any(len(word.strip(".,!?;:")) >= 3 for word in words)
