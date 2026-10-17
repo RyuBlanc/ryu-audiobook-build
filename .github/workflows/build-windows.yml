@@ -477,11 +477,19 @@ jobs:
       - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Ryu-Audiobook-Windows-${{ github.run_number }}
-          path: |
-            installer/installer-output/Ryu's Audiobook Setup.exe
-            dist/Ryu's Audiobook/Ryu's Audiobook.exe
+          name: Ryu-Audiobook-Installer-${{ github.run_number }}
+          path: installer/installer-output/Ryu's Audiobook Setup.exe
           if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+      - name: Upload portable Windows application
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Audiobook-Portable-${{ github.run_number }}
+          path: dist/Ryu's Audiobook/
+          if-no-files-found: error
+          compression-level: 0
           retention-days: 3
 
       - name: Remove older Windows build runs and artifacts
@@ -514,4 +522,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "v0.3.7-build-${{ github.run_number }}"
-          gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, the Obsidian/Ember dragon-tech interface, cached frosted loading, smooth low-power progress and page transitions, a global Reduce Motion preference, 1,344 original cinematic/anime-inspired BGM arrangements, linked book opening/page-turn/closing cue sets, optional text-aware story sound effects, Qwen VoiceDesign preset isolation, Audiobook AI smoke validation, Chatterbox runtime validation, and installer verification. The BGM catalogue is recipe-generated locally; sound-effect placement is text-based and should be reviewed before publication." --target $env:GITHUB_SHA
+          gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, the Obsidian/Ember dragon-tech interface, global Reduce Motion preference, a local-first audio catalogue with 26 real starter BGM tracks across calm, fantasy, adventure, comedy, action, sci-fi, emotional, mystery, horror and slice-of-life moods, plus six real book opening/page-turn/closing sound cues. Add licensed tracks through Generate > Real BGM catalogue / Real audiobook cue files. Includes Qwen VoiceDesign preset isolation, audiobook AI smoke validation, Chatterbox runtime validation, frozen EXE checks and installer verification. Starter-track source and license notes are included beside the local audio library." --target $env:GITHUB_SHA
