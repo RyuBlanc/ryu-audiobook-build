@@ -19,71 +19,71 @@ def asset_path(name: str) -> Path:
 
 APP_STYLE = """
 QMainWindow, QWidget {
-    background: #090a10;
-    color: #f1edf5;
+    background: #090A0F;
+    color: #F5F5F6;
     font-family: "Segoe UI";
     font-size: 10pt;
 }
 QMainWindow {
-    background: #08090e;
+    background: #090A0F;
 }
 QStackedWidget#studioStack {
-    background: #090a10;
+    background: #090A0F;
     border: 0;
 }
 QLabel {
-    color: #e9e4ee;
+    color: #F5F5F6;
 }
 QLabel#brand {
-    color: #fff7fb;
+    color: #F5F5F6;
     font-size: 15pt;
     letter-spacing: 1.4px;
 }
 QLabel#muted {
-    color: #a29baa;
+    color: #A5ACB8;
 }
 QLabel#projectTitle {
-    color: #efe8f2;
+    color: #F5F5F6;
     font-size: 10pt;
     font-weight: 600;
 }
 QLabel#stat {
-    background: #14131b;
-    border: 1px solid #2d2735;
+    background: #141821;
+    border: 1px solid #282E38;
     border-radius: 8px;
     padding: 8px 10px;
-    color: #d3cad9;
+    color: #A5ACB8;
 }
 QTabWidget::pane {
-    border: 1px solid #302b38;
-    background: #101017;
+    border: 1px solid #282E38;
+    background: #0F131A;
     border-radius: 12px;
 }
 QTabBar {
-    background: #0b0c12;
+    background: #0F131A;
 }
 QTabBar::tab {
-    background: #15151d;
-    color: #aaa3b3;
+    background: #141821;
+    color: #A5ACB8;
     padding: 12px 16px;
     margin: 0 6px 5px 0;
     min-width: 100px;
-    border: 1px solid #292632;
+    border: 1px solid #282E38;
     border-radius: 8px;
 }
 QTabBar::tab:hover {
     background: #211a25;
-    color: #fff7fb;
-    border-color: #493044;
+    color: #F5F5F6;
+    border-color: #353C49;
 }
 QTabBar::tab:selected {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #31121f, stop:1 #1b1723);
-    border: 1px solid #6c2942;
+    border: 1px solid #6F1023;
     color: #ffffff;
 }
 QGroupBox {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #13131b, stop:1 #101017);
-    border: 1px solid #302b38;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #141821, stop:1 #0F131A);
+    border: 1px solid #282E38;
     border-radius: 13px;
     margin-top: 14px;
     padding: 14px;
@@ -96,28 +96,28 @@ QGroupBox::title {
     color: #efe6f0;
 }
 QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox, QDoubleSpinBox, QDateEdit, QTimeEdit, QListWidget, QTableWidget {
-    background: #15151d;
-    color: #f3eef6;
-    border: 1px solid #302d3a;
+    background: #141821;
+    color: #F5F5F6;
+    border: 1px solid #282E38;
     border-radius: 8px;
     padding: 8px 10px;
-    selection-background-color: #81223f;
+    selection-background-color: #B21F3F;
     selection-color: #ffffff;
 }
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QListWidget:focus, QTableWidget:focus {
-    border: 1px solid #df425f;
+    border: 1px solid #D4375D;
 }
 QComboBox QAbstractItemView {
-    background: #15151d;
-    color: #f3eef6;
-    selection-background-color: #81223f;
+    background: #141821;
+    color: #F5F5F6;
+    selection-background-color: #B21F3F;
     selection-color: #ffffff;
     border: 1px solid #473143;
     padding: 5px;
 }
 QPushButton {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #22212b, stop:1 #191923);
-    color: #f3eef6;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #181D28, stop:1 #181D28);
+    color: #F5F5F6;
     border: 1px solid #383342;
     border-radius: 8px;
     padding: 9px 14px;
@@ -131,17 +131,17 @@ QPushButton:pressed {
     background: #15131b;
 }
 QPushButton:focus {
-    border: 1px solid #cf3d5a;
+    border: 1px solid #D4375D;
 }
 QPushButton#primary {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #95142f, stop:0.58 #bd2345, stop:1 #d54a47);
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #6F1023, stop:0.58 #B21F3F, stop:1 #B21F3F);
     border: 1px solid #df5369;
     color: #fff8fb;
     font-weight: 700;
     padding: 11px 20px;
 }
 QPushButton#primary:hover {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #b91f43, stop:1 #e35b52);
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #D4375D, stop:1 #D4375D);
     border-color: #f06b77;
 }
 QPushButton#danger {
@@ -160,22 +160,22 @@ QPushButton:disabled {
 }
 QCheckBox {
     spacing: 8px;
-    color: #e9e3ed;
+    color: #F5F5F6;
 }
 QCheckBox::indicator {
     width: 15px;
     height: 15px;
     border-radius: 4px;
     border: 1px solid #504354;
-    background: #14131b;
+    background: #141821;
 }
 QCheckBox::indicator:checked {
-    background: #c82a50;
-    border: 1px solid #e5526c;
+    background: #B21F3F;
+    border: 1px solid #D4375D;
 }
 QProgressBar {
-    background: #101017;
-    border: 1px solid #302938;
+    background: #0F131A;
+    border: 1px solid #282E38;
     border-radius: 6px;
     height: 14px;
     padding: 1px;
@@ -190,14 +190,14 @@ QProgressBar::chunk {
 }
 QListWidget#sidebar {
     background: qlineargradient(x1:0, y1:0, x2:0.85, y2:1, stop:0 #11121a, stop:0.55 #101016, stop:1 #141018);
-    border: 1px solid #2c2935;
+    border: 1px solid #282E38;
     border-radius: 13px;
     padding: 8px 6px;
     outline: 0;
 }
 QListWidget#sidebar::item {
     background: transparent;
-    color: #b7b1bf;
+    color: #A5ACB8;
     border: 1px solid transparent;
     border-left: 2px solid transparent;
     border-radius: 7px;
@@ -206,19 +206,19 @@ QListWidget#sidebar::item {
 }
 QListWidget#sidebar::item:hover {
     background: #1b1822;
-    color: #fff7fb;
-    border-color: #302535;
+    color: #F5F5F6;
+    border-color: #282E38;
 }
 QListWidget#sidebar::item:selected {
     background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #29121d, stop:0.8 #1b1722, stop:1 #17151d);
     color: #fff6f8;
     border: 1px solid #3e2531;
-    border-left: 3px solid #ec4b68;
+    border-left: 3px solid #D4375D;
 }
 QHeaderView::section {
     background: #19151e;
     color: #d8cbdc;
-    border: 1px solid #342938;
+    border: 1px solid #282E38;
     padding: 7px 9px;
 }
 QScrollBar:vertical {
@@ -247,13 +247,33 @@ QScrollBar::handle:horizontal {
 QToolTip {
     background: #17131d;
     color: #fff4fa;
-    border: 1px solid #8c2947;
+    border: 1px solid #6F1023;
     padding: 6px 8px;
 }
 QStatusBar {
-    background: #08080b;
-    color: #aaa2b0;
+    background: #090A0F;
+    color: #A5ACB8;
     border-top: 1px solid #2c2632;
+}
+
+QLabel#brandEdition {
+    color: #D6B06A;
+    font-size: 9pt;
+    font-weight: 600;
+}
+QFrame, QSplitter::handle {
+    border-color: #282E38;
+}
+QToolButton {
+    color: #F5F5F6;
+    background: #141821;
+    border: 1px solid #282E38;
+    border-radius: 10px;
+    padding: 7px 10px;
+}
+QToolButton:hover {
+    background: #181D28;
+    border-color: #D4375D;
 }
 """
 
@@ -273,8 +293,16 @@ def main() -> int:
                 Qt.TransformationMode.SmoothTransformation,
             )
             app.setOverrideCursor(QCursor(cursor_pixmap, 21, 13))
-    icon_path = asset_path("ryu_audiobook_logo.png")
-    app_icon = QIcon(str(icon_path)) if icon_path.exists() else QIcon()
+    app_icon = QIcon()
+    # Prefer a lossless PNG if one is present; the branded SVG is the
+    # packaged fallback so the executable never falls back to a generic icon.
+    for icon_name in ("ryu_audiobook_logo.png", "ryu_audiobook_logo.svg", "ryu_audiobook_logo.jpg"):
+        icon_path = asset_path(icon_name)
+        if icon_path.is_file():
+            candidate_icon = QIcon(str(icon_path))
+            if not candidate_icon.isNull():
+                app_icon = candidate_icon
+                break
     app.setWindowIcon(app_icon)
     window = ProjectWorkflow()
     window.setWindowTitle(f"{APP_NAME} • {full_version()}")
