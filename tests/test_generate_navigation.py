@@ -99,11 +99,19 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
         try:
             self.assertEqual(
                 list(workflow.workflow_step_buttons),
-                ["Import", "Chapters", "Voice & Narration", "Sound Design", "Generate", "Audiobooks"],
+                ["Import", "Chapters", "Voice & Narration", "Voice Cast", "Pronunciation",
+                 "Sound Design", "Generate", "Audiobooks"],
             )
+            self.assertTrue(hasattr(workflow, "theme_toggle"))
+            self.assertTrue(hasattr(workflow, "notifications_button"))
+            self.assertTrue(hasattr(workflow, "menu_toggle"))
             workflow.select_section("Import")
             self.assertTrue(workflow.workflow_step_buttons["Import"].isChecked())
             self.assertIs(workflow.stack.currentWidget(), workflow.import_page)
+            workflow.select_section("Voice Cast")
+            self.assertTrue(workflow.workflow_step_buttons["Voice Cast"].isChecked())
+            workflow.select_section("Pronunciation")
+            self.assertTrue(workflow.workflow_step_buttons["Pronunciation"].isChecked())
             workflow.select_section("Audiobooks")
             self.assertTrue(workflow.workflow_step_buttons["Audiobooks"].isChecked())
             self.assertIs(workflow.stack.currentWidget(), workflow.audiobooks_page)

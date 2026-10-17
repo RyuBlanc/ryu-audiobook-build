@@ -5,7 +5,7 @@ from datetime import datetime
 import sys
 import traceback
 
-from PySide6.QtCore import Qt, QThread, Signal, QEasingCurve, QPropertyAnimation, QTimer, QSize
+from PySide6.QtCore import Qt, QThread, Signal, QEasingCurve, QPropertyAnimation, QTimer, QSize, QSettings
 from PySide6.QtGui import QFontMetrics, QIcon, QColor
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QStackedWidget,
     QGraphicsOpacityEffect,
+    QApplication,
 )
 
 from app.chapters.detector import Chapter, detect_chapters
@@ -148,6 +149,7 @@ class ProjectWorkflow(QMainWindow):
 
         self.import_book_icon = _import_book_icon()
         sidebar_panel = QWidget()
+        self.sidebar_panel = sidebar_panel
         sidebar_panel.setObjectName("studioSidebar")
         sidebar_panel.setFixedWidth(276)
         side_layout = QVBoxLayout(sidebar_panel)
@@ -163,6 +165,7 @@ class ProjectWorkflow(QMainWindow):
         brand_mark.setPixmap(self.import_book_icon.pixmap(QSize(54, 54)))
         brand_row.addWidget(brand_mark)
         brand_col = QVBoxLayout()
+        self.brand_col = brand_col
         brand_col.setSpacing(2)
         brand = QLabel("RYU'S AUDIOBOOK")
         brand.setObjectName("brand")
@@ -180,6 +183,9 @@ class ProjectWorkflow(QMainWindow):
 
         self.sidebar = QListWidget()
         self.sidebar.setObjectName("sidebar")
+        self._nav_item_full_text: dict[int, str] = {}
+        self._nav_item_icon_text: dict[int, str] = {}
+        self._sidebar_collapsed = False
         self.sidebar.setMinimumWidth(0)
         self.sidebar.setSpacing(3)
         self.sidebar.setIconSize(QSize(20, 20))
@@ -219,6 +225,8 @@ class ProjectWorkflow(QMainWindow):
                 item.setData(32, key)
                 item.setToolTip(title)
                 self.sidebar.addItem(item)
+                self._nav_item_full_text[id(item)] = item.text()
+                self._nav_item_icon_text[id(item)] = ("＋" if key == "Import" else icon_text.strip() or "•")
 
         add_nav_group("Home", [
             ("Dashboard", "Dashboard", "⌂"),
@@ -284,6 +292,13 @@ class ProjectWorkflow(QMainWindow):
         page_col.addWidget(self.page_subheading)
         header.addLayout(page_col, 1)
 
+        self.menu_toggle = QPushButton("☰")
+        self.menu_toggle.setObjectName("shellIconButton")
+        self.menu_toggle.setToolTip("Collapse or expand navigation")
+        self.menu_toggle.setFixedWidth(40)
+        self.menu_toggle.clicked.connect(self.toggle_sidebar)
+        header.insertWidget(0, self.menu_toggle)
+
         self.project_label = QLabel("No book open")
         self.project_label.setObjectName("projectPill")
         self.project_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
@@ -299,6 +314,19 @@ class ProjectWorkflow(QMainWindow):
         self.global_search.setMaximumWidth(250)
         self.global_search.returnPressed.connect(self._search_library)
         header.addWidget(self.global_search)
+
+        self.theme_toggle = QPushButton("◐")
+        self.theme_toggle.setObjectName("shellIconButton")
+        self.theme_toggle.setToolTip("Toggle dark and cream themes")
+        self.theme_toggle.setFixedWidth(40)
+        self.theme_toggle.clicked.connect(self.toggle_theme)
+        header.addWidget(self.theme_toggle)
+
+        self.notifications_button = QPushButton("♧ 0")
+        self.notifications_button.setObjectName("shellIconButton")
+        self.notifications_button.setToolTip("View local project warnings and generation status")
+        self.notifications_button.clicked.connect(self.show_notifications)
+        header.addWidget(self.notifications_button)
 
         self.new_book_button = QPushButton("Import Book")
         self.new_book_button.setObjectName("primary")
@@ -317,12 +345,14 @@ class ProjectWorkflow(QMainWindow):
         workflow_rail_layout.setContentsMargins(22, 9, 22, 10)
         workflow_rail_layout.setSpacing(8)
         for number, key, label in (
-            ("01", "Import", "Import Book"),
-            ("02", "Chapters", "Edit Chapters"),
-            ("03", "Voice & Narration", "Voice Studio"),
-            ("04", "Sound Design", "Sound Design"),
-            ("05", "Generate", "Production"),
-            ("06", "Audiobooks", "Listen"),
+            ("01", "Import", "Import"),
+            ("02", "Chapters", "Chapters"),
+            ("03", "Voice & Narration", "Narrator"),
+            ("04", "Voice Cast", "Characters"),
+            ("05", "Pronunciation", "Pronunciation"),
+            ("06", "Sound Design", "Sound Design"),
+            ("07", "Generate", "Generate"),
+            ("08", "Audiobooks", "Listen & Export"),
         ):
             button = QPushButton(f"{number}  ·  {label}")
             button.setObjectName("workflowStep")
@@ -388,6 +418,85 @@ class ProjectWorkflow(QMainWindow):
 
         # Row 0 is the non-selectable HOME heading; Library is the first destination.
         self.sidebar.setCurrentRow(1)
+        stored_theme = str(QSettings("RyuBlanc", "Ryu's Audiobook").value("ui/theme", "dark")).lower()
+        self.theme_toggle.setText("☀" if stored_theme == "light" else "◐")
+
+    def toggle_sidebar(self) -> None:
+        """Collapse to an icon rail or restore the full grouped navigation."""
+        self._sidebar_collapsed = not self._sidebar_collapsed
+        if self._sidebar_collapsed:
+            self.sidebar_panel.setFixedWidth(78)
+            self.brand_col.setEnabled(False)
+            self.brand_col_widget = self.brand_col
+            # Keep the logo visible while removing the wordmark from the narrow rail.
+            for row in range(self.sidebar.count()):
+                item = self.sidebar.item(row)
+                key = str(item.data(32) or "")
+                if not key:
+                    item.setHidden(True)
+                    continue
+                full = self._nav_item_full_text.get(id(item), item.text())
+                icon = self._nav_item_icon_text.get(id(item), "•")
+                item.setText(icon)
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item.setToolTip(self.nav_titles.get(key, full.strip()))
+        else:
+            self.sidebar_panel.setFixedWidth(276)
+            self.brand_col.setEnabled(True)
+            for row in range(self.sidebar.count()):
+                item = self.sidebar.item(row)
+                item.setHidden(False)
+                item.setText(self._nav_item_full_text.get(id(item), item.text()))
+                item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                key = str(item.data(32) or "")
+                if key:
+                    item.setToolTip(self.nav_titles.get(key, item.text().strip()))
+        self.sidebar.setMinimumWidth(0)
+        self.sidebar.updateGeometry()
+
+    def toggle_theme(self) -> None:
+        """Switch between saved dark and cream palettes using the Settings theme engine."""
+        settings = QSettings("RyuBlanc", "Ryu's Audiobook")
+        current = str(settings.value("ui/theme", "dark")).lower()
+        target = "light" if current != "light" else "dark"
+        settings.setValue("ui/theme", target)
+        settings.sync()
+        from app.ui.settings_page import apply_application_theme
+        app = QApplication.instance()
+        if app is not None:
+            apply_application_theme(app, target)
+        self.theme_toggle.setText("☀" if target == "light" else "◐")
+        self.theme_toggle.setToolTip("Switch to dark theme" if target == "light" else "Switch to cream light theme")
+
+    def show_notifications(self) -> None:
+        """Show actual local project attention states; never fabricate a running job."""
+        issues: list[str] = []
+        active = 0
+        for project in self._safe_list_projects():
+            state = load_state(project.folder)
+            status = str(state.get("status") or "new").strip().lower()
+            failed = state.get("failed_chapters") or []
+            if status in {"generating", "running", "queued"}:
+                active += 1
+                issues.append(f"IN PROGRESS · {project.title}")
+            if status in {"failed", "cancelled"} or failed:
+                detail = f"{len(failed)} failed chapter(s)" if failed else status
+                issues.append(f"NEEDS ATTENTION · {project.title} — {detail}")
+        if not issues:
+            issues.append("No active or failed generation jobs are recorded in local project state.")
+        QMessageBox.information(
+            self,
+            "Local notifications",
+            "\n".join([f"Active projects: {active}", "", *issues]),
+        )
+
+    @staticmethod
+    def _safe_list_projects():
+        from app.core.project import list_projects
+        try:
+            return list_projects()
+        except Exception:
+            return []
 
     def _settings_saved(self, reduce_motion: bool) -> None:
         """Apply saved UI preferences to an already-open generation page."""
@@ -456,8 +565,8 @@ class ProjectWorkflow(QMainWindow):
             "Import": "Import",
             "Chapters": "Chapters",
             "Voice & Narration": "Voice & Narration",
-            "Voice Cast": "Voice & Narration",
-            "Pronunciation": "Voice & Narration",
+            "Voice Cast": "Voice Cast",
+            "Pronunciation": "Pronunciation",
             "Sound Design": "Sound Design",
             "Generate": "Generate",
             "Audiobooks": "Audiobooks",

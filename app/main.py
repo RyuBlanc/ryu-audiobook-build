@@ -433,14 +433,28 @@ QWidget#workflowRail {
     background: #0F131A;
     border-bottom: 1px solid #282E38;
 }
+QPushButton#shellIconButton {
+    background: #141821;
+    color: #F5F5F6;
+    border: 1px solid #353C49;
+    border-radius: 10px;
+    padding: 7px 10px;
+    min-height: 22px;
+    font-size: 12pt;
+    font-weight: 700;
+}
+QPushButton#shellIconButton:hover {
+    background: #1B1822;
+    border-color: #B21F3F;
+}
 QPushButton#workflowStep {
     background: #141821;
     color: #A5ACB8;
     border: 1px solid #282E38;
     border-radius: 12px;
-    padding: 8px 12px;
+    padding: 6px 7px;
     min-height: 18px;
-    font-size: 9pt;
+    font-size: 8pt;
     font-weight: 600;
 }
 QPushButton#workflowStep:hover {
