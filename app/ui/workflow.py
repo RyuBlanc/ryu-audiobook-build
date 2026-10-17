@@ -1520,11 +1520,9 @@ class ProjectWorkflow(QMainWindow):
         # must never make the entire production screen inaccessible.
         self.generation = new_generation
         self._generation_index = self.stack.indexOf(new_generation)
-        feature_page_error = None
         try:
             self._install_generation_feature_pages(new_generation)
         except Exception as exc:
-            feature_page_error = exc
             self._log_ui_failure("Install optional Generate feature pages", exc)
             for attribute in ("pronunciation_page", "sound_design_page"):
                 page = getattr(self, attribute, None)
