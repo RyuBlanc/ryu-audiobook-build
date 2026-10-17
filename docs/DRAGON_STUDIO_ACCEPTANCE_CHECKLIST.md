@@ -1,6 +1,6 @@
 # Ryu's Audiobook — Dragon Studio Acceptance Checklist
 
-**Baseline:** `docs/prototypes/Ryus_Audiobook_Dragon_Studio_Premium_Final.html` for the full application; the newly supplied `Ryus_Audiobook_Voice_Studio_Fixed_All_Steps.html` overrides the Voice Studio screen only.  
+**Overall final design:** `docs/prototypes/Ryus_Audiobook_Voice_Studio_Fixed_All_Steps.html` is the canonical visual/system design reference for the entire app and the detailed Voice Studio screen. Apply its design language to every sidebar destination; do not remove existing features. The previous Dragon Studio Premium HTML is no longer the competing overall design baseline.
 **Behavioral contract:** `docs/UI_UX_IMPLEMENTATION_SPEC.md`  
 **Branch:** `fix/import-qa-speaker-hover-hardware`  
 **Rule:** A control is accepted only when its real desktop-app action is connected, its result is observable, state persists where expected, and a regression test or documented manual test proves it. A visual-only match does not pass.

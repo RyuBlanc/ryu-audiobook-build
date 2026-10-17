@@ -1,5 +1,5 @@
 # RYU'S AUDIOBOOK
-## DRAGON STUDIO EDITION
+## DRAGON STUDIO — OVERALL FINAL DESIGN SYSTEM
 ## COMPLETE UI/UX IMPLEMENTATION SPECIFICATION
 
 ======================================================================
@@ -2125,3 +2125,12 @@ The user supplied a dedicated updated Voice Studio HTML reference named `Ryus_Au
 - Test guided mode and Show All Steps, keyboard/scroll behavior, resize/full-screen, and persistence across restart.
 
 The screen-by-screen acceptance criteria live in `docs/DRAGON_STUDIO_ACCEPTANCE_CHECKLIST.md`. Every item remains unchecked until real implementation and test evidence are recorded.
+
+
+## OVERALL DESIGN SOURCE OF TRUTH — UPDATED 2026-10-18
+
+The user-selected final design reference is `docs/prototypes/Ryus_Audiobook_Voice_Studio_Fixed_All_Steps.html`. It is the canonical visual shell and interaction-design reference for the whole application: dark graphite surfaces, velvet-crimson emphasis, sidebar navigation, top project bar, cards, status indicators, responsive spacing, and the step-based workflow language. Apply this design system consistently across Dashboard, Library, Import Studio, Chapter Studio, Voice Studio, Character Studio, Pronunciation, Sound Design, Production Studio, Audiobooks, History, Settings, and all existing workflows.
+
+Voice Studio in this file is the detailed canonical screen design, including Voice Library → Configure → Voice Profile → Preview & Assign. Do not use the older Dragon Studio HTML as a competing visual baseline. Existing application capabilities must remain available and be represented in the relevant screen; do not interpret this visual reference as permission to remove features or make other navigation destinations point to the Voice Studio screen.
+
+The HTML file is a design prototype, not proof that desktop behavior is implemented. Every visible control must be connected to the real local application state/backend, persist when expected, provide clear success/error/progress feedback, and pass regression/manual acceptance tests. Preserve local-first processing and local book storage.
