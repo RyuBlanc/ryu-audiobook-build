@@ -133,24 +133,36 @@ jobs:
             @{ Rel='music\fantasy\hero_reprise.ogg'; Url='https://opengameart.org/sites/default/files/hero_reprise.ogg'; Min=50000 },
             @{ Rel='music\sci-fi\subspace.mp3'; Url='https://opengameart.org/sites/default/files/subspace.mp3'; Min=100000 },
             @{ Rel='music\sci-fi\subspace_loop.mp3'; Url='https://opengameart.org/sites/default/files/subspace_loop.mp3'; Min=100000 },
-            @{ Rel='music\horror\Sector.mp3'; Url='https://opengameart.org/sites/default/files/Sector.mp3'; Min=30000 },
-            @{ Rel='music\mystery\Airy.mp3'; Url='https://opengameart.org/sites/default/files/Airy.mp3'; Min=30000 },
-            @{ Rel='music\sci-fi\Pulse.mp3'; Url='https://opengameart.org/sites/default/files/Pulse.mp3'; Min=30000 },
-            @{ Rel='music\action\Urgent.mp3'; Url='https://opengameart.org/sites/default/files/Urgent.mp3'; Min=30000 },
+            @{ Rel='music\horror\Sector.mp3'; Url='https://opengameart.org/sites/default/files/sector.mp3'; AltUrls=@('https://opengameart.org/sites/default/files/Sector.mp3','https://lpc.opengameart.org/sites/default/files/sector.mp3','https://lpc.opengameart.org/sites/default/files/Sector.mp3'); Min=30000 },
+            @{ Rel='music\mystery\Airy.mp3'; Url='https://opengameart.org/sites/default/files/airy.mp3'; AltUrls=@('https://opengameart.org/sites/default/files/Airy.mp3','https://lpc.opengameart.org/sites/default/files/airy.mp3','https://lpc.opengameart.org/sites/default/files/Airy.mp3'); Min=30000 },
+            @{ Rel='music\sci-fi\Pulse.mp3'; Url='https://opengameart.org/sites/default/files/pulse.mp3'; AltUrls=@('https://opengameart.org/sites/default/files/Pulse.mp3','https://lpc.opengameart.org/sites/default/files/pulse.mp3','https://lpc.opengameart.org/sites/default/files/Pulse.mp3'); Min=30000 },
+            @{ Rel='music\action\Urgent.mp3'; Url='https://opengameart.org/sites/default/files/urgent.mp3'; AltUrls=@('https://opengameart.org/sites/default/files/Urgent.mp3','https://lpc.opengameart.org/sites/default/files/urgent.mp3','https://lpc.opengameart.org/sites/default/files/Urgent.mp3'); Min=30000 },
             @{ Rel='music\adventure\01_-_it_is_dangerous_to_be_lonely_without_a_sword.ogg'; Url='https://opengameart.org/sites/default/files/01_-_it_is_dangerous_to_be_lonely_without_a_sword.ogg'; Min=30000 }
           )
           foreach ($item in $musicItems) {
             $target = Join-Path $starterRoot $item.Rel
             New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
-            try {
-              curl.exe -L --fail --retry 2 --silent --show-error -A 'RyuAudiobookStarterAudio/1.0' -o $target $item.Url
-              if ($LASTEXITCODE -ne 0) { throw "Download exit code $LASTEXITCODE" }
-              if ((Get-Item $target).Length -lt $item.Min) { throw "File is too small or not an audio download" }
-              Write-Host "Starter track ready: $($item.Rel)"
+            $candidateUrls = @($item.Url)
+            if ($item.ContainsKey('AltUrls')) { $candidateUrls += @($item.AltUrls) }
+            $downloaded = $false
+            foreach ($candidateUrl in $candidateUrls) {
+              try {
+                curl.exe -L --fail --retry 1 --silent --show-error -A 'RyuAudiobookStarterAudio/1.0' -o $target $candidateUrl
+                if ($LASTEXITCODE -ne 0) { throw "Download exit code $LASTEXITCODE from $candidateUrl" }
+                if (-not (Test-Path $target) -or (Get-Item $target).Length -lt $item.Min) {
+                  throw "File is missing or below minimum size from $candidateUrl"
+                }
+                Write-Host "Starter track ready: $($item.Rel) ($candidateUrl)"
+                $downloaded = $true
+                break
+              }
+              catch {
+                Write-Warning "Track source failed for $($item.Rel) at $candidateUrl : $($_.Exception.Message)"
+                Remove-Item -Force -ErrorAction SilentlyContinue $target
+              }
             }
-            catch {
-              Write-Warning "Skipping unavailable starter track $($item.Rel): $($_.Exception.Message)"
-              Remove-Item -Force -ErrorAction SilentlyContinue $target
+            if (-not $downloaded) {
+              Write-Warning "Skipping unavailable supplemental starter track: $($item.Rel)"
             }
           }
           $bundledMusic = @(Get-ChildItem (Join-Path $starterRoot 'music') -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Extension.ToLowerInvariant() -in @('.mp3','.ogg','.flac') })
@@ -225,6 +237,31 @@ jobs:
             if ($count -lt 1) { throw "Starter pack is missing a real $kind sound cue." }
           }
           Write-Host 'Physical book opening, page-turn and closing cues are ready.'
+
+          Write-Host '=== Finalize manifest to include only downloaded audio files ==='
+          $manifestPath = Join-Path $starterRoot 'manifest.json'
+          $starterManifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $availableEntries = @()
+          foreach ($entry in $starterManifest.tracks) {
+            $relative = ([string]$entry.bundle_path).Replace('/', '\')
+            $assetPath = Join-Path $starterRoot $relative
+            if (Test-Path $assetPath -PathType Leaf) {
+              $availableEntries += $entry
+            }
+            else {
+              Write-Host "Excluding unavailable audio from packaged manifest: $relative"
+            }
+          }
+          $starterManifest.tracks = @($availableEntries)
+          $manifestJson = ConvertTo-Json -InputObject $starterManifest -Depth 20
+          [System.IO.File]::WriteAllText(
+            $manifestPath,
+            $manifestJson + [Environment]::NewLine,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+          $packagedMusicCount = @($starterManifest.tracks | Where-Object { $_.type -eq 'music' }).Count
+          $packagedCueCount = @($starterManifest.tracks | Where-Object { $_.type -eq 'cue' }).Count
+          Write-Host "Packaged audio manifest finalized: $packagedMusicCount real BGM tracks and $packagedCueCount real book cues."
 
 
           Write-Host '=== Verify application version ==='
