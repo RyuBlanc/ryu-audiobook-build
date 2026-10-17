@@ -100,9 +100,9 @@ class ChapterEditorPage(QWidget):
         self._assignment_plus.setObjectName("assignmentPlus")
         dragon_assets = Path(__file__).resolve().parents[2] / "assets"
         # Use the supplied master PNG so this control preserves the actual
-        # four-winged dragon silhouette. The circle is a UI treatment around
-        # that artwork, not a separately redrawn approximation.
-        dragon_plus_path = dragon_assets / "dragon_four_winged.png"
+        # four-winged dragon silhouette. The build creates this asset from the master PNG; the circle is a UI
+        # treatment around that artwork, not a separately redrawn approximation.
+        dragon_plus_path = dragon_assets / "dragon_cross.png"
         if dragon_plus_path.is_file():
             self._assignment_plus.setIcon(QIcon(str(dragon_plus_path)))
             self._assignment_plus.setIconSize(QSize(22, 22))
