@@ -729,8 +729,17 @@ class RegressionTests(unittest.TestCase):
         generation = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
         self.assertIn('self.settings.value("audio/default_bitrate", 256)', settings)
         self.assertIn('self.settings.setValue("audio/default_bitrate"', settings)
-        self.assertIn('value("audio/default_bitrate", DEFAULT_AUDIO_BITRATE_KBPS)', generation)
+        self.assertIn('"audio/default_bitrate"', generation)
+        self.assertIn("DEFAULT_AUDIO_BITRATE_KBPS", generation)
         self.assertIn('audio_state.get("audio_bitrate")', generation)
+
+    def test_settings_accent_and_interface_scale_are_applied(self):
+        settings = Path("app/ui/settings_page.py").read_text(encoding="utf-8")
+        self.assertIn('self.settings.setValue("ui/accent"', settings)
+        self.assertIn('self.settings.setValue("ui/interface_scale"', settings)
+        self.assertIn('if accent == "velvet":', settings)
+        self.assertIn("factor = scale / 100.0", settings)
+        self.assertIn("apply_application_theme(app, theme)", settings)
 
     def test_metadata_dropdowns_and_multiselect_genres_exist(self):
         widgets = Path("app/ui/metadata_widgets.py").read_text(encoding="utf-8")

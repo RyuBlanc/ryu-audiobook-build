@@ -77,20 +77,55 @@ _LIGHT_COLOURS = {
 }
 
 
-def apply_application_theme(app, theme: str) -> None:
-    """Apply an accessible light or dark palette while keeping the brand accents."""
+def apply_application_theme(app, theme: str, accent: str | None = None, scale: int | None = None) -> None:
+    """Apply theme, crimson-family accent and accessible interface scaling."""
+    settings = QSettings("RyuBlanc", "Ryu's Audiobook")
+    accent = str(accent or settings.value("ui/accent", "crimson")).casefold()
+    try:
+        scale = max(80, min(150, int(scale if scale is not None else settings.value("ui/interface_scale", 100))))
+    except (TypeError, ValueError):
+        scale = 100
+
     base = app.property("_ryuDarkStylesheet")
     if not isinstance(base, str) or not base:
         base = app.styleSheet()
         app.setProperty("_ryuDarkStylesheet", base)
-    if str(theme).lower() != "light":
-        app.setStyleSheet(base)
-        return
-    style = re.sub(
-        r"#[0-9A-Fa-f]{6}",
-        lambda match: _LIGHT_COLOURS.get(match.group(0).upper(), match.group(0)),
-        base,
-    )
+
+    style = base
+    if accent == "velvet":
+        for original, replacement in (
+            ("#B21F3F", "#8B1732"),
+            ("#D4375D", "#B21F3F"),
+            ("#6F1023", "#5C1025"),
+            ("#84142E", "#6E142A"),
+            ("#C51E4C", "#9C1A3A"),
+            ("#A92B4C", "#8B1732"),
+        ):
+            style = style.replace(original, replacement)
+
+    if scale != 100:
+        factor = scale / 100.0
+        scalable = re.compile(
+            r"((?:font-size|min-height|min-width|max-height|max-width|padding(?:-[\w-]+)?|"
+            r"margin(?:-[\w-]+)?|spacing|border-radius)\s*:\s*)([^;]+)",
+            re.IGNORECASE,
+        )
+
+        def scale_declaration(match):
+            def scale_px(number):
+                value = float(number.group(1))
+                scaled = 0 if value == 0 else max(1, round(value * factor))
+                return f"{scaled}px"
+            return match.group(1) + re.sub(r"(\d+(?:\.\d+)?)px", scale_px, match.group(2))
+
+        style = scalable.sub(scale_declaration, style)
+
+    if str(theme).lower() == "light":
+        style = re.sub(
+            r"#[0-9A-Fa-f]{6}",
+            lambda match: _LIGHT_COLOURS.get(match.group(0).upper(), match.group(0)),
+            style,
+        )
     app.setStyleSheet(style)
 
 
