@@ -151,9 +151,9 @@ def build_voice_preview(
         # discover that the result is 3–4 minutes long. Use a conservative
         # character budget, keep sentence boundaries intact, and stop as soon
         # as the requested duration is reached.
-        # The previous 12 chars/sec source budget caused a 30-second
-        # preview to contain only a few seconds of audio. Give the preview
-        # enough sentence-complete source text to reach the requested target.
+        # Fast neural voices can speak short samples far faster than expected.
+        # Keep a generous sentence-complete source budget, then stop only after
+        # measured output duration reaches the selected target.
         target_chars = int(float(target_seconds) * 80.0)
         effective_max_chars = max(
             360,
