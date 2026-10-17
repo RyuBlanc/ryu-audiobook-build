@@ -2175,6 +2175,34 @@ Rias Gremory
             self.assertIn("Hee-doh Is-say", provider.last_text)
             self.assertEqual(provider.last_voice, "Narrator")
 
+    def test_targeted_preview_budget_can_exceed_default_for_fast_voices(self):
+        from unittest.mock import patch
+        import app.tts.preview as preview
+
+        class DummyProvider:
+            def synthesize(self, text, output_path, voice=None):
+                _write_wav(output_path, 0.20)
+
+        captured = {}
+        def capture_units(text, provider, voice, pronunciation_dictionary, max_chars, dialogue_assignments=None):
+            captured["max_chars"] = max_chars
+            return [("A complete preview sentence.", voice)]
+
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "preview.wav"
+            with patch.object(preview, "_preview_units", side_effect=capture_units):
+                preview.build_voice_preview(
+                    "Sentence. " * 600,
+                    DummyProvider(),
+                    "Narrator",
+                    output,
+                    max_chars=1400,
+                    target_seconds=30,
+                    narration_speed=1.0,
+                    pacing_profile="natural",
+                )
+            self.assertEqual(captured["max_chars"], 6000)
+
     def test_voice_profile_library_preserves_custom_voice_and_labels(self):
         with tempfile.TemporaryDirectory() as temp:
             import app.tts.voice_profile as vp
