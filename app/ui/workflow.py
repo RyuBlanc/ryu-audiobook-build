@@ -139,6 +139,7 @@ class ProjectWorkflow(QMainWindow):
         self._redetect_worker: RedetectChaptersWorker | None = None
         self._page_animation: QPropertyAnimation | None = None
         self._page_animation_widget: QWidget | None = None
+        self._mini_player_dismissed = False
 
         # Persistent Dragon Studio shell: grouped navigation on the left,
         # a compact project-aware top bar, and the existing functional pages.
@@ -409,6 +410,12 @@ class ProjectWorkflow(QMainWindow):
         self.mini_open_button = QPushButton("Open Player")
         self.mini_open_button.clicked.connect(lambda: self.select_section("Audiobooks"))
         mini_layout.addWidget(self.mini_open_button)
+        self.mini_hide_button = QPushButton("×")
+        self.mini_hide_button.setObjectName("shellIconButton")
+        self.mini_hide_button.setFixedSize(32, 32)
+        self.mini_hide_button.setToolTip("Hide mini-player")
+        self.mini_hide_button.clicked.connect(self._hide_mini_player)
+        mini_layout.addWidget(self.mini_hide_button)
         self.mini_player_bar.setVisible(False)
         main_layout.addWidget(self.mini_player_bar)
 
@@ -478,9 +485,14 @@ class ProjectWorkflow(QMainWindow):
             self.mini_player_bar.setVisible(False)
             self.mini_title.setText("No audiobook playing")
             return
+        self._mini_player_dismissed = False
         self.mini_title.setText(self.audiobooks_page.now_playing.text())
         self.mini_title.setToolTip(source.toLocalFile())
         self.mini_player_bar.setVisible(True)
+
+    def _hide_mini_player(self) -> None:
+        self._mini_player_dismissed = True
+        self.mini_player_bar.setVisible(False)
 
     def _mini_position_changed(self, position: int) -> None:
         self.mini_timeline.blockSignals(True)
@@ -498,7 +510,8 @@ class ProjectWorkflow(QMainWindow):
         self.mini_play_button.setText("Ⅱ" if playing else "▶")
         if not self.audiobooks_page.player.source().isEmpty():
             self.mini_title.setText(self.audiobooks_page.now_playing.text())
-            self.mini_player_bar.setVisible(True)
+            if not self._mini_player_dismissed:
+                self.mini_player_bar.setVisible(True)
 
     def _toggle_mini_playback(self) -> None:
         player = self.audiobooks_page.player

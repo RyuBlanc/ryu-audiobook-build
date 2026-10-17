@@ -188,6 +188,19 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                 workflow.deleteLater()
                 self.app.processEvents()
 
+    def test_mini_player_can_be_dismissed_without_stopping_audio(self) -> None:
+        workflow = ProjectWorkflow()
+        try:
+            self.assertTrue(hasattr(workflow, "mini_hide_button"))
+            workflow.mini_player_bar.setVisible(True)
+            workflow.mini_hide_button.click()
+            self.assertTrue(workflow.mini_player_bar.isHidden())
+            self.assertTrue(workflow._mini_player_dismissed)
+        finally:
+            workflow.close()
+            workflow.deleteLater()
+            self.app.processEvents()
+
     def test_library_matches_html_segmented_filters(self) -> None:
         from app.ui.library import project_matches
         from app.core.project import Project
