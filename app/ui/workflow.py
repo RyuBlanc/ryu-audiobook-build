@@ -168,9 +168,11 @@ class ProjectWorkflow(QMainWindow):
         self.brand_col = brand_col
         brand_col.setSpacing(2)
         brand = QLabel("RYU'S AUDIOBOOK")
+        self.brand_label = brand
         brand.setObjectName("brand")
         brand_col.addWidget(brand)
         edition = QLabel("DRAGON STUDIO")
+        self.edition_label = edition
         edition.setObjectName("brandEdition")
         brand_col.addWidget(edition)
         brand_row.addLayout(brand_col, 1)
@@ -372,6 +374,42 @@ class ProjectWorkflow(QMainWindow):
         body.addWidget(self.stack, 1)
         main_layout.addLayout(body, 1)
 
+        # Persistent mini-player from the HTML prototype, backed by the same
+        # QMediaPlayer used by the real local Audiobooks screen.
+        self.mini_player_bar = QWidget()
+        self.mini_player_bar.setObjectName("miniPlayerBar")
+        mini_layout = QHBoxLayout(self.mini_player_bar)
+        mini_layout.setContentsMargins(22, 8, 22, 8)
+        mini_layout.setSpacing(12)
+        self.mini_play_button = QPushButton("▶")
+        self.mini_play_button.setObjectName("primary")
+        self.mini_play_button.setFixedSize(40, 36)
+        self.mini_play_button.setToolTip("Play or pause current audiobook")
+        self.mini_play_button.clicked.connect(self._toggle_mini_playback)
+        mini_layout.addWidget(self.mini_play_button)
+        self.mini_title = QLabel("No audiobook playing")
+        self.mini_title.setObjectName("sectionTitle")
+        self.mini_title.setMinimumWidth(120)
+        self.mini_title.setMaximumWidth(260)
+        self.mini_title.setWordWrap(False)
+        mini_layout.addWidget(self.mini_title)
+        self.mini_position = QLabel("0:00")
+        self.mini_position.setObjectName("muted")
+        mini_layout.addWidget(self.mini_position)
+        self.mini_timeline = QSlider(Qt.Orientation.Horizontal)
+        self.mini_timeline.setRange(0, 0)
+        self.mini_timeline.setToolTip("Seek through the current audiobook")
+        self.mini_timeline.sliderMoved.connect(self._seek_mini_player)
+        mini_layout.addWidget(self.mini_timeline, 1)
+        self.mini_duration = QLabel("0:00")
+        self.mini_duration.setObjectName("muted")
+        mini_layout.addWidget(self.mini_duration)
+        self.mini_open_button = QPushButton("Open Player")
+        self.mini_open_button.clicked.connect(lambda: self.select_section("Audiobooks"))
+        mini_layout.addWidget(self.mini_open_button)
+        self.mini_player_bar.setVisible(False)
+        main_layout.addWidget(self.mini_player_bar)
+
         shell_layout.addWidget(sidebar_panel)
         shell_layout.addWidget(main_panel, 1)
 
@@ -403,6 +441,10 @@ class ProjectWorkflow(QMainWindow):
         self.stack.addWidget(self.hardware_page)
         self.audiobooks_page = AudiobooksPage(self.open_project)
         self.stack.addWidget(self.audiobooks_page)
+        self.audiobooks_page.player.sourceChanged.connect(self._mini_source_changed)
+        self.audiobooks_page.player.positionChanged.connect(self._mini_position_changed)
+        self.audiobooks_page.player.durationChanged.connect(self._mini_duration_changed)
+        self.audiobooks_page.player.playbackStateChanged.connect(self._mini_playback_state_changed)
         self.history_page = HistoryPage(
             on_open_project=self.open_project,
             on_open_generation=lambda: self.select_section("Generate"),
@@ -421,13 +463,62 @@ class ProjectWorkflow(QMainWindow):
         stored_theme = str(QSettings("RyuBlanc", "Ryu's Audiobook").value("ui/theme", "dark")).lower()
         self.theme_toggle.setText("☀" if stored_theme == "light" else "◐")
 
+    @staticmethod
+    def _mini_time_text(milliseconds: int) -> str:
+        seconds = max(0, int(milliseconds // 1000))
+        hours, remainder = divmod(seconds, 3600)
+        minutes, secs = divmod(remainder, 60)
+        return f"{hours:d}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:d}:{secs:02d}"
+
+    def _mini_source_changed(self, source) -> None:
+        player = self.audiobooks_page.player
+        if source.isEmpty():
+            self.mini_player_bar.setVisible(False)
+            self.mini_title.setText("No audiobook playing")
+            return
+        self.mini_title.setText(self.audiobooks_page.now_playing.text())
+        self.mini_title.setToolTip(source.toLocalFile())
+        self.mini_player_bar.setVisible(True)
+
+    def _mini_position_changed(self, position: int) -> None:
+        self.mini_timeline.blockSignals(True)
+        self.mini_timeline.setValue(position)
+        self.mini_timeline.blockSignals(False)
+        self.mini_position.setText(self._mini_time_text(position))
+
+    def _mini_duration_changed(self, duration: int) -> None:
+        self.mini_timeline.setRange(0, max(0, duration))
+        self.mini_duration.setText(self._mini_time_text(duration))
+
+    def _mini_playback_state_changed(self, state) -> None:
+        from PySide6.QtMultimedia import QMediaPlayer
+        playing = state == QMediaPlayer.PlaybackState.PlayingState
+        self.mini_play_button.setText("Ⅱ" if playing else "▶")
+        if not self.audiobooks_page.player.source().isEmpty():
+            self.mini_title.setText(self.audiobooks_page.now_playing.text())
+            self.mini_player_bar.setVisible(True)
+
+    def _toggle_mini_playback(self) -> None:
+        player = self.audiobooks_page.player
+        from PySide6.QtMultimedia import QMediaPlayer
+        if player.source().isEmpty():
+            self.select_section("Audiobooks")
+            return
+        if player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            player.pause()
+        else:
+            player.play()
+
+    def _seek_mini_player(self, position: int) -> None:
+        self.audiobooks_page.player.setPosition(position)
+
     def toggle_sidebar(self) -> None:
         """Collapse to an icon rail or restore the full grouped navigation."""
         self._sidebar_collapsed = not self._sidebar_collapsed
         if self._sidebar_collapsed:
             self.sidebar_panel.setFixedWidth(78)
-            self.brand_col.setEnabled(False)
-            self.brand_col_widget = self.brand_col
+            self.brand_label.setVisible(False)
+            self.edition_label.setVisible(False)
             # Keep the logo visible while removing the wordmark from the narrow rail.
             for row in range(self.sidebar.count()):
                 item = self.sidebar.item(row)
@@ -442,7 +533,8 @@ class ProjectWorkflow(QMainWindow):
                 item.setToolTip(self.nav_titles.get(key, full.strip()))
         else:
             self.sidebar_panel.setFixedWidth(276)
-            self.brand_col.setEnabled(True)
+            self.brand_label.setVisible(True)
+            self.edition_label.setVisible(True)
             for row in range(self.sidebar.count()):
                 item = self.sidebar.item(row)
                 item.setHidden(False)

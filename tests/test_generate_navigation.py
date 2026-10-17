@@ -105,6 +105,8 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
             self.assertTrue(hasattr(workflow, "theme_toggle"))
             self.assertTrue(hasattr(workflow, "notifications_button"))
             self.assertTrue(hasattr(workflow, "menu_toggle"))
+            self.assertTrue(hasattr(workflow, "mini_player_bar"))
+            self.assertIsNotNone(workflow.audiobooks_page.player)
             workflow.select_section("Import")
             self.assertTrue(workflow.workflow_step_buttons["Import"].isChecked())
             self.assertIs(workflow.stack.currentWidget(), workflow.import_page)

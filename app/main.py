@@ -433,6 +433,10 @@ QWidget#workflowRail {
     background: #0F131A;
     border-bottom: 1px solid #282E38;
 }
+QWidget#miniPlayerBar {
+    background: #0F131A;
+    border-top: 1px solid #353C49;
+}
 QPushButton#shellIconButton {
     background: #141821;
     color: #F5F5F6;
