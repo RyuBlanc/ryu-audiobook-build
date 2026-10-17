@@ -71,6 +71,7 @@ HOOKS = ROOT / "hooks"
 BUNDLED_PIPER = ROOT / "bundled_models" / "piper"
 BUNDLED_KOKORO = ROOT / "bundled_models" / "kokoro"
 ASSETS = ROOT / "assets"
+STARTER_AUDIO = ASSETS / "starter_audio"
 LOGO_SVG = ASSETS / "ryu_audiobook_logo.svg"
 LOGO_PNG = ASSETS / "ryu_audiobook_logo.png"
 LOGO_ICO = ASSETS / "ryu_audiobook_logo.ico"
@@ -201,6 +202,14 @@ args = [
         for module in required_modules
     ],
 ]
+
+if STARTER_AUDIO.is_dir() and (STARTER_AUDIO / "manifest.json").is_file():
+    if not any(STARTER_AUDIO.rglob("*.mp3")) and not any(STARTER_AUDIO.rglob("*.wav")) and not any(STARTER_AUDIO.rglob("*.ogg")) and not any(STARTER_AUDIO.rglob("*.flac")):
+        raise RuntimeError("Starter audio pack has no downloaded files.")
+    args.append(f"--add-data={STARTER_AUDIO};assets/starter_audio")
+else:
+    raise RuntimeError("Bundled starter audio manifest is missing.")
+
 
 if BUNDLED_PIPER.exists() and any(BUNDLED_PIPER.glob("*.onnx")):
     args.append(f"--add-data={BUNDLED_PIPER};bundled_models/piper")

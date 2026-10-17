@@ -1,0 +1,50 @@
+RYU'S AUDIOBOOK — STARTER AUDIO CREDITS
+
+The bundled starter tracks are selected from sources whose pages list open
+licenses. On first launch, available audio files are copied to:
+Ryu's Audiobook/Audio Library. You can add, replace or remove tracks there.
+
+MUSIC — CC0 1.0 Universal (public-domain dedication; attribution not required)
+- Fantasy Song Pack Volume 1 — troubadour:
+  https://opengameart.org/content/fantasy-song-pack-volume-1
+  Back to Nature, Bells of Winter, Fairy Lights, Homestead, Jaunt, Snow Day,
+  Springly Sprigs, Wandering Woodlands.
+- Let's Battle! — haruta:
+  https://opengameart.org/content/lets-battle-0
+- Battle Theme — Wolfgang_:
+  https://lpc.opengameart.org/content/battle-theme-0
+- The Final Battle — skrjablin:
+  https://opengameart.org/content/the-final-battle
+- Hope, Hard Battle 1 and Hard Battle 2 — MintoDog:
+  https://opengameart.org/content/hopeorchestral-battle-music
+  https://opengameart.org/content/hard-battle-1
+  https://opengameart.org/content/hard-battle-2
+- Pop Boss Battle — haruta:
+  https://opengameart.org/content/pop-boss-battle
+- Boss Battle Theme — CleytonKauffman:
+  https://opengameart.org/content/boss-battle-theme
+- Safe Space (Loop) — Tsorthan Grove:
+  https://opengameart.org/content/safe-space-0
+
+BOOK SOUNDS — CC0 1.0 Universal
+- Page Turn — qubodup:
+  https://freesound.org/people/qubodup/sounds/442857/
+- Page Turning — Bratok999:
+  https://freesound.org/people/Bratok999/sounds/173563/
+- Book Closing — nekomimi07:
+  https://freesound.org/people/nekomimi07/sounds/410988/
+- Book Manipulations (opening/closing excerpts) — timothyd4y:
+  https://freesound.org/people/timothyd4y/sounds/478743/
+
+BOOK SOUNDS — CC-BY 3.0 (attribution required)
+- Inventory Sound Effects — artisticdude, submitted by Ogrebane; created for
+  Summoning Wars:
+  https://opengameart.org/content/inventory-sound-effects
+  Required credit: "Inventory Sound Effects" by artisticdude, submitted by
+  Ogrebane, licensed under CC-BY 3.0.
+
+Each audio entry has a manifest source URL and license note. During packaging,
+the workflow downloads source files and validates that the required real BGM
+and the opening, page-turn and closing categories are available. Some sources
+may omit a public preview or change availability; additional files can be
+imported from Generate > Real audiobook cue files.

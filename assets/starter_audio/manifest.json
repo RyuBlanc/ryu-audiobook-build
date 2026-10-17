@@ -1,0 +1,245 @@
+{
+  "version": "2026-10-17-starter-pack-v1",
+  "tracks": [
+    {
+      "type": "music",
+      "category": "calm",
+      "bundle_path": "music/calm/back_to_nature.mp3",
+      "title": "Back to Nature",
+      "author": "troubadour",
+      "source_url": "https://opengameart.org/content/fantasy-song-pack-volume-1",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication; attribution is not required."
+    },
+    {
+      "type": "music",
+      "category": "fantasy",
+      "bundle_path": "music/fantasy/bells_of_winter.mp3",
+      "title": "Bells of Winter",
+      "author": "troubadour",
+      "source_url": "https://opengameart.org/content/fantasy-song-pack-volume-1",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication; attribution is not required."
+    },
+    {
+      "type": "music",
+      "category": "fantasy",
+      "bundle_path": "music/fantasy/fairy_lights.mp3",
+      "title": "Fairy Lights",
+      "author": "troubadour",
+      "source_url": "https://opengameart.org/content/fantasy-song-pack-volume-1",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication; attribution is not required."
+    },
+    {
+      "type": "music",
+      "category": "slice-of-life",
+      "bundle_path": "music/slice-of-life/homestead.mp3",
+      "title": "Homestead",
+      "author": "troubadour",
+      "source_url": "https://opengameart.org/content/fantasy-song-pack-volume-1",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication; attribution is not required."
+    },
+    {
+      "type": "music",
+      "category": "adventure",
+      "bundle_path": "music/adventure/jaunt.mp3",
+      "title": "Jaunt",
+      "author": "troubadour",
+      "source_url": "https://opengameart.org/content/fantasy-song-pack-volume-1",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication; attribution is not required."
+    },
+    {
+      "type": "music",
+      "category": "calm",
+      "bundle_path": "music/calm/snow_day.mp3",
+      "title": "Snow Day",
+      "author": "troubadour",
+      "source_url": "https://opengameart.org/content/fantasy-song-pack-volume-1",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication; attribution is not required."
+    },
+    {
+      "type": "music",
+      "category": "comedy",
+      "bundle_path": "music/comedy/springly_sprigs.mp3",
+      "title": "Springly Sprigs",
+      "author": "troubadour",
+      "source_url": "https://opengameart.org/content/fantasy-song-pack-volume-1",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication; attribution is not required."
+    },
+    {
+      "type": "music",
+      "category": "adventure",
+      "bundle_path": "music/adventure/wandering_woodlands.mp3",
+      "title": "Wandering Woodlands",
+      "author": "troubadour",
+      "source_url": "https://opengameart.org/content/fantasy-song-pack-volume-1",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication; attribution is not required."
+    },
+    {
+      "type": "music",
+      "category": "action",
+      "bundle_path": "music/action/lets_battle.mp3",
+      "title": "Let's Battle",
+      "author": "haruta",
+      "source_url": "https://opengameart.org/content/lets-battle-0",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication; attribution is not required."
+    },
+    {
+      "type": "music",
+      "category": "action",
+      "bundle_path": "music/action/battle-theme.mp3",
+      "title": "Battle Theme",
+      "author": "Wolfgang_",
+      "source_url": "https://lpc.opengameart.org/content/battle-theme-0",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication; attribution is not required."
+    },
+    {
+      "type": "music",
+      "category": "action",
+      "bundle_path": "music/action/the_final_battle.ogg",
+      "title": "The Final Battle",
+      "author": "skrjablin",
+      "source_url": "https://opengameart.org/content/the-final-battle",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication; attribution is not required."
+    },
+    {
+      "type": "music",
+      "category": "action",
+      "bundle_path": "music/action/hope_orchestral_battle_music_bpm165.ogg",
+      "title": "Hope (Orchestral Battle Music)",
+      "author": "MintoDog",
+      "source_url": "https://opengameart.org/content/hopeorchestral-battle-music",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication; attribution is not required."
+    },
+    {
+      "type": "music",
+      "category": "action",
+      "bundle_path": "music/action/hard_battle_2_bpm140.mp3",
+      "title": "Hard Battle 2",
+      "author": "MintoDog",
+      "source_url": "https://opengameart.org/content/hard-battle-2",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication; attribution is not required."
+    },
+    {
+      "type": "music",
+      "category": "action",
+      "bundle_path": "music/action/hard_battle_1_bpm170.mp3",
+      "title": "Hard Battle 1",
+      "author": "MintoDog",
+      "source_url": "https://opengameart.org/content/hard-battle-1",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication; attribution is not required."
+    },
+    {
+      "type": "music",
+      "category": "action",
+      "bundle_path": "music/action/pop_boss_battle.mp3",
+      "title": "Pop Boss Battle",
+      "author": "haruta",
+      "source_url": "https://opengameart.org/content/pop-boss-battle",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication; attribution is not required."
+    },
+    {
+      "type": "music",
+      "category": "action",
+      "bundle_path": "music/action/boss-battle-theme.mp3",
+      "title": "Boss Battle Theme",
+      "author": "CleytonKauffman",
+      "source_url": "https://opengameart.org/content/boss-battle-theme",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication; attribution is not required."
+    },
+    {
+      "type": "music",
+      "category": "sci-fi",
+      "bundle_path": "music/sci-fi/safe_space_loop.flac",
+      "title": "Safe Space (Loop)",
+      "author": "Tsorthan Grove",
+      "source_url": "https://opengameart.org/content/safe-space-0",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication; attribution is not required."
+    },
+    {
+      "type": "cue",
+      "category": "opening",
+      "bundle_path": "cues/opening/book-opening.wav",
+      "title": "Book Manipulations — opening excerpt",
+      "author": "timothyd4y",
+      "source_url": "https://freesound.org/people/timothyd4y/sounds/478743/",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0; short opening excerpt made from the source book-handling recording."
+    },
+    {
+      "type": "cue",
+      "category": "page",
+      "bundle_path": "cues/page/page-turn.mp3",
+      "title": "Page Turn",
+      "author": "qubodup",
+      "source_url": "https://freesound.org/people/qubodup/sounds/442857/",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication."
+    },
+    {
+      "type": "cue",
+      "category": "page",
+      "bundle_path": "cues/page/soft-page-turn.wav",
+      "title": "Page Turning — soft excerpt",
+      "author": "Bratok999",
+      "source_url": "https://freesound.org/people/Bratok999/sounds/173563/",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0; excerpt from the source page-turn recording."
+    },
+    {
+      "type": "cue",
+      "category": "page",
+      "bundle_path": "cues/page/firm-page-turn.wav",
+      "title": "Page Turning — firm excerpt",
+      "author": "Bratok999",
+      "source_url": "https://freesound.org/people/Bratok999/sounds/173563/",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0; excerpt from the source page-turn recording."
+    },
+    {
+      "type": "cue",
+      "category": "page",
+      "bundle_path": "cues/page/page-turn-inventory.wav",
+      "title": "Turn Page",
+      "author": "artisticdude (submitted by Ogrebane)",
+      "source_url": "https://opengameart.org/content/inventory-sound-effects",
+      "license": "CC-BY 3.0 (also offered under CC-BY-SA/GPL)",
+      "license_note": "Attribution required under CC-BY 3.0: Inventory Sound Effects by artisticdude, submitted by Ogrebane; created for Summoning Wars."
+    },
+    {
+      "type": "cue",
+      "category": "ending",
+      "bundle_path": "cues/ending/book-closing.mp3",
+      "title": "Book Closing",
+      "author": "nekomimi07",
+      "source_url": "https://freesound.org/people/nekomimi07/sounds/410988/",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0/public-domain dedication."
+    },
+    {
+      "type": "cue",
+      "category": "ending",
+      "bundle_path": "cues/ending/book-closing-alt.wav",
+      "title": "Book Manipulations — closing excerpt",
+      "author": "timothyd4y",
+      "source_url": "https://freesound.org/people/timothyd4y/sounds/478743/",
+      "license": "CC0 1.0 Universal",
+      "license_note": "CC0; short closing excerpt made from the source book-handling recording."
+    }
+  ]
+}

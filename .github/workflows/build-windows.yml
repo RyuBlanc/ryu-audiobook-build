@@ -108,6 +108,125 @@ jobs:
           $voices = Get-Item 'bundled_models\kokoro\voices-v1.0.bin'
           if ($model.Length -lt 100MB -or $voices.Length -lt 10MB) { throw 'Kokoro offline assets are incomplete.' }
 
+          Write-Host '=== Download CC0 audiobook BGM starter pack ==='
+          $starterRoot = Join-Path (Get-Location).Path 'assets\starter_audio'
+          $musicItems = @(
+            @{ Rel='music\calm\back_to_nature.mp3'; Url='https://opengameart.org/sites/default/files/back_to_nature.mp3'; Min=100000 },
+            @{ Rel='music\fantasy\bells_of_winter.mp3'; Url='https://opengameart.org/sites/default/files/bells_of_winter.mp3'; Min=100000 },
+            @{ Rel='music\fantasy\fairy_lights.mp3'; Url='https://opengameart.org/sites/default/files/fairy_lights.mp3'; Min=100000 },
+            @{ Rel='music\slice-of-life\homestead.mp3'; Url='https://opengameart.org/sites/default/files/homestead.mp3'; Min=100000 },
+            @{ Rel='music\adventure\jaunt.mp3'; Url='https://opengameart.org/sites/default/files/jaunt.mp3'; Min=100000 },
+            @{ Rel='music\calm\snow_day.mp3'; Url='https://opengameart.org/sites/default/files/snow_day.mp3'; Min=100000 },
+            @{ Rel='music\comedy\springly_sprigs.mp3'; Url='https://opengameart.org/sites/default/files/springly_sprigs.mp3'; Min=100000 },
+            @{ Rel='music\adventure\wandering_woodlands.mp3'; Url='https://opengameart.org/sites/default/files/wandering_woodlands.mp3'; Min=100000 },
+            @{ Rel='music\action\lets_battle.mp3'; Url='https://opengameart.org/sites/default/files/lets_battle.mp3'; Min=50000 },
+            @{ Rel='music\action\battle-theme.mp3'; Url='https://lpc.opengameart.org/sites/default/files/Battle.mp3'; Min=100000 },
+            @{ Rel='music\action\the_final_battle.ogg'; Url='https://opengameart.org/sites/default/files/the_final_battle.ogg'; Min=50000 },
+            @{ Rel='music\action\hope_orchestral_battle_music_bpm165.ogg'; Url='https://opengameart.org/sites/default/files/hope_orchestral_battle_music_bpm165.ogg'; Min=50000 },
+            @{ Rel='music\action\hard_battle_2_bpm140.mp3'; Url='https://opengameart.org/sites/default/files/hard_battle_2_bpm140.mp3'; Min=50000 },
+            @{ Rel='music\action\hard_battle_1_bpm170.mp3'; Url='https://opengameart.org/sites/default/files/hard_battle_1_bpm170.mp3'; Min=50000 },
+            @{ Rel='music\action\pop_boss_battle.mp3'; Url='https://opengameart.org/sites/default/files/pop_boss_battle.mp3'; Min=50000 },
+            @{ Rel='music\action\boss-battle-theme.mp3'; Url='https://opengameart.org/sites/default/files/CleytonRX%20-%20Battle%20RPG%20Theme.mp3'; Min=100000 },
+            @{ Rel='music\sci-fi\safe_space_loop.flac'; Url='https://opengameart.org/sites/default/files/safe_space_loop.flac'; Min=100000 }
+          )
+          foreach ($item in $musicItems) {
+            $target = Join-Path $starterRoot $item.Rel
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+            try {
+              curl.exe -L --fail --retry 2 --silent --show-error -A 'RyuAudiobookStarterAudio/1.0' -o $target $item.Url
+              if ($LASTEXITCODE -ne 0) { throw "Download exit code $LASTEXITCODE" }
+              if ((Get-Item $target).Length -lt $item.Min) { throw "File is too small or not an audio download" }
+              Write-Host "Starter track ready: $($item.Rel)"
+            }
+            catch {
+              Write-Warning "Skipping unavailable starter track $($item.Rel): $($_.Exception.Message)"
+              Remove-Item -Force -ErrorAction SilentlyContinue $target
+            }
+          }
+          $bundledMusic = @(Get-ChildItem (Join-Path $starterRoot 'music') -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Extension.ToLowerInvariant() -in @('.mp3','.ogg','.flac') })
+          if ($bundledMusic.Count -lt 14) { throw "Expected at least 14 real starter BGM tracks; found $($bundledMusic.Count)." }
+          Write-Host "Downloaded $($bundledMusic.Count) real starter BGM tracks."
+
+          Write-Host '=== Download physical-book sound-effect starter cues ==='
+          function Get-FreesoundPreview {
+            param([string]$PageUrl,[string]$Destination)
+            try {
+              $response = Invoke-WebRequest -Uri $PageUrl -UseBasicParsing -TimeoutSec 45 -Headers @{ 'User-Agent'='Mozilla/5.0 Ryu-Audiobook-asset-builder/1.0' }
+              $html = [System.Net.WebUtility]::HtmlDecode($response.Content).Replace('\/','/')
+              $found = [regex]::Matches($html, '(?:(?:https?:)?//(?:cdn\.)?freesound\.org)?/(?:data/)?previews/\d+/\d+_\d+-(?:hq|lq)\.mp3(?:\?[^"''\s]*)?')
+              if ($found.Count -eq 0) { Write-Warning "No public preview URL found on $PageUrl."; return $false }
+              $urls = @($found | ForEach-Object { $_.Value } | Select-Object -Unique)
+              $url = $urls | Where-Object { $_ -match '-hq\.mp3' } | Select-Object -First 1
+              if (-not $url) { $url = $urls | Select-Object -First 1 }
+              if ($url.StartsWith('//')) { $url = 'https:' + $url }
+              elseif ($url.StartsWith('/')) { $url = 'https://cdn.freesound.org' + $url }
+              New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Destination) | Out-Null
+              curl.exe -L --fail --retry 2 --silent --show-error -A 'Mozilla/5.0 Ryu-Audiobook-asset-builder/1.0' -o $Destination $url
+              if ($LASTEXITCODE -ne 0 -or -not (Test-Path $Destination) -or (Get-Item $Destination).Length -lt 5000) {
+                Remove-Item -Force -ErrorAction SilentlyContinue $Destination
+                Write-Warning "Could not download preview for $PageUrl."
+                return $false
+              }
+              Write-Host "Downloaded CC0 public preview from $PageUrl"; return $true
+            }
+            catch { Write-Warning "Could not obtain public preview for $PageUrl : $($_.Exception.Message)"; return $false }
+          }
+          $tmpCueRoot = Join-Path $env:RUNNER_TEMP 'ryu-starter-cues'
+          New-Item -ItemType Directory -Force -Path $tmpCueRoot | Out-Null
+          $ffmpeg = & $pythonExe -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
+          $bookHandling = Join-Path $tmpCueRoot 'book-manipulations-preview.mp3'
+          if (Get-FreesoundPreview 'https://freesound.org/people/timothyd4y/sounds/478743/' $bookHandling) {
+            $openingOut = Join-Path $starterRoot 'cues\opening\book-opening.wav'
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $openingOut) | Out-Null
+            & $ffmpeg -y -i $bookHandling -t 2.8 -af 'afade=t=in:st=0:d=0.06,afade=t=out:st=2.35:d=0.4' -ac 2 -ar 44100 $openingOut
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $openingOut) -or (Get-Item $openingOut).Length -lt 5000) { Remove-Item -Force -ErrorAction SilentlyContinue $openingOut }
+            $endingOut = Join-Path $starterRoot 'cues\ending\book-closing-alt.wav'
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $endingOut) | Out-Null
+            & $ffmpeg -y -sseof -3.0 -i $bookHandling -t 2.7 -af 'afade=t=in:st=0:d=0.08,afade=t=out:st=2.2:d=0.4' -ac 2 -ar 44100 $endingOut
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $endingOut) -or (Get-Item $endingOut).Length -lt 5000) { Remove-Item -Force -ErrorAction SilentlyContinue $endingOut }
+          }
+          $pageTurnRaw = Join-Path $tmpCueRoot 'page-turn-preview.mp3'
+          if (Get-FreesoundPreview 'https://freesound.org/people/qubodup/sounds/442857/' $pageTurnRaw) {
+            $pageTurnOut = Join-Path $starterRoot 'cues\page\page-turn.mp3'
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $pageTurnOut) | Out-Null
+            Copy-Item -Force $pageTurnRaw $pageTurnOut
+          }
+          $pageSequenceRaw = Join-Path $tmpCueRoot 'page-turn-sequence.mp3'
+          if (Get-FreesoundPreview 'https://freesound.org/people/Bratok999/sounds/173563/' $pageSequenceRaw) {
+            foreach ($sample in @(@{Name='soft-page-turn.wav';Start='0.5';Duration='0.8'},@{Name='firm-page-turn.wav';Start='4.0';Duration='0.9'})) {
+              $sampleOut = Join-Path (Join-Path $starterRoot 'cues\page') $sample.Name
+              New-Item -ItemType Directory -Force -Path (Split-Path -Parent $sampleOut) | Out-Null
+              & $ffmpeg -y -ss $sample.Start -i $pageSequenceRaw -t $sample.Duration -af 'afade=t=in:st=0:d=0.04,afade=t=out:st=0.55:d=0.25' -ac 2 -ar 44100 $sampleOut
+              if ($LASTEXITCODE -ne 0 -or -not (Test-Path $sampleOut) -or (Get-Item $sampleOut).Length -lt 3000) { Remove-Item -Force -ErrorAction SilentlyContinue $sampleOut }
+            }
+          }
+          $bookClose = Join-Path $tmpCueRoot 'book-closing-preview.mp3'
+          if (Get-FreesoundPreview 'https://freesound.org/people/nekomimi07/sounds/410988/' $bookClose) {
+            $closeOut = Join-Path $starterRoot 'cues\ending\book-closing.mp3'
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $closeOut) | Out-Null
+            Copy-Item -Force $bookClose $closeOut
+          }
+
+          $inventoryZip = Join-Path $tmpCueRoot 'inventory_sound_effects.zip'
+          curl.exe -L --fail --retry 2 --silent --show-error -A 'RyuAudiobookStarterAudio/1.0' -o $inventoryZip 'https://opengameart.org/sites/default/files/inventory_sound_effects.zip'
+          if ($LASTEXITCODE -eq 0 -and (Test-Path $inventoryZip)) {
+            $inventoryExtract = Join-Path $tmpCueRoot 'inventory-extracted'
+            Expand-Archive -Force $inventoryZip $inventoryExtract
+            $inventoryPage = Get-ChildItem $inventoryExtract -Recurse -File -Filter '*.wav' | Where-Object { $_.Name -match '(?i)(turn.?page|page.?turn)' } | Select-Object -First 1
+            if ($inventoryPage) {
+              $inventoryOut = Join-Path $starterRoot 'cues\page\page-turn-inventory.wav'
+              New-Item -ItemType Directory -Force -Path (Split-Path -Parent $inventoryOut) | Out-Null
+              Copy-Item -Force $inventoryPage.FullName $inventoryOut
+            }
+          }
+          foreach ($kind in @('opening','page','ending')) {
+            $folder = Join-Path $starterRoot ("cues\" + $kind)
+            $count = @(Get-ChildItem $folder -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension.ToLowerInvariant() -in @('.wav','.mp3','.ogg','.flac') }).Count
+            if ($count -lt 1) { throw "Starter pack is missing a real $kind sound cue." }
+          }
+          Write-Host 'Physical book opening, page-turn and closing cues are ready.'
+
+
           Write-Host '=== Verify application version ==='
           $env:PYTHONPATH = (Get-Location).Path
           $version = & $pythonExe -c "from app.version import full_version; print(full_version())"
@@ -279,6 +398,20 @@ jobs:
             throw 'Frozen package has no Kokoro voice pack.'
           }
           Write-Host "Bundled offline assets verified: Piper=$($piperModels.Count), Kokoro=$kokoroVoices"
+          $starterCandidates = @(
+            (Join-Path $exeDir 'assets\starter_audio'),
+            (Join-Path $exeDir '_internal\assets\starter_audio')
+          )
+          $starterRoot = $starterCandidates | Where-Object { Test-Path (Join-Path $_ 'manifest.json') } | Select-Object -First 1
+          if (-not $starterRoot) { throw 'Frozen EXE package has no starter-audio manifest.' }
+          $starterMusic = @(Get-ChildItem (Join-Path $starterRoot 'music') -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension.ToLowerInvariant() -in @('.mp3','.ogg','.flac') })
+          if ($starterMusic.Count -lt 14) { throw "Frozen package has fewer than 14 real starter BGM tracks; found $($starterMusic.Count)." }
+          foreach ($kind in @('opening','page','ending')) {
+            $cueFolder = Join-Path (Join-Path $starterRoot 'cues') $kind
+            $cueFiles = @(Get-ChildItem $cueFolder -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension.ToLowerInvariant() -in @('.wav','.mp3','.ogg','.flac') })
+            if ($cueFiles.Count -lt 1) { throw "Frozen package has no $kind book-cue audio." }
+          }
+          Write-Host "Bundled real starter audio verified: BGM=$($starterMusic.Count), with opening/page-turn/closing cue categories."
           Write-Host 'Critical application modules were already exercised by the frozen EXE self-test.'
 
       - name: Install Inno Setup

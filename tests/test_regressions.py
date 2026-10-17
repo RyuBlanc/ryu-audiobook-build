@@ -853,6 +853,69 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn("CUE_STYLE_LABELS", ui)
         self.assertNotIn("BGM catalogue (1,344 cinematic arrangements)", ui)
 
+    def test_bundled_starter_audio_seeds_once_and_preserves_user_files(self):
+        from unittest.mock import patch
+        from app.audio.library import ensure_audio_library, list_music_tracks, list_cue_tracks
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            bundle = root / "bundle"
+            library_root = root / "Audio Library"
+            music_rel = Path("music") / "fantasy" / "starter-fantasy.mp3"
+            opening_rel = Path("cues") / "opening" / "starter-opening.wav"
+            (bundle / music_rel).parent.mkdir(parents=True)
+            (bundle / opening_rel).parent.mkdir(parents=True)
+            (bundle / music_rel).write_bytes(b"starter sample bytes")
+            (bundle / opening_rel).write_bytes(b"starter cue bytes")
+            (bundle / "manifest.json").write_text(
+                json.dumps({
+                    "version": "unit-test-v1",
+                    "tracks": [
+                        {
+                            "type": "music", "category": "fantasy",
+                            "bundle_path": music_rel.as_posix(),
+                            "title": "Starter Fantasy", "author": "Test Artist",
+                            "source_url": "https://example.invalid/fantasy",
+                            "license": "CC0 1.0 Universal",
+                            "license_note": "CC0 test license",
+                        },
+                        {
+                            "type": "cue", "category": "opening",
+                            "bundle_path": opening_rel.as_posix(),
+                            "title": "Starter Opening", "author": "Test Artist",
+                            "source_url": "https://example.invalid/opening",
+                            "license": "CC0 1.0 Universal",
+                            "license_note": "CC0 test license",
+                        },
+                    ],
+                }),
+                encoding="utf-8",
+            )
+            (bundle / "ATTRIBUTION.md").write_text("Starter pack credits", encoding="utf-8")
+            with patch("app.audio.library.audio_library_root", return_value=library_root), patch(
+                "app.audio.library._bundled_starter_audio_root", return_value=bundle
+            ):
+                ensure_audio_library()
+                music_path = library_root / music_rel
+                cue_path = library_root / opening_rel
+                self.assertTrue(music_path.is_file())
+                self.assertTrue(cue_path.is_file())
+                self.assertEqual(len(list_music_tracks()), 1)
+                self.assertEqual(len(list_cue_tracks("opening")), 1)
+                metadata = json.loads(
+                    music_path.with_name(music_path.name + ".license.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(metadata["license"], "CC0 1.0 Universal")
+                self.assertEqual(metadata["source_url"], "https://example.invalid/fantasy")
+                (library_root / "Starter Audio Credits.md").write_text("User-edited credits", encoding="utf-8")
+                music_path.write_bytes(b"user edit")
+                ensure_audio_library()
+                self.assertEqual(music_path.read_bytes(), b"user edit")
+                self.assertEqual((library_root / "Starter Audio Credits.md").read_text(encoding="utf-8"), "User-edited credits")
+                cue_path.unlink()
+                ensure_audio_library()
+                self.assertFalse(cue_path.exists())
+
     def test_real_audio_library_imports_by_category_and_rotates_cues(self):
         from unittest.mock import patch
         from app.audio.library import (
@@ -1254,6 +1317,11 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(any("sounddino.com/en/effects/audiobooks-music" in item["url"] for item in AUDIO_SOURCE_LINKS))
         self.assertTrue(any("storyblocks.com/audio/search/flip-book" in item["url"] for item in AUDIO_SOURCE_LINKS))
         self.assertTrue(any("pixabay.com/sound-effects/search/book-page-turn" in item["url"] for item in AUDIO_SOURCE_LINKS))
+        starter_manifest = Path("assets/starter_audio/manifest.json")
+        self.assertTrue(starter_manifest.is_file())
+        starter = json.loads(starter_manifest.read_text(encoding="utf-8"))
+        self.assertGreaterEqual(sum(1 for entry in starter["tracks"] if entry["type"] == "music"), 14)
+        self.assertTrue(all(entry.get("license") and entry.get("source_url") for entry in starter["tracks"]))
         self.assertEqual(detect_chapter_mood("A Secret Revealed", "A strange hidden clue appeared."), "mystery")
         self.assertEqual(detect_chapter_mood("The Confession", "She blushed and confessed her love."), "romance")
         self.assertEqual(detect_chapter_mood("The Battlefield", "Swords clashed in the battle."), "action")

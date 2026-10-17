@@ -12,6 +12,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import sys
 from app.core.paths import audio_library_root
 
 AUDIO_EXTENSIONS={".wav",".mp3",".m4a",".aac",".flac",".ogg",".opus",".wma"}
@@ -44,6 +45,9 @@ AUDIO_SOURCE_LINKS=(
  {"label":"Pixabay — book closing sounds","url":"https://pixabay.com/sound-effects/search/book-closing/","group":"cue"},
  {"label":"Storyblocks — flip-book and page-turn sounds","url":"https://www.storyblocks.com/audio/search/flip-book","group":"cue"},
  {"label":"Audio.com — BGM and sound effects","url":"https://audio.com/category/sound-effect/bgm","group":"both"},
+ {"label":"OpenGameArt — CC0 fantasy song pack","url":"https://opengameart.org/content/fantasy-song-pack-volume-1","group":"music"},
+ {"label":"OpenGameArt — CC0 music collection","url":"https://opengameart.org/content/good-cc0-music","group":"music"},
+ {"label":"Freesound — book and page-turn recordings","url":"https://freesound.org/search/?q=book+page+turn","group":"cue"},
 )
 @dataclass(frozen=True)
 class AudioTrack:
@@ -52,10 +56,82 @@ class AudioTrack:
  category_label: str
  license_note: str=""
 
+def _bundled_starter_audio_root():
+ candidates=[]
+ frozen=getattr(sys,"_MEIPASS",None)
+ if frozen: candidates.append(Path(frozen)/"assets"/"starter_audio")
+ candidates.append(Path(__file__).resolve().parents[2]/"assets"/"starter_audio")
+ for candidate in candidates:
+  if (candidate/"manifest.json").is_file(): return candidate
+ return None
+
+def _seed_bundled_starter_audio(root):
+ """Seed redistributed starter tracks once without overwriting user changes."""
+ bundle=_bundled_starter_audio_root()
+ if bundle is None: return 0
+ try: manifest=json.loads((bundle/"manifest.json").read_text(encoding="utf-8"))
+ except (OSError,ValueError,TypeError): return 0
+ marker=root/".starter-audio-state.json"
+ try: state=json.loads(marker.read_text(encoding="utf-8"))
+ except (OSError,ValueError,TypeError): state={}
+ seeded=state.get("seeded_files") if isinstance(state.get("seeded_files"),dict) else {}
+ added=0
+ for entry in manifest.get("tracks",[]):
+  if not isinstance(entry,dict): continue
+  rel=str(entry.get("bundle_path") or "").replace(chr(92),"/")
+  if not rel or rel in seeded: continue
+  source=(bundle/rel).resolve()
+  try: source.relative_to(bundle.resolve())
+  except ValueError: continue
+  if not source.is_file(): continue
+  role=str(entry.get("type") or "").casefold()
+  category=str(entry.get("category") or "")
+  if role=="music" and category in MUSIC_CATEGORY_LABELS:
+   dest_dir=root/"music"/category
+  elif role=="cue" and category in {key for key,_label in CUE_KINDS}:
+   dest_dir=root/"cues"/category
+  else: continue
+  dest_dir.mkdir(parents=True,exist_ok=True)
+  target=dest_dir/source.name
+  if target.exists():
+   suffix=2
+   while target.exists():
+    target=dest_dir/f"{source.stem} (Starter {suffix}){source.suffix}"
+    suffix+=1
+  shutil.copy2(source,target)
+  license_name=str(entry.get("license") or "License not specified")
+  note=str(entry.get("license_note") or "")
+  metadata={
+   "role":role if role=="music" else category,
+   "category":category,
+   "title":str(entry.get("title") or source.stem),
+   "author":str(entry.get("author") or ""),
+   "original_filename":source.name,
+   "source_url":str(entry.get("source_url") or ""),
+   "license":license_name,
+   "license_note":f"{license_name}. {note}".strip(),
+   "starter_pack_version":str(manifest.get("version") or ""),
+   "imported_at":datetime.now(timezone.utc).isoformat(),
+  }
+  try: _metadata_path(target).write_text(json.dumps(metadata,ensure_ascii=False,indent=2),encoding="utf-8")
+  except OSError: pass
+  seeded[rel]=str(target.relative_to(root)).replace(chr(92),"/")
+  added+=1
+ if added or not marker.exists():
+  try: marker.write_text(json.dumps({"version":str(manifest.get("version") or ""),"seeded_files":seeded},ensure_ascii=False,indent=2),encoding="utf-8")
+  except OSError: pass
+ credits=bundle/"ATTRIBUTION.md"
+ local_credits=root/"Starter Audio Credits.md"
+ if credits.is_file() and not local_credits.exists():
+  try: shutil.copy2(credits,local_credits)
+  except OSError: pass
+ return added
+
 def ensure_audio_library():
  root=audio_library_root()
  for key,_ in MUSIC_CATEGORIES: (root/"music"/key).mkdir(parents=True,exist_ok=True)
  for key,_ in CUE_KINDS: (root/"cues"/key).mkdir(parents=True,exist_ok=True)
+ _seed_bundled_starter_audio(root)
  return root
 
 def music_category_root(category):
