@@ -904,10 +904,8 @@ class ProjectWorkflow(QMainWindow):
                         break
             else:
                 self._show_page(self.library)
-                QMessageBox.information(
-                    self,
-                    "Open a book first",
-                    f"{key} uses book-specific settings. Select a book in Library or import one, then open {key}.",
+                self.page_subheading.setText(
+                    f"Select a book in Library or import one to open {key}."
                 )
                 return
         if not self.project:
@@ -1057,11 +1055,8 @@ class ProjectWorkflow(QMainWindow):
                                 self.sidebar.blockSignals(False)
                     if not self.project:
                         self._show_page(self.library)
-                        QMessageBox.information(
-                            self,
-                            "Open a book first",
-                            "Generate needs an audiobook project. Select a book in Library "
-                            "or import a new book, then select Generate again.",
+                        self.page_subheading.setText(
+                            "Select a book in Library or import a new book to start generating."
                         )
                         return
                 if self.generation is None:
