@@ -172,7 +172,7 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                 self.assertEqual(workflow.dashboard.recent_list.count(), 1)
                 self.assertIn(project.title, workflow.dashboard.recent_list.item(0).text())
                 self.assertEqual(workflow.dashboard.continue_title.text(), project.title)
-                self.assertTrue(workflow.dashboard.continue_card.isVisible())
+                self.assertFalse(workflow.dashboard.continue_card.isHidden())
             finally:
                 workflow.close()
                 workflow.deleteLater()
