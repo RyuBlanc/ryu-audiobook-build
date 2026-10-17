@@ -31,6 +31,33 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
         icon = _import_book_icon()
         self.assertFalse(icon.isNull(), "The branded Import control must have a packaged logo resource.")
 
+    def test_grouped_navigation_shell_preserves_backend_page_keys(self) -> None:
+        workflow = ProjectWorkflow()
+        try:
+            page_keys = [
+                workflow.sidebar.item(i).data(32)
+                for i in range(workflow.sidebar.count())
+                if workflow.sidebar.item(i).data(32)
+            ]
+            self.assertEqual(
+                page_keys,
+                ["Library", "Import", "Chapters", "Voice & Narration",
+                 "Voice Cast", "Generate", "Models", "Hardware"],
+            )
+            group_labels = [
+                workflow.sidebar.item(i).text()
+                for i in range(workflow.sidebar.count())
+                if not workflow.sidebar.item(i).data(32)
+            ]
+            self.assertEqual(group_labels, ["HOME", "PROJECT", "PRODUCTION", "SYSTEM"])
+            self.assertEqual(workflow.page_heading.text(), "Audiobook Library")
+            self.assertIsNotNone(workflow.global_search)
+            self.assertIsNotNone(workflow.project_mini_title)
+        finally:
+            workflow.close()
+            workflow.deleteLater()
+            self.app.processEvents()
+
     def _project(self, folder: Path) -> Project:
         folder.mkdir(parents=True, exist_ok=True)
         project = Project(

@@ -261,6 +261,73 @@ QLabel#brandEdition {
     font-size: 9pt;
     font-weight: 600;
 }
+QWidget#studioSidebar {
+    background: #0F131A;
+    border-right: 1px solid #282E38;
+}
+QWidget#studioMainPanel {
+    background: #090A0F;
+}
+QWidget#sidebarDivider {
+    background: #282E38;
+    max-height: 1px;
+}
+QLabel#pageHeading {
+    color: #F5F5F6;
+    font-size: 19pt;
+    font-weight: 700;
+}
+QLabel#pageSubheading {
+    color: #A5ACB8;
+    font-size: 9pt;
+}
+QLabel#projectPill {
+    color: #F5F5F6;
+    background: #141821;
+    border: 1px solid #282E38;
+    border-radius: 10px;
+    padding: 8px 12px;
+}
+QLabel#projectMiniTitle {
+    color: #F5F5F6;
+    font-size: 10pt;
+    font-weight: 600;
+}
+QWidget#currentProjectCard {
+    background: #141821;
+    border: 1px solid #282E38;
+    border-radius: 12px;
+}
+QLineEdit#globalSearch {
+    min-height: 22px;
+    border-radius: 10px;
+    padding-left: 12px;
+}
+QListWidget#sidebar {
+    background: transparent;
+    border: 0;
+    border-radius: 8px;
+    padding: 2px;
+    outline: 0;
+}
+QListWidget#sidebar::item {
+    color: #A5ACB8;
+    padding: 10px 8px;
+    border: 1px solid transparent;
+    border-left: 3px solid transparent;
+    border-radius: 9px;
+    margin: 1px 0;
+}
+QListWidget#sidebar::item:selected {
+    color: #F5F5F6;
+    background: #28121C;
+    border: 1px solid #6F1023;
+    border-left: 3px solid #D4375D;
+}
+QListWidget#sidebar::item:hover {
+    background: #181D28;
+    border-color: #282E38;
+}
 QFrame, QSplitter::handle {
     border-color: #282E38;
 }
@@ -296,7 +363,7 @@ def main() -> int:
     app_icon = QIcon()
     # Prefer a lossless PNG if one is present; the branded SVG is the
     # packaged fallback so the executable never falls back to a generic icon.
-    for icon_name in ("ryu_audiobook_logo.png", "ryu_audiobook_logo.svg", "ryu_audiobook_logo.jpg"):
+    for icon_name in ("ryu_audiobook_logo.svg", "ryu_audiobook_logo.png", "ryu_audiobook_logo.jpg"):
         icon_path = asset_path(icon_name)
         if icon_path.is_file():
             candidate_icon = QIcon(str(icon_path))

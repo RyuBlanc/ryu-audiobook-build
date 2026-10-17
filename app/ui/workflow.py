@@ -6,11 +6,12 @@ import sys
 import traceback
 
 from PySide6.QtCore import Qt, QThread, Signal, QEasingCurve, QPropertyAnimation, QTimer, QSize
-from PySide6.QtGui import QFontMetrics, QIcon
+from PySide6.QtGui import QFontMetrics, QIcon, QColor
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QSizePolicy,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -123,37 +124,151 @@ class ProjectWorkflow(QMainWindow):
         self._page_animation: QPropertyAnimation | None = None
         self._page_animation_widget: QWidget | None = None
 
+        # Persistent Dragon Studio shell: grouped navigation on the left,
+        # a compact project-aware top bar, and the existing functional pages.
+        # Visible labels may evolve without changing the internal routing keys.
         shell = QWidget()
-        shell_layout = QVBoxLayout(shell)
+        shell_layout = QHBoxLayout(shell)
         shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(0)
 
-        header = QHBoxLayout()
-        header.setContentsMargins(26, 18, 26, 16)
         self.import_book_icon = _import_book_icon()
+        sidebar_panel = QWidget()
+        sidebar_panel.setObjectName("studioSidebar")
+        sidebar_panel.setFixedWidth(252)
+        side_layout = QVBoxLayout(sidebar_panel)
+        side_layout.setContentsMargins(14, 18, 14, 16)
+        side_layout.setSpacing(12)
+
+        brand_row = QHBoxLayout()
+        brand_row.setSpacing(10)
         brand_mark = QLabel()
         brand_mark.setObjectName("brandMark")
         brand_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        brand_mark.setFixedSize(QSize(60, 60))
-        brand_mark.setPixmap(self.import_book_icon.pixmap(QSize(60, 60)))
-        header.addWidget(brand_mark)
+        brand_mark.setFixedSize(QSize(54, 54))
+        brand_mark.setPixmap(self.import_book_icon.pixmap(QSize(54, 54)))
+        brand_row.addWidget(brand_mark)
         brand_col = QVBoxLayout()
         brand_col.setSpacing(2)
         brand = QLabel("RYU'S AUDIOBOOK")
         brand.setObjectName("brand")
         brand_col.addWidget(brand)
-        subtitle = QLabel(f"DRAGON STUDIO EDITION  •  Premium local AI audiobook studio  •  {full_version()}")
-        subtitle.setObjectName("brandEdition")
-        brand_col.addWidget(subtitle)
-        header.addLayout(brand_col)
-        header.addSpacing(28)
+        edition = QLabel("DRAGON STUDIO")
+        edition.setObjectName("brandEdition")
+        brand_col.addWidget(edition)
+        brand_row.addLayout(brand_col, 1)
+        side_layout.addLayout(brand_row)
+
+        brand_divider = QWidget()
+        brand_divider.setObjectName("sidebarDivider")
+        brand_divider.setFixedHeight(1)
+        side_layout.addWidget(brand_divider)
+
+        self.sidebar = QListWidget()
+        self.sidebar.setObjectName("sidebar")
+        self.sidebar.setMinimumWidth(0)
+        self.sidebar.setSpacing(3)
+        self.sidebar.setIconSize(QSize(20, 20))
+        self.nav_titles = {
+            "Library": "Audiobook Library",
+            "Import": "Import Studio",
+            "Chapters": "Chapter Studio",
+            "Voice & Narration": "Voice Studio",
+            "Voice Cast": "Character Studio",
+            "Generate": "Production Studio",
+            "Models": "Models Center",
+            "Hardware": "Performance Center",
+        }
+
+        def add_nav_group(label: str, entries: list[tuple[str, str, str]]) -> None:
+            group_item = QListWidgetItem(label.upper())
+            group_item.setData(32, "")
+            group_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            group_item.setForeground(QColor("#D6B06A"))
+            group_font = group_item.font()
+            group_font.setBold(True)
+            group_font.setPointSize(8)
+            group_item.setFont(group_font)
+            self.sidebar.addItem(group_item)
+            for key, title, icon_text in entries:
+                if key == "Import":
+                    item = QListWidgetItem(f"  {title}")
+                    item.setIcon(self.import_book_icon)
+                else:
+                    item = QListWidgetItem(f"  {icon_text}   {title}")
+                item.setData(32, key)
+                item.setToolTip(title)
+                self.sidebar.addItem(item)
+
+        add_nav_group("Home", [("Library", "Audiobook Library", "⌂")])
+        add_nav_group("Project", [
+            ("Import", "Import Studio", ""),
+            ("Chapters", "Chapter Studio", "☷"),
+            ("Voice & Narration", "Voice Studio", "◉"),
+            ("Voice Cast", "Character Studio", "♙"),
+        ])
+        add_nav_group("Production", [("Generate", "Production Studio", "▶")])
+        add_nav_group("System", [
+            ("Models", "Models Center", "◆"),
+            ("Hardware", "Performance Center", "⚙"),
+        ])
+
+        self.sidebar.currentRowChanged.connect(self._sidebar_changed)
+        self.sidebar.itemClicked.connect(self._sidebar_item_clicked)
+        side_layout.addWidget(self.sidebar, 1)
+
+        self.current_project_card = QWidget()
+        self.current_project_card.setObjectName("currentProjectCard")
+        current_project_layout = QVBoxLayout(self.current_project_card)
+        current_project_layout.setContentsMargins(12, 10, 12, 10)
+        current_project_layout.setSpacing(4)
+        current_project_eyebrow = QLabel("CURRENT PROJECT")
+        current_project_eyebrow.setObjectName("muted")
+        current_project_layout.addWidget(current_project_eyebrow)
+        self.project_mini_title = QLabel("No book open")
+        self.project_mini_title.setObjectName("projectMiniTitle")
+        self.project_mini_title.setWordWrap(True)
+        self.project_mini_title.setToolTip("No book open")
+        current_project_layout.addWidget(self.project_mini_title)
+        self.project_mini_status = QLabel("Local-first workspace")
+        self.project_mini_status.setObjectName("muted")
+        current_project_layout.addWidget(self.project_mini_status)
+        side_layout.addWidget(self.current_project_card)
+
+        main_panel = QWidget()
+        main_panel.setObjectName("studioMainPanel")
+        main_layout = QVBoxLayout(main_panel)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(24, 18, 24, 14)
+        header.setSpacing(14)
+        page_col = QVBoxLayout()
+        page_col.setSpacing(1)
+        self.page_heading = QLabel("Audiobook Library")
+        self.page_heading.setObjectName("pageHeading")
+        page_col.addWidget(self.page_heading)
+        self.page_subheading = QLabel("Your local audiobook projects and ongoing work.")
+        self.page_subheading.setObjectName("pageSubheading")
+        page_col.addWidget(self.page_subheading)
+        header.addLayout(page_col, 1)
 
         self.project_label = QLabel("No book open")
-        self.project_label.setObjectName("projectTitle")
-        self.project_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.project_label.setMinimumWidth(0)
+        self.project_label.setObjectName("projectPill")
+        self.project_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        self.project_label.setMinimumWidth(110)
+        self.project_label.setMaximumWidth(260)
         self.project_label.setToolTip("No book open")
-        header.addWidget(self.project_label, 1)
+        header.addWidget(self.project_label)
+
+        self.global_search = QLineEdit()
+        self.global_search.setObjectName("globalSearch")
+        self.global_search.setPlaceholderText("Search your local library…")
+        self.global_search.setClearButtonEnabled(True)
+        self.global_search.setMaximumWidth(250)
+        self.global_search.returnPressed.connect(self._search_library)
+        header.addWidget(self.global_search)
 
         self.new_book_button = QPushButton("Import Book")
         self.new_book_button.setObjectName("primary")
@@ -161,47 +276,18 @@ class ProjectWorkflow(QMainWindow):
         self.new_book_button.setIconSize(QSize(20, 20))
         self.new_book_button.clicked.connect(lambda: self.select_section("Import"))
         header.addWidget(self.new_book_button)
-        shell_layout.addLayout(header)
+        main_layout.addLayout(header)
 
         body = QHBoxLayout()
-        body.setContentsMargins(12, 0, 12, 12)
+        body.setContentsMargins(22, 6, 22, 16)
         body.setSpacing(10)
-
-        self.sidebar = QListWidget()
-        self.sidebar.setObjectName("sidebar")
-        self.sidebar.setFixedWidth(190)
-        self.sidebar.setSpacing(4)
-        self.sidebar.setIconSize(QSize(20, 20))
-
-        sections = [
-            ("Library", "⌂"),
-            ("Import", ""),
-            ("Chapters", "☷"),
-            ("Voice & Narration", "◉"),
-            ("Voice Cast", "♙"),
-            ("Generate", "▶"),
-            ("Models", "◆"),
-            ("Hardware", "⚙"),
-        ]
-        for name, icon in sections:
-            if name == "Import":
-                item = QListWidgetItem(f"   {name}")
-                item.setIcon(self.import_book_icon)
-            else:
-                item = QListWidgetItem(f"  {icon}   {name}")
-            item.setData(32, name)
-            self.sidebar.addItem(item)
-
-        self.sidebar.currentRowChanged.connect(self._sidebar_changed)
-        # Clicking the already-selected row does not emit currentRowChanged.
-        # Keep navigation reliable if another workflow action changed the stack.
-        self.sidebar.itemClicked.connect(self._sidebar_item_clicked)
-        body.addWidget(self.sidebar)
-
         self.stack = QStackedWidget()
         self.stack.setObjectName("studioStack")
         body.addWidget(self.stack, 1)
-        shell_layout.addLayout(body, 1)
+        main_layout.addLayout(body, 1)
+
+        shell_layout.addWidget(sidebar_panel)
+        shell_layout.addWidget(main_panel, 1)
 
         self.setCentralWidget(shell)
         self.loading_overlay = FrostedLoadingOverlay(shell)
@@ -265,6 +351,43 @@ class ProjectWorkflow(QMainWindow):
         )
         self.project_label.setText(text)
         self.project_label.setToolTip(title)
+        if hasattr(self, "project_mini_title"):
+            self.project_mini_title.setText(title)
+            self.project_mini_title.setToolTip(title)
+            is_open = self.project is not None
+            self.project_mini_status.setText(
+                "Project open • saved locally" if is_open else "Local-first workspace"
+            )
+
+    def _search_library(self) -> None:
+        """Route top-bar search to the real local library filter."""
+        query = self.global_search.text().strip()
+        if not query:
+            return
+        self.select_section("Library")
+        self._show_page(self.library)
+        self.library.search.setText(query)
+
+    def _update_page_chrome(self, widget: QWidget) -> None:
+        pages = [
+            (self.library, "Library", "Your local audiobook projects and ongoing work."),
+            (self.import_page, "Import", "Bring a source book into your local workflow."),
+            (self.voice, "Voice & Narration", "Choose, configure, and preview the narrator."),
+            (self.voice_cast, "Voice Cast", "Review dialogue and assign character voices."),
+        ]
+        if self.editor is not None:
+            pages.append((self.editor, "Chapters", "Review and edit your book chapter by chapter."))
+        if self.generation is not None:
+            pages.append((self.generation, "Generate", "Preview, generate, recover, and assemble your audiobook."))
+        if self.stack.count() > 4:
+            pages.append((self.stack.widget(4), "Models", "Manage local speech and analysis components."))
+        if self.stack.count() > 5:
+            pages.append((self.stack.widget(5), "Hardware", "Verify local backends and review hardware performance."))
+        for page, key, subtitle in pages:
+            if page is widget:
+                self.page_heading.setText(self.nav_titles.get(key, key))
+                self.page_subheading.setText(subtitle)
+                return
 
     def _show_page(self, widget: QWidget) -> None:
         """Switch pages first; animation is optional and must never block navigation."""
@@ -297,6 +420,7 @@ class ProjectWorkflow(QMainWindow):
             raise RuntimeError(
                 f"Navigation did not activate {type(widget).__name__}."
             )
+        self._update_page_chrome(widget)
 
         # A graphics effect is decorative. If a platform-specific Qt animation
         # fails, keep the newly selected page visible and log the issue instead
