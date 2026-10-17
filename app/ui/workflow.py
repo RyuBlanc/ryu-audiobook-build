@@ -451,7 +451,14 @@ class ProjectWorkflow(QMainWindow):
                 self._log_ui_failure("Generate page navigation", exc)
                 # Keep the Generate page selected when construction succeeded;
                 # only use Import as a fallback if the page itself is unavailable.
-                if self.generation is None or self.stack.indexOf(self.generation) < 0:
+                if (
+                    self.generation is None
+                    or self.stack.indexOf(self.generation) < 0
+                    or (
+                        self.project is not None
+                        and self.generation.project_folder != self.project.folder
+                    )
+                ):
                     self._show_page(self.import_page)
                 QMessageBox.critical(
                     self,
@@ -670,8 +677,18 @@ class ProjectWorkflow(QMainWindow):
             )
         except Exception as exc:
             self._log_ui_failure("Construct Generate page", exc)
-            if old_generation is not None and self.stack.indexOf(old_generation) >= 0:
-                # Keep a valid page alive for recovery and expose the actual error.
+            old_is_registered = (
+                old_generation is not None
+                and self.stack.indexOf(old_generation) >= 0
+            )
+            old_matches_project = (
+                old_is_registered
+                and old_generation.project_folder == self.project.folder
+            )
+            if old_matches_project:
+                # Preserve the working page only when it belongs to the same
+                # project. Never show a previous book's Generate settings as
+                # though they belonged to the newly selected project.
                 if hasattr(old_generation, "status"):
                     old_generation.status.setText(
                         f"Generate refresh failed ({type(exc).__name__}: {exc}). "
@@ -679,6 +696,12 @@ class ProjectWorkflow(QMainWindow):
                     )
                 self.generation = old_generation
                 return
+            if old_is_registered:
+                self.stack.removeWidget(old_generation)
+                old_generation.hide()
+                old_generation.deleteLater()
+            self.generation = None
+            self._generation_index = -1
             raise
 
         self.stack.addWidget(new_generation)
