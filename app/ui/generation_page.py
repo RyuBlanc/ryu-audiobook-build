@@ -336,6 +336,7 @@ class GenerationPage(QWidget):
         self.content_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         content = QWidget()
         root = QVBoxLayout(content)
+        self.content_root_layout = root
         root.setContentsMargins(6, 4, 6, 12)
         root.setSpacing(12)
 
@@ -392,6 +393,7 @@ class GenerationPage(QWidget):
         root.addWidget(cast_box)
 
         pronunciation_box = QGroupBox("Pronunciation Dictionary")
+        self.pronunciation_box = pronunciation_box
         pronunciation_box.setObjectName("pronunciationDictionarySection")
         pronunciation_layout = QVBoxLayout(pronunciation_box)
         pronunciation_hint = QLabel(
@@ -460,6 +462,7 @@ class GenerationPage(QWidget):
         root.addWidget(pronunciation_box)
 
         settings = QGroupBox("Audio settings")
+        self.audio_settings_box = settings
         settings.setObjectName("audioSettingsSection")
         settings_form = QFormLayout(settings)
         self._background_audio_form = settings_form
@@ -643,6 +646,7 @@ class GenerationPage(QWidget):
         }
 
         opening_card = QGroupBox("Book opening")
+        self.opening_cue_box = opening_card
         opening_card_layout = QVBoxLayout(opening_card)
         opening_card_layout.setContentsMargins(10, 10, 10, 10)
         opening_card_layout.setSpacing(6)
@@ -666,6 +670,7 @@ class GenerationPage(QWidget):
         custom_cues_layout.addWidget(opening_card)
 
         other_cues_card = QGroupBox("Chapter transition and book closing")
+        self.transition_cue_box = other_cues_card
         other_cues_layout = QVBoxLayout(other_cues_card)
         other_cues_layout.setContentsMargins(10, 10, 10, 10)
         other_cues_layout.setSpacing(5)

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QStackedWidget,
+    QScrollArea,
     QGraphicsOpacityEffect,
     QApplication,
 )
@@ -726,6 +727,8 @@ class ProjectWorkflow(QMainWindow):
 
         pages = [
             (self.dashboard, "Dashboard", "A live summary of your local audiobook workspace."),
+            (getattr(self, "pronunciation_page", None), "Pronunciation", "Correct names and terms, audition changes, and save per-book overrides."),
+            (getattr(self, "sound_design_page", None), "Sound Design", "Configure contextual music, chapter transitions, and audio quality."),
             (self.library, "Library", "Your local audiobook projects and ongoing work."),
             (self.import_page, "Import", "Bring a source book into your local workflow."),
             (self.voice, "Voice & Narration", "Choose, configure, and preview the narrator."),
@@ -741,7 +744,7 @@ class ProjectWorkflow(QMainWindow):
         pages.append((self.models_page, "Models", "Manage local speech and analysis components."))
         pages.append((self.hardware_page, "Hardware", "Verify local backends and review hardware performance."))
         for page, key, subtitle in pages:
-            if page is widget:
+            if page is not None and page is widget:
                 self.page_heading.setText(self.nav_titles.get(key, key))
                 self.page_subheading.setText(subtitle)
                 return
@@ -885,14 +888,12 @@ class ProjectWorkflow(QMainWindow):
             )
 
     def _open_generation_feature(self, feature: str) -> None:
-        """Open a focused section of the current project's real Production Studio."""
+        """Open the dedicated, book-specific Pronunciation or Sound Design screen."""
         key = "Pronunciation" if feature == "pronunciation" else "Sound Design"
         if not self.project:
             selected_projects = self.library._selected_projects()
             if selected_projects:
                 self.open_project(selected_projects[0])
-                # open_project navigates to Chapters; restore the requested destination
-                # without triggering a nested page change.
                 for index in range(self.sidebar.count()):
                     if self.sidebar.item(index).data(32) == key:
                         self.sidebar.blockSignals(True)
@@ -917,14 +918,79 @@ class ProjectWorkflow(QMainWindow):
             or self.generation.project_folder != self.project.folder
         ):
             self.ensure_generation_page()
-        if self.generation is None:
+        target = self.pronunciation_page if feature == "pronunciation" else self.sound_design_page
+        if target is None or self.stack.indexOf(target) < 0:
+            QMessageBox.warning(self, key, f"{key} could not be initialized. Open Generate once and try again.")
             return
-        self._show_page(self.generation)
-        QTimer.singleShot(
-            90,
-            lambda page=self.generation, section=feature:
-                page.focus_section(section) if page and self.stack.indexOf(page) >= 0 else None,
+        self._show_page(target)
+
+    def _install_generation_feature_pages(self, generation_page: GenerationPage) -> None:
+        """Mount the existing production controls on dedicated reference-design screens."""
+        old_pronunciation = getattr(self, "pronunciation_page", None)
+        old_sound_design = getattr(self, "sound_design_page", None)
+        for old_page in (old_pronunciation, old_sound_design):
+            if old_page is not None:
+                if self.stack.indexOf(old_page) >= 0:
+                    self.stack.removeWidget(old_page)
+                old_page.hide()
+                old_page.deleteLater()
+
+        self.pronunciation_page = QWidget()
+        self.pronunciation_page.setObjectName("pronunciationStudioPage")
+        pronunciation_layout = QVBoxLayout(self.pronunciation_page)
+        pronunciation_layout.setContentsMargins(8, 6, 8, 8)
+        pronunciation_layout.setSpacing(10)
+        pronunciation_layout.addWidget(QLabel("<h2>Pronunciation Studio</h2>"))
+        pronunciation_subtitle = QLabel(
+            "Correct character names and story terms, audition changes with the selected voice, and save book-specific overrides."
         )
+        pronunciation_subtitle.setObjectName("muted")
+        pronunciation_subtitle.setWordWrap(True)
+        pronunciation_layout.addWidget(pronunciation_subtitle)
+        pronunciation_scroll = QScrollArea()
+        pronunciation_scroll.setWidgetResizable(True)
+        pronunciation_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        pronunciation_content = QWidget()
+        pronunciation_content_layout = QVBoxLayout(pronunciation_content)
+        pronunciation_content_layout.setContentsMargins(2, 2, 8, 8)
+        pronunciation_content_layout.setSpacing(12)
+        generation_page.content_root_layout.removeWidget(generation_page.pronunciation_box)
+        pronunciation_content_layout.addWidget(generation_page.pronunciation_box)
+        pronunciation_content_layout.addStretch(1)
+        pronunciation_scroll.setWidget(pronunciation_content)
+        pronunciation_layout.addWidget(pronunciation_scroll, 1)
+        self.stack.addWidget(self.pronunciation_page)
+
+        self.sound_design_page = QWidget()
+        self.sound_design_page.setObjectName("soundDesignStudioPage")
+        sound_layout = QVBoxLayout(self.sound_design_page)
+        sound_layout.setContentsMargins(8, 6, 8, 8)
+        sound_layout.setSpacing(10)
+        sound_layout.addWidget(QLabel("<h2>Sound Design Studio</h2>"))
+        sound_subtitle = QLabel(
+            "Configure narration quality, contextual background music, opening sounds, chapter transitions, and closing cues."
+        )
+        sound_subtitle.setObjectName("muted")
+        sound_subtitle.setWordWrap(True)
+        sound_layout.addWidget(sound_subtitle)
+        sound_scroll = QScrollArea()
+        sound_scroll.setWidgetResizable(True)
+        sound_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        sound_content = QWidget()
+        sound_content_layout = QVBoxLayout(sound_content)
+        sound_content_layout.setContentsMargins(2, 2, 8, 8)
+        sound_content_layout.setSpacing(12)
+        for section in (
+            generation_page.audio_settings_box,
+            generation_page.opening_cue_box,
+            generation_page.transition_cue_box,
+        ):
+            generation_page.content_root_layout.removeWidget(section)
+            sound_content_layout.addWidget(section)
+        sound_content_layout.addStretch(1)
+        sound_scroll.setWidget(sound_content)
+        sound_layout.addWidget(sound_scroll, 1)
+        self.stack.addWidget(self.sound_design_page)
 
     def _sidebar_changed(self, row: int) -> None:
         if row < 0 or row >= self.sidebar.count():
@@ -1237,6 +1303,9 @@ class ProjectWorkflow(QMainWindow):
         # constructor raised, self.generation could still point at a deleted Qt
         # object and every later click on Generate failed with a C++ object error.
         old_generation = self.generation
+        old_current_page = self.stack.currentWidget()
+        old_was_pronunciation = old_current_page is getattr(self, "pronunciation_page", None)
+        old_was_sound_design = old_current_page is getattr(self, "sound_design_page", None)
         old_was_current = (
             old_generation is not None
             and self.stack.indexOf(old_generation) >= 0
@@ -1279,10 +1348,15 @@ class ProjectWorkflow(QMainWindow):
             raise
 
         self.stack.addWidget(new_generation)
+        self._install_generation_feature_pages(new_generation)
         self.generation = new_generation
         self._generation_index = self.stack.indexOf(new_generation)
         if old_was_current:
             self.stack.setCurrentWidget(new_generation)
+        elif old_was_pronunciation:
+            self.stack.setCurrentWidget(self.pronunciation_page)
+        elif old_was_sound_design:
+            self.stack.setCurrentWidget(self.sound_design_page)
         if old_generation is not None and old_generation is not new_generation:
             if self.stack.indexOf(old_generation) >= 0:
                 self.stack.removeWidget(old_generation)
