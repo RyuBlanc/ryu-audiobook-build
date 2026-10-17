@@ -37,6 +37,7 @@ from app.tts.readiness import build_generation_readiness
 from app.tts.chatterbox_runtime import runtime_ready
 from app.audio.assembler import DEFAULT_AUDIO_BITRATE_KBPS, _duration_ms
 from app.tts.resume import inspect_generation_state
+from app.audio.sound_design import MOOD_ORDER, VARIATIONS_PER_MOOD, music_variation_info
 
 
 class VoicePreviewWorker(QThread):
