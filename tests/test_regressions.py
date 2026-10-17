@@ -711,7 +711,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("selected_projects = self.library._selected_projects()", section)
         self.assertIn("self.open_project(selected_projects[0])", section)
         self.assertIn("self.sidebar.blockSignals(True)", section)
-        self.assertIn('"Open a book first"', section)
+        self.assertIn("Select a book in Library or import a new book to start generating.", section)
         self.assertIn("QTimer.singleShot(75, self._refresh_generation_context)", section)
         self.assertLess(section.index("self._show_page(self.generation)"), section.index("QTimer.singleShot"))
         self.assertIn("Generate page could not be opened", section)
