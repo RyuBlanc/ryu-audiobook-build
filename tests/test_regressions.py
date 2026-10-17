@@ -2201,7 +2201,7 @@ Rias Gremory
                     narration_speed=1.0,
                     pacing_profile="natural",
                 )
-            self.assertEqual(captured["max_chars"], 6000)
+            self.assertEqual(captured["max_chars"], min(len("Sentence. " * 600), 30 * 240))
 
     def test_voice_profile_library_preserves_custom_voice_and_labels(self):
         with tempfile.TemporaryDirectory() as temp:
