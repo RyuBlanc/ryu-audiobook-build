@@ -1515,15 +1515,38 @@ class ProjectWorkflow(QMainWindow):
             raise
 
         self.stack.addWidget(new_generation)
-        self._install_generation_feature_pages(new_generation)
+        # Register the core Generate page before installing the optional
+        # Pronunciation and Sound Design wrappers. A failure in either wrapper
+        # must never make the entire production screen inaccessible.
         self.generation = new_generation
         self._generation_index = self.stack.indexOf(new_generation)
-        if old_was_current:
+        feature_page_error = None
+        try:
+            self._install_generation_feature_pages(new_generation)
+        except Exception as exc:
+            feature_page_error = exc
+            self._log_ui_failure("Install optional Generate feature pages", exc)
+            for attribute in ("pronunciation_page", "sound_design_page"):
+                page = getattr(self, attribute, None)
+                if page is None:
+                    continue
+                try:
+                    if self.stack.indexOf(page) >= 0:
+                        self.stack.removeWidget(page)
+                    page.hide()
+                    page.deleteLater()
+                except RuntimeError:
+                    # Qt may already have destroyed a partially built wrapper.
+                    pass
+                setattr(self, attribute, None)
+            if hasattr(new_generation, "status"):
+                new_generation.status.setText(
+                    "Generate is available, but Pronunciation/Sound Design screens "
+                    f"could not be mounted ({type(exc).__name__}: {exc}). "
+                    "See Logs/application.log for details."
+                )
+        if old_was_current or old_was_pronunciation or old_was_sound_design:
             self.stack.setCurrentWidget(new_generation)
-        elif old_was_pronunciation:
-            self.stack.setCurrentWidget(self.pronunciation_page)
-        elif old_was_sound_design:
-            self.stack.setCurrentWidget(self.sound_design_page)
         if old_generation is not None and old_generation is not new_generation:
             if self.stack.indexOf(old_generation) >= 0:
                 self.stack.removeWidget(old_generation)
