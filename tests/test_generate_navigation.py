@@ -62,9 +62,10 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                 page = workflow.generation
                 self.assertEqual(
                     page.bgm_variation.count(),
-                    1345,
-                    "The Generate BGM selector should have Auto plus all 1,344 catalogue entries.",
+                    1,
+                    "A fresh local library should show Auto until real music files are imported.",
                 )
+                self.assertEqual(page.bgm_variation.currentData(), "auto")
                 workflow.select_section("Generate")
                 QTest.qWait(125)
 

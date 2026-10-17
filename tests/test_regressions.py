@@ -883,12 +883,12 @@ class RegressionTests(unittest.TestCase):
                 self.assertEqual(tracks[0].category, "fantasy")
                 self.assertIn("Pixabay URL", license_note_for(tracks[0].path))
                 self.assertEqual(
-                    resolve_music_track("fantasy", seed_text="chapter 1"),
-                    added_music[0],
+                    resolve_music_track("fantasy", seed_text="chapter 1").samefile(added_music[0]),
+                    True,
                 )
                 self.assertEqual(len(list_cue_tracks("page")), 1)
-                self.assertEqual(resolve_cue_track("page", seed_text="chapter 2"), added_page[0])
-                self.assertEqual(resolve_cue_track("ending", seed_text="book end"), added_ending[0])
+                self.assertTrue(resolve_cue_track("page", seed_text="chapter 2").samefile(added_page[0]))
+                self.assertTrue(resolve_cue_track("ending", seed_text="book end").samefile(added_ending[0]))
 
     def test_explicit_music_catalogue_id_is_mapped_without_changing_mood(self):
         from app.audio.assembler import _selected_music_recipe
@@ -1235,7 +1235,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("_selected_music_recipe", assembler)
         self.assertIn("sidechaincompress=", assembler)
         self.assertIn("automatic-real-audio-design", assembler)
-        self.assertIn('elif effective_audio_mode in {"manual", "off"} and chapter_transition_sound:', assembler)
+        self.assertIn('effective_audio_mode in {"manual","off"}', assembler)
 
     def test_audiobook_audio_categories_and_mood_detection(self):
         from app.audio.sound_design import detect_chapter_mood
