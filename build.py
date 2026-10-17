@@ -155,6 +155,7 @@ required_modules = [
     "app.tts.providers.kokoro",
     "app.tts.providers.qwen_character",
     "app.ui.workflow",
+    "app.audio.library",
 ]
 
 for module in required_modules:

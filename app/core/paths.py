@@ -25,6 +25,11 @@ def settings_root() -> Path:
     return app_root() / "Settings"
 
 
+def audio_library_root() -> Path:
+    """User-owned/licensed audiobook music and cue files."""
+    return app_root() / "Audio Library"
+
+
 def soundtracks_root() -> Path:
     """Local cache and previews for the generated soundtrack catalogue."""
     return app_root() / "Soundtracks"
@@ -38,5 +43,6 @@ def ensure_roots() -> None:
         audiobooks_root(),
         settings_root(),
         soundtracks_root(),
+        audio_library_root(),
     ):
         path.mkdir(parents=True, exist_ok=True)

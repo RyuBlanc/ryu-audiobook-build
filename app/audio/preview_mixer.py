@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -24,8 +25,19 @@ def _run_ffmpeg(args: list[str]) -> None:
 
 
 def _duration_seconds(path: Path) -> float:
-    with wave.open(str(path), "rb") as reader:
-        return reader.getnframes() / max(1, reader.getframerate())
+    try:
+        with wave.open(str(path), "rb") as reader:
+            return reader.getnframes() / max(1, reader.getframerate())
+    except (OSError, wave.Error):
+        probe = subprocess.run(
+            [imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-i", str(path)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+        )
+        match = re.search(r"Duration:\s+(\d+):(\d+):([0-9.]+)",
+                          str(probe.stderr or probe.stdout or ""))
+        if not match:
+            raise RuntimeError(f"Could not read audio duration for {path.name}.")
+        return int(match.group(1))*3600 + int(match.group(2))*60 + float(match.group(3))
 
 
 def _join_audio(first: Path, second: Path, output: Path) -> Path:
@@ -50,7 +62,7 @@ def mix_voice_preview(
     background_enabled: bool = True,
     background_mode: str = "auto",
     music_style: str = "auto",
-    music_variation_id: int | None = None,
+    music_variation_id: int | str | Path | None = None,
     background_audio_path: str | Path | None = None,
     ambience_audio_path: str | Path | None = None,
     music_volume: float = 0.12,
@@ -71,19 +83,8 @@ def mix_voice_preview(
     narration, places a few explicit story-event cues, and adds a page-turn/end cue
     when the selected chapter's position warrants one. All work is local.
     """
-    from app.audio.sound_design import (
-        ENDING_SECONDS,
-        MOOD_ORDER,
-        MUSIC_CATALOGUE_SIZE,
-        VARIATIONS_PER_MOOD,
-        detect_chapter_mood,
-        select_music_variation,
-        normalize_cue_style,
-        synthesize_audiobook_ending,
-        synthesize_music_bed,
-        synthesize_opening_cue,
-        synthesize_page_turn,
-    )
+    from app.audio.sound_design import detect_chapter_mood, select_music_variation
+    from app.audio.library import resolve_cue_track, resolve_music_track
     from app.audio.story_events import (
         MAX_EVENTS_PER_CHUNK,
         detect_story_events,
@@ -100,18 +101,12 @@ def mix_voice_preview(
     title = "Voice preview"
     mood = detect_chapter_mood(title, text, music_style)
 
-    selected_variation = None
+    selected_variation = select_music_variation(title, text, mood)
+    selected_music_track = None
     if music_variation_id is not None:
-        try:
-            selected_id = int(music_variation_id)
-        except (TypeError, ValueError):
-            selected_id = 0
-        if 1 <= selected_id <= MUSIC_CATALOGUE_SIZE:
-            mood_index, selected_variation = divmod(selected_id - 1, VARIATIONS_PER_MOOD)
-            mood = MOOD_ORDER[mood_index]
-
-    if selected_variation is None:
-        selected_variation = select_music_variation(title, text, mood)
+        candidate_track = Path(str(music_variation_id)).expanduser()
+        if candidate_track.is_file():
+            selected_music_track = candidate_track.resolve()
 
     music_volume = max(0.0, min(1.0, float(music_volume)))
     ambience_volume = max(0.0, min(1.0, float(ambience_volume)))
@@ -121,55 +116,30 @@ def mix_voice_preview(
         temp = Path(tmp)
         voice_for_mix = voice_path
         prefix_seconds = 0.0
-        cue_style = normalize_cue_style(sound_cue_style)
-
-        def selected_cue(kind: str, custom_path: str | Path | None) -> Path:
-            candidate = Path(custom_path).expanduser() if custom_path else None
-            if cue_style == "custom" and candidate and candidate.is_file():
-                return candidate.resolve()
-            generated_style = "classic-book" if cue_style == "custom" else cue_style
-            if kind == "opening":
-                return synthesize_opening_cue(
-                    temp / "preview-opening-cue.wav",
-                    variation_index=selected_variation,
-                    cue_style=generated_style,
-                )
-            if kind == "page":
-                return synthesize_page_turn(
-                    temp / "preview-page-turn.wav",
-                    variation_index=selected_variation,
-                    cue_style=generated_style,
-                )
-            if kind == "ending":
-                return synthesize_audiobook_ending(
-                    temp / "preview-book-ending.wav",
-                    mood,
-                    variation_index=selected_variation,
-                    cue_style=generated_style,
-                    duration_seconds=ENDING_SECONDS,
-                )
-            raise ValueError(f"Unknown book cue type: {kind}")
+        def selected_cue(kind: str, custom_path: str | Path | None) -> Path | None:
+            return resolve_cue_track(
+                kind, selected_path=custom_path,
+                seed_text=f"{kind}|{mood}|{selected_variation}|{text[:120]}",
+            )
 
         if chapter_transition_sound:
-            if is_first_chapter:
-                cue = selected_cue("opening", opening_cue_path)
-                prefixed_voice = temp / "preview-with-book-opening.wav"
-            else:
-                cue = selected_cue("page", page_turn_cue_path)
-                prefixed_voice = temp / "preview-with-page-turn.wav"
-            _join_audio(cue, voice_for_mix, prefixed_voice)
-            voice_for_mix = prefixed_voice
-            prefix_seconds = _duration_seconds(cue)
+            kind = "opening" if is_first_chapter else "page"
+            custom = opening_cue_path if is_first_chapter else page_turn_cue_path
+            cue = selected_cue(kind, custom)
+            if cue is not None:
+                prefixed_voice = temp / f"preview-with-{kind}.wav"
+                _join_audio(cue, voice_for_mix, prefixed_voice)
+                voice_for_mix = prefixed_voice
+                prefix_seconds = _duration_seconds(cue)
 
         voice_duration = max(0.05, _duration_seconds(voice_for_mix))
         layers: list[tuple[Path, float, str]] = []
         if background_enabled and mode == "auto" and music_volume > 0:
-            music = synthesize_music_bed(
-                temp / f"preview-music-{mood}-{selected_variation:03d}.wav",
-                mood,
-                variation_index=selected_variation,
+            music = resolve_music_track(
+                mood, selected_track=selected_music_track, seed_text=f"{title}|{text}"
             )
-            layers.append((music, music_volume, "music"))
+            if music is not None:
+                layers.append((music, music_volume, "music"))
         elif background_enabled and mode == "manual":
             for layer_path, gain, label in (
                 (background_audio_path, music_volume, "music"),
@@ -266,9 +236,10 @@ def mix_voice_preview(
         final_path = mixed_path
         if chapter_transition_sound and is_last_chapter:
             ending = selected_cue("ending", ending_cue_path)
-            closed_path = temp / "preview-with-book-ending.wav"
-            _join_audio(final_path, ending, closed_path)
-            final_path = closed_path
+            if ending is not None:
+                closed_path = temp / "preview-with-book-ending.wav"
+                _join_audio(final_path, ending, closed_path)
+                final_path = closed_path
 
         shutil.copy2(final_path, output_path)
 
