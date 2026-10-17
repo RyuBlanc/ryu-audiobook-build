@@ -42,7 +42,31 @@ def project_matches(project, query: str, status_filter: str) -> bool:
     if status_filter and status_filter != "All" and status != status_filter:
         return False
 
-    searchable = f"{project.title} {project.source_path.name if project.source_path else ''}".casefold()
+    state = load_state(project.folder)
+    parts = [project.title, project.source_path.name if project.source_path else ""]
+    for key in ("author", "series", "narrator", "narrator_name", "voice_name", "selected_voice"):
+        value = state.get(key)
+        if isinstance(value, (str, int, float)):
+            parts.append(str(value))
+    metadata = state.get("metadata")
+    if isinstance(metadata, dict):
+        for key in ("title", "author", "series", "narrator", "language"):
+            value = metadata.get(key)
+            if isinstance(value, (str, int, float)):
+                parts.append(str(value))
+    profiles = state.get("voice_profiles") or state.get("selected_profiles") or []
+    if isinstance(profiles, (list, tuple)):
+        parts.extend(str(value) for value in profiles if isinstance(value, (str, int, float)))
+    searchable = " ".join(parts).casefold()
+    normalized_filter = (status_filter or "All").strip().casefold()
+    if normalized_filter == "active" and status not in {"In Progress", "Ready"}:
+        return False
+    if normalized_filter == "completed" and status != "Completed":
+        return False
+    if normalized_filter in {"attention", "needs attention", "failed"} and status != "Needs Attention":
+        return False
+    if normalized_filter not in {"", "all", "active", "completed", "attention", "needs attention", "failed"} and status != status_filter:
+        return False
     return not query or query in searchable
 
 
@@ -89,16 +113,26 @@ class LibraryPage(QWidget):
 
         filters = QHBoxLayout()
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Search books…")
+        self.search.setPlaceholderText("Search title, author or narrator…")
         self.search.textChanged.connect(self.refresh)
         filters.addWidget(self.search, 1)
 
         self.status_filter = QComboBox()
-        self.status_filter.addItems([
-            "All", "Completed", "In Progress", "Needs Attention", "Ready", "Imported"
-        ])
+        self.status_filter.addItems(["All", "Active", "Completed", "Attention"])
+        self.status_filter.setVisible(False)
         self.status_filter.currentIndexChanged.connect(self.refresh)
-        filters.addWidget(self.status_filter)
+        self.filter_buttons: dict[str, QPushButton] = {}
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(6)
+        for label in ("All", "Active", "Completed", "Attention"):
+            button = QPushButton(label)
+            button.setCheckable(True)
+            button.setObjectName("libraryFilter")
+            button.setChecked(label == "All")
+            button.clicked.connect(lambda _checked=False, value=label: self._set_status_filter(value))
+            self.filter_buttons[label] = button
+            filter_row.addWidget(button)
+        filters.addLayout(filter_row)
         layout.addLayout(filters)
 
         stats_box = QGroupBox("Collection Summary")
@@ -156,9 +190,21 @@ class LibraryPage(QWidget):
 
         self.refresh()
 
+    def _set_status_filter(self, value: str) -> None:
+        index = self.status_filter.findText(value)
+        if index >= 0 and self.status_filter.currentIndex() != index:
+            self.status_filter.setCurrentIndex(index)
+        for label, button in self.filter_buttons.items():
+            button.setChecked(label == value)
+        self.refresh()
+
     def refresh(self) -> None:
         query = self.search.text() if hasattr(self, "search") else ""
         status_filter = self.status_filter.currentText() if hasattr(self, "status_filter") else "All"
+        for label, button in getattr(self, "filter_buttons", {}).items():
+            button.blockSignals(True)
+            button.setChecked(label == status_filter)
+            button.blockSignals(False)
 
         self.projects = list_projects()
         visible = [
