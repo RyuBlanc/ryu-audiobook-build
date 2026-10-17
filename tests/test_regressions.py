@@ -179,7 +179,8 @@ class RegressionTests(unittest.TestCase):
             'QGroupBox("4  •  Preview")',
         ):
             self.assertIn(marker, source)
-        self.assertIn("for seconds in (10, 20, 30):", source)
+        self.assertIn("PREVIEW_DURATION_OPTIONS = (10, 20, 30, 45, 60)", source)
+        self.assertIn("for seconds in PREVIEW_DURATION_OPTIONS:", source)
         self.assertIn("preview_library", source)
         self.assertIn("preview_voice", source)
         self.assertIn("preview_model", source)
@@ -682,6 +683,13 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("stop_on_failure = True", source)
         self.assertIn("self.close()", source)
         self.assertIn("heartbeat=", source)
+
+    def test_import_controls_use_the_audiobook_brand_mark(self):
+        source = Path("app/ui/workflow.py").read_text(encoding="utf-8")
+        self.assertIn("def _import_book_icon()", source)
+        self.assertIn("ryu_audiobook_logo.svg", source)
+        self.assertIn("self.new_book_button.setIcon(self.import_book_icon)", source)
+        self.assertIn('item.setIcon(self.import_book_icon)', source)
 
     def test_generate_navigation_opens_selected_library_project_and_handles_empty_library(self):
         workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
