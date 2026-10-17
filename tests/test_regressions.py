@@ -709,6 +709,56 @@ class RegressionTests(unittest.TestCase):
             page.close()
             page.deleteLater()
 
+    def test_qwen_clone_draft_identity_is_stable_before_profile_save(self):
+        from types import SimpleNamespace
+        from app.ui.voice_page import VoicePage
+        from app.tts.voice_profile import VoiceProfile
+
+        class SavedBox:
+            def __init__(self, name=""):
+                self.name = name
+            def currentData(self):
+                return self.name
+
+        with tempfile.TemporaryDirectory() as temp:
+            reference = Path(temp) / "authorized-reference.wav"
+            reference.write_bytes(b"reference")
+            draft = SimpleNamespace(
+                profiles=[],
+                saved_profiles=SavedBox(),
+                _draft_qwen_clone_profile_ids={},
+            )
+            first = VoicePage._stable_qwen_clone_profile_id(
+                draft, "Draft Voice", reference, "Hello there."
+            )
+            repeated = VoicePage._stable_qwen_clone_profile_id(
+                draft, "Draft Voice", reference, "Hello there."
+            )
+            changed_transcript = VoicePage._stable_qwen_clone_profile_id(
+                draft, "Draft Voice", reference, "Good morning."
+            )
+            self.assertEqual(first, repeated)
+            self.assertNotEqual(first, changed_transcript)
+
+            saved = VoiceProfile(
+                name="Saved Clone",
+                provider="qwen-character",
+                voice_id=reference.stem,
+                sample_path=str(reference),
+                authorized=True,
+                qwen_mode="clone",
+                reference_text="Hello there.",
+                qwen_profile_id="persisted-clone-id",
+            )
+            draft.profiles = [saved]
+            draft.saved_profiles = SavedBox("Saved Clone")
+            self.assertEqual(
+                VoicePage._stable_qwen_clone_profile_id(
+                    draft, "Saved Clone", reference, "Hello there."
+                ),
+                "persisted-clone-id",
+            )
+
     def test_generate_tab_reads_latest_persisted_profile(self):
         import app.tts.voice_profile as voice_profiles
         from app.ui.generation_page import GenerationPage

@@ -259,6 +259,10 @@ class VoicePage(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.profiles = load_profiles()
+        # Keep a draft clone's identity stable between preview and Save. Without
+        # this cache, an unsaved clone could preview with UUID A and be saved
+        # with UUID B, causing the saved voice to sound different at generation.
+        self._draft_qwen_clone_profile_ids: dict[tuple[str, str], str] = {}
         self.sapi = SystemSAPIProvider()
         self.sample_path: Path | None = None
         self.last_preview: Path | None = None
@@ -2026,6 +2030,32 @@ class VoicePage(QWidget):
         )
         return hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
 
+    def _stable_qwen_clone_profile_id(
+        self, clone_name: str, sample_path: Path, reference_text: str
+    ) -> str:
+        """Reuse a saved or draft clone identity across preview and profile save."""
+        selected_name = str(self.saved_profiles.currentData() or "")
+        resolved_sample = str(Path(sample_path).expanduser().resolve())
+        existing_clone = next(
+            (
+                profile for profile in self.profiles
+                if profile.provider == "qwen-character"
+                and (profile.qwen_mode or "custom") == "clone"
+                and profile.name.casefold()
+                in {selected_name.casefold(), clone_name.casefold()}
+                and profile.sample_path
+                and str(Path(profile.sample_path).expanduser().resolve()) == resolved_sample
+            ),
+            None,
+        )
+        if existing_clone and existing_clone.qwen_profile_id:
+            return existing_clone.qwen_profile_id
+
+        draft_key = (resolved_sample, str(reference_text or "").strip())
+        if draft_key not in self._draft_qwen_clone_profile_ids:
+            self._draft_qwen_clone_profile_ids[draft_key] = uuid.uuid4().hex
+        return self._draft_qwen_clone_profile_ids[draft_key]
+
     def _profile_from_ui(self) -> VoiceProfile | None:
         provider = self.mode.currentData()
         name = self.name.text().strip()
@@ -2098,27 +2128,10 @@ class VoicePage(QWidget):
                 self.status.setText("Confirm that you have permission to use this voice reference.")
                 return None
             clone_name = name or self.sample_path.stem
-            # Reuse the identity namespace of a saved clone when previewing or
-            # updating it. Generating a fresh UUID on every UI read invalidates
-            # cached reference conditioning and can make a saved custom voice
-            # appear to change between preview and audiobook generation.
-            selected_name = str(self.saved_profiles.currentData() or "")
-            existing_clone = next(
-                (
-                    p for p in self.profiles
-                    if p.provider == "qwen-character"
-                    and (p.qwen_mode or "custom") == "clone"
-                    and p.name.casefold() in {selected_name.casefold(), clone_name.casefold()}
-                    and p.sample_path
-                    and Path(p.sample_path).expanduser().resolve()
-                    == self.sample_path.expanduser().resolve()
-                ),
-                None,
-            )
-            profile_id = (
-                existing_clone.qwen_profile_id
-                if existing_clone and existing_clone.qwen_profile_id
-                else uuid.uuid4().hex
+            profile_id = self._stable_qwen_clone_profile_id(
+                clone_name,
+                self.sample_path,
+                self.qwen_reference_text.text(),
             )
             return VoiceProfile(
                 name=clone_name,
