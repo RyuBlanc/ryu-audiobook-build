@@ -329,7 +329,7 @@ class ProjectWorkflow(QMainWindow):
             button.setCheckable(True)
             button.setMinimumHeight(36)
             button.setToolTip(f"Open {label}")
-            button.clicked.connect(lambda _checked=False, target=key: self.select_section(target))
+            button.clicked.connect(lambda _checked=False, target=key: self._navigate_workflow_step(target))
             self.workflow_step_buttons[key] = button
             workflow_rail_layout.addWidget(button, 1)
         main_layout.addWidget(workflow_rail)
@@ -802,6 +802,15 @@ class ProjectWorkflow(QMainWindow):
             self._show_page(self.models_page)
         elif name == "Hardware":
             self._show_page(self.hardware_page)
+
+    def _navigate_workflow_step(self, name: str) -> None:
+        current = self.sidebar.currentItem()
+        if current is not None and current.data(32) == name:
+            # Same-row clicks do not emit currentRowChanged; still recover a stale
+            # stacked page (notably the Generate/Production destination).
+            self._sidebar_changed(self.sidebar.currentRow())
+            return
+        self.select_section(name)
 
     def select_section(self, name: str) -> None:
         for i in range(self.sidebar.count()):

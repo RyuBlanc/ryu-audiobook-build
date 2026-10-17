@@ -107,6 +107,9 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
             workflow.select_section("Audiobooks")
             self.assertTrue(workflow.workflow_step_buttons["Audiobooks"].isChecked())
             self.assertIs(workflow.stack.currentWidget(), workflow.audiobooks_page)
+            workflow.stack.setCurrentWidget(workflow.import_page)
+            workflow.workflow_step_buttons["Audiobooks"].click()
+            self.assertIs(workflow.stack.currentWidget(), workflow.audiobooks_page)
         finally:
             workflow.close()
             workflow.deleteLater()
@@ -168,6 +171,8 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                 self.assertEqual(workflow.dashboard.metric_total.metric_value.text(), "1")
                 self.assertEqual(workflow.dashboard.recent_list.count(), 1)
                 self.assertIn(project.title, workflow.dashboard.recent_list.item(0).text())
+                self.assertEqual(workflow.dashboard.continue_title.text(), project.title)
+                self.assertTrue(workflow.dashboard.continue_card.isVisible())
             finally:
                 workflow.close()
                 workflow.deleteLater()

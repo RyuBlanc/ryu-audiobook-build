@@ -328,6 +328,21 @@ QWidget#dashboardMetric {
     border: 1px solid #282E38;
     border-radius: 14px;
 }
+QGroupBox#dashboardContinueCard {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #181D28, stop:1 #141821);
+    border: 1px solid #353C49;
+    border-radius: 18px;
+    padding-top: 11px;
+}
+QLabel#dashboardHeroCover {
+    color: #FFE3A8;
+    background: qradialgradient(cx:0.65, cy:0.25, radius:0.95, fx:0.65, fy:0.25, stop:0 #D6B06A, stop:0.22 #51111E, stop:0.72 #25080F, stop:1 #090A0F);
+    border: 1px solid #6F1023;
+    border-radius: 14px;
+    font-size: 10pt;
+    font-weight: 800;
+    letter-spacing: 1px;
+}
 QLabel#dashboardMetricLabel {
     color: #D6B06A;
     font-size: 8pt;

@@ -6,6 +6,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
+    QProgressBar,
+    QScrollArea,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -31,8 +33,16 @@ class DashboardPage(QWidget):
         self.projects: list[Project] = []
         self.visible_projects: list[Project] = []
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(4, 6, 4, 6)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        scroll = QScrollArea()
+        scroll.setObjectName("dashboardScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        content = QWidget()
+        root = QVBoxLayout(content)
+        root.setContentsMargins(4, 6, 4, 14)
         root.setSpacing(16)
 
         hero = QHBoxLayout()
@@ -72,6 +82,53 @@ class DashboardPage(QWidget):
         ):
             metrics.addWidget(card, 1)
         root.addLayout(metrics)
+
+        # Continue-project hero card mirrors the reference layout while using
+        # only real project/chapter/output data from the user's local library.
+        self.continue_card = QGroupBox("CONTINUE PROJECT")
+        self.continue_card.setObjectName("dashboardContinueCard")
+        continue_layout = QHBoxLayout(self.continue_card)
+        continue_layout.setContentsMargins(18, 18, 18, 18)
+        continue_layout.setSpacing(18)
+        self.continue_cover = QLabel("RYU'S\nAUDIOBOOK")
+        self.continue_cover.setObjectName("dashboardHeroCover")
+        self.continue_cover.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.continue_cover.setFixedSize(118, 156)
+        continue_layout.addWidget(self.continue_cover, 0, Qt.AlignmentFlag.AlignTop)
+        continue_details = QVBoxLayout()
+        continue_details.setSpacing(7)
+        continue_eyebrow = QLabel("LATEST LOCAL PROJECT")
+        continue_eyebrow.setObjectName("brandEdition")
+        continue_details.addWidget(continue_eyebrow)
+        self.continue_title = QLabel("Import a book to get started")
+        self.continue_title.setObjectName("sectionTitle")
+        self.continue_title.setWordWrap(True)
+        continue_details.addWidget(self.continue_title)
+        self.continue_summary = QLabel("Your recent project details will appear here.")
+        self.continue_summary.setObjectName("muted")
+        self.continue_summary.setWordWrap(True)
+        continue_details.addWidget(self.continue_summary)
+        self.continue_progress = QProgressBar()
+        self.continue_progress.setRange(0, 100)
+        self.continue_progress.setValue(0)
+        self.continue_progress.setFormat("Recorded chapter completion: %p%")
+        self.continue_progress.setMinimumHeight(16)
+        self.continue_progress.setVisible(False)
+        continue_details.addWidget(self.continue_progress)
+        self.continue_note = QLabel("No generation estimate is shown until real job data exists.")
+        self.continue_note.setObjectName("muted")
+        self.continue_note.setWordWrap(True)
+        continue_details.addWidget(self.continue_note)
+        continue_details.addStretch(1)
+        continue_actions = QHBoxLayout()
+        self.continue_latest_button = QPushButton("Continue Project")
+        self.continue_latest_button.setObjectName("primary")
+        self.continue_latest_button.clicked.connect(self._continue_latest)
+        continue_actions.addWidget(self.continue_latest_button)
+        continue_actions.addStretch(1)
+        continue_details.addLayout(continue_actions)
+        continue_layout.addLayout(continue_details, 1)
+        root.addWidget(self.continue_card)
 
         lower = QHBoxLayout()
         lower.setSpacing(14)
@@ -119,6 +176,8 @@ class DashboardPage(QWidget):
         self.empty_note.setWordWrap(True)
         root.addWidget(self.empty_note)
 
+        scroll.setWidget(content)
+        outer.addWidget(scroll, 1)
         self.refresh()
 
     def _metric(self, label: str, value: str, detail: str) -> QWidget:
@@ -170,6 +229,36 @@ class DashboardPage(QWidget):
         self.metric_attention.metric_value.setText(str(attention))
 
         self.visible_projects = self.projects[:8]
+        self.continue_card.setVisible(bool(self.projects))
+        self.continue_latest_button.setEnabled(bool(self.projects))
+        if self.projects:
+            latest = self.projects[0]
+            latest_status, latest_output = project_status(latest)
+            latest_state = load_state(latest.folder)
+            completed_records = latest_state.get("completed_chapters") or []
+            total_chapters = len(latest.chapters)
+            self.continue_title.setText(latest.title)
+            summary_parts = [latest_status, f"{total_chapters} chapter(s)"]
+            if completed_records:
+                summary_parts.append(f"{len(completed_records)} chapter(s) recorded complete")
+            if latest_output:
+                summary_parts.append("Output file exists")
+            self.continue_summary.setText("  ·  ".join(summary_parts))
+            if latest_status == "Completed" and latest_output:
+                self.continue_progress.setValue(100)
+                self.continue_progress.setVisible(True)
+                self.continue_note.setText("A non-empty output file is present in the local project.")
+            elif total_chapters > 0 and completed_records:
+                recorded = min(len(completed_records), total_chapters)
+                self.continue_progress.setValue(round(recorded * 100 / total_chapters))
+                self.continue_progress.setVisible(True)
+                self.continue_note.setText(
+                    "Progress reflects chapters recorded in local project state; it is not an ETA."
+                )
+            else:
+                self.continue_progress.setValue(0)
+                self.continue_progress.setVisible(False)
+                self.continue_note.setText("No completed-chapter record is available yet. Continue from the project workflow.")
         self.recent_list.blockSignals(True)
         self.recent_list.clear()
         for project in self.visible_projects:
@@ -189,6 +278,11 @@ class DashboardPage(QWidget):
 
         self.empty_note.setVisible(not self.projects)
         self.recent_list.setVisible(bool(self.projects))
+        if not self.projects:
+            self.continue_title.setText("Import your first book")
+            self.continue_summary.setText("The card will show your latest project after a local import.")
+            self.continue_note.setText("Your books and output remain on this device.")
+
         self.continue_button.setEnabled(bool(self.projects))
         if self.visible_projects:
             self.recent_list.setCurrentRow(0)
@@ -220,6 +314,10 @@ class DashboardPage(QWidget):
         lines.append(f"Local project folder: {project.folder}")
         self.status_detail.setText("\n".join(lines))
         self.status_detail.setTextFormat(Qt.TextFormat.PlainText)
+
+    def _continue_latest(self) -> None:
+        if self.projects and self.on_open_project:
+            self.on_open_project(self.projects[0])
 
     def _continue_selected(self) -> None:
         row = self.recent_list.currentRow()
