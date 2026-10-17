@@ -1,6 +1,6 @@
 # Ryu's Audiobook — Dragon Studio Acceptance Checklist
 
-**Baseline:** `docs/prototypes/Ryus_Audiobook_Dragon_Studio_Premium_Final.html`  
+**Baseline:** `docs/prototypes/Ryus_Audiobook_Dragon_Studio_Premium_Final.html` for the full application; the newly supplied `Ryus_Audiobook_Voice_Studio_Fixed_All_Steps.html` overrides the Voice Studio screen only.  
 **Behavioral contract:** `docs/UI_UX_IMPLEMENTATION_SPEC.md`  
 **Branch:** `fix/import-qa-speaker-hover-hardware`  
 **Rule:** A control is accepted only when its real desktop-app action is connected, its result is observable, state persists where expected, and a regression test or documented manual test proves it. A visual-only match does not pass.
@@ -44,14 +44,23 @@
 - [ ] Empty/whitespace-only chapters are clearly identified; generation can skip or request repair without silently aborting unrelated valid chapters.
 - [ ] Autosave/state survives screen changes and app restart; current book title remains visible.
 
-### 5. Voice Studio — HTML `#voices`
-- [ ] Built-in/provider/backend selectors and filters affect the real voice catalogue.
-- [ ] Custom/reference voice imports validate the audio and persist a named profile.
-- [ ] Selected profile is the same profile used by preview and full-book generation.
-- [ ] Preview duration choices (10/20/30/45/60 seconds) are respected within reasonable tolerance; actual duration is reported.
-- [ ] Preview has in-app play/pause/stop and progress/elapsed feedback; no unexpected external player.
-- [ ] Voice profile changes persist and stale profile selections cannot override the current choice.
-- [ ] Missing model/runtime/provider failures are actionable and do not freeze the UI.
+### 5. Voice Studio — UPDATED DESIGN: `Ryus_Audiobook_Voice_Studio_Fixed_All_Steps.html`
+**Precedence:** The newly supplied Voice Studio HTML supersedes the Voice Studio screen in the original full-app HTML only. The original full-app HTML remains the baseline for the other 13 screens. This updated HTML is a design reference, not proof that its simulated JavaScript behaviors are implemented in Python.
+
+- [ ] **Four-step workflow:** Voice Library → Configure → Voice Profile → Preview & Assign; guided and Show All Steps modes both work, with Back/Continue preserving the working selection.
+- [ ] **Source selection:** Offline Neural, Windows SAPI, Qwen CustomVoice, Qwen VoiceDesign, Qwen Voice Clone, authorized Custom Voice reference, Edge TTS, and ElevenLabs sources are listed only when the corresponding runtime/provider is actually supported. Selecting a source must not replace the active narrator.
+- [ ] **Provider-specific configuration:** the selected provider reveals its own real settings. Qwen voice design presets/description/language/seed, clone reference/transcript/permission, custom-reference audio/permission, Edge language/gender/region filters, and premium provider credentials must be connected to real backend values. Unsupported controls must be disabled or clearly marked, not simulated.
+- [ ] **Provider readiness:** Install/Repair, Refresh Catalogue, model health and provider status report actual local runtime/network/API state. Do not show hard-coded “installed”, voice counts, or “ready” states.
+- [ ] **Voice catalogue:** search and filters change the real catalogue; selecting a voice updates the working selection and provider-specific voice ID without silently assigning it to narrator/character.
+- [ ] **Profile persistence:** create/update, save draft, load/search, and delete saved profiles. Profiles preserve provider ID, voice ID, model/runtime, language, design prompt/seed, reference-audio path and transcript where applicable, permission acknowledgement, and provider-specific settings. Reopen the app and verify profile identity and paths.
+- [ ] **Assignment safety:** browsing/configuring never changes the active narrator. “Save Profile Only” persists without assignment; “Save and Use as Narrator” updates the actual project narrator; “Assign to Character” opens the real character selector and stores the assignment.
+- [ ] **Preview targets:** Current Chapter, Selected Passage, and Custom Text modes use their actual corresponding text source. 10/30/60-second options in the updated HTML (plus existing 20/45-second options where retained) pass the chosen target duration to preview generation. Report requested and actual duration; do not silently substitute a 10-second preview.
+- [ ] **Preview transport:** generation progress and errors are observable; in-app Play/Pause/Stop/Cancel, playback progress, elapsed time and volume control operate on the generated preview. No external media-player launch or blocking “not responding” popup.
+- [ ] **Validation gate:** narrator/character assignment is enabled only after a real preview succeeds and the selected provider/profile/model still match the preview. Changing source, voice, profile, settings or preview text invalidates stale validation.
+- [ ] **Summary panel:** working selection, provider health, saved/unsaved profile, preview validity, current narrator and assignment status reflect actual application state.
+- [ ] **Error handling:** missing models, invalid reference audio, absent authorization, missing API key, network failure and unsupported hardware produce actionable messages and leave the last valid narrator/profile unchanged.
+- [ ] **No placeholder behavior:** temporary premium candidates must be generated by the actual configured provider before they can be auditioned or saved; no fake candidate names, timer-based preview completion, fake key setup, or success toast without a successful backend response.
+- [ ] **Responsive layout:** scrolling, window resize/full-screen, smaller screens, keyboard focus and long provider forms remain usable.
 
 ### 6. Character Studio — HTML `#characters`
 - [ ] Analyze runs in a worker and leaves the UI responsive.
@@ -122,6 +131,8 @@
 ## Critical bug regression checklist
 
 - [ ] Custom voice: import → save profile → select → preview → close/reopen → generate; confirm the exact voice/profile propagates throughout.
+- [ ] Voice Studio step flow: test every source, provider-specific configuration, profile save/load/delete, draft save, all preview text sources and durations, in-app transport, and both narrator/character assignment routes. Verify changing a selection invalidates stale preview validation.
+- [ ] Voice Studio safety: verify provider/runtime readiness and permission/API-key gates against real state; reject fake preview/candidate success and preserve the previous narrator after errors.
 - [ ] Characters: use fixtures with quoted dialogue, speaker tags, and em-dash dialogue; verify nonzero characters when names/speaker cues are present, and verify manual override.
 - [ ] Empty chapters: valid chapter + empty chapter + valid chapter; verify the user gets a clear warning and the chosen skip/repair policy is applied without silently discarding valid chapters.
 - [ ] Preview duration: test 10/20/30/45/60 seconds for at least one local provider and one custom voice; record requested vs actual durations.
@@ -140,4 +151,4 @@ For every accepted item, record:
 - Artifact/build used for the manual test.
 - Any limitation or platform-specific caveat.
 
-**Current status:** checklist created as the acceptance contract. Items remain unchecked until evidence is recorded against the current commit; passing CI alone does not establish full product acceptance.
+**Current status:** checklist updated to use the newly supplied Voice Studio HTML as the Voice Studio-specific design contract. Items remain unchecked until evidence is recorded against the current commit; passing CI alone does not establish full product acceptance. The uploaded HTML still needs to be copied into the repository at `docs/prototypes/Ryus_Audiobook_Voice_Studio_Fixed_All_Steps.html`; the checklist/spec can be updated now, but this change does not falsely claim that the attachment bytes are already committed.
