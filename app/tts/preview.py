@@ -147,17 +147,17 @@ def build_voice_preview(
     target_seconds: float | None = None,
 ) -> PreviewResult:
     if target_seconds is not None and float(target_seconds) > 0:
-        # Targeted previews should not synthesize an entire chapter and then
-        # discover that the result is 3–4 minutes long. Use a conservative
-        # character budget, keep sentence boundaries intact, and stop as soon
-        # as the requested duration is reached.
-        # Fast neural voices can speak short samples far faster than expected.
-        # Keep a generous sentence-complete source budget, then stop only after
-        # measured output duration reaches the selected target.
-        target_chars = int(float(target_seconds) * 80.0)
-        effective_max_chars = max(
-            360,
-            min(int(max_chars), max(target_chars, 360)),
+        # A character estimate is only a safety budget, not the preview's
+        # stopping condition: fast local voices can render 1,400–1,800 characters
+        # in about ten seconds. Capping source text to that default budget makes
+        # a requested 30/60-second preview silently end too early.
+        # Give the worker enough sentence-complete source for fast voices; the
+        # measured WAV duration below remains the actual stopping condition.
+        # Never read beyond the text the caller supplied.
+        target_chars = int(float(target_seconds) * 240.0)
+        effective_max_chars = min(
+            len(text),
+            max(int(max_chars), target_chars, 360),
         )
     else:
         effective_max_chars = int(max_chars)
