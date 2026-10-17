@@ -493,4 +493,11 @@ def _is_plausible_name(value: str) -> bool:
         return False
     if not all(word and (word[0].isupper() or not word[0].isascii()) for word in words):
         return False
-    return any(len(word.strip(".,!?;:")) >= 3 for word in words)
+    # Japanese, Chinese and Korean character names are often only two
+    # Unicode characters long. Do not discard these otherwise valid explicit
+    # speaker labels simply because they are shorter than Latin-script names.
+    return any(
+        len(token) >= 3
+        or (not token.isascii() and len(token) >= 2)
+        for token in (word.strip(".,!?;:") for word in words)
+    )

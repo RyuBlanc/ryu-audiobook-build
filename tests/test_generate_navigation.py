@@ -175,6 +175,28 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                 workflow.deleteLater()
                 self.app.processEvents()
 
+    def test_generate_remains_available_if_optional_studio_mount_fails(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-generate-optional-studio-") as temp:
+            workflow = ProjectWorkflow()
+            project = self._project(Path(temp) / "sample-project")
+            try:
+                with patch.object(
+                    workflow,
+                    "_install_generation_feature_pages",
+                    side_effect=RuntimeError("simulated optional screen failure"),
+                ):
+                    workflow.open_project(project)
+
+                self.assertIsNotNone(workflow.generation)
+                self.assertIn("could not be mounted", workflow.generation.status.text())
+                workflow.select_section("Generate")
+                self.assertIs(workflow.stack.currentWidget(), workflow.generation)
+                self.assertTrue(workflow.generation.start_button.isVisible())
+            finally:
+                workflow.close()
+                workflow.deleteLater()
+                self.app.processEvents()
+
     def test_import_preview_page_constructs_and_drop_zone_is_enabled(self) -> None:
         workflow = ProjectWorkflow()
         try:

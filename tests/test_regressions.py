@@ -83,6 +83,23 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(by_name["リアス"].dialogue_count, 1)
         self.assertEqual(by_name["アーシア"].dialogue_count, 1)
 
+    def test_character_detection_accepts_two_character_cjk_names(self):
+        from app.chapters.detector import Chapter
+
+        chapter = Chapter(
+            number=1,
+            title="Short CJK speaker names",
+            text='玲奈: 「待って。」\n悠真: 「今行く。」',
+        )
+        analysis = analyze_book([chapter])
+        by_name = {item.name: item for item in analysis.characters}
+
+        self.assertIn("玲奈", by_name)
+        self.assertIn("悠真", by_name)
+        self.assertEqual(by_name["玲奈"].dialogue_count, 1)
+        self.assertEqual(by_name["悠真"].dialogue_count, 1)
+        self.assertEqual(analysis.dialogue_total, 2)
+
     def test_pronunciation_candidates_reject_ordinary_english(self):
         self.assertTrue(is_common_english_phrase("All"))
         self.assertTrue(is_common_english_phrase("Confirmed"))
