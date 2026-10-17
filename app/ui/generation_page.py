@@ -578,6 +578,24 @@ class GenerationPage(QWidget):
         saved_track_index = self.bgm_variation.findData(saved_track_path)
         self.bgm_variation.setCurrentIndex(saved_track_index if saved_track_index >= 0 else 0)
 
+        music_filter_row = QHBoxLayout()
+        self.music_catalogue_search = QLineEdit()
+        self.music_catalogue_search.setObjectName("musicCatalogueSearch")
+        self.music_catalogue_search.setPlaceholderText("Search tracks, mood or scene…")
+        self.music_catalogue_search.setClearButtonEnabled(True)
+        music_filter_row.addWidget(self.music_catalogue_search, 2)
+        self.music_category_filter = QComboBox()
+        self.music_category_filter.setObjectName("musicCategoryFilter")
+        self.music_category_filter.addItem("All categories", "all")
+        for category_key, category_label in MUSIC_CATEGORIES:
+            self.music_category_filter.addItem(category_label, category_key)
+        music_filter_row.addWidget(self.music_category_filter, 1)
+        music_filter_container = QWidget()
+        music_filter_container.setLayout(music_filter_row)
+        settings_form.addRow("Browse music", music_filter_container)
+        self.music_catalogue_search.textChanged.connect(lambda *_: self._refresh_bgm_catalogue())
+        self.music_category_filter.currentIndexChanged.connect(lambda *_: self._refresh_bgm_catalogue())
+
         music_catalogue_row = QHBoxLayout()
         music_catalogue_row.addWidget(self.bgm_variation, 1)
         self.music_catalogue_preview = QPushButton("▶ Preview selected BGM")
@@ -1817,10 +1835,24 @@ class GenerationPage(QWidget):
 
     def _refresh_bgm_catalogue(self, preferred_path: str | None = None) -> None:
         current = str(preferred_path or self.bgm_variation.currentData() or "auto")
+        query = str(self.music_catalogue_search.text() if hasattr(self, "music_catalogue_search") else "").strip().casefold()
+        category = str(self.music_category_filter.currentData() or "all") if hasattr(self, "music_category_filter") else "all"
+        tracks = list_music_tracks()
+        visible_tracks = [
+            track for track in tracks
+            if (category == "all" or track.category == category)
+            and (
+                not query
+                or query in track.path.name.casefold()
+                or query in track.category_label.casefold()
+                or query in track.category.casefold()
+                or query in str(track.license_note or "").casefold()
+            )
+        ]
         self.bgm_variation.blockSignals(True)
         self.bgm_variation.clear()
         self.bgm_variation.addItem("Auto • match each chapter to a real track", "auto")
-        for track in list_music_tracks():
+        for track in visible_tracks:
             self.bgm_variation.addItem(
                 f"{track.category_label} • {track.path.name}",
                 str(track.path),
@@ -1828,6 +1860,12 @@ class GenerationPage(QWidget):
         index = self.bgm_variation.findData(current)
         self.bgm_variation.setCurrentIndex(index if index >= 0 else 0)
         self.bgm_variation.blockSignals(False)
+        if hasattr(self, "music_catalogue_hint"):
+            self.music_catalogue_hint.setText(
+                f"Showing {len(visible_tracks)} of {len(tracks)} local music tracks. "
+                "Search by title or mood; choose a category to narrow the catalogue. "
+                "Import licensed tracks to expand your offline library."
+            )
 
     def import_music_tracks(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(

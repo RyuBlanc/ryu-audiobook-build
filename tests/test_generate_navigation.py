@@ -145,6 +145,9 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                     "A fresh local library should show Auto until real music files are imported.",
                 )
                 self.assertEqual(page.bgm_variation.currentData(), "auto")
+                self.assertTrue(hasattr(page, "music_catalogue_search"))
+                self.assertTrue(hasattr(page, "music_category_filter"))
+                self.assertGreater(page.music_category_filter.count(), 1)
                 workflow.select_section("Generate")
                 QTest.qWait(125)
 
