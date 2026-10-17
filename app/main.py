@@ -437,6 +437,25 @@ QWidget#miniPlayerBar {
     background: #0F131A;
     border-top: 1px solid #353C49;
 }
+QPushButton#libraryFilter {
+    background: transparent;
+    color: #A5ACB8;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    padding: 7px 13px;
+    min-height: 20px;
+    font-weight: 600;
+}
+QPushButton#libraryFilter:hover {
+    background: #181D28;
+    border-color: #353C49;
+    color: #F5F5F6;
+}
+QPushButton#libraryFilter:checked {
+    background: #31121F;
+    color: #FFFFFF;
+    border: 1px solid #B21F3F;
+}
 QPushButton#shellIconButton {
     background: #141821;
     color: #F5F5F6;

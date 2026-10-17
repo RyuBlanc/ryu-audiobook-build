@@ -329,6 +329,7 @@ class ProjectWorkflow(QMainWindow):
         self.notifications_button.setToolTip("View local project warnings and generation status")
         self.notifications_button.clicked.connect(self.show_notifications)
         header.addWidget(self.notifications_button)
+        self._refresh_notification_count()
 
         self.new_book_button = QPushButton("Import Book")
         self.new_book_button.setObjectName("primary")
@@ -560,6 +561,20 @@ class ProjectWorkflow(QMainWindow):
         self.theme_toggle.setText("☀" if target == "light" else "◐")
         self.theme_toggle.setToolTip("Switch to dark theme" if target == "light" else "Switch to cream light theme")
 
+    def _refresh_notification_count(self) -> None:
+        """Update the header count from persisted local project state."""
+        count = 0
+        for project in self._safe_list_projects():
+            state = load_state(project.folder)
+            status = str(state.get("status") or "new").strip().lower()
+            if status in {"generating", "running", "queued", "failed", "cancelled"} or state.get("failed_chapters"):
+                count += 1
+        self.notifications_button.setText(f"♧ {count}")
+        self.notifications_button.setToolTip(
+            f"{count} local project(s) active or needing attention"
+            if count else "No active or failed jobs recorded locally"
+        )
+
     def show_notifications(self) -> None:
         """Show actual local project attention states; never fabricate a running job."""
         issues: list[str] = []
@@ -719,6 +734,7 @@ class ProjectWorkflow(QMainWindow):
 
     def _show_page(self, widget: QWidget) -> None:
         """Switch pages first; animation is optional and must never block navigation."""
+        self._refresh_notification_count()
         if widget is None:
             return
 

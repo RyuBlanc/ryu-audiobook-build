@@ -188,6 +188,16 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                 workflow.deleteLater()
                 self.app.processEvents()
 
+    def test_library_matches_html_segmented_filters(self) -> None:
+        from app.ui.library import project_matches
+        from app.core.project import Project
+        from app.chapters.detector import Chapter
+        from pathlib import Path
+        project = Project("A Test Book", Path("/tmp/a-test-book"), Path("/tmp/source.txt"), [Chapter(1, "Chapter 1", "Text")])
+        self.assertTrue(project_matches(project, "test", "All"))
+        self.assertFalse(project_matches(project, "source", "Active"))
+        self.assertFalse(project_matches(project, "test", "Completed"))
+
     def test_library_supports_grid_and_list_views(self) -> None:
         workflow = ProjectWorkflow()
         try:

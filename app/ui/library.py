@@ -39,9 +39,6 @@ def project_matches(project, query: str, status_filter: str) -> bool:
     query = (query or "").strip().casefold()
     status, _ = project_status(project)
 
-    if status_filter and status_filter != "All" and status != status_filter:
-        return False
-
     state = load_state(project.folder)
     parts = [project.title, project.source_path.name if project.source_path else ""]
     for key in ("author", "series", "narrator", "narrator_name", "voice_name", "selected_voice"):
