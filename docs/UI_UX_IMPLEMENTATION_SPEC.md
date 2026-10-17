@@ -2102,3 +2102,26 @@ Final requirement:
 The completed redesign must make Ryu's Audiobook feel like a polished,
 premium, local audiobook-production studio while preserving the current
 application's complete feature set and backend capabilities.
+
+## Updated Voice Studio design contract (2026-10-17)
+
+The user supplied a dedicated updated Voice Studio HTML reference named `Ryus_Audiobook_Voice_Studio_Fixed_All_Steps.html`. It supersedes the Voice Studio screen in `docs/prototypes/Ryus_Audiobook_Dragon_Studio_Premium_Final.html` only; the original full-app HTML remains authoritative for every other screen. The dedicated reference should be preserved in the repository at `docs/prototypes/Ryus_Audiobook_Voice_Studio_Fixed_All_Steps.html` when the original attachment bytes can be transferred without alteration.
+
+### Required Voice Studio workflow
+
+1. **Voice Library** — select a source without changing the current narrator: Offline Neural, Windows SAPI, Qwen CustomVoice, Qwen VoiceDesign, Qwen Voice Clone, authorized Custom Voice reference, Edge TTS, and ElevenLabs (only when supported by installed runtime/configuration).
+2. **Configure** — show provider-specific configuration and real runtime/provider health. Reference-audio providers require explicit authorization; Qwen clone supports an optional exact transcript; provider credentials remain local. Install/repair/refresh actions must invoke real operations or be disabled with an explanation.
+3. **Voice Profile** — save/update, search/load, and delete named profiles. Persist provider ID, voice ID, model/runtime, language, prompts/seed, reference paths/transcript and provider-specific settings. Save Draft is distinct from saving a reusable profile.
+4. **Preview & Assign** — choose Current Chapter, Selected Passage, or Custom Text; select preview duration; generate and validate a real preview; play/pause/stop/cancel in-app; then explicitly Save Profile Only, Save and Use as Narrator, or Assign to Character. Narrator/character assignment must be disabled until the current selection has a successful matching preview.
+
+### State and reliability rules
+
+- Browsing and configuring never overwrite the active narrator. Only the explicit assignment action may do so.
+- A source, voice, profile, model, preview text, or relevant setting change invalidates the previous preview validation.
+- Requested and actual preview duration must be observable; do not silently shorten a 30-second request to 10 seconds.
+- Summary labels (provider health, working selection, profile save state, preview validation, active narrator, assignment state) must reflect real backend/project state.
+- Do not implement HTML mock behavior as fake success. No timer-based fake generation, placeholder candidate voices, fabricated installed/ready status, fake API-key setup, or success message before a backend operation succeeds.
+- Provider failures, missing models, invalid reference audio, missing permission acknowledgement, API/network failures, and unsupported hardware must leave the last valid narrator/profile intact and show actionable recovery guidance.
+- Test guided mode and Show All Steps, keyboard/scroll behavior, resize/full-screen, and persistence across restart.
+
+The screen-by-screen acceptance criteria live in `docs/DRAGON_STUDIO_ACCEPTANCE_CHECKLIST.md`. Every item remains unchecked until real implementation and test evidence are recorded.
