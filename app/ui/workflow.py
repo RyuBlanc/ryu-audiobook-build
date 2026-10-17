@@ -1237,8 +1237,18 @@ class ProjectWorkflow(QMainWindow):
                 if not self._generation_page_is_current():
                     # Drop a stale/unregistered page reference before rebuilding;
                     # ensure_generation_page must not inspect a deleted Qt wrapper.
+                    stale_generation = self.generation
                     self.generation = None
                     self._generation_index = -1
+                    if stale_generation is not None:
+                        try:
+                            if self.stack.indexOf(stale_generation) >= 0:
+                                self.stack.removeWidget(stale_generation)
+                            stale_generation.hide()
+                            stale_generation.deleteLater()
+                        except RuntimeError:
+                            # Qt may already have destroyed the underlying widget.
+                            pass
                     self.ensure_generation_page()
                 if not self._generation_page_is_current():
                     raise RuntimeError("The Generate page could not be initialized.")
