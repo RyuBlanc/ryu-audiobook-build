@@ -1234,9 +1234,13 @@ class ProjectWorkflow(QMainWindow):
                             "Select a book in Library or import a new book to start generating."
                         )
                         return
-                if self.generation is None:
+                if not self._generation_page_is_current():
+                    # Drop a stale/unregistered page reference before rebuilding;
+                    # ensure_generation_page must not inspect a deleted Qt wrapper.
+                    self.generation = None
+                    self._generation_index = -1
                     self.ensure_generation_page()
-                if self.generation is None:
+                if not self._generation_page_is_current():
                     raise RuntimeError("The Generate page could not be initialized.")
                 self._show_page(self.generation)
                 # Do not run disk/profile/readiness refreshes before showing the page;
@@ -1460,6 +1464,26 @@ class ProjectWorkflow(QMainWindow):
         except Exception:
             # Keep the existing project intact if automatic repair cannot run.
             return
+
+    def _generation_page_is_current(self) -> bool:
+        """Return whether the Generate widget is alive and belongs to the active book.
+
+        Qt widgets can be removed/recreated during project saves and renames. A
+        stale Python wrapper or an unregistered page must never block the next
+        Generate click; treat either case as a cache miss and rebuild safely.
+        """
+        page = self.generation
+        project = self.project
+        if page is None or project is None:
+            return False
+        try:
+            return (
+                self.stack.indexOf(page) >= 0
+                and page.project_folder == project.folder
+            )
+        except RuntimeError:
+            # Qt has already destroyed the underlying C++ widget.
+            return False
 
     def ensure_generation_page(self) -> None:
         if not self.project:
