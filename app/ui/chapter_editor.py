@@ -363,34 +363,48 @@ class ChapterEditorPage(QWidget):
         self._update_assignment_plus()
 
     def eventFilter(self, watched, event):
-        text_widget = getattr(self, "text", None)
-        viewport = text_widget.viewport() if text_widget is not None else None
+        # Qt can deliver final child/viewport events while the parent editor is
+        # being destroyed. Do not dereference its deleted QTextEdit wrapper.
+        try:
+            text_widget = getattr(self, "text", None)
+            viewport = text_widget.viewport() if text_widget is not None else None
+        except RuntimeError:
+            return False
+
         if watched is viewport:
-            if event.type() == QEvent.Type.MouseMove:
-                point = event.position().toPoint()
-                position = self.text.cursorForPosition(point).position()
-                hover_item = next(
-                    (item for item in self._assignment_hover_items if item[0] <= position < item[1]),
-                    None,
-                )
-                if hover_item is None:
-                    if self._assignment_tooltip_key is not None:
-                        QToolTip.hideText()
-                        self._assignment_tooltip_key = None
-                else:
-                    start, end, speakers = hover_item
-                    key = (start, end, speakers)
-                    if key != self._assignment_tooltip_key:
-                        QToolTip.showText(
-                            self.text.viewport().mapToGlobal(point + QPoint(14, 18)),
-                            "Assigned speaker: " + ", ".join(speakers),
-                            self.text,
-                        )
-                        self._assignment_tooltip_key = key
-            elif event.type() == QEvent.Type.Leave:
-                QToolTip.hideText()
-                self._assignment_tooltip_key = None
-        return super().eventFilter(watched, event)
+            try:
+                if event.type() == QEvent.Type.MouseMove:
+                    point = event.position().toPoint()
+                    position = text_widget.cursorForPosition(point).position()
+                    hover_item = next(
+                        (item for item in self._assignment_hover_items if item[0] <= position < item[1]),
+                        None,
+                    )
+                    if hover_item is None:
+                        if self._assignment_tooltip_key is not None:
+                            QToolTip.hideText()
+                            self._assignment_tooltip_key = None
+                    else:
+                        start, end, speakers = hover_item
+                        key = (start, end, speakers)
+                        if key != self._assignment_tooltip_key:
+                            QToolTip.showText(
+                                text_widget.viewport().mapToGlobal(point + QPoint(14, 18)),
+                                "Assigned speaker: " + ", ".join(speakers),
+                                text_widget,
+                            )
+                            self._assignment_tooltip_key = key
+                elif event.type() == QEvent.Type.Leave:
+                    QToolTip.hideText()
+                    self._assignment_tooltip_key = None
+            except RuntimeError:
+                # The target may have been deleted between event dispatch and
+                # Python callback teardown. Returning False lets Qt finish it.
+                return False
+        try:
+            return super().eventFilter(watched, event)
+        except RuntimeError:
+            return False
 
     def _update_assignment_plus(self) -> None:
         if self._loading_fields or not self.text.isEnabled():
