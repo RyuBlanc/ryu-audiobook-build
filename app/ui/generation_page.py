@@ -403,6 +403,21 @@ class GenerationPage(QWidget):
         pronunciation_hint.setWordWrap(True)
         pronunciation_layout.addWidget(pronunciation_hint)
 
+        pronunciation_filter_row = QHBoxLayout()
+        self.pronunciation_scope = QComboBox()
+        self.pronunciation_scope.setObjectName("pronunciationScope")
+        self.pronunciation_scope.addItem("Current book", "book")
+        self.pronunciation_scope.addItem("Global library", "global")
+        pronunciation_filter_row.addWidget(self.pronunciation_scope)
+        self.pronunciation_search = QLineEdit()
+        self.pronunciation_search.setObjectName("pronunciationSearch")
+        self.pronunciation_search.setPlaceholderText("Search dictionary…")
+        self.pronunciation_search.setClearButtonEnabled(True)
+        pronunciation_filter_row.addWidget(self.pronunciation_search, 1)
+        pronunciation_layout.addLayout(pronunciation_filter_row)
+        self.pronunciation_search.textChanged.connect(self._apply_pronunciation_search)
+        self.pronunciation_scope.currentIndexChanged.connect(self._switch_pronunciation_scope)
+
         self.pronunciation_table = QTableWidget(0, 3)
         self.pronunciation_table.setHorizontalHeaderLabels(["Written", "Pronounce as", "Enabled"])
         self.pronunciation_table.setWordWrap(False)
@@ -1118,6 +1133,63 @@ class GenerationPage(QWidget):
         item.setData(Qt.ItemDataRole.UserRole, source)
         item.setCheckState(Qt.CheckState.Checked if enabled else Qt.CheckState.Unchecked)
         self.pronunciation_table.setItem(row, 2, item)
+        if hasattr(self, "pronunciation_search"):
+            self._apply_pronunciation_search()
+
+    def _apply_pronunciation_search(self) -> None:
+        query = str(self.pronunciation_search.text() or "").strip().casefold()
+        for row in range(self.pronunciation_table.rowCount()):
+            values = []
+            for column in (0, 1):
+                cell = self.pronunciation_table.item(row, column)
+                values.append(cell.text().casefold() if cell else "")
+            self.pronunciation_table.setRowHidden(
+                row, bool(query) and not any(query in value for value in values)
+            )
+
+    def _switch_pronunciation_scope(self, *_args) -> None:
+        # Save the visible scope before loading the newly selected one.
+        if not hasattr(self, "pronunciation_table"):
+            return
+        previous = str(getattr(self, "_loaded_pronunciation_scope", "book"))
+        if previous == str(self.pronunciation_scope.currentData() or "book"):
+            return
+        self._save_pronunciations(scope=previous)
+        self._load_pronunciations()
+
+    def _global_pronunciation_entries(self) -> list[dict]:
+        raw = QSettings("RyuBlanc", "Ryu's Audiobook").value(
+            "pronunciation/global_dictionary", "[]"
+        )
+        try:
+            entries = json.loads(str(raw)) if isinstance(raw, str) else raw
+        except (TypeError, ValueError, json.JSONDecodeError):
+            entries = []
+        return [
+            dict(item) for item in entries
+            if isinstance(item, dict)
+            and str(item.get("written") or "").strip()
+            and str(item.get("spoken") or "").strip()
+        ] if isinstance(entries, list) else []
+
+    def _combined_pronunciation_entries(self) -> list[dict]:
+        """Merge global entries with per-book overrides; book entries win by spelling."""
+        global_entries = self._global_pronunciation_entries()
+        book_entries = []
+        if self.project_folder:
+            state = load_state(self.project_folder)
+            value = state.get("pronunciation_dictionary", [])
+            if isinstance(value, list):
+                book_entries = [
+                    dict(item) for item in value
+                    if isinstance(item, dict)
+                    and str(item.get("written") or "").strip()
+                    and str(item.get("spoken") or "").strip()
+                ]
+        merged: dict[str, dict] = {}
+        for item in global_entries + book_entries:
+            merged[str(item["written"]).casefold()] = item
+        return list(merged.values())
 
     def _load_audiobook_analysis(self):
         """Load the completed AI book analysis, or partial chapter analyses."""
@@ -1350,7 +1422,25 @@ class GenerationPage(QWidget):
 
     def _load_pronunciations(self):
         self.pronunciation_table.setRowCount(0)
+        scope = str(self.pronunciation_scope.currentData() or "book")
+        self._loaded_pronunciation_scope = scope
         if not self.project_folder:
+            return
+        if scope == "global":
+            entries = self._global_pronunciation_entries()
+            for item in entries:
+                self._add_pronunciation_row(
+                    str(item.get("written") or ""),
+                    str(item.get("spoken") or ""),
+                    item.get("enabled", True) is not False,
+                    source=str(item.get("source") or "manual"),
+                )
+            self.pronunciation_status.setText(
+                f"{len(entries)} global pronunciation entr{'y' if len(entries) == 1 else 'ies'} loaded. "
+                "Saved entries are available across books on this PC."
+                if entries else "Global library is empty. Add a pronunciation and save it to reuse it across books."
+            )
+            self._apply_pronunciation_search()
             return
         state = load_state(self.project_folder)
         entries = state.get("pronunciation_dictionary", [])
@@ -1443,16 +1533,32 @@ class GenerationPage(QWidget):
                 f"{count} pronunciation override{'s' if count != 1 else ''} saved for this book."
                 if count else "No pronunciation overrides saved for this book."
             )
+        self._apply_pronunciation_search()
 
-    def _save_pronunciations(self):
+    def _save_pronunciations(self, scope: str | None = None):
+        target_scope = str(scope or self.pronunciation_scope.currentData() or "book")
+        entries = self._pronunciation_entries()
+        if target_scope == "global":
+            settings = QSettings("RyuBlanc", "Ryu's Audiobook")
+            settings.setValue(
+                "pronunciation/global_dictionary",
+                json.dumps(entries, ensure_ascii=False),
+            )
+            settings.sync()
+            self.pronunciation_status.setText(
+                f"Saved {len(entries)} global pronunciation entr{'y' if len(entries) == 1 else 'ies'}."
+            )
+            return
         if not self.project_folder:
             return
         state = load_state(self.project_folder)
-        entries = self._pronunciation_entries()
         state["pronunciation_dictionary"] = entries
         state["pronunciation_dictionary_version"] = 2
         save_state(self.project_folder, state)
-        self.pronunciation_status.setText(f"{len(entries)} pronunciation override{'s' if len(entries) != 1 else ''} saved for this book." if entries else "No pronunciation overrides saved for this book.")
+        self.pronunciation_status.setText(
+            f"{len(entries)} pronunciation override{'s' if len(entries) != 1 else ''} saved for this book."
+            if entries else "No pronunciation overrides saved for this book."
+        )
     def _test_selected_pronunciation(self) -> None:
         row = self.pronunciation_table.currentRow()
         if row < 0:
@@ -2218,7 +2324,7 @@ class GenerationPage(QWidget):
 
         chapter = self.chapters[index]
         self._save_pronunciations()
-        pronunciation_dictionary = self._pronunciation_entries()
+        pronunciation_dictionary = self._combined_pronunciation_entries()
         text = chapter.text
         output = Path(tempfile.gettempdir()) / 'ryu_audiobook_voice_preview.wav'
         backend = self.backend.currentData() or profile.backend
@@ -2685,7 +2791,7 @@ class GenerationPage(QWidget):
             provider, voice, self.chapters, self.audio_root,
             on_progress=lambda *args: self.signals.progress.emit(*args),
             on_finished=lambda summary: self.signals.finished.emit(summary),
-            pronunciation_dictionary=self._pronunciation_entries(),
+            pronunciation_dictionary=self._combined_pronunciation_entries(),
             narration_speed=float(self.narration_speed.currentData() or 0.90),
             pacing_profile=self.pacing_profile.currentData() or "natural",
             metadata=metadata,
