@@ -133,10 +133,36 @@ class SettingsPage(QWidget):
         stored_theme = str(self.settings.value("ui/theme", "dark")).lower()
         self.theme.setCurrentIndex(max(0, self.theme.findData(stored_theme)))
         appearance_layout.addRow("Application theme", self.theme)
+        self.accent = QComboBox()
+        self.accent.addItem("Dragon Crimson", "crimson")
+        self.accent.addItem("Velvet Red", "velvet")
+        stored_accent = str(self.settings.value("ui/accent", "crimson")).lower()
+        self.accent.setCurrentIndex(max(0, self.accent.findData(stored_accent)))
+        appearance_layout.addRow("Accent", self.accent)
+        self.interface_scale = QComboBox()
+        for scale in (100, 110, 125):
+            self.interface_scale.addItem(f"{scale}%", scale)
+        stored_scale = int(self.settings.value("ui/interface_scale", 100) or 100)
+        self.interface_scale.setCurrentIndex(max(0, self.interface_scale.findData(stored_scale)))
+        appearance_layout.addRow("Interface scale", self.interface_scale)
         self.reduce_motion = QCheckBox("Reduce page and waveform motion")
         self.reduce_motion.setChecked(self.settings.value("ui/reduce_motion", False, type=bool))
         appearance_layout.addRow("Motion", self.reduce_motion)
         root.addWidget(appearance)
+
+        output = QGroupBox("Default output")
+        output_layout = QFormLayout(output)
+        self.default_bitrate = QComboBox()
+        for kbps in (128, 160, 192, 224, 256, 288, 320):
+            self.default_bitrate.addItem(f"M4B · AAC · {kbps} kbps", kbps)
+        stored_bitrate = int(self.settings.value("audio/default_bitrate", 256) or 256)
+        self.default_bitrate.setCurrentIndex(max(0, self.default_bitrate.findData(stored_bitrate)))
+        output_layout.addRow("Default audiobook quality", self.default_bitrate)
+        output_note = QLabel("A book's saved bitrate overrides this default. M4B is the supported export container.")
+        output_note.setObjectName("muted")
+        output_note.setWordWrap(True)
+        output_layout.addRow("", output_note)
+        root.addWidget(output)
 
         storage = QGroupBox("Local storage")
         storage_layout = QVBoxLayout(storage)
@@ -200,10 +226,16 @@ class SettingsPage(QWidget):
         stored_theme = str(self.settings.value("ui/theme", "dark")).lower()
         self.theme.setCurrentIndex(max(0, self.theme.findData(stored_theme)))
         self.reduce_motion.setChecked(self.settings.value("ui/reduce_motion", False, type=bool))
+        self.accent.setCurrentIndex(max(0, self.accent.findData(str(self.settings.value("ui/accent", "crimson")).lower())))
+        self.interface_scale.setCurrentIndex(max(0, self.interface_scale.findData(int(self.settings.value("ui/interface_scale", 100) or 100))))
+        self.default_bitrate.setCurrentIndex(max(0, self.default_bitrate.findData(int(self.settings.value("audio/default_bitrate", 256) or 256))))
 
     def save_settings(self) -> None:
         theme = str(self.theme.currentData() or "dark")
         self.settings.setValue("ui/theme", theme)
+        self.settings.setValue("ui/accent", str(self.accent.currentData() or "crimson"))
+        self.settings.setValue("ui/interface_scale", int(self.interface_scale.currentData() or 100))
+        self.settings.setValue("audio/default_bitrate", int(self.default_bitrate.currentData() or 256))
         self.settings.setValue("ui/reduce_motion", self.reduce_motion.isChecked())
         self.settings.sync()
         app = QApplication.instance()
@@ -215,7 +247,10 @@ class SettingsPage(QWidget):
             except Exception as exc:
                 self.status.setText(f"Settings saved, but one live preference could not refresh: {exc}")
                 return
-        self.status.setText("Settings saved. Your appearance and motion preference are applied locally.")
+        self.status.setText(
+            "Settings saved locally. Theme, accent and interface scale preferences are recorded; "
+            "default bitrate is used for new books unless a book already has its own saved quality."
+        )
 
     @staticmethod
     def open_folder(folder: Path) -> None:

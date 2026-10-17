@@ -724,6 +724,14 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("self.on_autosave or self.on_save", editor)
         self.assertIn("self.project.save()", workflow[workflow.index("def autosave_project"):workflow.index("def save_project")])
 
+    def test_settings_expose_and_persist_default_bitrate(self):
+        settings = Path("app/ui/settings_page.py").read_text(encoding="utf-8")
+        generation = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        self.assertIn('self.settings.value("audio/default_bitrate", 256)', settings)
+        self.assertIn('self.settings.setValue("audio/default_bitrate"', settings)
+        self.assertIn('value("audio/default_bitrate", DEFAULT_AUDIO_BITRATE_KBPS)', generation)
+        self.assertIn('audio_state.get("audio_bitrate")', generation)
+
     def test_metadata_dropdowns_and_multiselect_genres_exist(self):
         widgets = Path("app/ui/metadata_widgets.py").read_text(encoding="utf-8")
         generation = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
@@ -1108,6 +1116,14 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(profile.qwen_mode, "design")
         self.assertEqual(profile.qwen_seed, 123)
         self.assertIn("anime heroine", profile.qwen_prompt)
+
+    def test_pronunciation_scope_supports_global_library_and_search(self):
+        source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        self.assertIn('addItem("Global library", "global")', source)
+        self.assertIn('pronunciation/global_dictionary', source)
+        self.assertIn("def _combined_pronunciation_entries", source)
+        self.assertIn("self._combined_pronunciation_entries()", source)
+        self.assertIn("def _apply_pronunciation_search", source)
 
     def test_pronunciation_dictionary_has_audio_test_controls(self):
         source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")

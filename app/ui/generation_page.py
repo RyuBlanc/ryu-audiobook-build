@@ -519,8 +519,14 @@ class GenerationPage(QWidget):
             if kbps == DEFAULT_AUDIO_BITRATE_KBPS:
                 label += " • Premium recommended"
             self.audio_bitrate.addItem(label, kbps)
+        try:
+            global_bitrate = int(QSettings("RyuBlanc", "Ryu's Audiobook").value(
+                "audio/default_bitrate", DEFAULT_AUDIO_BITRATE_KBPS
+            ) or DEFAULT_AUDIO_BITRATE_KBPS)
+        except (TypeError, ValueError):
+            global_bitrate = DEFAULT_AUDIO_BITRATE_KBPS
         self.audio_bitrate.setCurrentIndex(
-            max(0, self.audio_bitrate.findData(DEFAULT_AUDIO_BITRATE_KBPS))
+            max(0, self.audio_bitrate.findData(global_bitrate))
         )
         settings_form.addRow("Audio quality", self.audio_bitrate)
 
@@ -528,6 +534,14 @@ class GenerationPage(QWidget):
         # The default remains narration-only. Track settings are stored in the
         # project state and mixed only during final M4B packaging.
         audio_state = load_state(self.project_folder) if self.project_folder else {}
+        try:
+            project_bitrate = int(audio_state.get("audio_bitrate")) if audio_state.get("audio_bitrate") is not None else None
+        except (TypeError, ValueError):
+            project_bitrate = None
+        if project_bitrate is not None:
+            saved_bitrate_index = self.audio_bitrate.findData(project_bitrate)
+            if saved_bitrate_index >= 0:
+                self.audio_bitrate.setCurrentIndex(saved_bitrate_index)
         self.background_audio_enabled = QCheckBox("Enable background music / ambience")
         self.background_audio_enabled.setChecked(
             bool(audio_state.get("background_audio_enabled", False))
