@@ -113,29 +113,31 @@ class CastAwareProvider(TTSProvider):
             "assignments": sorted(self.assignments.items()),
             "profiles": sorted(
                 (
-                    k,
-                    self.profiles[k].provider,
-                    self.profiles[k].voice_id,
-                    self.profiles[k].sample_path,
-                    self.profiles[k].model_id,
-                    self.profiles[k].backend,
-                    self.profiles[k].language,
-                    self.profiles[k].qwen_mode,
-                    self.profiles[k].qwen_prompt,
-                    self.profiles[k].qwen_seed,
-                    self.profiles[k].qwen_anchor_path,
-                    self.profiles[k].qwen_anchor_text,
-                    self.profiles[k].reference_text,
+                    name.casefold(),
+                    profile.provider,
+                    profile.voice_id,
+                    profile.sample_path,
+                    profile.model_id,
+                    profile.backend,
+                    profile.language,
+                    profile.qwen_mode,
+                    profile.qwen_prompt,
+                    profile.qwen_seed,
+                    profile.qwen_anchor_path,
+                    profile.qwen_anchor_text,
+                    profile.reference_text,
                     # Voice identity and synthesis controls must participate in
                     # the generation signature so edits to a saved custom voice
                     # cannot silently reuse audio rendered with its old profile.
-                    self.profiles[k].qwen_profile_id,
-                    self.profiles[k].authorized,
-                    self.profiles[k].exaggeration,
-                    self.profiles[k].cfg_weight,
-                    self.profiles[k].style_preset,
+                    profile.qwen_profile_id,
+                    profile.authorized,
+                    profile.exaggeration,
+                    profile.cfg_weight,
+                    profile.style_preset,
                 )
-                for k in self.assignments if k in self.profiles
+                for name in sorted(set(self.assignments.values()), key=str.casefold)
+                for profile in [self.profiles.get(name.casefold())]
+                if profile is not None
             ),
             "narrating_character": self.narrating_character,
             "backend_override": self.backend_override,
