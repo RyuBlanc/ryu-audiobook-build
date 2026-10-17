@@ -60,6 +60,11 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
 
                 self.assertIsNotNone(workflow.generation, "Opening a project must create its Generate page.")
                 page = workflow.generation
+                self.assertEqual(
+                    page.bgm_variation.count(),
+                    1345,
+                    "The Generate BGM selector should have Auto plus all 1,344 catalogue entries.",
+                )
                 workflow.select_section("Generate")
                 QTest.qWait(125)
 
