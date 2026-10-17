@@ -1420,11 +1420,14 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('story_effects_enabled: bool = False', manager)
         self.assertIn('if story_effects_enabled:', assembler)
 
-    def test_manual_music_still_gets_chapter_transition_cues(self):
+    def test_manual_music_still_gets_real_chapter_transition_cues(self):
+        from unittest.mock import patch
+        from app.audio.library import import_audio_files
         from app.audio.assembler import _duration_ms
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
+            library_root = root / "Audio Library"
             chapter_dir = root / "001_Manual_Chapter"
             _write_wav(chapter_dir / "chunks" / "00001.wav", 3.0)
             (chapter_dir / "narration.json").write_text(
@@ -1436,24 +1439,35 @@ class RegressionTests(unittest.TestCase):
             )
             music = root / "continuous-music.wav"
             _write_wav(music, 1.0)
+            opening = root / "physical-book-opening.wav"
+            _write_wav(opening, 1.18)
+            page_turn = root / "physical-page-turn.wav"
+            _write_wav(page_turn, 0.62)
+            ending = root / "physical-book-closing.wav"
+            _write_wav(ending, 2.65)
             progress = []
-            output = root / "manual-with-cue.m4b"
-            result = assemble_m4b(
-                [chapter_dir],
-                output,
-                "Manual Mode Cue Test",
-                chapter_titles=["Manual Chapter"],
-                progress=lambda done, total, message: progress.append(message),
-                background_audio_mode="manual",
-                background_audio_path=music,
-                background_audio_volume=0.18,
-                chapter_transition_sound=True,
-                background_audio_fade_in=0.3,
-                background_audio_fade_out=0.3,
-            )
+            output = root / "manual-with-real-cue.m4b"
+            with patch("app.audio.library.audio_library_root", return_value=library_root):
+                import_audio_files([opening], target_kind="opening")
+                import_audio_files([page_turn], target_kind="page")
+                import_audio_files([ending], target_kind="ending")
+                result = assemble_m4b(
+                    [chapter_dir],
+                    output,
+                    "Manual Mode Cue Test",
+                    chapter_titles=["Manual Chapter"],
+                    progress=lambda done, total, message: progress.append(message),
+                    background_audio_mode="manual",
+                    background_audio_path=music,
+                    background_audio_volume=0.18,
+                    chapter_transition_sound=True,
+                    background_audio_fade_in=0.3,
+                    background_audio_fade_out=0.3,
+                )
             self.assertEqual(result, output)
             self.assertIn("mixed-background-audio", progress)
-            self.assertGreaterEqual(_duration_ms(output), 3500)
+            self.assertGreaterEqual(_duration_ms(output), 6500)
+            self.assertLessEqual(_duration_ms(output), 7200)
             self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
 
     def test_audio_bitrate_range_is_enforced(self):
