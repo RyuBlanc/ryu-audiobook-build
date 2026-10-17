@@ -14,6 +14,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from app.chapters.detector import Chapter
+from app.core.paths import ensure_roots
 from app.core.project import Project
 from app.ui.workflow import ProjectWorkflow, _import_book_icon
 
@@ -21,6 +22,9 @@ from app.ui.workflow import ProjectWorkflow, _import_book_icon
 class GenerateNavigationSmokeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        # Match production startup: the Library page expects the app roots to
+        # exist before ProjectWorkflow constructs and refreshes its library.
+        ensure_roots()
         cls.app = QApplication.instance() or QApplication([])
 
     def test_branded_import_icon_resource_is_loadable(self) -> None:
