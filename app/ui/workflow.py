@@ -32,6 +32,7 @@ from app.ui.chapter_editor import ChapterEditorPage
 from app.ui.generation_page import GenerationPage
 from app.ui.import_page import ImportPage
 from app.ui.library import LibraryPage
+from app.ui.dashboard_page import DashboardPage
 from app.ui.voice_page import VoicePage
 from app.ui.hardware_page import HardwarePage
 from app.ui.models_page import ModelsPage
@@ -170,6 +171,7 @@ class ProjectWorkflow(QMainWindow):
         self.sidebar.setSpacing(3)
         self.sidebar.setIconSize(QSize(20, 20))
         self.nav_titles = {
+            "Dashboard": "Dashboard",
             "Library": "Audiobook Library",
             "Import": "Import Studio",
             "Chapters": "Chapter Studio",
@@ -200,7 +202,10 @@ class ProjectWorkflow(QMainWindow):
                 item.setToolTip(title)
                 self.sidebar.addItem(item)
 
-        add_nav_group("Home", [("Library", "Audiobook Library", "⌂")])
+        add_nav_group("Home", [
+            ("Dashboard", "Dashboard", "⌂"),
+            ("Library", "Audiobook Library", "▤"),
+        ])
         add_nav_group("Project", [
             ("Import", "Import Studio", ""),
             ("Chapters", "Chapter Studio", "☷"),
@@ -297,6 +302,12 @@ class ProjectWorkflow(QMainWindow):
         self.import_page = ImportPage(self.handle_import)
         self.voice = VoicePage()
 
+        self.dashboard = DashboardPage(
+            self.open_project,
+            lambda: self.select_section("Import"),
+            lambda: self.select_section("Library"),
+        )
+        self.stack.addWidget(self.dashboard)
         self.stack.addWidget(self.library)
         self.stack.addWidget(self.import_page)
         self.stack.addWidget(self.voice)
@@ -305,8 +316,10 @@ class ProjectWorkflow(QMainWindow):
             lambda: self.project.source_path if self.project else None,
         )
         self.stack.addWidget(self.voice_cast)
-        self.stack.addWidget(ModelsPage())
-        self.stack.addWidget(HardwarePage())
+        self.models_page = ModelsPage()
+        self.stack.addWidget(self.models_page)
+        self.hardware_page = HardwarePage()
+        self.stack.addWidget(self.hardware_page)
 
         self.editor: ChapterEditorPage | None = None
         self.generation: GenerationPage | None = None
@@ -371,6 +384,7 @@ class ProjectWorkflow(QMainWindow):
 
     def _update_page_chrome(self, widget: QWidget) -> None:
         pages = [
+            (self.dashboard, "Dashboard", "A live summary of your local audiobook workspace."),
             (self.library, "Library", "Your local audiobook projects and ongoing work."),
             (self.import_page, "Import", "Bring a source book into your local workflow."),
             (self.voice, "Voice & Narration", "Choose, configure, and preview the narrator."),
@@ -380,10 +394,8 @@ class ProjectWorkflow(QMainWindow):
             pages.append((self.editor, "Chapters", "Review and edit your book chapter by chapter."))
         if self.generation is not None:
             pages.append((self.generation, "Generate", "Preview, generate, recover, and assemble your audiobook."))
-        if self.stack.count() > 4:
-            pages.append((self.stack.widget(4), "Models", "Manage local speech and analysis components."))
-        if self.stack.count() > 5:
-            pages.append((self.stack.widget(5), "Hardware", "Verify local backends and review hardware performance."))
+        pages.append((self.models_page, "Models", "Manage local speech and analysis components."))
+        pages.append((self.hardware_page, "Hardware", "Verify local backends and review hardware performance."))
         for page, key, subtitle in pages:
             if page is widget:
                 self.page_heading.setText(self.nav_titles.get(key, key))
@@ -477,9 +489,9 @@ class ProjectWorkflow(QMainWindow):
         elif name == "Voice Cast":
             expected = self.voice_cast
         elif name == "Models":
-            expected = self.stack.widget(4)
+            expected = self.models_page
         elif name == "Hardware":
-            expected = self.stack.widget(5)
+            expected = self.hardware_page
         else:
             return
         # If currentRowChanged already navigated, do not repeat or refresh twice.
@@ -519,7 +531,10 @@ class ProjectWorkflow(QMainWindow):
             return
         name = item.data(32)
 
-        if name == "Library":
+        if name == "Dashboard":
+            self.dashboard.refresh()
+            self._show_page(self.dashboard)
+        elif name == "Library":
             self._show_page(self.library)
         elif name == "Import":
             self._show_page(self.import_page)
@@ -599,9 +614,9 @@ class ProjectWorkflow(QMainWindow):
                     "Your imported book and saved chapter text have not been deleted.",
                 )
         elif name == "Models":
-            self._show_page(self.stack.widget(4))
+            self._show_page(self.models_page)
         elif name == "Hardware":
-            self._show_page(self.stack.widget(5))
+            self._show_page(self.hardware_page)
 
     def select_section(self, name: str) -> None:
         for i in range(self.sidebar.count()):

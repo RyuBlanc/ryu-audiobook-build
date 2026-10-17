@@ -272,6 +272,27 @@ QWidget#sidebarDivider {
     background: #282E38;
     max-height: 1px;
 }
+QWidget#dashboardMetric {
+    background: #141821;
+    border: 1px solid #282E38;
+    border-radius: 14px;
+}
+QLabel#dashboardMetricLabel {
+    color: #D6B06A;
+    font-size: 8pt;
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+QLabel#dashboardMetricValue {
+    color: #F5F5F6;
+    font-size: 22pt;
+    font-weight: 700;
+}
+QLabel#sectionTitle {
+    color: #F5F5F6;
+    font-size: 13pt;
+    font-weight: 700;
+}
 QLabel#pageHeading {
     color: #F5F5F6;
     font-size: 19pt;

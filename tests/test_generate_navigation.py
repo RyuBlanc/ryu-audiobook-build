@@ -41,7 +41,7 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
             ]
             self.assertEqual(
                 page_keys,
-                ["Library", "Import", "Chapters", "Voice & Narration",
+                ["Dashboard", "Library", "Import", "Chapters", "Voice & Narration",
                  "Voice Cast", "Generate", "Models", "Hardware"],
             )
             group_labels = [
@@ -50,8 +50,8 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                 if not workflow.sidebar.item(i).data(32)
             ]
             self.assertEqual(group_labels, ["HOME", "PROJECT", "PRODUCTION", "SYSTEM"])
-            self.assertEqual(workflow.page_heading.text(), "Audiobook Library")
-            self.assertEqual(workflow.sidebar.currentItem().data(32), "Library")
+            self.assertEqual(workflow.page_heading.text(), "Dashboard")
+            self.assertEqual(workflow.sidebar.currentItem().data(32), "Dashboard")
             self.assertIsNotNone(workflow.global_search)
             self.assertIsNotNone(workflow.project_mini_title)
         finally:
@@ -106,6 +106,21 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                 self.assertTrue(page.preview_page_cue.isVisible(), "Chapter-turn preview must be present.")
                 self.assertTrue(page.preview_ending_cue.isVisible(), "Book-closing preview must be present.")
                 self.assertEqual(page.title.text(), project.title)
+            finally:
+                workflow.close()
+                workflow.deleteLater()
+                self.app.processEvents()
+
+    def test_dashboard_is_backed_by_local_project_library(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="ryu-dashboard-") as temp:
+            workflow = ProjectWorkflow()
+            project = self._project(Path(temp) / "sample-project")
+            try:
+                with patch("app.ui.dashboard_page.list_projects", return_value=[project]):
+                    workflow.dashboard.refresh()
+                self.assertEqual(workflow.dashboard.metric_total.metric_value.text(), "1")
+                self.assertEqual(workflow.dashboard.recent_list.count(), 1)
+                self.assertIn(project.title, workflow.dashboard.recent_list.item(0).text())
             finally:
                 workflow.close()
                 workflow.deleteLater()
