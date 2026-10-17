@@ -61,6 +61,11 @@ jobs:
           Write-Host '=== Run regression tests ==='
           git reset --hard HEAD
           git clean -ffdx
+
+          # Freeze the CI build number into Python source. Reading an environment
+          # variable at runtime made installed EXEs incorrectly display "Build dev".
+          ('BUILD_NUMBER = "' + $env:RYU_BUILD_NUMBER + '"') | Set-Content -Path 'app\build_info.py' -Encoding ascii
+
           $env:PYTHONPATH = (Get-Location).Path
           $env:PYTHONDONTWRITEBYTECODE = '1'
           & $pythonExe -B -m unittest discover -s tests -v
