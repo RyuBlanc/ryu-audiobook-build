@@ -24,8 +24,8 @@ These repository copies are the current reference files for parity work. The old
 - [x] Dragon Studio HTML reference path and blob SHA recorded.
 - [x] Voice Studio HTML reference path and blob SHA recorded.
 - [x] Agreed feature checklist recorded below.
-- [ ] Stage 1 CI for the latest preview-budget regression commit finishes green; run link: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39075400488
-- [ ] Confirm whether the user has a newer local HTML file than the canonical repository copy. This is a parity confirmation, not a blocker to proceeding with the current recorded baseline.
+- [x] Source and scope baseline is established; CI/installer validation belongs to the implementation and release gates, not source identification.
+- [ ] Confirm whether the user has a newer local HTML file than the canonical repository copy. The repository references are the canonical starting point; a newer user-supplied file should supersede them only after inspection.
 - [ ] Confirm a successful, retained Windows installer artifact for the exact approved commit before release; no installer is declared delivered by this baseline note.
 
 ## Agreed product feature checklist
@@ -72,7 +72,7 @@ These repository copies are the current reference files for parity work. The old
 
 ## Stage 2 gate
 
-Stage 2 is application stability: startup/runtime errors, Generate navigation, missing UI modules, and unresponsive navigation. Start Stage 2 from the source baseline above; do not treat an in-progress CI run as a green result. The current preview-duration change is a small regression fix on the working branch, and must pass CI before it is called verified.
+Stage 1 source/scope baseline is complete. Stage 2 is application stability: startup/runtime errors, Generate navigation, missing UI modules, and unresponsive navigation. Start Stage 2 from the source baseline above. Current validation run for the preview-budget regression is still pending/in progress: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39075400488. Do not treat an in-progress CI run as a green result. The preview-duration change must pass CI before it is called verified.
 
 ## Important status distinction
 
