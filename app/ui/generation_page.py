@@ -1891,11 +1891,20 @@ class GenerationPage(QWidget):
             target_kind=kind,
             license_note=license_note,
         )
-        self._cue_path_fields[kind].clear()
-        self.status.setText(
-            f"Imported {len(added)} real {kind} cue(s). "
-            "Leave this field blank to rotate through the library or choose a specific file."
-        )
+        if kind == "opening" and added:
+            # Importing from the opening card selects the first imported clip
+            # so the filename is visible and the preview uses that exact file.
+            self._cue_path_fields[kind].setText(str(added[0]))
+            self.status.setText(
+                f"Imported {len(added)} opening sound(s). Selected: {added[0].name}. "
+                "Use Auto to rotate through the opening library."
+            )
+        else:
+            self._cue_path_fields[kind].clear()
+            self.status.setText(
+                f"Imported {len(added)} real {kind} cue(s). "
+                "Leave this field blank to rotate through the library or choose a specific file."
+            )
 
     def choose_from_cue_library(self, kind: str) -> None:
         tracks = list_cue_tracks(kind)
