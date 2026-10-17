@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime
+import traceback
 
 from PySide6.QtCore import Qt, QThread, Signal, QEasingCurve, QPropertyAnimation, QTimer
 from PySide6.QtGui import QFontMetrics
@@ -206,6 +208,24 @@ class ProjectWorkflow(QMainWindow):
         if hasattr(self, "loading_overlay") and self.centralWidget():
             self.loading_overlay.setGeometry(self.centralWidget().rect())
 
+    def _log_ui_failure(self, context: str, exc: BaseException) -> None:
+        """Persist UI exceptions so frozen Windows builds are diagnosable."""
+        try:
+            from app.core.paths import app_root
+
+            log_dir = app_root() / "Logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            log_path = log_dir / "application.log"
+            trace = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            with log_path.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    f"\\n[{datetime.now().astimezone().isoformat()}] "
+                    f"{context}: {type(exc).__name__}: {exc}\\n{trace}\\n"
+                )
+        except Exception:
+            # Diagnostics must never crash or block a navigation action.
+            pass
+
     def _set_project_title(self, title: str) -> None:
         self._project_title_full = title or "No book open"
         self._refresh_project_label()
@@ -220,39 +240,71 @@ class ProjectWorkflow(QMainWindow):
         self.project_label.setToolTip(title)
 
     def _show_page(self, widget: QWidget) -> None:
-        """Use a short page fade unless the user has reduced-motion enabled."""
-        if not widget:
+        """Switch pages first; animation is optional and must never block navigation."""
+        if widget is None:
             return
+
+        # A page can be re-created when a book is saved or renamed. Never try to
+        # show a widget that is no longer registered with the stacked widget.
+        if self.stack.indexOf(widget) < 0:
+            raise RuntimeError(
+                f"Cannot navigate to {type(widget).__name__}: page is not in the workflow stack."
+            )
+
         if self._page_animation is not None:
-            self._page_animation.stop()
+            try:
+                self._page_animation.stop()
+            except RuntimeError:
+                # The previous page may already have been deleted by Qt.
+                pass
             if self._page_animation_widget is not None:
-                self._page_animation_widget.setGraphicsEffect(None)
+                try:
+                    self._page_animation_widget.setGraphicsEffect(None)
+                except RuntimeError:
+                    pass
             self._page_animation = None
             self._page_animation_widget = None
 
         self.stack.setCurrentWidget(widget)
-        if reduced_motion_enabled() or not widget.isVisible():
-            return
+        if self.stack.currentWidget() is not widget:
+            raise RuntimeError(
+                f"Navigation did not activate {type(widget).__name__}."
+            )
 
-        effect = QGraphicsOpacityEffect(widget)
-        effect.setOpacity(0.0)
-        widget.setGraphicsEffect(effect)
-        animation = QPropertyAnimation(effect, b"opacity", self)
-        animation.setDuration(135)
-        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        animation.setStartValue(0.0)
-        animation.setEndValue(1.0)
-        self._page_animation = animation
-        self._page_animation_widget = widget
+        # A graphics effect is decorative. If a platform-specific Qt animation
+        # fails, keep the newly selected page visible and log the issue instead
+        # of falling back to Import and making Generate appear broken.
+        try:
+            if reduced_motion_enabled() or not widget.isVisible():
+                return
 
-        def finish() -> None:
-            if self._page_animation is animation:
+            effect = QGraphicsOpacityEffect(widget)
+            effect.setOpacity(0.0)
+            widget.setGraphicsEffect(effect)
+            animation = QPropertyAnimation(effect, b"opacity", self)
+            animation.setDuration(135)
+            animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+            animation.setStartValue(0.0)
+            animation.setEndValue(1.0)
+            self._page_animation = animation
+            self._page_animation_widget = widget
+
+            def finish() -> None:
+                if self._page_animation is animation:
+                    widget.setGraphicsEffect(None)
+                    self._page_animation = None
+                    self._page_animation_widget = None
+
+            animation.finished.connect(finish)
+            animation.start()
+        except Exception as exc:
+            self._log_ui_failure("Page transition animation", exc)
+            try:
                 widget.setGraphicsEffect(None)
-                self._page_animation = None
-                self._page_animation_widget = None
-
-        animation.finished.connect(finish)
-        animation.start()
+            except RuntimeError:
+                pass
+            self._page_animation = None
+            self._page_animation_widget = None
 
     def _sidebar_item_clicked(self, item: QListWidgetItem) -> None:
         """Recover navigation when the clicked row is already selected."""
@@ -297,8 +349,10 @@ class ProjectWorkflow(QMainWindow):
             try:
                 callback()
             except Exception as exc:
-                # A stale optional widget/profile must not block navigation.
-                problems.append(f"{label}: {exc}")
+                # A stale optional widget/profile must not block navigation,
+                # but retain the complete traceback for the support log.
+                self._log_ui_failure(f"Generate context refresh ({label})", exc)
+                problems.append(f"{label}: {type(exc).__name__}: {exc}")
         if problems and hasattr(page, "status"):
             page.status.setText(
                 "Generate opened, but some details could not be refreshed. "
@@ -373,7 +427,11 @@ class ProjectWorkflow(QMainWindow):
                 # this was able to leave the previous page visible if a refresh failed.
                 QTimer.singleShot(75, self._refresh_generation_context)
             except Exception as exc:
-                self._show_page(self.import_page)
+                self._log_ui_failure("Generate page navigation", exc)
+                # Keep the Generate page selected when construction succeeded;
+                # only use Import as a fallback if the page itself is unavailable.
+                if self.generation is None or self.stack.indexOf(self.generation) < 0:
+                    self._show_page(self.import_page)
                 QMessageBox.critical(
                     self,
                     "Generate page could not be opened",
@@ -571,17 +629,47 @@ class ProjectWorkflow(QMainWindow):
     def ensure_generation_page(self) -> None:
         if not self.project:
             return
-        if self.generation:
-            self.stack.removeWidget(self.generation)
-            self.generation.deleteLater()
-        self.generation = GenerationPage(
-            self.project.chapters,
-            self.project.folder / "working",
-            self.project.folder,
-            self.project.title,
+
+        # Build the replacement before touching the current widget. Previously,
+        # the old page was removed and scheduled for deletion first; if the new
+        # constructor raised, self.generation could still point at a deleted Qt
+        # object and every later click on Generate failed with a C++ object error.
+        old_generation = self.generation
+        old_was_current = (
+            old_generation is not None
+            and self.stack.indexOf(old_generation) >= 0
+            and self.stack.currentWidget() is old_generation
         )
-        self.stack.addWidget(self.generation)
-        self._generation_index = self.stack.indexOf(self.generation)
+        try:
+            new_generation = GenerationPage(
+                self.project.chapters,
+                self.project.folder / "working",
+                self.project.folder,
+                self.project.title,
+            )
+        except Exception as exc:
+            self._log_ui_failure("Construct Generate page", exc)
+            if old_generation is not None and self.stack.indexOf(old_generation) >= 0:
+                # Keep a valid page alive for recovery and expose the actual error.
+                if hasattr(old_generation, "status"):
+                    old_generation.status.setText(
+                        f"Generate refresh failed ({type(exc).__name__}: {exc}). "
+                        "The previous page is still available; see Logs/application.log."
+                    )
+                self.generation = old_generation
+                return
+            raise
+
+        self.stack.addWidget(new_generation)
+        self.generation = new_generation
+        self._generation_index = self.stack.indexOf(new_generation)
+        if old_was_current:
+            self.stack.setCurrentWidget(new_generation)
+        if old_generation is not None and old_generation is not new_generation:
+            if self.stack.indexOf(old_generation) >= 0:
+                self.stack.removeWidget(old_generation)
+            old_generation.hide()
+            old_generation.deleteLater()
 
     def open_project(self, project: Project) -> None:
         self.project = project
