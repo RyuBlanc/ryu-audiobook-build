@@ -815,7 +815,7 @@ class RegressionTests(unittest.TestCase):
     def test_chapter_editor_uses_inline_sentence_assignment_ui(self):
         source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
         self.assertIn('QPushButton("", self.text.viewport())', source)
-        self.assertIn('dragon_four_winged.png', source)
+        self.assertIn('dragon_cross.png', source)
         self.assertNotIn('dragon_cross.svg', source)
         self.assertIn('border-radius: 14px', source)
         self.assertIn('setIconSize(QSize(22, 22))', source)
@@ -853,7 +853,7 @@ class RegressionTests(unittest.TestCase):
         editor_source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
         self.assertIn('dragon_four_winged.png', build_source)
         self.assertIn('dragon_cursor.png', cursor_source)
-        self.assertIn('dragon_four_winged.png', editor_source)
+        self.assertIn('dragon_cross.png', editor_source)
         self.assertNotIn('dragon_cursor.svg', cursor_source)
         self.assertNotIn('dragon_cross.svg', editor_source)
         self.assertNotIn('DRAGON_CURSOR_SVG', build_source)
