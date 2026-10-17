@@ -622,7 +622,10 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("self.instruct", source)
         self.assertIn("self.qwen_seed", source)
         self.assertIn("GENERATION_PIPELINE_VERSION", generator)
-        self.assertIn("self.profiles[k].qwen_mode", cast)
+        # Cast signatures must follow assigned profile names, not character names.
+        self.assertIn("self.assignments.values()", cast)
+        self.assertIn("profile.qwen_mode", cast)
+        self.assertIn("profile.qwen_profile_id", cast)
 
     def test_qwen_generation_uses_text_sized_token_ceiling_and_heartbeat(self):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
