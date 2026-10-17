@@ -28,6 +28,18 @@ class GenerationReadiness:
         return sum(1 for item in self.items if not item.ok)
 
 
+def partition_chapters_by_body(chapters):
+    """Separate synthesizable chapters from empty records without mutating the project."""
+    valid = []
+    empty = []
+    for chapter in list(chapters or []):
+        if str(getattr(chapter, "text", "") or "").strip():
+            valid.append(chapter)
+        else:
+            empty.append(chapter)
+    return valid, empty
+
+
 def build_generation_readiness(
     chapters,
     voice_name: str | None,
@@ -38,19 +50,28 @@ def build_generation_readiness(
     cover_selected: bool = False,
 ) -> GenerationReadiness:
     chapters = list(chapters or [])
-    empty = [getattr(chapter, "number", "?") for chapter in chapters if not str(getattr(chapter, "text", "") or "").strip()]
+    valid_chapters, empty_chapters = partition_chapters_by_body(chapters)
+    empty_numbers = [getattr(chapter, "number", "?") for chapter in empty_chapters]
     assignments = assignments if isinstance(assignments, dict) else {}
+
+    if not chapters:
+        chapter_detail = "No chapters available."
+    elif not valid_chapters:
+        chapter_detail = "No chapter contains body text. Restore text or repair the source."
+    elif empty_chapters:
+        chapter_detail = (
+            f"{len(valid_chapters)} chapter(s) contain text; empty chapter(s) "
+            f"{', '.join(map(str, empty_numbers))} will be skipped if source repair cannot recover them."
+        )
+    else:
+        chapter_detail = f"{len(valid_chapters)} chapter(s) ready."
 
     items = [
         ReadinessItem(
             "Chapters",
-            bool(chapters) and not empty,
-            (
-                f"{len(chapters)} chapter(s) ready."
-                if chapters and not empty
-                else ("Empty chapters: " + ", ".join(map(str, empty)) if empty else "No chapters available.")
-            ),
-            True,
+            bool(valid_chapters) and not empty_chapters,
+            chapter_detail,
+            not bool(valid_chapters),
         ),
         ReadinessItem(
             "Narrator voice",

@@ -2204,5 +2204,40 @@ Rias Gremory
             )
 
 
+    def test_generation_readiness_allows_valid_chapters_and_nonblocking_empty_chapters(self):
+        from app.chapters.detector import Chapter
+        from app.tts.readiness import build_generation_readiness, partition_chapters_by_body
+
+        valid = Chapter(1, "Chapter One", "Narration text.")
+        empty = Chapter(2, "Chapter Two", "   ")
+        chapters, skipped = partition_chapters_by_body([valid, empty])
+        self.assertEqual(chapters, [valid])
+        self.assertEqual(skipped, [empty])
+
+        readiness = build_generation_readiness(
+            [valid, empty], "Narrator", "piper", "C:/Books/Book.m4b"
+        )
+        chapter_item = next(item for item in readiness.items if item.label == "Chapters")
+        self.assertTrue(readiness.ready)
+        self.assertFalse(chapter_item.ok)
+        self.assertFalse(chapter_item.blocking)
+        self.assertIn("will be skipped", chapter_item.detail)
+
+    def test_generation_readiness_blocks_when_every_chapter_is_empty(self):
+        from app.chapters.detector import Chapter
+        from app.tts.readiness import build_generation_readiness
+
+        readiness = build_generation_readiness(
+            [Chapter(1, "Chapter One", " "), Chapter(2, "Chapter Two", "")],
+            "Narrator",
+            "piper",
+            "C:/Books/Book.m4b",
+        )
+        chapter_item = next(item for item in readiness.items if item.label == "Chapters")
+        self.assertFalse(readiness.ready)
+        self.assertTrue(chapter_item.blocking)
+        self.assertIn("No chapter contains body text", chapter_item.detail)
+
+
 if __name__ == "__main__":
     unittest.main()

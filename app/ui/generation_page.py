@@ -33,7 +33,7 @@ from app.tts.voice_profile import load_profiles, load_saved_profile, load_saved_
 from app.tts.providers.piper import PiperProvider
 from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.preview import build_voice_preview
-from app.tts.readiness import build_generation_readiness
+from app.tts.readiness import build_generation_readiness, partition_chapters_by_body
 from app.tts.chatterbox_runtime import runtime_ready
 from app.audio.assembler import DEFAULT_AUDIO_BITRATE_KBPS, _duration_ms
 from app.tts.resume import inspect_generation_state
@@ -2526,7 +2526,7 @@ class GenerationPage(QWidget):
                 ),
                 encoding="utf-8",
             )
-            self.chapters = detected
+            self.chapters[:] = detected
             self._update_overview()
             self.status.setText("Chapter list was automatically repaired from the original source.")
             return True
@@ -2624,44 +2624,35 @@ class GenerationPage(QWidget):
             self.status.setText("No chapters available.")
             return
 
+        # Try to repair stale/empty chapter records from the original source
+        # before readiness gating. The readiness panel must not prevent the
+        # repair path from running.
+        empty_before_repair = [c for c in self.chapters if not str(c.text or "").strip()]
+        if empty_before_repair:
+            self._repair_empty_chapters_from_source()
+
         self._refresh_readiness()
         if not self.start_button.isEnabled():
             self.status.setText("Generation is blocked by the readiness checks above.")
             return
 
-        empty = [c for c in self.chapters if not c.text or not c.text.strip()]
-        if empty:
-            self._repair_empty_chapters_from_source()
-            empty = [c for c in self.chapters if not c.text or not c.text.strip()]
-        if empty:
-            # Empty records are never synthesizable. If the source cannot be
-            # re-read, safely remove only the empty records instead of blocking
-            # an otherwise valid audiobook because of stale project state.
-            self.chapters = [c for c in self.chapters if c.text and c.text.strip()]
-            for number, chapter in enumerate(self.chapters, start=1):
-                chapter.number = number
-            if self.project_folder:
-                try:
-                    chapters_file = self.project_folder / "chapters.json"
-                    chapters_file.write_text(
-                        json.dumps(
-                            [{"number": c.number, "title": c.title, "text": c.text} for c in self.chapters],
-                            ensure_ascii=False,
-                            indent=2,
-                        ),
-                        encoding="utf-8",
-                    )
-                except OSError:
-                    pass
-            self._update_overview()
-            empty = [c for c in self.chapters if not c.text or not c.text.strip()]
-        if empty:
-            numbers = ", ".join(str(c.number) for c in empty)
+        generation_chapters, skipped_empty_chapters = partition_chapters_by_body(self.chapters)
+        if not generation_chapters:
             self.status.setText(
-                f"Generation stopped: chapter(s) {numbers} contain no body text. "
-                "Please review the Chapters page."
+                "Generation stopped: no chapters contain body text. "
+                "Repair the source or restore chapter text before generating."
             )
             return
+
+        # Keep the original project chapter list untouched when a stale empty
+        # chapter cannot be repaired. Only non-empty chapters are passed to the
+        # generator; the readiness panel records which chapter numbers were skipped.
+        if skipped_empty_chapters:
+            skipped_numbers = ", ".join(str(c.number) for c in skipped_empty_chapters)
+            self.status.setText(
+                f"Empty chapter(s) {skipped_numbers} will be skipped. "
+                "Your original chapter list is preserved."
+            )
 
         output = Path(self.output.text().strip()) if self.output.text().strip() else self._default_output()
         if not output:
@@ -2802,7 +2793,7 @@ class GenerationPage(QWidget):
         }
         selected_bgm_path_value = str(self.bgm_variation.currentData() or "auto")
         self.manager = GenerationManager(
-            provider, voice, self.chapters, self.audio_root,
+            provider, voice, generation_chapters, self.audio_root,
             on_progress=lambda *args: self.signals.progress.emit(*args),
             on_finished=lambda summary: self.signals.finished.emit(summary),
             pronunciation_dictionary=self._combined_pronunciation_entries(),
