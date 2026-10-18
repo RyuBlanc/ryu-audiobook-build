@@ -195,7 +195,7 @@ def extract_text(path: Path) -> ExtractedBook:
     if suffix not in SUPPORTED_EXTENSIONS:
         raise ValueError(f"Unsupported book format: {suffix or 'unknown'}")
     if suffix == ".txt":
-        text = path.read_text(encoding="utf-8", errors="replace")
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
     elif suffix == ".pdf":
         text = _extract_pdf(path)
     elif suffix == ".epub":
@@ -239,14 +239,29 @@ def _extract_epub(path: Path) -> str:
     from ebooklib import ITEM_DOCUMENT, epub
 
     book = epub.read_epub(str(path))
+    document_items = list(book.get_items_of_type(ITEM_DOCUMENT))
+
+    # EPUB manifest order is not necessarily reading order. Follow the spine
+    # first, then append unreferenced document items as a fallback for malformed
+    # books that omit content from the spine.
+    by_id = {item.get_id(): item for item in document_items}
+    ordered_items = []
+    seen_ids = set()
+    for spine_entry in getattr(book, "spine", []) or []:
+        item_id = spine_entry[0] if isinstance(spine_entry, (tuple, list)) else spine_entry
+        item = by_id.get(item_id)
+        if item is not None and item_id not in seen_ids:
+            ordered_items.append(item)
+            seen_ids.add(item_id)
+    ordered_items.extend(item for item in document_items if item.get_id() not in seen_ids)
+
     parts = []
-    for item in book.get_items_of_type(ITEM_DOCUMENT):
+    for item in ordered_items:
         soup = BeautifulSoup(item.get_content(), "html.parser")
         text = soup.get_text("\n", strip=True)
         if text:
             parts.append(text)
     return "\n\n".join(parts)
-
 
 def _extract_docx(path: Path) -> str:
     from docx import Document
