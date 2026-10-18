@@ -379,6 +379,8 @@ class QwenCharacterProvider(TTSProvider):
         """
         if not items:
             return []
+        if self.qwen_mode not in {"design", "design-preview"}:
+            return [self.synthesize(text, output) for text, output in items]
         self._start_worker()
         if not self._worker or not self._worker.stdin:
             raise RuntimeError("Offline character worker is unavailable.")
