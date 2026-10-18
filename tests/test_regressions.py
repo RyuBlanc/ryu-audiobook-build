@@ -302,11 +302,11 @@ class RegressionTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "bom_story.txt"
-            path.write_bytes("\\xef\\xbb\\xbfChapter 1\\nThe story begins.".encode("utf-8"))
+            path.write_bytes(b"\xef\xbb\xbfChapter 1\nThe story begins.")
             extracted = extract_text(path)
             self.assertEqual(extracted.title, "bom_story")
-            self.assertTrue(extracted.text.startswith("Chapter 1\\n"))
-            self.assertNotIn("\\ufeff", extracted.text)
+            self.assertTrue(extracted.text.startswith("Chapter 1\n"))
+            self.assertNotIn("\ufeff", extracted.text)
             self.assertIn("The story begins.", extracted.text)
 
     def test_source_reflow_preserves_life_chapter_headings(self):
