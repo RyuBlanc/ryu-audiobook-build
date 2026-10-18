@@ -2668,6 +2668,21 @@ Rias Gremory
         self.assertIn("self._autosave_timer.timeout.connect(self._autosave)", source)
 
 
+    def test_stage5_audiobooks_player_screen_scrolls_without_losing_controls(self):
+        from pathlib import Path
+
+        source = Path("app/ui/audiobooks_page.py").read_text(encoding="utf-8")
+        self.assertIn("QScrollArea", source)
+        self.assertIn("scroll.setObjectName(\"audiobooksScroll\")", source)
+        self.assertIn("scroll.setWidgetResizable(True)", source)
+        self.assertIn("scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
+        self.assertIn("scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
+        self.assertIn("self.play_button.clicked.connect(self.play_selected)", source)
+        self.assertIn("self.pause_button.clicked.connect(self.pause_resume)", source)
+        self.assertIn("self.stop_button.clicked.connect(self.stop_playback)", source)
+        self.assertIn("self.timeline.sliderMoved.connect(self.player.setPosition)", source)
+        self.assertIn("self.open_output_button.clicked.connect(self._open_output_folder)", source)
+
     def test_stage5_voice_cast_studio_scrolls_on_short_displays(self):
         from pathlib import Path
 
