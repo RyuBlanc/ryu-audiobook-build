@@ -297,6 +297,18 @@ class RegressionTests(unittest.TestCase):
             ["41", "Report", "www.asianovel.com", "41", "Report", "www.asianovel.com"],
         )
 
+    def test_txt_import_strips_utf8_bom_without_changing_story_text(self):
+        from app.documents.parser import extract_text
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "bom_story.txt"
+            path.write_bytes("\\xef\\xbb\\xbfChapter 1\\nThe story begins.".encode("utf-8"))
+            extracted = extract_text(path)
+            self.assertEqual(extracted.title, "bom_story")
+            self.assertTrue(extracted.text.startswith("Chapter 1\\n"))
+            self.assertNotIn("\\ufeff", extracted.text)
+            self.assertIn("The story begins.", extracted.text)
+
     def test_source_reflow_preserves_life_chapter_headings(self):
         from app.documents.parser import reflow_source_text
         source = (
