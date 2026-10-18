@@ -778,10 +778,15 @@ class VoicePage(QWidget):
         self.play_button = QPushButton("▶  Play")
         self.play_button.setEnabled(False)
         self.play_button.clicked.connect(self.play_last_preview)
+        self.save_preview_button = QPushButton("↓  Save Preview")
+        self.save_preview_button.setToolTip("Save the generated voice preview as an audio file")
+        self.save_preview_button.setEnabled(False)
+        self.save_preview_button.clicked.connect(self.save_last_preview)
         self.stop_button = QPushButton("■  Stop / Cancel")
         self.stop_button.clicked.connect(self.stop_preview_or_playback)
         pa.addWidget(self.preview_button)
         pa.addWidget(self.play_button)
+        pa.addWidget(self.save_preview_button)
         pa.addWidget(self.stop_button)
         pa.addStretch(1)
         pv.addLayout(pa)
@@ -2426,6 +2431,8 @@ class VoicePage(QWidget):
         self.player.setSource(QUrl.fromLocalFile(path))
         self.play_button.setEnabled(True)
         self.play_button.setText("▶  Play")
+        if hasattr(self, "save_preview_button"):
+            self.save_preview_button.setEnabled(True)
         self.preview_percent_bar.setValue(100)
         self.preview_activity_bar.setVisible(False)
         actual_seconds = None
@@ -2463,6 +2470,8 @@ class VoicePage(QWidget):
         self.status.setText(f"Preview failed: {message}")
         self.preview_button.setEnabled(True)
         self.play_button.setEnabled(False)
+        if hasattr(self, "save_preview_button"):
+            self.save_preview_button.setEnabled(False)
         QMessageBox.warning(self, "Voice Preview Failed", message)
 
     def _preview_worker_cancelled(self) -> None:
@@ -2472,6 +2481,8 @@ class VoicePage(QWidget):
         self.status.setText("Voice preview cancelled.")
         self.preview_button.setEnabled(True)
         self.play_button.setEnabled(False)
+        if hasattr(self, "save_preview_button"):
+            self.save_preview_button.setEnabled(False)
 
     def _preview_worker_finished(self) -> None:
         self.preview_button.setEnabled(True)
@@ -2542,6 +2553,46 @@ class VoicePage(QWidget):
         self.profile_badge.setText(profile.name)
         self._update_profile_details(profile)
         self.status.setText(f"Saved voice profile '{profile.name}' • {self._provider_label(profile)}.")
+
+    def save_last_preview(self) -> None:
+        """Let the user save the latest generated voice preview to a chosen path."""
+        source = self.last_preview
+        if not source or not source.is_file():
+            self.status.setText("Generate a voice preview before saving it.")
+            return
+        default_name = f"Ryu_Audiobook_Voice_Preview{source.suffix or '.wav'}"
+        destination, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Save Voice Preview",
+            str(Path.home() / "Downloads" / default_name),
+            "WAV Audio (*.wav);;MP3 Audio (*.mp3);;All Files (*)",
+        )
+        if not destination:
+            return
+        target = Path(destination)
+        if not target.suffix:
+            target = target.with_suffix(".wav" if "WAV" in selected_filter else source.suffix or ".wav")
+        try:
+            if target.suffix.casefold() == source.suffix.casefold():
+                import shutil
+                shutil.copy2(source, target)
+            elif target.suffix.casefold() == ".mp3":
+                import imageio_ffmpeg
+                import subprocess
+                subprocess.run(
+                    [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-i", str(source), "-vn", "-codec:a", "libmp3lame", "-b:a", "192k", str(target)],
+                    check=True, capture_output=True, text=True, timeout=120,
+                )
+            elif target.suffix.casefold() == ".wav":
+                import shutil
+                shutil.copy2(source, target)
+            else:
+                raise ValueError("Choose WAV or MP3 for the saved voice preview.")
+            self.status.setText(f"Voice preview saved: {target}")
+            self.preview_engine_status.setText(f"Preview saved • {target.name}")
+        except Exception as exc:
+            QMessageBox.warning(self, "Save Voice Preview Failed", str(exc))
+            self.status.setText(f"Could not save voice preview: {exc}")
 
     def stop_preview_or_playback(self) -> None:
         self.player.stop()
