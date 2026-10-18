@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QProgressBar,
+    QScrollArea,
     QPushButton,
     QTextEdit,
     QVBoxLayout,
@@ -107,9 +108,23 @@ class ImportPage(QWidget):
         self.chapters = None
         self.worker: ImportPreviewWorker | None = None
 
-        root = QVBoxLayout(self)
-        root.setContentsMargins(4, 6, 4, 6)
+        # Keep the complete import workflow reachable on shorter displays.
+        # The scroll area contains the existing real controls; it does not replace
+        # the import logic or alter the drop/browse/create-project callbacks.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        scroll = QScrollArea(self)
+        scroll.setObjectName("importScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        root = QVBoxLayout(content)
+        root.setContentsMargins(4, 6, 8, 14)
         root.setSpacing(14)
+        scroll.setWidget(content)
+        outer.addWidget(scroll, 1)
 
         title = QLabel("Import Studio")
         title.setObjectName("pageHeading")
