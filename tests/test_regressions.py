@@ -2606,6 +2606,37 @@ Rias Gremory
         self.assertFalse(chapter_item.blocking)
         self.assertIn("will be skipped", chapter_item.detail)
 
+    def test_generation_readiness_blocks_qwen_voice_when_runtime_is_missing(self):
+        from app.chapters.detector import Chapter
+        from app.tts.readiness import build_generation_readiness
+
+        readiness = build_generation_readiness(
+            [Chapter(1, "Chapter One", "Narration text.")],
+            "Custom Character Voice",
+            "qwen-character",
+            "C:/Books/Book.m4b",
+            qwen_runtime_ready=False,
+        )
+        self.assertFalse(readiness.ready)
+        item = next(item for item in readiness.items if item.label == "Qwen3-TTS runtime")
+        self.assertTrue(item.blocking)
+        self.assertFalse(item.ok)
+        self.assertIn("Install / repair", item.detail)
+
+    def test_generation_readiness_does_not_require_qwen_for_other_voices(self):
+        from app.chapters.detector import Chapter
+        from app.tts.readiness import build_generation_readiness
+
+        readiness = build_generation_readiness(
+            [Chapter(1, "Chapter One", "Narration text.")],
+            "Piper Narrator",
+            "piper",
+            "C:/Books/Book.m4b",
+            qwen_runtime_ready=False,
+        )
+        self.assertTrue(readiness.ready)
+        self.assertTrue(all(item.label != "Qwen3-TTS runtime" for item in readiness.items))
+
     def test_generation_readiness_blocks_when_every_chapter_is_empty(self):
         from app.chapters.detector import Chapter
         from app.tts.readiness import build_generation_readiness
