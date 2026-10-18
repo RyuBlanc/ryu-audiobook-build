@@ -35,6 +35,7 @@ from app.tts.system_sapi import SystemSAPIProvider
 from app.tts.preview import build_voice_preview
 from app.tts.readiness import build_generation_readiness, partition_chapters_by_body
 from app.tts.chatterbox_runtime import runtime_ready
+from app.tts.qwen_character_runtime import runtime_ready as qwen_runtime_ready
 from app.audio.assembler import DEFAULT_AUDIO_BITRATE_KBPS, _duration_ms
 from app.tts.resume import inspect_generation_state
 from app.audio.library import (
@@ -2622,6 +2623,7 @@ class GenerationPage(QWidget):
             custom_runtime_ready=runtime_ready(),
             assignments=assignments,
             cover_selected=bool(self.cover),
+            qwen_runtime_ready=qwen_runtime_ready(),
         )
 
         self._refresh_resume_state()
