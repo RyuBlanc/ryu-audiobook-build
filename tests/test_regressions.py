@@ -2668,6 +2668,19 @@ Rias Gremory
         self.assertIn("self._autosave_timer.timeout.connect(self._autosave)", source)
 
 
+    def test_stage5_voice_cast_studio_scrolls_on_short_displays(self):
+        from pathlib import Path
+
+        source = Path("app/ui/voice_cast_page.py").read_text(encoding="utf-8")
+        self.assertIn("QScrollArea", source)
+        self.assertIn("scroll.setObjectName(\"voiceCastScroll\")", source)
+        self.assertIn("scroll.setWidgetResizable(True)", source)
+        self.assertIn("scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
+        self.assertIn("scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
+        self.assertIn("self.analyze_button.clicked.connect(self.analyze)", source)
+        self.assertIn("self.assign_button.clicked.connect(self.assign_voice)", source)
+        self.assertIn("self.unassign_button.clicked.connect(self.unassign_voice)", source)
+
     def test_stage5_mini_player_keeps_playback_controls_in_compact_windows(self):
         from pathlib import Path
 
