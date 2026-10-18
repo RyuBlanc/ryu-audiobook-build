@@ -49,6 +49,8 @@ def build_generation_readiness(
     assignments: dict | None = None,
     cover_selected: bool = False,
     qwen_runtime_ready: bool = True,
+    qwen_models_ready: bool = True,
+    qwen_model_detail: str = "Required local Qwen model files are present.",
 ) -> GenerationReadiness:
     chapters = list(chapters or [])
     valid_chapters, empty_chapters = partition_chapters_by_body(chapters)
@@ -100,6 +102,12 @@ def build_generation_readiness(
                 else "Install / repair the Qwen3-TTS runtime before generation."
             ) if voice_provider == "qwen-character" else
             "Not required for the selected narrator.",
+            voice_provider == "qwen-character",
+        ),
+        ReadinessItem(
+            "Qwen voice model",
+            voice_provider != "qwen-character" or qwen_models_ready,
+            qwen_model_detail if voice_provider == "qwen-character" else "Not required for the selected narrator.",
             voice_provider == "qwen-character",
         ),
         ReadinessItem(
