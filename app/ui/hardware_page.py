@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import QLabel, QComboBox, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QThread, Signal, Qt
+from PySide6.QtWidgets import QLabel, QComboBox, QPushButton, QVBoxLayout, QWidget, QScrollArea
 
 from app.hardware.backend import detect_hardware
 from app.tts.benchmark import benchmark_provider
@@ -37,7 +37,10 @@ class _BenchmarkThread(QThread):
 class HardwarePage(QWidget):
     def __init__(self):
         super().__init__()
-        layout = QVBoxLayout(self)
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(4, 6, 4, 12)
+        layout.setSpacing(14)
         self.profile = detect_hardware()
 
         layout.addWidget(QLabel("<h2>Hardware & TTS Performance</h2>"))
@@ -60,6 +63,17 @@ class HardwarePage(QWidget):
         layout.addWidget(self.result)
 
         self.refresh()
+
+        scroll = QScrollArea(self)
+        scroll.setObjectName("hardwareScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setWidget(content)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
 
     def refresh(self):
         lines = [
