@@ -344,6 +344,26 @@ class RegressionTests(unittest.TestCase):
             extracted.index("Second in reading order."),
         )
 
+    def test_docx_import_preserves_story_text_inside_tables(self):
+        from docx import Document
+        from app.documents.parser import extract_text
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "table_story.docx"
+            document = Document()
+            document.add_paragraph("Opening paragraph.")
+            table = document.add_table(rows=1, cols=1)
+            table.cell(0, 0).text = "Story text inside a table."
+            document.add_paragraph("Closing paragraph.")
+            document.save(path)
+
+            extracted = extract_text(path)
+            self.assertIn("Opening paragraph.", extracted.text)
+            self.assertIn("Story text inside a table.", extracted.text)
+            self.assertIn("Closing paragraph.", extracted.text)
+            self.assertLess(extracted.text.index("Opening paragraph."), extracted.text.index("Story text inside a table."))
+            self.assertLess(extracted.text.index("Story text inside a table."), extracted.text.index("Closing paragraph."))
+
     def test_source_reflow_preserves_life_chapter_headings(self):
         from app.documents.parser import reflow_source_text
         source = (
