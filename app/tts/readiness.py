@@ -100,7 +100,7 @@ def build_generation_readiness(
                 else "Install / repair the Qwen3-TTS runtime before generation."
             ) if voice_provider == "qwen-character" else
             "Not required for the selected narrator.",
-            True,
+            voice_provider == "qwen-character",
         ),
         ReadinessItem(
             "Output",
