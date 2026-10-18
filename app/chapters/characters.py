@@ -392,16 +392,15 @@ def _speaker_near_quote(
         if re.search(rf"\b{escaped}\s+(?:{SPEAKER_VERBS})\b", local_after, re.I):
             return candidate, 0.92
 
-    # PDF extraction can separate a speaker label from the quote onto
-    # adjacent lines. Prefer an exact known candidate over contextual guessing.
-    adjacent = text[max(0, start - 260):start]
-    adjacent_after = text[end:min(len(text), end + 260)]
-    for candidate in candidates:
-        escaped = re.escape(candidate)
-        if re.search(rf"(?m)^\s*{escaped}\s*$", adjacent, re.I):
-            return candidate, 0.93
-        if re.search(rf"(?m)^\s*{escaped}\s*$", adjacent_after, re.I):
-            return candidate, 0.93
+    # A standalone speaker label belongs to the immediately preceding
+    # non-empty line, not any matching label in a broad window. Searching a
+    # 260-character window also sees labels for later dialogue and can silently
+    # assign this quote to the wrong character.
+    preceding_line = text[:start].rstrip(" \t\r\n").rsplit("\n", 1)[-1].rstrip("\r").strip()
+    if _is_plausible_name(preceding_line):
+        resolved = _resolve_candidate(preceding_line, candidates)
+        if resolved:
+            return resolved, 0.96
 
     # Some light-novel layouts place the character name in nearby narration
     # without a speech verb. Only use this when exactly one known candidate
