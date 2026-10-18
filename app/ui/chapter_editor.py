@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QSizePolicy,
     QToolTip,
+    QScrollArea,
 )
 from app.chapters.detector import Chapter
 from app.chapters.editor import ChapterEditor
