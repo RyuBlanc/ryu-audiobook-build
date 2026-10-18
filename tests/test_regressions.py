@@ -1988,6 +1988,23 @@ More story text here.
         self.assertTrue(chapters)
         self.assertTrue(all(c.text.strip() for c in chapters))
         self.assertEqual([c.number for c in chapters], list(range(1, len(chapters) + 1)))
+    
+    def test_empty_chapter_heading_does_not_leak_into_previous_chapter(self):
+        text = """Life.0
+Opening story text.
+
+Life.1
+
+Life.2
+Second chapter story text.
+"""
+        chapters = detect_chapters(text)
+        self.assertEqual([chapter.title for chapter in chapters], ["Life.0", "Life.2"])
+        self.assertEqual(chapters[0].text, "Opening story text.")
+        self.assertEqual(chapters[1].text, "Second chapter story text.")
+        self.assertNotIn("Life.1", "\\n".join(chapter.text for chapter in chapters))
+        self.assertTrue(all(chapter.text.strip() for chapter in chapters))
+
 
     def test_narration_preprocessing_preserves_source_and_repairs_wrapping(self):
         source = """This is a sentence that was split
