@@ -2668,5 +2668,17 @@ Rias Gremory
         self.assertIn("self._autosave_timer.timeout.connect(self._autosave)", source)
 
 
+    def test_stage5_workflow_rail_scrolls_instead_of_compressing_navigation_steps(self):
+        from pathlib import Path
+
+        source = Path("app/ui/workflow.py").read_text(encoding="utf-8")
+        self.assertIn('workflow_rail.setMinimumWidth(1080)', source)
+        self.assertIn('workflow_scroll.setObjectName("workflowRailScroll")', source)
+        self.assertIn("workflow_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
+        self.assertIn("workflow_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)", source)
+        self.assertIn("self.workflow_step_buttons[key] = button", source)
+        self.assertIn("self._navigate_workflow_step(target)", source)
+
+
 if __name__ == "__main__":
     unittest.main()
