@@ -309,6 +309,41 @@ class RegressionTests(unittest.TestCase):
             self.assertNotIn("\ufeff", extracted.text)
             self.assertIn("The story begins.", extracted.text)
 
+    def test_epub_import_follows_spine_reading_order(self):
+        import types
+        from unittest.mock import patch
+        from app.documents.parser import _extract_epub
+
+        class FakeItem:
+            def __init__(self, item_id, html):
+                self.item_id = item_id
+                self.html = html
+
+            def get_id(self):
+                return self.item_id
+
+            def get_content(self):
+                return self.html.encode("utf-8")
+
+        first = FakeItem("chapter-b", "<html><body>Second in reading order.</body></html>")
+        second = FakeItem("chapter-a", "<html><body>First in reading order.</body></html>")
+        fake_book = types.SimpleNamespace(
+            spine=[("chapter-a", "yes"), ("chapter-b", "yes")]
+        )
+        fake_book.get_items_of_type = lambda item_type: [first, second]
+        fake_epub = types.SimpleNamespace(read_epub=lambda _path: fake_book)
+        fake_ebooklib = types.ModuleType("ebooklib")
+        fake_ebooklib.ITEM_DOCUMENT = 9
+        fake_ebooklib.epub = fake_epub
+
+        with patch.dict("sys.modules", {"ebooklib": fake_ebooklib}):
+            extracted = _extract_epub(Path("fake.epub"))
+
+        self.assertLess(
+            extracted.index("First in reading order."),
+            extracted.index("Second in reading order."),
+        )
+
     def test_source_reflow_preserves_life_chapter_headings(self):
         from app.documents.parser import reflow_source_text
         source = (
