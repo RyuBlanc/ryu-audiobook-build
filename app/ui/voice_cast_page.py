@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtWidgets import (
     QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QListWidget,
-    QListWidgetItem, QPushButton, QVBoxLayout, QWidget, QLineEdit, QTextEdit,
+    QListWidgetItem, QPushButton, QVBoxLayout, QWidget, QLineEdit, QTextEdit, QScrollArea,
 )
 
 from app.chapters.characters import analyze_book
@@ -96,9 +96,21 @@ class VoiceCastPage(QWidget):
         self.profiles = []
         self.analysis_worker: VoiceCastAnalysisWorker | None = None
 
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        scroll = QScrollArea()
+        scroll.setObjectName("voiceCastScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        content = QWidget()
+        root = QVBoxLayout(content)
         root.setContentsMargins(22, 22, 22, 22)
         root.setSpacing(12)
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
         root.addWidget(QLabel("<h1>Voice Cast</h1>"))
 
         intro = QLabel(
