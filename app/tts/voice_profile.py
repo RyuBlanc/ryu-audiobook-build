@@ -294,10 +294,27 @@ def save_profiles(profiles: list[VoiceProfile]) -> None:
         or p.sample_path
         or p.provider not in {"piper", "kokoro"}
     ]
-    profiles_file().write_text(
-        json.dumps([asdict(profile) for profile in persistent], ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    # Replace the profile catalogue atomically. A crash or forced shutdown
+    # during a direct write must not leave voices.json truncated and make
+    # custom voices disappear on the next application launch.
+    destination = profiles_file()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(
+        [asdict(profile) for profile in persistent],
+        ensure_ascii=False,
+        indent=2,
     )
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    try:
+        temporary.write_text(payload, encoding="utf-8")
+        # Verify the temporary file before it can replace the last good copy.
+        written = json.loads(temporary.read_text(encoding="utf-8"))
+        expected = json.loads(payload)
+        if written != expected:
+            raise IOError("Voice profile catalogue verification failed.")
+        temporary.replace(destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def import_reference_audio(source: Path, profile_name: str, minimum_seconds: float = 6.0) -> Path:
