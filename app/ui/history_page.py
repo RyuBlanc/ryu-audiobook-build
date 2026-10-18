@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QHeaderView,
+    QScrollArea,
 )
 
 from app.core.project import Project, list_projects
@@ -57,7 +58,8 @@ class HistoryPage(QWidget):
         self.on_open_generation = on_open_generation
         self._projects_by_folder: dict[str, Project] = {}
 
-        root = QVBoxLayout(self)
+        content = QWidget()
+        root = QVBoxLayout(content)
         root.setContentsMargins(4, 6, 4, 6)
         root.setSpacing(14)
 
@@ -122,6 +124,17 @@ class HistoryPage(QWidget):
         self.status.setObjectName("muted")
         self.status.setWordWrap(True)
         root.addWidget(self.status)
+
+        scroll = QScrollArea(self)
+        scroll.setObjectName("historyScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setWidget(content)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
 
         self.refresh()
 
