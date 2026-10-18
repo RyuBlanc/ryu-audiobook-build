@@ -1831,6 +1831,49 @@ class RegressionTests(unittest.TestCase):
             finally:
                 vp.voices_root = original_root
 
+    def test_qwen_custom_voice_profile_round_trip_preserves_generation_settings(self):
+        import app.tts.voice_profile as vp
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "Voices"
+            original_root = vp.voices_root
+            vp.voices_root = lambda: root
+            try:
+                reference = root / "Custom Hero" / "reference.wav"
+                reference.parent.mkdir(parents=True)
+                reference.write_bytes(b"test reference placeholder")
+                profile = VoiceProfile(
+                    name="Custom Hero Voice",
+                    provider="qwen-character",
+                    voice_id="custom-hero",
+                    sample_path=str(reference),
+                    model_id="base-1.7b",
+                    backend="automatic",
+                    language="English",
+                    authorized=True,
+                    qwen_mode="clone",
+                    qwen_prompt="Warm, steady, cinematic male voice.",
+                    qwen_seed=2468,
+                    reference_text="The journey begins now.",
+                    qwen_anchor_path=str(reference),
+                    qwen_anchor_text="The journey begins now.",
+                    qwen_profile_id="custom-hero-stable-id",
+                )
+                save_profiles([profile])
+                loaded = vp.load_saved_profile("Custom Hero Voice")
+                self.assertIsNotNone(loaded)
+                self.assertEqual(loaded.provider, "qwen-character")
+                self.assertEqual(loaded.qwen_mode, "clone")
+                self.assertEqual(loaded.model_id, "base-1.7b")
+                self.assertEqual(loaded.sample_path, str(reference))
+                self.assertEqual(loaded.reference_text, "The journey begins now.")
+                self.assertEqual(loaded.qwen_anchor_path, str(reference))
+                self.assertEqual(loaded.qwen_anchor_text, "The journey begins now.")
+                self.assertEqual(loaded.qwen_seed, 2468)
+                self.assertEqual(loaded.qwen_profile_id, "custom-hero-stable-id")
+            finally:
+                vp.voices_root = original_root
+
     def test_custom_reference_audio_is_normalized_for_cloning(self):
         with tempfile.TemporaryDirectory() as temp:
             import app.tts.voice_profile as vp
