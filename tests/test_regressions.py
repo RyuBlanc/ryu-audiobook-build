@@ -2614,6 +2614,15 @@ Rias Gremory
         self.assertIn("candidate = detected_by_number.get(int(chapter.number))", repair)
         self.assertIn('if str(chapter.text or "").strip():', repair)
 
+    def test_generation_progress_range_uses_only_chapters_sent_to_manager(self):
+        source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        start = source.index("def start(self)")
+        end = source.index("def toggle_generation_pause", start)
+        generation_start = source[start:end]
+        self.assertIn("generation_chapters, skipped_empty_chapters = partition_chapters_by_body(self.chapters)", generation_start)
+        self.assertIn("self.progress.setRange(0, len(generation_chapters))", generation_start)
+        self.assertNotIn("self.progress.setRange(0, len(self.chapters))", generation_start)
+
     def test_generation_readiness_allows_valid_chapters_and_nonblocking_empty_chapters(self):
         from app.chapters.detector import Chapter
         from app.tts.readiness import build_generation_readiness, partition_chapters_by_body

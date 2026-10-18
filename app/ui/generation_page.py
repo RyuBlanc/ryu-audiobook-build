@@ -2807,7 +2807,7 @@ class GenerationPage(QWidget):
             })
             save_state(self.project_folder, state)
 
-        self.progress.setRange(0, len(self.chapters))
+        self.progress.setRange(0, len(generation_chapters))
         self.progress.setValue(0)
         self.last_progress_value = 0
         self.initial_progress_value = 0
