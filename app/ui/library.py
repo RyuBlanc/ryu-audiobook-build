@@ -6,7 +6,7 @@ from PySide6.QtCore import QUrl, QSize, Qt
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QLabel, QListWidget, QListWidgetItem, QPushButton, QHBoxLayout,
-    QVBoxLayout, QWidget, QMessageBox, QLineEdit, QComboBox, QGroupBox,
+    QVBoxLayout, QWidget, QMessageBox, QLineEdit, QComboBox, QGroupBox, QScrollArea,
 )
 
 from app.core.project import list_projects, delete_project
@@ -74,7 +74,8 @@ class LibraryPage(QWidget):
         self.on_import = on_import
         self.projects = []
 
-        layout = QVBoxLayout(self)
+        content = QWidget()
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(4, 6, 4, 6)
         layout.setSpacing(14)
 
@@ -184,6 +185,17 @@ class LibraryPage(QWidget):
         self.open_button.clicked.connect(self.open_selected)
         self.delete_button.clicked.connect(self.delete_selected)
         self.folder_button.clicked.connect(self.open_selected_folder)
+
+        scroll = QScrollArea(self)
+        scroll.setObjectName("libraryScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setWidget(content)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
 
         self.refresh()
 
