@@ -2696,6 +2696,19 @@ Rias Gremory
         self.assertIn("self.assign_button.clicked.connect(self.assign_voice)", source)
         self.assertIn("self.unassign_button.clicked.connect(self.unassign_voice)", source)
 
+    def test_stage5_hardware_studio_scrolls_and_preserves_benchmark_actions(self):
+        from pathlib import Path
+
+        source = Path("app/ui/hardware_page.py").read_text(encoding="utf-8")
+        self.assertIn("QScrollArea", source)
+        self.assertIn('scroll.setObjectName("hardwareScroll")', source)
+        self.assertIn("scroll.setWidgetResizable(True)", source)
+        self.assertIn("scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)", source)
+        self.assertIn("scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
+        self.assertIn("self.benchmark_button.clicked.connect(self.run_benchmark)", source)
+        self.assertIn("self.benchmark_thread.start()", source)
+        self.assertIn("self.benchmark_thread.finished_result.connect(self._benchmark_finished)", source)
+
     def test_stage5_generation_history_scrolls_and_preserves_project_actions(self):
         from pathlib import Path
 
