@@ -267,7 +267,7 @@ def assemble_m4b(
     """
     if not chapter_dirs:
         raise ValueError("No chapters were supplied.")
-    audio_bitrate = normalize_audio_bitrate(bitrate)
+    audio_bitrate = _encoding_audio_bitrate(bitrate)
 
     chapters: list[Path] = []
     for index, directory in enumerate(chapter_dirs, start=1):
