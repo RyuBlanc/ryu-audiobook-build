@@ -2696,6 +2696,20 @@ Rias Gremory
         self.assertIn("self.assign_button.clicked.connect(self.assign_voice)", source)
         self.assertIn("self.unassign_button.clicked.connect(self.unassign_voice)", source)
 
+    def test_stage5_settings_studio_scrolls_without_losing_preferences_or_storage_actions(self):
+        from pathlib import Path
+
+        source = Path("app/ui/settings_page.py").read_text(encoding="utf-8")
+        self.assertIn("QScrollArea", source)
+        self.assertIn('scroll.setObjectName("settingsScroll")', source)
+        self.assertIn("scroll.setWidgetResizable(True)", source)
+        self.assertIn("scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)", source)
+        self.assertIn("scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
+        self.assertIn("self.save_button.clicked.connect(self.save_settings)", source)
+        self.assertIn("self.default_bitrate", source)
+        self.assertIn("self.open_log_button.clicked.connect(self.open_application_log)", source)
+        self.assertIn('("Open Voice Profiles", voices_root())', source)
+
     def test_stage5_mini_player_keeps_playback_controls_in_compact_windows(self):
         from pathlib import Path
 
