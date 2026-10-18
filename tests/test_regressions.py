@@ -2654,5 +2654,19 @@ Rias Gremory
         self.assertIn("self.create_button.clicked.connect(self.create_project)", source)
 
 
+    def test_stage5_chapter_studio_scrolls_page_controls_on_short_displays(self):
+        from pathlib import Path
+
+        source = Path("app/ui/chapter_editor.py").read_text(encoding="utf-8")
+        self.assertIn("QScrollArea", source)
+        self.assertIn('scroll.setObjectName("chapterEditorScroll")', source)
+        self.assertIn("scroll.setWidgetResizable(True)", source)
+        self.assertIn("scroll.setHorizontalScrollBarPolicy", source)
+        # Keep core editor actions and the chapter/text workspace in the scroll content.
+        self.assertIn('QPushButton("Re-detect Chapters")', source)
+        self.assertIn('QLabel("Chapter Text")', source)
+        self.assertIn("self._autosave_timer.timeout.connect(self._autosave)", source)
+
+
 if __name__ == "__main__":
     unittest.main()
