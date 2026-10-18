@@ -578,6 +578,11 @@ QScrollArea#dashboardScroll > QWidget > QWidget {
     background: #090A0F;
     border: 0;
 }
+QScrollArea#importScroll, QScrollArea#importScroll > QWidget,
+QScrollArea#importScroll > QWidget > QWidget {
+    background: #090A0F;
+    border: 0;
+}
 QLabel#pageHeading {
     color: #F5F5F6;
     font-size: 19pt;
