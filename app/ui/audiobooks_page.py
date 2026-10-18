@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSlider,
     QVBoxLayout,
+    QScrollArea,
     QWidget,
 )
 from PySide6.QtGui import QDesktopServices
@@ -91,9 +92,21 @@ class AudiobooksPage(QWidget):
         self._projects_by_folder: dict[str, Project] = {}
         self._active_path: Path | None = None
 
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        scroll = QScrollArea()
+        scroll.setObjectName("audiobooksScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        content = QWidget()
+        root = QVBoxLayout(content)
         root.setContentsMargins(4, 6, 4, 6)
         root.setSpacing(14)
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
 
         header = QHBoxLayout()
         title_col = QVBoxLayout()
