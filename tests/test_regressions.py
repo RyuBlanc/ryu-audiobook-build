@@ -1801,10 +1801,15 @@ class RegressionTests(unittest.TestCase):
             self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
 
     def test_audio_bitrate_range_is_enforced(self):
-        from app.audio.assembler import normalize_audio_bitrate
+        from app.audio.assembler import _encoding_audio_bitrate, normalize_audio_bitrate
         self.assertEqual(normalize_audio_bitrate(None), "256k")
         self.assertEqual(normalize_audio_bitrate(128), "128k")
         self.assertEqual(normalize_audio_bitrate("320 kbps"), "320k")
+        # The lowest requested target uses an encoding margin so final AAC
+        # remains above the product's hard 128 kbps minimum.
+        self.assertEqual(_encoding_audio_bitrate(128), "160k")
+        self.assertEqual(_encoding_audio_bitrate(160), "160k")
+        self.assertEqual(_encoding_audio_bitrate(256), "256k")
         with self.assertRaises(ValueError):
             normalize_audio_bitrate(127)
         with self.assertRaises(ValueError):
