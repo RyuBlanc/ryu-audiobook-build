@@ -2643,6 +2643,16 @@ Rias Gremory
         self.assertIn("QPushButton#workflowStep:checked", source)
         self.assertIn("QProgressBar::chunk", source)
 
+    def test_stage5_import_studio_uses_scroll_area_to_prevent_clipped_controls(self):
+        from pathlib import Path
+
+        source = Path("app/ui/import_page.py").read_text(encoding="utf-8")
+        self.assertIn("QScrollArea", source)
+        self.assertIn('scroll.setObjectName("importScroll")', source)
+        self.assertIn("scroll.setWidgetResizable(True)", source)
+        self.assertIn("scroll.setHorizontalScrollBarPolicy", source)
+        self.assertIn("self.create_button.clicked.connect(self.create_project)", source)
+
 
 if __name__ == "__main__":
     unittest.main()
