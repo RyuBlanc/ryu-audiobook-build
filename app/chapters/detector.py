@@ -52,33 +52,26 @@ def detect_chapters(text: str) -> list[Chapter]:
     if not markers:
         return [Chapter(1, "Full Book", text.strip())] if text.strip() else []
 
-    valid_markers: list[tuple[int, str]] = []
+    chapters: list[Chapter] = []
+    preamble = "\n".join(lines[:markers[0][0]]).strip()
+
+    # Use every detected marker to establish boundaries. Filtering empty
+    # chapters before calculating boundaries can accidentally pull an empty
+    # chapter heading into the preceding chapter's narration text.
     for position, (start, title) in enumerate(markers):
         end = markers[position + 1][0] if position + 1 < len(markers) else len(lines)
-        body = "\n".join(lines[start + 1:end]).strip()
-        if position == 0:
-            preamble = "\n".join(lines[:start]).strip()
-            if preamble:
-                body = f"{preamble}\n\n{body}".strip()
-        if body:
-            valid_markers.append((start, title))
-
-    if not valid_markers:
-        return [Chapter(1, "Full Book", text.strip())] if text.strip() else []
-
-    chapters: list[Chapter] = []
-    preamble = "\n".join(lines[: valid_markers[0][0]]).strip()
-
-    for position, (start, title) in enumerate(valid_markers):
-        end = valid_markers[position + 1][0] if position + 1 < len(valid_markers) else len(lines)
         body = "\n".join(lines[start + 1:end]).strip()
         if position == 0 and preamble:
             body = f"{preamble}\n\n{body}".strip()
         if not body:
+            # Empty heading records are omitted, but their boundaries still
+            # remain respected so headings never leak into neighboring bodies.
             continue
         chapters.append(Chapter(len(chapters) + 1, title, body))
 
-    return chapters
+    if chapters:
+        return chapters
+    return [Chapter(1, "Full Book", text.strip())] if text.strip() else []
 
 
 def _heading_title(line: str) -> str | None:
