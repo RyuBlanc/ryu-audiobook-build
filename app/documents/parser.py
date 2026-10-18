@@ -265,10 +265,29 @@ def _extract_epub(path: Path) -> str:
 
 def _extract_docx(path: Path) -> str:
     from docx import Document
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+    from docx.oxml.text.paragraph import CT_P
+    from docx.oxml.table import CT_Tbl
 
     document = Document(path)
-    return "\n\n".join(p.text for p in document.paragraphs if p.text.strip())
+    parts = []
 
+    # Walk document body blocks in their original order. Some books place
+    # story text inside one-cell tables, so reading paragraphs alone can
+    # silently omit those sections.
+    for block in document.element.body.iterchildren():
+        if isinstance(block, CT_P):
+            paragraph = Paragraph(block, document)
+            if paragraph.text.strip():
+                parts.append(paragraph.text)
+        elif isinstance(block, CT_Tbl):
+            table = Table(block, document)
+            for row in table.rows:
+                cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                if cells:
+                    parts.append(" ".join(cells))
+    return "\n\n".join(parts)
 
 def remove_page_noise(text: str) -> str:
     kept = []
