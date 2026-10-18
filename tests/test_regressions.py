@@ -2668,6 +2668,18 @@ Rias Gremory
         self.assertIn("self._autosave_timer.timeout.connect(self._autosave)", source)
 
 
+    def test_stage5_mini_player_keeps_playback_controls_in_compact_windows(self):
+        from pathlib import Path
+
+        source = Path("app/ui/workflow.py").read_text(encoding="utf-8")
+        self.assertIn("compact_player = width < 1080", source)
+        self.assertIn("self.mini_title.setVisible(not compact_player)", source)
+        self.assertIn("self.mini_position.setVisible(not compact_player)", source)
+        self.assertIn("self.mini_duration.setVisible(not compact_player)", source)
+        self.assertIn("self.mini_play_button.clicked.connect(self._toggle_mini_playback)", source)
+        self.assertIn("self.mini_timeline.sliderMoved.connect(self._seek_mini_player)", source)
+        self.assertIn("self.mini_open_button.clicked.connect(lambda: self.select_section(\"Audiobooks\"))", source)
+
     def test_stage5_header_adapts_to_compact_window_widths(self):
         from pathlib import Path
 
