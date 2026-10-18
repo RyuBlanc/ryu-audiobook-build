@@ -46,6 +46,20 @@ def normalize_audio_bitrate(bitrate: int | str | None) -> str:
     return f"{kbps}k"
 
 
+def _encoding_audio_bitrate(bitrate: int | str | None) -> str:
+    """Choose an encoder target that reliably clears the 128 kbps output floor.
+
+    The AAC encoder can report a stream below a 128k target for short/simple
+    test audio. Keep the user-facing supported range unchanged, but use a
+    160k encoder target for a 128k request so the finished M4B retains margin
+    above the required minimum after AAC/container overhead.
+    """
+    requested = normalize_audio_bitrate(bitrate)
+    if requested == "128k":
+        return "160k"
+    return requested
+
+
 def ffmpeg_path() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
@@ -97,7 +111,7 @@ def assemble_chapter(
         raise ValueError(f"No audio chunks found for {chapter_dir.name}")
     output = chapter_dir / "chapter.m4a"
     concat_file = chapter_dir / "concat.txt"
-    audio_bitrate = normalize_audio_bitrate(bitrate)
+    audio_bitrate = _encoding_audio_bitrate(bitrate)
 
     # Reuse a previously assembled chapter only when its WAV chunks are newer
     # than the M4A. Existing chapters from the old 64k encoder are deliberately
