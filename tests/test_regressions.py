@@ -2668,6 +2668,16 @@ Rias Gremory
         self.assertIn("self._autosave_timer.timeout.connect(self._autosave)", source)
 
 
+    def test_stage5_header_adapts_to_compact_window_widths(self):
+        from pathlib import Path
+
+        source = Path("app/ui/workflow.py").read_text(encoding="utf-8")
+        self.assertIn("def resizeEvent(self, event)", source)
+        self.assertIn("compact_header = width < 1240", source)
+        self.assertIn("self.project_label.setVisible(not compact_header)", source)
+        self.assertIn("self.global_search.setMaximumWidth(180 if width < 1400 else 250)", source)
+        self.assertIn("self.global_search.returnPressed.connect(self._search_library)", source)
+
     def test_stage5_workflow_rail_scrolls_instead_of_compressing_navigation_steps(self):
         from pathlib import Path
 
