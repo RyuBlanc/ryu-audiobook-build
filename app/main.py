@@ -568,6 +568,166 @@ QLabel#pageHeading {
 QLabel#pageSubheading {
     line-height: 1.35;
 }
+
+/* Stage 5.2 — bring the working desktop pages closer to the approved HTML. */
+QWidget#studioMainPanel {
+    background: #090A0F;
+}
+QScrollArea#dashboardScroll, QScrollArea#dashboardScroll > QWidget,
+QScrollArea#dashboardScroll > QWidget > QWidget {
+    background: #090A0F;
+    border: 0;
+}
+QLabel#pageHeading {
+    color: #F5F5F6;
+    font-size: 19pt;
+    font-weight: 700;
+    padding-bottom: 1px;
+}
+QLabel#pageSubheading {
+    color: #A5ACB8;
+    font-size: 9pt;
+}
+QLabel#sectionTitle {
+    color: #F5F5F6;
+    font-size: 13pt;
+    font-weight: 700;
+}
+QLabel#muted {
+    color: #A5ACB8;
+}
+QGroupBox {
+    background: #141821;
+    border: 1px solid #282E38;
+    border-radius: 14px;
+    margin-top: 16px;
+    padding: 12px;
+    font-weight: 600;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 14px;
+    padding: 0 7px;
+    color: #D6B06A;
+}
+QFrame#importDropZone {
+    background: #141821;
+    border: 1px dashed #353C49;
+    border-radius: 18px;
+}
+QFrame#importDropZone[dragging="true"] {
+    background: #28121C;
+    border: 2px solid #D4375D;
+}
+QWidget#dashboardMetric, QWidget#currentProjectCard {
+    background: #141821;
+    border: 1px solid #282E38;
+    border-radius: 14px;
+}
+QGroupBox#dashboardContinueCard {
+    background: #141821;
+    border: 1px solid #353C49;
+    border-radius: 18px;
+}
+QLabel#dashboardMetricLabel {
+    color: #D6B06A;
+    font-size: 8pt;
+    font-weight: 700;
+}
+QLabel#dashboardMetricValue {
+    color: #F5F5F6;
+    font-size: 22pt;
+    font-weight: 700;
+}
+QPushButton#primary {
+    border-radius: 10px;
+    min-height: 22px;
+    padding: 10px 18px;
+}
+QPushButton#shellIconButton {
+    border-radius: 11px;
+    min-height: 22px;
+}
+QPushButton#workflowStep {
+    border-radius: 12px;
+    min-height: 22px;
+    padding: 7px 9px;
+}
+QPushButton#workflowStep:checked {
+    color: #FFFFFF;
+    background: #31121F;
+    border: 1px solid #B21F3F;
+}
+QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox, QDoubleSpinBox,
+QDateEdit, QTimeEdit, QListWidget, QTableWidget, QTreeWidget {
+    border-radius: 10px;
+    padding: 8px 10px;
+    selection-background-color: #B21F3F;
+    selection-color: #FFFFFF;
+}
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus,
+QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus, QTimeEdit:focus,
+QListWidget:focus, QTableWidget:focus, QTreeWidget:focus {
+    border: 1px solid #D4375D;
+}
+QComboBox QAbstractItemView {
+    background: #141821;
+    color: #F5F5F6;
+    border: 1px solid #353C49;
+    selection-background-color: #31121F;
+    selection-color: #FFFFFF;
+    padding: 5px;
+}
+QTableWidget, QTreeWidget {
+    gridline-color: #282E38;
+    alternate-background-color: #0F131A;
+}
+QTableWidget::item, QTreeWidget::item {
+    padding: 5px;
+}
+QMenu {
+    background: #141821;
+    color: #F5F5F6;
+    border: 1px solid #353C49;
+    padding: 5px;
+}
+QMenu::item {
+    padding: 7px 24px 7px 12px;
+    border-radius: 6px;
+}
+QMenu::item:selected {
+    background: #28121C;
+    color: #FFFFFF;
+}
+QProgressBar {
+    background: #0F131A;
+    border: 1px solid #282E38;
+    border-radius: 7px;
+    min-height: 12px;
+    text-align: center;
+}
+QProgressBar::chunk {
+    background: #B21F3F;
+    border-radius: 5px;
+}
+QScrollBar:vertical {
+    background: #101014;
+    width: 10px;
+    margin: 2px;
+}
+QScrollBar::handle:vertical {
+    background: #3A3442;
+    border-radius: 5px;
+    min-height: 30px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #A92B4C;
+}
+QPushButton:disabled, QToolButton:disabled {
+    color: #706977;
+    background: #14131A;
+    border-color: #24212B;
+}
 """
 
 def main() -> int:
