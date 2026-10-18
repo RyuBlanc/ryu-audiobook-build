@@ -1798,6 +1798,39 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("320", source)
         self.assertIn("audio_bitrate", source)
 
+    def test_voice_profile_catalogue_write_is_atomic_and_preserves_last_good_copy(self):
+        from unittest.mock import patch
+        import app.tts.voice_profile as vp
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "Voices"
+            original_root = vp.voices_root
+            vp.voices_root = lambda: root
+            try:
+                destination = root / "voices.json"
+                root.mkdir(parents=True)
+                previous = '[{"name":"Last Good Voice","provider":"chatterbox","voice_id":"reference"}]'
+                destination.write_text(previous, encoding="utf-8")
+                profile = VoiceProfile(
+                    name="New Custom Voice",
+                    provider="chatterbox",
+                    voice_id="reference-new",
+                    sample_path=str(root / "reference.wav"),
+                    authorized=True,
+                )
+                with patch.object(Path, "replace", side_effect=OSError("simulated replace failure")):
+                    with self.assertRaises(OSError):
+                        save_profiles([profile])
+                self.assertEqual(destination.read_text(encoding="utf-8"), previous)
+                self.assertFalse(destination.with_suffix(".json.tmp").exists())
+
+                save_profiles([profile])
+                saved = json.loads(destination.read_text(encoding="utf-8"))
+                self.assertEqual(saved[0]["name"], "New Custom Voice")
+                self.assertFalse(destination.with_suffix(".json.tmp").exists())
+            finally:
+                vp.voices_root = original_root
+
     def test_custom_reference_audio_is_normalized_for_cloning(self):
         with tempfile.TemporaryDirectory() as temp:
             import app.tts.voice_profile as vp
