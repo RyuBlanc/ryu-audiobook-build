@@ -2696,6 +2696,21 @@ Rias Gremory
         self.assertIn("self.assign_button.clicked.connect(self.assign_voice)", source)
         self.assertIn("self.unassign_button.clicked.connect(self.unassign_voice)", source)
 
+    def test_stage5_audiobook_library_scrolls_without_losing_collection_actions(self):
+        from pathlib import Path
+
+        source = Path("app/ui/library.py").read_text(encoding="utf-8")
+        self.assertIn("QScrollArea", source)
+        self.assertIn('scroll.setObjectName("libraryScroll")', source)
+        self.assertIn("scroll.setWidgetResizable(True)", source)
+        self.assertIn("scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)", source)
+        self.assertIn("scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
+        self.assertIn("self.grid_button.clicked.connect", source)
+        self.assertIn("self.list_button.clicked.connect", source)
+        self.assertIn("self.open_button.clicked.connect(self.open_selected)", source)
+        self.assertIn("self.delete_button.clicked.connect(self.delete_selected)", source)
+        self.assertIn("self.folder_button.clicked.connect(self.open_selected_folder)", source)
+
     def test_stage5_settings_studio_scrolls_without_losing_preferences_or_storage_actions(self):
         from pathlib import Path
 
