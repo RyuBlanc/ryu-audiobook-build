@@ -87,12 +87,22 @@ def analyze_book(chapters: list[Chapter]) -> CharacterAnalysis:
     last_speaker: str | None = None
     assigned_dialogue = 0
 
-    manual_speakers = {
-        str(item.get("speaker", "")).strip()
-        for chapter in chapters
-        for item in getattr(chapter, "dialogue_assignments", [])
-        if str(item.get("speaker", "")).strip()
-    }
+    # Manual Voice Cast assignments may use either the legacy "speaker"
+    # field or the newer multi-speaker "speakers" list. Include both so
+    # previously assigned characters are not lost during re-analysis.
+    manual_speakers: set[str] = set()
+    for chapter in chapters:
+        for assignment in getattr(chapter, "dialogue_assignments", []) or []:
+            if not isinstance(assignment, dict):
+                continue
+            raw_speakers = assignment.get("speakers")
+            if isinstance(raw_speakers, (list, tuple)):
+                manual_speakers.update(
+                    str(value).strip() for value in raw_speakers if str(value).strip()
+                )
+            legacy_speaker = str(assignment.get("speaker") or "").strip()
+            if legacy_speaker:
+                manual_speakers.add(legacy_speaker)
     for speaker in manual_speakers:
         if _is_plausible_name(speaker):
             canonical.append(speaker)

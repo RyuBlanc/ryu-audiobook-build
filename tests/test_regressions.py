@@ -100,6 +100,24 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(by_name["悠真"].dialogue_count, 1)
         self.assertEqual(analysis.dialogue_total, 2)
 
+    def test_character_analysis_preserves_multi_speaker_manual_assignments(self):
+        chapter = Chapter(
+            number=1,
+            title="Multi-speaker assignment",
+            text='“We are ready.”',
+            dialogue_assignments=[{
+                "start": 0,
+                "end": 15,
+                "text": "We are ready.",
+                "speakers": ["Rias Gremory", "Akeno Himejima"],
+                "multi_speaker_mode": "chorus",
+            }],
+        )
+        analysis = analyze_book([chapter])
+        names = {item.name for item in analysis.characters}
+        self.assertIn("Rias Gremory", names)
+        self.assertIn("Akeno Himejima", names)
+
     def test_pronunciation_candidates_reject_ordinary_english(self):
         self.assertTrue(is_common_english_phrase("All"))
         self.assertTrue(is_common_english_phrase("Confirmed"))
@@ -2586,6 +2604,15 @@ Rias Gremory
         self.assertIn('"dialogue_assignments"] = getattr(current, "dialogue_assignments", [])', repair)
         self.assertIn("temp_file.replace(chapters_file)", repair)
         self.assertNotIn("self.chapters[:] = detected", repair)
+
+    def test_empty_chapter_repair_has_chapter_number_fallback(self):
+        source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        start = source.index("def _repair_empty_chapters_from_source")
+        end = source.index("def _refresh_resume_state", start)
+        repair = source[start:end]
+        self.assertIn("detected_by_number", repair)
+        self.assertIn("candidate = detected_by_number.get(int(chapter.number))", repair)
+        self.assertIn('if str(chapter.text or "").strip():', repair)
 
     def test_generation_readiness_allows_valid_chapters_and_nonblocking_empty_chapters(self):
         from app.chapters.detector import Chapter

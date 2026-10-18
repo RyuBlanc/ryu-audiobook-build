@@ -2528,11 +2528,22 @@ class GenerationPage(QWidget):
                 for chapter in detected
                 if normalize_title(chapter.title) and str(chapter.text or "").strip()
             }
+            detected_by_number = {
+                int(chapter.number): chapter
+                for chapter in detected
+                if str(chapter.text or "").strip()
+            }
             changed = False
             for chapter in self.chapters:
                 if str(chapter.text or "").strip():
                     continue
                 candidate = detected_by_title.get(normalize_title(chapter.title))
+                # Source extraction sometimes normalizes or renumbers headings
+                # differently from the saved project. If the title does not
+                # match, use the corresponding chapter number as a conservative
+                # fallback, but only for an empty target chapter.
+                if candidate is None:
+                    candidate = detected_by_number.get(int(chapter.number))
                 if candidate is None and chapter.number == 1 and len(self.chapters) == 1 and len(detected) == 1:
                     candidate = detected[0]
                 if candidate is None or not str(candidate.text or "").strip():
