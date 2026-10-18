@@ -137,7 +137,23 @@ class ChapterEditorPage(QWidget):
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.setInterval(900)
         self._autosave_timer.timeout.connect(self._autosave)
-        root = QVBoxLayout(self)
+        # Keep the complete editor reachable on short displays and when the
+        # user's interface scale is increased. The chapter list and text editor
+        # retain their own internal scrolling; this scrolls the page controls.
+        page_layout = QVBoxLayout(self)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
+        scroll = QScrollArea(self)
+        scroll.setObjectName("chapterEditorScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        root = QVBoxLayout(content)
+        root.setContentsMargins(4, 6, 8, 14)
+        root.setSpacing(12)
+        scroll.setWidget(content)
+        page_layout.addWidget(scroll)
         root.addWidget(QLabel("Chapter Editor"))
 
         primary = QHBoxLayout()
