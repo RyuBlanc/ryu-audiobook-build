@@ -2646,14 +2646,12 @@ Rias Gremory
         import app.tts.qwen_character_runtime as runtime
 
         custom = SimpleNamespace(qwen_mode="custom", model_id="auto")
-        with patch.object(runtime, "best_custom_kind", return_value="custom-0.6b"), \\
-             patch.object(runtime, "model_installed", side_effect=lambda kind: kind == "custom-0.6b"):
+        with patch.object(runtime, "best_custom_kind", return_value="custom-0.6b"), patch.object(runtime, "model_installed", side_effect=lambda kind: kind == "custom-0.6b"):
             self.assertEqual(runtime.required_models_for_profile(custom), ("custom-0.6b",))
             self.assertEqual(runtime.profile_model_readiness(custom)[0], True)
 
         design = SimpleNamespace(qwen_mode="design", model_id="auto")
-        with patch.object(runtime, "best_long_form_clone_kind", return_value="base-0.6b"), \\
-             patch.object(runtime, "model_installed", return_value=False):
+        with patch.object(runtime, "best_long_form_clone_kind", return_value="base-0.6b"), patch.object(runtime, "model_installed", return_value=False):
             ready, detail = runtime.profile_model_readiness(design)
             self.assertFalse(ready)
             self.assertIn("base-0.6b", detail)
