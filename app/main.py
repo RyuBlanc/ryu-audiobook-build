@@ -493,6 +493,81 @@ QPushButton#workflowStep:checked {
 QPushButton#workflowStep:focus {
     border: 1px solid #D4375D;
 }
+
+/* Dragon Studio Stage 5: consistent, high-contrast control surfaces. */
+QWidget#studioMainPanel, QStackedWidget#studioStack, QScrollArea,
+QScrollArea > QWidget > QWidget {
+    background: #090A0F;
+    border: 0;
+}
+QFrame[card="true"], QWidget[card="true"], QGroupBox[card="true"] {
+    background: #141821;
+    border: 1px solid #282E38;
+    border-radius: 14px;
+}
+QLabel#eyebrow, QLabel[role="eyebrow"] {
+    color: #D6B06A;
+    font-size: 8pt;
+    font-weight: 700;
+}
+QLabel#muted, QLabel[role="muted"] {
+    color: #A5ACB8;
+}
+QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox, QDoubleSpinBox,
+QDateEdit, QTimeEdit, QListWidget, QTableWidget, QTreeWidget {
+    min-height: 22px;
+}
+QLineEdit:hover, QTextEdit:hover, QPlainTextEdit:hover, QComboBox:hover,
+QSpinBox:hover, QDoubleSpinBox:hover, QDateEdit:hover, QTimeEdit:hover {
+    border-color: #353C49;
+}
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus,
+QSpinBox:focus, QDoubleSpinBox:focus, QDateEdit:focus, QTimeEdit:focus,
+QListWidget:focus, QTableWidget:focus, QTreeWidget:focus {
+    border: 1px solid #D4375D;
+}
+QComboBox::drop-down, QDateEdit::drop-down, QTimeEdit::drop-down {
+    border: 0;
+    border-left: 1px solid #282E38;
+    width: 26px;
+}
+QTableWidget, QTreeWidget {
+    gridline-color: #282E38;
+    alternate-background-color: #0F131A;
+    selection-background-color: #31121F;
+    selection-color: #F5F5F6;
+}
+QTableWidget::item, QTreeWidget::item {
+    padding: 5px;
+}
+QMenu {
+    background: #141821;
+    color: #F5F5F6;
+    border: 1px solid #353C49;
+    padding: 5px;
+}
+QMenu::item {
+    padding: 7px 24px 7px 12px;
+    border-radius: 6px;
+}
+QMenu::item:selected {
+    background: #28121C;
+    color: #FFFFFF;
+}
+QToolButton:pressed, QCheckBox:pressed {
+    background: #28121C;
+}
+QPushButton#primary:disabled {
+    color: #A5ACB8;
+    background: #282E38;
+    border-color: #353C49;
+}
+QLabel#pageHeading {
+    letter-spacing: -0.4px;
+}
+QLabel#pageSubheading {
+    line-height: 1.35;
+}
 """
 
 def main() -> int:
