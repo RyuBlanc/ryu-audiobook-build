@@ -48,6 +48,7 @@ def build_generation_readiness(
     custom_runtime_ready: bool = True,
     assignments: dict | None = None,
     cover_selected: bool = False,
+    qwen_runtime_ready: bool = True,
 ) -> GenerationReadiness:
     chapters = list(chapters or [])
     valid_chapters, empty_chapters = partition_chapters_by_body(chapters)
@@ -88,6 +89,17 @@ def build_generation_readiness(
                 else "Not required for the selected narrator."
             ) if voice_provider != "chatterbox" or custom_runtime_ready else
             "Install / repair the Custom Voice Engine before generation.",
+            True,
+        ),
+        ReadinessItem(
+            "Qwen3-TTS runtime",
+            voice_provider != "qwen-character" or qwen_runtime_ready,
+            (
+                "Qwen3-TTS runtime is ready."
+                if qwen_runtime_ready
+                else "Install / repair the Qwen3-TTS runtime before generation."
+            ) if voice_provider == "qwen-character" else
+            "Not required for the selected narrator.",
             True,
         ),
         ReadinessItem(
