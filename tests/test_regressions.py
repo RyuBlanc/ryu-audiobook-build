@@ -2108,11 +2108,11 @@ Issei Hyoudou—that’s my name, but my friends and family just call me Issei.
             number=1,
             title="Standalone speaker labels",
             text=(
-                "Rias Gremory\\n"
-                "「We should leave now.」\\n"
-                "Akeno Himejima\\n"
-                "“Of course, Rias.”\\n"
-                "リアス\\n"
+                "Rias Gremory\n"
+                "「We should leave now.」\n"
+                "Akeno Himejima\n"
+                "“Of course, Rias.”\n"
+                "リアス\n"
                 "「わかったわ。」"
             ),
         )
@@ -2126,6 +2126,21 @@ Issei Hyoudou—that’s my name, but my friends and family just call me Issei.
         self.assertEqual(by_name["Rias Gremory"].dialogue_count, 1)
         self.assertEqual(by_name["Akeno Himejima"].dialogue_count, 1)
         self.assertEqual(by_name["リアス"].dialogue_count, 1)
+
+    def test_dialogue_assignment_fast_path_suggests_standalone_speaker_labels(self):
+        text = (
+            "Rias Gremory\n"
+            "「We should leave now.」\n"
+            "Akeno Himejima\n"
+            "“Of course, Rias.”"
+        )
+        chapter = Chapter(1, "Standalone speaker label assignment", text)
+        start = text.index("「")
+        end = text.index("」", start) + 1
+        segment = dialogue_segment_for_selection(chapter, start, end)
+        self.assertIsNotNone(segment)
+        self.assertEqual(segment.suggested_speaker, "Rias Gremory")
+        self.assertGreaterEqual(segment.confidence, 0.90)
 
     def test_light_novel_em_dash_dialogue_is_detected(self):
         text = """Chapter 1
