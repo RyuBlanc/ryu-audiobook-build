@@ -2640,6 +2640,54 @@ Rias Gremory
         self.assertFalse(item.blocking)
         self.assertIn("Not required", item.detail)
 
+    def test_qwen_profile_model_readiness_requires_selected_model_and_design_base(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        import app.tts.qwen_character_runtime as runtime
+
+        custom = SimpleNamespace(qwen_mode="custom", model_id="auto")
+        with patch.object(runtime, "best_custom_kind", return_value="custom-0.6b"), \\
+             patch.object(runtime, "model_installed", side_effect=lambda kind: kind == "custom-0.6b"):
+            self.assertEqual(runtime.required_models_for_profile(custom), ("custom-0.6b",))
+            self.assertEqual(runtime.profile_model_readiness(custom)[0], True)
+
+        design = SimpleNamespace(qwen_mode="design", model_id="auto")
+        with patch.object(runtime, "best_long_form_clone_kind", return_value="base-0.6b"), \\
+             patch.object(runtime, "model_installed", side_effect=lambda kind: kind == "design-1.7b"):
+            ready, detail = runtime.profile_model_readiness(design)
+            self.assertFalse(ready)
+            self.assertIn("base-0.6b", detail)
+            self.assertIn("design-1.7b", detail)
+
+    def test_generation_readiness_blocks_missing_qwen_model_only_for_qwen(self):
+        from app.chapters.detector import Chapter
+        from app.tts.readiness import build_generation_readiness
+
+        chapter = Chapter(1, "Chapter One", "Narration text.")
+        readiness = build_generation_readiness(
+            [chapter], "Qwen Character", "qwen-character", "C:/Books/Book.m4b",
+            qwen_runtime_ready=True,
+            qwen_models_ready=False,
+            qwen_model_detail="Missing custom-0.6b model files.",
+        )
+        self.assertFalse(readiness.ready)
+        item = next(item for item in readiness.items if item.label == "Qwen voice model")
+        self.assertFalse(item.ok)
+        self.assertTrue(item.blocking)
+        self.assertIn("custom-0.6b", item.detail)
+
+        other = build_generation_readiness(
+            [chapter], "Piper Narrator", "piper", "C:/Books/Book.m4b",
+            qwen_runtime_ready=False,
+            qwen_models_ready=False,
+            qwen_model_detail="Missing custom-0.6b model files.",
+        )
+        self.assertTrue(other.ready)
+        item = next(item for item in other.items if item.label == "Qwen voice model")
+        self.assertTrue(item.ok)
+        self.assertFalse(item.blocking)
+        self.assertIn("Not required", item.detail)
+
     def test_generation_readiness_blocks_when_every_chapter_is_empty(self):
         from app.chapters.detector import Chapter
         from app.tts.readiness import build_generation_readiness
