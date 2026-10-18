@@ -499,6 +499,12 @@ class ProjectWorkflow(QMainWindow):
         compact_header = width < 1240
         self.project_label.setVisible(not compact_header)
         self.global_search.setMaximumWidth(180 if width < 1400 else 250)
+        # Keep core playback and seeking controls visible on narrow windows;
+        # collapse secondary labels before the timeline gets squeezed away.
+        compact_player = width < 1080
+        self.mini_title.setVisible(not compact_player)
+        self.mini_position.setVisible(not compact_player)
+        self.mini_duration.setVisible(not compact_player)
 
     @staticmethod
     def _mini_time_text(milliseconds: int) -> str:
