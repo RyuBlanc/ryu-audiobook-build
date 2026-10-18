@@ -2696,6 +2696,21 @@ Rias Gremory
         self.assertIn("self.assign_button.clicked.connect(self.assign_voice)", source)
         self.assertIn("self.unassign_button.clicked.connect(self.unassign_voice)", source)
 
+    def test_stage5_generation_history_scrolls_and_preserves_project_actions(self):
+        from pathlib import Path
+
+        source = Path("app/ui/history_page.py").read_text(encoding="utf-8")
+        self.assertIn("QScrollArea", source)
+        self.assertIn('scroll.setObjectName("historyScroll")', source)
+        self.assertIn("scroll.setWidgetResizable(True)", source)
+        self.assertIn("scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)", source)
+        self.assertIn("scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)", source)
+        self.assertIn("self.refresh_button.clicked.connect(self.refresh)", source)
+        self.assertIn("self.open_button.clicked.connect(self._open_project)", source)
+        self.assertIn("self.production_button.clicked.connect(self._open_generation)", source)
+        self.assertIn("self.output_button.clicked.connect(self._open_output_folder)", source)
+        self.assertIn("self.table.itemSelectionChanged.connect(self._selection_changed)", source)
+
     def test_stage5_audiobook_library_scrolls_without_losing_collection_actions(self):
         from pathlib import Path
 
