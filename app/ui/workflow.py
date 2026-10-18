@@ -371,7 +371,18 @@ class ProjectWorkflow(QMainWindow):
             button.clicked.connect(lambda _checked=False, target=key: self._navigate_workflow_step(target))
             self.workflow_step_buttons[key] = button
             workflow_rail_layout.addWidget(button, 1)
-        main_layout.addWidget(workflow_rail)
+        # Keep all eight workflow actions readable on compact windows.
+        # The rail scrolls horizontally rather than squeezing labels or hiding steps.
+        workflow_rail.setMinimumWidth(1080)
+        workflow_scroll = QScrollArea()
+        workflow_scroll.setObjectName("workflowRailScroll")
+        workflow_scroll.setWidgetResizable(False)
+        workflow_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        workflow_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        workflow_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        workflow_scroll.setFixedHeight(62)
+        workflow_scroll.setWidget(workflow_rail)
+        main_layout.addWidget(workflow_scroll)
 
         body = QHBoxLayout()
         body.setContentsMargins(22, 6, 22, 16)
