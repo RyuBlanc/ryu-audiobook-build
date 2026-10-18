@@ -82,7 +82,7 @@ class Stage743OutputValidationTests(unittest.TestCase):
                     "language": "en",
                     "genre": "Fantasy",
                 },
-                bitrate=128,
+                bitrate=256,
             )
 
             self.assertTrue(output.is_file())
