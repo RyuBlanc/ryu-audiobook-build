@@ -2489,6 +2489,17 @@ Rias Gremory
             )
 
 
+    def test_empty_chapter_repair_preserves_existing_edits_and_assignments(self):
+        source = Path("app/ui/generation_page.py").read_text(encoding="utf-8")
+        start = source.index("def _repair_empty_chapters_from_source")
+        end = source.index("def _refresh_resume_state", start)
+        repair = source[start:end]
+        self.assertIn("if str(chapter.text or "").strip():", repair)
+        self.assertIn("Existing non-empty bodies are user", repair)
+        self.assertIn('"dialogue_assignments"] = getattr(current, "dialogue_assignments", [])', repair)
+        self.assertIn("temp_file.replace(chapters_file)", repair)
+        self.assertNotIn("self.chapters[:] = detected", repair)
+
     def test_generation_readiness_allows_valid_chapters_and_nonblocking_empty_chapters(self):
         from app.chapters.detector import Chapter
         from app.tts.readiness import build_generation_readiness, partition_chapters_by_body
