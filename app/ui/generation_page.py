@@ -2500,6 +2500,7 @@ class GenerationPage(QWidget):
         )
 
     def _repair_empty_chapters_from_source(self) -> bool:
+        """Repair empty chapter bodies without replacing manual edits or assignments."""
         if not self.project_folder:
             return False
         try:
@@ -2511,24 +2512,52 @@ class GenerationPage(QWidget):
             source = self.project_folder / "source" / source_name
             if not source.exists():
                 return False
+
             detected = detect_chapters(extract_text(source).text)
-            if not detected or any(not c.text.strip() for c in detected):
+            if not detected:
                 return False
+
+            def normalize_title(value: str) -> str:
+                return re.sub(r"[\W_]+", "", str(value or "").casefold())
+
+            # Repair only empty chapters. Existing non-empty bodies are user
+            # edits and must never be replaced by source text automatically.
+            detected_by_title = {
+                normalize_title(chapter.title): chapter
+                for chapter in detected
+                if normalize_title(chapter.title) and str(chapter.text or "").strip()
+            }
+            changed = False
+            for chapter in self.chapters:
+                if str(chapter.text or "").strip():
+                    continue
+                candidate = detected_by_title.get(normalize_title(chapter.title))
+                if candidate is None and chapter.number == 1 and len(self.chapters) == 1 and len(detected) == 1:
+                    candidate = detected[0]
+                if candidate is None or not str(candidate.text or "").strip():
+                    continue
+                chapter.text = candidate.text
+                changed = True
+
+            if not changed:
+                return False
+
+            # Preserve all fields (including dialogue assignments) and use
+            # atomic Project persistence rather than rebuilding chapter JSON.
             chapters_file = self.project_folder / "chapters.json"
-            chapters_file.write_text(
-                json.dumps(
-                    [
-                        {"number": c.number, "title": c.title, "text": c.text}
-                        for c in detected
-                    ],
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
-            self.chapters[:] = detected
+            payload = json.loads(chapters_file.read_text(encoding="utf-8"))
+            by_number = {int(ch.number): ch for ch in self.chapters}
+            for item in payload:
+                current = by_number.get(int(item.get("number", 0)))
+                if current is not None:
+                    item["title"] = current.title
+                    item["text"] = current.text
+                    item["dialogue_assignments"] = getattr(current, "dialogue_assignments", [])
+            temp_file = chapters_file.with_suffix(".json.repair.tmp")
+            temp_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            temp_file.replace(chapters_file)
             self._update_overview()
-            self.status.setText("Chapter list was automatically repaired from the original source.")
+            self.status.setText("Empty chapter text was restored from the original source; existing edits were preserved.")
             return True
         except Exception:
             return False
