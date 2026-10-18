@@ -73,8 +73,8 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
         # Voice Studio has a separately approved updated reference, so the
         # overall prototype's voice anchor is checked independently below.
         for anchor in anchors:
-            self.assertRegex(self.prototype, rf'id=["\\']{re.escape(anchor)}["\\']')
-        self.assertRegex(self.prototype, r'id=["\\']voice[^"\\']*["\\']')
+            self.assertRegex(self.prototype, rf"""id=["']{re.escape(anchor)}["']""")
+        self.assertRegex(self.prototype, r"""id=["']voice[^"']*["']""")
 
     def test_updated_voice_studio_reference_keeps_four_step_workflow(self):
         for phrase in ("Voice Library", "Configure", "Voice Profile", "Preview & Assign"):
