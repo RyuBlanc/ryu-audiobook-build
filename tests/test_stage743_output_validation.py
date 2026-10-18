@@ -63,7 +63,7 @@ class Stage743OutputValidationTests(unittest.TestCase):
             chapter_dirs = []
             for number in (1, 2):
                 chapter_dir = root / f"{number:03d}_Chapter_{number}"
-                write_test_wav(chapter_dir / "chunks" / "00001.wav")
+                write_test_wav(chapter_dir / "chunks" / "00001.wav", seconds=8.0)
                 chapter_dirs.append(chapter_dir)
 
             cover = root / "cover.png"
@@ -82,7 +82,7 @@ class Stage743OutputValidationTests(unittest.TestCase):
                     "language": "en",
                     "genre": "Fantasy",
                 },
-                bitrate=256,
+                bitrate=128,
             )
 
             self.assertTrue(output.is_file())
