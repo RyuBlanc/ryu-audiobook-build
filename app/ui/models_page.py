@@ -177,11 +177,15 @@ class QwenCharacterInstallWorker(QThread):
 
 class QwenCacheResetWorker(QThread):
     finished_ok = Signal(int)
+    failed = Signal(str)
     progress = Signal(str)
 
     def run(self) -> None:
-        count = reset_qwen_voice_cache(self.progress.emit)
-        self.finished_ok.emit(count)
+        try:
+            count = reset_qwen_voice_cache(self.progress.emit)
+            self.finished_ok.emit(count)
+        except Exception as exc:
+            self.failed.emit(str(exc))
 
 
 class QwenRepairWorker(QThread):
@@ -650,12 +654,18 @@ class ModelsPage(QWidget):
         self.qwen_cache_worker = QwenCacheResetWorker()
         self.qwen_cache_worker.progress.connect(self.status.setText)
         self.qwen_cache_worker.finished_ok.connect(self._qwen_cache_reset_ok)
+        self.qwen_cache_worker.failed.connect(self._qwen_cache_reset_failed)
         self.qwen_cache_worker.start()
 
     def _qwen_cache_reset_ok(self, count: int) -> None:
         self.reset_qwen_cache.setEnabled(True)
         self.status.setText(f"Qwen voice cache reset • removed {count} generated reference file(s).")
         self.refresh()
+
+    def _qwen_cache_reset_failed(self, message: str) -> None:
+        self.reset_qwen_cache.setEnabled(True)
+        self.status.setText("Qwen voice cache reset failed; saved profiles and downloaded models were kept.")
+        QMessageBox.warning(self, "Qwen Voice Cache Reset Failed", message)
 
     def repair_qwen_runtime(self) -> None:
         answer = QMessageBox.question(
