@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QVBoxLayout,
     QWidget,
+    QScrollArea,
 )
 
 from app.core.paths import app_root, audio_library_root, library_root, models_root, voices_root
@@ -137,7 +138,8 @@ class SettingsPage(QWidget):
         self.on_saved = on_saved
         self.settings = QSettings("RyuBlanc", "Ryu's Audiobook")
 
-        root = QVBoxLayout(self)
+        content = QWidget()
+        root = QVBoxLayout(content)
         root.setContentsMargins(4, 6, 4, 6)
         root.setSpacing(14)
 
@@ -256,6 +258,17 @@ class SettingsPage(QWidget):
         self.status.setWordWrap(True)
         root.addWidget(self.status)
         root.addStretch(1)
+
+        scroll = QScrollArea(self)
+        scroll.setObjectName("settingsScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setWidget(content)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
 
     def refresh(self) -> None:
         stored_theme = str(self.settings.value("ui/theme", "dark")).lower()
