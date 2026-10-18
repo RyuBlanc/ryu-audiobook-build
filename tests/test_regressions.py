@@ -2696,6 +2696,22 @@ Rias Gremory
         self.assertIn("self.assign_button.clicked.connect(self.assign_voice)", source)
         self.assertIn("self.unassign_button.clicked.connect(self.unassign_voice)", source)
 
+    def test_stage5_qwen_voice_cache_reset_handles_worker_errors_and_restores_button(self):
+        from pathlib import Path
+
+        source = Path("app/ui/models_page.py").read_text(encoding="utf-8")
+        worker_start = source.index("class QwenCacheResetWorker")
+        worker_end = source.index("\n\nclass QwenRepairWorker", worker_start)
+        worker = source[worker_start:worker_end]
+        self.assertIn("failed = Signal(str)", worker)
+        self.assertIn("try:", worker)
+        self.assertIn("self.failed.emit(str(exc))", worker)
+        self.assertIn("self.qwen_cache_worker.failed.connect(self._qwen_cache_reset_failed)", source)
+        self.assertIn("def _qwen_cache_reset_failed(self, message: str)", source)
+        failed_handler = source[source.index("def _qwen_cache_reset_failed"):source.index("def repair_qwen_runtime")]
+        self.assertIn("self.reset_qwen_cache.setEnabled(True)", failed_handler)
+        self.assertIn("QMessageBox.warning", failed_handler)
+
     def test_stage5_hardware_studio_scrolls_and_preserves_benchmark_actions(self):
         from pathlib import Path
 
