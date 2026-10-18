@@ -313,13 +313,16 @@ class ProjectWorkflow(QMainWindow):
         self.project_label.setMinimumWidth(110)
         self.project_label.setMaximumWidth(260)
         self.project_label.setToolTip("No book open")
+        self.project_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         header.addWidget(self.project_label)
 
         self.global_search = QLineEdit()
         self.global_search.setObjectName("globalSearch")
         self.global_search.setPlaceholderText("Search your local library…")
         self.global_search.setClearButtonEnabled(True)
+        self.global_search.setMinimumWidth(130)
         self.global_search.setMaximumWidth(250)
+        self.global_search.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.global_search.returnPressed.connect(self._search_library)
         header.addWidget(self.global_search)
 
@@ -486,6 +489,16 @@ class ProjectWorkflow(QMainWindow):
         self.sidebar.setCurrentRow(1)
         stored_theme = str(QSettings("RyuBlanc", "Ryu's Audiobook").value("ui/theme", "dark")).lower()
         self.theme_toggle.setText("☀" if stored_theme == "light" else "◐")
+
+    def resizeEvent(self, event) -> None:
+        """Keep the shell header usable at compact window widths."""
+        super().resizeEvent(event)
+        width = event.size().width()
+        # The project title remains available in the sidebar card when the
+        # header is compact, so give search and primary actions the space.
+        compact_header = width < 1240
+        self.project_label.setVisible(not compact_header)
+        self.global_search.setMaximumWidth(180 if width < 1400 else 250)
 
     @staticmethod
     def _mini_time_text(milliseconds: int) -> str:
