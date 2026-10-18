@@ -2635,7 +2635,10 @@ Rias Gremory
             qwen_runtime_ready=False,
         )
         self.assertTrue(readiness.ready)
-        self.assertTrue(all(item.label != "Qwen3-TTS runtime" for item in readiness.items))
+        item = next(item for item in readiness.items if item.label == "Qwen3-TTS runtime")
+        self.assertTrue(item.ok)
+        self.assertFalse(item.blocking)
+        self.assertIn("Not required", item.detail)
 
     def test_generation_readiness_blocks_when_every_chapter_is_empty(self):
         from app.chapters.detector import Chapter
