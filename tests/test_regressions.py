@@ -2633,6 +2633,16 @@ Rias Gremory
         self.assertIn("QTableWidget::item", source)
         self.assertIn("QPushButton#primary:disabled", source)
 
+    def test_stage5_html_aligned_page_styles_cover_dashboard_import_and_workflow(self):
+        from pathlib import Path
+
+        source = Path("app/main.py").read_text(encoding="utf-8")
+        self.assertIn("QScrollArea#dashboardScroll", source)
+        self.assertIn("QFrame#importDropZone", source)
+        self.assertIn("QWidget#dashboardMetric", source)
+        self.assertIn("QPushButton#workflowStep:checked", source)
+        self.assertIn("QProgressBar::chunk", source)
+
 
 if __name__ == "__main__":
     unittest.main()
