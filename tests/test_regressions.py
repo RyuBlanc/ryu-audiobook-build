@@ -2653,7 +2653,7 @@ Rias Gremory
 
         design = SimpleNamespace(qwen_mode="design", model_id="auto")
         with patch.object(runtime, "best_long_form_clone_kind", return_value="base-0.6b"), \\
-             patch.object(runtime, "model_installed", side_effect=lambda kind: kind == "design-1.7b"):
+             patch.object(runtime, "model_installed", return_value=False):
             ready, detail = runtime.profile_model_readiness(design)
             self.assertFalse(ready)
             self.assertIn("base-0.6b", detail)
