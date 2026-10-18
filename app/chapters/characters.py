@@ -255,6 +255,10 @@ def _discover_explicit_speakers(text: str) -> set[str]:
     patterns = (
         # Name: "dialogue" / Name： 「dialogue」
         rf"(?m)^\s*{SPEAKER_NAME_TOKEN}\s*[:：]\s*[“\"「『]",
+        # A standalone speaker label immediately before a quoted dialogue line.
+        # Require the next line to begin with a quote or dialogue dash to avoid
+        # treating arbitrary headings/narration as character names.
+        rf"(?m)^\s*{SPEAKER_NAME_TOKEN}\s*\r?\n\s*[“\"「『—–-]",
         # "dialogue," Name said / 「dialogue」 Name replied
         rf"[”\"」』]\s*,?\s*{SPEAKER_NAME_TOKEN}\s+(?:{SPEAKER_VERBS})\b",
         # Name said, "dialogue" (including a comma after the speech verb)

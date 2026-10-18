@@ -2103,6 +2103,30 @@ Issei Hyoudou—that’s my name, but my friends and family just call me Issei.
         self.assertGreaterEqual(analysis.dialogue_total, 4)
         self.assertLess(analysis.unassigned_dialogue, analysis.dialogue_total)
 
+    def test_character_detection_supports_standalone_labels_before_quoted_dialogue(self):
+        chapter = Chapter(
+            number=1,
+            title="Standalone speaker labels",
+            text=(
+                "Rias Gremory\\n"
+                "「We should leave now.」\\n"
+                "Akeno Himejima\\n"
+                "“Of course, Rias.”\\n"
+                "リアス\\n"
+                "「わかったわ。」"
+            ),
+        )
+        analysis = analyze_book([chapter])
+        by_name = {item.name: item for item in analysis.characters}
+
+        self.assertIn("Rias Gremory", by_name)
+        self.assertIn("Akeno Himejima", by_name)
+        self.assertIn("リアス", by_name)
+        self.assertEqual(analysis.dialogue_total, 3)
+        self.assertEqual(by_name["Rias Gremory"].dialogue_count, 1)
+        self.assertEqual(by_name["Akeno Himejima"].dialogue_count, 1)
+        self.assertEqual(by_name["リアス"].dialogue_count, 1)
+
     def test_light_novel_em_dash_dialogue_is_detected(self):
         text = """Chapter 1
 Issei Hyoudou\u2014That's my name.
