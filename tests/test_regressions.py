@@ -2494,7 +2494,7 @@ Rias Gremory
         start = source.index("def _repair_empty_chapters_from_source")
         end = source.index("def _refresh_resume_state", start)
         repair = source[start:end]
-        self.assertIn("if str(chapter.text or "").strip():", repair)
+        self.assertIn('if str(chapter.text or "").strip():', repair)
         self.assertIn("Existing non-empty bodies are user", repair)
         self.assertIn('"dialogue_assignments"] = getattr(current, "dialogue_assignments", [])', repair)
         self.assertIn("temp_file.replace(chapters_file)", repair)
