@@ -2622,5 +2622,17 @@ Rias Gremory
         self.assertIn("No chapter contains body text", chapter_item.detail)
 
 
+    def test_stage5_shared_theme_defines_consistent_studio_surfaces_and_focus_states(self):
+        from pathlib import Path
+
+        source = Path("app/main.py").read_text(encoding="utf-8")
+        self.assertIn("Dragon Studio Stage 5", source)
+        self.assertIn("QWidget#studioMainPanel", source)
+        self.assertIn("QMenu::item:selected", source)
+        self.assertIn("QComboBox:focus", source)
+        self.assertIn("QTableWidget::item", source)
+        self.assertIn("QPushButton#primary:disabled", source)
+
+
 if __name__ == "__main__":
     unittest.main()
