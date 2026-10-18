@@ -1798,6 +1798,17 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("320", source)
         self.assertIn("audio_bitrate", source)
 
+    def test_voice_studio_preview_has_save_action_and_audio_export_paths(self):
+        source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
+        self.assertIn('self.save_preview_button = QPushButton("↓  Save Preview")', source)
+        self.assertIn('self.save_preview_button.clicked.connect(self.save_last_preview)', source)
+        self.assertIn('def save_last_preview(self) -> None:', source)
+        self.assertIn('QFileDialog.getSaveFileName(', source)
+        self.assertIn('WAV Audio (*.wav);;MP3 Audio (*.mp3)', source)
+        self.assertIn('"libmp3lame"', source)
+        self.assertIn('self.save_preview_button.setEnabled(True)', source)
+        self.assertIn('self.save_preview_button.setEnabled(False)', source)
+
     def test_voice_profile_catalogue_write_is_atomic_and_preserves_last_good_copy(self):
         from unittest.mock import patch
         import app.tts.voice_profile as vp
