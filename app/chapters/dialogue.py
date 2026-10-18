@@ -9,6 +9,7 @@ from app.chapters.characters import (
     _clean_dialogue,
     _speaker_near_quote,
     _discover_candidates,
+    _discover_explicit_speakers,
     _is_plausible_name,
 )
 from app.chapters.detector import Chapter
@@ -99,8 +100,10 @@ def dialogue_segment_for_selection(
     local_before_start = max(0, best_start - 1800)
     local_after_end = min(len(text), best_end + 1200)
     local_window = text[local_before_start:local_after_end]
+    discovered_names = _discover_candidates(local_window)
+    discovered_names.update(_discover_explicit_speakers(local_window))
     discovered = {
-        name for name in _discover_candidates(local_window)
+        name for name in discovered_names
         if _is_plausible_name(name)
     }
     candidates = list(dict.fromkeys(manual_speakers + sorted(discovered)))
@@ -167,8 +170,11 @@ def dialogue_segments(chapter: Chapter) -> list[DialogueSegment]:
         if str(item.get("speaker", "")).strip()
     ]
 
+    chapter_text = chapter.text or ""
+    discovered_names = _discover_candidates(chapter_text)
+    discovered_names.update(_discover_explicit_speakers(chapter_text))
     discovered = {
-        name for name in _discover_candidates(chapter.text or "")
+        name for name in discovered_names
         if _is_plausible_name(name)
     }
     candidates = list(dict.fromkeys(
