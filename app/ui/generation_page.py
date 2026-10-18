@@ -2615,6 +2615,15 @@ class GenerationPage(QWidget):
         provider_name = profile.provider if profile else None
         state = load_state(self.project_folder) if self.project_folder else {}
         assignments = state.get("voice_cast", {}) if isinstance(state, dict) else {}
+        qwen_models_ready = True
+        qwen_model_detail = "Required local Qwen model files are present."
+        if profile and profile.provider == "qwen-character":
+            try:
+                from app.tts.qwen_character_runtime import profile_model_readiness
+                qwen_models_ready, qwen_model_detail = profile_model_readiness(profile)
+            except Exception as exc:
+                qwen_models_ready = False
+                qwen_model_detail = f"Could not verify the selected Qwen model: {exc}"
         readiness = build_generation_readiness(
             self.chapters,
             profile.name if profile else None,
@@ -2624,6 +2633,8 @@ class GenerationPage(QWidget):
             assignments=assignments,
             cover_selected=bool(self.cover),
             qwen_runtime_ready=qwen_runtime_ready(),
+            qwen_models_ready=qwen_models_ready,
+            qwen_model_detail=qwen_model_detail,
         )
 
         self._refresh_resume_state()
