@@ -189,6 +189,18 @@ def _detect_first_person_narrator(text: str) -> str | None:
 
 def _discover_candidates(text: str) -> set[str]:
     candidates: set[str] = set()
+
+    # Handle standalone labels line-by-line instead of a multiline regex.
+    # This prevents whitespace matching from swallowing neighboring labels.
+    lines = text.splitlines()
+    for index, line in enumerate(lines[:-1]):
+        label = line.strip()
+        following = lines[index + 1].lstrip(" \\t")
+        if not label or not following or following[0] not in '“"「『—–-':
+            continue
+        if _is_plausible_name(label):
+            candidates.add(_clean_name(label))
+
     patterns = (
         # Explicit self-identification is highly reliable and common in
         # first-person/light-novel narration.
@@ -255,10 +267,6 @@ def _discover_explicit_speakers(text: str) -> set[str]:
     patterns = (
         # Name: "dialogue" / Name： 「dialogue」
         rf"(?m)^\s*{SPEAKER_NAME_TOKEN}\s*[:：]\s*[“\"「『]",
-        # A standalone speaker label immediately before a quoted dialogue line.
-        # Require the next line to begin with a quote or dialogue dash to avoid
-        # treating arbitrary headings/narration as character names.
-        r"(?m)^[ \t]*([^\W\d_][\w'’.-]*(?:[ \t]+[^\W\d_][\w'’.-]*){0,2})[ \t]*\r?\n[ \t]*[“\"「『—–-]",
         # "dialogue," Name said / 「dialogue」 Name replied
         rf"[”\"」』]\s*,?\s*{SPEAKER_NAME_TOKEN}\s+(?:{SPEAKER_VERBS})\b",
         # Name said, "dialogue" (including a comma after the speech verb)
