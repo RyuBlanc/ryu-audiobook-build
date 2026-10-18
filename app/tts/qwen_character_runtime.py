@@ -449,6 +449,41 @@ def best_long_form_clone_kind(vram_gb: float | None = None) -> str:
     return "base-0.6b"
 
 
+
+def required_models_for_profile(profile) -> tuple[str, ...]:
+    """Return the exact local model kinds required by a saved Qwen voice profile.
+
+    Selection mirrors QwenCharacterProvider: explicit model IDs win; automatic
+    CustomVoice/Clone profiles use the same installed-model preference helpers.
+    VoiceDesign additionally requires a Base model to preserve identity during
+    long-form generation.
+    """
+    mode = str(getattr(profile, "qwen_mode", "custom") or "custom").casefold()
+    requested = str(getattr(profile, "model_id", "auto") or "auto").casefold()
+    if mode in {"design", "design-preview"}:
+        return (best_voice_design_kind(), best_long_form_clone_kind())
+    if mode == "clone":
+        kind = requested if requested in {"base-0.6b", "base-1.7b"} else best_clone_kind()
+        return (kind,)
+    kind = requested if requested in {"custom-0.6b", "custom-1.7b"} else best_custom_kind()
+    return (kind,)
+
+
+def profile_model_readiness(profile) -> tuple[bool, str]:
+    """Check model files required by a Qwen profile without importing ML runtimes."""
+    required = required_models_for_profile(profile)
+    missing = [kind for kind in required if not model_installed(kind)]
+    if not missing:
+        return True, "Required local Qwen model files are present: " + ", ".join(required) + "."
+    labels = [f"{kind} ({MODEL_IDS.get(kind, kind)})" for kind in missing]
+    phase = str(getattr(profile, "qwen_mode", "custom") or "custom").casefold()
+    action = {
+        "design": "Install Qwen VoiceDesign and its required Base model",
+        "design-preview": "Install Qwen VoiceDesign and its required Base model",
+        "clone": "Install the matching Qwen Base model",
+    }.get(phase, "Install the matching Qwen CustomVoice model")
+    return False, "Missing or incomplete model files: " + "; ".join(labels) + f". {action} in Models."
+
 def _run(command: list[str], progress=None, timeout: int = 3600) -> None:
     process = subprocess.Popen(
         command,
