@@ -136,6 +136,8 @@
         if ($('genStage')) $('genStage').textContent = job.stage || job.message || job.state;
         if ($('aiProgressText')) $('aiProgressText').textContent = job.stage || job.message || job.state;
         if ($('aiProgressBar')) $('aiProgressBar').style.width = pct + '%';
+        if ($('previewProgress')) $('previewProgress').style.width = pct + '%';
+        if ($('previewState') && job.type === 'voice-preview') $('previewState').textContent = job.stage || job.state;
         await refreshJobs();
         if (['completed','failed','cancelled'].includes(job.state)) {
           clearInterval(poll); poll = null;
@@ -202,8 +204,20 @@
     const name = (selectedVoice || $('profileName')?.value || '').trim();
     if (!name) throw new Error('Save or select a voice profile first.');
     const c = selectedChapter();
-    const duration = document.querySelector('#voices .segmented button.active')?.textContent.match(/\d+/)?.[0] || '30';
-    const data = await call('voice.preview', {profile_name:name,text:c?.text || '',duration_seconds:Number(duration),chapter_number:c?.number});
+    const lengthGroup = [...document.querySelectorAll('#voices .toolbar')].find(el => /Length/.test(el.textContent));
+    const duration = lengthGroup?.querySelector('.seg button.active')?.textContent.match(/\d+/)?.[0] || '30';
+    const modeGroup = [...document.querySelectorAll('#voices .seg')].find(el => [...el.querySelectorAll('button')].some(b => /Current Chapter|Selected Passage|Custom Text/.test(b.textContent)));
+    const mode = modeGroup?.querySelector('button.active')?.textContent.trim() || 'Current Chapter';
+    const previewBox = [...document.querySelectorAll('#voices textarea')].find(el => /Preview text/.test(el.closest('label')?.textContent || ''));
+    let previewText = c?.text || '';
+    if (/Custom Text/i.test(mode)) previewText = previewBox?.value || '';
+    if (/Selected Passage/i.test(mode)) {
+      const editor = $('chapterEditor');
+      previewText = editor && editor.selectionEnd > editor.selectionStart ? editor.value.slice(editor.selectionStart, editor.selectionEnd) : window.getSelection()?.toString() || '';
+      if (!previewText.trim()) throw new Error('Select a passage in Chapter Studio before generating a passage preview.');
+    }
+    if (!previewText.trim()) throw new Error('The selected preview text is empty.');
+    const data = await call('voice.preview', {profile_name:name,text:previewText,duration_seconds:Number(duration),chapter_number:c?.number});
     if ($('previewState')) $('previewState').textContent = 'Generating';
     if ($('validation')) $('validation').textContent = 'Preview job ' + data.job_id + ' is running locally.';
     await monitorJob(data.job_id, async job => { if ($('previewState')) $('previewState').textContent = 'Ready'; preparePreviewPlayback(job); });
