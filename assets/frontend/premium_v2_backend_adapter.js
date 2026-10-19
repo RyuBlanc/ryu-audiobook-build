@@ -254,7 +254,7 @@
     const rows = await call('history.list');
     const section = $('history');
     const filter = $('historyFilters')?.querySelector('button.active')?.textContent?.trim().toLowerCase() || 'all';
-    section?.querySelectorAll('.history-row[data-backend-history]').forEach(el => el.remove());
+    section?.querySelectorAll('.history-row').forEach(el => el.remove());
     const host = $('historyFilters')?.parentElement;
     const visible = rows.filter(j => {
       const state = String(j.state || '').toLowerCase();
