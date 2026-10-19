@@ -1233,4 +1233,12 @@ class PremiumV2Window(QMainWindow):
           load();
         })();
         """
+        adapter_path = frontend_path().with_name("premium_v2_backend_adapter.js")
+        if adapter_path.is_file():
+            try:
+                script += "\\n" + adapter_path.read_text(encoding="utf-8")
+            except OSError:
+                log.exception("Could not load Premium V2 backend adapter from %s", adapter_path)
+        else:
+            log.error("Premium V2 backend adapter is missing: %s", adapter_path)
         self.web.page().runJavaScript(script)
