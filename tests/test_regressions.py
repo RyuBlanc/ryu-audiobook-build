@@ -2502,6 +2502,40 @@ Rias Gremory
                 )
             self.assertEqual(captured["max_chars"], min(len("Sentence. " * 600), 30 * 240))
 
+    def test_timed_preview_stops_after_requested_audio_duration(self):
+        class TimedDummyProvider:
+            def __init__(self):
+                self.calls = 0
+
+            def synthesize(self, text, output_path, voice=None):
+                self.calls += 1
+                _write_wav(output_path, 0.30)
+
+        text = " ".join(
+            f"Sentence number {number} is ready."
+            for number in range(1, 9)
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "timed-preview.wav"
+            provider = TimedDummyProvider()
+            result = build_voice_preview(
+                text,
+                provider,
+                "Narrator",
+                output,
+                narration_speed=1.0,
+                pacing_profile="natural",
+                max_chars=1400,
+                target_seconds=1.5,
+            )
+            with wave.open(str(result.output_path), "rb") as wav:
+                actual_seconds = wav.getnframes() / float(wav.getframerate())
+
+            self.assertGreaterEqual(actual_seconds, 1.5)
+            self.assertLess(result.segments, 8)
+            self.assertEqual(provider.calls, result.segments)
+            self.assertEqual(result.output_path, output)
+
     def test_voice_profile_library_preserves_custom_voice_and_labels(self):
         with tempfile.TemporaryDirectory() as temp:
             import app.tts.voice_profile as vp
