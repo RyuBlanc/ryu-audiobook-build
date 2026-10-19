@@ -162,6 +162,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("call('job.clear_completed')", adapter)
         self.assertIn("window.__ryuBackendJobsObserver", adapter)
         self.assertIn("No backend jobs in this view.", adapter)
+        self.assertIn("const canControlGeneration = j.type === 'audiobook-generation'", adapter)
+        self.assertIn("j.type === 'audiobook-generation' && j.state === 'running'", adapter)
+        self.assertIn("No active audiobook generation jobs support pause or resume.", adapter)
 
     def test_frontend_is_packaged_and_selected_by_desktop_entrypoint(self):
         self.assertIn("ryu_audiobook_premium_v2.html", self.build)
