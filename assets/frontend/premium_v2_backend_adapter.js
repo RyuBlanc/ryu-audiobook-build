@@ -117,7 +117,7 @@
       if (!authorized) throw new Error('Confirm you have permission to use this reference recording.');
       const imported = await call('voice.import_reference', {profile_name:name});
       if (imported.cancelled) return;
-      sample_path = imported.path || '';
+      sample_path = imported.sample_path || imported.path || '';
     }
     const voice_id = provider === 'piper' ? (voices.find(v => v.name === name)?.voice_id || 'en_US-amy-medium') : name;
     const result = await call('voice.save', {name,provider,voice_id,sample_path,authorized,
