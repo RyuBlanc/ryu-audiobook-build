@@ -59,6 +59,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "voice.save": "_voice_save",
             "voice.import_reference": "_voice_import_reference",
             "character.analyze": "_character_analyze",
+            "character.update": "_character_update",
+            "character.delete": "_character_delete",
             "pronunciation.save": "_pronunciation_save",
             "production.generate_book": "_production_generate_book",
             "job.list": "_job_list",
@@ -72,6 +74,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('"voice.import_reference": True', self.host)
         self.assertIn('"models.install": self._models_install', self.host)
         self.assertIn('"models.install": True', self.host)
+        self.assertIn('"character.update": True', self.host)
+        self.assertIn('"character.delete": True', self.host)
         self.assertIn("Confirm that you have permission", self.host)
         self.assertIn("def _voice_save(", self.host)
         self.assertIn('if provider_name == "chatterbox" and not voice_id:', self.host)
@@ -103,7 +107,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         for command in (
             "project.list", "project.open", "import.choose_file", "import.start", "chapter.update",
             "voice.list", "voice.save", "voice.import_reference", "voice.preview",
-            "character.analyze", "character.assign", "pronunciation.list",
+            "character.analyze", "character.assign", "character.update", "character.delete", "pronunciation.list",
             "pronunciation.save", "pronunciation.analyze", "production.preview",
             "production.generate_book", "player.get_active", "job.list", "job.pause", "job.resume",
             "job.cancel", "settings.save", "sound.catalog", "sound.import", "sound.assign", "sound.save_manifest", "models.install",
@@ -123,6 +127,11 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("async function refreshModels()", script)
         self.assertIn("call('diagnostics.check')", script)
         self.assertIn("call('models.install'", script)
+        self.assertIn("qwen_mode:provider === 'qwen-character' ? qwenMode", script)
+        self.assertIn("qwen_prompt:choice === 'voicedesign' ? designPrompt", script)
+        self.assertIn("qwen_seed:choice === 'voicedesign' ? designSeed", script)
+        self.assertIn("call('character.update'", script)
+        self.assertIn("call('character.delete'", script)
 
     def test_frontend_is_packaged_and_selected_by_desktop_entrypoint(self):
         self.assertIn("ryu_audiobook_premium_v2.html", self.build)
