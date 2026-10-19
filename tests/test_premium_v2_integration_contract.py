@@ -150,6 +150,16 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("base64.b64decode(encoded, validate=True)", self.host)
         self.assertIn("Dropped files are limited to 25 MB.", self.host)
 
+    def test_dashboard_recent_projects_and_actions_are_backend_driven(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("dash.querySelector('.recent-grid')", adapter)
+        self.assertIn("data-project-folder=", adapter)
+        self.assertIn("e.target.closest('#dashboard .recent-grid [data-project-folder]')", adapter)
+        self.assertIn("label === 'continue project'", adapter)
+        self.assertIn("label === 'view job'", adapter)
+        self.assertIn("dashboardButton.id === 'pauseDash'", adapter)
+        self.assertIn("call('project.get_active')", adapter)
+
     def test_library_search_and_filters_use_real_project_records(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("e.target?.id === 'librarySearch'", adapter)
