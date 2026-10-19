@@ -72,6 +72,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('"voice.import_reference": True', self.host)
         self.assertIn("Confirm that you have permission", self.host)
         self.assertIn("def _voice_save(", self.host)
+        self.assertIn('if provider_name == "chatterbox" and not voice_id:', self.host)
+        self.assertIn("voice_id = name", self.host)
         self.assertIn("def _voice_import_reference(", self.host)
         self.assertIn("def _generation_finished(", self.host)
         self.assertIn("def _import_worker(", self.host)
