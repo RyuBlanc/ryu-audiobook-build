@@ -28,7 +28,7 @@ Verify all 15 Premium V2 destinations against the approved HTML and the behavior
 
 ### 8.2.2 — Screen-by-screen behavioral parity
 - [ ] Dashboard and Library: real project counts, search/filter, open/rename/delete safety.
-- [ ] Import and Chapters: background extraction, cancellation/errors, text coverage, edit/reorder/merge, autosave. Chapter Studio's visible Split chapter action is now connected to a persistent backend split at the editor cursor; validate it in CI and then against a real project before marking this group accepted.
+- [ ] Import and Chapters: background extraction, cancellation/errors, text coverage, edit/reorder/merge, autosave. Chapter Studio's visible Split chapter action is connected to a persistent backend split at the editor cursor (Build #624 passed). Text edits now debounce to a persistent backend autosave after 900 ms and show saving/saved/failure status; the integration-contract guard is added, pending the next CI run and real-project verification.
 - [ ] Voice Studio and Character Studio: provider configuration, profile persistence, preview transport, assignments and character-analysis recovery.
 - [ ] Pronunciation and Sound Design: real dictionary scope/override behavior, catalogue filters, presets, music/cue controls.
 - [ ] Production, Audiobooks and History: readiness, progress, pause/resume/cancel/retry, playback and history safety.
@@ -49,4 +49,4 @@ Verify all 15 Premium V2 destinations against the approved HTML and the behavior
 
 **In progress — Stage 8.2.2.** Premium V2 is selected by `app/main.py` and embedded using `QWebEngineView` / `QWebChannel`; `requirements.txt` includes `PySide6-WebEngine`. Recent implementation work connects Dashboard recent-project cards/actions, Library search and filters, persisted Background Jobs controls, real file-input/drag-drop imports, the Chapter Studio split action, and supported Sound Design catalogue actions to the backend. Build #618 (commit `cd3103e21631a5565abf5e399190f44bc36da4a5`) completed successfully, including tests, frozen-application validation, bundled voice assets/critical modules checks, installer build, and portable artifact upload. Artifacts: `Ryu-Audiobook-Installer-618` (648,478,960 bytes) and `Ryu-Audiobook-Portable-618` (1,347,970,862 bytes); both expire 2026-10-22. This confirms CI/package creation, not successful manual Windows runtime testing. Chapter-level cue editing, full-book mix preview, and other controls remain open. No claim is made that all 15 destinations have passed interactive testing.
 
-Next: validate the measured-WAV-duration regression and the newly connected Chapter Studio split action in CI. Then continue screen-by-screen behavior and end-to-end audio verification.
+Next: validate Chapter Studio autosave wiring and retain the Build #624 split/preview-duration CI evidence. Then continue screen-by-screen behavior and end-to-end audio verification.
