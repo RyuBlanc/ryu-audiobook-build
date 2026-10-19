@@ -99,11 +99,52 @@ class AssemblyPage(QWidget):
             self.output_path = Path(path)
             self.output.setText(str(self.output_path))
 
+    def _validate_build_inputs(self) -> tuple[list[Path], Path] | None:
+        """Validate the selected production inputs before starting background packaging."""
+        if not self.chapter_dirs:
+            self.status.setText("No chapters are connected. Generate chapter audio first.")
+            return None
+        if self.output_path is None:
+            self.status.setText("Choose where to save the M4B audiobook first.")
+            return None
+
+        valid_dirs: list[Path] = []
+        problems: list[str] = []
+        for directory in self.chapter_dirs:
+            chapter_dir = Path(directory)
+            if not chapter_dir.is_dir():
+                problems.append(f"{chapter_dir.name}: chapter folder is missing")
+                continue
+            chunks_dir = chapter_dir / "chunks"
+            chunks = list(chunks_dir.glob("*.wav")) if chunks_dir.is_dir() else []
+            if not chunks:
+                problems.append(f"{chapter_dir.name}: no WAV audio chunks found")
+                continue
+            valid_dirs.append(chapter_dir)
+
+        if problems:
+            self.status.setText("Cannot package audiobook:\n" + "\n".join(problems[:5]))
+            return None
+        output_path = Path(self.output_path)
+        if output_path.suffix.casefold() != ".m4b":
+            output_path = output_path.with_suffix(".m4b")
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self.status.setText(f"Output folder is not writable: {exc}")
+            return None
+        if not output_path.parent.is_dir():
+            self.status.setText("The selected output folder does not exist.")
+            return None
+        return valid_dirs, output_path
+
     def build(self) -> None:
-        if not self.chapter_dirs or not self.output_path:
-            self.status.setText("Generate chapter audio and choose an output file first.")
+        validated = self._validate_build_inputs()
+        if validated is None:
             return
+        chapter_dirs, output_path = validated
         if self.worker is not None and self.worker.isRunning():
+            self.status.setText("An audiobook packaging job is already running.")
             return
         self.build_button.setEnabled(False)
         self.progress.setRange(0, 1)
