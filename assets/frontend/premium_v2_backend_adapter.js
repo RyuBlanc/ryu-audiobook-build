@@ -48,7 +48,13 @@
       const active = projects.filter(p => !p.completed && !['failed','error','attention'].includes(String(p.status || '').toLowerCase())).length;
       const attention = projects.filter(p => ['failed','error','attention'].includes(String(p.status || '').toLowerCase()) || !Number(p.chapter_count || 0)).length;
       [projects.length, completed, active, attention].forEach((value, index) => { if (metrics[index]) metrics[index].textContent = value; });
-      dash.querySelectorAll('[data-project-folder]').forEach(c => c.remove());
+      const recent = dash.querySelector('.recent-grid');
+      if (recent) recent.innerHTML = projects.slice(0, 3).map(p => {
+        const status = String(p.status || 'new').toLowerCase();
+        const badge = p.completed ? 'Completed' : (['failed','error','attention'].includes(status) || !Number(p.chapter_count || 0) ? 'Attention' : 'Active');
+        const badgeClass = badge === 'Completed' ? '' : (badge === 'Attention' ? 'warn' : 'info');
+        return '<article class="card project-card" data-project-folder="' + esc(p.folder) + '"><div class="book-cover"></div><div class="project-pad"><span class="badge ' + badgeClass + '">● ' + badge + '</span><h3>' + esc(p.title) + '</h3><p class="muted">' + Number(p.chapter_count || 0) + ' chapters · ' + esc(p.status || 'Local project') + '</p></div></article>';
+      }).join('') || '<p class="muted">No local projects yet. Import a book to see it here.</p>';
     }
     $('libraryFilters')?.querySelectorAll('button').forEach(button => {
       if (!button.dataset.backendFilterBound) {
@@ -528,6 +534,56 @@
       }
     }, true);
     document.addEventListener('click', async e => {
+      const recentProject = e.target.closest('#dashboard .recent-grid [data-project-folder]');
+      if (recentProject) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        try {
+          const opened = await call('project.open', {folder:recentProject.dataset.projectFolder});
+          await refreshProjects(); await refreshChapters();
+          if (typeof window.go === 'function') window.go('chapters');
+          message('Opened local project: ' + (opened.title || 'project'));
+        } catch (err) { message(err?.message || String(err), true); }
+        return;
+      }
+      const dashboardButton = e.target.closest('#dashboard button');
+      if (dashboardButton) {
+        const label = dashboardButton.textContent.trim().toLowerCase();
+        if (dashboardButton.id === 'pauseDash') {
+          e.preventDefault(); e.stopImmediatePropagation();
+          try {
+            const rows = await call('job.list', {include_hidden:false});
+            const job = rows.find(j => j.type === 'audiobook-generation' && j.state === 'running');
+            if (!job) throw new Error('There is no running audiobook generation job to pause.');
+            await call('job.pause', {job_id:job.job_id}); await refreshJobs();
+            message('Pause requested for ' + (job.title || 'audiobook generation') + '.');
+          } catch (err) { message(err?.message || String(err), true); }
+          return;
+        }
+        if (label === 'continue project') {
+          e.preventDefault(); e.stopImmediatePropagation();
+          try {
+            const activeProject = await call('project.get_active');
+            const candidate = activeProject || projects.find(p => !p.completed && Number(p.chapter_count || 0) > 0) || projects[0];
+            if (!candidate) throw new Error('Import a book before continuing a project.');
+            const opened = await call('project.open', {folder:candidate.folder});
+            await refreshProjects(); await refreshChapters();
+            if (typeof window.go === 'function') window.go('chapters');
+            message('Continuing ' + (opened.title || candidate.title) + '.');
+          } catch (err) { message(err?.message || String(err), true); }
+          return;
+        }
+        if (label === 'view job') {
+          e.preventDefault(); e.stopImmediatePropagation();
+          try {
+            const rows = await call('job.list', {include_hidden:false});
+            const job = rows.find(j => !['completed','failed','cancelled'].includes(j.state));
+            if (!job) throw new Error('There are no active background jobs to view.');
+            $('backgroundJobsButton')?.click();
+            message((job.title || job.type) + ' · ' + (job.stage || job.state));
+          } catch (err) { message(err?.message || String(err), true); }
+          return;
+        }
+      }
       const libraryFilter = e.target.closest('#libraryFilters button');
       if (libraryFilter) {
         e.preventDefault(); e.stopImmediatePropagation();
