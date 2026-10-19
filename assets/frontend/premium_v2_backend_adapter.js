@@ -15,7 +15,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null;
+  let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null;
   const selectedChapter = () => chapters.find(c => c.number === window.ryuPremiumSelectedChapter) || chapters[0];
   const renderSelect = (select, rows, value, label) => {
@@ -111,7 +111,14 @@
     sounds = await call('sound.catalog');
     const grid = $('soundTrackGrid');
     const query = ($('soundTrackSearch')?.value || '').trim().toLowerCase();
-    const visible = sounds.filter(t => !query || (t.title + ' ' + t.source + ' ' + t.format).toLowerCase().includes(query));
+    const sourceFilter = document.querySelector('#soundSourceFilter [data-source].active')?.dataset.source || 'all';
+    const visible = sounds.filter(t => {
+      const matchesQuery = !query || (t.title + ' ' + t.source + ' ' + t.format).toLowerCase().includes(query);
+      const matchesSource = sourceFilter === 'all' ||
+        (sourceFilter === 'built-in' && String(t.source).toLowerCase().includes('bundled')) ||
+        (sourceFilter === 'imported' && String(t.source).toLowerCase().includes('imported'));
+      return matchesQuery && matchesSource;
+    });
     if (grid) grid.innerHTML = visible.map(t => '<article class="sound-track card"><div class="sound-track-info"><b>' + esc(t.title) + '</b><small>' + esc(t.source) + ' · ' + esc(t.format) + ' · ' + Math.round(Number(t.size_bytes || 0)/1024) + ' KB</small></div><button class="btn small secondary" data-select-sound="' + esc(t.path) + '">Select</button></article>').join('') || '<p class="muted">No local or bundled sound tracks found. Import your own licensed audio files.</p>';
     return sounds;
   }
@@ -505,7 +512,64 @@
     if ($('playerTimeline')) $('playerTimeline').oninput=()=>{if(playerAudio&&playerAudio.duration)playerAudio.currentTime=Number($('playerTimeline').value)/100*playerAudio.duration;};
     if ($('hideMini')) $('hideMini').onclick=()=> $('miniPlayer')?.classList.add('hidden');
     if ($('saveSettingsAdvanced')) $('saveSettingsAdvanced').onclick=act(async()=>{await call('settings.save',{theme:$('themeSelectAdvanced')?.value||'dark',effects:$('effectsModeAdvanced')?.value||'high'});message('Settings saved to this PC.');});
+    document.addEventListener('input', e => {
+      if (e.target?.id === 'soundTrackSearch') {
+        e.stopImmediatePropagation();
+        refreshSounds().catch(err => message(err?.message || String(err), true));
+      } else if (e.target?.id === 'cueSearch') {
+        e.stopImmediatePropagation();
+        message('Cue search is unavailable because chapter cue assets are not yet connected to the local catalogue.', true);
+      }
+    }, true);
     document.addEventListener('click', async e => {
+      const source = e.target.closest('#soundSourceFilter [data-source]');
+      if (source) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        source.parentElement?.querySelectorAll('[data-source]').forEach(b => b.classList.toggle('active', b === source));
+        refreshSounds().catch(err => message(err?.message || String(err), true));
+        return;
+      }
+      const soundButton = e.target.closest('#importMusicTracks, #importCueClips, #previewSelectedTrack, #setBookDefaultTrack, #saveSoundPresetAdvanced, #applySoundToProduction, #soundPreviewBook, #previewCueSequence, #clearAllCues, #saveChapterBgm');
+      if (soundButton) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        try {
+          if (soundButton.id === 'importMusicTracks' || soundButton.id === 'importCueClips') {
+            const result = await call('sound.import');
+            await refreshSounds();
+            message('Imported ' + (result.imported || []).length + ' audio asset(s) into the local catalogue.');
+          } else if (soundButton.id === 'previewSelectedTrack') {
+            const track = sounds.find(item => item.path === selectedSoundPath);
+            if (!track) throw new Error('Select a track from the local catalogue first.');
+            if (soundPreviewAudio) { soundPreviewAudio.pause(); soundPreviewAudio = null; }
+            const normalized = String(track.path).replace(/\\/g, '/');
+            const fileUrl = 'file:///' + normalized.split('/').map((part, i) => i === 0 && /^[A-Za-z]:$/.test(part) ? part : encodeURIComponent(part)).join('/');
+            soundPreviewAudio = new Audio(fileUrl);
+            soundPreviewAudio.onended = () => $('soundWave')?.classList.remove('playing');
+            soundPreviewAudio.onerror = () => message('The selected local audio file could not be played in the embedded preview.', true);
+            await soundPreviewAudio.play();
+            $('soundWave')?.classList.add('playing');
+          } else if (soundButton.id === 'setBookDefaultTrack') {
+            if (!selectedSoundPath) throw new Error('Select a track from the local sound catalogue first.');
+            await call('sound.assign', {path:selectedSoundPath,volume:Number($('advancedMusicVolume')?.value || 18)/100});
+            message('Book default background track saved.');
+          } else if (soundButton.id === 'saveSoundPresetAdvanced') {
+            const result = await call('sound.save_manifest', {path:selectedSoundPath || '',enabled:Boolean(selectedSoundPath),volume:Number($('advancedMusicVolume')?.value || 18)/100});
+            message(result.enabled ? 'Book sound manifest saved.' : 'Book sound manifest saved with background music disabled.');
+          } else if (soundButton.id === 'applySoundToProduction') {
+            await call('sound.save_manifest', {path:selectedSoundPath || '',enabled:Boolean(selectedSoundPath),volume:Number($('advancedMusicVolume')?.value || 18)/100});
+            document.querySelector('[data-page="generate"]')?.click();
+          } else if (soundButton.id === 'saveChapterBgm') {
+            throw new Error('Per-chapter BGM overrides are not connected yet. Use Set Book Default Track to save the supported book-wide setting.');
+          } else if (soundButton.id === 'clearAllCues') {
+            throw new Error('Story cue assignments are not connected to persistent backend storage yet; no saved cue data was changed.');
+          } else if (soundButton.id === 'previewCueSequence') {
+            throw new Error('Cue-sequence preview is not available until story cue assets are connected to the backend.');
+          } else if (soundButton.id === 'soundPreviewBook') {
+            throw new Error('Full-book mix preview is not connected yet. You can preview an individual local track.');
+          }
+        } catch (err) { message(err?.message || String(err), true); }
+        return;
+      }
       const filter = e.target.closest('[data-job-filter]');
       if (filter) {
         e.preventDefault(); e.stopImmediatePropagation();
