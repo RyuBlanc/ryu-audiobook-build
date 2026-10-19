@@ -257,7 +257,7 @@
     }
     await startImportPayload({file_name:file.name,title:file.name.replace(/\.[^.]+$/,''),content_base64:btoa(binary)}, file.name);
   }
-  function preparePreviewPlayback(job) {
+  function preparePreviewPlayback(job, requestedSeconds) {
     const url = job?.result?.file_url;
     if (!url) { if ($('validation')) $('validation').textContent = 'Preview completed, but the backend did not return a playable local file URL.'; return; }
     if (previewAudio) { previewAudio.pause(); previewAudio = null; }
@@ -266,7 +266,13 @@
     previewAudio.onended = () => { if ($('playPreview')) $('playPreview').textContent = '▶ Play'; };
     previewAudio.onerror = () => { if ($('validation')) $('validation').textContent = 'The preview file exists but the embedded player could not open it. Use the preview output path from job details.'; };
     if ($('playPreview')) $('playPreview').disabled = false;
-    if ($('validation')) $('validation').textContent = 'Preview ready · ' + Number(job.result.actual_duration_seconds || 0).toFixed(1) + ' seconds';
+    const actual = Number(job.result.actual_duration_seconds || 0);
+    const requested = Number(requestedSeconds || job.result.requested_duration_seconds || 0);
+    if ($('validation')) {
+      $('validation').textContent = requested > 0 && actual + 1.5 < requested
+        ? 'Preview shorter than requested · ' + actual.toFixed(1) + 's of ' + requested.toFixed(0) + 's. The source text or voice provider produced less audio than requested; try a longer passage and check the selected voice.'
+        : 'Preview ready · ' + actual.toFixed(1) + ' seconds' + (requested > 0 ? ' (requested ' + requested.toFixed(0) + 's)' : '');
+    }
   }
   async function previewVoice() {
     const name = (selectedVoice || $('profileName')?.value || '').trim();
@@ -288,7 +294,7 @@
     const data = await call('voice.preview', {profile_name:name,text:previewText,duration_seconds:Number(duration),chapter_number:c?.number});
     if ($('previewState')) $('previewState').textContent = 'Generating';
     if ($('validation')) $('validation').textContent = 'Preview job ' + data.job_id + ' is running locally.';
-    await monitorJob(data.job_id, async job => { if ($('previewState')) $('previewState').textContent = 'Ready'; preparePreviewPlayback(job); });
+    await monitorJob(data.job_id, async job => { if ($('previewState')) $('previewState').textContent = 'Ready'; preparePreviewPlayback(job, Number(duration)); });
   }
   async function openPlayer() {
     const data = await call('player.get_active');
@@ -451,7 +457,7 @@
     ['saveProfile','saveDraft','addPremium','saveOnly'].forEach(id=>{if($(id))$(id).onclick=act(saveVoice);});
     if ($('useNarrator')) $('useNarrator').onclick=act(async()=>{const v=await saveVoice();if(v)await call('voice.select',{profile_name:v.name});message('Saved and selected narrator.');});
     if ($('generatePreview')) $('generatePreview').onclick=act(previewVoice);
-    if ($('previewGenerate')) $('previewGenerate').onclick=act(async()=>{const name=selectedVoice||$('profileName')?.value;const group=[...document.querySelectorAll('#generate .segmented')].find(el=>[...el.querySelectorAll('button')].some(b=>/10s|30s|60s/i.test(b.textContent)));const duration=group?.querySelector('button.active')?.textContent.match(/\d+/)?.[0]||'30';const data=await call('production.preview',{profile_name:name,duration_seconds:Number(duration)});await monitorJob(data.job_id,preparePreviewPlayback);});
+    if ($('previewGenerate')) $('previewGenerate').onclick=act(async()=>{const name=selectedVoice||$('profileName')?.value;const group=[...document.querySelectorAll('#generate .segmented')].find(el=>[...el.querySelectorAll('button')].some(b=>/10s|30s|60s/i.test(b.textContent)));const duration=group?.querySelector('button.active')?.textContent.match(/\d+/)?.[0]||'30';const data=await call('production.preview',{profile_name:name,duration_seconds:Number(duration)});await monitorJob(data.job_id,job=>preparePreviewPlayback(job,Number(duration)));});
     if ($('playPreview')) $('playPreview').onclick=act(async()=>{if(!previewAudio)throw new Error('Generate a preview first.');if(!previewAudio.paused){previewAudio.pause();$('playPreview').textContent='▶ Play';}else{await previewAudio.play();$('playPreview').textContent='Ⅱ Pause';}});
     if ($('stopPreview')) $('stopPreview').onclick=()=>{if(previewAudio){previewAudio.pause();previewAudio.currentTime=0;}if($('playPreview'))$('playPreview').textContent='▶ Play';};
     if ($('startGenerate')) $('startGenerate').onclick=act(async()=>{const data=await call('production.generate_book',{profile_name:selectedVoice||$('profileName')?.value,bitrate:256});await monitorJob(data.job_id);});
