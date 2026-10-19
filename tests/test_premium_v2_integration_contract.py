@@ -70,6 +70,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('"production.generate_book": True', self.host)
         self.assertIn('"voice.save": True', self.host)
         self.assertIn('"voice.import_reference": True', self.host)
+        self.assertIn('"models.install": self._models_install', self.host)
+        self.assertIn('"models.install": True', self.host)
         self.assertIn("Confirm that you have permission", self.host)
         self.assertIn("def _voice_save(", self.host)
         self.assertIn('if provider_name == "chatterbox" and not voice_id:', self.host)
@@ -104,7 +106,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "character.analyze", "character.assign", "pronunciation.list",
             "pronunciation.save", "pronunciation.analyze", "production.preview",
             "production.generate_book", "player.get_active", "job.list", "job.pause", "job.resume",
-            "job.cancel", "settings.save", "sound.catalog", "sound.import", "sound.assign", "sound.save_manifest",
+            "job.cancel", "settings.save", "sound.catalog", "sound.import", "sound.assign", "sound.save_manifest", "models.install",
         ):
             self.assertIn(command, script)
         self.assertIn('adapter_path = frontend_path().with_name("premium_v2_backend_adapter.js")', self.host)
@@ -117,6 +119,10 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("duration_seconds:Number(duration)", script)
         self.assertIn("function openPlayer()", script)
         self.assertIn("playerAudio.play()", script)
+        self.assertIn("async function refreshHistory()", script)
+        self.assertIn("async function refreshModels()", script)
+        self.assertIn("call(\'diagnostics.check\')", script)
+        self.assertIn("call(\'models.install\'", script)
 
     def test_frontend_is_packaged_and_selected_by_desktop_entrypoint(self):
         self.assertIn("ryu_audiobook_premium_v2.html", self.build)
