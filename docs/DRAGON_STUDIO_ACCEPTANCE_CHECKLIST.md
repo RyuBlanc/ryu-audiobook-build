@@ -152,3 +152,12 @@ For every accepted item, record:
 - Any limitation or platform-specific caveat.
 
 **Current status:** checklist updated to use the newly supplied Voice Studio HTML as the Voice Studio-specific design contract. Items remain unchecked until evidence is recorded against the current commit; passing CI alone does not establish full product acceptance. The uploaded HTML still needs to be copied into the repository at `docs/prototypes/Ryus_Audiobook_Voice_Studio_Fixed_All_Steps.html`; the checklist/spec can be updated now, but this change does not falsely claim that the attachment bytes are already committed.
+
+### Stage 9 — initial verified CI evidence (2026-10-19)
+
+- **Build #520:** [GitHub Actions run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39211387118) — commit `2f7edd663d4bf5e05d406e64d2ba9d1fb5fba5a4`; conclusion: success.
+- Observed successful workflow steps: Prepare/validate/build application; frozen-application verification; bundled voice assets and critical modules verification; Inno Setup installation; installer build; installer artifact upload; portable application artifact upload; older Windows build-run/artifact cleanup.
+- Produced artifacts: `Ryu-Audiobook-Installer-520` (531,822,398 bytes) and `Ryu-Audiobook-Portable-520` (876,414,228 bytes). These are CI artifacts and expire on 2026-10-22; they are not yet evidence of a successful manual Windows launch.
+- Release publishing was **skipped** for this run, so Build #520 must not be described as a new published GitHub release.
+- **Still outstanding:** current-build Windows install/launch and functional smoke test; critical reliability scenarios; real audiobook/M4B metadata, chapter and bitrate inspection; per-screen visual/interaction acceptance. Do not mark G0–G5 complete until their evidence is collected.
+
