@@ -85,6 +85,7 @@ class PremiumV2Bridge(QObject):
                 "chapter.add": self._chapter_add,
                 "chapter.delete": self._chapter_delete,
                 "chapter.reorder": self._chapter_reorder,
+                "chapter.split": self._chapter_split,
                 "project.rename": self._project_rename,
                 "import.choose_file": self._import_choose_file,
                 "import.start": self._import_start,
@@ -513,6 +514,55 @@ class PremiumV2Bridge(QObject):
             item.number = i
         project.save()
         return {"chapter_count": len(project.chapters), "moved_to": destination}
+
+    def _chapter_split(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist current editor text and split one chapter at the selected cursor."""
+        from app.chapters.detector import Chapter
+
+        project = self._active_project()
+        try:
+            number = int(payload.get("number"))
+            split_at = int(payload.get("split_at"))
+        except (TypeError, ValueError):
+            raise ValueError("Select a chapter and place the cursor where it should split.")
+        index = next((i for i, item in enumerate(project.chapters) if item.number == number), None)
+        if index is None:
+            raise ValueError("The selected chapter no longer exists.")
+        chapter = project.chapters[index]
+        text_value = payload.get("text", chapter.text or "")
+        if not isinstance(text_value, str):
+            raise ValueError("Chapter text must be a string before it can be split.")
+        if len(text_value) > 10_000_000:
+            raise ValueError("Chapter text is too large to split in one operation.")
+        if split_at <= 0 or split_at >= len(text_value):
+            raise ValueError("Place the cursor inside the chapter text, not at the beginning or end.")
+        left, right = text_value[:split_at].rstrip(), text_value[split_at:].lstrip()
+        if not left or not right:
+            raise ValueError("Both sides of a split must contain text. Move the cursor between two passages.")
+        title_value = str(payload.get("title") or chapter.title or f"Chapter {number}").strip()[:500]
+        if not title_value:
+            raise ValueError("Chapter title cannot be empty.")
+        chapter.title = title_value
+        chapter.text = left
+        new_title = str(payload.get("new_title") or f"{title_value} (continued)").strip()[:500]
+        new_chapter = Chapter(number + 1, new_title, right)
+        project.chapters.insert(index + 1, new_chapter)
+        for i, item in enumerate(project.chapters, 1):
+            item.number = i
+        project.save()
+        project_state = load_state(project.folder)
+        project_state["modified_at"] = self._now()
+        save_state(project.folder, project_state)
+        return {
+            "number": chapter.number,
+            "new_number": new_chapter.number,
+            "title": chapter.title,
+            "new_title": new_chapter.title,
+            "left_word_count": len(left.split()),
+            "right_word_count": len(right.split()),
+            "chapter_count": len(project.chapters),
+            "saved": True,
+        }
 
     def _voice_import_reference(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Import and normalize an explicitly selected voice-reference recording."""
