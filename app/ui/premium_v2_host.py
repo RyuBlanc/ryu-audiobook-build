@@ -30,7 +30,7 @@ from app.tts.preview import build_voice_preview
 from app.tts.profile_provider import provider_from_profile
 from app.tts.pronunciation_suggester import suggest_names_from_text, suggest_pronunciation
 from app.tts.voice_profile import load_profiles
-from app.core.state import load_state
+from app.core.state import load_state, save_state
 from app.version import APP_NAME, full_version
 
 log = logging.getLogger(__name__)
