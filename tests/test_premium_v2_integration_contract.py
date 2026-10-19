@@ -139,6 +139,19 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("voices.map(v=>'<option value=", script)
         self.assertIn("window.confirm('Remove", script)
 
+    def test_background_jobs_screen_uses_backend_state_and_actions(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("let backendJobFilter = 'active'", adapter)
+        self.assertIn("call('job.list', {include_hidden:false})", adapter)
+        self.assertIn("data-backend-job=", adapter)
+        self.assertIn("stopImmediatePropagation()", adapter)
+        self.assertIn("call('job.pause'", adapter)
+        self.assertIn("call('job.resume'", adapter)
+        self.assertIn("call('job.cancel'", adapter)
+        self.assertIn("call('job.clear_completed')", adapter)
+        self.assertIn("window.__ryuBackendJobsObserver", adapter)
+        self.assertIn("No backend jobs in this view.", adapter)
+
     def test_frontend_is_packaged_and_selected_by_desktop_entrypoint(self):
         self.assertIn("ryu_audiobook_premium_v2.html", self.build)
         self.assertIn("PremiumV2Window", self.main)
