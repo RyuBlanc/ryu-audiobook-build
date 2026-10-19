@@ -115,13 +115,30 @@
     if (grid) grid.innerHTML = visible.map(t => '<article class="sound-track card"><div class="sound-track-info"><b>' + esc(t.title) + '</b><small>' + esc(t.source) + ' · ' + esc(t.format) + ' · ' + Math.round(Number(t.size_bytes || 0)/1024) + ' KB</small></div><button class="btn small secondary" data-select-sound="' + esc(t.path) + '">Select</button></article>').join('') || '<p class="muted">No local or bundled sound tracks found. Import your own licensed audio files.</p>';
     return sounds;
   }
+  let backendJobFilter = 'active';
   async function refreshJobs() {
-    const jobs = await call('job.list', {include_hidden:false}), box = $('backgroundJobsList');
-    if (box) box.innerHTML = jobs.map(j => '<article class="job-row"><b>' + esc(j.title || j.type || j.job_id) + '</b><p>' + esc(j.stage || j.message || j.state) + '</p><div class="progress"><i style="width:' + Math.max(0,Math.min(100,Number(j.progress || 0))) + '%"></i></div><small>' + esc(j.state) + ' · ' + Math.round(Number(j.progress || 0)) + '%</small><div class="toolbar">' + (j.state === 'running' ? '<button class="btn small secondary" data-job-action="pause" data-job-id="' + esc(j.job_id) + '">Pause</button>' : '') + (j.state === 'paused' ? '<button class="btn small" data-job-action="resume" data-job-id="' + esc(j.job_id) + '">Resume</button>' : '') + '<button class="btn small ghost" data-job-action="cancel" data-job-id="' + esc(j.job_id) + '">Cancel</button></div></article>').join('') || '<p class="muted">No backend jobs yet.</p>';
-    if ($('jobsRunningCount')) $('jobsRunningCount').textContent = jobs.filter(j => ['running','pause_requested'].includes(j.state)).length;
-    if ($('jobsQueuedCount')) $('jobsQueuedCount').textContent = jobs.filter(j => j.state === 'queued').length;
-    if ($('jobsCompletedCount')) $('jobsCompletedCount').textContent = jobs.filter(j => j.state === 'completed').length;
-    if ($('backgroundJobCount')) $('backgroundJobCount').textContent = jobs.filter(j => !['completed','failed','cancelled'].includes(j.state)).length + ' background jobs';
+    const allJobs = await call('job.list', {include_hidden:false});
+    const jobs = allJobs.filter(j => backendJobFilter === 'all' ||
+      (backendJobFilter === 'completed' ? j.state === 'completed' :
+      (backendJobFilter === 'failed' ? j.state === 'failed' :
+      !['completed','failed','cancelled'].includes(j.state))));
+    const box = $('backgroundJobsList');
+    if (box) {
+      box.innerHTML = jobs.map(j => {
+        const id = esc(j.job_id || ''), state = String(j.state || 'unknown');
+        const action = (name,label,cls) => '<button class="btn small ' + cls + '" data-job-action="' + name + '" data-job-id="' + id + '">' + label + '</button>';
+        const actions = (['running','pause_requested'].includes(state) ? action('pause','Pause','secondary') : '') +
+          (['paused','pause_requested'].includes(state) ? action('resume','Resume','') : '') +
+          (['queued','running','paused','pause_requested','cancel_requested'].includes(state) ? action('cancel','Cancel','ghost') : '') +
+          (state === 'failed' && j.recoverable ? '<small>Retry by restarting this operation from its screen.</small>' : '');
+        return '<article class="job-row" data-backend-job="' + id + '"><b>' + esc(j.title || j.type || id) + '</b><p>' + esc(j.stage || j.message || state) + '</p><div class="progress"><i style="width:' + Math.max(0,Math.min(100,Number(j.progress || 0))) + '%"></i></div><small>' + esc(state) + ' · ' + Math.round(Number(j.progress || 0)) + '%</small>' + (j.message ? '<p>' + esc(j.message) + '</p>' : '') + (j.error?.message ? '<p class="muted">' + esc(j.error.message) + '</p>' : '') + '<div class="toolbar">' + actions + '</div></article>';
+      }).join('') || '<p class="muted" data-backend-empty="1">No backend jobs in this view.</p>';
+      box.dataset.backendJobsRendered = '1';
+    }
+    if ($('jobsRunningCount')) $('jobsRunningCount').textContent = allJobs.filter(j => ['running','pause_requested','cancel_requested'].includes(j.state)).length;
+    if ($('jobsQueuedCount')) $('jobsQueuedCount').textContent = allJobs.filter(j => j.state === 'queued').length;
+    if ($('jobsCompletedCount')) $('jobsCompletedCount').textContent = allJobs.filter(j => j.state === 'completed').length;
+    if ($('backgroundJobCount')) $('backgroundJobCount').textContent = allJobs.filter(j => !['completed','failed','cancelled'].includes(j.state)).length + ' background jobs';
   }
   async function monitorJob(jobId, done) {
     activeJob = jobId; if (poll) clearInterval(poll);
@@ -449,8 +466,55 @@
     if ($('playerTimeline')) $('playerTimeline').oninput=()=>{if(playerAudio&&playerAudio.duration)playerAudio.currentTime=Number($('playerTimeline').value)/100*playerAudio.duration;};
     if ($('hideMini')) $('hideMini').onclick=()=> $('miniPlayer')?.classList.add('hidden');
     if ($('saveSettingsAdvanced')) $('saveSettingsAdvanced').onclick=act(async()=>{await call('settings.save',{theme:$('themeSelectAdvanced')?.value||'dark',effects:$('effectsModeAdvanced')?.value||'high'});message('Settings saved to this PC.');});
-    document.addEventListener('click',async e=>{const b=e.target.closest('[data-job-action]');if(!b)return;e.preventDefault();try{const commands={pause:'job.pause',resume:'job.resume',cancel:'job.cancel'};await call(commands[b.dataset.jobAction]||'job.cancel',{job_id:b.dataset.jobId});await refreshJobs();}catch(err){message(err?.message||String(err),true);}});
-    if (!window.__ryuBackendJobTimer) window.__ryuBackendJobTimer=setInterval(()=>refreshJobs().catch(()=>{}),3000);
+    document.addEventListener('click', async e => {
+      const filter = e.target.closest('[data-job-filter]');
+      if (filter) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        backendJobFilter = filter.dataset.jobFilter || 'active';
+        filter.parentElement?.querySelectorAll('[data-job-filter]').forEach(b => b.classList.toggle('active', b === filter));
+        refreshJobs().catch(err => message(err?.message || String(err), true));
+        return;
+      }
+      const b = e.target.closest('[data-job-action]');
+      if (b) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        try {
+          const commands = {pause:'job.pause',resume:'job.resume',cancel:'job.cancel'};
+          await call(commands[b.dataset.jobAction] || 'job.cancel', {job_id:b.dataset.jobId});
+          await refreshJobs();
+        } catch (err) { message(err?.message || String(err), true); }
+        return;
+      }
+      const clear = e.target.closest('#clearCompletedJobs, #clearModelQueue');
+      if (clear) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        try { await call('job.clear_completed'); await refreshJobs(); await refreshHistory().catch(()=>{}); message('Completed background jobs cleared.'); }
+        catch (err) { message(err?.message || String(err), true); }
+        return;
+      }
+      const pauseAll = e.target.closest('#pauseAllJobs');
+      if (pauseAll) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        try {
+          const rows = await call('job.list', {include_hidden:false});
+          for (const job of rows.filter(j => ['running','pause_requested'].includes(j.state))) await call('job.pause', {job_id:job.job_id});
+          await refreshJobs(); message('Pause requested for all running jobs.');
+        } catch (err) { message(err?.message || String(err), true); }
+        return;
+      }
+      const open = e.target.closest('#backgroundJobsButton');
+      if (open) { setTimeout(() => refreshJobs().catch(()=>{}), 0); }
+    }, true);
+    if (!window.__ryuBackendJobTimer) window.__ryuBackendJobTimer=setInterval(()=>refreshJobs().catch(()=>{}),1500);
+    const jobsBox = $('backgroundJobsList');
+    if (jobsBox && !window.__ryuBackendJobsObserver) {
+      window.__ryuBackendJobsObserver = new MutationObserver(() => {
+        if (!jobsBox.isConnected) return;
+        const hasBackendRows = Boolean(jobsBox.querySelector('[data-backend-job], [data-backend-empty]'));
+        if (!hasBackendRows && jobsBox.childElementCount) refreshJobs().catch(()=>{});
+      });
+      window.__ryuBackendJobsObserver.observe(jobsBox, {childList:true,subtree:false});
+    }
     message('Premium V2 local backend connected.');
   }
   const start = () => wire().catch(e=>message(e.message,true));
