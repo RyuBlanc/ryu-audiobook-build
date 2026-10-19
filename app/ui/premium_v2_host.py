@@ -5,6 +5,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import shutil
 import sys
 import threading
 import uuid
@@ -110,6 +111,10 @@ class PremiumV2Bridge(QObject):
                 "performance.info": self._performance_info,
                 "diagnostics.check": self._diagnostics_check,
                 "system.open_output": self._system_open_output,
+                "sound.catalog": self._sound_catalog,
+                "sound.import": self._sound_import,
+                "sound.assign": self._sound_assign,
+                "sound.save_manifest": self._sound_save_manifest,
             }
             handler = handlers.get(command)
             if handler is None:
@@ -188,6 +193,10 @@ class PremiumV2Bridge(QObject):
             "performance.info": False,
             "diagnostics.check": True,
             "system.open_output": True,
+            "sound.catalog": True,
+            "sound.import": True,
+            "sound.assign": True,
+            "sound.save_manifest": True,
             "reason": "Local import, chapter editing, saved voice selection and preview, character analysis, pronunciation rules, audiobook generation, background jobs, history, playback metadata, and settings are connected. Live hardware telemetry and model installation are not connected yet.",
         }
 
@@ -934,6 +943,103 @@ class PremiumV2Bridge(QObject):
         if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder.resolve()))):
             raise RuntimeError("Windows did not open the output folder.")
         return {"opened": True, "path": str(folder.resolve())}
+
+    def _sound_catalog(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
+        extensions = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".aiff", ".opus"}
+        roots = [(app_root() / "Audio Library", "Imported locally")]
+        bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])) / "assets" / "starter_audio"
+        if bundled.is_dir():
+            roots.append((bundled, "Bundled with application"))
+        found: dict[str, dict[str, Any]] = {}
+        for root, source in roots:
+            if not root.is_dir():
+                continue
+            try:
+                candidates = root.rglob("*")
+                for path in candidates:
+                    if not path.is_file() or path.suffix.lower() not in extensions:
+                        continue
+                    try:
+                        resolved = path.resolve()
+                        size = resolved.stat().st_size
+                    except OSError:
+                        continue
+                    if size <= 0:
+                        continue
+                    key = str(resolved)
+                    found[key] = {"id": key, "title": path.stem, "path": key,
+                                  "source": source, "format": path.suffix.lower(),
+                                  "size_bytes": size, "duration_seconds": None,
+                                  "licensing": "Unknown; verify rights before publishing"}
+            except OSError:
+                log.exception("Could not scan sound asset folder %s", root)
+        return sorted(found.values(), key=lambda row: (row["source"], row["title"].casefold()))
+
+    def _sound_import(self, payload: dict[str, Any]) -> dict[str, Any]:
+        paths = payload.get("paths")
+        if not isinstance(paths, list) or not paths:
+            selected, _filter = QFileDialog.getOpenFileNames(
+                None, "Import audio assets", str(Path.home()),
+                "Audio files (*.wav *.mp3 *.flac *.ogg *.m4a *.aac *.aiff *.opus)",
+            )
+            paths = selected
+        if not paths:
+            return {"cancelled": True, "imported": []}
+        extensions = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".aiff", ".opus"}
+        target_root = app_root() / "Audio Library"
+        target_root.mkdir(parents=True, exist_ok=True)
+        imported = []
+        for raw in paths:
+            source = Path(str(raw)).expanduser().resolve()
+            if not source.is_file() or source.suffix.lower() not in extensions:
+                raise ValueError(f"Unsupported or missing audio asset: {source.name}")
+            destination = target_root / source.name
+            if destination.exists() and destination.resolve() != source:
+                destination = target_root / f"{source.stem}-{uuid.uuid4().hex[:8]}{source.suffix.lower()}"
+            if source != destination.resolve():
+                shutil.copy2(source, destination)
+            imported.append({"title": destination.stem, "path": str(destination.resolve()),
+                             "source": "Imported locally", "format": destination.suffix.lower(),
+                             "size_bytes": destination.stat().st_size})
+        return {"cancelled": False, "imported": imported, "catalog": self._sound_catalog({})}
+
+    def _sound_assign(self, payload: dict[str, Any]) -> dict[str, Any]:
+        project = self._active_project()
+        raw = str(payload.get("path") or "").strip()
+        state = load_state(project.folder)
+        if not raw:
+            state.update({"background_audio_path": "", "background_audio_mode": "off"})
+            save_state(project.folder, state)
+            return {"saved": True, "path": None, "mode": "off"}
+        selected = Path(raw).expanduser().resolve()
+        valid = any(str(row["path"]) == str(selected) for row in self._sound_catalog({}))
+        if not selected.is_file() or not valid:
+            raise ValueError("Choose an audio file from the local Sound Design catalogue.")
+        volume = max(0.0, min(1.0, float(payload.get("volume", 0.18))))
+        state.update({"background_audio_path": str(selected), "background_audio_volume": volume,
+                      "background_audio_mode": "manual", "modified_at": self._now()})
+        save_state(project.folder, state)
+        return {"saved": True, "path": str(selected), "title": selected.stem, "volume": volume, "mode": "manual"}
+
+    def _sound_save_manifest(self, payload: dict[str, Any]) -> dict[str, Any]:
+        project = self._active_project()
+        state = load_state(project.folder)
+        path = str(payload.get("path") or state.get("background_audio_path") or "").strip()
+        enabled = bool(payload.get("enabled", bool(path)))
+        volume = max(0.0, min(1.0, float(payload.get("volume", state.get("background_audio_volume") or 0.18))))
+        if enabled and path:
+            selected = Path(path).expanduser().resolve()
+            if not selected.is_file() or not any(row["path"] == str(selected) for row in self._sound_catalog({})):
+                raise ValueError("Selected BGM is missing from the local sound library.")
+            state.update({"background_audio_path": str(selected), "background_audio_mode": "manual",
+                          "background_audio_enabled": True, "background_audio_volume": volume})
+        else:
+            state.update({"background_audio_path": "", "background_audio_mode": "off", "background_audio_enabled": False})
+        state["sound_manifest"] = {"bgm_path": state.get("background_audio_path") or None,
+                                   "bgm_volume": volume, "enabled": bool(enabled and path),
+                                   "updated_at": self._now()}
+        save_state(project.folder, state)
+        return dict(state["sound_manifest"])
 
     def _settings_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
         self.settings.sync()
