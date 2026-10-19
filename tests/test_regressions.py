@@ -794,6 +794,30 @@ class RegressionTests(unittest.TestCase):
             page.close()
             page.deleteLater()
 
+    def test_voice_preview_is_invalidated_when_target_settings_change(self):
+        from app.ui.voice_page import VoicePage
+
+        page = VoicePage()
+        try:
+            page.last_preview = Path(tempfile.gettempdir()) / "old-preview.wav"
+            page.last_preview_elapsed_seconds = 12.0
+            page.play_button.setEnabled(True)
+            page.save_preview_button.setEnabled(True)
+
+            current = page.preview_duration.currentIndex()
+            page.preview_duration.setCurrentIndex(
+                (current + 1) % page.preview_duration.count()
+            )
+
+            self.assertIsNone(page.last_preview)
+            self.assertIsNone(page.last_preview_elapsed_seconds)
+            self.assertFalse(page.play_button.isEnabled())
+            self.assertFalse(page.save_preview_button.isEnabled())
+            self.assertIn("Preview invalidated", page.preview_engine_status.text())
+        finally:
+            page.close()
+            page.deleteLater()
+
     def test_qwen_clone_draft_identity_is_stable_before_profile_save(self):
         from types import SimpleNamespace
         from app.ui.voice_page import VoicePage
