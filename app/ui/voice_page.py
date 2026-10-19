@@ -11,7 +11,7 @@ import wave
 import time
 import uuid
 
-from PySide6.QtCore import QUrl, QThread, Signal
+from PySide6.QtCore import QUrl, QThread, QTimer, Signal
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QInputDialog, QFormLayout, QGroupBox, QHBoxLayout,
@@ -2417,8 +2417,26 @@ class VoicePage(QWidget):
         self.preview_worker.finished_ok.connect(self._preview_worker_ok)
         self.preview_worker.failed.connect(self._preview_worker_failed)
         self.preview_worker.cancelled.connect(self._preview_worker_cancelled)
-        self.preview_worker.finished.connect(self._preview_worker_finished)
-        self.preview_worker.start()
+        worker = self.preview_worker
+        worker.finished.connect(self._preview_worker_finished)
+        worker.start()
+        # If the UI remains on "Queued", distinguish a worker that never
+        # reported its first status from a slow model load. Do not interrupt
+        # inference: the watchdog only improves diagnostics and user feedback.
+        QTimer.singleShot(10000, lambda active=worker: self._preview_start_watchdog(active))
+
+    def _preview_start_watchdog(self, worker: VoicePreviewWorker) -> None:
+        if self.preview_worker is not worker or not worker.isRunning():
+            return
+        current = self.preview_engine_status.text().strip()
+        if current.startswith("Queued •"):
+            message = (
+                "Preview worker is running but has not reported its startup phase. "
+                "Check Settings\\qwen_character_worker.log for Qwen VoiceDesign errors; "
+                "generation has not been cancelled."
+            )
+            self.preview_engine_status.setText(message)
+            self.status.setText(message)
 
     def _preview_worker_status(self, message: str) -> None:
         self.preview_engine_status.setText(message)
