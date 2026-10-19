@@ -55,6 +55,10 @@ class PremiumV2Bridge(QObject):
                 "app.get_info": self._app_info,
                 "app.get_capabilities": self._capabilities,
                 "project.list": self._project_list,
+                "project.open": self._project_open,
+                "project.get_active": self._project_get_active,
+                "chapter.list": self._chapter_list,
+                "chapter.update": self._chapter_update,
                 "settings.get": self._settings_get,
             }
             handler = handlers.get(command)
@@ -98,11 +102,13 @@ class PremiumV2Bridge(QObject):
             "app.get_info": True,
             "app.get_capabilities": True,
             "project.list": True,
+            "project.open": True,
+            "project.get_active": True,
+            "chapter.list": True,
+            "chapter.update": True,
             "settings.get": True,
             "project.create": False,
-            "project.open": False,
             "import.start": False,
-            "chapter.update": False,
             "voice.preview": False,
             "production.generate_book": False,
             "job.pause": False,
@@ -128,6 +134,75 @@ class PremiumV2Bridge(QObject):
                 "completed": completed,
             })
         return result
+
+
+    def _project_open(self, payload: dict[str, Any]) -> dict[str, Any]:
+        requested = str(payload.get("folder") or "").strip()
+        if not requested:
+            raise ValueError("Choose a saved local project first.")
+        selected = next((p for p in list_projects()
+                         if str(p.folder.resolve()) == str(Path(requested).resolve())), None)
+        if selected is None:
+            raise ValueError("That project is not present in the local library.")
+        self.settings.setValue("project/active_folder", str(selected.folder.resolve()))
+        self.settings.sync()
+        return {"title": selected.title, "folder": str(selected.folder),
+                "chapter_count": len(selected.chapters)}
+
+    def _project_get_active(self, _payload: dict[str, Any]) -> dict[str, Any] | None:
+        folder = str(self.settings.value("project/active_folder", "") or "")
+        if not folder:
+            return None
+        selected = next((p for p in list_projects()
+                         if str(p.folder.resolve()) == str(Path(folder).resolve())), None)
+        if selected is None:
+            self.settings.remove("project/active_folder")
+            self.settings.sync()
+            return None
+        return {"title": selected.title, "folder": str(selected.folder),
+                "chapter_count": len(selected.chapters)}
+
+    def _active_project(self):
+        folder = str(self.settings.value("project/active_folder", "") or "")
+        if not folder:
+            raise ValueError("Open a local project from the Library first.")
+        selected = next((p for p in list_projects()
+                         if str(p.folder.resolve()) == str(Path(folder).resolve())), None)
+        if selected is None:
+            self.settings.remove("project/active_folder")
+            self.settings.sync()
+            raise ValueError("The active project is no longer available in the local library.")
+        return selected
+
+    def _chapter_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
+        project = self._active_project()
+        return [{"number": c.number, "title": c.title, "text": c.text,
+                 "word_count": len(c.text.split()),
+                 "dialogue_assignments": c.dialogue_assignments}
+                for c in project.chapters]
+
+    def _chapter_update(self, payload: dict[str, Any]) -> dict[str, Any]:
+        project = self._active_project()
+        try:
+            number = int(payload.get("number"))
+        except (TypeError, ValueError):
+            raise ValueError("Select a valid chapter before saving.")
+        chapter = next((c for c in project.chapters if c.number == number), None)
+        if chapter is None:
+            raise ValueError("The selected chapter no longer exists.")
+        text_value = payload.get("text")
+        title_value = payload.get("title", chapter.title)
+        if not isinstance(text_value, str) or not text_value.strip():
+            raise ValueError("Chapter text cannot be empty.")
+        if len(text_value) > 10_000_000:
+            raise ValueError("Chapter text is too large to save in one operation.")
+        if not isinstance(title_value, str) or not title_value.strip():
+            raise ValueError("Chapter title cannot be empty.")
+        chapter.title = title_value.strip()[:500]
+        chapter.text = text_value
+        project.save()
+        return {"number": chapter.number, "title": chapter.title,
+                "word_count": len(chapter.text.split()), "saved": True}
 
     def _settings_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
         self.settings.sync()
