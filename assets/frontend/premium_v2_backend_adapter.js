@@ -28,7 +28,14 @@
     projects = await call('project.list');
     const grid = $('libraryGrid');
     const search = ($('librarySearch')?.value || '').trim().toLowerCase();
-    const visible = projects.filter(p => !search || (p.title + ' ' + (p.source_path || '') + ' ' + (p.status || '')).toLowerCase().includes(search));
+    const filter = $('libraryFilters')?.querySelector('button.active')?.textContent?.trim().toLowerCase() || 'all';
+    const visible = projects.filter(p => {
+      const complete = Boolean(p.completed), status = String(p.status || '').toLowerCase();
+      const matchesFilter = filter === 'all' || (filter === 'completed' && complete) ||
+        (filter === 'active' && !complete && !['failed','error','attention'].includes(status)) ||
+        (filter === 'attention' && (['failed','error','attention'].includes(status) || !Number(p.chapter_count || 0)));
+      return matchesFilter && (!search || (p.title + ' ' + (p.source_path || '') + ' ' + status).toLowerCase().includes(search));
+    });
     if (grid) grid.innerHTML = visible.map(p => {
       const complete = Boolean(p.completed);
       const status = complete ? 'Completed' : (p.status || 'New');
@@ -36,9 +43,19 @@
     }).join('') || '<p class="muted">No local projects found. Import a book to start your library.</p>';
     const dash = $('dashboard');
     if (dash) {
-      const cards = [...dash.querySelectorAll('[data-project-folder]')];
-      cards.forEach(c => c.remove());
+      const metrics = dash.querySelectorAll('.metrics .metric strong');
+      const completed = projects.filter(p => p.completed).length;
+      const active = projects.filter(p => !p.completed && !['failed','error','attention'].includes(String(p.status || '').toLowerCase())).length;
+      const attention = projects.filter(p => ['failed','error','attention'].includes(String(p.status || '').toLowerCase()) || !Number(p.chapter_count || 0)).length;
+      [projects.length, completed, active, attention].forEach((value, index) => { if (metrics[index]) metrics[index].textContent = value; });
+      dash.querySelectorAll('[data-project-folder]').forEach(c => c.remove());
     }
+    $('libraryFilters')?.querySelectorAll('button').forEach(button => {
+      if (!button.dataset.backendFilterBound) {
+        button.dataset.backendFilterBound = '1';
+        button.addEventListener('click', () => setTimeout(() => refreshProjects().catch(e=>message(e.message,true)), 0));
+      }
+    });
     return projects;
   }
   async function refreshVoices() {
