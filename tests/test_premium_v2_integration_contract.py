@@ -237,6 +237,17 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("PremiumV2Window", self.main)
         self.assertIn("frontend_path().is_file()", self.main)
 
+    def test_production_skips_empty_chapters_and_rejects_all_empty_books(self):
+        start = self.host.index("def _production_generate_book")
+        end = self.host.index("def _generation_progress", start)
+        worker = self.host[start:end]
+        self.assertIn("chapters = [c for c in project.chapters if (c.text or \"\").strip()]", worker)
+        self.assertIn("skipped = len(project.chapters) - len(chapters)", worker)
+        self.assertIn("if not chapters:", worker)
+        self.assertIn("No chapters contain narration text. Restore chapter text before generating.", worker)
+        self.assertIn('"empty_chapters_skipped": skipped', worker)
+        self.assertIn("Render {len(chapters)} non-empty chapter(s)", worker)
+
 
 if __name__ == "__main__":
     unittest.main()
