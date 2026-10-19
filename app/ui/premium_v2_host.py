@@ -670,6 +670,39 @@ class PremiumV2Bridge(QObject):
     def _preview_worker(self, job_id: str, profile, text_value: str, seconds: int, state: dict[str, Any]) -> None:
         try:
             provider, voice = provider_from_profile(profile)
+            # Keep Voice Studio previews consistent with production: saved
+            # character assignments must route quoted dialogue through their
+            # selected profiles, while narration continues to use the narrator.
+            cast_assignments: dict[str, str] = {}
+            cast_profiles: dict[str, Any] = {}
+            available_profiles = {p.name.casefold(): p for p in load_profiles()}
+            for character in state.get("characters") or []:
+                if not isinstance(character, dict):
+                    continue
+                assigned_name = str(character.get("voice_profile") or "").strip()
+                if not assigned_name:
+                    continue
+                assigned_profile = available_profiles.get(assigned_name.casefold())
+                if assigned_profile is None:
+                    raise ValueError(
+                        f"Character '{character.get('name', 'Unknown')}' uses voice profile "
+                        f"'{assigned_name}', which is no longer available. Reassign its voice in Character Studio."
+                    )
+                cast_profiles[assigned_profile.name] = assigned_profile
+                character_names = [str(character.get("name") or "").strip()]
+                aliases = character.get("aliases") or []
+                if isinstance(aliases, list):
+                    character_names.extend(str(alias).strip() for alias in aliases)
+                for character_name in character_names:
+                    if character_name:
+                        cast_assignments[character_name] = assigned_profile.name
+            if cast_assignments:
+                from app.tts.cast_provider import CastAwareProvider
+                provider = CastAwareProvider(
+                    provider, voice, cast_profiles, cast_assignments,
+                    narrating_character=str(state.get("narrating_character") or ""),
+                    backend_override=str(state.get("backend") or "automatic"),
+                )
             folder = app_root() / "Previews"
             folder.mkdir(parents=True, exist_ok=True)
             output = folder / f"preview_{job_id}.wav"
