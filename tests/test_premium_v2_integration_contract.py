@@ -150,6 +150,17 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("base64.b64decode(encoded, validate=True)", self.host)
         self.assertIn("Dropped files are limited to 25 MB.", self.host)
 
+    def test_sound_design_controls_do_not_fall_back_to_prototype_success_toasts(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("#importMusicTracks, #importCueClips, #previewSelectedTrack", adapter)
+        self.assertIn("call('sound.import')", adapter)
+        self.assertIn("call('sound.assign'", adapter)
+        self.assertIn("call('sound.save_manifest'", adapter)
+        self.assertIn("The selected local audio file could not be played", adapter)
+        self.assertIn("Per-chapter BGM overrides are not connected yet.", adapter)
+        self.assertIn("Story cue assignments are not connected to persistent backend storage yet", adapter)
+        self.assertIn("Cue search is unavailable because chapter cue assets are not yet connected", adapter)
+
     def test_background_jobs_screen_uses_backend_state_and_actions(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("let backendJobFilter = 'active'", adapter)
