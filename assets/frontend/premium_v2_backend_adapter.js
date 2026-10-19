@@ -398,6 +398,12 @@
       if(!c){message('Select a character from the assigned cast first.',true);return;}
       if($('characterEditorTitle'))$('characterEditorTitle').textContent='Edit character';
       if($('editCharacterName'))$('editCharacterName').value=c.name||'';
+      const voiceSelect=$('editCharacterVoice');
+      if(voiceSelect){
+        const current=c.voice_profile||'';
+        voiceSelect.innerHTML='<option value="">Unassigned</option>'+voices.map(v=>'<option value="'+esc(v.name)+'">'+esc(v.name)+' · '+esc(v.provider||'voice')+'</option>').join('');
+        voiceSelect.value=current;
+      }
       if($('editCharacterShort'))$('editCharacterShort').value=c.short_description||'';
       if($('editCharacterAliases'))$('editCharacterAliases').value=(c.aliases||[]).join(', ');
       if($('editCharacterVoice'))$('editCharacterVoice').value=c.voice_profile||'';
@@ -423,6 +429,7 @@
     if ($('deleteCharacter')) $('deleteCharacter').onclick=act(async()=>{
       const name=window.ryuPremiumSelectedCharacter;
       if(!name)throw new Error('Select a character before deleting.');
+      if(!window.confirm('Remove "'+name+'" from this book’s saved cast?'))return;
       await call('character.delete',{name});
       window.ryuPremiumSelectedCharacter=null;
       $('characterEditorModal')?.classList.remove('show');
