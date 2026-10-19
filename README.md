@@ -38,3 +38,7 @@ This repository contains source code and build configuration. User books, genera
 ## Current Test Build
 
 Voice library now exposes the offline Qwen character catalogue before installation, with hardware-aware 0.6B/1.7B selection and pronunciation audio testing.
+
+## Premium V2 frontend integration status
+
+The approved HTML source is stored at `assets/frontend/ryu_audiobook_premium_v2.html` and is loaded inside the desktop process using Qt WebEngine when that asset is present. The embedded bridge currently connects app information, persisted local project listing and settings reads. Other actions return a truthful `not_connected` result until each screen's backend command is implemented and tested. See `docs/PREMIUM_V2_SCREEN_FUNCTION_MAP.md`, `docs/PREMIUM_V2_BACKEND_API_MAP.md`, `docs/PREMIUM_V2_DATABASE_SCHEMA.md`, `docs/PREMIUM_V2_KNOWN_LIMITATIONS.md` and `docs/PREMIUM_V2_TEST_REPORT.md`. The integration is in progress; this note is not a release-complete claim.

@@ -22,3 +22,14 @@
 - Installer artifact built and runtime-verified with Premium V2.
 
 No unsupported success claims are made in this update log.
+
+### Embedded frontend implementation started
+- Added the exact Premium V2 HTML asset at `assets/frontend/ryu_audiobook_premium_v2.html`.
+- Added `app/ui/premium_v2_host.py`, a local Qt WebEngine host and allow-listed JSON bridge.
+- The current bridge has real app-info, local-project-list and settings-read commands; unsupported commands return an explicit `not_connected` error instead of pretending to succeed.
+- The desktop entry point selects the embedded HTML when the bundled asset exists; the historical widget shell remains a fallback for source/build trees missing that asset.
+- Added a Premium V2 integration-contract test file and WebEngine packaging hooks/dependencies.
+- Connected the dashboard/library's initial project listing and headline counts to persisted local project records. Project opening and job operations are explicitly disabled until their commands are connected.
+
+### Current gate
+This is a staged integration, not a complete app. The full 20-step functional acceptance, complete screen wiring, durable jobs/SQLite migration, visual comparison and Windows runtime smoke are still open.

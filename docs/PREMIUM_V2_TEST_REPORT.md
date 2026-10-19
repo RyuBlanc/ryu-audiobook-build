@@ -32,3 +32,12 @@
 ## Release-blocking acceptance
 
 Do not mark release complete until the 20-step workflow in the user specification passes with no hard-coded demo data, all project/job/playback state survives restart, generated output is validated and playable, and logs/backup can be exported.
+
+## Additional integration code added after the initial audit
+- Bundled the exact Premium V2 HTML under `assets/frontend/ryu_audiobook_premium_v2.html`.
+- Added an embedded `QWebEngineView` host and `QWebChannel` bridge.
+- The first connected operations are app info, local project listing and settings read. Unimplemented commands explicitly return `not_connected`.
+- Dashboard/library counts and project cards are now refreshed from `project.list`; actions not yet implemented are disabled and labeled as pending.
+- Added `tests/test_premium_v2_integration_contract.py` for the 15-destination HTML, host, bridge capabilities and packaging contract.
+
+**Important:** These tests have been authored but not yet observed passing in CI at the time of this report. No runtime or full end-to-end pass is claimed.
