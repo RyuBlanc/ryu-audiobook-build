@@ -131,6 +131,91 @@ class RedetectChaptersWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class StudioToast(QWidget):
+    """Compact, non-blocking toast matching the approved HTML notification style."""
+
+    def __init__(self, parent: QWidget, title: str, message: str, kind: str = "info") -> None:
+        super().__init__(parent, Qt.WindowType.Widget)
+        self.setObjectName("studioToast")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        accent = {"success": "#36C879", "warning": "#F5B942", "error": "#EB5757", "info": "#4E9CFF"}.get(kind, "#4E9CFF")
+        symbol = {"success": "✓", "warning": "!", "error": "×", "info": "i"}.get(kind, "i")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(13, 10, 12, 10)
+        layout.setSpacing(10)
+        mark = QLabel(symbol)
+        mark.setFixedSize(25, 25)
+        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mark.setStyleSheet(f"color:{accent};font-size:16px;font-weight:800;border:1px solid {accent};border-radius:12px;")
+        layout.addWidget(mark, 0, Qt.AlignmentFlag.AlignTop)
+        column = QVBoxLayout()
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(2)
+        heading = QLabel(title)
+        heading.setStyleSheet("color:#F5F5F6;font-size:13px;font-weight:700;background:transparent;")
+        detail = QLabel(message)
+        detail.setWordWrap(True)
+        detail.setMaximumWidth(330)
+        detail.setStyleSheet("color:#A6AFBD;font-size:12px;background:transparent;")
+        column.addWidget(heading)
+        column.addWidget(detail)
+        layout.addLayout(column, 1)
+        close = QPushButton("×")
+        close.setFixedSize(22, 22)
+        close.setCursor(Qt.CursorShape.PointingHandCursor)
+        close.setStyleSheet("QPushButton{color:#A6AFBD;background:transparent;border:0;font-size:17px;} QPushButton:hover{color:#FFFFFF;}")
+        close.clicked.connect(self.dismiss)
+        layout.addWidget(close, 0, Qt.AlignmentFlag.AlignTop)
+        self.setStyleSheet(f"#studioToast{{background:#191F2B;border:1px solid #2B3240;border-left:4px solid {accent};border-radius:10px;}}")
+        self.setMinimumWidth(300)
+        self.setMaximumWidth(410)
+        self._opacity = QGraphicsOpacityEffect(self)
+        self._opacity.setOpacity(0.0)
+        self.setGraphicsEffect(self._opacity)
+        self._fade = QPropertyAnimation(self._opacity, b"opacity", self)
+        self._fade.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self.dismiss)
+
+    def show_toast(self, duration_ms: int = 4200) -> None:
+        host = self.parentWidget()
+        if host is not None:
+            self.adjustSize()
+            self.move(max(12, host.width() - self.width() - 20), max(12, host.height() - self.height() - 20))
+        self.show()
+        self.raise_()
+        if reduced_motion_enabled():
+            self._opacity.setOpacity(1.0)
+        else:
+            self._fade.setDuration(170)
+            self._fade.setStartValue(0.0)
+            self._fade.setEndValue(1.0)
+            self._fade.start()
+        self._timer.start(max(1200, int(duration_ms)))
+
+    def dismiss(self) -> None:
+        self._timer.stop()
+        if reduced_motion_enabled():
+            self.hide()
+            self.deleteLater()
+            return
+        self._fade.stop()
+        self._fade.setDuration(130)
+        self._fade.setStartValue(self._opacity.opacity())
+        self._fade.setEndValue(0.0)
+        try:
+            self._fade.finished.disconnect()
+        except (TypeError, RuntimeError):
+            pass
+        self._fade.finished.connect(self._finish_dismiss)
+        self._fade.start()
+
+    def _finish_dismiss(self) -> None:
+        self.hide()
+        self.deleteLater()
+
+
 class ProjectWorkflow(QMainWindow):
     """Main studio shell inspired by modern audiobook creation workflows."""
 
@@ -144,6 +229,7 @@ class ProjectWorkflow(QMainWindow):
         self._page_animation: QPropertyAnimation | None = None
         self._page_animation_widget: QWidget | None = None
         self._mini_player_dismissed = False
+        self._active_toasts: list[StudioToast] = []
 
         # Persistent Dragon Studio shell: grouped navigation on the left,
         # a compact project-aware top bar, and the existing functional pages.
@@ -639,11 +725,25 @@ class ProjectWorkflow(QMainWindow):
                 issues.append(f"NEEDS ATTENTION · {project.title} — {detail}")
         if not issues:
             issues.append("No active or failed generation jobs are recorded in local project state.")
-        QMessageBox.information(
-            self,
-            "Local notifications",
-            "\n".join([f"Active projects: {active}", "", *issues]),
-        )
+        # The HTML reference uses compact toasts; avoid blocking navigation with a modal dialog.
+        summary = f"Active projects: {active}. " + " • ".join(issues[:3])
+        if len(issues) > 3:
+            summary += f" • and {len(issues) - 3} more"
+        kind = "error" if any("NEEDS ATTENTION" in item for item in issues) else ("success" if not active else "info")
+        self.show_toast("Local notifications", summary, kind, duration_ms=6500)
+
+    def show_toast(self, title: str, message: str, kind: str = "info", duration_ms: int = 4200) -> None:
+        """Show a truthful, dismissible toast without blocking the UI thread."""
+        host = self.centralWidget()
+        if host is None:
+            return
+        toast = StudioToast(host, title, message, kind)
+        self._active_toasts.append(toast)
+        toast.destroyed.connect(lambda _obj=None, item=toast: self._discard_toast(item))
+        toast.show_toast(duration_ms)
+
+    def _discard_toast(self, toast: StudioToast) -> None:
+        self._active_toasts = [item for item in self._active_toasts if item is not toast]
 
     @staticmethod
     def _safe_list_projects():
