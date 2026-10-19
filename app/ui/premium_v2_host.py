@@ -87,6 +87,8 @@ class PremiumV2Bridge(QObject):
                 "import.choose_file": self._import_choose_file,
                 "import.start": self._import_start,
                 "voice.list": self._voice_list,
+                "voice.save": self._voice_save,
+                "voice.import_reference": self._voice_import_reference,
                 "voice.select": self._voice_select,
                 "voice.preview": self._voice_preview,
                 "character.list": self._character_list,
@@ -170,6 +172,8 @@ class PremiumV2Bridge(QObject):
             "import.choose_file": True,
             "import.start": True,
             "voice.list": True,
+            "voice.save": True,
+            "voice.import_reference": True,
             "voice.select": True,
             "voice.preview": True,
             "character.list": True,
@@ -479,6 +483,107 @@ class PremiumV2Bridge(QObject):
             item.number = i
         project.save()
         return {"chapter_count": len(project.chapters), "moved_to": destination}
+
+    def _voice_import_reference(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Import and normalize an explicitly selected voice-reference recording."""
+        profile_name = str(payload.get("profile_name") or payload.get("name") or "Custom Voice").strip()
+        source_text = str(payload.get("source_path") or payload.get("path") or "").strip()
+        if source_text:
+            source = Path(source_text).expanduser().resolve()
+        else:
+            selected, _filter = QFileDialog.getOpenFileName(
+                None, "Select authorized voice reference audio", str(Path.home()),
+                "Audio files (*.wav *.mp3 *.flac *.ogg *.m4a *.aac *.aiff *.opus)",
+            )
+            if not selected:
+                return {"cancelled": True, "sample_path": None}
+            source = Path(selected).resolve()
+        from app.tts.voice_profile import import_reference_audio
+        normalized = import_reference_audio(source, profile_name)
+        return {"cancelled": False, "sample_path": str(normalized.resolve()),
+                "source_path": str(source), "profile_name": profile_name}
+
+    def _voice_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist a custom voice profile atomically in the local voice catalogue."""
+        from app.tts.voice_profile import (
+            VoiceProfile, import_reference_audio, load_saved_profiles, save_profiles,
+        )
+
+        name = str(payload.get("name") or payload.get("profile_name") or "").strip()
+        provider_name = str(payload.get("provider") or "chatterbox").strip().lower()
+        voice_id = str(payload.get("voice_id") or "").strip()
+        allowed = {"qwen-character", "chatterbox", "piper", "kokoro",
+                   "windows-sapi", "edge-tts", "elevenlabs"}
+        if not name:
+            raise ValueError("Give the custom voice profile a name before saving.")
+        if len(name) > 160:
+            raise ValueError("Voice profile names must be 160 characters or fewer.")
+        if provider_name not in allowed:
+            raise ValueError("Choose a supported voice provider.")
+        if not voice_id:
+            raise ValueError("A voice ID or speaker identifier is required.")
+
+        saved = load_saved_profiles()
+        existing = next((p for p in saved if p.name.casefold() == name.casefold()), None)
+        built_in_collision = next(
+            (p for p in load_profiles() if p.name.casefold() == name.casefold()
+             and existing is None),
+            None,
+        )
+        if built_in_collision is not None:
+            raise ValueError("That name is already used by a built-in voice. Choose a distinct profile name.")
+
+        sample_path = str(payload.get("sample_path") or "").strip() or None
+        reference_path = str(payload.get("reference_path") or "").strip()
+        if reference_path:
+            sample_path = str(import_reference_audio(Path(reference_path).expanduser().resolve(), name).resolve())
+        if sample_path:
+            sample = Path(sample_path).expanduser().resolve()
+            if not sample.is_file():
+                raise FileNotFoundError("The custom voice reference audio is missing.")
+            sample_path = str(sample)
+
+        qwen_mode = str(payload.get("qwen_mode") or ("clone" if provider_name == "chatterbox" else "custom")).strip().lower()
+        authorized = bool(payload.get("authorized", False))
+        if provider_name == "chatterbox" and not authorized:
+            raise ValueError("Confirm that you have permission to use this voice before saving a cloned voice.")
+        if provider_name == "chatterbox" and not sample_path:
+            raise ValueError("Import a reference recording before saving a Chatterbox custom voice.")
+        if provider_name == "qwen-character" and qwen_mode in {"clone", "voiceclone", "voice-clone"}:
+            if not authorized:
+                raise ValueError("Confirm that you have permission to clone this voice.")
+            if not sample_path:
+                raise ValueError("Import reference audio for a Qwen voice-clone profile.")
+
+        profile = VoiceProfile(
+            name=name, provider=provider_name, voice_id=voice_id,
+            sample_path=sample_path,
+            model_id=str(payload.get("model_id") or ("chatterbox" if provider_name == "chatterbox" else "auto")),
+            backend=str(payload.get("backend") or "automatic"),
+            language=str(payload.get("language") or "English"),
+            notes=str(payload.get("notes") or payload.get("description") or "")[:4000],
+            authorized=authorized,
+            exaggeration=max(0.0, min(1.0, float(payload.get("exaggeration", 0.5)))),
+            cfg_weight=max(0.0, min(1.0, float(payload.get("cfg_weight", 0.35)))),
+            style_preset=str(payload.get("style_preset") or "Natural"),
+            qwen_mode=qwen_mode,
+            qwen_prompt=str(payload.get("qwen_prompt") or payload.get("prompt") or "")[:4000],
+            qwen_seed=int(payload["qwen_seed"]) if payload.get("qwen_seed") not in (None, "") else None,
+            reference_text=str(payload.get("reference_text") or "")[:10000],
+            qwen_anchor_path=str(payload.get("qwen_anchor_path") or "") or None,
+            qwen_anchor_text=str(payload.get("qwen_anchor_text") or "")[:10000],
+            qwen_profile_id=str(payload.get("qwen_profile_id") or ""),
+        )
+        if existing is not None:
+            saved[saved.index(existing)] = profile
+        else:
+            saved.append(profile)
+        save_profiles(saved)
+        return {"name": profile.name, "provider": profile.provider, "voice_id": profile.voice_id,
+                "sample_path": profile.sample_path, "model_id": profile.model_id,
+                "backend": profile.backend, "language": profile.language,
+                "authorized": profile.authorized, "qwen_mode": profile.qwen_mode, "saved": True,
+                "count": len(load_profiles())}
 
     def _voice_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         return [{
