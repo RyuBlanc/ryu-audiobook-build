@@ -891,11 +891,71 @@ class VoicePage(QWidget):
         outer.addWidget(scroll, 1)
         self._apply_voice_step_visibility()
 
+        # A preview is evidence for one exact voice configuration and text.
+        # Editing that configuration must not leave a stale sample playable or
+        # saveable as though it validated the newly selected voice.
+        for widget_name, signal_name in (
+            ("mode", "currentIndexChanged"),
+            ("neural_voice", "currentIndexChanged"),
+            ("sapi_voice", "currentIndexChanged"),
+            ("qwen_design_prompt", "textChanged"),
+            ("qwen_design_language", "currentIndexChanged"),
+            ("qwen_design_seed", "valueChanged"),
+            ("qwen_clone_transcript", "textChanged"),
+            ("qwen_clone_authorized", "toggled"),
+            ("qwen_clone_sample_label", "textChanged"),
+            ("authorized", "toggled"),
+            ("sample_label", "textChanged"),
+            ("custom_style", "currentIndexChanged"),
+            ("custom_exaggeration", "valueChanged"),
+            ("custom_cfg_weight", "valueChanged"),
+            ("preview_text", "textChanged"),
+            ("preview_duration", "currentIndexChanged"),
+        ):
+            widget = getattr(self, widget_name, None)
+            signal = getattr(widget, signal_name, None) if widget is not None else None
+            if signal is not None:
+                signal.connect(self._invalidate_preview)
+
         self._populate_sapi_voices()
         self._update_profile_details(None)
         self.refresh_profiles()
         self._refresh_offline_catalog()
         self.update_mode()
+
+    def _invalidate_preview(self, *_args) -> None:
+        """Invalidate a preview when its voice settings, text, or target changes."""
+        if getattr(self, "_invalidating_preview", False):
+            return
+        self._invalidating_preview = True
+        try:
+            worker = getattr(self, "preview_worker", None)
+            if worker is not None and worker.isRunning():
+                worker.cancel()
+            player = getattr(self, "player", None)
+            if player is not None:
+                player.stop()
+            self.last_preview = None
+            self.last_preview_elapsed_seconds = None
+            if hasattr(self, "play_button"):
+                self.play_button.setEnabled(False)
+                self.play_button.setText("▶  Play")
+            if hasattr(self, "save_preview_button"):
+                self.save_preview_button.setEnabled(False)
+            if hasattr(self, "preview_percent_bar"):
+                self.preview_percent_bar.setValue(0)
+            if hasattr(self, "preview_activity_bar"):
+                self.preview_activity_bar.setVisible(False)
+            if hasattr(self, "preview_engine_status"):
+                self.preview_engine_status.setText(
+                    "Preview invalidated • generate a new preview for the current selection"
+                )
+            if hasattr(self, "status"):
+                self.status.setText(
+                    "Voice or preview settings changed. Generate a new preview before using or saving it."
+                )
+        finally:
+            self._invalidating_preview = False
 
     def _set_voice_step(self, index: int) -> None:
         """Select a Voice Studio step without rebuilding or losing its controls."""
