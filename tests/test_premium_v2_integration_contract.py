@@ -150,6 +150,14 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("base64.b64decode(encoded, validate=True)", self.host)
         self.assertIn("Dropped files are limited to 25 MB.", self.host)
 
+    def test_library_search_and_filters_use_real_project_records(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("e.target?.id === 'librarySearch'", adapter)
+        self.assertIn("e.target.closest('#libraryFilters button')", adapter)
+        self.assertIn("refreshProjects().catch", adapter)
+        self.assertIn("call('project.list')", adapter)
+        self.assertIn("No local projects found. Import a book to start your library.", adapter)
+
     def test_sound_design_controls_do_not_fall_back_to_prototype_success_toasts(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("#importMusicTracks, #importCueClips, #previewSelectedTrack", adapter)
