@@ -5,6 +5,7 @@ behavior can be checked without depending on a network TTS service or model.
 """
 import math
 import tempfile
+import unittest
 import wave
 from pathlib import Path
 from unittest.mock import patch
@@ -48,7 +49,7 @@ def _concat_wavs(paths: list[Path], destination: Path) -> None:
             output.writeframes(chunk)
 
 
-class PreviewDurationAcceptanceTests:
+class TestPreviewDurationAcceptance(unittest.TestCase):
     def test_requested_30_second_preview_does_not_stop_at_default_character_budget(self):
         class FastLocalProvider:
             def __init__(self):
