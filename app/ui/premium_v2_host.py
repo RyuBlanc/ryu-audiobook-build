@@ -94,6 +94,8 @@ class PremiumV2Bridge(QObject):
                 "character.list": self._character_list,
                 "character.analyze": self._character_analyze,
                 "character.assign": self._character_assign,
+                "character.update": self._character_update,
+                "character.delete": self._character_delete,
                 "pronunciation.list": self._pronunciation_list,
                 "pronunciation.save": self._pronunciation_save,
                 "pronunciation.delete": self._pronunciation_delete,
@@ -180,6 +182,8 @@ class PremiumV2Bridge(QObject):
             "character.list": True,
             "character.analyze": True,
             "character.assign": True,
+            "character.update": True,
+            "character.delete": True,
             "pronunciation.list": True,
             "pronunciation.save": True,
             "pronunciation.delete": True,
@@ -204,7 +208,7 @@ class PremiumV2Bridge(QObject):
             "sound.import": True,
             "sound.assign": True,
             "sound.save_manifest": True,
-            "reason": "Local import, chapter editing, saved voice selection and preview, character analysis, pronunciation rules, audiobook generation, background jobs, history, playback metadata, and settings are connected. Live hardware telemetry and model installation are not connected yet.",
+            "reason": "Local import, chapter editing, saved voice selection and preview, character analysis and editing, pronunciation rules, audiobook generation, background jobs, history, playback metadata, local model installation, and settings are connected. Live hardware telemetry remains unavailable.",
         }
 
     def _project_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -731,6 +735,65 @@ class PremiumV2Bridge(QObject):
         state["characters"] = characters
         save_state(project.folder, state)
         return {"name": name, "voice_profile": item["voice_profile"], "saved": True}
+
+    def _character_update(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist edits to a character discovered by analysis."""
+        project = self._active_project()
+        original_name = str(payload.get("original_name") or payload.get("name") or "").strip()
+        name = str(payload.get("name") or "").strip()
+        if not original_name or not name:
+            raise ValueError("A character name is required.")
+        if len(name) > 160:
+            raise ValueError("Character names must be 160 characters or fewer.")
+        state = load_state(project.folder)
+        characters = list(state.get("characters") or [])
+        item = next((c for c in characters
+                     if isinstance(c, dict) and str(c.get("name", "")).casefold() == original_name.casefold()), None)
+        if item is None:
+            raise ValueError("The selected character is no longer in the saved cast. Refresh and try again.")
+        duplicate = next((c for c in characters
+                          if isinstance(c, dict) and c is not item
+                          and str(c.get("name", "")).casefold() == name.casefold()), None)
+        if duplicate is not None:
+            raise ValueError("Another character already uses that name.")
+        profile_name = str(payload.get("voice_profile") or "").strip()
+        if profile_name and self._find_profile(profile_name) is None:
+            raise ValueError("Choose a voice from the saved Voice Studio catalogue.")
+        aliases = payload.get("aliases") or []
+        if isinstance(aliases, str):
+            aliases = [part.strip() for part in aliases.replace("\n", ",").split(",") if part.strip()]
+        if not isinstance(aliases, list):
+            raise ValueError("Character aliases must be a list or comma-separated text.")
+        item.update({
+            "name": name,
+            "role": str(payload.get("role") or item.get("role") or "Character").strip()[:160],
+            "short_description": str(payload.get("short_description") or "").strip()[:1000],
+            "aliases": list(dict.fromkeys(str(alias).strip()[:160] for alias in aliases if str(alias).strip())),
+            "notes": str(payload.get("notes") or "").strip()[:4000],
+            "scope": str(payload.get("scope") or "Current book only").strip()[:80],
+            "voice_profile": profile_name or None,
+        })
+        state["characters"] = characters
+        save_state(project.folder, state)
+        return {"character": item, "saved": True}
+
+    def _character_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Remove one character from the active book's saved cast."""
+        project = self._active_project()
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            raise ValueError("Choose a character to delete.")
+        state = load_state(project.folder)
+        characters = list(state.get("characters") or [])
+        kept = [c for c in characters if not (
+            isinstance(c, dict) and str(c.get("name", "")).casefold() == name.casefold()
+        )]
+        removed = len(characters) - len(kept)
+        if not removed:
+            raise ValueError("The selected character is no longer in the saved cast.")
+        state["characters"] = kept
+        save_state(project.folder, state)
+        return {"name": name, "deleted": True, "remaining": len(kept)}
 
     def _pronunciation_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         entries = load_state(self._active_project().folder).get("pronunciation_dictionary") or []
