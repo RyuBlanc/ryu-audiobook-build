@@ -76,6 +76,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('"models.install": True', self.host)
         self.assertIn('"character.update": True', self.host)
         self.assertIn('"character.delete": True', self.host)
+        self.assertIn('match = re.search(r"(?<!\\d)(\\d{1,3})%", detail)', self.host)
         self.assertIn("Confirm that you have permission", self.host)
         self.assertIn("def _voice_save(", self.host)
         self.assertIn('if provider_name == "chatterbox" and not voice_id:', self.host)
@@ -132,6 +133,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("qwen_seed:choice === 'voicedesign' ? designSeed", script)
         self.assertIn("call('character.update'", script)
         self.assertIn("call('character.delete'", script)
+        self.assertIn("voices.map(v=>'<option value='", script)
+        self.assertIn("window.confirm('Remove", script)
 
     def test_frontend_is_packaged_and_selected_by_desktop_entrypoint(self):
         self.assertIn("ryu_audiobook_premium_v2.html", self.build)
