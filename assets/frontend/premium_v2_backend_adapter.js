@@ -250,11 +250,113 @@
     const n = Math.max(0, Math.floor(Number(seconds) || 0)), h = Math.floor(n / 3600), m = Math.floor((n % 3600) / 60), sec = n % 60;
     return h ? h + ':' + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0') : m + ':' + String(sec).padStart(2,'0');
   };
+  async function refreshHistory() {
+    const rows = await call('history.list');
+    const section = $('history');
+    const filter = $('historyFilters')?.querySelector('button.active')?.textContent?.trim().toLowerCase() || 'all';
+    section?.querySelectorAll('.history-row[data-backend-history]').forEach(el => el.remove());
+    const host = $('historyFilters')?.parentElement;
+    const visible = rows.filter(j => {
+      const state = String(j.state || '').toLowerCase();
+      if (filter === 'completed') return state === 'completed';
+      if (filter === 'running') return ['queued','running','pause_requested','paused','retrying'].includes(state);
+      if (filter === 'failed') return ['failed','cancelled'].includes(state);
+      return true;
+    });
+    if (host) {
+      let empty = host.querySelector('[data-history-empty]');
+      if (!visible.length) {
+        if (!empty) { empty = document.createElement('p'); empty.dataset.historyEmpty='1'; empty.className='muted'; host.appendChild(empty); }
+        empty.textContent = 'No matching backend jobs yet.';
+      } else if (empty) empty.remove();
+      visible.forEach(j => {
+        const row = document.createElement('div');
+        row.className = 'history-row'; row.dataset.backendHistory='1';
+        const label = String(j.state || 'queued');
+        const duration = j.elapsed_seconds ? formatTime(j.elapsed_seconds) : 'Elapsed time unavailable';
+        row.innerHTML = '<div><b>' + esc(j.title || j.type || 'Background task') + '</b><br><span class="muted">' +
+          esc(j.project_title || 'Local task') + ' · ' + esc(j.stage || j.message || '') + ' · ' + esc(duration) +
+          '</span></div><span class="badge ' + (label==='failed'?'red':label==='running'?'info':'') + '">' + esc(label) +
+          '</span><span>' + Math.round(Number(j.progress || 0)) + '%</span><button class="btn small secondary" data-history-job="' +
+          esc(j.job_id) + '">View</button>';
+        host.appendChild(row);
+      });
+    }
+    return rows;
+  }
+  async function refreshModels() {
+    const rows = await call('models.list');
+    const grid = $('modelGrid');
+    if (grid) grid.innerHTML = rows.map(m => '<article class="card model-card"><div><span class="badge ' +
+      (m.installed ? '' : 'info') + '">' + (m.installed ? 'Installed' : 'Available') + '</span><h3>' + esc(m.name) +
+      '</h3><p class="muted">' + esc(m.provider || 'Local model') + ' · ' +
+      (m.voice_cloning ? 'Voice cloning capable' : 'Narration / speech') + '</p><p class="muted">' +
+      esc(m.notes || (m.multilingual ? 'Multilingual support' : 'Local voice model')) + '</p></div></article>').join('') ||
+      '<p class="muted">No model catalogue entries were returned by the local backend.</p>';
+    const heading = $('models')?.querySelector('.model-runtime h2');
+    if (heading) heading.textContent = rows.filter(m => m.installed).length + ' installed · ' + rows.filter(m => !m.installed).length + ' available in catalogue';
+    return rows;
+  }
+  async function loadSettings() {
+    const settings = await call('settings.get');
+    if ($('themeSelectAdvanced') && settings.theme) $('themeSelectAdvanced').value = settings.theme;
+    if ($('effectsModeAdvanced') && settings.effects) $('effectsModeAdvanced').value = settings.effects;
+    return settings;
+  }
+  async function runDiagnostics() {
+    const result = await call('diagnostics.check');
+    const box = $('integrityResults');
+    if (box) box.innerHTML = (result.checks || []).map(c => '<div class="list-item"><b>' + esc(c.name) +
+      '</b><span>' + esc(c.status) + ' · ' + esc(c.detail) + '</span></div>').join('') ||
+      '<p class="muted">No diagnostic results were returned.</p>';
+    message(result.passed ? 'Local integrity checks passed.' : 'Some local integrity checks need attention.', !result.passed);
+    return result;
+  }
   async function wire() {
     await call('app.get_info');
     await refreshProjects().catch(()=>{}); await refreshVoices().catch(()=>{}); await refreshChapters().catch(()=>{});
-    await refreshCharacters().catch(()=>{}); await refreshTerms().catch(()=>{}); await refreshSounds().catch(()=>{}); await refreshJobs().catch(()=>{});
+    await refreshCharacters().catch(()=>{}); await refreshTerms().catch(()=>{}); await refreshSounds().catch(()=>{}); await refreshJobs().catch(()=>{}); await refreshHistory().catch(()=>{}); await refreshModels().catch(()=>{}); await loadSettings().catch(()=>{});
     document.addEventListener('click', e => { const b=e.target.closest('[data-voice]'); if(b){selectedVoiceId=b.dataset.voice;const label=b.dataset.voice;if($('profileVoice'))$('profileVoice').textContent=label;if($('premiumName')&&!$('premiumName').value.trim())$('premiumName').value=label+' Custom';if($('profileName')&&!$('profileName').value.trim())$('profileName').value=label+' Custom';return;}if(e.target.closest('.provider'))selectedVoiceId=null; });
+    if ($('historyFilters')) $('historyFilters').querySelectorAll('button').forEach(button => button.addEventListener('click', () => {
+      $('historyFilters').querySelectorAll('button').forEach(b=>b.classList.toggle('active',b===button));
+      refreshHistory().catch(e=>message(e.message,true));
+    }));
+    if ($('history')) $('history').addEventListener('click', e => {
+      const b=e.target.closest('[data-history-job]'); if(!b)return;
+      const jobId=b.dataset.historyJob;
+      call('job.list',{include_hidden:true}).then(rows=>{const j=rows.find(x=>x.job_id===jobId);if(j)message((j.title||j.type)+' — '+(j.state||'unknown')+' · '+(j.stage||j.message||''));}).catch(x=>message(x.message,true));
+    });
+    if ($('checkModelUpdates')) $('checkModelUpdates').onclick=act(async()=>{await refreshModels();message('Local model catalogue refreshed. This checks the local catalogue; it does not contact an online update service.');});
+    if ($('startQwenInstall')) $('startQwenInstall').onclick=act(async()=>{
+      const choice=document.querySelector('input[name="qwenInstall"]:checked')?.value||'customvoice';
+      const data=await call('models.install',{selection:choice});
+      $('qwenInstallModal')?.classList.remove('show');
+      await monitorJob(data.job_id,refreshModels);
+    });
+    document.querySelectorAll('[data-close-qwen]').forEach(b=>b.addEventListener('click',()=>$('qwenInstallModal')?.classList.remove('show')));
+    if ($('clearModelQueue')) $('clearModelQueue').onclick=act(async()=>{await call('job.clear_completed');await refreshJobs();await refreshHistory();message('Completed background jobs cleared from the active queue.');});
+    if ($('runIntegrityCheck')) $('runIntegrityCheck').onclick=act(runDiagnostics);
+    if ($('runBenchmark')) $('runBenchmark').onclick=act(async()=>{
+      const result=await call('performance.info');
+      if($('benchmarkResult'))$('benchmarkResult').textContent=result.available?'Benchmark available':'Not connected';
+      message(result.reason||'Hardware benchmark is not available in this build.',!result.available);
+    });
+    if ($('chapterSearch')) $('chapterSearch').oninput=()=>{
+      const q=$('chapterSearch').value.trim().toLowerCase();
+      $('chapterList')?.querySelectorAll('[data-chapter-number]').forEach(el=>el.hidden=!el.textContent.toLowerCase().includes(q));
+    };
+    if ($('manualChapterSearch')) $('manualChapterSearch').oninput=()=>{
+      const q=$('manualChapterSearch').value.trim().toLowerCase();
+      $('manualChapterList')?.querySelectorAll('[data-chapter-number]').forEach(el=>el.hidden=!el.textContent.toLowerCase().includes(q));
+    };
+    if ($('pronTermSearch')) $('pronTermSearch').oninput=()=>{
+      const q=$('pronTermSearch').value.trim().toLowerCase();
+      $('pronTermList')?.querySelectorAll('[data-pron-term]').forEach(el=>el.hidden=!el.textContent.toLowerCase().includes(q));
+    };
+    if ($('pronSearchAdvanced')) $('pronSearchAdvanced').oninput=()=>{
+      const q=$('pronSearchAdvanced').value.trim().toLowerCase();
+      $('pronDictionaryBody')?.querySelectorAll('tr,[data-pron-row]').forEach(el=>el.hidden=!el.textContent.toLowerCase().includes(q));
+    };
     if ($('librarySearch')) $('librarySearch').oninput = () => refreshProjects().catch(e=>message(e.message,true));
     if ($('libraryGrid')) $('libraryGrid').addEventListener('click', async e => {
       const button = e.target.closest('[data-open-project]'); if (!button) return;
