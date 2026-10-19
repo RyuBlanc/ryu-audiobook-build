@@ -201,6 +201,7 @@ args = [
     f"--add-data={DRAGON_CROSS_PNG};assets",
     f"--add-data={DRAGON_CURSOR_PNG};assets",
     f"--add-data={ROOT / 'assets' / 'frontend' / 'ryu_audiobook_premium_v2.html'};assets/frontend",
+    f"--add-data={ROOT / 'assets' / 'frontend' / 'premium_v2_backend_adapter.js'};assets/frontend",
     f"--add-data={ROOT / "app" / "tts" / "chatterbox_worker.py"};app/tts",
     f"--add-data={ROOT / "app" / "tts" / "expression.py"};app/tts",
     f"--add-data={ROOT / "app" / "tts" / "qwen_character_worker.py"};app/tts",
