@@ -512,6 +512,10 @@ class PremiumV2Bridge(QObject):
         name = str(payload.get("name") or payload.get("profile_name") or "").strip()
         provider_name = str(payload.get("provider") or "chatterbox").strip().lower()
         voice_id = str(payload.get("voice_id") or "").strip()
+        # Reference-based Chatterbox profiles do not need a separate provider voice ID;
+        # use the saved profile name as a stable local identifier when the UI omits it.
+        if provider_name == "chatterbox" and not voice_id:
+            voice_id = name
         allowed = {"qwen-character", "chatterbox", "piper", "kokoro",
                    "windows-sapi", "edge-tts", "elevenlabs"}
         if not name:
