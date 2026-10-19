@@ -15,6 +15,7 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.workflow = (ROOT / "app" / "ui" / "workflow.py").read_text(encoding="utf-8")
+        cls.dashboard = (ROOT / "app" / "ui" / "dashboard_page.py").read_text(encoding="utf-8")
         # The original Dragon Studio prototype remains the full-app navigation
         # reference for the 14 destinations. The newer fixed all-steps HTML is
         # the approved, more detailed Voice Studio reference; it is not a
@@ -67,6 +68,36 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
         self.assertIn("QTimer.singleShot(75, self._refresh_generation_context)", handler)
         self.assertIn("Generate page could not be opened", handler)
         self.assertIn("Select a book in Library or import a new book to start generating.", handler)
+
+    def test_responsive_shell_has_one_merged_resize_handler(self):
+        # A duplicate method silently overrides the earlier implementation in Python.
+        self.assertEqual(len(re.findall(r"^    def resizeEvent\\(", self.workflow, re.MULTILINE)), 1)
+        start = self.workflow.index("    def resizeEvent(")
+        end = self.workflow.find("\\n    def ", start + 5)
+        handler = self.workflow[start:end if end >= 0 else None]
+        for required in (
+            "self.project_label.setVisible(not compact_header)",
+            "self.global_search.setMaximumWidth",
+            "self.mini_title.setVisible(not compact_player)",
+            "self.mini_position.setVisible(not compact_player)",
+            "self.mini_duration.setVisible(not compact_player)",
+            "self.loading_overlay.setGeometry",
+        ):
+            self.assertIn(required, handler)
+
+    def test_dashboard_metrics_and_recent_cards_are_project_backed(self):
+        for required in (
+            "list_projects()",
+            "project_status(project)",
+            "load_state(latest.folder)",
+            "self.metric_total.metric_value.setText(str(len(self.projects)))",
+            "self.on_open_project(self.projects[0])",
+            "self.on_open_project(self.visible_projects[row])",
+            "self.on_import()",
+            "self.on_open_library()",
+        ):
+            self.assertIn(required, self.dashboard)
+        self.assertNotIn("random.", self.dashboard.lower())
 
     def test_canonical_full_app_prototype_contains_all_fourteen_screen_anchors(self):
         anchors = {
