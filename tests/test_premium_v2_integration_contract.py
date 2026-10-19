@@ -44,6 +44,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('"app.get_info": True', self.host)
         self.assertIn('"project.list": True', self.host)
         self.assertIn('"settings.get": True', self.host)
+        self.assertIn('"project.open": True', self.host)
+        self.assertIn('"chapter.list": True', self.host)
+        self.assertIn('"chapter.update": True', self.host)
         self.assertIn('"project.create": False', self.host)
         self.assertIn('"production.generate_book": False', self.host)
         self.assertIn("not_connected", self.host)
@@ -53,7 +56,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("window.ryuBackend.invoke('project.list')", self.html)
         self.assertIn("window.ryuPremiumProjects", self.html)
         self.assertIn("job service is connected", self.html)
-        self.assertIn("integration pending", self.html)
+        self.assertIn("data-project-folder", self.html)
+        self.assertIn("invoke('chapter.update'", self.html)
 
     def test_frontend_is_packaged_and_selected_by_desktop_entrypoint(self):
         self.assertIn("ryu_audiobook_premium_v2.html", self.build)
