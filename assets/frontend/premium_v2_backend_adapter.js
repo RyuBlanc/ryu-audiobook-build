@@ -15,7 +15,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, activeJob = null, poll = null;
+  let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null;
   let chapters = [], characters = [], voices = [], terms = [];
   const selectedChapter = () => chapters.find(c => c.number === window.ryuPremiumSelectedChapter) || chapters[0];
   const renderSelect = (select, rows, value, label) => {
@@ -109,7 +109,7 @@
     const name = ($('profileName')?.value || $('premiumName')?.value || '').trim();
     if (!name) throw new Error('Enter a name for this voice profile.');
     const choice = document.querySelector('.provider.active')?.dataset.provider || 'offline';
-    const providerMap = {offline:'piper',qwen:'qwen-character',qwencharacter:'qwen-character',clone:'qwen-character',voiceclone:'qwen-character',customref:'chatterbox',chatterbox:'chatterbox'};
+    const providerMap = {offline:'piper',sapi:'windows-sapi',customvoice:'qwen-character',voicedesign:'qwen-character',qwenclone:'qwen-character',customref:'chatterbox',edge:'edge-tts',eleven:'elevenlabs'};
     const provider = providerMap[choice] || (choice.includes('clone') ? 'qwen-character' : 'piper');
     const authorized = Boolean($('clonePermission')?.checked || $('customPermission')?.checked);
     let sample_path = '';
@@ -119,7 +119,9 @@
       if (imported.cancelled) return;
       sample_path = imported.sample_path || imported.path || '';
     }
-    const voice_id = provider === 'piper' ? (voices.find(v => v.name === name)?.voice_id || 'en_US-amy-medium') : name;
+    const voiceLabel = $('profileVoice')?.textContent?.trim() || 'Amy';
+    const matchedPiper = voices.find(v => v.provider === 'piper' && String(v.voice_id || '').toLowerCase().includes(voiceLabel.toLowerCase()));
+    const voice_id = provider === 'piper' ? (selectedVoiceId || matchedPiper?.voice_id || voices.find(v => v.name === name)?.voice_id || 'en_US-amy-medium') : (selectedVoiceId || voiceLabel || name);
     const result = await call('voice.save', {name,provider,voice_id,sample_path,authorized,
       model_id:provider === 'chatterbox' ? 'chatterbox' : provider === 'qwen-character' ? 'qwen3-tts' : provider,
       backend:provider === 'piper' ? 'automatic' : provider,language:'English',
@@ -157,6 +159,7 @@
     await call('app.get_info');
     await refreshVoices().catch(()=>{}); await refreshChapters().catch(()=>{});
     await refreshCharacters().catch(()=>{}); await refreshTerms().catch(()=>{}); await refreshJobs().catch(()=>{});
+    document.addEventListener('click', e => { const b=e.target.closest('[data-voice]'); if(!b)return; selectedVoiceId=b.dataset.voice; const label=b.dataset.voice; if($('profileVoice'))$('profileVoice').textContent=label; if($('premiumName')&&!$('premiumName').value.trim())$('premiumName').value=label+' Custom'; if($('profileName')&&!$('profileName').value.trim())$('profileName').value=label+' Custom'; });
     if ($('browseBtn')) $('browseBtn').onclick = act(importBook);
     if ($('dropzone')) $('dropzone').onclick = e => { if (!e.target.closest('button')) importBook().catch(x=>message(x.message,true)); };
     if ($('cleanText')) $('cleanText').onclick = act(async()=>{const c=selectedChapter();if(!c)throw new Error('Import or open a book first.');const text=$('chapterEditor')?.value||'';$('chapterEditor').value=text.replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();message('Whitespace cleaned. Save changes to persist it.');});
