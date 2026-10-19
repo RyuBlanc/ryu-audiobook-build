@@ -1,7 +1,7 @@
 """Focused regressions for requested voice-preview duration.
 
-These tests use a deterministic local WAV provider so the duration-budget
-behavior can be checked without depending on a network TTS service or model.
+These tests use a deterministic local WAV provider so duration-budget behavior
+is checked without depending on a network TTS service or model.
 """
 import math
 import tempfile
@@ -50,7 +50,7 @@ def _concat_wavs(paths: list[Path], destination: Path) -> None:
 
 
 class TestPreviewDurationAcceptance(unittest.TestCase):
-    def test_requested_30_second_preview_does_not_stop_at_default_character_budget(self):
+    def test_supported_preview_durations_meet_requested_audio_budget(self):
         class FastLocalProvider:
             def __init__(self):
                 self.calls = 0
@@ -59,35 +59,40 @@ class TestPreviewDurationAcceptance(unittest.TestCase):
                 self.calls += 1
                 _write_tone(Path(output_path), 0.30)
 
-        # Longer than the old default 1,400-character cap. At 0.30 seconds
-        # per sentence, that old cap produces roughly ten seconds of audio;
-        # the requested 30-second budget must allow enough source text.
+        # Deliberately exceed the longest duration's expected source budget.
+        # The previous fixed 1,400-character budget produced only ~10 seconds
+        # for fast local voices, even when a longer preview was requested.
         text = " ".join(
             f"Sentence {number} contains enough words for the preview duration test."
-            for number in range(1, 220)
+            for number in range(1, 320)
         )
+
         with tempfile.TemporaryDirectory() as temp:
-            output = Path(temp) / "preview-30-seconds.wav"
-            provider = FastLocalProvider()
-            with patch("app.tts.preview._normalize", side_effect=_copy_normalized), patch(
-                "app.tts.preview._concat", side_effect=_concat_wavs
-            ):
-                result = build_voice_preview(
-                    text,
-                    provider,
-                    "Narrator",
-                    output,
-                    narration_speed=1.0,
-                    pacing_profile="off",
-                    max_chars=1400,
-                    target_seconds=30.0,
-                )
+            for requested_seconds in (10, 20, 30, 45, 60):
+                with self.subTest(requested_seconds=requested_seconds):
+                    output = Path(temp) / f"preview-{requested_seconds}-seconds.wav"
+                    provider = FastLocalProvider()
+                    with patch("app.tts.preview._normalize", side_effect=_copy_normalized), patch(
+                        "app.tts.preview._concat", side_effect=_concat_wavs
+                    ):
+                        result = build_voice_preview(
+                            text,
+                            provider,
+                            "Narrator",
+                            output,
+                            narration_speed=1.0,
+                            pacing_profile="off",
+                            max_chars=1400,
+                            target_seconds=float(requested_seconds),
+                        )
 
-            with wave.open(str(result.output_path), "rb") as wav:
-                actual_seconds = wav.getnframes() / float(wav.getframerate())
+                    with wave.open(str(result.output_path), "rb") as wav:
+                        actual_seconds = wav.getnframes() / float(wav.getframerate())
 
-            self.assertGreaterEqual(actual_seconds, 30.0)
-            self.assertLess(actual_seconds, 31.0)
-            self.assertEqual(provider.calls, result.segments)
-            self.assertGreater(result.segments, 35)
-            self.assertEqual(result.output_path, output)
+                    self.assertGreaterEqual(actual_seconds, requested_seconds)
+                    # Each synthetic unit is 0.30s, so the stopping condition
+                    # may overshoot by at most one generated segment.
+                    self.assertLess(actual_seconds, requested_seconds + 0.31)
+                    self.assertEqual(provider.calls, result.segments)
+                    self.assertGreater(result.segments, requested_seconds)
+                    self.assertEqual(result.output_path, output)
