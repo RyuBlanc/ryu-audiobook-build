@@ -56,6 +56,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "voice.list": "_voice_list",
             "voice.select": "_voice_select",
             "voice.preview": "_voice_preview",
+            "voice.save": "_voice_save",
+            "voice.import_reference": "_voice_import_reference",
             "character.analyze": "_character_analyze",
             "pronunciation.save": "_pronunciation_save",
             "production.generate_book": "_production_generate_book",
@@ -66,6 +68,11 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             self.assertIn(f'"{command}": self.{handler}', self.host)
         self.assertIn('"project.create": False', self.host)
         self.assertIn('"production.generate_book": True', self.host)
+        self.assertIn('"voice.save": True', self.host)
+        self.assertIn('"voice.import_reference": True', self.host)
+        self.assertIn("Confirm that you have permission", self.host)
+        self.assertIn("def _voice_save(", self.host)
+        self.assertIn("def _voice_import_reference(", self.host)
         self.assertIn("def _generation_finished(", self.host)
         self.assertIn("def _import_worker(", self.host)
         self.assertIn("not_connected", self.host)
