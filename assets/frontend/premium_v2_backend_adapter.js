@@ -201,7 +201,7 @@
     await call('app.get_info');
     await refreshProjects().catch(()=>{}); await refreshVoices().catch(()=>{}); await refreshChapters().catch(()=>{});
     await refreshCharacters().catch(()=>{}); await refreshTerms().catch(()=>{}); await refreshSounds().catch(()=>{}); await refreshJobs().catch(()=>{});
-    document.addEventListener('click', e => { const b=e.target.closest('[data-voice]'); if(!b)return; selectedVoiceId=b.dataset.voice; const label=b.dataset.voice; if($('profileVoice'))$('profileVoice').textContent=label; if($('premiumName')&&!$('premiumName').value.trim())$('premiumName').value=label+' Custom'; if($('profileName')&&!$('profileName').value.trim())$('profileName').value=label+' Custom'; });
+    document.addEventListener('click', e => { const b=e.target.closest('[data-voice]'); if(b){selectedVoiceId=b.dataset.voice;const label=b.dataset.voice;if($('profileVoice'))$('profileVoice').textContent=label;if($('premiumName')&&!$('premiumName').value.trim())$('premiumName').value=label+' Custom';if($('profileName')&&!$('profileName').value.trim())$('profileName').value=label+' Custom';return;}if(e.target.closest('.provider'))selectedVoiceId=null; });
     if ($('librarySearch')) $('librarySearch').oninput = () => refreshProjects().catch(e=>message(e.message,true));
     if ($('libraryGrid')) $('libraryGrid').addEventListener('click', async e => {
       const button = e.target.closest('[data-open-project]'); if (!button) return;
