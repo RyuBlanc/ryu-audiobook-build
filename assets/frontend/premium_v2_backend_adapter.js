@@ -165,11 +165,21 @@
     }
     const voiceLabel = $('profileVoice')?.textContent?.trim() || 'Amy';
     const matchedPiper = voices.find(v => v.provider === 'piper' && String(v.voice_id || '').toLowerCase().includes(voiceLabel.toLowerCase()));
+    const designPanel = document.querySelector('.provider[data-provider="voicedesign"]');
+    const designPrompt = designPanel?.querySelector('textarea')?.value?.trim() || '';
+    const designLanguage = designPanel?.querySelector('select')?.value || 'English';
+    const rawSeed = Number(designPanel?.querySelector('input[type="number"]')?.value || 0);
+    const designSeed = Number.isFinite(rawSeed) && rawSeed > 0 ? Math.trunc(rawSeed) : null;
+    if (choice === 'voicedesign' && !designPrompt) throw new Error('Enter a voice description before saving a VoiceDesign profile.');
+    const qwenMode = choice === 'voicedesign' ? 'design' : /clone/i.test(choice) ? 'clone' : 'custom';
     const voice_id = provider === 'piper' ? (matchedPiper?.voice_id || voices.find(v => v.name === name)?.voice_id || 'en_US-amy-medium') : (selectedVoiceId || voiceLabel || name);
     const result = await call('voice.save', {name,provider,voice_id,sample_path,authorized,
-      model_id:provider === 'chatterbox' ? 'chatterbox' : provider === 'qwen-character' ? 'qwen3-tts' : provider,
-      backend:provider === 'piper' ? 'automatic' : provider,language:'English',
-      qwen_mode:provider === 'qwen-character' ? (/clone/i.test(choice) ? 'clone' : 'custom') : 'custom',
+      model_id:provider === 'chatterbox' ? 'chatterbox' : provider === 'qwen-character' ? 'auto' : provider,
+      backend:provider === 'piper' ? 'automatic' : provider,language:choice === 'voicedesign' ? designLanguage : 'English',
+      qwen_mode:provider === 'qwen-character' ? qwenMode : 'custom',
+      qwen_prompt:choice === 'voicedesign' ? designPrompt : '',
+      qwen_seed:choice === 'voicedesign' ? designSeed : null,
+      notes:choice === 'voicedesign' ? designPrompt : '',
       reference_text:$('cloneTranscript')?.value || ''});
     selectedVoice = result.name; await refreshVoices();
     if ($('profileName')) $('profileName').value = result.name;
@@ -382,6 +392,44 @@
     if ($('savePronTerm')) $('savePronTerm').onclick=act(async()=>{await call('pronunciation.save',{written_form:$('pronWord')?.textContent?.trim()||'',spoken_form:$('pronValue')?.value||'',scope:$('pronScope')?.value||'current_book',handling_mode:$('pronHandling')?.value||'automatic'});await refreshTerms();message('Pronunciation rule saved locally.');});
     if ($('saveNewPron')) $('saveNewPron').onclick=act(async()=>{await call('pronunciation.save',{written_form:$('newPronWritten')?.value||'',spoken_form:$('newPronValue')?.value||'',language:$('newPronLanguage')?.value||'Auto',scope:$('newPronScope')?.value||'current_book'});await refreshTerms();$('pronEntryModal')?.classList.remove('show');message('Pronunciation entry saved.');});
     if ($('analyzePronunciation')) $('analyzePronunciation').onclick=act(async()=>{const r=await call('pronunciation.analyze');const list=$('pronDictionaryBody');if(list)list.innerHTML=(r.suggestions||[]).map(t=>'<div class="list-item"><b>'+esc(t.written_form)+'</b><span> → '+esc(t.spoken_form)+'</span></div>').join('')||'<p class="muted">No new suggestions found.</p>';message('Found '+(r.suggestions||[]).length+' suggestions to review.');});
+    if ($('editAssignedCharacter')) $('editAssignedCharacter').onclick=()=>{
+      const name=window.ryuPremiumSelectedCharacter;
+      const c=characters.find(x=>x.name===name);
+      if(!c){message('Select a character from the assigned cast first.',true);return;}
+      if($('characterEditorTitle'))$('characterEditorTitle').textContent='Edit character';
+      if($('editCharacterName'))$('editCharacterName').value=c.name||'';
+      if($('editCharacterShort'))$('editCharacterShort').value=c.short_description||'';
+      if($('editCharacterAliases'))$('editCharacterAliases').value=(c.aliases||[]).join(', ');
+      if($('editCharacterVoice'))$('editCharacterVoice').value=c.voice_profile||'';
+      if($('editCharacterScope'))$('editCharacterScope').value=c.scope||'Current book only';
+      if($('editCharacterNotes'))$('editCharacterNotes').value=c.notes||'';
+      $('characterEditorModal')?.classList.add('show');
+    };
+    if ($('saveCharacterProfile')) $('saveCharacterProfile').onclick=act(async()=>{
+      const original=window.ryuPremiumSelectedCharacter;
+      if(!original)throw new Error('Select a character before saving.');
+      const name=$('editCharacterName')?.value.trim()||'';
+      const voice=$('editCharacterVoice')?.value||'';
+      await call('character.update',{original_name:original,name,short_description:$('editCharacterShort')?.value||'',
+        aliases:$('editCharacterAliases')?.value||'',voice_profile:voice,scope:$('editCharacterScope')?.value||'Current book only',
+        notes:$('editCharacterNotes')?.value||''});
+      window.ryuPremiumSelectedCharacter=name;
+      $('characterEditorModal')?.classList.remove('show');
+      await refreshCharacters();
+      const c=characters.find(x=>x.name===name);
+      if(c){if($('assignedInspectorName'))$('assignedInspectorName').textContent=c.name;if($('assignedAliases'))$('assignedAliases').textContent=(c.aliases||[]).join(', ')||'—';if($('assignedVoiceName'))$('assignedVoiceName').textContent=c.voice_profile||'Unassigned';}
+      message('Character profile saved locally.');
+    });
+    if ($('deleteCharacter')) $('deleteCharacter').onclick=act(async()=>{
+      const name=window.ryuPremiumSelectedCharacter;
+      if(!name)throw new Error('Select a character before deleting.');
+      await call('character.delete',{name});
+      window.ryuPremiumSelectedCharacter=null;
+      $('characterEditorModal')?.classList.remove('show');
+      await refreshCharacters();
+      if($('assignedInspectorName'))$('assignedInspectorName').textContent='Select a character';
+      message('Character removed from this book’s saved cast.');
+    });
     if ($('assignCharacter')) $('assignCharacter').onclick=act(async()=>{const name=window.ryuPremiumSelectedCharacter;if(!name)throw new Error('Select a character first.');await call('character.assign',{name,profile_name:selectedVoice||$('profileName')?.value});await refreshCharacters();});
     if ($('editCharacterVoice')) $('editCharacterVoice').onchange=act(async()=>{if(!window.ryuPremiumSelectedCharacter)return;await call('character.assign',{name:window.ryuPremiumSelectedCharacter,profile_name:$('editCharacterVoice').value});await refreshCharacters();});
     if ($('importMusicTracks')) $('importMusicTracks').onclick = act(async()=>{const r=await call('sound.import');await refreshSounds();message('Imported '+(r.imported||[]).length+' sound file(s) into the local Audio Library.');});
