@@ -121,8 +121,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("playerAudio.play()", script)
         self.assertIn("async function refreshHistory()", script)
         self.assertIn("async function refreshModels()", script)
-        self.assertIn("call(\'diagnostics.check\')", script)
-        self.assertIn("call(\'models.install\'", script)
+        self.assertIn("call('diagnostics.check')", script)
+        self.assertIn("call('models.install'", script)
 
     def test_frontend_is_packaged_and_selected_by_desktop_entrypoint(self):
         self.assertIn("ryu_audiobook_premium_v2.html", self.build)
