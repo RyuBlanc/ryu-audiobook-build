@@ -266,5 +266,55 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
         ):
             self.assertIn(required, page)
 
+
+    def test_dashboard_progress_is_based_on_saved_records_and_has_empty_state(self):
+        for required in (
+            'state.get("completed_chapters")',
+            'latest_state.get("completed_chapters")',
+            'Progress reflects chapters recorded in local project state; it is not an ETA.',
+            'No completed-chapter record is available yet.',
+            'Your books and output remain on this device.',
+            'self.continue_button.setEnabled(bool(self.projects))',
+            'self.status_detail.setTextFormat(Qt.TextFormat.PlainText)',
+        ):
+            self.assertIn(required, self.dashboard)
+        self.assertNotIn("random.", self.dashboard.lower())
+
+    def test_hardware_benchmark_runs_off_ui_thread_and_reports_missing_voice(self):
+        page = (ROOT / "app" / "ui" / "hardware_page.py").read_text(encoding="utf-8")
+        for required in (
+            'self.profile = detect_hardware()',
+            'for backend in self.profile.backends:',
+            'if backend.available:',
+            'self.benchmark_button.clicked.connect(self.run_benchmark)',
+            'self.benchmark_thread = _BenchmarkThread(provider_backend, voices[0].stem)',
+            'self.benchmark_thread.finished_result.connect(self._benchmark_finished)',
+            'self.benchmark_thread.start()',
+            'Install a Piper voice first from the Models page.',
+            'self.benchmark_button.setEnabled(False)',
+            'self.benchmark_thread.finished.connect(lambda: self.benchmark_button.setEnabled(True))',
+        ):
+            self.assertIn(required, page)
+        worker = page[page.index('class _BenchmarkThread'):page.index('class HardwarePage')]
+        self.assertIn('benchmark_provider(', worker)
+
+    def test_models_page_keeps_optional_runtime_install_and_repair_recovery(self):
+        page = (ROOT / "app" / "ui" / "models_page.py").read_text(encoding="utf-8")
+        for required in (
+            'self.install_audiobook_ai.setEnabled(False)',
+            'self.audiobook_ai_worker.finished_ok.connect(self._audiobook_ai_ok)',
+            'self.audiobook_ai_worker.failed.connect(self._audiobook_ai_failed)',
+            'self.install_audiobook_ai.setEnabled(True)',
+            'self.install_chatterbox.setEnabled(False)',
+            'self.chatterbox_worker.finished_ok.connect(self._chatterbox_ok)',
+            'self.chatterbox_worker.failed.connect(self._chatterbox_failed)',
+            'self.repair_qwen.setEnabled(False)',
+            'self.qwen_repair_worker.finished_ok.connect(self._qwen_repair_ok)',
+            'self.qwen_repair_worker.failed.connect(self._qwen_repair_failed)',
+            'saved profiles and downloaded models were kept.',
+            'Your downloaded Qwen model files will NOT be deleted.',
+        ):
+            self.assertIn(required, page)
+
 if __name__ == "__main__":
     unittest.main()
