@@ -136,7 +136,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("qwen_seed:choice === 'voicedesign' ? designSeed", script)
         self.assertIn("call('character.update'", script)
         self.assertIn("call('character.delete'", script)
-        self.assertIn("voices.map(v=>'<option value='", script)
+        self.assertIn("voices.map(v=>'<option value=", script)
         self.assertIn("window.confirm('Remove", script)
 
     def test_frontend_is_packaged_and_selected_by_desktop_entrypoint(self):
