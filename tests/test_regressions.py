@@ -3015,3 +3015,14 @@ Rias Gremory
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_production_studio_validates_chapter_audio_and_normalizes_m4b_output(self):
+        source = Path("app/ui/assembly_page.py").read_text(encoding="utf-8")
+        self.assertIn("def _validate_build_inputs", source)
+        self.assertIn('chunks_dir.glob("*.wav")', source)
+        self.assertIn("chapter folder is missing", source)
+        self.assertIn("no WAV audio chunks found", source)
+        self.assertIn('output_path.suffix.casefold() != ".m4b"', source)
+        self.assertIn("self._validate_build_inputs()", source)
+        self.assertIn("An audiobook packaging job is already running.", source)
