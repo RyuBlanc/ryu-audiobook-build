@@ -139,6 +139,15 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("voices.map(v=>'<option value=", script)
         self.assertIn("window.confirm('Remove", script)
 
+    def test_voice_preview_uses_saved_character_voice_assignments(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        worker = host.split("def _preview_worker", 1)[1].split("def _character_list", 1)[0]
+        self.assertIn("available_profiles = {p.name.casefold(): p for p in load_profiles()}", worker)
+        self.assertIn("from app.tts.cast_provider import CastAwareProvider", worker)
+        self.assertIn("cast_assignments[character_name] = assigned_profile.name", worker)
+        self.assertIn("target_seconds=seconds", worker)
+        self.assertIn('"actual_duration_seconds": duration', worker)
+
     def test_file_input_and_dropzone_start_real_import_jobs(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("async function importDroppedFile(file)", adapter)
