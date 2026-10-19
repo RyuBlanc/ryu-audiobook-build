@@ -15,8 +15,11 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.workflow = (ROOT / "app" / "ui" / "workflow.py").read_text(encoding="utf-8")
+        # The fixed all-steps Voice Studio HTML is the approved system-wide
+        # reference. Keep tests anchored to the canonical design, not the retired
+        # Dragon Studio prototype.
         cls.prototype = (
-            ROOT / "docs" / "prototypes" / "Ryus_Audiobook_Dragon_Studio_Premium_Final.html"
+            ROOT / "docs" / "prototypes" / "Ryus_Audiobook_Voice_Studio_Fixed_All_Steps.html"
         ).read_text(encoding="utf-8")
         cls.voice_reference = (
             ROOT / "docs" / "prototypes" / "Ryus_Audiobook_Voice_Studio_Fixed_All_Steps.html"
