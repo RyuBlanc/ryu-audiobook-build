@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QWidget,
 )
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QPixmap
 
 from app.core.paths import app_root
 from app.core.project import Project, list_projects
@@ -153,6 +153,18 @@ class AudiobooksPage(QWidget):
         self.now_playing.setWordWrap(True)
         player_layout.addWidget(self.now_playing)
 
+        self.cover_art = QLabel("No cover art")
+        self.cover_art.setObjectName("audiobookCover")
+        self.cover_art.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cover_art.setMinimumSize(140, 140)
+        self.cover_art.setMaximumSize(190, 190)
+        player_layout.addWidget(self.cover_art, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        self.author_detail = QLabel("Author: Not set")
+        self.author_detail.setObjectName("muted")
+        self.author_detail.setWordWrap(True)
+        player_layout.addWidget(self.author_detail)
+
         self.file_detail = QLabel("Audio stays in its original local output folder.")
         self.file_detail.setObjectName("muted")
         self.file_detail.setWordWrap(True)
@@ -237,12 +249,32 @@ class AudiobooksPage(QWidget):
             self.now_playing.setText("Select a finished audiobook to begin.")
             self.file_detail.setText("No verified output file is selected.")
             return
-        self.now_playing.setText(str(item.data(Qt.ItemDataRole.UserRole + 2) or item.text().splitlines()[0]))
+        title = str(item.data(Qt.ItemDataRole.UserRole + 2) or item.text().splitlines()[0])
+        self.now_playing.setText(title)
         self.file_detail.setText(f"{path.name}\n{path.parent}\n{path.stat().st_size / (1024 * 1024):.1f} MB")
         self.status.setText("Selected. Press Play to listen inside Ryu's Audiobook.")
         folder = str(item.data(Qt.ItemDataRole.UserRole + 1) or "")
-        self.open_project_button.setEnabled(folder in self._projects_by_folder)
+        project = self._projects_by_folder.get(folder)
+        self.open_project_button.setEnabled(project is not None)
         self.open_output_button.setEnabled(True)
+        state = load_state(project.folder) if project is not None else {}
+        author = str(state.get("author") or state.get("author_name") or "").strip()
+        self.author_detail.setText(f"Author: {author or 'Not set'}")
+        cover_raw = str(state.get("cover_path") or "").strip()
+        cover_path = Path(cover_raw).expanduser() if cover_raw else None
+        if cover_path is not None and not cover_path.is_absolute() and project is not None:
+            cover_path = project.folder / cover_path
+        pixmap = QPixmap(str(cover_path)) if cover_path is not None and cover_path.is_file() else QPixmap()
+        if pixmap.isNull():
+            self.cover_art.setPixmap(QPixmap())
+            self.cover_art.setText("No cover art")
+            self.cover_art.setToolTip("Add cover art in the project metadata to display it here.")
+        else:
+            self.cover_art.setText("")
+            self.cover_art.setPixmap(pixmap.scaled(
+                180, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+            ))
+            self.cover_art.setToolTip(str(cover_path))
 
     def refresh(self) -> None:
         selected = str(self._active_path or "")
