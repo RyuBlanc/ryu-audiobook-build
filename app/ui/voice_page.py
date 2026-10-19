@@ -1011,10 +1011,17 @@ class VoicePage(QWidget):
             and self._preview_profile_signature == current_signature
         )
         has_project = self._active_project_folder() is not None
+        profile_is_saved = bool(
+            profile
+            and any(
+                item.name.casefold() == profile.name.casefold()
+                for item in load_saved_profiles()
+            )
+        )
         for name in ("use_as_narrator_button", "assign_character_button"):
             button = getattr(self, name, None)
             if button is not None:
-                button.setEnabled(valid_preview and has_project)
+                button.setEnabled(valid_preview and has_project and profile_is_saved)
 
     def assign_as_narrator(self) -> None:
         profile = self._profile_from_ui()
@@ -1038,6 +1045,12 @@ class VoicePage(QWidget):
             return
         state = load_state(folder)
         state["voice_profile"] = saved_profile.name
+        # Keep Voice Cast's narrator row aligned with Generate's active
+        # narrator profile. The actual narrator selector remains voice_profile.
+        assignments = state.get("voice_cast", {})
+        assignments = dict(assignments) if isinstance(assignments, dict) else {}
+        assignments["Narrator"] = saved_profile.name
+        state["voice_cast"] = assignments
         save_state(folder, state)
         window = self.window()
         generation = getattr(window, "generation", None)
