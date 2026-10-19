@@ -948,6 +948,17 @@ class VoicePage(QWidget):
         self._refresh_offline_catalog()
         self.update_mode()
 
+    @staticmethod
+    def _is_live_qt_object(value: Any) -> bool:
+        """Return whether a PySide wrapper still owns a live C++ object."""
+        if value is None:
+            return False
+        try:
+            from shiboken6 import isValid
+            return bool(isValid(value))
+        except (ImportError, RuntimeError, TypeError):
+            return False
+
     def _invalidate_preview(self, *_args) -> None:
         """Invalidate a preview when its voice settings, text, or target changes."""
         if getattr(self, "_invalidating_preview", False):
@@ -955,30 +966,36 @@ class VoicePage(QWidget):
         self._invalidating_preview = True
         try:
             worker = getattr(self, "preview_worker", None)
-            if worker is not None and worker.isRunning():
+            if self._is_live_qt_object(worker) and worker.isRunning():
                 worker.cancel()
             player = getattr(self, "player", None)
-            if player is not None:
+            if self._is_live_qt_object(player):
                 player.stop()
             self.last_preview = None
             self.last_preview_elapsed_seconds = None
-            if hasattr(self, "play_button"):
-                self.play_button.setEnabled(False)
-                self.play_button.setText("▶  Play")
-            if hasattr(self, "save_preview_button"):
-                self.save_preview_button.setEnabled(False)
+            play_button = getattr(self, "play_button", None)
+            if self._is_live_qt_object(play_button):
+                play_button.setEnabled(False)
+                play_button.setText("▶  Play")
+            save_button = getattr(self, "save_preview_button", None)
+            if self._is_live_qt_object(save_button):
+                save_button.setEnabled(False)
             self._preview_profile_signature = None
             self._refresh_assignment_actions()
-            if hasattr(self, "preview_percent_bar"):
-                self.preview_percent_bar.setValue(0)
-            if hasattr(self, "preview_activity_bar"):
-                self.preview_activity_bar.setVisible(False)
-            if hasattr(self, "preview_engine_status"):
-                self.preview_engine_status.setText(
+            percent_bar = getattr(self, "preview_percent_bar", None)
+            if self._is_live_qt_object(percent_bar):
+                percent_bar.setValue(0)
+            activity_bar = getattr(self, "preview_activity_bar", None)
+            if self._is_live_qt_object(activity_bar):
+                activity_bar.setVisible(False)
+            engine_status = getattr(self, "preview_engine_status", None)
+            if self._is_live_qt_object(engine_status):
+                engine_status.setText(
                     "Preview invalidated • generate a new preview for the current selection"
                 )
-            if hasattr(self, "status"):
-                self.status.setText(
+            status = getattr(self, "status", None)
+            if self._is_live_qt_object(status):
+                status.setText(
                     "Voice or preview settings changed. Generate a new preview before using or saving it."
                 )
         finally:
@@ -1020,7 +1037,7 @@ class VoicePage(QWidget):
         )
         for name in ("use_as_narrator_button", "assign_character_button"):
             button = getattr(self, name, None)
-            if button is not None:
+            if self._is_live_qt_object(button):
                 button.setEnabled(valid_preview and has_project and profile_is_saved)
 
     def assign_as_narrator(self) -> None:

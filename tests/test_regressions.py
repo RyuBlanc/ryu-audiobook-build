@@ -818,6 +818,22 @@ class RegressionTests(unittest.TestCase):
             page.close()
             page.deleteLater()
 
+    def test_voice_preview_invalidation_ignores_deleted_qt_status_widget(self):
+        import shiboken6
+        from app.ui.voice_page import VoicePage
+
+        page = VoicePage()
+        try:
+            # Closing stacked pages can destroy a child widget before its
+            # preview-setting signals are disconnected. The callback must
+            # tolerate a surviving Python wrapper with a deleted Qt object.
+            shiboken6.delete(page.status)
+            page._invalidate_preview()
+            self.assertIsNone(page.last_preview)
+        finally:
+            page.close()
+            page.deleteLater()
+
     def test_qwen_clone_draft_identity_is_stable_before_profile_save(self):
         from types import SimpleNamespace
         from app.ui.voice_page import VoicePage
