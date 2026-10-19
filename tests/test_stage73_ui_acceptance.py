@@ -201,5 +201,33 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
         ):
             self.assertIn(required, page)
 
+    def test_pronunciation_and_sound_design_open_dedicated_book_specific_pages(self):
+        start = self.workflow.index("    def _open_generation_feature(")
+        end = self.workflow.index("    def _install_generation_feature_pages(", start)
+        routing = self.workflow[start:end]
+        self.assertIn('key = "Pronunciation" if feature == "pronunciation" else "Sound Design"', routing)
+        self.assertIn('self.pronunciation_page if feature == "pronunciation" else self.sound_design_page', routing)
+        self.assertIn("self._show_page(target)", routing)
+        self.assertIn("Select a book in Library or import one to open", routing)
+
+        start = self.workflow.index("    def _install_generation_feature_pages(")
+        end = self.workflow.index("    def ensure_generation_page(", start)
+        feature_pages = self.workflow[start:end]
+        self.assertIn('setObjectName("pronunciationStudioPage")', feature_pages)
+        self.assertIn('setObjectName("soundDesignStudioPage")', feature_pages)
+        self.assertIn("Pronunciation Studio", feature_pages)
+        self.assertIn("Sound Design Studio", feature_pages)
+
+    def test_page_transition_is_non_blocking_and_respects_reduced_motion(self):
+        start = self.workflow.index("    def _show_page(")
+        end = self.workflow.index("    def _sidebar_item_clicked(", start)
+        transition = self.workflow[start:end]
+        self.assertIn("self.stack.setCurrentWidget(widget)", transition)
+        self.assertIn("if reduced_motion_enabled() or not widget.isVisible():", transition)
+        self.assertIn("animation.setDuration(135)", transition)
+        self.assertIn('self._log_ui_failure("Page transition animation", exc)', transition)
+        self.assertIn("widget.setGraphicsEffect(None)", transition)
+
+
 if __name__ == "__main__":
     unittest.main()
