@@ -229,7 +229,7 @@
     if ($('useNarrator')) $('useNarrator').onclick=act(async()=>{const v=await saveVoice();if(v)await call('voice.select',{profile_name:v.name});message('Saved and selected narrator.');});
     if ($('generatePreview')) $('generatePreview').onclick=act(previewVoice);
     if ($('previewGenerate')) $('previewGenerate').onclick=act(async()=>{const name=selectedVoice||$('profileName')?.value;const data=await call('production.preview',{profile_name:name,duration_seconds:30});await monitorJob(data.job_id,preparePreviewPlayback);});
-    if ($('playPreview')) $('playPreview').onclick=act(async()=>{if(!previewAudio)throw new Error('Generate a preview first.');await previewAudio.play();$('playPreview').textContent='Ⅱ Pause';});
+    if ($('playPreview')) $('playPreview').onclick=act(async()=>{if(!previewAudio)throw new Error('Generate a preview first.');if(!previewAudio.paused){previewAudio.pause();$('playPreview').textContent='▶ Play';}else{await previewAudio.play();$('playPreview').textContent='Ⅱ Pause';}});
     if ($('stopPreview')) $('stopPreview').onclick=()=>{if(previewAudio){previewAudio.pause();previewAudio.currentTime=0;}if($('playPreview'))$('playPreview').textContent='▶ Play';};
     if ($('startGenerate')) $('startGenerate').onclick=act(async()=>{const data=await call('production.generate_book',{profile_name:selectedVoice||$('profileName')?.value,bitrate:256});await monitorJob(data.job_id);});
     if ($('pauseGenerate')) $('pauseGenerate').onclick=act(async()=>{if(!activeJob)throw new Error('There is no active job to pause.');await call('job.pause',{job_id:activeJob});await refreshJobs();});
