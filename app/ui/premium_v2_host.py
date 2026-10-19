@@ -1106,7 +1106,7 @@ class PremiumV2Bridge(QObject):
 
         def report_progress(detail: str) -> None:
             detail = str(detail)
-            match = re.search(r"(?<!\\d)(\\d{1,3})%", detail)
+            match = re.search(r"(?<!\d)(\d{1,3})%", detail)
             changes: dict[str, Any] = {"state": "running", "stage": detail, "message": detail}
             if match:
                 changes["progress"] = min(98, max(1, int(match.group(1))))
