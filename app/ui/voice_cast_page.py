@@ -6,6 +6,7 @@ from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtWidgets import (
     QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QPushButton, QVBoxLayout, QWidget, QLineEdit, QTextEdit, QScrollArea,
+    QInputDialog,
 )
 
 from app.chapters.characters import analyze_book
@@ -131,6 +132,13 @@ class VoiceCastPage(QWidget):
         self.refresh_button = QPushButton("Refresh Voices")
         self.refresh_button.clicked.connect(self.refresh_profiles)
         actions.addWidget(self.refresh_button)
+
+        self.add_character_button = QPushButton("Add Character")
+        self.add_character_button.clicked.connect(self.add_character)
+        actions.addWidget(self.add_character_button)
+        self.rename_character_button = QPushButton("Rename Character")
+        self.rename_character_button.clicked.connect(self.rename_character)
+        actions.addWidget(self.rename_character_button)
         actions.addStretch(1)
         root.addLayout(actions)
 
@@ -295,6 +303,28 @@ class VoiceCastPage(QWidget):
                 "aliases": character.aliases,
             })
 
+        # Preserve user-created cast members that automated analysis cannot
+        # rediscover (for example, characters with no explicit speech tags).
+        folder = self._project_folder()
+        roster = load_state(folder).get("voice_cast_character_roster", []) if folder else []
+        known = {row["name"].casefold() for row in rows}
+        for saved_row in roster if isinstance(roster, list) else []:
+            if not isinstance(saved_row, dict):
+                continue
+            name = str(saved_row.get("name") or "").strip()
+            if not name or name.casefold() in known or name.casefold() == "narrator":
+                continue
+            rows.append({
+                "name": name,
+                "role": str(saved_row.get("role") or "Manually Added Character"),
+                "dialogue_count": int(saved_row.get("dialogue_count") or 0),
+                "examples": list(saved_row.get("examples") or []),
+                "voice": saved.get(name.casefold()),
+                "confidence": float(saved_row.get("confidence", 1.0)),
+                "aliases": list(saved_row.get("aliases") or []),
+            })
+            known.add(name.casefold())
+
         self.rows = rows
         self._save_cast()
 
@@ -390,14 +420,96 @@ class VoiceCastPage(QWidget):
             self.list.setCurrentRow(new_index)
 
     def _load_saved_cast(self):
+        folder = self._project_folder()
+        state = load_state(folder) if folder else {}
         saved = {
             str(k).casefold(): str(v)
             for k, v in self._saved_assignments().items()
-            if v
+            if v and str(k).casefold() != "narrator"
         }
+        roster = state.get("voice_cast_character_roster", [])
+        if isinstance(roster, list):
+            existing = {str(row.get("name") or "").casefold() for row in self.rows}
+            for item in roster:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "").strip()
+                if not name or name.casefold() in existing or name.casefold() == "narrator":
+                    continue
+                self.rows.append({
+                    "name": name,
+                    "role": str(item.get("role") or "Manually Added Character"),
+                    "dialogue_count": int(item.get("dialogue_count") or 0),
+                    "examples": list(item.get("examples") or []),
+                    "voice": saved.get(name.casefold()),
+                    "confidence": float(item.get("confidence", 1.0)),
+                    "aliases": list(item.get("aliases") or []),
+                })
+                existing.add(name.casefold())
         for row in self.rows:
             row["voice"] = saved.get(row["name"].casefold())
         self._refresh_labels()
+
+    def add_character(self):
+        name, ok = QInputDialog.getText(self, "Add Character", "Character name:")
+        name = str(name or "").strip()
+        if not ok or not name:
+            return
+        if name.casefold() == "narrator" or any(
+            row["name"].casefold() == name.casefold() for row in self.rows
+        ):
+            self.summary.setText("That character name already exists or is reserved for the narrator.")
+            return
+        self.rows.append({
+            "name": name, "role": "Manually Added Character",
+            "dialogue_count": 0, "examples": [], "voice": None,
+            "confidence": 1.0, "aliases": [],
+        })
+        self._save_cast()
+        self._refresh_labels()
+        self.summary.setText(f"Added '{name}' to this book's cast.")
+
+    def rename_character(self):
+        row = self._row_for_visible_index(self.list.currentRow())
+        if not row:
+            self.summary.setText("Select a character to rename.")
+            return
+        if row["name"].casefold() == "narrator":
+            self.summary.setText("The audiobook narrator cannot be renamed as a story character.")
+            return
+        old_name = row["name"]
+        name, ok = QInputDialog.getText(
+            self, "Rename Character", "New character name:", text=old_name
+        )
+        name = str(name or "").strip()
+        if not ok or not name or name == old_name:
+            return
+        if name.casefold() == "narrator" or any(
+            item is not row and item["name"].casefold() == name.casefold()
+            for item in self.rows
+        ):
+            self.summary.setText("That character name already exists or is reserved for the narrator.")
+            return
+        row["name"] = name
+        aliases = list(row.get("aliases") or [])
+        if old_name not in aliases:
+            aliases.append(old_name)
+        row["aliases"] = aliases
+        folder = self._project_folder()
+        if folder:
+            state = load_state(folder)
+            assignments = state.get("voice_cast", {})
+            if isinstance(assignments, dict) and old_name in assignments:
+                assignments = dict(assignments)
+                assignments[name] = assignments.pop(old_name)
+                state["voice_cast"] = assignments
+            if state.get("voice_cast_narrating_character") == old_name:
+                state["voice_cast_narrating_character"] = name
+            save_state(folder, state)
+        self._save_cast()
+        self._refresh_labels()
+        self.summary.setText(f"Renamed '{old_name}' to '{name}'.")
+
 
     def _refresh_labels(self):
         current_row = self.list.currentRow()
@@ -446,9 +558,25 @@ class VoiceCastPage(QWidget):
             return
 
         state = load_state(folder)
+        # Keep the full cast roster, including manually added characters
+        # without an assigned voice, so it survives restarts and re-analysis.
+        state["voice_cast_character_roster"] = [
+            {
+                "name": row["name"],
+                "role": row.get("role") or "Possible Character",
+                "dialogue_count": int(row.get("dialogue_count") or 0),
+                "examples": list(row.get("examples") or []),
+                "confidence": float(row.get("confidence", 0.0)),
+                "aliases": list(row.get("aliases") or []),
+            }
+            for row in self.rows if row.get("name") and row["name"].casefold() != "narrator"
+        ]
+        narrator_assignment = state.get("voice_cast", {}).get("Narrator") if isinstance(state.get("voice_cast"), dict) else None
         state["voice_cast"] = {
             row["name"]: row["voice"] for row in self.rows if row.get("voice")
         }
+        if narrator_assignment:
+            state["voice_cast"]["Narrator"] = narrator_assignment
 
         narrating = next(
             (
