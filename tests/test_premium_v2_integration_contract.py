@@ -139,6 +139,17 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("voices.map(v=>'<option value=", script)
         self.assertIn("window.confirm('Remove", script)
 
+    def test_file_input_and_dropzone_start_real_import_jobs(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("async function importDroppedFile(file)", adapter)
+        self.assertIn("content_base64:btoa(binary)", adapter)
+        self.assertIn("$('fileInput').onchange", adapter)
+        self.assertIn("$('dropzone').ondrop", adapter)
+        self.assertIn("await startImportPayload", adapter)
+        self.assertNotIn("simulateImport", adapter)
+        self.assertIn("base64.b64decode(encoded, validate=True)", self.host)
+        self.assertIn("Dropped files are limited to 25 MB.", self.host)
+
     def test_background_jobs_screen_uses_backend_state_and_actions(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("let backendJobFilter = 'active'", adapter)
