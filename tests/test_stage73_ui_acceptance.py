@@ -170,5 +170,36 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
         self.assertIn('self.status.setText(f"Import analysis failed: {message}")', import_page)
 
 
+
+    def test_audiobooks_shelf_shows_real_local_output_author_and_cover(self):
+        page = (ROOT / "app" / "ui" / "audiobooks_page.py").read_text(encoding="utf-8")
+        for required in (
+            'path.is_file() and path.suffix.lower() in _AUDIO_EXTENSIONS',
+            'path.stat().st_size > 0',
+            'self.cover_art = QLabel("No cover art")',
+            'state.get("author") or state.get("author_name")',
+            'state.get("cover_path")',
+            'QPixmap(str(cover_path))',
+            'pixmap.scaled(',
+            'self.author_detail.setText(f"Author: {author or \'Not set\'}")',
+            'self.open_project_button.setEnabled(project is not None)',
+        ):
+            self.assertIn(required, page)
+
+    def test_audiobooks_player_keeps_playback_and_recovery_controls(self):
+        page = (ROOT / "app" / "ui" / "audiobooks_page.py").read_text(encoding="utf-8")
+        for required in (
+            'self.player.positionChanged.connect(self._position_changed)',
+            'self.player.durationChanged.connect(self._duration_changed)',
+            'self.player.errorOccurred.connect(self._playback_error)',
+            'self.play_button.clicked.connect(self.play_selected)',
+            'self.pause_button.clicked.connect(self.pause_resume)',
+            'self.stop_button.clicked.connect(self.stop_playback)',
+            'self.open_output_button.clicked.connect(self._open_output_folder)',
+            'if path is None:',
+            'self.status.setText("Playback stopped.")',
+        ):
+            self.assertIn(required, page)
+
 if __name__ == "__main__":
     unittest.main()
