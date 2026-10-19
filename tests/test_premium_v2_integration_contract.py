@@ -146,6 +146,18 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("requested_duration_seconds", adapter)
         self.assertIn("preparePreviewPlayback(job, Number(duration))", adapter)
 
+    def test_chapter_split_is_persisted_and_connected_to_visible_control(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn('"chapter.split": self._chapter_split', self.host)
+        self.assertIn("def _chapter_split(self, payload: dict[str, Any])", self.host)
+        self.assertIn("project.chapters.insert(index + 1, new_chapter)", self.host)
+        self.assertIn("project.save()", self.host[self.host.index("def _chapter_split"):self.host.index("def _voice_import_reference")])
+        self.assertIn("Both sides of a split must contain text.", self.host)
+        self.assertIn("textContent.trim().toLowerCase() === 'split chapter'", adapter)
+        self.assertIn("call('chapter.split'", adapter)
+        self.assertIn("split_at:splitAt", adapter)
+        self.assertIn("window.ryuPremiumSelectedChapter = result.new_number", adapter)
+
     def test_voice_preview_uses_saved_character_voice_assignments(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         worker = host.split("def _preview_worker", 1)[1].split("def _character_list", 1)[0]
