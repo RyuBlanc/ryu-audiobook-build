@@ -207,5 +207,6 @@
     if (!window.__ryuBackendJobTimer) window.__ryuBackendJobTimer=setInterval(()=>refreshJobs().catch(()=>{}),3000);
     message('Premium V2 local backend connected.');
   }
-  window.addEventListener('ryu-backend-ready',()=>wire().catch(e=>message(e.message,true)),{once:true});
+  const start = () => wire().catch(e=>message(e.message,true));
+  if (window.ryuBackend?.invoke) start(); else window.addEventListener('ryu-backend-ready', start, {once:true});
 })();
