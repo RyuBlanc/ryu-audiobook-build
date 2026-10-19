@@ -15,7 +15,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null;
+  let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null;
   const selectedChapter = () => chapters.find(c => c.number === window.ryuPremiumSelectedChapter) || chapters[0];
   const renderSelect = (select, rows, value, label) => {
@@ -208,6 +208,34 @@
     if ($('validation')) $('validation').textContent = 'Preview job ' + data.job_id + ' is running locally.';
     await monitorJob(data.job_id, async job => { if ($('previewState')) $('previewState').textContent = 'Ready'; preparePreviewPlayback(job); });
   }
+  async function openPlayer() {
+    const data = await call('player.get_active');
+    if (playerAudio && playerAudio.src === data.file_url) { if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause(); return; }
+    if (playerAudio) playerAudio.pause();
+    playerAudio = new Audio(data.file_url);
+    playerAudio.preload = 'metadata';
+    playerAudio.ontimeupdate = () => {
+      const duration = playerAudio.duration || 0, current = playerAudio.currentTime || 0;
+      if ($('playerTimeline') && duration) $('playerTimeline').value = current / duration * 100;
+      if ($('miniProgress') && duration) $('miniProgress').style.width = current / duration * 100 + '%';
+      if ($('currentTime')) $('currentTime').textContent = formatTime(current);
+      const main = $('mainPlay'), mini = $('miniPlay');
+      if (main) main.textContent = playerAudio.paused ? '▶' : 'Ⅱ';
+      if (mini) mini.textContent = playerAudio.paused ? '▶' : 'Ⅱ';
+    };
+    playerAudio.onloadedmetadata = () => {
+      const headings = $('player')?.querySelectorAll('h2') || [];
+      if (headings[0]) headings[0].textContent = data.title;
+      if (headings[1]) headings[1].textContent = data.chapters?.[0]?.title || 'Audiobook ready';
+      const mini = $('miniPlayer'); if (mini) mini.querySelector('b').textContent = data.title;
+    };
+    playerAudio.onerror = () => message('The local audiobook file could not be opened in the embedded player.', true);
+    await playerAudio.play();
+  }
+  const formatTime = seconds => {
+    const n = Math.max(0, Math.floor(Number(seconds) || 0)), h = Math.floor(n / 3600), m = Math.floor((n % 3600) / 60), sec = n % 60;
+    return h ? h + ':' + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0') : m + ':' + String(sec).padStart(2,'0');
+  };
   async function wire() {
     await call('app.get_info');
     await refreshProjects().catch(()=>{}); await refreshVoices().catch(()=>{}); await refreshChapters().catch(()=>{});
@@ -246,6 +274,9 @@
     if ($('soundTrackGrid')) $('soundTrackGrid').addEventListener('click', e=>{const b=e.target.closest('[data-select-sound]');if(!b)return;selectedSoundPath=b.dataset.selectSound;if($('selectedSoundTitle'))$('selectedSoundTitle').textContent=sounds.find(t=>t.path===selectedSoundPath)?.title||'Selected track';if($('selectedSoundMeta'))$('selectedSoundMeta').textContent='Selected from the local catalogue';message('Selected sound track. Save it to the active book to apply it.');});
     if ($('setBookDefaultTrack')) $('setBookDefaultTrack').onclick = act(async()=>{if(!selectedSoundPath)throw new Error('Select a track from the local sound catalogue first.');await call('sound.assign',{path:selectedSoundPath,volume:Number($('advancedMusicVolume')?.value||18)/100});message('Background track assigned to the active book.');});
     if ($('saveSoundPresetAdvanced')) $('saveSoundPresetAdvanced').onclick = act(async()=>{await call('sound.save_manifest',{path:selectedSoundPath||'',enabled:Boolean(selectedSoundPath),volume:Number($('advancedMusicVolume')?.value||18)/100});message('Sound manifest saved to the active book.');});
+    ['mainPlay','miniPlay'].forEach(id=>{if($(id))$(id).onclick=act(openPlayer);});
+    if ($('playerTimeline')) $('playerTimeline').oninput=()=>{if(playerAudio&&playerAudio.duration)playerAudio.currentTime=Number($('playerTimeline').value)/100*playerAudio.duration;};
+    if ($('hideMini')) $('hideMini').onclick=()=> $('miniPlayer')?.classList.add('hidden');
     if ($('saveSettingsAdvanced')) $('saveSettingsAdvanced').onclick=act(async()=>{await call('settings.save',{theme:$('themeSelectAdvanced')?.value||'dark',effects:$('effectsModeAdvanced')?.value||'high'});message('Settings saved to this PC.');});
     document.addEventListener('click',async e=>{const b=e.target.closest('[data-job-action]');if(!b)return;e.preventDefault();try{const commands={pause:'job.pause',resume:'job.resume',cancel:'job.cancel'};await call(commands[b.dataset.jobAction]||'job.cancel',{job_id:b.dataset.jobId});await refreshJobs();}catch(err){message(err?.message||String(err),true);}});
     if (!window.__ryuBackendJobTimer) window.__ryuBackendJobTimer=setInterval(()=>refreshJobs().catch(()=>{}),3000);
