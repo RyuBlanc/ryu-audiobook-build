@@ -16,7 +16,7 @@ from pathlib import Path
 
 import imageio_ffmpeg
 
-from app.audio.assembler import assemble_m4b
+from app.audio.assembler import assemble_m4b, _probe_audio_bitrate_kbps
 
 
 def write_test_wav(path: Path, seconds: float = 0.8) -> None:
@@ -87,6 +87,9 @@ class Stage743OutputValidationTests(unittest.TestCase):
 
             self.assertTrue(output.is_file())
             self.assertGreater(output.stat().st_size, 1024)
+            # Production acceptance includes a measured encoded stream bitrate,
+            # not merely the requested encoder setting.
+            self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
 
             probe = subprocess.run(
                 [imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-i", str(output)],
