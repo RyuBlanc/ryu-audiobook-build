@@ -79,13 +79,19 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("def _import_worker(", self.host)
         self.assertIn("not_connected", self.host)
 
-    def test_dashboard_and_library_query_real_project_records(self):
-        self.assertIn("ryu-premium-v2-backend-binding", self.html)
-        self.assertIn("window.ryuBackend.invoke('project.list')", self.html)
-        self.assertIn("window.ryuPremiumProjects", self.html)
-        self.assertIn("Job service not connected", self.html)
+    def test_authoritative_html_remains_presentation_source_and_adapter_owns_backend_calls(self):
+        # The approved HTML stays visually authoritative and free of injected bridge edits.
+        self.assertIn("<title>Ryu's Audiobook · Dragon Studio</title>", self.html)
+        self.assertNotIn("window.ryuBackend", self.html)
         self.assertIn("data-project-folder", self.html)
-        self.assertIn("invoke('chapter.update'", self.html)
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("call('project.list')", adapter)
+        self.assertIn("call('chapter.list')", adapter)
+        self.assertIn("call('chapter.update'", adapter)
+        self.assertIn("call('import.start'", adapter)
+        self.assertIn("call('voice.save'", adapter)
+        self.assertIn("call('character.analyze'", adapter)
+        self.assertIn("call('production.generate_book'", adapter)
 
     def test_backend_adapter_is_loaded_and_bundled(self):
         adapter = ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
