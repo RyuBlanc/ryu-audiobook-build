@@ -4,10 +4,10 @@
 
 ## Confirmed by inspection
 
-1. The user-provided Premium V2 HTML is not currently the repository's packaged frontend. The repository uses a PySide6 widget shell (`app/main.py`, `app/ui/workflow.py`).
-2. The existing requirements list PySide6 but do not list Qt WebEngine or QWebChannel integration dependencies.
+1. The Premium V2 HTML is now the selected embedded frontend at `assets/frontend/ryu_audiobook_premium_v2.html`; `app/main.py` launches `PremiumV2Window` when the asset exists. This confirms selection/packaging wiring, not full interactive parity.
+2. The requirements now include `PySide6-WebEngine`; `app/ui/premium_v2_host.py` embeds `QWebEngineView`, exposes an allow-listed `QWebChannel` bridge, and loads `premium_v2_backend_adapter.js`.
 3. The HTML contains 15 destinations, nine inline scripts, and approximately 387 interactive elements. The previous HTML reference has 14 destinations and approximately 199 controls.
-4. Static scan found timer-driven demo code including `simulateImport`; scripts contain no `fetch()` calls. Some pronunciation/sound data uses browser storage. This is not yet a backend integration.
+4. The supplied HTML still contains prototype-only inline behaviors, including timer-based model/job demos and browser-storage pronunciation/sound state. The adapter now overrides the import file-input and drop handlers to start real local import jobs; other inline demo handlers still require a control-by-control audit.
 5. Current desktop persistence includes project JSON and state JSON. The required shared SQLite schema and durable background-job service are not confirmed as implemented.
 6. Existing source does contain meaningful backend services for import/parsing, chapter detection/editing, voice profiles/providers, character/dialogue handling, pronunciation suggestions, sound design/mixing, generation, M4B assembly, model registry, hardware, history and settings. Exact per-control parity still needs runtime mapping and integration.
 7. Repository tests that describe 14 destinations must be updated to validate the Premium V2 15-destination frontend without deleting existing application capabilities.
@@ -15,6 +15,7 @@
 
 ## Not yet verified
 
+- Current commit's Windows CI run and regression results, including the new drag/drop import test.
 - Exact same-to-same visual parity in an embedded desktop WebEngine window at all specified dimensions.
 - Complete control-to-backend wiring, custom modal behavior, responsive behavior and keyboard/focus accessibility.
 - SQLite migration, restart recovery for projects/jobs/playback, or durable event streaming.
