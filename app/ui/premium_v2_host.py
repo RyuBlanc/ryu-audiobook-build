@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
 import os
@@ -400,19 +402,41 @@ class PremiumV2Bridge(QObject):
         return {"cancelled": not bool(path), "path": path or None}
 
     def _import_start(self, payload: dict[str, Any]) -> dict[str, Any]:
-        value = str(payload.get("file_path") or payload.get("path") or "").strip()
-        if not value:
-            raise ValueError("Select a book file before starting import.")
-        path = Path(value).expanduser().resolve()
-        if not path.is_file():
-            raise FileNotFoundError("The selected book file was not found.")
-        if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
-            raise ValueError("Unsupported format. Supported formats: " + ", ".join(sorted(SUPPORTED_EXTENSIONS)))
-        if path.stat().st_size <= 0:
-            raise ValueError("The selected file is empty.")
-        if path.stat().st_size > 250 * 1024 * 1024:
-            raise ValueError("The selected book exceeds the 250 MB import limit.")
-        title = str(payload.get("title") or path.stem).strip()[:300] or path.stem
+        encoded = payload.get("content_base64")
+        if encoded is not None:
+            file_name = Path(str(payload.get("file_name") or "dropped-book")).name
+            suffix = Path(file_name).suffix.lower()
+            if suffix not in SUPPORTED_EXTENSIONS:
+                raise ValueError("Unsupported format. Supported formats: " + ", ".join(sorted(SUPPORTED_EXTENSIONS)))
+            if not isinstance(encoded, str) or len(encoded) > 36 * 1024 * 1024:
+                raise ValueError("Dropped files are limited to 25 MB. Use Browse files for larger books.")
+            try:
+                content = base64.b64decode(encoded, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError("The dropped file data could not be read. Try Browse files instead.") from exc
+            if not content:
+                raise ValueError("The selected file is empty.")
+            if len(content) > 25 * 1024 * 1024:
+                raise ValueError("Dropped files are limited to 25 MB. Use Browse files for larger books.")
+            incoming = app_root() / "incoming_imports"
+            incoming.mkdir(parents=True, exist_ok=True)
+            path = incoming / (uuid.uuid4().hex + suffix)
+            path.write_bytes(content)
+            title = str(payload.get("title") or Path(file_name).stem).strip()[:300] or Path(file_name).stem
+        else:
+            value = str(payload.get("file_path") or payload.get("path") or "").strip()
+            if not value:
+                raise ValueError("Select a book file before starting import.")
+            path = Path(value).expanduser().resolve()
+            if not path.is_file():
+                raise FileNotFoundError("The selected book file was not found.")
+            if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+                raise ValueError("Unsupported format. Supported formats: " + ", ".join(sorted(SUPPORTED_EXTENSIONS)))
+            if path.stat().st_size <= 0:
+                raise ValueError("The selected file is empty.")
+            if path.stat().st_size > 250 * 1024 * 1024:
+                raise ValueError("The selected book exceeds the 250 MB import limit.")
+            title = str(payload.get("title") or path.stem).strip()[:300] or path.stem
         job_id = self._new_job("import", "Import " + title, "Extract text and detect chapters")
         self._job_update(job_id, state="running", started_at=self._now(), stage="Reading source file", progress=5)
         threading.Thread(target=self._import_worker, args=(job_id, path, title), daemon=True).start()
