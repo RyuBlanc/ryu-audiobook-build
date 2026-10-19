@@ -83,6 +83,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("voice_id = name", self.host)
         self.assertIn("def _voice_import_reference(", self.host)
         self.assertIn("def _generation_finished(", self.host)
+        self.assertIn("from app.tts.cast_provider import CastAwareProvider", self.host)
+        self.assertIn("cast_assignments[character_name] = assigned_profile.name", self.host)
+        self.assertIn("provider = CastAwareProvider(", self.host)
         self.assertIn("def _import_worker(", self.host)
         self.assertIn("not_connected", self.host)
 
