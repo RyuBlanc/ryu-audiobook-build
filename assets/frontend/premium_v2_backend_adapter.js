@@ -175,7 +175,7 @@
     if ($('assignCharacter')) $('assignCharacter').onclick=act(async()=>{const name=window.ryuPremiumSelectedCharacter;if(!name)throw new Error('Select a character first.');await call('character.assign',{name,profile_name:selectedVoice||$('profileName')?.value});await refreshCharacters();});
     if ($('editCharacterVoice')) $('editCharacterVoice').onchange=act(async()=>{if(!window.ryuPremiumSelectedCharacter)return;await call('character.assign',{name:window.ryuPremiumSelectedCharacter,profile_name:$('editCharacterVoice').value});await refreshCharacters();});
     if ($('saveSettingsAdvanced')) $('saveSettingsAdvanced').onclick=act(async()=>{await call('settings.save',{theme:$('themeSelectAdvanced')?.value||'dark',effects:$('effectsModeAdvanced')?.value||'high'});message('Settings saved to this PC.');});
-    document.addEventListener('click',async e=>{const b=e.target.closest('[data-job-action]');if(!b)return;e.preventDefault();try{await call('job.'+b.dataset.jobAction,{job_id:b.dataset.jobId});await refreshJobs();}catch(err){message(err?.message||String(err),true);}});
+    document.addEventListener('click',async e=>{const b=e.target.closest('[data-job-action]');if(!b)return;e.preventDefault();try{const commands={pause:'job.pause',resume:'job.resume',cancel:'job.cancel'};await call(commands[b.dataset.jobAction]||'job.cancel',{job_id:b.dataset.jobId});await refreshJobs();}catch(err){message(err?.message||String(err),true);}});
     if (!window.__ryuBackendJobTimer) window.__ryuBackendJobTimer=setInterval(()=>refreshJobs().catch(()=>{}),3000);
     message('Premium V2 local backend connected.');
   }
