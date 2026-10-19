@@ -23,7 +23,7 @@ Verify all 15 Premium V2 destinations against the approved HTML and the behavior
 ### 8.2.1 — Navigation and responsive shell
 - [x] Confirm the current implementation has the expected 14 navigation keys and workflow rail.
 - [x] Confirm existing static acceptance coverage exercises sidebar routes and generation-navigation recovery.
-- [ ] Run current UI acceptance suite in CI and inspect failures rather than relying only on source-string checks. Latest Windows workflow run #612 is queued; no result is available yet.
+- [x] Run current Windows CI and inspect failures. Build #618 succeeded after the stale integration-contract assertions were aligned with current adapter behavior; this is CI evidence, not interactive runtime acceptance.
 - [ ] Verify every destination can be opened at normal and reduced window sizes; verify scroll and collapsed sidebar behavior.
 
 ### 8.2.2 — Screen-by-screen behavioral parity
@@ -47,6 +47,6 @@ Verify all 15 Premium V2 destinations against the approved HTML and the behavior
 
 ## Current status
 
-**In progress.** Premium V2 is selected by `app/main.py` and embedded using `QWebEngineView` / `QWebChannel`; `requirements.txt` includes `PySide6-WebEngine`. Recent implementation work connects Dashboard recent-project cards/actions, Library search and filters, persisted Background Jobs controls, real file-input/drag-drop imports, and supported Sound Design catalogue actions to the backend. The adapter passes a JavaScript syntax check, and regression contract tests cover these changes. The latest Windows workflow run (#612, commit `5d42174701ef82e1b6bb234b92c9ff669b11bd6e`) is queued, so the tests and packaged build are not yet validated. Chapter-level cue editing, full-book mix preview, and several other controls remain open items. No claim is made that all 15 destinations have passed interactive testing.
+**In progress — Stage 8.2.2.** Premium V2 is selected by `app/main.py` and embedded using `QWebEngineView` / `QWebChannel`; `requirements.txt` includes `PySide6-WebEngine`. Recent implementation work connects Dashboard recent-project cards/actions, Library search and filters, persisted Background Jobs controls, real file-input/drag-drop imports, and supported Sound Design catalogue actions to the backend. Build #618 (commit `cd3103e21631a5565abf5e399190f44bc36da4a5`) completed successfully, including tests, frozen-application validation, bundled voice assets/critical modules checks, installer build, and portable artifact upload. Artifacts: `Ryu-Audiobook-Installer-618` (648,478,960 bytes) and `Ryu-Audiobook-Portable-618` (1,347,970,862 bytes); both expire 2026-10-22. This confirms CI/package creation, not successful manual Windows runtime testing. Chapter-level cue editing, full-book mix preview, and other controls remain open. No claim is made that all 15 destinations have passed interactive testing.
 
-Next: obtain a completed Windows CI run, fix any first concrete failure, then continue screen-by-screen behavior and end-to-end audio verification.
+Next: strengthen the timed-preview regression so it verifies measured WAV duration against the requested target, then continue screen-by-screen behavior and end-to-end audio verification.
