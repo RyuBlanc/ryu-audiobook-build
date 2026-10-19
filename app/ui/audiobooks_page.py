@@ -270,9 +270,23 @@ class AudiobooksPage(QWidget):
             f"{len(projects)} local project{'s' if len(projects) != 1 else ''} scanned"
         )
         if found == 0:
-            self.now_playing.setText("No finished audiobook outputs found yet.")
-            self.file_detail.setText("When a valid audio output is created, it will appear here. Open Production Studio to generate a book.")
-            self.status.setText("This list is based on files that actually exist on disk; it does not invent completed projects.")
+            if projects:
+                self.now_playing.setText("No finished audiobook outputs found yet.")
+                self.file_detail.setText(
+                    "Your local projects are still here, but none has a verified output file. "
+                    "Open a project and use Generate to create an audiobook."
+                )
+                self.status.setText(
+                    "No output files were found. Refresh after generation; unfinished projects are not shown as finished."
+                )
+            else:
+                self.now_playing.setText("Your audiobook shelf is empty.")
+                self.file_detail.setText(
+                    "Import a book to create a local project, then use Generate to build your first audiobook."
+                )
+                self.status.setText(
+                    "This shelf lists only non-empty audio files that actually exist on this device."
+                )
             self.open_project_button.setEnabled(False)
             self.open_output_button.setEnabled(False)
         else:
