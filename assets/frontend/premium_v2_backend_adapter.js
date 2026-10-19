@@ -15,7 +15,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null;
+  let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null;
   const selectedChapter = () => chapters.find(c => c.number === window.ryuPremiumSelectedChapter) || chapters[0];
   const renderSelect = (select, rows, value, label) => {
@@ -187,6 +187,17 @@
     if (result.job_id) await monitorJob(result.job_id, async () => { await refreshProjects(); await refreshChapters(); if (typeof window.go === 'function') window.go('chapters'); });
     else { await refreshChapters(); message('Book imported into the local library.'); }
   }
+  function preparePreviewPlayback(job) {
+    const url = job?.result?.file_url;
+    if (!url) { if ($('validation')) $('validation').textContent = 'Preview completed, but the backend did not return a playable local file URL.'; return; }
+    if (previewAudio) { previewAudio.pause(); previewAudio = null; }
+    previewAudio = new Audio(url);
+    previewAudio.preload = 'auto';
+    previewAudio.onended = () => { if ($('playPreview')) $('playPreview').textContent = '▶ Play'; };
+    previewAudio.onerror = () => { if ($('validation')) $('validation').textContent = 'The preview file exists but the embedded player could not open it. Use the preview output path from job details.'; };
+    if ($('playPreview')) $('playPreview').disabled = false;
+    if ($('validation')) $('validation').textContent = 'Preview ready · ' + Number(job.result.actual_duration_seconds || 0).toFixed(1) + ' seconds';
+  }
   async function previewVoice() {
     const name = (selectedVoice || $('profileName')?.value || '').trim();
     if (!name) throw new Error('Save or select a voice profile first.');
@@ -195,7 +206,7 @@
     const data = await call('voice.preview', {profile_name:name,text:c?.text || '',duration_seconds:Number(duration),chapter_number:c?.number});
     if ($('previewState')) $('previewState').textContent = 'Generating';
     if ($('validation')) $('validation').textContent = 'Preview job ' + data.job_id + ' is running locally.';
-    await monitorJob(data.job_id, async () => { if ($('previewState')) $('previewState').textContent = 'Ready'; if ($('playPreview')) $('playPreview').disabled = false; });
+    await monitorJob(data.job_id, async job => { if ($('previewState')) $('previewState').textContent = 'Ready'; preparePreviewPlayback(job); });
   }
   async function wire() {
     await call('app.get_info');
@@ -217,7 +228,9 @@
     ['saveProfile','saveDraft','addPremium','saveOnly'].forEach(id=>{if($(id))$(id).onclick=act(saveVoice);});
     if ($('useNarrator')) $('useNarrator').onclick=act(async()=>{const v=await saveVoice();if(v)await call('voice.select',{profile_name:v.name});message('Saved and selected narrator.');});
     if ($('generatePreview')) $('generatePreview').onclick=act(previewVoice);
-    if ($('previewGenerate')) $('previewGenerate').onclick=act(async()=>{const name=selectedVoice||$('profileName')?.value;const data=await call('production.preview',{profile_name:name,duration_seconds:30});await monitorJob(data.job_id);});
+    if ($('previewGenerate')) $('previewGenerate').onclick=act(async()=>{const name=selectedVoice||$('profileName')?.value;const data=await call('production.preview',{profile_name:name,duration_seconds:30});await monitorJob(data.job_id,preparePreviewPlayback);});
+    if ($('playPreview')) $('playPreview').onclick=act(async()=>{if(!previewAudio)throw new Error('Generate a preview first.');await previewAudio.play();$('playPreview').textContent='Ⅱ Pause';});
+    if ($('stopPreview')) $('stopPreview').onclick=()=>{if(previewAudio){previewAudio.pause();previewAudio.currentTime=0;}if($('playPreview'))$('playPreview').textContent='▶ Play';};
     if ($('startGenerate')) $('startGenerate').onclick=act(async()=>{const data=await call('production.generate_book',{profile_name:selectedVoice||$('profileName')?.value,bitrate:256});await monitorJob(data.job_id);});
     if ($('pauseGenerate')) $('pauseGenerate').onclick=act(async()=>{if(!activeJob)throw new Error('There is no active job to pause.');await call('job.pause',{job_id:activeJob});await refreshJobs();});
     if ($('cancelJob')) $('cancelJob').onclick=act(async()=>{if(!activeJob)throw new Error('There is no active job to cancel.');await call('job.cancel',{job_id:activeJob});await refreshJobs();});
