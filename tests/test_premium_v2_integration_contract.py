@@ -87,6 +87,23 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("data-project-folder", self.html)
         self.assertIn("invoke('chapter.update'", self.html)
 
+    def test_backend_adapter_is_loaded_and_bundled(self):
+        adapter = ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        self.assertTrue(adapter.is_file())
+        script = adapter.read_text(encoding="utf-8")
+        for command in (
+            "import.choose_file", "import.start", "chapter.update",
+            "voice.list", "voice.save", "voice.import_reference", "voice.preview",
+            "character.analyze", "character.assign", "pronunciation.list",
+            "pronunciation.save", "pronunciation.analyze", "production.preview",
+            "production.generate_book", "job.list", "job.pause", "job.resume",
+            "job.cancel", "settings.save",
+        ):
+            self.assertIn(command, script)
+        self.assertIn('adapter_path = frontend_path().with_name("premium_v2_backend_adapter.js")', self.host)
+        self.assertIn('adapter_path.read_text(encoding="utf-8")', self.host)
+        self.assertIn("premium_v2_backend_adapter.js", self.build)
+
     def test_frontend_is_packaged_and_selected_by_desktop_entrypoint(self):
         self.assertIn("ryu_audiobook_premium_v2.html", self.build)
         self.assertIn("PremiumV2Window", self.main)
