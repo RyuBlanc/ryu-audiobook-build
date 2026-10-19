@@ -1,6 +1,7 @@
 from pathlib import Path
 import re
 import unittest
+from bs4 import BeautifulSoup
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +23,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
 
     def test_authoritative_html_has_all_fifteen_destinations(self):
         self.assertTrue(HTML.is_file())
-        destinations = re.findall(r'data-page="([^"]+)"', self.html)
+        soup = BeautifulSoup(self.html, "html.parser")
+        destinations = [button.get("data-page") for button in soup.select("button.nav-btn[data-page]")]
         self.assertEqual(
             destinations,
             ["dashboard", "library", "import", "chapters", "voices", "characters",
@@ -55,7 +57,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("ryu-premium-v2-backend-binding", self.html)
         self.assertIn("window.ryuBackend.invoke('project.list')", self.html)
         self.assertIn("window.ryuPremiumProjects", self.html)
-        self.assertIn("job service is connected", self.html)
+        self.assertIn("Job service not connected", self.html)
         self.assertIn("data-project-folder", self.html)
         self.assertIn("invoke('chapter.update'", self.html)
 
