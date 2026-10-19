@@ -71,9 +71,9 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
 
     def test_responsive_shell_has_one_merged_resize_handler(self):
         # A duplicate method silently overrides the earlier implementation in Python.
-        self.assertEqual(len(re.findall(r"^    def resizeEvent\\(", self.workflow, re.MULTILINE)), 1)
+        self.assertEqual(len(re.findall(r"^    def resizeEvent\(", self.workflow, re.MULTILINE)), 1)
         start = self.workflow.index("    def resizeEvent(")
-        end = self.workflow.find("\\n    def ", start + 5)
+        end = self.workflow.find("\n    def ", start + 5)
         handler = self.workflow[start:end if end >= 0 else None]
         for required in (
             "self.project_label.setVisible(not compact_header)",
