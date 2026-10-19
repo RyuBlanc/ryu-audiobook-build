@@ -139,6 +139,13 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("voices.map(v=>'<option value=", script)
         self.assertIn("window.confirm('Remove", script)
 
+    def test_preview_ui_reports_requested_vs_actual_duration(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("function preparePreviewPlayback(job, requestedSeconds)", adapter)
+        self.assertIn("Preview shorter than requested", adapter)
+        self.assertIn("requested_duration_seconds", adapter)
+        self.assertIn("preparePreviewPlayback(job, Number(duration))", adapter)
+
     def test_voice_preview_uses_saved_character_voice_assignments(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         worker = host.split("def _preview_worker", 1)[1].split("def _character_list", 1)[0]
