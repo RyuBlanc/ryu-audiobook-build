@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 from app.core.paths import ensure_roots
 from app.version import APP_NAME, full_version
 from app.ui.workflow import ProjectWorkflow
+from app.ui.premium_v2_host import PremiumV2Window, frontend_path
 
 
 def asset_path(name: str) -> Path:
@@ -769,8 +770,13 @@ def main() -> int:
                 app_icon = candidate_icon
                 break
     app.setWindowIcon(app_icon)
-    window = ProjectWorkflow()
-    window.setWindowTitle(f"{APP_NAME} • {full_version()}")
+    # Premium V2 is the approved frontend. Keep the widget shell as a safe fallback
+    # only for source trees or builds where the frontend asset is genuinely absent.
+    if frontend_path().is_file():
+        window = PremiumV2Window()
+    else:
+        window = ProjectWorkflow()
+        window.setWindowTitle(f"{APP_NAME} • {full_version()}")
     window.setWindowIcon(app_icon)
     window.showMaximized()
     return app.exec()
