@@ -15,7 +15,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false;
+  let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null;
   const selectedChapter = () => chapters.find(c => c.number === window.ryuPremiumSelectedChapter) || chapters[0];
   const renderSelect = (select, rows, value, label) => {
@@ -452,8 +452,28 @@
         if (file) importDroppedFile(file).catch(err => message(err?.message || String(err), true));
       };
     }
-    if ($('cleanText')) $('cleanText').onclick = act(async()=>{const c=selectedChapter();if(!c)throw new Error('Import or open a book first.');const text=$('chapterEditor')?.value||'';$('chapterEditor').value=text.replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();message('Whitespace cleaned. Save changes to persist it.');});
-    if ($('saveChapter')) $('saveChapter').onclick = act(async()=>{const c=selectedChapter();if(!c)throw new Error('Select a chapter first.');const title=$('chapterTitle')?.textContent||c.title;const text=$('chapterEditor')?.value||'';const result=await call('chapter.update',{number:c.number,title,text});c.text=text;c.word_count=result.word_count;message('Chapter saved to local project.');await refreshChapters();});
+    const persistChapterSnapshot = async (number, title, text, automatic = false) => {
+      const state = $('saveState');
+      if (state) state.textContent = automatic ? 'Saving…' : 'Saving changes…';
+      const result = await call('chapter.update', {number, title, text});
+      const chapter = chapters.find(item => item.number === number);
+      if (chapter) { chapter.text = text; chapter.title = result.title || title; chapter.word_count = result.word_count; }
+      if (window.ryuPremiumSelectedChapter === number && state) state.textContent = automatic ? 'Autosaved just now' : 'Saved just now';
+      return result;
+    };
+    if ($('chapterEditor')) $('chapterEditor').addEventListener('input', () => {
+      const c = selectedChapter(); if (!c) return;
+      if (chapterSaveTimer) clearTimeout(chapterSaveTimer);
+      const number = c.number, title = $('chapterTitle')?.textContent || c.title, text = $('chapterEditor').value;
+      if ($('saveState')) $('saveState').textContent = 'Unsaved changes';
+      chapterSaveTimer = setTimeout(async () => {
+        chapterSaveTimer = null;
+        try { await persistChapterSnapshot(number, title, text, true); }
+        catch (err) { if ($('saveState') && window.ryuPremiumSelectedChapter === number) $('saveState').textContent = 'Autosave failed'; message('Chapter autosave failed: ' + (err?.message || String(err)), true); }
+      }, 900);
+    });
+    if ($('cleanText')) $('cleanText').onclick = act(async()=>{const c=selectedChapter();if(!c)throw new Error('Import or open a book first.');const text=$('chapterEditor')?.value||'';$('chapterEditor').value=text.replace(/[ \\t]+\\n/g,'\\n').replace(/\\n{3,}/g,'\\n\\n').trim();$('chapterEditor').dispatchEvent(new Event('input',{bubbles:true}));message('Text cleaned. Changes will autosave shortly.');});
+    if ($('saveChapter')) $('saveChapter').onclick = act(async()=>{const c=selectedChapter();if(!c)throw new Error('Select a chapter first.');if(chapterSaveTimer){clearTimeout(chapterSaveTimer);chapterSaveTimer=null;}const title=$('chapterTitle')?.textContent||c.title;const text=$('chapterEditor')?.value||'';await persistChapterSnapshot(c.number,title,text,false);message('Chapter saved to local project.');await refreshChapters();});
     const splitChapterButton = [...document.querySelectorAll('#chapters button')].find(button => button.textContent.trim().toLowerCase() === 'split chapter');
     if (splitChapterButton) splitChapterButton.onclick = act(async()=>{
       const c = selectedChapter(), editor = $('chapterEditor');
