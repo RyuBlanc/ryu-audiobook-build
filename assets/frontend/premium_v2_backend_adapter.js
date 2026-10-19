@@ -127,10 +127,12 @@
       box.innerHTML = jobs.map(j => {
         const id = esc(j.job_id || ''), state = String(j.state || 'unknown');
         const action = (name,label,cls) => '<button class="btn small ' + cls + '" data-job-action="' + name + '" data-job-id="' + id + '">' + label + '</button>';
-        const actions = (['running','pause_requested'].includes(state) ? action('pause','Pause','secondary') : '') +
-          (['paused','pause_requested'].includes(state) ? action('resume','Resume','') : '') +
-          (['queued','running','paused','pause_requested','cancel_requested'].includes(state) ? action('cancel','Cancel','ghost') : '') +
-          (state === 'failed' && j.recoverable ? '<small>Retry by restarting this operation from its screen.</small>' : '');
+        const canControlGeneration = j.type === 'audiobook-generation';
+        const actions = (canControlGeneration && ['running','pause_requested'].includes(state) ? action('pause','Pause','secondary') : '') +
+          (canControlGeneration && ['paused','pause_requested'].includes(state) ? action('resume','Resume','') : '') +
+          ((state === 'queued' || (canControlGeneration && ['running','paused','pause_requested','cancel_requested'].includes(state))) ? action('cancel','Cancel','ghost') : '') +
+          (state === 'failed' && j.recoverable ? '<small>Retry by restarting this operation from its screen.</small>' : '') +
+          (['running','pause_requested'].includes(state) && !canControlGeneration ? '<small>Cancellation and pause are not supported for this operation.</small>' : '');
         return '<article class="job-row" data-backend-job="' + id + '"><b>' + esc(j.title || j.type || id) + '</b><p>' + esc(j.stage || j.message || state) + '</p><div class="progress"><i style="width:' + Math.max(0,Math.min(100,Number(j.progress || 0))) + '%"></i></div><small>' + esc(state) + ' · ' + Math.round(Number(j.progress || 0)) + '%</small>' + (j.message ? '<p>' + esc(j.message) + '</p>' : '') + (j.error?.message ? '<p class="muted">' + esc(j.error.message) + '</p>' : '') + '<div class="toolbar">' + actions + '</div></article>';
       }).join('') || '<p class="muted" data-backend-empty="1">No backend jobs in this view.</p>';
       box.dataset.backendJobsRendered = '1';
@@ -534,8 +536,18 @@
         e.preventDefault(); e.stopImmediatePropagation();
         try {
           const rows = await call('job.list', {include_hidden:false});
-          for (const job of rows.filter(j => ['running','pause_requested'].includes(j.state))) await call('job.pause', {job_id:job.job_id});
-          await refreshJobs(); message('Pause requested for all running jobs.');
+          const resumable = rows.filter(j => j.type === 'audiobook-generation' && ['paused','pause_requested'].includes(j.state));
+          const pausable = rows.filter(j => j.type === 'audiobook-generation' && j.state === 'running');
+          if (pausable.length) {
+            for (const job of pausable) await call('job.pause', {job_id:job.job_id});
+            message('Pause requested for ' + pausable.length + ' audiobook generation job(s).');
+          } else if (resumable.length) {
+            for (const job of resumable) await call('job.resume', {job_id:job.job_id});
+            message('Resume requested for ' + resumable.length + ' audiobook generation job(s).');
+          } else {
+            message('No active audiobook generation jobs support pause or resume.');
+          }
+          await refreshJobs();
         } catch (err) { message(err?.message || String(err), true); }
         return;
       }
