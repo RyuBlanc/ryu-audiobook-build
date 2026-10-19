@@ -49,8 +49,25 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('"project.open": True', self.host)
         self.assertIn('"chapter.list": True', self.host)
         self.assertIn('"chapter.update": True', self.host)
+        # New commands must point to real handlers; never preserve the old
+        # "not connected" placeholders as release requirements.
+        for command, handler in {
+            "import.start": "_import_start",
+            "voice.list": "_voice_list",
+            "voice.select": "_voice_select",
+            "voice.preview": "_voice_preview",
+            "character.analyze": "_character_analyze",
+            "pronunciation.save": "_pronunciation_save",
+            "production.generate_book": "_production_generate_book",
+            "job.list": "_job_list",
+            "history.list": "_history_list",
+            "sound.catalog": "_sound_catalog",
+        }.items():
+            self.assertIn(f'"{command}": self.{handler}', self.host)
         self.assertIn('"project.create": False', self.host)
-        self.assertIn('"production.generate_book": False', self.host)
+        self.assertIn('"production.generate_book": True', self.host)
+        self.assertIn("def _generation_finished(", self.host)
+        self.assertIn("def _import_worker(", self.host)
         self.assertIn("not_connected", self.host)
 
     def test_dashboard_and_library_query_real_project_records(self):
