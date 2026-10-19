@@ -1410,6 +1410,32 @@ class RegressionTests(unittest.TestCase):
         from app.ui.voice_cast_page import VoiceCastAnalysisWorker
         self.assertTrue(issubclass(VoiceCastAnalysisWorker, QThread))
 
+    def test_voice_cast_supports_manual_character_add_rename_and_roster_persistence(self):
+        source = Path("app/ui/voice_cast_page.py").read_text(encoding="utf-8")
+        self.assertIn('QPushButton("Add Character")', source)
+        self.assertIn('QPushButton("Rename Character")', source)
+        self.assertIn("def add_character(self):", source)
+        self.assertIn("def rename_character(self):", source)
+        self.assertIn('state["voice_cast_character_roster"] = [', source)
+        self.assertIn('state.get("voice_cast_character_roster", [])', source)
+        self.assertIn("Preserve user-created cast members", source)
+        self.assertIn("assignments[name] = assignments.pop(old_name)", source)
+        self.assertIn("Manually Added Character", source)
+
+    def test_voice_cast_manual_roster_does_not_require_a_detected_speaker(self):
+        from app.chapters.detector import Chapter
+        analysis = analyze_book([Chapter(
+            number=1,
+            title="Unattributed dialogue",
+            text='“We should leave now.”\n\n“Not until sunrise.”',
+        )])
+        # The analyzer must not invent a speaker for unattributed quotes;
+        # Voice Cast's manual roster is the recovery path for this case.
+        self.assertEqual(analysis.dialogue_total, 2)
+        self.assertEqual(len(analysis.characters), 0)
+        source = Path("app/ui/voice_cast_page.py").read_text(encoding="utf-8")
+        self.assertIn("self.add_character_button.clicked.connect(self.add_character)", source)
+
     def test_chatterbox_reference_shorter_than_six_seconds_is_rejected(self):
         import app.tts.voice_profile as vp
         with tempfile.TemporaryDirectory() as temp:
