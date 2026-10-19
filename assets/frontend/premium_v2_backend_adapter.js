@@ -15,7 +15,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null;
+  let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null;
   const selectedChapter = () => chapters.find(c => c.number === window.ryuPremiumSelectedChapter) || chapters[0];
   const renderSelect = (select, rows, value, label) => {
@@ -518,7 +518,10 @@
         refreshSounds().catch(err => message(err?.message || String(err), true));
       } else if (e.target?.id === 'cueSearch') {
         e.stopImmediatePropagation();
-        message('Cue search is unavailable because chapter cue assets are not yet connected to the local catalogue.', true);
+        if (!cueSearchUnavailableNotified) {
+          cueSearchUnavailableNotified = true;
+          message('Cue search is unavailable because chapter cue assets are not yet connected to the local catalogue.', true);
+        }
       }
     }, true);
     document.addEventListener('click', async e => {
