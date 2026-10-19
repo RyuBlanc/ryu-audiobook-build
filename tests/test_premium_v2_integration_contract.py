@@ -83,7 +83,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         # The approved HTML stays visually authoritative and free of injected bridge edits.
         self.assertIn("<title>Ryu's Audiobook · Dragon Studio</title>", self.html)
         self.assertNotIn("window.ryuBackend", self.html)
-        self.assertIn("data-project-folder", self.html)
+        for control in ("browseBtn", "saveChapter", "saveProfile", "analyzeCharacters", "startGenerate"):
+            self.assertRegex(self.html, rf'id="{re.escape(control)}"')
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("call('project.list')", adapter)
         self.assertIn("call('chapter.list')", adapter)
