@@ -113,6 +113,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("function preparePreviewPlayback(job)", script)
         self.assertIn("previewAudio.play()", script)
         self.assertIn("previewAudio.pause()", script)
+        self.assertIn("lengthGroup?.querySelector('.seg button.active')", script)
+        self.assertIn("duration_seconds:Number(duration)", script)
         self.assertIn("function openPlayer()", script)
         self.assertIn("playerAudio.play()", script)
 
