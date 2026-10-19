@@ -576,21 +576,6 @@ class ProjectWorkflow(QMainWindow):
         stored_theme = str(QSettings("RyuBlanc", "Ryu's Audiobook").value("ui/theme", "dark")).lower()
         self.theme_toggle.setText("☀" if stored_theme == "light" else "◐")
 
-    def resizeEvent(self, event) -> None:
-        """Keep the shell header usable at compact window widths."""
-        super().resizeEvent(event)
-        width = event.size().width()
-        # The project title remains available in the sidebar card when the
-        # header is compact, so give search and primary actions the space.
-        compact_header = width < 1240
-        self.project_label.setVisible(not compact_header)
-        self.global_search.setMaximumWidth(180 if width < 1400 else 250)
-        # Keep core playback and seeking controls visible on narrow windows;
-        # collapse secondary labels before the timeline gets squeezed away.
-        compact_player = width < 1080
-        self.mini_title.setVisible(not compact_player)
-        self.mini_position.setVisible(not compact_player)
-        self.mini_duration.setVisible(not compact_player)
 
     @staticmethod
     def _mini_time_text(milliseconds: int) -> str:
@@ -761,7 +746,19 @@ class ProjectWorkflow(QMainWindow):
                 setter(bool(reduce_motion))
 
     def resizeEvent(self, event) -> None:
+        """Keep the header, mini-player, and loading overlay responsive on resize."""
         super().resizeEvent(event)
+        width = event.size().width()
+        # Keep the project title available in the sidebar card when the header
+        # is compact, and reserve room for the search and primary action.
+        compact_header = width < 1240
+        self.project_label.setVisible(not compact_header)
+        self.global_search.setMaximumWidth(180 if width < 1400 else 250)
+        # Collapse secondary playback labels before the seek bar is squeezed.
+        compact_player = width < 1080
+        self.mini_title.setVisible(not compact_player)
+        self.mini_position.setVisible(not compact_player)
+        self.mini_duration.setVisible(not compact_player)
         self._refresh_project_label()
         if hasattr(self, "loading_overlay") and self.centralWidget():
             self.loading_overlay.setGeometry(self.centralWidget().rect())
