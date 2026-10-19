@@ -161,3 +161,12 @@ For every accepted item, record:
 - Release publishing was **skipped** for this run, so Build #520 must not be described as a new published GitHub release.
 - **Still outstanding:** current-build Windows install/launch and functional smoke test; critical reliability scenarios; real audiobook/M4B metadata, chapter and bitrate inspection; per-screen visual/interaction acceptance. Do not mark G0–G5 complete until their evidence is collected.
 
+
+
+### Stage 9 — Build #521 verification (2026-10-19)
+
+- **Build #521:** [GitHub Actions run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39212701657) — commit `be12a218dded0916b409d04dac0e1eb834859f9e`; conclusion: success.
+- Observed successful steps: Prepare/validate/build application; frozen-application verification; bundled voice assets and critical modules verification; Inno Setup installation; installer build; installer upload; portable application upload; older build-run/artifact cleanup.
+- Produced artifacts: `Ryu-Audiobook-Installer-521` (531,862,055 bytes; SHA-256 `0268c3e2aa4d99b2d807e1cb46c43b27d75ee45c8a1dd31d2f4f548e98d05055`) and `Ryu-Audiobook-Portable-521` (876,414,193 bytes; SHA-256 `7294a5b801c308441f0a4f1fe2e0318218ff0b04347ae8c2fe14c1c8631dd490`). Both expire on 2026-10-22.
+- Release publishing was skipped. These are workflow artifacts, not a new published GitHub release.
+- **Next acceptance stage:** run fresh-install/launch and short-preview/M4B smoke tests against these exact Build #521 artifacts; then execute critical regressions (custom voice propagation, character discovery, empty-chapter recovery, requested-vs-actual preview duration, progress, and M4B metadata/chapters/cover/bitrate). CI packaging success alone does not pass G0–G5.
