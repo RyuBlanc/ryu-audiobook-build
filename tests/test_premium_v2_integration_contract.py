@@ -99,7 +99,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertTrue(adapter.is_file())
         script = adapter.read_text(encoding="utf-8")
         for command in (
-            "import.choose_file", "import.start", "chapter.update",
+            "project.list", "project.open", "import.choose_file", "import.start", "chapter.update",
             "voice.list", "voice.save", "voice.import_reference", "voice.preview",
             "character.analyze", "character.assign", "pronunciation.list",
             "pronunciation.save", "pronunciation.analyze", "production.preview",
