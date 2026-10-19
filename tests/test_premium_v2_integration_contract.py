@@ -157,6 +157,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("call('chapter.split'", adapter)
         self.assertIn("split_at:splitAt", adapter)
         self.assertIn("window.ryuPremiumSelectedChapter = result.new_number", adapter)
+        self.assertIn("Prevent a queued autosave of the unsplit text from overwriting the persisted split.", adapter)
+        self.assertIn("if (chapterSaveTimer) { clearTimeout(chapterSaveTimer); chapterSaveTimer = null; }", adapter)
         self.assertIn("$('chapterEditor').addEventListener('input'", adapter)
         self.assertIn("chapterSaveTimer = setTimeout", adapter)
         self.assertIn("Autosaved just now", adapter)
