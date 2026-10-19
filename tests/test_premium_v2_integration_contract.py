@@ -104,7 +104,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "character.analyze", "character.assign", "pronunciation.list",
             "pronunciation.save", "pronunciation.analyze", "production.preview",
             "production.generate_book", "job.list", "job.pause", "job.resume",
-            "job.cancel", "settings.save",
+            "job.cancel", "settings.save", "sound.catalog", "sound.import", "sound.assign", "sound.save_manifest",
         ):
             self.assertIn(command, script)
         self.assertIn('adapter_path = frontend_path().with_name("premium_v2_backend_adapter.js")', self.host)
