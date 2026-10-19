@@ -860,6 +860,39 @@ class PremiumV2Bridge(QObject):
         if profile is None:
             raise ValueError("No narrator is saved. Open Voice Studio, select an installed voice, and save it as narrator.")
         provider, voice = provider_from_profile(profile)
+        # Character Studio assignments must affect actual synthesis, not only the
+        # roster UI. Wrap the narrator with the existing cast-aware router when
+        # at least one saved character has a valid voice assignment.
+        cast_assignments: dict[str, str] = {}
+        cast_profiles: dict[str, Any] = {}
+        available_profiles = {p.name.casefold(): p for p in load_profiles()}
+        for character in state.get("characters") or []:
+            if not isinstance(character, dict):
+                continue
+            assigned_name = str(character.get("voice_profile") or "").strip()
+            if not assigned_name:
+                continue
+            assigned_profile = available_profiles.get(assigned_name.casefold())
+            if assigned_profile is None:
+                raise ValueError(
+                    f"Character '{character.get('name', 'Unknown')}' uses voice profile "
+                    f"'{assigned_name}', which is no longer available. Reassign its voice in Character Studio."
+                )
+            cast_profiles[assigned_profile.name] = assigned_profile
+            character_names = [str(character.get("name") or "").strip()]
+            aliases = character.get("aliases") or []
+            if isinstance(aliases, list):
+                character_names.extend(str(alias).strip() for alias in aliases)
+            for character_name in character_names:
+                if character_name:
+                    cast_assignments[character_name] = assigned_profile.name
+        if cast_assignments:
+            from app.tts.cast_provider import CastAwareProvider
+            provider = CastAwareProvider(
+                provider, voice, cast_profiles, cast_assignments,
+                narrating_character=str(state.get("narrating_character") or ""),
+                backend_override=str(state.get("backend") or "automatic"),
+            )
         output_text = str(payload.get("output_path") or state.get("output_path") or "").strip()
         if output_text:
             output = Path(output_text).expanduser().resolve()
