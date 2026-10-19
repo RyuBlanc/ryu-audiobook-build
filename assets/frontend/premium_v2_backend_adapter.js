@@ -207,14 +207,40 @@
     if ($('saveOnly')) $('saveOnly').disabled = false;
     message('Saved voice profile locally: ' + result.name); return result;
   }
+  async function startImportPayload(payload, displayName) {
+    if ($('importStatus')) $('importStatus').textContent = 'Importing ' + displayName + '…';
+    if ($('importBar')) $('importBar').style.width = '5%';
+    const result = await call('import.start', payload);
+    if (result.job_id) await monitorJob(result.job_id, async () => {
+      await refreshProjects(); await refreshChapters();
+      if (typeof window.go === 'function') window.go('chapters');
+    });
+    else { await refreshProjects(); await refreshChapters(); message('Book imported into the local library.'); }
+  }
   async function importBook() {
     const chosen = await call('import.choose_file');
     if (chosen.cancelled || !chosen.path) return;
-    if ($('importStatus')) $('importStatus').textContent = 'Importing ' + chosen.path.split(/[\\/]/).pop() + '…';
-    if ($('importBar')) $('importBar').style.width = '8%';
-    const result = await call('import.start', {file_path:chosen.path,title:chosen.path.split(/[\\/]/).pop().replace(/\.[^.]+$/,'')});
-    if (result.job_id) await monitorJob(result.job_id, async () => { await refreshProjects(); await refreshChapters(); if (typeof window.go === 'function') window.go('chapters'); });
-    else { await refreshChapters(); message('Book imported into the local library.'); }
+    const name = chosen.path.split(/[\\/]/).pop();
+    await startImportPayload({file_path:chosen.path,title:name.replace(/\.[^.]+$/,'')}, name);
+  }
+  async function importDroppedFile(file) {
+    if (!file) return;
+    const suffix = (file.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+    if (!['.epub','.pdf','.txt','.docx'].includes(suffix)) {
+      throw new Error('Unsupported file type. Use EPUB, PDF, TXT, or DOCX.');
+    }
+    if (!file.size) throw new Error('The selected file is empty.');
+    if (file.size > 25 * 1024 * 1024) {
+      throw new Error('Dropped files are limited to 25 MB. Use Browse files for larger books.');
+    }
+    if ($('importStatus')) $('importStatus').textContent = 'Reading ' + file.name + '…';
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));
+    }
+    await startImportPayload({file_name:file.name,title:file.name.replace(/\.[^.]+$/,''),content_base64:btoa(binary)}, file.name);
   }
   function preparePreviewPlayback(job) {
     const url = job?.result?.file_url;
@@ -393,7 +419,18 @@
       finally { button.disabled = false; }
     });
     if ($('browseBtn')) $('browseBtn').onclick = act(importBook);
-    if ($('dropzone')) $('dropzone').onclick = e => { if (!e.target.closest('button')) importBook().catch(x=>message(x.message,true)); };
+    if ($('fileInput')) $('fileInput').onchange = e => {
+      const file = e.target.files?.[0]; e.target.value = '';
+      if (file) importDroppedFile(file).catch(err => message(err?.message || String(err), true));
+    };
+    if ($('dropzone')) {
+      $('dropzone').onclick = e => { if (!e.target.closest('button')) importBook().catch(x=>message(x.message,true)); };
+      $('dropzone').ondrop = e => {
+        e.preventDefault(); e.stopPropagation(); $('dropzone').classList.remove('drag');
+        const file = e.dataTransfer?.files?.[0];
+        if (file) importDroppedFile(file).catch(err => message(err?.message || String(err), true));
+      };
+    }
     if ($('cleanText')) $('cleanText').onclick = act(async()=>{const c=selectedChapter();if(!c)throw new Error('Import or open a book first.');const text=$('chapterEditor')?.value||'';$('chapterEditor').value=text.replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();message('Whitespace cleaned. Save changes to persist it.');});
     if ($('saveChapter')) $('saveChapter').onclick = act(async()=>{const c=selectedChapter();if(!c)throw new Error('Select a chapter first.');const title=$('chapterTitle')?.textContent||c.title;const text=$('chapterEditor')?.value||'';const result=await call('chapter.update',{number:c.number,title,text});c.text=text;c.word_count=result.word_count;message('Chapter saved to local project.');await refreshChapters();});
     ['saveProfile','saveDraft','addPremium','saveOnly'].forEach(id=>{if($(id))$(id).onclick=act(saveVoice);});
