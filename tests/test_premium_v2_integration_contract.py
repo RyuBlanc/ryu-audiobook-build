@@ -103,13 +103,18 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "voice.list", "voice.save", "voice.import_reference", "voice.preview",
             "character.analyze", "character.assign", "pronunciation.list",
             "pronunciation.save", "pronunciation.analyze", "production.preview",
-            "production.generate_book", "job.list", "job.pause", "job.resume",
+            "production.generate_book", "player.get_active", "job.list", "job.pause", "job.resume",
             "job.cancel", "settings.save", "sound.catalog", "sound.import", "sound.assign", "sound.save_manifest",
         ):
             self.assertIn(command, script)
         self.assertIn('adapter_path = frontend_path().with_name("premium_v2_backend_adapter.js")', self.host)
         self.assertIn('adapter_path.read_text(encoding="utf-8")', self.host)
         self.assertIn("premium_v2_backend_adapter.js", self.build)
+        self.assertIn("function preparePreviewPlayback(job)", script)
+        self.assertIn("previewAudio.play()", script)
+        self.assertIn("previewAudio.pause()", script)
+        self.assertIn("function openPlayer()", script)
+        self.assertIn("playerAudio.play()", script)
 
     def test_frontend_is_packaged_and_selected_by_desktop_entrypoint(self):
         self.assertIn("ryu_audiobook_premium_v2.html", self.build)
