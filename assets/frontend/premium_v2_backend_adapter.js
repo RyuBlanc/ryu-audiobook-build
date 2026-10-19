@@ -16,7 +16,7 @@
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
   let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null;
-  let chapters = [], characters = [], voices = [], terms = [];
+  let chapters = [], characters = [], voices = [], terms = [], projects = [];
   const selectedChapter = () => chapters.find(c => c.number === window.ryuPremiumSelectedChapter) || chapters[0];
   const renderSelect = (select, rows, value, label) => {
     if (!select) return;
@@ -24,6 +24,23 @@
     select.innerHTML = rows.map(r => '<option value="' + esc(r[value]) + '">' + esc(label(r)) + '</option>').join('');
     if (rows.some(r => String(r[value]) === previous)) select.value = previous;
   };
+  async function refreshProjects() {
+    projects = await call('project.list');
+    const grid = $('libraryGrid');
+    const search = ($('librarySearch')?.value || '').trim().toLowerCase();
+    const visible = projects.filter(p => !search || (p.title + ' ' + (p.source_path || '') + ' ' + (p.status || '')).toLowerCase().includes(search));
+    if (grid) grid.innerHTML = visible.map(p => {
+      const complete = Boolean(p.completed);
+      const status = complete ? 'Completed' : (p.status || 'New');
+      return '<article class="card project-card" data-name="' + esc(p.title) + '" data-project-folder="' + esc(p.folder) + '"><div class="book-cover"></div><div class="project-pad"><span class="badge ' + (complete ? '' : 'info') + '">' + esc(status) + '</span><h3>' + esc(p.title) + '</h3><p class="muted">' + Number(p.chapter_count || 0) + ' chapters · Local project</p><p class="muted">' + esc(p.source_path || 'Source path unavailable') + '</p><button class="btn small" type="button" data-open-project="' + esc(p.folder) + '">Open project</button></div></article>';
+    }).join('') || '<p class="muted">No local projects found. Import a book to start your library.</p>';
+    const dash = $('dashboard');
+    if (dash) {
+      const cards = [...dash.querySelectorAll('[data-project-folder]')];
+      cards.forEach(c => c.remove());
+    }
+    return projects;
+  }
   async function refreshVoices() {
     voices = await call('voice.list');
     const rows = voices.map(v => ({...v, label: v.name + ' · ' + v.provider}));
@@ -142,7 +159,7 @@
     if ($('importStatus')) $('importStatus').textContent = 'Importing ' + chosen.path.split(/[\\/]/).pop() + '…';
     if ($('importBar')) $('importBar').style.width = '8%';
     const result = await call('import.start', {file_path:chosen.path,title:chosen.path.split(/[\\/]/).pop().replace(/\.[^.]+$/,'')});
-    if (result.job_id) await monitorJob(result.job_id, async () => { await refreshChapters(); if (typeof window.go === 'function') window.go('chapters'); });
+    if (result.job_id) await monitorJob(result.job_id, async () => { await refreshProjects(); await refreshChapters(); if (typeof window.go === 'function') window.go('chapters'); });
     else { await refreshChapters(); message('Book imported into the local library.'); }
   }
   async function previewVoice() {
@@ -157,9 +174,17 @@
   }
   async function wire() {
     await call('app.get_info');
-    await refreshVoices().catch(()=>{}); await refreshChapters().catch(()=>{});
+    await refreshProjects().catch(()=>{}); await refreshVoices().catch(()=>{}); await refreshChapters().catch(()=>{});
     await refreshCharacters().catch(()=>{}); await refreshTerms().catch(()=>{}); await refreshJobs().catch(()=>{});
     document.addEventListener('click', e => { const b=e.target.closest('[data-voice]'); if(!b)return; selectedVoiceId=b.dataset.voice; const label=b.dataset.voice; if($('profileVoice'))$('profileVoice').textContent=label; if($('premiumName')&&!$('premiumName').value.trim())$('premiumName').value=label+' Custom'; if($('profileName')&&!$('profileName').value.trim())$('profileName').value=label+' Custom'; });
+    if ($('librarySearch')) $('librarySearch').oninput = () => refreshProjects().catch(e=>message(e.message,true));
+    if ($('libraryGrid')) $('libraryGrid').addEventListener('click', async e => {
+      const button = e.target.closest('[data-open-project]'); if (!button) return;
+      button.disabled = true;
+      try { const opened = await call('project.open', {folder:button.dataset.openProject}); await refreshProjects(); await refreshChapters(); await refreshCharacters(); if (typeof window.go === 'function') window.go('chapters'); message('Opened local project: ' + (opened.title || opened.folder || 'project')); }
+      catch (err) { message(err?.message || String(err), true); }
+      finally { button.disabled = false; }
+    });
     if ($('browseBtn')) $('browseBtn').onclick = act(importBook);
     if ($('dropzone')) $('dropzone').onclick = e => { if (!e.target.closest('button')) importBook().catch(x=>message(x.message,true)); };
     if ($('cleanText')) $('cleanText').onclick = act(async()=>{const c=selectedChapter();if(!c)throw new Error('Import or open a book first.');const text=$('chapterEditor')?.value||'';$('chapterEditor').value=text.replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();message('Whitespace cleaned. Save changes to persist it.');});
