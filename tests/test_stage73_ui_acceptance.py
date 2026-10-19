@@ -121,10 +121,6 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
         self.assertIn("must preserve", spec.lower())
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
     def test_library_has_distinct_empty_collection_and_no_filter_match_recovery(self):
         library = (ROOT / "app" / "ui" / "library.py").read_text(encoding="utf-8")
         self.assertIn("Your local library is empty.", library)
@@ -139,3 +135,40 @@ if __name__ == "__main__":
         self.assertIn("QListWidget.SelectionMode.ExtendedSelection", library)
         self.assertIn("QMessageBox.StandardButton.No,", library)
         self.assertIn("if answer != QMessageBox.StandardButton.Yes:", library)
+
+
+    def test_import_studio_preserves_review_before_local_project_creation(self):
+        import_page = (ROOT / "app" / "ui" / "import_page.py").read_text(encoding="utf-8")
+        for required in (
+            '"EPUB", "PDF", "TXT", "DOCX"',
+            'self.drop_zone.files_dropped.connect(self._drop_files)',
+            'self.worker.ready.connect(self._analysis_ready)',
+            'self.worker.failed.connect(self._analysis_failed)',
+            'self.preview.setPlainText',
+            'self.create_button.setEnabled(True)',
+            'self.on_import(self.source_path, self.book, self.chapters)',
+            'Your source file remains in your chosen location',
+            'self.setObjectName("importScroll")',
+        ):
+            self.assertIn(required, import_page)
+
+    def test_import_studio_rejects_unsupported_or_missing_files_and_multiple_drops(self):
+        import_page = (ROOT / "app" / "ui" / "import_page.py").read_text(encoding="utf-8")
+        self.assertIn('if len(paths) != 1:', import_page)
+        self.assertIn('Drop one book at a time', import_page)
+        self.assertIn('if not path.is_file():', import_page)
+        self.assertIn('if path.suffix.lower() not in {".pdf", ".epub", ".txt", ".docx"}:', import_page)
+        self.assertIn('Unsupported file format. Choose a PDF, EPUB, TXT, or DOCX book.', import_page)
+        self.assertIn('self.create_button.setEnabled(False)', import_page)
+
+    def test_import_preview_blocks_empty_text_and_suspicious_chapter_loss(self):
+        import_page = (ROOT / "app" / "ui" / "import_page.py").read_text(encoding="utf-8")
+        self.assertIn('if not str(book.text or "").strip():', import_page)
+        self.assertIn('if not chapters:', import_page)
+        self.assertIn('chapter_words < int(source_words * 0.90)', import_page)
+        self.assertIn('Import was stopped to protect your book from losing content.', import_page)
+        self.assertIn('self.status.setText(f"Import analysis failed: {message}")', import_page)
+
+
+if __name__ == "__main__":
+    unittest.main()
