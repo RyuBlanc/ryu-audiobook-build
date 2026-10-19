@@ -62,7 +62,6 @@ class PremiumV2Bridge(QObject):
         self._jobs_lock = threading.RLock()
         self._jobs: dict[str, dict[str, Any]] = {}
         self._generators: dict[str, GenerationManager] = {}
-        self._model_workers: dict[str, Any] = {}
         self._load_durable_jobs()
 
     @Slot(str, str, result=str)
@@ -1020,7 +1019,7 @@ class PremiumV2Bridge(QObject):
         return self._settings_get({})
 
     def _models_install(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Install the selected Qwen Voice Studio capability as a durable background job."""
+        """Install selected Qwen Voice Studio models as a durable background job."""
         selection_map = {
             "customvoice": "CustomVoice",
             "voicedesign": "VoiceDesign",
@@ -1031,37 +1030,67 @@ class PremiumV2Bridge(QObject):
         selection = selection_map.get(requested)
         if selection is None:
             raise ValueError("Choose CustomVoice, VoiceDesign, Voice Clone, or all Qwen capabilities.")
-        from app.ui.models_page import QwenCharacterInstallWorker
+
         job_id = self._new_job(
             "model-install", "Install " + selection,
             "Install Qwen3-TTS runtime and selected local voice model(s)",
         )
-        worker = QwenCharacterInstallWorker(selection)
-        self._model_workers[job_id] = worker
-        self._job_update(job_id, state="running", stage="Preparing installation",
-                         message="Installing local Qwen3-TTS components. This may take a while.")
-        worker.progress.connect(
-            lambda detail, jid=job_id: self._job_update(
-                jid, state="running", stage=str(detail), message=str(detail)
-            )
+        self._job_update(
+            job_id, state="running", started_at=self._now(), progress=1,
+            stage="Preparing installation",
+            message="Installing local Qwen3-TTS components. This may take a while.",
         )
-        worker.finished_ok.connect(
-            lambda detail, jid=job_id: self._job_update(
-                jid, state="completed", progress=100, stage="Installation complete",
-                message="Qwen Voice Studio installation completed.",
-                result={"detail": str(detail)}
-            )
-        )
-        worker.failed.connect(
-            lambda detail, jid=job_id: self._job_update(
-                jid, state="failed", stage="Installation failed",
-                message="Qwen Voice Studio installation failed.",
-                error={"code": "model_install_failed", "message": str(detail)},
-                recoverable=True
-            )
-        )
-        worker.finished.connect(lambda jid=job_id: self._model_workers.pop(jid, None))
-        worker.start()
+
+        def report_progress(detail: str) -> None:
+            detail = str(detail)
+            match = re.search(r"(?<!\\d)(\\d{1,3})%", detail)
+            changes: dict[str, Any] = {"state": "running", "stage": detail, "message": detail}
+            if match:
+                changes["progress"] = min(98, max(1, int(match.group(1))))
+            self._job_update(job_id, **changes)
+
+        def install() -> None:
+            try:
+                from app.tts.qwen_character_runtime import (
+                    install_runtime, install_model,
+                    best_custom_kind, best_clone_kind, best_voice_design_kind,
+                )
+                report_progress("Installing isolated Qwen3-TTS runtime…")
+                install_runtime(report_progress)
+                choices = {
+                    "CustomVoice": [best_custom_kind()],
+                    "VoiceDesign": [best_voice_design_kind(), best_clone_kind()],
+                    "Voice Clone": [best_clone_kind()],
+                }
+                if selection == "Full Qwen Voice Studio":
+                    targets = []
+                    for kind in (best_custom_kind(), best_voice_design_kind(), best_clone_kind()):
+                        if kind not in targets:
+                            targets.append(kind)
+                else:
+                    targets = choices[selection]
+                for kind in targets:
+                    report_progress(f"Preparing Qwen3-TTS {selection} model: {kind}…")
+                    install_model(kind, report_progress)
+                self._job_update(
+                    job_id, state="completed", progress=100,
+                    stage="Installation complete",
+                    message="Qwen Voice Studio installation completed.",
+                    result={"selection": selection, "models": targets},
+                    error=None, recoverable=False,
+                )
+            except Exception as exc:
+                log.exception("Premium V2 Qwen model installation failed")
+                self._job_update(
+                    job_id, state="failed", stage="Installation failed",
+                    message="Qwen Voice Studio installation failed.",
+                    error={"code": "model_install_failed", "message": str(exc)},
+                    recoverable=True,
+                )
+
+        threading.Thread(
+            target=install, daemon=True, name="RyuPremiumModelInstall"
+        ).start()
         return {"job_id": job_id, "selection": selection, "state": "running"}
 
     def _models_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
