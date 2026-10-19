@@ -170,3 +170,12 @@ For every accepted item, record:
 - Produced artifacts: `Ryu-Audiobook-Installer-521` (531,862,055 bytes; SHA-256 `0268c3e2aa4d99b2d807e1cb46c43b27d75ee45c8a1dd31d2f4f548e98d05055`) and `Ryu-Audiobook-Portable-521` (876,414,193 bytes; SHA-256 `7294a5b801c308441f0a4f1fe2e0318218ff0b04347ae8c2fe14c1c8631dd490`). Both expire on 2026-10-22.
 - Release publishing was skipped. These are workflow artifacts, not a new published GitHub release.
 - **Next acceptance stage:** run fresh-install/launch and short-preview/M4B smoke tests against these exact Build #521 artifacts; then execute critical regressions (custom voice propagation, character discovery, empty-chapter recovery, requested-vs-actual preview duration, progress, and M4B metadata/chapters/cover/bitrate). CI packaging success alone does not pass G0–G5.
+
+
+### Stage 9 — Build #522 verification (2026-10-19)
+
+- **Build #522:** [GitHub Actions run](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39215251361) — commit `16ab7c719b0fc4ebfeb706e389f9a0d1538c4ae5`; conclusion: success.
+- This build validates the acceptance-checklist evidence update. It does **not** close G0–G5 or replace Windows runtime/audio checks.
+- **Current HTML replication audit — initial source inventory:** the repository contains the full Dragon Studio reference at `docs/prototypes/Ryus_Audiobook_Dragon_Studio_Premium_Final.html` (14 navigation anchors: Dashboard, Library, Import, Chapters, Voices, Characters, Pronunciation, Sound Design, Generate, Player, History, Models, Performance, Settings) and the newer Voice Studio-specific reference at `docs/prototypes/Ryus_Audiobook_Voice_Studio_Fixed_All_Steps.html`. The implementation spec identifies the latter as authoritative for Voice Studio and the full-app HTML as baseline for the other 13 screens.
+- Static acceptance tests currently check the 14 destinations, sidebar dispatch, canonical HTML anchors, updated Voice Studio four-step workflow, several screen behaviors, and non-blocking reduced-motion-aware transitions. This is **not** a full visual comparison or proof of functional parity.
+- **Stage 9.2 in progress:** audit screen-by-screen parity against the committed HTML/spec, record verified gaps, and strengthen regression checks without prematurely applying the user's upcoming HTML refresh. The user's newer HTML has not yet been supplied in this conversation; keep it separate until received, then compare and merge its icon/animation/smoothness changes without removing working features.
