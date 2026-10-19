@@ -156,6 +156,7 @@ class PremiumV2Bridge(QObject):
         return {
             "app.get_info": True,
             "app.get_capabilities": True,
+            "project.create": False,
             "project.list": True,
             "project.open": True,
             "project.get_active": True,
