@@ -30,6 +30,7 @@ class PassiveScrollComboBox(QComboBox):
             event.ignore()
 
 from app.ui.motion import SmoothProgressBar
+from app.core.state import load_state, save_state
 from app.tts.profile_provider import provider_from_profile
 from app.tts.preview import build_voice_preview
 from app.tts.expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT
@@ -791,6 +792,30 @@ class VoicePage(QWidget):
         pa.addStretch(1)
         pv.addLayout(pa)
 
+        assignment_actions = QHBoxLayout()
+        self.save_profile_only_button = QPushButton("Save Profile Only")
+        self.save_profile_only_button.setToolTip(
+            "Save the current voice profile without changing this book's narrator."
+        )
+        self.save_profile_only_button.clicked.connect(self.save_profile)
+        self.use_as_narrator_button = QPushButton("Save and Use as Narrator")
+        self.use_as_narrator_button.setObjectName("primary")
+        self.use_as_narrator_button.setToolTip(
+            "Use this saved, successfully previewed voice as the current book's narrator."
+        )
+        self.use_as_narrator_button.setEnabled(False)
+        self.use_as_narrator_button.clicked.connect(self.assign_as_narrator)
+        self.assign_character_button = QPushButton("Assign to Character")
+        self.assign_character_button.setToolTip(
+            "Assign this saved, successfully previewed voice to a character in the current book."
+        )
+        self.assign_character_button.setEnabled(False)
+        self.assign_character_button.clicked.connect(self.assign_to_character)
+        assignment_actions.addWidget(self.save_profile_only_button)
+        assignment_actions.addWidget(self.use_as_narrator_button)
+        assignment_actions.addWidget(self.assign_character_button)
+        pv.addLayout(assignment_actions)
+
         progress = QHBoxLayout()
         self.preview_progress = QLabel("0:00 / 0:00")
         progress.addWidget(self.preview_progress)
@@ -942,6 +967,8 @@ class VoicePage(QWidget):
                 self.play_button.setText("▶  Play")
             if hasattr(self, "save_preview_button"):
                 self.save_preview_button.setEnabled(False)
+            self._preview_profile_signature = None
+            self._refresh_assignment_actions()
             if hasattr(self, "preview_percent_bar"):
                 self.preview_percent_bar.setValue(0)
             if hasattr(self, "preview_activity_bar"):
@@ -956,6 +983,137 @@ class VoicePage(QWidget):
                 )
         finally:
             self._invalidating_preview = False
+
+    @staticmethod
+    def _voice_profile_signature(profile: VoiceProfile | None) -> tuple | None:
+        if profile is None:
+            return None
+        return (
+            profile.name, profile.provider, profile.voice_id, profile.model_id,
+            profile.backend, profile.language, profile.qwen_mode, profile.qwen_prompt,
+            profile.qwen_seed, profile.qwen_profile_id, profile.sample_path,
+            profile.reference_text, profile.authorized, profile.style_preset,
+            profile.exaggeration, profile.cfg_weight,
+        )
+
+    def _active_project_folder(self):
+        window = self.window()
+        project = getattr(window, "project", None)
+        return getattr(project, "folder", None)
+
+    def _refresh_assignment_actions(self) -> None:
+        profile = self._profile_from_ui() if hasattr(self, "mode") else None
+        current_signature = self._voice_profile_signature(profile)
+        valid_preview = bool(
+            getattr(self, "last_preview", None)
+            and Path(self.last_preview).is_file()
+            and getattr(self, "_preview_profile_signature", None) is not None
+            and self._preview_profile_signature == current_signature
+        )
+        has_project = self._active_project_folder() is not None
+        for name in ("use_as_narrator_button", "assign_character_button"):
+            button = getattr(self, name, None)
+            if button is not None:
+                button.setEnabled(valid_preview and has_project)
+
+    def assign_as_narrator(self) -> None:
+        profile = self._profile_from_ui()
+        if not profile or not self.last_preview or not Path(self.last_preview).is_file():
+            self.status.setText("Generate a fresh preview before assigning this voice as narrator.")
+            return
+        if getattr(self, "_preview_profile_signature", None) != self._voice_profile_signature(profile):
+            self.status.setText("Voice settings changed. Generate a fresh preview before assignment.")
+            self._invalidate_preview()
+            return
+        folder = self._active_project_folder()
+        if not folder:
+            self.status.setText("Open a book first. The narrator assignment is saved per book.")
+            return
+        saved_profile = next(
+            (item for item in load_saved_profiles() if item.name.casefold() == profile.name.casefold()),
+            None,
+        )
+        if saved_profile is None:
+            self.status.setText("Save this voice profile first, then generate its preview and assign it.")
+            return
+        state = load_state(folder)
+        state["voice_profile"] = saved_profile.name
+        save_state(folder, state)
+        window = self.window()
+        generation = getattr(window, "generation", None)
+        if generation is not None:
+            generation._refresh_voice_profiles()
+            index = generation.voice_profile.findText(saved_profile.name)
+            if index >= 0:
+                generation.voice_profile.setCurrentIndex(index)
+            generation._refresh_readiness()
+            generation._update_overview()
+        self.status.setText(
+            f"Saved and assigned '{saved_profile.name}' as narrator for this book."
+        )
+        self._refresh_assignment_actions()
+
+    def assign_to_character(self) -> None:
+        profile = self._profile_from_ui()
+        if not profile or not self.last_preview or not Path(self.last_preview).is_file():
+            self.status.setText("Generate a fresh preview before assigning this voice to a character.")
+            return
+        if getattr(self, "_preview_profile_signature", None) != self._voice_profile_signature(profile):
+            self.status.setText("Voice settings changed. Generate a fresh preview before assignment.")
+            self._invalidate_preview()
+            return
+        folder = self._active_project_folder()
+        if not folder:
+            self.status.setText("Open a book first. Character assignments are saved per book.")
+            return
+        saved_profile = next(
+            (item for item in load_saved_profiles() if item.name.casefold() == profile.name.casefold()),
+            None,
+        )
+        if saved_profile is None:
+            self.status.setText("Save this voice profile first, then generate its preview and assign it.")
+            return
+        window = self.window()
+        cast_page = getattr(window, "voice_cast", None)
+        names = []
+        if cast_page is not None:
+            names.extend(
+                str(row.get("name") or "").strip()
+                for row in getattr(cast_page, "rows", [])
+                if str(row.get("name") or "").strip()
+            )
+        state = load_state(folder)
+        assignments = state.get("voice_cast", {})
+        if isinstance(assignments, dict):
+            names.extend(str(name).strip() for name in assignments if str(name).strip())
+        names = sorted({name for name in names if name.casefold() != "narrator"}, key=str.casefold)
+        if not names:
+            self.status.setText(
+                "No characters are available yet. Open Voice Cast, analyze the book, then assign this voice."
+            )
+            if hasattr(window, "select_section"):
+                window.select_section("Voice Cast")
+            return
+        character, ok = QInputDialog.getItem(
+            self, "Assign Voice to Character", "Character:", names, 0, False
+        )
+        if not ok or not character:
+            return
+        assignments = dict(assignments) if isinstance(assignments, dict) else {}
+        assignments[character] = saved_profile.name
+        state["voice_cast"] = assignments
+        save_state(folder, state)
+        if cast_page is not None:
+            for row in getattr(cast_page, "rows", []):
+                if str(row.get("name", "")).casefold() == character.casefold():
+                    row["voice"] = saved_profile.name
+            cast_page._refresh_labels()
+        generation = getattr(window, "generation", None)
+        if generation is not None:
+            generation._load_voice_cast_summary()
+            generation._refresh_readiness()
+        self.status.setText(f"Assigned '{saved_profile.name}' to {character} for this book.")
+        self._refresh_assignment_actions()
 
     def _set_voice_step(self, index: int) -> None:
         """Select a Voice Studio step without rebuilding or losing its controls."""
@@ -2505,6 +2663,9 @@ class VoicePage(QWidget):
     def _preview_worker_ok(self, path: str, elapsed_seconds: float = 0.0) -> None:
         self.last_preview = Path(path)
         self.last_preview_elapsed_seconds = max(0.0, float(elapsed_seconds))
+        active_profile = self._profile_from_ui()
+        self._preview_profile_signature = self._voice_profile_signature(active_profile)
+        self._refresh_assignment_actions()
         self.player.stop()
         self.player.setSource(QUrl.fromLocalFile(path))
         self.play_button.setEnabled(True)
