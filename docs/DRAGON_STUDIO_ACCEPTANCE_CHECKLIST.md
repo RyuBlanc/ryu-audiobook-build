@@ -179,3 +179,19 @@ For every accepted item, record:
 - **Current HTML replication audit — initial source inventory:** the repository contains the full Dragon Studio reference at `docs/prototypes/Ryus_Audiobook_Dragon_Studio_Premium_Final.html` (14 navigation anchors: Dashboard, Library, Import, Chapters, Voices, Characters, Pronunciation, Sound Design, Generate, Player, History, Models, Performance, Settings) and the newer Voice Studio-specific reference at `docs/prototypes/Ryus_Audiobook_Voice_Studio_Fixed_All_Steps.html`. The implementation spec identifies the latter as authoritative for Voice Studio and the full-app HTML as baseline for the other 13 screens.
 - Static acceptance tests currently check the 14 destinations, sidebar dispatch, canonical HTML anchors, updated Voice Studio four-step workflow, several screen behaviors, and non-blocking reduced-motion-aware transitions. This is **not** a full visual comparison or proof of functional parity.
 - **Stage 9.2 in progress:** audit screen-by-screen parity against the committed HTML/spec, record verified gaps, and strengthen regression checks without prematurely applying the user's upcoming HTML refresh. The user's newer HTML has not yet been supplied in this conversation; keep it separate until received, then compare and merge its icon/animation/smoothness changes without removing working features.
+
+
+### Stage 9.2 — Interactive HTML navigation and popup parity audit (started 2026-10-19)
+
+The acceptance target is the **installed PySide6 desktop application**, not merely a browser-rendered HTML mockup. All navigations, popups/modals, menus, tooltips, toasts, confirmation dialogs, and controls represented in the HTML must have an intentional desktop equivalent and a real action/result. Where a browser-only interaction has no direct desktop equivalent, preserve the user intent with a native desktop interaction and document the difference.
+
+- [x] Confirm the current full-app HTML contains the 14 intended navigation anchors and identify the separately authoritative Voice Studio HTML.
+- [x] Confirm static route checks cover all 14 sidebar destinations and that each route dispatches to a desktop page or feature-specific page.
+- [ ] Inventory every interactive element and popup/dialog in the HTML per screen; map it to the desktop widget, signal/slot/action, persistence, and observable success/error state.
+- [ ] Exercise each sidebar destination and each in-screen navigation path on Windows, including back/continue, menu/dropdown, search/filter, modal open/close, confirmation accept/cancel, and recovery/empty states.
+- [ ] Verify no HTML popup is merely decorative or replaced by a fake success toast; destructive actions require confirmation and non-destructive feedback remains non-blocking where appropriate.
+- [ ] Verify full-screen/window resize, scroll reachability, keyboard focus, and reduced-motion behavior for each screen and dialog.
+- [ ] Record gaps with source HTML anchor/control, desktop implementation file, expected behavior, test/evidence, and fix commit.
+- [ ] Once the user's upcoming HTML is supplied, diff it against these current references and process screen-by-screen. Do not replace the existing baseline before comparing and recording differences.
+
+**Audit evidence so far:** `app/ui/workflow.py` defines the desktop shell and route dispatch; `tests/test_stage73_ui_acceptance.py` statically guards the 14 routes and several key flows. The app also has a non-blocking `StudioToast` component with fade/reduced-motion handling. These findings establish a starting point only: the current static checks do not yet prove every HTML popup/control is fully replicated or manually functional in the installed app.
