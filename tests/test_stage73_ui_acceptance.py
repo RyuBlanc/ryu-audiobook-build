@@ -148,7 +148,7 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
             'self.create_button.setEnabled(True)',
             'self.on_import(self.source_path, self.book, self.chapters)',
             'Your source file remains in your chosen location',
-            'self.setObjectName("importScroll")',
+            'scroll.setObjectName("importScroll")',
         ):
             self.assertIn(required, import_page)
 
