@@ -157,6 +157,10 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("call('chapter.split'", adapter)
         self.assertIn("split_at:splitAt", adapter)
         self.assertIn("window.ryuPremiumSelectedChapter = result.new_number", adapter)
+        self.assertIn("$('chapterEditor').addEventListener('input'", adapter)
+        self.assertIn("chapterSaveTimer = setTimeout", adapter)
+        self.assertIn("Autosaved just now", adapter)
+        self.assertIn("Chapter autosave failed:", adapter)
 
     def test_voice_preview_uses_saved_character_voice_assignments(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
