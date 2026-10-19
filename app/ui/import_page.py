@@ -209,12 +209,24 @@ class ImportPage(QWidget):
             self._begin_analysis(Path(path))
 
     def _drop_files(self, paths: list[str]) -> None:
-        if paths:
-            self._begin_analysis(Path(paths[0]))
+        if not paths:
+            return
+        if len(paths) != 1:
+            self.status.setText("Drop one book at a time so each import can be checked before project creation.")
+            return
+        self._begin_analysis(Path(paths[0]))
 
     def _begin_analysis(self, path: Path) -> None:
         if self.worker is not None and self.worker.isRunning():
-            self.status.setText("Another book is still being analysed.")
+            self.status.setText("Another book is still being analysed. Wait for it to finish before selecting another.")
+            return
+        if not path.is_file():
+            self.status.setText("The selected file could not be found. Choose a file that still exists and try again.")
+            self.create_button.setEnabled(False)
+            return
+        if path.suffix.lower() not in {".pdf", ".epub", ".txt", ".docx"}:
+            self.status.setText("Unsupported file format. Choose a PDF, EPUB, TXT, or DOCX book.")
+            self.create_button.setEnabled(False)
             return
         self.source_path = path
         self.book = None
