@@ -743,4 +743,90 @@ function renderJobs(){let show=jobs.filter(j=>jobFilter==='all'||(jobFilter==='c
 document.getElementById('backgroundJobsButton').onclick=()=>{modal.classList.add('show');renderJobs()};document.getElementById('closeBackgroundJobs').onclick=()=>modal.classList.remove('show');document.querySelectorAll('[data-job-filter]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-job-filter]').forEach(x=>x.classList.toggle('active',x===b));jobFilter=b.dataset.jobFilter;renderJobs()});document.getElementById('backgroundJobsList').onclick=e=>{const action=e.target.closest('[data-job-action]');if(!action)return;const job=jobs.find(j=>j.id===action.closest('[data-job]').dataset.job),a=action.dataset.jobAction;if(a==='pause'){job.state='paused';job.eta='Paused by user'}if(a==='resume'||a==='start'||a==='retry'){job.state='running';job.eta='Calculating remaining time…'}if(a==='cancel'){job.state='cancelled';job.eta='Cancelled'}renderJobs();toast(`${job.title}: ${job.state}`,'warn')};document.getElementById('pauseAllJobs').onclick=e=>{allPaused=!allPaused;jobs.forEach(j=>{if(allPaused&&j.state==='running')j.state='paused';else if(!allPaused&&j.state==='paused')j.state='running'});e.target.textContent=allPaused?'Resume all':'Pause all';renderJobs()};document.getElementById('clearCompletedJobs').onclick=()=>{for(let i=jobs.length-1;i>=0;i--)if(['completed','cancelled'].includes(jobs[i].state))jobs.splice(i,1);renderJobs();toast('Completed background-job records cleared')};document.getElementById('openJobHistory').onclick=()=>modal.classList.remove('show');document.getElementById('openUpdateLog').onclick=()=>document.getElementById('updateLogModal').classList.add('show');document.getElementById('closeUpdateLog').onclick=()=>document.getElementById('updateLogModal').classList.remove('show');syncJobCounts();
 setInterval(()=>{const r=jobs.find(j=>j.state==='running');if(r&&r.progress<99){r.progress++;r.eta=Math.max(1,Math.ceil((100-r.progress)*.75))+' min remaining';if(modal.classList.contains('show'))renderJobs()}},4000);
 })();
-</script></body></html>
+</script>
+<script id="ryu-premium-v2-backend-binding">
+/* Premium V2 desktop binding: project cards and headline counts come from the local Python backend. */
+(() => {
+  const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const byId = id => document.getElementById(id);
+  const setText = (node, value) => { if (node) node.textContent = value; };
+  const showToast = (message, type='') => { if (typeof window.toast === 'function') window.toast(message, type); };
+  function statusFor(project) {
+    const status = String(project.status || 'new').toLowerCase();
+    if (project.completed) return 'Completed';
+    if (['failed','cancelled','error'].includes(status)) return 'Attention';
+    if (['generating','in_progress','running'].includes(status)) return 'Active';
+    return 'Ready';
+  }
+  function renderProjects(projects) {
+    const grid = byId('libraryGrid');
+    if (!grid) return;
+    const q = (byId('librarySearch')?.value || '').trim().toLowerCase();
+    const activeFilter = byId('libraryFilters')?.querySelector('button.active')?.textContent.trim().toLowerCase() || 'all';
+    const rows = projects.filter(p => {
+      const status = statusFor(p).toLowerCase();
+      const search = [p.title, p.source_path, p.status].join(' ').toLowerCase();
+      return (!q || search.includes(q)) && (activeFilter === 'all' || (activeFilter === 'attention' ? status === 'attention' : status === activeFilter));
+    });
+    if (!rows.length) {
+      grid.innerHTML = '<article class="card project-card"><div class="project-pad"><h3>No matching local projects</h3><p class="muted">Import a supported book to create a project. Filters use saved local project records.</p></div></article>';
+      return;
+    }
+    grid.innerHTML = rows.map(p => {
+      const status = statusFor(p);
+      const badge = status === 'Attention' ? 'warn' : status === 'Active' ? 'info' : '';
+      return '<article class="card project-card" data-name="' + escapeHtml([p.title,p.source_path,p.status].join(' ').toLowerCase()) + '">' +
+        '<div class="book-cover"></div><div class="project-pad"><span class="badge ' + badge + '">' + escapeHtml(status) + '</span>' +
+        '<h3>' + escapeHtml(p.title) + '</h3><p class="muted">' + escapeHtml(p.chapter_count) + ' chapters · saved locally</p>' +
+        '<p class="muted">' + escapeHtml(p.source_path || 'Source metadata unavailable') + '</p>' +
+        '<button class="btn small" type="button" disabled title="Opening projects from Premium V2 is not connected yet">Open project · integration pending</button></div></article>';
+    }).join('');
+  }
+  function renderDashboard(projects) {
+    const metrics = document.querySelectorAll('#dashboard .metric strong');
+    const completed = projects.filter(p => p.completed).length;
+    const active = projects.filter(p => statusFor(p) === 'Active').length;
+    const attention = projects.filter(p => statusFor(p) === 'Attention').length;
+    [projects.length, completed, active, attention].forEach((v,i) => setText(metrics[i], String(v)));
+    const first = projects[0];
+    const card = document.querySelector('#dashboard .continue-card');
+    if (card) {
+      setText(card.querySelector('h2'), first ? first.title : 'No local project yet');
+      setText(card.querySelector('p.muted'), first ? (first.chapter_count + ' chapters · local project') : 'Import a supported book to begin a project.');
+      const bar = card.querySelector('.progress i');
+      if (bar) bar.style.width = '0%';
+      const meta = card.querySelector('.meta-row');
+      if (meta) meta.textContent = first ? 'Progress is shown after the job service is connected.' : 'No saved project data yet.';
+      const button = card.querySelector('button');
+      if (button) { button.disabled = true; button.title = 'Opening projects from Premium V2 is not connected yet'; }
+    }
+    const jobCard = document.querySelector('#dashboard .job-card');
+    if (jobCard) jobCard.innerHTML = '<span class="eyebrow">BACKGROUND JOBS</span><h2>Job service not connected</h2><p class="muted">No active-job count or progress is shown until the durable desktop job service is connected.</p><button class="btn secondary" type="button" disabled>Open Background Jobs</button>';
+  }
+  async function syncLocalProjectData() {
+    if (!window.ryuBackend?.invoke) return;
+    const result = await window.ryuBackend.invoke('project.list');
+    if (!result?.success || !Array.isArray(result.data)) {
+      showToast(result?.error?.message || 'Local project data is currently unavailable', 'error');
+      return;
+    }
+    window.ryuPremiumProjects = result.data;
+    renderProjects(result.data);
+    renderDashboard(result.data);
+  }
+  window.addEventListener('ryu-backend-ready', () => {
+    syncLocalProjectData();
+    byId('librarySearch')?.addEventListener('input', () => renderProjects(window.ryuPremiumProjects || []));
+    byId('libraryFilters')?.querySelectorAll('button').forEach(button => button.addEventListener('click', () => setTimeout(() => renderProjects(window.ryuPremiumProjects || []), 0)));
+    const notify = byId('notifyBtn');
+    if (notify) notify.onclick = () => showToast('Background job controls are not connected yet.', 'error');
+    const globalSearch = byId('globalSearch');
+    if (globalSearch) globalSearch.addEventListener('keydown', event => {
+      if (event.key === 'Enter') setTimeout(() => renderProjects(window.ryuPremiumProjects || []), 0);
+    });
+  }, { once: true });
+})();
+</script>
+
+</body>
+</html>
