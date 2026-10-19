@@ -264,7 +264,21 @@ class LibraryPage(QWidget):
         if visible:
             self.list.setCurrentRow(0)
         else:
-            self.details.setText("No books match the current search/filter.")
+            if self.projects:
+                self.details.setText(
+                    "No books match the current search/filter. Clear the search or choose All "
+                    "to see your other local projects."
+                )
+                self.subtitle.setText(
+                    "No matching books • clear the search or choose All to restore the collection."
+                )
+            else:
+                self.details.setText(
+                    "Your local library is empty. Import a book to create your first audiobook project."
+                )
+                self.subtitle.setText(
+                    "No local projects yet • import a book to begin your audiobook workflow."
+                )
         self.list.setViewMode(
             QListWidget.ViewMode.IconMode if self.grid_button.isChecked()
             else QListWidget.ViewMode.ListMode
