@@ -121,7 +121,7 @@
     }
     const voiceLabel = $('profileVoice')?.textContent?.trim() || 'Amy';
     const matchedPiper = voices.find(v => v.provider === 'piper' && String(v.voice_id || '').toLowerCase().includes(voiceLabel.toLowerCase()));
-    const voice_id = provider === 'piper' ? (selectedVoiceId || matchedPiper?.voice_id || voices.find(v => v.name === name)?.voice_id || 'en_US-amy-medium') : (selectedVoiceId || voiceLabel || name);
+    const voice_id = provider === 'piper' ? (matchedPiper?.voice_id || voices.find(v => v.name === name)?.voice_id || 'en_US-amy-medium') : (selectedVoiceId || voiceLabel || name);
     const result = await call('voice.save', {name,provider,voice_id,sample_path,authorized,
       model_id:provider === 'chatterbox' ? 'chatterbox' : provider === 'qwen-character' ? 'qwen3-tts' : provider,
       backend:provider === 'piper' ? 'automatic' : provider,language:'English',
