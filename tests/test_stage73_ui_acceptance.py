@@ -123,3 +123,19 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_library_has_distinct_empty_collection_and_no_filter_match_recovery(self):
+        library = (ROOT / "app" / "ui" / "library.py").read_text(encoding="utf-8")
+        self.assertIn("Your local library is empty.", library)
+        self.assertIn("Import a book to create your first audiobook project.", library)
+        self.assertIn("No books match the current search/filter.", library)
+        self.assertIn("clear the search or choose All", library)
+
+    def test_library_search_filters_and_destructive_actions_require_confirmation(self):
+        library = (ROOT / "app" / "ui" / "library.py").read_text(encoding="utf-8")
+        self.assertIn("self.search.textChanged.connect(self.refresh)", library)
+        self.assertIn("project_matches(project, query, status_filter)", library)
+        self.assertIn("QListWidget.SelectionMode.ExtendedSelection", library)
+        self.assertIn("QMessageBox.StandardButton.No,", library)
+        self.assertIn("if answer != QMessageBox.StandardButton.Yes:", library)
