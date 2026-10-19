@@ -229,5 +229,42 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
         self.assertIn("widget.setGraphicsEffect(None)", transition)
 
 
+    def test_generation_history_uses_real_local_state_and_safe_output_paths(self):
+        page = (ROOT / "app" / "ui" / "history_page.py").read_text(encoding="utf-8")
+        for required in (
+            "def _output_for(project: Project, state: dict)",
+            "path = project.folder / path",
+            "path.is_file() and path.stat().st_size > 0",
+            "def _status_for(project: Project, state: dict)",
+            "list_projects()",
+            "load_state(project.folder)",
+            "self.table.setHorizontalHeaderLabels(",
+            "self.table.itemSelectionChanged.connect(self._selection_changed)",
+            "self.open_button.clicked.connect(self._open_project)",
+            "self.production_button.clicked.connect(self._open_generation)",
+            "self.output_button.clicked.connect(self._open_output_folder)",
+            "History is reconstructed from local state files; no synthetic job entries are shown.",
+        ):
+            self.assertIn(required, page)
+
+    def test_settings_preserve_local_first_accessible_preferences_and_output_quality(self):
+        page = (ROOT / "app" / "ui" / "settings_page.py").read_text(encoding="utf-8")
+        for required in (
+            'self.theme.addItem("Dark · Obsidian", "dark")',
+            'self.theme.addItem("Light · Cream", "light")',
+            'self.accent.addItem("Dragon Crimson", "crimson")',
+            'self.accent.addItem("Velvet Red", "velvet")',
+            'self.reduce_motion = QCheckBox("Reduce page and waveform motion")',
+            'for kbps in (128, 160, 192, 224, 256, 288, 320):',
+            'self.save_button.clicked.connect(self.save_settings)',
+            '("Open Audiobook Library", library_root())',
+            '("Open Voice Profiles", voices_root())',
+            '("Open Audio Library", audio_library_root())',
+            '("Open Models Folder", models_root())',
+            '("Open Logs Folder", app_root() / "Logs")',
+            "Books, voice profiles, models, audio and logs remain on this PC.",
+        ):
+            self.assertIn(required, page)
+
 if __name__ == "__main__":
     unittest.main()
