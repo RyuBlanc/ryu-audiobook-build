@@ -454,6 +454,20 @@
     }
     if ($('cleanText')) $('cleanText').onclick = act(async()=>{const c=selectedChapter();if(!c)throw new Error('Import or open a book first.');const text=$('chapterEditor')?.value||'';$('chapterEditor').value=text.replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim();message('Whitespace cleaned. Save changes to persist it.');});
     if ($('saveChapter')) $('saveChapter').onclick = act(async()=>{const c=selectedChapter();if(!c)throw new Error('Select a chapter first.');const title=$('chapterTitle')?.textContent||c.title;const text=$('chapterEditor')?.value||'';const result=await call('chapter.update',{number:c.number,title,text});c.text=text;c.word_count=result.word_count;message('Chapter saved to local project.');await refreshChapters();});
+    const splitChapterButton = [...document.querySelectorAll('#chapters button')].find(button => button.textContent.trim().toLowerCase() === 'split chapter');
+    if (splitChapterButton) splitChapterButton.onclick = act(async()=>{
+      const c = selectedChapter(), editor = $('chapterEditor');
+      if (!c || !editor) throw new Error('Open a chapter before splitting it.');
+      if (editor.selectionStart !== editor.selectionEnd) throw new Error('Place the cursor at the split point; do not select a range of text.');
+      const splitAt = editor.selectionStart, text = editor.value;
+      if (splitAt <= 0 || splitAt >= text.length) throw new Error('Place the cursor inside the chapter text, between two passages.');
+      const result = await call('chapter.split',{number:c.number,title:$('chapterTitle')?.textContent||c.title,text,split_at:splitAt});
+      window.ryuPremiumSelectedChapter = result.new_number;
+      await refreshChapters();
+      const next = chapters.find(item=>item.number===result.new_number);
+      if (next && editor) { editor.value = next.text; if ($('chapterTitle')) $('chapterTitle').textContent = next.title; }
+      message('Chapter split and saved · '+result.chapter_count+' chapters now in this book.');
+    });
     ['saveProfile','saveDraft','addPremium','saveOnly'].forEach(id=>{if($(id))$(id).onclick=act(saveVoice);});
     if ($('useNarrator')) $('useNarrator').onclick=act(async()=>{const v=await saveVoice();if(v)await call('voice.select',{profile_name:v.name});message('Saved and selected narrator.');});
     if ($('generatePreview')) $('generatePreview').onclick=act(previewVoice);
