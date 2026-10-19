@@ -513,7 +513,10 @@
     if ($('hideMini')) $('hideMini').onclick=()=> $('miniPlayer')?.classList.add('hidden');
     if ($('saveSettingsAdvanced')) $('saveSettingsAdvanced').onclick=act(async()=>{await call('settings.save',{theme:$('themeSelectAdvanced')?.value||'dark',effects:$('effectsModeAdvanced')?.value||'high'});message('Settings saved to this PC.');});
     document.addEventListener('input', e => {
-      if (e.target?.id === 'soundTrackSearch') {
+      if (e.target?.id === 'librarySearch') {
+        e.stopImmediatePropagation();
+        refreshProjects().catch(err => message(err?.message || String(err), true));
+      } else if (e.target?.id === 'soundTrackSearch') {
         e.stopImmediatePropagation();
         refreshSounds().catch(err => message(err?.message || String(err), true));
       } else if (e.target?.id === 'cueSearch') {
@@ -525,6 +528,13 @@
       }
     }, true);
     document.addEventListener('click', async e => {
+      const libraryFilter = e.target.closest('#libraryFilters button');
+      if (libraryFilter) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        libraryFilter.parentElement?.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === libraryFilter));
+        refreshProjects().catch(err => message(err?.message || String(err), true));
+        return;
+      }
       const source = e.target.closest('#soundSourceFilter [data-source]');
       if (source) {
         e.preventDefault(); e.stopImmediatePropagation();
