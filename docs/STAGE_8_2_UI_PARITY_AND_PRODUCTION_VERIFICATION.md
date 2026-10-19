@@ -35,9 +35,10 @@ Verify all 15 Premium V2 destinations against the approved HTML and the behavior
 - [ ] Models, Performance and Settings: truthful runtime/hardware status, safe model operations, persisted settings.
 
 ### 8.2.3 — Production acceptance
-- [ ] Test actual local preview generation and playback; record requested versus actual preview duration.
-- [ ] Test a short multi-chapter M4B with chapter markers, title, author, cover and measured bitrate.
-- [ ] Test mixed valid/empty chapters, cancel/retry/resume and offline behavior.
+- [ ] Test actual local preview generation and playback on Windows; record requested versus actual preview duration.
+- [x] Automated multi-chapter M4B acceptance covers chapter markers/titles, title, author, narrator, language, genre, cover art and decodability. A measured encoded-audio bitrate floor (>=128 kbps) is now part of the acceptance test; awaiting CI for this revision.
+- [x] Static integration contract guards mixed valid/empty chapter handling: empty narration chapters are skipped and counted, while an all-empty book is rejected before generation; awaiting CI for this revision.
+- [ ] Exercise cancel/retry/resume and offline behavior with the packaged Windows app.
 - [ ] Test installer and portable build from the same final candidate commit.
 
 ### 8.2.4 — Release evidence
@@ -47,7 +48,9 @@ Verify all 15 Premium V2 destinations against the approved HTML and the behavior
 
 ## Current status
 
-**In progress — Stage 8.2.2.** Premium V2 is selected by `app/main.py` and embedded using `QWebEngineView` / `QWebChannel`; `requirements.txt` includes `PySide6-WebEngine`. Recent implementation work connects Dashboard recent-project cards/actions, Library search and filters, persisted Background Jobs controls, real file-input/drag-drop imports, the Chapter Studio split action, and supported Sound Design catalogue actions to the backend. Build #618 (commit `cd3103e21631a5565abf5e399190f44bc36da4a5`) completed successfully, including tests, frozen-application validation, bundled voice assets/critical modules checks, installer build, and portable artifact upload. Artifacts: `Ryu-Audiobook-Installer-618` (648,478,960 bytes) and `Ryu-Audiobook-Portable-618` (1,347,970,862 bytes); both expire 2026-10-22. This confirms CI/package creation, not successful manual Windows runtime testing. Chapter-level cue editing, full-book mix preview, and other controls remain open. No claim is made that all 15 destinations have passed interactive testing.
+**Stage 8.2.2 complete for the implemented CI-covered interactions; Stage 8.2.3 production acceptance is now in progress.** This is not a claim of full interactive UI parity: merge, per-chapter sound cues, full-book mix preview, responsive/manual screen acceptance, and real Windows voice-preview verification remain open. Premium V2 is selected by `app/main.py` and embedded using `QWebEngineView` / `QWebChannel`; `requirements.txt` includes `PySide6-WebEngine`. Recent implementation work connects Dashboard recent-project cards/actions, Library search and filters, persisted Background Jobs controls, real file-input/drag-drop imports, the Chapter Studio split action, and supported Sound Design catalogue actions to the backend. Build #618 (commit `cd3103e21631a5565abf5e399190f44bc36da4a5`) completed successfully, including tests, frozen-application validation, bundled voice assets/critical modules checks, installer build, and portable artifact upload. Artifacts: `Ryu-Audiobook-Installer-618` (648,478,960 bytes) and `Ryu-Audiobook-Portable-618` (1,347,970,862 bytes); both expire 2026-10-22. This confirms CI/package creation, not successful manual Windows runtime testing. Chapter-level cue editing, full-book mix preview, and other controls remain open. No claim is made that all 15 destinations have passed interactive testing.
+
+Build #633 (commit `b240679ca97dee3f4e39d3d4e3de86fc2d6ba494`) passed the stronger chapter autosave serialization guard, in addition to the normal application validation, frozen app, asset checks, installer and portable packaging. This still does not substitute for interactive Windows testing.
 
 Build #630 (commit `693dd1758ccf35aac7ef81fe862de4b1c06b579c`) passed: application validation/build, frozen application, voice assets/critical modules, installer, portable artifact and cleanup. Artifacts `Ryu-Audiobook-Installer-630` (648,256,728 bytes; SHA-256 `f73af4eca59d9229b190296526611a5ad03228a69a460953e9554fad66edea8f`) and `Ryu-Audiobook-Portable-630` (1,347,977,791 bytes; SHA-256 `78568309dd641bd1a7ec7bb4097978bd1ac1f712dcd455e235f88e1ce70a3ba2`) expire 2026-10-22. Release publishing was skipped. The following stronger save-serialization fix is in a newer commit and needs its own CI run.
 
