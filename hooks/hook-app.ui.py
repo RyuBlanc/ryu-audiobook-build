@@ -11,6 +11,10 @@ hiddenimports = [
     "app.ui.models_page",
     "app.ui.voice_page",
     "app.ui.workflow",
+    "app.ui.premium_v2_host",
+    "PySide6.QtWebEngineCore",
+    "PySide6.QtWebEngineWidgets",
+    "PySide6.QtWebChannel",
 ]
 
 module_collection_mode = "pyz+py"
