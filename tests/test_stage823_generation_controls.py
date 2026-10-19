@@ -45,7 +45,7 @@ class LocalTestProvider:
 
 
 class Stage823GenerationControlTests(unittest.TestCase):
-    def _manager_paused_after_first_chapter(self, root: Path):
+    def _manager_paused_after_first_chapter(self, root: Path, output: Path | None = None):
         paused = threading.Event()
         summaries = []
         manager_ref = {}
@@ -66,7 +66,7 @@ class Stage823GenerationControlTests(unittest.TestCase):
             on_finished=summaries.append,
         )
         manager_ref["manager"] = manager
-        manager.start()
+        manager.start(output_path=output, title="Control Test Book", author="Test Author")
         self.assertTrue(paused.wait(10), "generation did not reach a pause checkpoint")
         return manager, summaries
 
@@ -84,7 +84,9 @@ class Stage823GenerationControlTests(unittest.TestCase):
 
     def test_cancel_while_paused_finishes_as_cancelled_without_next_chapter(self):
         with tempfile.TemporaryDirectory() as temp:
-            manager, summaries = self._manager_paused_after_first_chapter(Path(temp))
+            root = Path(temp)
+            output = root / "cancelled-book.m4b"
+            manager, summaries = self._manager_paused_after_first_chapter(root, output=output)
             manager.cancel()
             manager._thread.join(timeout=10)
 
@@ -93,6 +95,7 @@ class Stage823GenerationControlTests(unittest.TestCase):
             self.assertTrue(summaries[0].cancelled)
             self.assertEqual(summaries[0].chapters_completed, 1)
             self.assertEqual(summaries[0].chapters_failed, [])
+            self.assertFalse(output.exists(), "cancelled generation must not package a partial audiobook")
 
 
 if __name__ == "__main__":
