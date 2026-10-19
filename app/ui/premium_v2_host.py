@@ -62,6 +62,7 @@ class PremiumV2Bridge(QObject):
         self._jobs_lock = threading.RLock()
         self._jobs: dict[str, dict[str, Any]] = {}
         self._generators: dict[str, GenerationManager] = {}
+        self._model_workers: dict[str, Any] = {}
         self._load_durable_jobs()
 
     @Slot(str, str, result=str)
@@ -110,6 +111,7 @@ class PremiumV2Bridge(QObject):
                 "settings.get": self._settings_get,
                 "settings.save": self._settings_save,
                 "models.list": self._models_list,
+                "models.install": self._models_install,
                 "performance.info": self._performance_info,
                 "diagnostics.check": self._diagnostics_check,
                 "system.open_output": self._system_open_output,
@@ -195,6 +197,7 @@ class PremiumV2Bridge(QObject):
             "settings.get": True,
             "settings.save": True,
             "models.list": True,
+            "models.install": True,
             "performance.info": False,
             "diagnostics.check": True,
             "system.open_output": True,
@@ -1015,6 +1018,51 @@ class PremiumV2Bridge(QObject):
             self.settings.setValue(setting, value)
         self.settings.sync()
         return self._settings_get({})
+
+    def _models_install(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Install the selected Qwen Voice Studio capability as a durable background job."""
+        selection_map = {
+            "customvoice": "CustomVoice",
+            "voicedesign": "VoiceDesign",
+            "voiceclone": "Voice Clone",
+            "all": "Full Qwen Voice Studio",
+        }
+        requested = str(payload.get("selection") or "customvoice").strip().lower()
+        selection = selection_map.get(requested)
+        if selection is None:
+            raise ValueError("Choose CustomVoice, VoiceDesign, Voice Clone, or all Qwen capabilities.")
+        from app.ui.models_page import QwenCharacterInstallWorker
+        job_id = self._new_job(
+            "model-install", "Install " + selection,
+            "Install Qwen3-TTS runtime and selected local voice model(s)",
+        )
+        worker = QwenCharacterInstallWorker(selection)
+        self._model_workers[job_id] = worker
+        self._job_update(job_id, state="running", stage="Preparing installation",
+                         message="Installing local Qwen3-TTS components. This may take a while.")
+        worker.progress.connect(
+            lambda detail, jid=job_id: self._job_update(
+                jid, state="running", stage=str(detail), message=str(detail)
+            )
+        )
+        worker.finished_ok.connect(
+            lambda detail, jid=job_id: self._job_update(
+                jid, state="completed", progress=100, stage="Installation complete",
+                message="Qwen Voice Studio installation completed.",
+                result={"detail": str(detail)}
+            )
+        )
+        worker.failed.connect(
+            lambda detail, jid=job_id: self._job_update(
+                jid, state="failed", stage="Installation failed",
+                message="Qwen Voice Studio installation failed.",
+                error={"code": "model_install_failed", "message": str(detail)},
+                recoverable=True
+            )
+        )
+        worker.finished.connect(lambda jid=job_id: self._model_workers.pop(jid, None))
+        worker.start()
+        return {"job_id": job_id, "selection": selection, "state": "running"}
 
     def _models_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         from app.tts.model_registry import BUILTIN_CATALOG, installed_models
