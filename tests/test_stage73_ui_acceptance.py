@@ -174,7 +174,7 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
     def test_audiobooks_shelf_shows_real_local_output_author_and_cover(self):
         page = (ROOT / "app" / "ui" / "audiobooks_page.py").read_text(encoding="utf-8")
         for required in (
-            'path.is_file() and path.suffix.lower() in _AUDIO_EXTENSIONS',
+            'candidate.is_file() and candidate.suffix.lower() in _AUDIO_EXTENSIONS and candidate.stat().st_size > 0',
             'path.stat().st_size > 0',
             'self.cover_art = QLabel("No cover art")',
             'state.get("author") or state.get("author_name")',
