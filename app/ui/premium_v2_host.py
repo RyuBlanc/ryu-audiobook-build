@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import logging
 import os
@@ -476,6 +477,29 @@ class PremiumV2Bridge(QObject):
             if path.stat().st_size > 250 * 1024 * 1024:
                 raise ValueError("The selected book exceeds the 250 MB import limit.")
             title = str(payload.get("title") or path.stem).strip()[:300] or path.stem
+        # Detect exact-content duplicates before creating a new project/job. The original
+        # source is copied into each project folder, so compare those preserved files,
+        # not only the incoming filename or path.
+        try:
+            source_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError as exc:
+            raise ValueError("The selected source file could not be read. Check its permissions and try again.") from exc
+        for existing_project in list_projects():
+            existing_source = existing_project.source_path
+            if not existing_source or not existing_source.is_file():
+                continue
+            try:
+                existing_digest = hashlib.sha256(existing_source.read_bytes()).hexdigest()
+            except OSError:
+                # A missing/unreadable historical source should not block importing a
+                # different book; its integrity is reported by the project itself.
+                continue
+            if source_digest == existing_digest:
+                raise ValueError(
+                    f"This file is already imported as “{existing_project.title}”. "
+                    "Open that project from Audiobook Library instead of importing a duplicate."
+                )
+
         job_id = self._new_job("import", "Import " + title, "Extract text and detect chapters")
         self._job_update(job_id, state="running", started_at=self._now(), stage="Reading source file", progress=5)
         threading.Thread(target=self._import_worker, args=(job_id, path, title), daemon=True).start()
@@ -505,8 +529,9 @@ class PremiumV2Bridge(QObject):
                              project_folder=str(project.folder.resolve()), result={
                                  "title": project.title, "folder": str(project.folder.resolve()),
                                  "chapter_count": len(chapters), "word_count": state["word_count"],
+                                 "source_file": str(project.source_path or path),
                                  "preview_text": "\n\n".join(c.text for c in chapters[:2])[:4000],
-                                 "warnings": [],
+                                 "warnings": [f"Detected {len(chapters)} chapter(s); review chapter boundaries before production."],
                              })
         except Exception as exc:
             log.exception("Premium V2 import failed")
