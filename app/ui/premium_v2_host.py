@@ -594,16 +594,18 @@ class PremiumV2Bridge(QObject):
         current = project.chapters[number - 1]
         previous = project.chapters[number - 2]
         previous_text = previous.text.rstrip()
-        current_text = current.text.lstrip()
+        current_original = current.text or ""
+        current_text = current_original.lstrip()
+        removed_leading = len(current_original) - len(current_text)
         separator = "\n\n" if previous_text and current_text else ""
         assignment_offset = len(previous_text + separator)
         previous.text = (previous_text + separator + current_text).strip()
         for assignment in current.dialogue_assignments or []:
             shifted = dict(assignment)
             if isinstance(shifted.get("start"), int):
-                shifted["start"] += assignment_offset
+                shifted["start"] = max(0, shifted["start"] - removed_leading) + assignment_offset
             if isinstance(shifted.get("end"), int):
-                shifted["end"] += assignment_offset
+                shifted["end"] = max(0, shifted["end"] - removed_leading) + assignment_offset
             previous.dialogue_assignments.append(shifted)
         del project.chapters[number - 1]
         for index, chapter in enumerate(project.chapters, 1):
