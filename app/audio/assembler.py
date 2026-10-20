@@ -458,13 +458,6 @@ def assemble_m4b(
                     cue_offset_by_chapter[index]=_duration_ms(cue)
                     _concat_audio_files(cue,current_audio,prefixed,audio_bitrate)
                     current_audio=prefixed
-                if index > 1 and scene_transition_cue_path:
-                    scene_cue = _resolve_cue_audio(temp_dir, "scene", "library", variation, mood, scene_transition_cue_path)
-                    if scene_cue is not None:
-                        scene_prefixed = temp_dir / f"{effective_audio_mode}-real-scene-cue-{index:05d}.m4a"
-                        _concat_audio_files(scene_cue, current_audio, scene_prefixed, audio_bitrate)
-                        cue_offset_by_chapter[index] = cue_offset_by_chapter.get(index, 0) + _duration_ms(scene_cue)
-                        current_audio = scene_prefixed
                 if index==len(chapters):
                     closing=_resolve_cue_audio(temp_dir,"ending","library",variation,mood,ending_cue_path)
                     if closing is not None:
@@ -473,6 +466,39 @@ def assemble_m4b(
                         current_audio=ended
                 cued_chapters.append(current_audio)
             chapters=cued_chapters
+
+        # Scene cues are independent of the opening/chapter/closing transition
+        # toggle. A scene-only assignment must not silently enable the library's
+        # opening/page/closing defaults, and it must still reach the final mix.
+        if effective_audio_mode in {"manual", "off"} and scene_transition_cue_path:
+            scene_cued_chapters: list[Path] = []
+            for index, (chapter_file, chapter_dir, chapter_title) in enumerate(
+                zip(chapters, chapter_dirs, names), start=1
+            ):
+                if index == 1:
+                    scene_cued_chapters.append(chapter_file)
+                    continue
+                narration_text = ""
+                try:
+                    payload = json.loads((chapter_dir / "narration.json").read_text(encoding="utf-8"))
+                    narration_text = str(payload.get("narration_text") or "")
+                    chapter_title = str(payload.get("title") or chapter_title)
+                except (OSError, ValueError, TypeError):
+                    pass
+                mood, variation = _selected_music_recipe(
+                    chapter_title, narration_text, auto_music_style, None
+                )
+                scene_cue = _resolve_cue_audio(
+                    temp_dir, "scene", "library", variation, mood, scene_transition_cue_path
+                )
+                if scene_cue is None:
+                    scene_cued_chapters.append(chapter_file)
+                    continue
+                scene_prefixed = temp_dir / f"{effective_audio_mode}-real-scene-cue-{index:05d}.m4a"
+                _concat_audio_files(scene_cue, chapter_file, scene_prefixed, audio_bitrate)
+                cue_offset_by_chapter[index] = cue_offset_by_chapter.get(index, 0) + _duration_ms(scene_cue)
+                scene_cued_chapters.append(scene_prefixed)
+            chapters = scene_cued_chapters
 
         # Story-aware SFX are aligned to the source text inside each generated
         # chunk. Only explicit phrases trigger effects; cues are volume-limited,

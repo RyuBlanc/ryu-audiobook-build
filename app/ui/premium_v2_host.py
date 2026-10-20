@@ -1661,7 +1661,7 @@ class PremiumV2Bridge(QObject):
             }
         cues[slot] = selected_path
         state["sound_cues"] = cues
-        state["chapter_transition_sound"] = any(cues.get(key) for key in ("opening", "chapter", "scene", "closing"))
+        state["chapter_transition_sound"] = any(cues.get(key) for key in ("opening", "chapter", "closing"))
         # Keep the legacy fields synchronized with the saved cue manifest; the
         # production assembler consumes all four cue paths, including scene transitions.
         if slot == "opening":
@@ -1671,8 +1671,8 @@ class PremiumV2Bridge(QObject):
         elif slot == "closing":
             state["ending_cue_path"] = selected_path
         else:
-            # Scene cue assignment is persisted for editing; the current
-            # assembler has no separate scene-transition audio input.
+            # Scene transitions are mixed independently from the
+            # opening/chapter/closing cue toggle.
             state["scene_transition_cue_path"] = selected_path
         state["modified_at"] = self._now()
         save_state(project.folder, state)
