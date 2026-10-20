@@ -17,6 +17,7 @@
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
   let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve();
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
+  let libraryCharacters = [], libraryEditorId = null, libraryEditorActive = false;
   const selectedChapter = () => chapters.find(c => c.number === window.ryuPremiumSelectedChapter) || chapters[0];
   const renderSelect = (select, rows, value, label) => {
     if (!select) return;
@@ -107,6 +108,31 @@
       if ($('editCharacterVoice')) $('editCharacterVoice').value = c.voice_profile || '';
       window.ryuPremiumSelectedCharacter = c.name;
     }));
+  }
+  async function refreshCharacterLibrary() {
+    libraryCharacters = await call('character_library.list');
+    const grid = $('characterLibraryGrid'), query = ($('characterLibrarySearch')?.value || '').trim().toLowerCase(), series = $('characterSeriesFilter')?.value || 'All series';
+    const rows = libraryCharacters.filter(c => (!query || [c.name,c.short,c.voice,c.series,c.scope,...(c.aliases||[])].join(' ').toLowerCase().includes(query)) && (series === 'All series' || c.series === series || c.scope === series));
+    if (grid) grid.innerHTML = rows.map(c => '<article class="library-character-card" data-library-id="'+esc(c.id)+'"><div class="library-character-top"><span class="avatar">'+esc((c.short||c.name||'?').slice(0,1))+'</span><div><h3>'+esc(c.name)+'</h3><p>'+esc(c.series||c.scope||'Global')+' · '+esc(c.voice||'Unassigned')+'</p></div></div><div class="alias-row">'+((c.aliases||[]).map(x=>'<span class="alias-tag">'+esc(x)+'</span>').join('')||'<span class="alias-tag">No aliases</span>')+'</div><div class="library-character-meta"><span>'+Number(c.lines||0)+' assigned lines</span><span>'+Number(c.chapters||0)+' chapters</span><span>'+Number(c.confidence??100)+'% confidence</span><span>'+esc(c.scope||'Global character library')+'</span></div><div class="library-character-actions"><button class="btn small secondary" data-test-library="'+esc(c.id)+'">▶ Test</button><button class="btn small secondary" data-edit-library="'+esc(c.id)+'">Edit</button><button class="btn small ghost library-delete" data-delete-library="'+esc(c.id)+'">Delete</button></div></article>').join('') || '<div class="card"><b>No characters found</b><p class="muted">Import a cast or add a character to begin your reusable library.</p></div>';
+    return libraryCharacters;
+  }
+  function openLibraryEditor(c) {
+    libraryEditorActive = true; libraryEditorId = c?.id || null;
+    if ($('characterEditorTitle')) $('characterEditorTitle').textContent = c ? 'Edit character' : 'Add new character';
+    if ($('editCharacterName')) $('editCharacterName').value = c?.name || ''; if ($('editCharacterShort')) $('editCharacterShort').value = c?.short || '';
+    if ($('editCharacterAliases')) $('editCharacterAliases').value = (c?.aliases||[]).join(', '); if ($('editCharacterVoice')) $('editCharacterVoice').value = c?.voice || (voices[0]?.name || 'Unassigned');
+    if ($('editCharacterScope')) $('editCharacterScope').value = c?.scope || 'Global character library'; if ($('editCharacterNotes')) $('editCharacterNotes').value = c?.notes || '';
+    if ($('deleteCharacter')) $('deleteCharacter').style.visibility = c ? 'visible' : 'hidden'; $('characterEditorModal')?.classList.add('show');
+  }
+  async function saveLibraryEditor() {
+    const name = $('editCharacterName')?.value.trim() || ''; if (!name) throw new Error('Enter a character name before saving it to the Character Library.');
+    const scope = $('editCharacterScope')?.value || 'Global character library';
+    const result = await call('character_library.save', {id:libraryEditorId||'',name,short:$('editCharacterShort')?.value||'',aliases:$('editCharacterAliases')?.value||'',voice:$('editCharacterVoice')?.value||'Unassigned',scope,series:scope,notes:$('editCharacterNotes')?.value||''});
+    libraryEditorId = result.character.id; libraryEditorActive = false; $('characterEditorModal')?.classList.remove('show'); await refreshCharacterLibrary(); message('Character saved to the reusable local Character Library.');
+  }
+  function importCharacterLibraryFile() {
+    const picker=document.createElement('input'); picker.type='file'; picker.accept='.json,application/json';
+    picker.onchange=async()=>{const file=picker.files?.[0];if(!file)return;if(file.size>10*1024*1024){message('Character Library imports are limited to 10 MB.',true);return;}try{const data=JSON.parse(await file.text()), rows=Array.isArray(data)?data:data?.characters;if(!Array.isArray(rows))throw new Error('JSON must be an array or contain a characters array.');const result=await call('character_library.import',{characters:rows});await refreshCharacterLibrary();message('Imported '+result.imported+' character(s) into the local Character Library.');}catch(error){message(error?.message||String(error),true);}}; picker.click();
   }
   async function refreshTerms() {
     terms = await call('pronunciation.list');
@@ -482,7 +508,18 @@
   async function wire() {
     await call('app.get_info');
     await refreshProjects().catch(()=>{}); await refreshVoices().catch(()=>{}); await refreshChapters().catch(()=>{});
-    await refreshCharacters().catch(()=>{}); await refreshTerms().catch(()=>{}); await refreshSounds().catch(()=>{}); await refreshSoundCues().catch(()=>{}); await refreshChapterBgm().catch(()=>{}); await refreshJobs().catch(()=>{}); await refreshHistory().catch(()=>{}); await refreshModels().catch(()=>{}); await refreshPerformance().catch(()=>{}); await loadSettings().catch(()=>{});
+    await refreshCharacters().catch(()=>{}); await refreshCharacterLibrary().catch(()=>{}); await refreshTerms().catch(()=>{}); await refreshSounds().catch(()=>{}); await refreshSoundCues().catch(()=>{}); await refreshChapterBgm().catch(()=>{}); await refreshJobs().catch(()=>{}); await refreshHistory().catch(()=>{}); await refreshModels().catch(()=>{}); await refreshPerformance().catch(()=>{}); await loadSettings().catch(()=>{});
+    document.addEventListener('click', e => {
+      const add=e.target.closest('#addLibraryCharacter'), imp=e.target.closest('#importCharacterLibrary'), edit=e.target.closest('[data-edit-library]'), remove=e.target.closest('[data-delete-library]'), test=e.target.closest('[data-test-library]'), save=e.target.closest('#saveCharacterProfile'), del=e.target.closest('#deleteCharacter');
+      if(add){e.preventDefault();e.stopImmediatePropagation();openLibraryEditor(null);return;}
+      if(imp){e.preventDefault();e.stopImmediatePropagation();importCharacterLibraryFile();return;}
+      if(edit){e.preventDefault();e.stopImmediatePropagation();openLibraryEditor(libraryCharacters.find(c=>String(c.id)===edit.dataset.editLibrary));return;}
+      if(remove){e.preventDefault();e.stopImmediatePropagation();const c=libraryCharacters.find(x=>String(x.id)===remove.dataset.deleteLibrary);if(!c||!window.confirm('Delete '+c.name+' from the reusable Character Library?'))return;call('character_library.delete',{id:c.id}).then(refreshCharacterLibrary).then(()=>message('Character removed from the reusable library.')).catch(err=>message(err?.message||String(err),true));return;}
+      if(save&&libraryEditorActive){e.preventDefault();e.stopImmediatePropagation();saveLibraryEditor().catch(err=>message(err?.message||String(err),true));return;}
+      if(del&&libraryEditorActive){e.preventDefault();e.stopImmediatePropagation();if(!libraryEditorId){libraryEditorActive=false;$('characterEditorModal')?.classList.remove('show');return;}const c=libraryCharacters.find(x=>String(x.id)===String(libraryEditorId));if(!c||!window.confirm('Delete '+c.name+' from the reusable Character Library?'))return;call('character_library.delete',{id:libraryEditorId}).then(()=>{libraryEditorActive=false;$('characterEditorModal')?.classList.remove('show');return refreshCharacterLibrary();}).then(()=>message('Character removed from the reusable library.')).catch(err=>message(err?.message||String(err),true));return;}
+      if(e.target.closest('#characterLibrarySearch, #characterSeriesFilter'))setTimeout(()=>refreshCharacterLibrary().catch(err=>message(err?.message||String(err),true)),0);
+      if(test){e.preventDefault();e.stopImmediatePropagation();const c=libraryCharacters.find(x=>String(x.id)===test.dataset.testLibrary);const profile=voices.find(v=>String(v.name).toLowerCase()===String(c?.voice||'').toLowerCase());if(!c||!profile){message('No matching saved voice profile exists for this character. Choose a saved profile in Voice Studio first.',true);return;}call('voice.preview',{profile_name:profile.name,text:'Hello, my name is '+c.name+'.',duration_seconds:10}).then(data=>monitorJob(data.job_id,async job=>{const url=job?.result?.file_url;if(!url)throw new Error('The character preview finished without a playable audio file.');if(previewAudio)previewAudio.pause();previewAudio=new Audio(url);await previewAudio.play();message('Playing character voice preview.');})).catch(err=>message(err?.message||String(err),true));return;}
+    }, true);
     document.addEventListener('click', e => { const b=e.target.closest('[data-voice]'); if(b){selectedVoiceId=b.dataset.voice;const label=b.dataset.voice;if($('profileVoice'))$('profileVoice').textContent=label;if($('premiumName')&&!$('premiumName').value.trim())$('premiumName').value=label+' Custom';if($('profileName')&&!$('profileName').value.trim())$('profileName').value=label+' Custom';return;}if(e.target.closest('.provider'))selectedVoiceId=null; });
     if ($('historyFilters')) $('historyFilters').querySelectorAll('button').forEach(button => button.addEventListener('click', () => {
       $('historyFilters').querySelectorAll('button').forEach(b=>b.classList.toggle('active',b===button));

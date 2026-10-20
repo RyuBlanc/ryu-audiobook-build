@@ -341,6 +341,28 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("monitorJob(data.job_id, async job=>", adapter)
         self.assertIn("await previewAudio.play()", adapter)
 
+    def test_reusable_character_library_is_persisted_and_connected(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        for command, handler in {
+            "character_library.list": "_character_library_list",
+            "character_library.save": "_character_library_save",
+            "character_library.delete": "_character_library_delete",
+            "character_library.import": "_character_library_import",
+        }.items():
+            self.assertIn(f'"{command}": self.{handler}', host)
+            self.assertIn(f'"{command}": True', host)
+        self.assertIn('settings_root() / "character_library.json"', host)
+        self.assertIn("temporary.replace(path)", host)
+        self.assertIn("call('character_library.list')", adapter)
+        self.assertIn("call('character_library.save'", adapter)
+        self.assertIn("call('character_library.delete'", adapter)
+        self.assertIn("call('character_library.import'", adapter)
+        self.assertIn("importCharacterLibraryFile()", adapter)
+        self.assertIn("openLibraryEditor(null)", adapter)
+        self.assertIn("saveLibraryEditor()", adapter)
+        self.assertIn("Character Library imports are limited to 10 MB.", adapter)
+
 
 if __name__ == "__main__":
     unittest.main()

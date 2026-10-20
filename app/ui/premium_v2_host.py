@@ -96,6 +96,10 @@ class PremiumV2Bridge(QObject):
                 "voice.select": self._voice_select,
                 "voice.preview": self._voice_preview,
                 "character.list": self._character_list,
+                "character_library.list": self._character_library_list,
+                "character_library.save": self._character_library_save,
+                "character_library.delete": self._character_library_delete,
+                "character_library.import": self._character_library_import,
                 "character.analyze": self._character_analyze,
                 "character.assign": self._character_assign,
                 "character.update": self._character_update,
@@ -190,6 +194,10 @@ class PremiumV2Bridge(QObject):
             "voice.select": True,
             "voice.preview": True,
             "character.list": True,
+            "character_library.list": True,
+            "character_library.save": True,
+            "character_library.delete": True,
+            "character_library.import": True,
             "character.analyze": True,
             "character.assign": True,
             "character.update": True,
@@ -995,6 +1003,77 @@ class PremiumV2Bridge(QObject):
         save_state(project.folder, state)
         return {"name": name, "deleted": True, "remaining": len(kept)}
 
+    def _character_library_path(self) -> Path:
+        return settings_root() / "character_library.json"
+
+    def _character_library_read(self) -> list[dict[str, Any]]:
+        path = self._character_library_path()
+        try:
+            data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
+        except (OSError, ValueError, TypeError):
+            raise ValueError("The saved Character Library file is invalid. Import a valid JSON cast file to restore it.")
+        rows = data.get("characters", []) if isinstance(data, dict) else data
+        if not isinstance(rows, list): raise ValueError("Character Library data must be a list of characters.")
+        return [row for row in rows if isinstance(row, dict) and str(row.get("name") or "").strip()]
+
+    def _character_library_write(self, rows: list[dict[str, Any]]) -> None:
+        path = self._character_library_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(json.dumps({"version": 1, "characters": rows}, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.replace(path)
+
+    def _character_library_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._character_library_read()
+
+    def _character_library_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        name = str(payload.get("name") or "").strip()
+        if not name: raise ValueError("Enter a character name before saving it to the Character Library.")
+        aliases = payload.get("aliases") or []
+        if isinstance(aliases, str): aliases = aliases.split(",")
+        if not isinstance(aliases, list): raise ValueError("Character aliases must be a list or comma-separated text.")
+        row_id = str(payload.get("id") or "").strip() or uuid.uuid4().hex
+        scope = str(payload.get("scope") or "Global character library").strip()[:100]
+        item = {"id": row_id, "name": name[:300], "short": str(payload.get("short") or name.split()[0]).strip()[:120],
+                "aliases": list(dict.fromkeys(str(x).strip()[:160] for x in aliases if str(x).strip())),
+                "voice": str(payload.get("voice") or "Unassigned").strip()[:200], "scope": scope,
+                "series": str(payload.get("series") or scope).strip()[:100], "notes": str(payload.get("notes") or "").strip()[:4000],
+                "lines": max(0, int(payload.get("lines") or 0)), "chapters": max(0, int(payload.get("chapters") or 0)),
+                "confidence": max(0, min(100, int(payload.get("confidence", 100)))), "updated_at": self._now()}
+        rows = self._character_library_read()
+        old = next((i for i, row in enumerate(rows) if str(row.get("id") or "") == row_id or str(row.get("name") or "").casefold() == name.casefold()), None)
+        if old is None: rows.append(item)
+        else: rows[old] = item
+        self._character_library_write(rows)
+        return {"character": item, "count": len(rows), "saved": True}
+
+    def _character_library_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
+        row_id = str(payload.get("id") or "").strip()
+        name = str(payload.get("name") or "").strip().casefold()
+        rows = self._character_library_read()
+        kept = [row for row in rows if not ((row_id and str(row.get("id") or "") == row_id) or (name and str(row.get("name") or "").casefold() == name))]
+        if len(kept) == len(rows): raise ValueError("The selected character is no longer in the Character Library.")
+        self._character_library_write(kept)
+        return {"deleted": len(rows)-len(kept), "count": len(kept)}
+
+    def _character_library_import(self, payload: dict[str, Any]) -> dict[str, Any]:
+        incoming = payload.get("characters")
+        if isinstance(incoming, dict): incoming = incoming.get("characters")
+        if not isinstance(incoming, list) or not incoming: raise ValueError("Choose a JSON file containing a non-empty character list.")
+        rows = self._character_library_read()
+        by_name = {str(row.get("name") or "").casefold(): i for i, row in enumerate(rows)}
+        imported = 0
+        for candidate in incoming:
+            if not isinstance(candidate, dict) or not str(candidate.get("name") or "").strip(): continue
+            item = dict(candidate); item["name"] = str(item["name"]).strip(); item["id"] = str(item.get("id") or uuid.uuid4().hex)
+            aliases = item.get("aliases") or []; item["aliases"] = aliases if isinstance(aliases, list) else str(aliases).split(",")
+            key = item["name"].casefold()
+            if key in by_name: rows[by_name[key]] = {**rows[by_name[key]], **item}
+            else: by_name[key] = len(rows); rows.append(item)
+            imported += 1
+        if not imported: raise ValueError("The selected JSON file contained no valid named characters.")
+        self._character_library_write(rows)
+        return {"imported": imported, "count": len(rows), "merged_by_name": True}
     def _pronunciation_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         entries = load_state(self._active_project().folder).get("pronunciation_dictionary") or []
         return entries if isinstance(entries, list) else []
