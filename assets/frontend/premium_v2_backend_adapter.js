@@ -1321,7 +1321,11 @@
       }
       if (button.closest('#settings') && label === 'export logs') {
         stop();
-        message('Sanitized log export is not connected yet; no export file was created.', true);
+        void call('diagnostics.export_logs').then(result => {
+          if (result?.cancelled) return;
+          message('Sanitized diagnostics exported to ' + result.path +
+            ' · ' + Number(result.files_included || 0) + ' log file(s) included.');
+        }).catch(err => message(err?.message || String(err), true));
         return;
       }
     }, true);

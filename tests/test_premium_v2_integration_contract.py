@@ -75,6 +75,12 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         }.items():
             self.assertIn(f'"{command}": self.{handler}', self.host)
         self.assertIn('"project.create": False', self.host)
+        self.assertIn('"diagnostics.export_logs": self._diagnostics_export_logs', self.host)
+        self.assertIn('"diagnostics.export_logs": True', self.host)
+        self.assertIn("def _sanitize_diagnostic_text(", self.host)
+        self.assertIn("Bearer [REDACTED]", self.host)
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("call('diagnostics.export_logs')", adapter)
         self.assertIn('"production.generate_book": True', self.host)
         self.assertIn('"voice.save": True', self.host)
         self.assertIn('"voice.import_reference": True', self.host)

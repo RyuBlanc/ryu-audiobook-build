@@ -33,3 +33,14 @@ No unsupported success claims are made in this update log.
 
 ### Current gate
 This is a staged integration, not a complete app. The full 20-step functional acceptance, complete screen wiring, durable jobs/SQLite migration, visual comparison and Windows runtime smoke are still open.
+
+## 2026-10-20 — Stage 8.2.12 implementation follow-up
+
+### Connected
+- Replaced the Settings → Diagnostics “Export logs” placeholder with the real allow-listed `diagnostics.export_logs` bridge command.
+- Added a native save dialog, bounded log collection, a background-job diagnostic summary, atomic output writing, and redaction for common credential/token patterns, API-key-like strings, email addresses, and the current user home path.
+- Added regression assertions for the bridge handler, capability map, sanitizer, and frontend invocation.
+
+### Acceptance state
+- This is a targeted gap closure, not a declaration that all Premium V2 controls are complete.
+- CI must pass after this commit. Packaged Windows execution, redaction review, visual parity, complete control mapping, and end-to-end acceptance remain open until verified.

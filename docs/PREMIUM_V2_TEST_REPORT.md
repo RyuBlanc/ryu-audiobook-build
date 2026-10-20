@@ -40,4 +40,12 @@ Do not mark release complete until the 20-step workflow in the user specificatio
 - Dashboard/library counts and project cards are now refreshed from `project.list`; actions not yet implemented are disabled and labeled as pending.
 - Added `tests/test_premium_v2_integration_contract.py` for the 15-destination HTML, host, bridge capabilities and packaging contract.
 
-**Important:** These tests have been authored but not yet observed passing in CI at the time of this report. No runtime or full end-to-end pass is claimed.
+**Important:** The report above records the original audit snapshot. The latest follow-up adds automated contract assertions for sanitized diagnostic export; CI and packaged Windows behavior must still be observed before claiming acceptance.
+
+## 2026-10-20 follow-up — diagnostics export
+
+- Connected Settings → Diagnostics → Export logs to the allow-listed `diagnostics.export_logs` backend command.
+- Added a real Save dialog, bounded collection of recent local `.log` files, a recent background-job summary, atomic report writing, and sanitization for common credential patterns, bearer tokens, API-key-like strings, email addresses, and the current user home path.
+- Canceling the dialog does not create a file. The success message reports the destination and actual number of log files included.
+- Added regression assertions for command registration, capability advertisement, sanitization, and the frontend call.
+- **Not yet verified:** execution in Windows WebEngine, completeness of redaction against arbitrary third-party log formats, and full application acceptance.

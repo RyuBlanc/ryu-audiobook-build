@@ -12,6 +12,7 @@
 6. Existing source does contain meaningful backend services for import/parsing, chapter detection/editing, voice profiles/providers, character/dialogue handling, pronunciation suggestions, sound design/mixing, generation, M4B assembly, model registry, hardware, history and settings. Exact per-control parity still needs runtime mapping and integration.
 7. Repository tests that describe 14 destinations must be updated to validate the Premium V2 15-destination frontend without deleting existing application capabilities.
 8. The supplied screenshots show a Build 491 Voice Studio state and a prior GitHub workflow view; they are context/evidence, not a substitute for running the current installer.
+9. Sanitized diagnostic export is connected to a real save dialog and bounded local-log collection. The implementation redacts common credential patterns, email addresses, and the current user home path; its packaged Windows behavior remains to be verified.
 
 ## Not yet verified
 
@@ -30,3 +31,4 @@
 - Do not delete old HTML references or desktop features until their functions are mapped and preserved.
 - Do not embed credentials in HTML, JavaScript, project JSON, or logs.
 - Do not claim the final installer exists until a current CI artifact has completed and the exact artifact has been verified.
+- Diagnostic export is a best-effort sanitizer, not a guarantee that every possible secret format is recognized; inspect the report before sharing it externally.

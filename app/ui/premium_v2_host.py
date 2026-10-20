@@ -125,6 +125,7 @@ class PremiumV2Bridge(QObject):
                 "models.install": self._models_install,
                 "performance.info": self._performance_info,
                 "diagnostics.check": self._diagnostics_check,
+                "diagnostics.export_logs": self._diagnostics_export_logs,
                 "system.open_output": self._system_open_output,
                 "sound.catalog": self._sound_catalog,
                 "sound.import": self._sound_import,
@@ -224,6 +225,7 @@ class PremiumV2Bridge(QObject):
             "models.install": True,
             "performance.info": False,
             "diagnostics.check": True,
+            "diagnostics.export_logs": True,
             "system.open_output": True,
             "sound.catalog": True,
             "sound.import": True,
@@ -1539,6 +1541,105 @@ class PremiumV2Bridge(QObject):
         checks.append({"name": "Background-job persistence", "status": "passed" if self._jobs_path().parent.exists() else "warning",
                        "detail": str(self._jobs_path())})
         return {"checks": checks, "passed": all(c["status"] == "passed" for c in checks)}
+
+    @staticmethod
+    def _sanitize_diagnostic_text(value: str) -> str:
+        """Remove common credentials and user-identifying paths from exported diagnostics."""
+        text = str(value or "")
+        home = str(Path.home())
+        if home:
+            text = text.replace(home, "<USER_HOME>")
+            text = text.replace(home.replace("\\", "/"), "<USER_HOME>")
+        text = re.sub(
+            r"""(?i)(["']?(?:api[_ -]?key|access[_ -]?token|refresh[_ -]?token|password|passwd|secret|authorization|client_secret)["']?\s*[:=]\s*["']?)[^,\s"']+""",
+            r"\1[REDACTED]",
+            text,
+        )
+        text = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", text)
+        text = re.sub(r"\bsk-[A-Za-z0-9_-]{12,}\b", "[REDACTED_KEY]", text)
+        text = re.sub(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", "[REDACTED_EMAIL]", text, flags=re.IGNORECASE)
+        return "".join(char for char in text if char in "\r\n\t" or ord(char) >= 32)
+
+    def _diagnostics_export_logs(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Export a user-selected, bounded, sanitized diagnostic report and available app logs."""
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        suggested = settings_root() / f"ryu-audiobook-diagnostics-{timestamp}.txt"
+        target, _filter = QFileDialog.getSaveFileName(
+            None, "Export sanitized diagnostics", str(suggested),
+            "Text reports (*.txt);;All files (*.*)",
+        )
+        if not target:
+            return {"cancelled": True, "files_included": 0}
+
+        roots = (settings_root(), app_root(), app_root() / "logs")
+        log_paths: list[Path] = []
+        seen: set[str] = set()
+        for root in roots:
+            if not root.is_dir():
+                continue
+            try:
+                candidates = sorted(root.glob("*.log"), key=lambda item: item.stat().st_mtime, reverse=True)
+            except OSError:
+                continue
+            for candidate in candidates:
+                key = str(candidate.resolve()).casefold()
+                if key not in seen and candidate.is_file():
+                    seen.add(key)
+                    log_paths.append(candidate)
+
+        sections = [
+            "RYU'S AUDIOBOOK — SANITIZED DIAGNOSTIC REPORT",
+            f"Generated: {self._now()}",
+            f"Application: {APP_NAME} {full_version()}",
+            f"Platform: {sys.platform}",
+            f"Log files found: {len(log_paths)}",
+            "",
+            "BACKGROUND JOB SUMMARY",
+        ]
+        with self._jobs_lock:
+            jobs = sorted(self._jobs.values(), key=lambda row: str(row.get("queued_at") or ""), reverse=True)[:100]
+            for job in jobs:
+                error = job.get("error") if isinstance(job.get("error"), dict) else {}
+                sections.append(self._sanitize_diagnostic_text(
+                    f"- type={job.get('type','unknown')} state={job.get('state','unknown')} "
+                    f"progress={job.get('progress',0)} stage={job.get('stage','')} "
+                    f"error_code={error.get('code','')}"
+                ))
+        if not jobs:
+            sections.append("(No background jobs recorded.)")
+
+        total_bytes = 0
+        included = 0
+        for log_path in log_paths:
+            if total_bytes >= 5 * 1024 * 1024:
+                sections.append("\n[Remaining log files omitted: 5 MiB export limit reached.]")
+                break
+            try:
+                with log_path.open("rb") as handle:
+                    handle.seek(0, os.SEEK_END)
+                    size = handle.tell()
+                    handle.seek(max(0, size - 1024 * 1024), os.SEEK_SET)
+                    raw = handle.read(min(1024 * 1024, 5 * 1024 * 1024 - total_bytes))
+                content = raw.decode("utf-8", errors="replace")
+            except OSError:
+                continue
+            included += 1
+            total_bytes += len(raw)
+            sections.extend(["", f"LOG FILE: {log_path.name} (sanitized; newest portion only)",
+                             self._sanitize_diagnostic_text(content)])
+
+        output = "\n".join(sections).rstrip() + "\n"
+        destination = Path(target).expanduser().resolve()
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(destination.name + ".tmp")
+        try:
+            temporary.write_text(output, encoding="utf-8")
+            temporary.replace(destination)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
+        return {"cancelled": False, "path": str(destination), "files_included": included,
+                "bytes_written": destination.stat().st_size, "sanitized": True}
 
     def _system_open_output(self, _payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
