@@ -302,6 +302,11 @@ class GenerationManager:
                         )
                     break
 
+        # Cancellation can arrive while the final chapter is rendering. Recheck
+        # before starting the expensive full-book encode so a late cancel request
+        # does not package a book after the user asked to stop.
+        if self.cancel_event.is_set():
+            cancelled = True
         if not cancelled and self._wait_if_paused(len(self.chapters), len(self.chapters)):
             cancelled = True
 

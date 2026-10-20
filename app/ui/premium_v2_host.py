@@ -393,8 +393,20 @@ class PremiumV2Bridge(QObject):
                     row["elapsed_seconds"] = max(0, int((datetime.now(timezone.utc) - datetime.fromisoformat(row["started_at"])).total_seconds()))
                 except (TypeError, ValueError):
                     pass
+                try:
+                    progress = max(0.0, min(100.0, float(row.get("progress") or 0)))
+                    elapsed = int(row.get("elapsed_seconds") or 0)
+                    # Avoid displaying noisy estimates during startup or when
+                    # progress has not advanced enough to be meaningful.
+                    row["eta_seconds"] = (
+                        max(0, int(elapsed * (100.0 - progress) / progress))
+                        if elapsed >= 5 and progress >= 5 and progress < 100 else None
+                    )
+                except (TypeError, ValueError, ZeroDivisionError):
+                    row["eta_seconds"] = None
             if row.get("state") in {"completed", "failed", "cancelled"}:
                 row["completed_at"] = row.get("completed_at") or row["updated_at"]
+                row["eta_seconds"] = 0
             self._persist_jobs()
             return dict(row)
 
@@ -1328,7 +1340,11 @@ class PremiumV2Bridge(QObject):
             current = self._jobs.get(job_id, {}).get("progress", 0)
             self._job_update(job_id, state=status, stage="Generation " + status,
                              progress=min(98, int(current or 0)), message=detail,
-                             output_path=str(actual) if valid else None,
+                             # A previous successful file may still exist at the same
+                             # destination. Do not attach it to a failed/cancelled job
+                             # as if this attempt produced a complete audiobook.
+                             output_path=str(actual) if valid and status != "cancelled"
+                                 and not summary.packaging_failed and not summary.chapters_failed else None,
                              error={"code": status, "message": detail,
                                     "failed_chapters": list(summary.chapters_failed or [])},
                              recoverable=not summary.cancelled)
