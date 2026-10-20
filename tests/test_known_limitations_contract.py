@@ -21,7 +21,7 @@ class KnownLimitationsContractTests(unittest.TestCase):
             "performance.info",
             "secure provider-specific credential store",
             "Premium cloud candidate generation",
-            "Review status is not yet supplied by the chapter backend",
+            "Review status is persisted in `chapters.json`",
             "Per-line AI speaker suggestions are still prototype-only",
             "Dialogue-line speaker assignment is not persisted by the current backend",
             "Custom project-library and audio-assets root selection is not implemented",
@@ -37,10 +37,12 @@ class KnownLimitationsContractTests(unittest.TestCase):
         self.assertIn('"diagnostics.export_logs": True', self.host)
         self.assertIn("call('diagnostics.export_logs')", self.adapter)
         self.assertIn("Sanitized log export", self.doc)
+        self.assertIn('"chapter.review": self._chapter_review', self.host)
+        self.assertIn('"chapter.review": True', self.host)
+        self.assertIn("call('chapter.review'", self.adapter)
         for phrase in (
             "Credential management is not connected to a secure provider-specific credential store",
             "Premium cloud candidate generation is not connected to a provider endpoint",
-            "Review status is not yet supplied by the chapter backend",
             "Per-line AI speaker suggestions are still prototype-only",
             "Custom project-library and audio-assets root selection is not implemented",
             "Dialogue-line speaker assignment is not persisted by the current backend",

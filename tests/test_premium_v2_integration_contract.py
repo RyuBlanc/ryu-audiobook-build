@@ -418,7 +418,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "testAllVoices", "call('models.install'", "refreshVoices()",
             "Credential management is not connected to a secure provider-specific credential store",
             "Premium cloud candidate generation is not connected to a provider endpoint",
-            "Review status is not yet supplied by the chapter backend",
+            "call('chapter.review', {number, review_status:nextStatus})",
+            "row.hidden = chapter?.review_status === 'reviewed'",
             "playerAudio.playbackRate",
         ):
             self.assertIn(token, adapter)
