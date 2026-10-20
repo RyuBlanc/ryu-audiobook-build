@@ -160,6 +160,21 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("requested_duration_seconds", adapter)
         self.assertIn("preparePreviewPlayback(job, Number(duration))", adapter)
 
+    def test_chapter_operations_missing_from_visual_controls_are_reachable_contextually(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        for command, handler in {
+            "chapter.add": "_chapter_add",
+            "chapter.delete": "_chapter_delete",
+            "chapter.reorder": "_chapter_reorder",
+            "chapter.merge": "_chapter_merge",
+        }.items():
+            self.assertIn(f'"{command}": self.{handler}', host)
+            self.assertIn(f'"{command}": True', host)
+            self.assertIn("call('" + command + "'", adapter)
+        for action in ("add", "rename", "delete", "up", "down", "merge"):
+            self.assertIn(action, adapter[adapter.index("Chapter actions for"):adapter.index("if ($('chapterEditor')) $('chapterEditor').addEventListener")])
+
     def test_import_detects_exact_content_duplicates_before_creating_a_job(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn("import hashlib", host)
