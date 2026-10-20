@@ -485,5 +485,25 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("Character Library imports are limited to 10 MB.", adapter)
 
 
+    def test_chapter_review_status_is_persisted_and_filter_is_backend_driven(self):
+        detector = (ROOT / "app" / "chapters" / "detector.py").read_text(encoding="utf-8")
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn('review_status: str = "needs_review"', detector)
+        self.assertIn('"chapter.review": self._chapter_review', host)
+        self.assertIn('"chapter.review": True', host)
+        self.assertIn('chapter.review_status = status', host)
+        self.assertIn('"review_status": getattr(c, "review_status", "needs_review")', host)
+        self.assertIn("call('chapter.review', {number, review_status:nextStatus})", adapter)
+        self.assertIn("row.hidden = chapter?.review_status === 'reviewed'", adapter)
+        self.assertNotIn("Review status is not yet supplied by the chapter backend", adapter)
+
+    def test_legacy_chapter_json_remains_compatible_with_review_default(self):
+        detector = (ROOT / "app" / "chapters" / "detector.py").read_text(encoding="utf-8")
+        project = (ROOT / "app" / "core" / "project.py").read_text(encoding="utf-8")
+        self.assertIn('review_status: str = "needs_review"', detector)
+        self.assertIn("chapters = [Chapter(**item) for item in chapter_data]", project)
+
+
 if __name__ == "__main__":
     unittest.main()
