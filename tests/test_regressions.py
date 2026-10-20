@@ -1912,7 +1912,7 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(normalize_audio_bitrate("320 kbps"), "320k")
         # The lowest requested target uses an encoding margin so final AAC
         # remains above the product's hard 128 kbps minimum.
-        self.assertEqual(_encoding_audio_bitrate(128), "192k")
+        self.assertEqual(_encoding_audio_bitrate(128), "256k")
         self.assertEqual(_encoding_audio_bitrate(160), "160k")
         self.assertEqual(_encoding_audio_bitrate(256), "256k")
         with self.assertRaises(ValueError):
