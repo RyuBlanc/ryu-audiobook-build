@@ -379,7 +379,8 @@ def assemble_m4b(
                 if chapter_transition_sound:
                     cue_kind = "opening" if index == 1 else "page"
                     selected_cue = opening_cue_path if cue_kind == "opening" else page_turn_cue_path
-                    cue = _resolve_cue_audio(temp_dir, cue_kind, "library", variation, mood, selected_cue) if selected_cue else None
+                    # A missing explicit path means use the imported library cue.
+                    cue = _resolve_cue_audio(temp_dir, cue_kind, "library", variation, mood, selected_cue)
                     if cue is not None:
                         prefixed = temp_dir / f"auto-real-cue-{index:05d}.m4a"
                         cue_offset_by_chapter[index] = _duration_ms(cue)
@@ -423,7 +424,8 @@ def assemble_m4b(
                     # An empty local library must not bring back generated filler.
                     final_chapter=current_audio
                 if chapter_transition_sound and index==len(chapters):
-                    closing=_resolve_cue_audio(temp_dir,"ending","library",variation,mood,ending_cue_path) if ending_cue_path else None if ending_cue_path else None
+                    # Resolve the imported closing cue even when no custom path is supplied.
+                    closing=_resolve_cue_audio(temp_dir,"ending","library",variation,mood,ending_cue_path)
                     if closing is not None:
                         ended=temp_dir/f"auto-real-ending-{index:05d}.m4a"
                         _concat_audio_files(final_chapter,closing,ended,audio_bitrate)
