@@ -838,8 +838,8 @@
 
           } else if (soundButton.id === 'soundPreviewBook') {
             if (soundPreviewAudio) { soundPreviewAudio.pause(); soundPreviewAudio = null; }
-            const started = await call('production.preview', {duration_seconds:30, include_sound_design:true});
-            message('Generating a 30-second narration + music/cue mix preview…');
+            const started = await call('sound.preview_book');
+            message('Generating the full-book mix preview from saved chapter narration…');
             let finished = false;
             for (let attempt = 0; attempt < 240; attempt++) {
               await new Promise(resolve => setTimeout(resolve, 1500));
@@ -858,7 +858,7 @@
                 finished = true;
                 break;
               }
-              if (attempt % 4 === 0) message('Sound Design preview · ' + Number(job.progress || 0) + '% · ' + (job.stage || 'Generating audio'));
+              if (attempt % 4 === 0) message('Full-book mix preview · ' + Number(job.progress || 0) + '% · ' + (job.stage || 'Mixing saved chapters'));
             }
             if (!finished) throw new Error('Sound Design preview timed out. Check Generation History for its status.');
           }
