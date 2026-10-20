@@ -166,8 +166,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('if len(project.chapters) <= 1:', host)
         self.assertIn('A project must keep at least one chapter.', host)
         self.assertIn('assignment_offset = len(previous_text + separator)', host)
-        self.assertIn('shifted["start"] += assignment_offset', host)
-        self.assertIn('shifted["end"] += assignment_offset', host)
+        self.assertIn('removed_leading = len(current_original) - len(current_text)', host)
+        self.assertIn('shifted["start"] = max(0, shifted["start"] - removed_leading) + assignment_offset', host)
+        self.assertIn('shifted["end"] = max(0, shifted["end"] - removed_leading) + assignment_offset', host)
         self.assertIn('await persistChapterSnapshot(number,', adapter)
         self.assertIn("await chapterSavePromise.catch(() => {});", adapter)
 
