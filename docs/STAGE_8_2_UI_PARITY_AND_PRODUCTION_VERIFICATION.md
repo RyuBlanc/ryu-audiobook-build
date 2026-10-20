@@ -77,3 +77,19 @@ Build #627 (commit `d0937bb6ef09e8d8d4fe01640d15583028e84964`) passed: applicati
 - **Portable artifact:** `Ryu-Audiobook-Portable-642`, 1,347,978,556 bytes, SHA-256 `65aabf8a84177dcf638774eb985f938803cb596edbdd08cdf37a5fa458f36d1e`.
 - **Artifact expiry:** 2026-10-23 (UTC).
 - **Limit:** These artifacts are traceable to the passing candidate, but no interactive Windows playback, installer launch, portable launch, or offline/retry/cancel test has been performed by this CI run. Those gates remain open.
+
+
+## Stage 8.2.3 acceptance evidence — Build #644
+
+- **Commit:** `2a35c5d3ce2209445b5ee979085fed8047ceb420`
+- **Workflow:** [Build #644](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39346306130) — success.
+- **Expected:** when an online TTS provider raises the network-outage error, the manager records the current and remaining chapters as failed, does not keep retrying the unavailable provider for each chapter, and does not create a partial audiobook.
+- **Observed:** the complete Windows CI job passed the regression suite, frozen-app validation, bundled voice asset/critical module checks, installer creation, portable artifact upload, and cleanup. Release publishing was skipped.
+- **Installer artifact:** `Ryu-Audiobook-Installer-644`, 648,212,197 bytes, SHA-256 `250b6666e6f162a41de7680401371b6a0395ee8f668a603fa2c2150a66b56a75`.
+- **Portable artifact:** `Ryu-Audiobook-Portable-644`, 1,347,978,514 bytes, SHA-256 `0fd4c46fae17d16091fb2f6c765fe00f69ad7169750c6e83e49f32fac90fc313`.
+- **Artifact expiry:** 2026-10-23 (UTC).
+- **Limit:** automated provider simulation only. Actual online-to-offline transition, retry controls, playback, and application launch still require interactive Windows verification.
+
+## Stage 8.2.4 — Release evidence (in progress)
+
+The evidence ledger has begun with passing CI candidates #642 and #644, including commit SHAs, expected/observed outcomes, artifact names, sizes, checksums, and expiry. The current candidate lineage is #644. Keep this candidate traceable while completing manual acceptance; do not declare release-complete or bug-free until the remaining gates are verified. CI artifact creation is not a substitute for installer/portable launch and desktop interaction evidence.
