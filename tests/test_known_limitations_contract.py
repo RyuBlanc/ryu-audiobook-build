@@ -36,7 +36,7 @@ class KnownLimitationsContractTests(unittest.TestCase):
         self.assertIn('"diagnostics.export_logs": self._diagnostics_export_logs', self.host)
         self.assertIn('"diagnostics.export_logs": True', self.host)
         self.assertIn("call('diagnostics.export_logs')", self.adapter)
-        self.assertIn("Sanitized diagnostic export", self.doc)
+        self.assertIn("Sanitized log export", self.doc)
         for phrase in (
             "Credential management is not connected to a secure provider-specific credential store",
             "Premium cloud candidate generation is not connected to a provider endpoint",
