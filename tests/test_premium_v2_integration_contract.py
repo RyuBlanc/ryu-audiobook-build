@@ -223,6 +223,10 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("call('sound.cues.clear')", adapter)
         self.assertIn("refreshSoundCues().catch", adapter)
         self.assertIn("Playing assigned cue clips in book order.", adapter)
+        self.assertIn("call('production.preview', {duration_seconds:30, include_sound_design:true})", adapter)
+        self.assertIn("Generating a 30-second narration + music/cue mix preview", adapter)
+        self.assertIn("def _render_sound_design_preview(", self.host)
+        self.assertIn('state["_include_sound_design_preview"] = True', self.host)
 
     def test_background_jobs_screen_uses_backend_state_and_actions(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
