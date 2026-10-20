@@ -56,7 +56,10 @@ def _encoding_audio_bitrate(bitrate: int | str | None) -> str:
     """
     requested = normalize_audio_bitrate(bitrate)
     if requested == "128k":
-        return "160k"
+        # Short/simple synthetic or test narration can average well below a
+        # 128k target with AAC. Use a wider safety margin because final output
+        # validation measures the encoded stream, not just the requested rate.
+        return "192k"
     return requested
 
 
@@ -448,7 +451,8 @@ def assemble_m4b(
                 cue_offset_by_chapter[index]=0
                 kind="opening" if index==1 else "page"
                 selected_cue=opening_cue_path if kind=="opening" else page_turn_cue_path
-                cue=_resolve_cue_audio(temp_dir,kind,"library",variation,mood,selected_cue) if selected_cue else None
+                # Fall back to the imported library when no custom cue is selected.
+                cue=_resolve_cue_audio(temp_dir,kind,"library",variation,mood,selected_cue)
                 if cue is not None:
                     prefixed=temp_dir/f"{effective_audio_mode}-real-cue-{index:05d}.m4a"
                     cue_offset_by_chapter[index]=_duration_ms(cue)
