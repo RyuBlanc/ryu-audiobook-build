@@ -129,3 +129,26 @@ The evidence ledger has begun with passing CI candidates #642 and #644, includin
 - Opening, chapter/page-turn, and closing assignments update the existing fields consumed by audiobook assembly. Scene transition assignment is saved for editing but is not yet rendered as a distinct scene cue by the assembler.
 - **Still open:** chapter-specific BGM assignments are not connected to actual per-chapter mixing; full-book mix preview is not implemented. Actual generated-audio verification and Windows interaction checks remain mandatory.
 - A new CI run is required to validate this change set; no claim is made that the Sound Design stage is complete until it passes.
+
+
+## Frozen completion roadmap — six packages
+
+The remaining implementation is frozen to six packages. Defects found during a package are fixed within that package; they do not create new numbered stages. The approved HTML remains the visual source of truth and must not be redesigned.
+
+1. **Package 1 / Stage 8.2.7 — CI stabilization.** Build #661 passed after correcting the malformed integration-contract test module. Newer changes in Package 2 require their own full CI run before acceptance.
+2. **Package 2 / Stage 8.2.8 — Sound Design.** Connect persistent chapter BGM strategy and per-chapter rules to actual assembly; render scene cues; connect a real generated narration + music/cue preview. Validate custom/default/no-BGM behavior, timing, volume, persistence, and duration.
+3. **Package 3 / Stage 8.2.9 — Frontend/backend parity.** Audit all 15 destinations and important controls for real actions, saved state, progress, empty/error states, and responsive behavior. No redesign; no unapproved chapter-merge control.
+4. **Package 4 / Stage 8.2.10 — Generation reliability.** Verify measured preview durations, progress, pause/resume/cancel/retry/recovery, offline/provider failures, character voice routing, and final output integrity.
+5. **Package 5 / Stage 8.2.11 — Windows release validation.** Build installer and portable packages from the same candidate; verify bundled assets, launch, local playback, and compact-window behavior. CI packaging is not manual runtime acceptance.
+6. **Package 6 / Stage 8.2.12 — Final acceptance/release.** Run full regression and packaging workflows, compare UI parity to approved HTML, capture artifact names/sizes/checksums, resolve release blockers, and provide the final verified application.
+
+## Stage 8.2.8 — Sound Design implementation notes
+
+- Added persistent sound.chapter_bgm.get and sound.chapter_bgm.save bridge commands. The strategy (same or custom) and per-chapter rules (default, custom, none) are stored in the active project's state and validated against real local/bundled catalogue paths.
+- Connected the existing Chapter BGM controls to real project chapter records and the actual audio catalogue. Chapter volume, start offset (immediate / after first paragraph / after 10 seconds), and end behavior are persisted.
+- Added chapter-scoped music mixing before audiobook concatenation. When chapter overrides exist, the assembler chooses each chapter's default/custom/no-music rule and does not mix the default music a second time across the complete book. The requested encoding bitrate is retained. Start offsets, fades, ducking, and chapter duration are handled in the mixing helper.
+- Scene cue assignments are now passed from project state through GenerationManager to assembly and are inserted at chapter transitions when assigned. Unassigned cue slots no longer silently resolve to fallback clips; only selected cues are inserted. Story-effect offsets include the scene cue duration.
+- Connected the Book Mix Preview button to an asynchronous production preview job. It synthesizes a 30-second narration preview with the saved opening cue and selected first-chapter BGM, applies a ducked music mix, and returns a playable local audio file. This is a sample audition of the current sound design, not a full-duration audiobook render.
+- Added a regression test that exercises custom BGM on one chapter, no BGM on another, scene cue insertion, and output duration bounds. Static contract tests cover the bridge, adapter, generation manager, and assembler connections.
+- **Validation pending:** the latest changes must pass a full Windows CI run. Interactive playback, sound levels, and all 15 destinations still require packaged Windows acceptance. Do not mark Package 2 complete until CI passes and the mix behavior has been verified against actual user projects.
+
