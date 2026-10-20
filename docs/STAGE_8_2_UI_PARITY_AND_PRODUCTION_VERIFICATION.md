@@ -28,7 +28,7 @@ Verify all 15 Premium V2 destinations against the approved HTML and the behavior
 
 ### 8.2.2 — Screen-by-screen behavioral parity
 - [ ] Dashboard and Library: real project counts, search/filter, open/rename/delete safety.
-- [ ] Import and Chapters: background extraction, cancellation/errors, text coverage, edit/reorder/merge, autosave. Chapter Studio's visible Split chapter action is connected to a persistent backend split at the editor cursor (Build #624 passed). Text edits now debounce to a persistent backend autosave after 900 ms and show saving/saved/failure status (Build #627 passed). A follow-up guard now clears any pending autosave before splitting, preventing the old full-chapter snapshot from overwriting the split result; the adapter now cancels queued snapshots, serializes in-flight autosaves to prevent out-of-order writes, and waits for any active save before splitting or manually saving. Build #630 passed the previous queued-timer guard; the stronger serialization guard is awaiting its own CI run and real-project verification. Merge remains an open functional gap because the approved Chapter Studio HTML has no visible merge control; do not add one by redesigning the HTML.
+- [ ] Import and Chapters: background extraction, cancellation/errors, text coverage, edit/reorder/merge, autosave. Chapter Studio's visible Split chapter action is connected to a persistent backend split at the editor cursor (Build #624 passed). Text edits now debounce to a persistent backend autosave after 900 ms and show saving/saved/failure status (Build #627 passed). A follow-up guard now clears any pending autosave before splitting, preventing the old full-chapter snapshot from overwriting the split result; the adapter now cancels queued snapshots, serializes in-flight autosaves to prevent out-of-order writes, and waits for any active save before splitting or manually saving. CI has subsequently passed through Build #642 on the same branch; real-project verification remains open. Merge remains an open functional gap because the approved Chapter Studio HTML has no visible merge control; do not add one by redesigning the HTML.
 - [ ] Voice Studio and Character Studio: provider configuration, profile persistence, preview transport, assignments and character-analysis recovery.
 - [ ] Pronunciation and Sound Design: real dictionary scope/override behavior, catalogue filters, presets, music/cue controls.
 - [ ] Production, Audiobooks and History: readiness, progress, pause/resume/cancel/retry, playback and history safety.
@@ -36,6 +36,7 @@ Verify all 15 Premium V2 destinations against the approved HTML and the behavior
 
 ### 8.2.3 — Production acceptance
 - [ ] Test actual local preview generation and playback on Windows; record requested versus actual preview duration.
+- [x] Automated duration acceptance checks cover all supported targets (10, 20, 30, 45, and 60 seconds) and compare measured WAV duration against the requested target using a deterministic local test provider. Build #642 passed; this is regression evidence, not actual Windows provider/playback evidence.
 - [x] Automated multi-chapter M4B acceptance covers chapter markers/titles, title, author, narrator, language, genre, cover art, decodability, and measured encoded-audio bitrate (>=128 kbps). Current full test suite passed in Build #637.
 - [x] Static integration contract guards mixed valid/empty chapter handling: empty narration chapters are skipped and counted, while an all-empty book is rejected before generation. Current full test suite passed in Build #637.
 - [x] Automated GenerationManager tests verify pause/resume at chapter checkpoints and cancellation while paused; Build #637 passed the full unit-test suite. [ ] Exercise cancel/retry/resume and offline behavior with the packaged Windows app.
@@ -64,3 +65,15 @@ Build #627 (commit `d0937bb6ef09e8d8d4fe01640d15583028e84964`) passed: applicati
 - **Build #637:** [successful Windows build](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39303588976), commit `85060997c54f35f13d3eaf01eb1e9178aab00ac9`. Unit tests and Windows packaging passed, including the new pause/resume/cancel tests.
 - **Still open:** actual local voice-preview playback and requested-vs-observed duration on Windows; packaged-app cancel/retry/resume and offline behavior; installer/portable launch smoke test on the same final candidate.
 - **Visual/functional gaps still tracked:** chapter merge without redesigning approved HTML, per-chapter sound-cue assignment, full-book mix preview, responsive/manual checks across all destinations.
+
+
+## Stage 8.2.3 acceptance evidence — Build #642
+
+- **Commit:** `54f615a276dd6c3d806b8f598be8864428eebe78`
+- **Workflow:** [Build #642](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39344864488) — success.
+- **Expected:** automated preview tests exercise 10/20/30/45/60-second targets, stop on measured synthesized WAV duration rather than a fixed source-character cap, and avoid overrun beyond the test provider's one-segment tolerance.
+- **Observed:** the Windows CI job passed regression tests, frozen application validation, bundled voice assets/critical modules, installer build, portable artifact upload, and artifact cleanup. The workflow's release-publish step was skipped.
+- **Installer artifact:** `Ryu-Audiobook-Installer-642`, 648,333,557 bytes, SHA-256 `02b827f5f9ab452957fd82e8467866ce27a762339d4f875db5420005bb59fdbc`.
+- **Portable artifact:** `Ryu-Audiobook-Portable-642`, 1,347,978,556 bytes, SHA-256 `65aabf8a84177dcf638774eb985f938803cb596edbdd08cdf37a5fa458f36d1e`.
+- **Artifact expiry:** 2026-10-23 (UTC).
+- **Limit:** These artifacts are traceable to the passing candidate, but no interactive Windows playback, installer launch, portable launch, or offline/retry/cancel test has been performed by this CI run. Those gates remain open.
