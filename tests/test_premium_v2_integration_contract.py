@@ -288,8 +288,6 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('"generation_supported": slot != "scene"', worker)
         self.assertIn('state["sound_cues"] = {"opening": None, "chapter": None, "scene": None, "closing": None}', self.host)
 
-rker)
-
 
 if __name__ == "__main__":
     unittest.main()
