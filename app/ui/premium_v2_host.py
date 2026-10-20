@@ -1208,7 +1208,7 @@ class PremiumV2Bridge(QObject):
                 narrating_character=str(state.get("narrating_character") or ""),
                 backend_override=str(state.get("backend") or "automatic"),
             )
-        output_text = str(payload.get("output_path") or state.get("output_path") or "").strip()
+        output_text = str(payload.get("output_path") or state.get("output_path") or state.get("generation_target_path") or "").strip()
         if output_text:
             output = Path(output_text).expanduser().resolve()
             if output.suffix.lower() not in {".m4b", ".m4a", ".mp3"}:
@@ -1224,7 +1224,11 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Select a bitrate from 128 through 320 kbps.")
         job_id = self._new_job("audiobook-generation", "Generate " + project.title,
                                f"Render {len(chapters)} non-empty chapter(s)", project)
-        state.update({"voice_profile": profile.name, "voice_id": profile.voice_id, "output_path": str(output),
+        # While a new generation is running, do not expose a prior file at the
+        # same destination as the current audiobook. Keep the intended destination
+        # separately; only publish output_path after the final file validates.
+        state.update({"voice_profile": profile.name, "voice_id": profile.voice_id,
+                      "output_path": None, "generation_target_path": str(output),
                       "status": "generating", "audio_bitrate": bitrate, "generation_job_id": job_id,
                       "generation_started_at": self._now(), "empty_chapters_skipped": skipped})
         save_state(project.folder, state)
