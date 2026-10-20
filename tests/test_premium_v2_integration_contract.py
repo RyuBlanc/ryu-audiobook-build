@@ -324,12 +324,17 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         start = self.host.index("def _production_generate_book")
         end = self.host.index("def _generation_progress", start)
         worker = self.host[start:end]
-        self.assertIn("chapters = [c for c in project.chapters if (c.text or \"\").strip()]", worker)
+        self.assertIn('chapters = [c for c in project.chapters if not getattr(c, "skip_for_generation", False) and (c.text or "").strip()]', worker)
         self.assertIn("skipped = len(project.chapters) - len(chapters)", worker)
+        self.assertIn('empty_skipped = sum(1 for c in project.chapters if not (c.text or "").strip())', worker)
+        self.assertIn('excluded_skipped = sum(1 for c in project.chapters if getattr(c, "skip_for_generation", False) and (c.text or "").strip())', worker)
         self.assertIn("if not chapters:", worker)
-        self.assertIn("No chapters contain narration text. Restore chapter text before generating.", worker)
-        self.assertIn('"empty_chapters_skipped": skipped', worker)
-        self.assertIn("Render {len(chapters)} non-empty chapter(s)", worker)
+        self.assertIn("No chapters are eligible for generation. Restore chapter text or re-include a skipped chapter.", worker)
+        self.assertIn('"empty_chapters_skipped": empty_skipped', worker)
+        self.assertIn('"excluded_chapters_skipped": excluded_skipped', worker)
+        self.assertIn('"chapters_skipped_for_generation": skipped', worker)
+        self.assertIn("Render {len(chapters)} eligible chapter(s)", worker)
+        self.assertIn("Starting with {empty_skipped} empty and {excluded_skipped} excluded chapter(s) skipped", worker)
 
     def test_preview_duration_setting_accepts_every_supported_target(self):
         self.assertIn('if key == "preview_seconds" and int(value) not in {10, 20, 30, 45, 60}:', self.host)

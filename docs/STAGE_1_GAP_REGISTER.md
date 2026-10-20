@@ -63,5 +63,5 @@
 - Exact-content duplicate detection and actionable existing-project guidance are implemented in the host before a new import job is created.
 - Import completion data reports the preserved source path and flags chapter boundaries for review.
 - Chapter review status defaults legacy chapters to `needs_review`, persists `reviewed`/`needs_review` with chapter JSON, and drives the existing Review filter.
-- Explicit chapter exclusion now persists as `skip_for_generation`, is available through the contextual chapter action, preserves the chapter text, and excludes only flagged chapters from audiobook generation. Generation state separately records empty chapters and intentionally excluded chapters.
+- Explicit chapter exclusion now persists as `skip_for_generation`, is available through the contextual chapter action, preserves the chapter text, and excludes only flagged chapters from audiobook generation. Job messages, returned job data, and project state distinguish empty chapters from intentionally excluded chapters; a stale contract test and misleading progress summary were corrected in the same batch.
 - Still open: find/replace, undo/redo, re-detection protection, parser/chapter fixtures, import retry/cancel behavior, malformed-file diagnostics, and edit/save/reload acceptance. Stage 2 is not complete.

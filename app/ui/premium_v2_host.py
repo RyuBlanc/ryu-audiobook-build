@@ -1341,7 +1341,7 @@ class PremiumV2Bridge(QObject):
         if not 128 <= bitrate <= 320:
             raise ValueError("Select a bitrate from 128 through 320 kbps.")
         job_id = self._new_job("audiobook-generation", "Generate " + project.title,
-                               f"Render {len(chapters)} eligible chapter(s); skip {skipped} empty/excluded chapter(s)", project)
+                               f"Render {len(chapters)} eligible chapter(s); skip {empty_skipped} empty and {excluded_skipped} excluded chapter(s)", project)
         # While a new generation is running, do not expose a prior file at the
         # same destination as the current audiobook. Keep the intended destination
         # separately; only publish output_path after the final file validates.
@@ -1384,9 +1384,12 @@ class PremiumV2Bridge(QObject):
         with self._jobs_lock:
             self._generators[job_id] = manager
         self._job_update(job_id, state="running", started_at=self._now(), stage="Preparing generation",
-                         progress=1, message=f"Starting with {skipped} empty chapter(s) skipped",
+                         progress=1, message=f"Starting with {empty_skipped} empty and {excluded_skipped} excluded chapter(s) skipped",
                          result={"output_path": str(output), "chapter_count": len(chapters),
-                                 "empty_chapters_skipped": skipped, "voice_profile": profile.name})
+                                 "empty_chapters_skipped": empty_skipped,
+                                 "excluded_chapters_skipped": excluded_skipped,
+                                 "chapters_skipped_for_generation": skipped,
+                                 "voice_profile": profile.name})
         try:
             manager.start(output, metadata["title"], metadata["author"],
                           Path(state["cover_path"]) if state.get("cover_path") and Path(state["cover_path"]).is_file() else None,
@@ -1400,7 +1403,9 @@ class PremiumV2Bridge(QObject):
                              error={"code": "generation_start_failed", "message": str(exc)}, recoverable=True)
             raise
         return {"job_id": job_id, "state": "running", "output_path": str(output),
-                "chapter_count": len(chapters), "empty_chapters_skipped": skipped, "voice_profile": profile.name}
+                "chapter_count": len(chapters), "empty_chapters_skipped": empty_skipped,
+                "excluded_chapters_skipped": excluded_skipped,
+                "chapters_skipped_for_generation": skipped, "voice_profile": profile.name}
 
     def _generation_progress(self, job_id: str, chapter: int, total: int, done: int, message: str) -> None:
         msg = str(message or "")
