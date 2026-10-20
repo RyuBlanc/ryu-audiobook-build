@@ -597,6 +597,22 @@
     if ($('pauseGenerate')) $('pauseGenerate').onclick=act(async()=>{if(!activeJob)throw new Error('There is no active job to pause.');await call('job.pause',{job_id:activeJob});await refreshJobs();});
     if ($('cancelJob')) $('cancelJob').onclick=act(async()=>{if(!activeJob)throw new Error('There is no active job to cancel.');await call('job.cancel',{job_id:activeJob});await refreshJobs();});
     ['analyzeCharacters','runAiAnalysis'].forEach(id=>{if($(id))$(id).onclick=act(async()=>{const data=await call('character.analyze');await monitorJob(data.job_id,refreshCharacters);});});
+    if ($('previewPronTerm')) $('previewPronTerm').onclick=act(async()=>{
+      const profile = $('pronQuickVoice')?.value || '';
+      const term = $('pronWord')?.textContent?.trim() || $('pronValue')?.value?.trim() || '';
+      if (!profile) throw new Error('Select a saved voice profile for the pronunciation test.');
+      if (!term) throw new Error('Select a pronunciation term before testing it.');
+      const data = await call('voice.preview', {profile_name:profile, text:term, duration_seconds:10});
+      await monitorJob(data.job_id, async job=>{
+        const url = job?.result?.file_url;
+        if (!url) throw new Error('The pronunciation preview finished without a playable audio file.');
+        if (previewAudio) { previewAudio.pause(); previewAudio = null; }
+        previewAudio = new Audio(url);
+        previewAudio.onerror = () => message('The pronunciation preview audio could not be played.', true);
+        try { await previewAudio.play(); message('Playing the selected voice pronunciation preview.'); }
+        catch (error) { message(error?.message || 'The pronunciation preview could not be played.', true); }
+      });
+    });
     if ($('savePronTerm')) $('savePronTerm').onclick=act(async()=>{await call('pronunciation.save',{written_form:$('pronWord')?.textContent?.trim()||'',spoken_form:$('pronValue')?.value||'',scope:$('pronScope')?.value||'current_book',handling_mode:$('pronHandling')?.value||'automatic'});await refreshTerms();message('Pronunciation rule saved locally.');});
     if ($('saveNewPron')) $('saveNewPron').onclick=act(async()=>{await call('pronunciation.save',{written_form:$('newPronWritten')?.value||'',spoken_form:$('newPronValue')?.value||'',language:$('newPronLanguage')?.value||'Auto',scope:$('newPronScope')?.value||'current_book'});await refreshTerms();$('pronEntryModal')?.classList.remove('show');message('Pronunciation entry saved.');});
     if ($('analyzePronunciation')) $('analyzePronunciation').onclick=act(async()=>{const r=await call('pronunciation.analyze');const list=$('pronDictionaryBody');if(list)list.innerHTML=(r.suggestions||[]).map(t=>'<div class="list-item"><b>'+esc(t.written_form)+'</b><span> → '+esc(t.spoken_form)+'</span></div>').join('')||'<p class="muted">No new suggestions found.</p>';message('Found '+(r.suggestions||[]).length+' suggestions to review.');});

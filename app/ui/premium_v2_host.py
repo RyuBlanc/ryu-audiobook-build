@@ -1696,6 +1696,7 @@ class PremiumV2Bridge(QObject):
         self.settings.sync()
         return {
             "theme": self.settings.value("ui/theme", "dark"),
+            "effects": self.settings.value("ui/effects", "high"),
             "accent": self.settings.value("ui/accent", "crimson"),
             "interface_scale": self.settings.value("ui/interface_scale", 100),
             "storage_root": str(app_root()),

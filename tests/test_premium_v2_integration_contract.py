@@ -328,5 +328,19 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('state["sound_cues"] = {"opening": None, "chapter": None, "scene": None, "closing": None}', self.host)
 
 
+    def test_settings_get_returns_saved_effects_preference(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn('"effects": self.settings.value("ui/effects", "high")', host)
+        self.assertIn("if ($('effectsModeAdvanced') && settings.effects) $('effectsModeAdvanced').value = settings.effects;", adapter)
+
+    def test_pronunciation_term_preview_uses_real_voice_preview_job(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("if ($('previewPronTerm')) $('previewPronTerm').onclick=act(async()=>", adapter)
+        self.assertIn("call('voice.preview', {profile_name:profile, text:term, duration_seconds:10})", adapter)
+        self.assertIn("monitorJob(data.job_id, async job=>", adapter)
+        self.assertIn("await previewAudio.play()", adapter)
+
+
 if __name__ == "__main__":
     unittest.main()
