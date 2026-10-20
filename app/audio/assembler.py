@@ -307,6 +307,7 @@ def assemble_m4b(
     opening_cue_path: Path | str | None = None,
     page_turn_cue_path: Path | str | None = None,
     ending_cue_path: Path | str | None = None,
+    scene_transition_cue_path: Path | str | None = None,
     chapter_bgm_overrides: dict[str, dict] | None = None,
 ) -> Path:
     """Create one premium M4B containing all chapters and navigation metadata.
@@ -383,6 +384,12 @@ def assemble_m4b(
                         cue_offset_by_chapter[index] = _duration_ms(cue)
                         _concat_audio_files(cue, current_audio, prefixed, audio_bitrate)
                         current_audio = prefixed
+                if index > 1 and scene_transition_cue_path:
+                    scene_cue = _resolve_cue_audio(temp_dir, "scene", "library", variation, mood, scene_transition_cue_path)
+                    if scene_cue is not None:
+                        scene_prefixed = temp_dir / f"auto-real-scene-cue-{index:05d}.m4a"
+                        _concat_audio_files(scene_cue, current_audio, scene_prefixed, audio_bitrate)
+                        current_audio = scene_prefixed
 
                 duration_ms = _duration_ms(current_audio)
                 duration_seconds = max(0.1, duration_ms / 1000.0)
@@ -443,6 +450,12 @@ def assemble_m4b(
                     cue_offset_by_chapter[index]=_duration_ms(cue)
                     _concat_audio_files(cue,current_audio,prefixed,audio_bitrate)
                     current_audio=prefixed
+                if index > 1 and scene_transition_cue_path:
+                    scene_cue = _resolve_cue_audio(temp_dir, "scene", "library", variation, mood, scene_transition_cue_path)
+                    if scene_cue is not None:
+                        scene_prefixed = temp_dir / f"{effective_audio_mode}-real-scene-cue-{index:05d}.m4a"
+                        _concat_audio_files(scene_cue, current_audio, scene_prefixed, audio_bitrate)
+                        current_audio = scene_prefixed
                 if index==len(chapters):
                     closing=_resolve_cue_audio(temp_dir,"ending","library",variation,mood,ending_cue_path)
                     if closing is not None:
