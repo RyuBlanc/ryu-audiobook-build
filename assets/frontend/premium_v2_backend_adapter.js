@@ -16,7 +16,7 @@
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
   let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve();
-  let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null;
+  let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {};
   const selectedChapter = () => chapters.find(c => c.number === window.ryuPremiumSelectedChapter) || chapters[0];
   const renderSelect = (select, rows, value, label) => {
     if (!select) return;
@@ -127,6 +127,28 @@
     });
     if (grid) grid.innerHTML = visible.map(t => '<article class="sound-track card"><div class="sound-track-info"><b>' + esc(t.title) + '</b><small>' + esc(t.source) + ' · ' + esc(t.format) + ' · ' + Math.round(Number(t.size_bytes || 0)/1024) + ' KB</small></div><button class="btn small secondary" data-select-sound="' + esc(t.path) + '">Select</button></article>').join('') || '<p class="muted">No local or bundled sound tracks found. Import your own licensed audio files.</p>';
     return sounds;
+  }
+  async function refreshSoundCues() {
+    cueAssignments = await call('sound.cues.get');
+    const names = {opening:'openingCueName',chapter:'chapterCueName',scene:'sceneCueName',closing:'closingCueName'};
+    for (const [slot,id] of Object.entries(names)) {
+      const node = $(id);
+      if (node) node.textContent = cueAssignments[slot]?.title || 'Not assigned';
+    }
+    const grid = $('cueGrid');
+    if (!grid) return cueAssignments;
+    const query = ($('cueSearch')?.value || '').trim().toLowerCase();
+    const sourceFilter = document.querySelector('#cueSourceFilter [data-cue-source].active')?.dataset.cueSource || 'all';
+    const visible = sounds.filter(t => {
+      const text = (t.title + ' ' + t.source + ' ' + t.format).toLowerCase();
+      const source = String(t.source || '').toLowerCase();
+      return (!query || text.includes(query)) &&
+        (sourceFilter === 'all' || (sourceFilter === 'built-in' && source.includes('bundled')) ||
+         (sourceFilter === 'imported' && source.includes('imported')));
+    });
+    grid.innerHTML = visible.map(t => '<button type="button" class="cue-track card" data-cue-path="' + esc(t.path) + '"><b>' + esc(t.title) + '</b><small>' + esc(t.source) + ' · ' + esc(t.format) + '</small></button>').join('') ||
+      '<p class="muted">No matching local cue clips. Import licensed audio clips to use them here.</p>';
+    return cueAssignments;
   }
   let backendJobFilter = 'active';
   async function refreshJobs() {
@@ -558,6 +580,7 @@
     if ($('importMusicTracks')) $('importMusicTracks').onclick = act(async()=>{const r=await call('sound.import');await refreshSounds();message('Imported '+(r.imported||[]).length+' sound file(s) into the local Audio Library.');});
     if ($('importCueClips')) $('importCueClips').onclick = act(async()=>{const r=await call('sound.import');await refreshSounds();message('Imported '+(r.imported||[]).length+' sound clip(s) into the local Audio Library.');});
     if ($('soundTrackSearch')) $('soundTrackSearch').oninput = () => refreshSounds().catch(e=>message(e.message,true));
+    document.querySelectorAll('#cueSourceFilter [data-cue-source]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('#cueSourceFilter [data-cue-source]').forEach(x => x.classList.toggle('active', x === button)); refreshSoundCues().catch(e => message(e.message, true)); }));
     if ($('soundTrackGrid')) $('soundTrackGrid').addEventListener('click', e=>{const b=e.target.closest('[data-select-sound]');if(!b)return;selectedSoundPath=b.dataset.selectSound;if($('selectedSoundTitle'))$('selectedSoundTitle').textContent=sounds.find(t=>t.path===selectedSoundPath)?.title||'Selected track';if($('selectedSoundMeta'))$('selectedSoundMeta').textContent='Selected from the local catalogue';message('Selected sound track. Save it to the active book to apply it.');});
     if ($('setBookDefaultTrack')) $('setBookDefaultTrack').onclick = act(async()=>{if(!selectedSoundPath)throw new Error('Select a track from the local sound catalogue first.');await call('sound.assign',{path:selectedSoundPath,volume:Number($('advancedMusicVolume')?.value||18)/100});message('Background track assigned to the active book.');});
     if ($('saveSoundPresetAdvanced')) $('saveSoundPresetAdvanced').onclick = act(async()=>{await call('sound.save_manifest',{path:selectedSoundPath||'',enabled:Boolean(selectedSoundPath),volume:Number($('advancedMusicVolume')?.value||18)/100});message('Sound manifest saved to the active book.');});
@@ -574,10 +597,7 @@
         refreshSounds().catch(err => message(err?.message || String(err), true));
       } else if (e.target?.id === 'cueSearch') {
         e.stopImmediatePropagation();
-        if (!cueSearchUnavailableNotified) {
-          cueSearchUnavailableNotified = true;
-          message('Cue search is unavailable because chapter cue assets are not yet connected to the local catalogue.', true);
-        }
+        refreshSoundCues().catch(err => message(err?.message || String(err), true));
       }
     }, true);
     document.addEventListener('click', async e => {
@@ -645,6 +665,30 @@
         refreshSounds().catch(err => message(err?.message || String(err), true));
         return;
       }
+      const cueSlot = e.target.closest('[data-assign-cue]');
+      if (cueSlot) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        pendingCueSlot = cueSlot.dataset.assignCue;
+        message('Choose a clip from the Effects library to assign it to ' + pendingCueSlot + '.');
+        return;
+      }
+      const cueTrack = e.target.closest('#cueGrid [data-cue-path]');
+      if (cueTrack) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        try {
+          const path = cueTrack.dataset.cuePath;
+          if (pendingCueSlot) {
+            const result = await call('sound.cues.save', {slot:pendingCueSlot,path});
+            pendingCueSlot = null;
+            await refreshSoundCues();
+            message(result.generation_supported ? 'Cue assignment saved to this book.' : 'Scene cue assignment saved for editing; current audiobook assembly does not yet render a separate scene cue.');
+          } else {
+            selectedSoundPath = path;
+            message('Cue clip selected. Choose Change beside a cue slot, then select this clip to assign it.');
+          }
+        } catch (err) { message(err?.message || String(err), true); }
+        return;
+      }
       const soundButton = e.target.closest('#importMusicTracks, #importCueClips, #previewSelectedTrack, #setBookDefaultTrack, #saveSoundPresetAdvanced, #applySoundToProduction, #soundPreviewBook, #previewCueSequence, #clearAllCues, #saveChapterBgm');
       if (soundButton) {
         e.preventDefault(); e.stopImmediatePropagation();
@@ -652,6 +696,7 @@
           if (soundButton.id === 'importMusicTracks' || soundButton.id === 'importCueClips') {
             const result = await call('sound.import');
             await refreshSounds();
+        await refreshSoundCues();
             message('Imported ' + (result.imported || []).length + ' audio asset(s) into the local catalogue.');
           } else if (soundButton.id === 'previewSelectedTrack') {
             const track = sounds.find(item => item.path === selectedSoundPath);
@@ -677,9 +722,28 @@
           } else if (soundButton.id === 'saveChapterBgm') {
             throw new Error('Per-chapter BGM overrides are not connected yet. Use Set Book Default Track to save the supported book-wide setting.');
           } else if (soundButton.id === 'clearAllCues') {
-            throw new Error('Story cue assignments are not connected to persistent backend storage yet; no saved cue data was changed.');
+            await call('sound.cues.clear');
+            pendingCueSlot = null;
+            await refreshSoundCues();
+            message('All book cue assignments cleared.');
           } else if (soundButton.id === 'previewCueSequence') {
-            throw new Error('Cue-sequence preview is not available until story cue assets are connected to the backend.');
+            const sequence = ['opening','chapter','scene','closing'].map(slot => cueAssignments[slot]?.path).filter(Boolean);
+            if (!sequence.length) throw new Error('Assign at least one cue before previewing the sequence.');
+            if (soundPreviewAudio) { soundPreviewAudio.pause(); soundPreviewAudio = null; }
+            let index = 0;
+            const playNext = () => {
+              if (index >= sequence.length) { soundPreviewAudio = null; return; }
+              const raw = sequence[index++];
+              const normalized = String(raw).replace(/\\/g, '/');
+              const fileUrl = 'file:///' + normalized.split('/').map((part, i) => i === 0 && /^[A-Za-z]:$/.test(part) ? part : encodeURIComponent(part)).join('/');
+              soundPreviewAudio = new Audio(fileUrl);
+              soundPreviewAudio.onended = playNext;
+              soundPreviewAudio.onerror = () => { soundPreviewAudio = null; message('A cue clip could not be played in the embedded preview.', true); };
+              soundPreviewAudio.play().catch(err => { soundPreviewAudio = null; message(err?.message || 'Cue sequence playback failed.', true); });
+            };
+            playNext();
+            message('Playing assigned cue clips in book order.');
+
           } else if (soundButton.id === 'soundPreviewBook') {
             throw new Error('Full-book mix preview is not connected yet. You can preview an individual local track.');
           }
