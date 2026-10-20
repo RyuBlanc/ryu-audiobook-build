@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import sys
 import threading
 import uuid
@@ -720,12 +721,80 @@ class PremiumV2Bridge(QObject):
         seconds = int(payload.get("duration_seconds") or payload.get("duration") or 30)
         if seconds not in {10, 20, 30, 45, 60}:
             raise ValueError("Preview duration must be 10, 20, 30, 45, or 60 seconds.")
-        job_id = self._new_job("voice-preview", "Preview · " + profile.name,
+        include_sound_design = bool(payload.get("include_sound_design"))
+        if include_sound_design:
+            state["_include_sound_design_preview"] = True
+        job_id = self._new_job("sound-design-preview" if include_sound_design else "voice-preview",
+                               ("Sound Design mix preview · " if include_sound_design else "Preview · ") + profile.name,
                                f"Generate up to {seconds} seconds using the selected provider", project)
         self._job_update(job_id, state="running", started_at=self._now(), stage="Preparing preview", progress=2)
         threading.Thread(target=self._preview_worker, args=(job_id, profile, text_value, seconds, state),
                          daemon=True, name="RyuPremiumPreview").start()
         return {"job_id": job_id, "state": "running", "duration_seconds": seconds, "profile_name": profile.name}
+
+    def _render_sound_design_preview(self, source: Path, job_id: str, state: dict[str, Any]) -> Path:
+        """Render a short audition using the active book's real music/cue assignments."""
+        from app.audio.assembler import _concat_audio_files, _duration_ms, _run
+
+        preview_root = app_root() / "Previews"
+        preview_root.mkdir(parents=True, exist_ok=True)
+        audio_source = Path(source).resolve()
+        opening = Path(str(state.get("opening_cue_path") or "")).expanduser()
+        if opening.is_file():
+            with_opening = preview_root / f"sound-preview-opening-{job_id}.m4a"
+            _concat_audio_files(opening, audio_source, with_opening, "192k")
+            audio_source = with_opening
+
+        music_path = None
+        volume = max(0.0, min(0.50, float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18)))
+        first_override = (state.get("chapter_bgm_overrides") or {}).get("1", {})
+        if isinstance(first_override, dict):
+            rule = str(first_override.get("rule") or "default").lower()
+            if rule == "none":
+                music_path = None
+            elif rule == "custom":
+                music_path = Path(str(first_override.get("path") or "")).expanduser()
+                volume = max(0.0, min(0.50, float(first_override.get("volume", volume))))
+            else:
+                raw_music = str(state.get("background_audio_path") or "")
+                music_path = Path(raw_music).expanduser() if raw_music else None
+                volume = max(0.0, min(0.50, float(first_override.get("volume", volume))))
+        elif str(state.get("background_audio_mode") or "off").lower() == "manual":
+            raw_music = str(state.get("background_audio_path") or "")
+            music_path = Path(raw_music).expanduser() if raw_music else None
+
+        if music_path and not music_path.is_file():
+            raise FileNotFoundError(f"Selected background music is missing: {music_path}")
+        output = preview_root / f"sound_mix_preview_{job_id}.m4a"
+        duration_ms = _duration_ms(audio_source)
+        duration_seconds = max(0.1, duration_ms / 1000.0)
+        if music_path and volume > 0:
+            fade_in = max(0.0, min(30.0, float(state.get("background_audio_fade_in", 2.0))))
+            fade_out = max(0.0, min(30.0, float(state.get("background_audio_fade_out", 3.0)), duration_seconds))
+            fade_out_start = max(0.0, duration_seconds - fade_out)
+            music_filters = [f"volume={volume:.4f}"]
+            if fade_in:
+                music_filters.append(f"afade=t=in:st=0:d={min(fade_in, duration_seconds):.3f}")
+            if fade_out:
+                music_filters.append(f"afade=t=out:st={fade_out_start:.3f}:d={fade_out:.3f}")
+            music_filters.extend(["aresample=44100", "aformat=sample_rates=44100:channel_layouts=stereo"])
+            _run([
+                "-i", str(audio_source), "-stream_loop", "-1", "-i", str(music_path),
+                "-filter_complex",
+                "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[narr];"
+                f"[1:a]{','.join(music_filters)}[bed];"
+                "[bed][narr]sidechaincompress=threshold=0.025:ratio=7:attack=22:release=420:makeup=1[ducked];"
+                "[narr][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[out]",
+                "-map", "[out]", "-vn", "-t", f"{duration_seconds:.3f}",
+                "-c:a", "aac", "-b:a", "192k", "-ar", "44100", str(output),
+            ])
+        else:
+            _run(["-i", str(audio_source), "-vn", "-c:a", "aac", "-b:a", "192k", "-ar", "44100", str(output)])
+        if not output.is_file() or output.stat().st_size < 1024:
+            raise RuntimeError("The Sound Design mix preview could not be rendered.")
+        if abs(_duration_ms(output) - duration_ms) > 1800:
+            raise RuntimeError("The Sound Design mix preview changed duration unexpectedly.")
+        return output
 
     def _preview_worker(self, job_id: str, profile, text_value: str, seconds: int, state: dict[str, Any]) -> None:
         try:
@@ -776,16 +845,23 @@ class PremiumV2Bridge(QObject):
                 max_chars=max(1400, seconds * 240), progress_callback=progress,
                 target_seconds=seconds,
             )
+            preview_path = Path(result.output_path)
+            if state.get("_include_sound_design_preview"):
+                preview_path = self._render_sound_design_preview(preview_path, job_id, state)
             duration = None
             try:
-                with wave.open(str(result.output_path), "rb") as wav:
-                    duration = round(wav.getnframes() / max(1, wav.getframerate()), 2)
-            except (wave.Error, OSError):
-                pass
+                from app.audio.assembler import _duration_ms
+                duration = round(_duration_ms(preview_path) / 1000.0, 2)
+            except (RuntimeError, OSError, ValueError):
+                try:
+                    with wave.open(str(preview_path), "rb") as wav:
+                        duration = round(wav.getnframes() / max(1, wav.getframerate()), 2)
+                except (wave.Error, OSError):
+                    pass
             self._job_update(job_id, state="completed", stage="Preview ready", progress=100,
-                             message="Audio preview was generated by the selected voice provider",
-                             output_path=str(result.output_path), result={
-                                 "output_path": str(result.output_path), "file_url": result.output_path.resolve().as_uri(),
+                             message="Sound Design mix preview ready" if state.get("_include_sound_design_preview") else "Audio preview was generated by the selected voice provider",
+                             output_path=str(preview_path), result={
+                                 "output_path": str(preview_path), "file_url": preview_path.resolve().as_uri(),
                                  "requested_duration_seconds": seconds, "actual_duration_seconds": duration,
                                  "voices_used": list(result.voices_used), "segments": result.segments,
                              })
