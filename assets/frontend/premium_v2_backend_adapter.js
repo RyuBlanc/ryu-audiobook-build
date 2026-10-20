@@ -624,8 +624,8 @@
     if ($('soundTrackSearch')) $('soundTrackSearch').oninput = () => refreshSounds().catch(e=>message(e.message,true));
     document.querySelectorAll('#cueSourceFilter [data-cue-source]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('#cueSourceFilter [data-cue-source]').forEach(x => x.classList.toggle('active', x === button)); refreshSoundCues().catch(e => message(e.message, true)); }));
     if ($('soundTrackGrid')) $('soundTrackGrid').addEventListener('click', e=>{const b=e.target.closest('[data-select-sound]');if(!b)return;selectedSoundPath=b.dataset.selectSound;if($('selectedSoundTitle'))$('selectedSoundTitle').textContent=sounds.find(t=>t.path===selectedSoundPath)?.title||'Selected track';if($('selectedSoundMeta'))$('selectedSoundMeta').textContent='Selected from the local catalogue';message('Selected sound track. Save it to the active book to apply it.');});
-    if ($('setBookDefaultTrack')) $('setBookDefaultTrack').onclick = act(async()=>{if(!selectedSoundPath)throw new Error('Select a track from the local sound catalogue first.');await call('sound.assign',{path:selectedSoundPath,volume:Number($('advancedMusicVolume')?.value||18)/100});message('Background track assigned to the active book.');});
-    if ($('saveSoundPresetAdvanced')) $('saveSoundPresetAdvanced').onclick = act(async()=>{await call('sound.save_manifest',{path:selectedSoundPath||'',enabled:Boolean(selectedSoundPath),volume:Number($('advancedMusicVolume')?.value||18)/100});message('Sound manifest saved to the active book.');});
+    if ($('setBookDefaultTrack')) $('setBookDefaultTrack').onclick = act(async()=>{if(!selectedSoundPath)throw new Error('Select a track from the local sound catalogue first.');await call('sound.assign',{path:selectedSoundPath,volume:Number($('advancedMusicVolume')?.value||18)/100});await refreshChapterBgm();message('Background track assigned to the active book.');});
+    if ($('saveSoundPresetAdvanced')) $('saveSoundPresetAdvanced').onclick = act(async()=>{await call('sound.save_manifest',{path:selectedSoundPath||'',enabled:Boolean(selectedSoundPath),volume:Number($('advancedMusicVolume')?.value||18)/100});await refreshChapterBgm();message('Sound manifest saved to the active book.');});
     ['mainPlay','miniPlay'].forEach(id=>{if($(id))$(id).onclick=act(openPlayer);});
     if ($('playerTimeline')) $('playerTimeline').oninput=()=>{if(playerAudio&&playerAudio.duration)playerAudio.currentTime=Number($('playerTimeline').value)/100*playerAudio.duration;};
     if ($('hideMini')) $('hideMini').onclick=()=> $('miniPlayer')?.classList.add('hidden');
@@ -786,7 +786,8 @@
           if (soundButton.id === 'importMusicTracks' || soundButton.id === 'importCueClips') {
             const result = await call('sound.import');
             await refreshSounds();
-        await refreshSoundCues();
+            await refreshSoundCues();
+            await refreshChapterBgm();
             message('Imported ' + (result.imported || []).length + ' audio asset(s) into the local catalogue.');
           } else if (soundButton.id === 'previewSelectedTrack') {
             const track = sounds.find(item => item.path === selectedSoundPath);
@@ -808,6 +809,7 @@
             message(result.enabled ? 'Book sound manifest saved.' : 'Book sound manifest saved with background music disabled.');
           } else if (soundButton.id === 'applySoundToProduction') {
             await call('sound.save_manifest', {path:selectedSoundPath || '',enabled:Boolean(selectedSoundPath),volume:Number($('advancedMusicVolume')?.value || 18)/100});
+            await refreshChapterBgm();
             document.querySelector('[data-page="generate"]')?.click();
           } else if (soundButton.id === 'saveChapterBgm') {
             await refreshChapterBgm();
