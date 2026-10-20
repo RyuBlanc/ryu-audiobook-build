@@ -231,6 +231,55 @@ def _resolve_cue_audio(
                              seed_text=f"{kind}|{mood}|{int(variation_index)}")
 
 
+def _mix_chapter_bgm(
+    chapter_file: Path,
+    track_path: Path | str,
+    output_path: Path,
+    volume: float,
+    fade_in: float = 2.0,
+    fade_out: float = 3.0,
+    start_offset_ms: int = 0,
+) -> Path:
+    """Mix one chapter-specific music bed under narration without changing duration."""
+    track = Path(track_path).expanduser()
+    if not track.is_file():
+        raise FileNotFoundError(f"Chapter background music was not found: {track}")
+    duration_ms = _duration_ms(chapter_file)
+    duration_seconds = max(0.1, duration_ms / 1000.0)
+    gain = max(0.0, min(1.0, float(volume)))
+    if gain <= 0.0:
+        return chapter_file
+    offset_ms = max(0, min(int(start_offset_ms), max(0, duration_ms - 1)))
+    offset_seconds = offset_ms / 1000.0
+    fade_in_seconds = max(0.0, min(30.0, float(fade_in)))
+    fade_out_seconds = max(0.0, min(30.0, float(fade_out), duration_seconds))
+    fade_out_start = max(offset_seconds, duration_seconds - fade_out_seconds)
+    music_filters = [f"volume={gain:.4f}", "aresample=44100",
+                     "aformat=sample_rates=44100:channel_layouts=stereo"]
+    if fade_in_seconds > 0:
+        music_filters.append(f"afade=t=in:st={offset_seconds:.3f}:d={fade_in_seconds:.3f}")
+    if fade_out_seconds > 0:
+        music_filters.append(f"afade=t=out:st={fade_out_start:.3f}:d={fade_out_seconds:.3f}")
+    if offset_ms:
+        music_filters.append(f"adelay={offset_ms}|{offset_ms}")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    _run([
+        "-i", str(chapter_file), "-stream_loop", "-1", "-i", str(track),
+        "-filter_complex",
+        "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[narr];"
+        f"[1:a]{','.join(music_filters)}[bed];"
+        "[narr][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
+        "alimiter=limit=0.95[out]",
+        "-map", "[out]", "-vn", "-t", f"{duration_seconds:.3f}",
+        "-c:a", "aac", "-b:a", "192k", "-ar", "44100", str(output_path),
+    ])
+    if not output_path.exists() or output_path.stat().st_size < 1024:
+        raise RuntimeError("FFmpeg did not create chapter-specific BGM audio.")
+    if abs(_duration_ms(output_path) - duration_ms) > 1500:
+        raise RuntimeError("Chapter-specific BGM changed chapter duration unexpectedly.")
+    return output_path
+
+
 def assemble_m4b(
     chapter_dirs: list[Path],
     output_path: Path,
@@ -258,6 +307,7 @@ def assemble_m4b(
     opening_cue_path: Path | str | None = None,
     page_turn_cue_path: Path | str | None = None,
     ending_cue_path: Path | str | None = None,
+    chapter_bgm_overrides: dict[str, dict] | None = None,
 ) -> Path:
     """Create one premium M4B containing all chapters and navigation metadata.
 
@@ -560,6 +610,51 @@ def assemble_m4b(
                     progress(chapter_index, len(chapters), "story-effects-mixed")
             chapters = mixed_chapters
 
+        # Mix chapter-specific BGM before concatenation. When overrides exist,
+        # book music is scoped per chapter so custom/none rules replace the default.
+        effective_overrides = chapter_bgm_overrides if isinstance(chapter_bgm_overrides, dict) else {}
+        chapter_scoped_bgm = bool(effective_overrides) and effective_audio_mode == "manual"
+        if chapter_scoped_bgm:
+            chapter_music_files: list[Path] = []
+            for chapter_index, (chapter_file, chapter_dir) in enumerate(zip(chapters, chapter_dirs), start=1):
+                override = effective_overrides.get(str(chapter_index), {})
+                if not isinstance(override, dict):
+                    override = {}
+                rule = str(override.get("rule") or "default").strip().lower()
+                if rule not in {"default", "custom", "none"}:
+                    raise ValueError(f"Unsupported BGM rule for chapter {chapter_index}: {rule}")
+                selected_track = override.get("path") if rule == "custom" else background_audio_path
+                if rule == "none" or not selected_track:
+                    chapter_music_files.append(chapter_file)
+                    continue
+                if rule == "custom" and not Path(str(selected_track)).expanduser().is_file():
+                    raise FileNotFoundError(f"Custom BGM for chapter {chapter_index} was not found: {selected_track}")
+                volume = override.get("volume", background_audio_volume) if rule == "custom" else background_audio_volume
+                start_offset = str(override.get("start_offset") or "immediate").strip().lower()
+                offset_ms = 0
+                if start_offset == "after_10_seconds":
+                    offset_ms = 10_000
+                elif start_offset == "after_first_paragraph":
+                    try:
+                        manifest = json.loads((chapter_dir / "chunk_manifest.json").read_text(encoding="utf-8"))
+                        first_chunk = (manifest.get("chunks") or [])[0]
+                        chunk_path = chapter_dir / "chunks" / str(first_chunk.get("file") or "")
+                        if chunk_path.is_file():
+                            offset_ms = _duration_ms(chunk_path)
+                    except (OSError, ValueError, TypeError, IndexError):
+                        offset_ms = 0
+                behavior = str(override.get("end_behavior") or "fade_before_end").strip().lower()
+                fade_out = float(background_audio_fade_out) if behavior == "fade_before_end" else 0.0
+                mixed = temp_dir / f"chapter-bgm-{chapter_index:05d}.m4a"
+                chapter_music_files.append(_mix_chapter_bgm(
+                    chapter_file, selected_track, mixed, float(volume),
+                    fade_in=float(background_audio_fade_in), fade_out=fade_out,
+                    start_offset_ms=offset_ms,
+                ))
+                if progress:
+                    progress(chapter_index, len(chapters), "mixed-chapter-background-audio")
+            chapters = chapter_music_files
+
         concat = temp_dir / "chapters.txt"
         concat_lines = ["ffconcat version 1.0"]
         durations: list[int] = []
@@ -637,7 +732,7 @@ def assemble_m4b(
         # therefore remain continuous across chapter boundaries. FFmpeg/CPU
         # does the work; no GPU memory is needed.
         audio_layers: list[tuple[str, Path | str | None, float]] = [
-            ("music", background_audio_path, background_audio_volume),
+            ("music", None if chapter_scoped_bgm else background_audio_path, background_audio_volume),
             ("ambience", ambience_audio_path, ambience_audio_volume),
         ]
         active_layers = [
