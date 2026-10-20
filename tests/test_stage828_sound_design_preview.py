@@ -8,14 +8,17 @@ from pathlib import Path
 class Stage828SoundDesignPreviewTests(unittest.TestCase):
     def test_full_book_mix_preview_is_registered_as_a_background_job(self):
         source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        worker = Path("app/ui/full_book_preview.py").read_text(encoding="utf-8")
         self.assertIn('"sound.preview_book": self._sound_preview_book', source)
         self.assertIn('"sound.preview_book": True', source)
         self.assertIn('def _sound_preview_book(self, _payload: dict[str, Any])', source)
-        self.assertIn('self._new_job(\n            "sound-design-book-preview"', source)
-        self.assertIn('name="RyuFullBookSoundPreview"', source)
+        self.assertIn("start_full_book_preview(self)", source)
+        self.assertIn("def start_full_book_preview(host)", worker)
+        self.assertIn('host._new_job(\n        "sound-design-book-preview"', worker)
+        self.assertIn('name="RyuFullBookSoundPreview"', worker)
 
     def test_full_book_mix_preview_reuses_saved_narration_and_validates_all_chapters(self):
-        source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        source = Path("app/ui/full_book_preview.py").read_text(encoding="utf-8")
         self.assertIn('audio_root = project.folder / "working_audio"', source)
         self.assertIn('A full-book mix preview needs saved narration audio for every chapter.', source)
         self.assertIn('reuses_saved_narration', source)
