@@ -160,6 +160,22 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("requested_duration_seconds", adapter)
         self.assertIn("preparePreviewPlayback(job, Number(duration))", adapter)
 
+    def test_import_detects_exact_content_duplicates_before_creating_a_job(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("import hashlib", host)
+        self.assertIn("source_digest = hashlib.sha256(path.read_bytes()).hexdigest()", host)
+        self.assertIn("for existing_project in list_projects():", host)
+        self.assertIn("existing_digest = hashlib.sha256(existing_source.read_bytes()).hexdigest()", host)
+        self.assertIn("Open that project from Audiobook Library instead of importing a duplicate.", host)
+        self.assertLess(host.index("source_digest = hashlib.sha256(path.read_bytes()).hexdigest()"),
+                        host.index('job_id = self._new_job("import", "Import " + title'))
+
+    def test_import_report_includes_source_and_chapter_review_warning(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn('"source_file": str(project.source_path or path)', host)
+        self.assertIn('Detected {len(chapters)} chapter(s); review chapter boundaries before production.', host)
+        self.assertIn('shutil.copy2(source_path, destination)', (ROOT / "app" / "core" / "project.py").read_text(encoding="utf-8"))
+
     def test_chapter_clean_button_uses_backend_cleaner(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
