@@ -25,7 +25,6 @@ class KnownLimitationsContractTests(unittest.TestCase):
             "Per-line AI speaker suggestions are still prototype-only",
             "Dialogue-line speaker assignment is not persisted by the current backend",
             "Custom project-library and audio-assets root selection is not implemented",
-            "Sanitized log export is not connected yet",
             "Per-model actions",
         ):
             with self.subTest(phrase=phrase):
@@ -34,13 +33,16 @@ class KnownLimitationsContractTests(unittest.TestCase):
     def test_documented_capability_gaps_match_source(self):
         self.assertIn('"project.create": False', self.host)
         self.assertIn('"performance.info": False', self.host)
+        self.assertIn('"diagnostics.export_logs": self._diagnostics_export_logs', self.host)
+        self.assertIn('"diagnostics.export_logs": True', self.host)
+        self.assertIn("call('diagnostics.export_logs')", self.adapter)
+        self.assertIn("Sanitized diagnostic export", self.doc)
         for phrase in (
             "Credential management is not connected to a secure provider-specific credential store",
             "Premium cloud candidate generation is not connected to a provider endpoint",
             "Review status is not yet supplied by the chapter backend",
             "Per-line AI speaker suggestions are still prototype-only",
             "Custom project-library and audio-assets root selection is not implemented",
-            "Sanitized log export is not connected yet",
             "Dialogue-line speaker assignment is not persisted by the current backend",
         ):
             with self.subTest(phrase=phrase):
