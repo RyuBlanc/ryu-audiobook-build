@@ -708,8 +708,8 @@ class PremiumV2Bridge(QObject):
                 raise ValueError("Select a chapter that contains narration text.")
             text_value = chapter.text
         seconds = int(payload.get("duration_seconds") or payload.get("duration") or 30)
-        if seconds not in {10, 30, 60}:
-            raise ValueError("Preview duration must be 10, 30, or 60 seconds.")
+        if seconds not in {10, 20, 30, 45, 60}:
+            raise ValueError("Preview duration must be 10, 20, 30, 45, or 60 seconds.")
         job_id = self._new_job("voice-preview", "Preview · " + profile.name,
                                f"Generate up to {seconds} seconds using the selected provider", project)
         self._job_update(job_id, state="running", started_at=self._now(), stage="Preparing preview", progress=2)
