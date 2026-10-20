@@ -93,3 +93,22 @@ Build #627 (commit `d0937bb6ef09e8d8d4fe01640d15583028e84964`) passed: applicati
 ## Stage 8.2.4 — Release evidence (in progress)
 
 The evidence ledger has begun with passing CI candidates #642 and #644, including commit SHAs, expected/observed outcomes, artifact names, sizes, checksums, and expiry. The current candidate lineage is #644. Keep this candidate traceable while completing manual acceptance; do not declare release-complete or bug-free until the remaining gates are verified. CI artifact creation is not a substitute for installer/portable launch and desktop interaction evidence.
+
+
+## Stage 8.2.5 — Preview duration bridge correction (Build #647)
+
+- **Commit:** `453b59f24e597a6efcff4a164da714ba83106a39`
+- **Workflow:** [Build #647](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39349177409) — success.
+- **Expected:** the desktop backend accepts every supported preview target covered by regression tests: 10, 20, 30, 45, and 60 seconds.
+- **Observed:** Windows CI passed application validation, test suite, frozen application validation, bundled voice asset/critical module checks, installer build, portable artifact upload, and cleanup. Release publishing was skipped.
+- **Installer artifact:** `Ryu-Audiobook-Installer-647`, 648,192,026 bytes, SHA-256 `f2030f391ec2b0c28c73fc32601e2654e69aa1e4960737d68417d730704442f0`.
+- **Portable artifact:** `Ryu-Audiobook-Portable-647`, 1,347,979,034 bytes, SHA-256 `3416a73726a3845f3a1ec154c58670a4019dfd8a6b41d9bcc48a5c7597b7080a`.
+- **Artifact expiry:** 2026-10-23 UTC.
+- **Limit:** the regression provider is deterministic and automated. Real provider duration and audible playback still require packaged Windows acceptance.
+
+## Stage 8.2.6 — Frontend/backend contract hardening (in progress)
+
+- Added a regression guard that extracts static backend calls from the Premium V2 adapter and verifies that every call has an allow-listed desktop bridge handler.
+- Preserve the approved HTML without redesign; this test checks the adapter/bridge boundary, not pixel parity or real interaction.
+- Next focus: run this guard in Windows CI, then continue the screen-by-screen acceptance work. Sound Design gaps remain explicit: per-chapter BGM overrides, persistent story-cue assignments, cue-sequence preview, and full-book mix preview are not connected. Do not mark these features complete or imply their buttons work.
+- Manual gates remain open: actual Windows voice preview/playback, installer and portable launch, generation pause/resume/cancel/retry and offline behavior, all 15 destinations at normal/reduced window sizes, and real-project persistence checks.
