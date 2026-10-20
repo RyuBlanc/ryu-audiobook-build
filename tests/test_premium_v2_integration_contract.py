@@ -341,6 +341,16 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("monitorJob(data.job_id, async job=>", adapter)
         self.assertIn("await previewAudio.play()", adapter)
 
+    def test_output_folder_resume_and_history_controls_use_backend(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("buttonLabel === 'open output folder'", adapter)
+        self.assertIn("call('system.open_output')", adapter)
+        self.assertIn("buttonLabel === 'resume production'", adapter)
+        self.assertIn("call('job.resume', {job_id:paused.job_id})", adapter)
+        self.assertIn("e.target.closest('#historyFilters button')", adapter)
+        self.assertIn("e.target.closest('[data-history-job]')", adapter)
+        self.assertIn("call('history.list')", adapter)
+
     def test_character_library_series_scope_matches_default_filter(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("c?.scope || 'Series · Slime'", adapter)

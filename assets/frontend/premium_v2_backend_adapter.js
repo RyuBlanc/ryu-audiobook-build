@@ -512,6 +512,46 @@
     await refreshProjects().catch(()=>{}); await refreshVoices().catch(()=>{}); await refreshChapters().catch(()=>{});
     await refreshCharacters().catch(()=>{}); await refreshCharacterLibrary().catch(()=>{}); await refreshTerms().catch(()=>{}); await refreshSounds().catch(()=>{}); await refreshSoundCues().catch(()=>{}); await refreshChapterBgm().catch(()=>{}); await refreshJobs().catch(()=>{}); await refreshHistory().catch(()=>{}); await refreshModels().catch(()=>{}); await refreshPerformance().catch(()=>{}); await loadSettings().catch(()=>{});
     document.addEventListener('click', e => {
+      const button = e.target.closest('button');
+      const buttonLabel = button?.textContent?.trim().toLowerCase() || '';
+      if (button && buttonLabel === 'open output folder') {
+        e.preventDefault(); e.stopImmediatePropagation();
+        call('system.open_output').then(result => message('Opened output folder: ' + (result.path || ''))).catch(err => message(err?.message || String(err), true));
+        return;
+      }
+      if (button && buttonLabel === 'resume production') {
+        e.preventDefault(); e.stopImmediatePropagation();
+        (async()=> {
+          const rows = await call('job.list', {include_hidden:false});
+          const paused = rows.find(j => j.type === 'audiobook-generation' && ['paused','pause_requested'].includes(j.state));
+          if (!paused) throw new Error('No paused audiobook generation job is available to resume. Start generation from Production Studio to reuse compatible saved checkpoints.');
+          await call('job.resume', {job_id:paused.job_id});
+          await refreshJobs(); await refreshHistory();
+          message('Resume requested for ' + (paused.title || 'audiobook generation') + '.');
+        })().catch(err => message(err?.message || String(err), true));
+        return;
+      }
+      const historyFilter = e.target.closest('#historyFilters button');
+      if (historyFilter) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        historyFilter.parentElement?.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === historyFilter));
+        refreshHistory().catch(err => message(err?.message || String(err), true));
+        return;
+      }
+      const historyJob = e.target.closest('[data-history-job]');
+      if (historyJob) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        (async()=> {
+          const id = historyJob.dataset.historyJob;
+          const rows = await call('history.list');
+          const job = rows.find(j => String(j.job_id) === String(id));
+          if (!job) throw new Error('This history job is no longer available. Refresh History and try again.');
+          await refreshJobs();
+          $('backgroundJobsButton')?.click();
+          message((job.title || job.type || 'Background task') + ' · ' + (job.stage || job.message || job.state) + ' · ' + Math.round(Number(job.progress || 0)) + '%');
+        })().catch(err => message(err?.message || String(err), true));
+        return;
+      }
       const add=e.target.closest('#addLibraryCharacter'), imp=e.target.closest('#importCharacterLibrary'), edit=e.target.closest('[data-edit-library]'), remove=e.target.closest('[data-delete-library]'), test=e.target.closest('[data-test-library]'), save=e.target.closest('#saveCharacterProfile'), del=e.target.closest('#deleteCharacter');
       if(add){e.preventDefault();e.stopImmediatePropagation();openLibraryEditor(null);return;}
       if(imp){e.preventDefault();e.stopImmediatePropagation();importCharacterLibraryFile();return;}
