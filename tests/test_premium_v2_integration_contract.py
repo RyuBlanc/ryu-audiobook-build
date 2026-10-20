@@ -160,6 +160,15 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("requested_duration_seconds", adapter)
         self.assertIn("preparePreviewPlayback(job, Number(duration))", adapter)
 
+    def test_chapter_clean_button_uses_backend_cleaner(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("call('chapter.clean',{text:source})", adapter)
+        self.assertIn("typeof result.text!=='string'", adapter)
+        self.assertIn("def _chapter_clean(self, payload: dict[str, Any])", host)
+        self.assertIn('"chapter.clean": self._chapter_clean', host)
+        self.assertIn("clean_text(text_value)", host)
+
     def test_chapter_split_is_persisted_and_connected_to_visible_control(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn('"chapter.split": self._chapter_split', self.host)
