@@ -217,9 +217,11 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("call('sound.assign'", adapter)
         self.assertIn("call('sound.save_manifest'", adapter)
         self.assertIn("The selected local audio file could not be played", adapter)
-        self.assertIn("Per-chapter BGM overrides are not connected yet.", adapter)
-        self.assertIn("Story cue assignments are not connected to persistent backend storage yet", adapter)
-        self.assertIn("Cue search is unavailable because chapter cue assets are not yet connected", adapter)
+        self.assertIn("call('sound.cues.save'", adapter)
+        self.assertIn("call('sound.cues.get')", adapter)
+        self.assertIn("call('sound.cues.clear')", adapter)
+        self.assertIn("refreshSoundCues().catch", adapter)
+        self.assertIn("Playing assigned cue clips in book order.", adapter)
 
     def test_background_jobs_screen_uses_backend_state_and_actions(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
@@ -262,7 +264,31 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("if not chapters:", worker)
         self.assertIn("No chapters contain narration text. Restore chapter text before generating.", worker)
         self.assertIn('"empty_chapters_skipped": skipped', worker)
-        self.assertIn("Render {len(chapters)} non-empty chapter(s)", worker)
+        self.assertIn("Render {len(chapters)} non-empty chapter(s)", wo
+
+    def test_preview_duration_setting_accepts_every_supported_target(self):
+        self.assertIn('if key == "preview_seconds" and int(value) not in {10, 20, 30, 45, 60}:', self.host)
+        self.assertIn('Preview duration must be 10, 20, 30, 45, or 60 seconds.', self.host)
+
+    def test_sound_cue_assignments_are_allowlisted_and_persisted(self):
+        for command, method in (
+            ("sound.cues.get", "_sound_cues_get"),
+            ("sound.cues.save", "_sound_cues_save"),
+            ("sound.cues.clear", "_sound_cues_clear"),
+        ):
+            self.assertIn(f'"{command}": self.{method}', self.host)
+        start = self.host.index("def _sound_cues_save")
+        end = self.host.index("def _sound_cues_clear", start)
+        worker = self.host[start:end]
+        self.assertIn('{"opening", "chapter", "scene", "closing"}', worker)
+        self.assertIn('state["sound_cues"] = cues', worker)
+        self.assertIn('state["opening_cue_path"] = selected_path', worker)
+        self.assertIn('state["page_turn_cue_path"] = selected_path', worker)
+        self.assertIn('state["ending_cue_path"] = selected_path', worker)
+        self.assertIn('"generation_supported": slot != "scene"', worker)
+        self.assertIn('state["sound_cues"] = {"opening": None, "chapter": None, "scene": None, "closing": None}', self.host)
+
+rker)
 
 
 if __name__ == "__main__":
