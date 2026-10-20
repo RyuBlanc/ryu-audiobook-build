@@ -43,5 +43,57 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         self.assertNotIn("call('production.preview'", branch)
 
 
+    def test_chapter_bgm_mixer_preserves_timeline_and_applies_offset_and_fades(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.audio import assembler
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            narration = root / "chapter.m4a"
+            track = root / "music.wav"
+            output = root / "mixed.m4a"
+            narration.write_bytes(b"narration")
+            track.write_bytes(b"music")
+
+            def fake_run(args):
+                Path(args[-1]).write_bytes(b"x" * 2048)
+
+            with patch.object(assembler, "_duration_ms", side_effect=[20_000, 20_000]), \
+                 patch.object(assembler, "_run", side_effect=fake_run) as run:
+                result = assembler._mix_chapter_bgm(
+                    narration, track, output, 0.2, fade_in=1.5, fade_out=2.5,
+                    start_offset_ms=10_000, bitrate="192k",
+                )
+
+            self.assertEqual(result, output)
+            self.assertTrue(output.is_file())
+            args = run.call_args.args[0]
+            filters = args[args.index("-filter_complex") + 1]
+            self.assertIn("adelay=10000|10000", filters)
+            self.assertIn("afade=t=in:st=10.000:d=1.500", filters)
+            self.assertIn("afade=t=out:st=17.500:d=2.500", filters)
+            self.assertIn("duration=first", filters)
+            self.assertEqual(args[args.index("-t") + 1], "20.000")
+
+    def test_zero_volume_chapter_bgm_does_not_reencode_narration(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.audio import assembler
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            narration = root / "chapter.m4a"
+            track = root / "music.wav"
+            output = root / "mixed.m4a"
+            narration.write_bytes(b"narration")
+            track.write_bytes(b"music")
+            with patch.object(assembler, "_run") as run:
+                result = assembler._mix_chapter_bgm(narration, track, output, 0.0)
+            self.assertEqual(result, narration)
+            run.assert_not_called()
+            self.assertFalse(output.exists())
+
+
 if __name__ == "__main__":
     unittest.main()
