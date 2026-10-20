@@ -126,6 +126,8 @@ class PremiumV2Bridge(QObject):
                 "sound.cues.get": self._sound_cues_get,
                 "sound.cues.save": self._sound_cues_save,
                 "sound.cues.clear": self._sound_cues_clear,
+                "sound.chapter_bgm.get": self._sound_chapter_bgm_get,
+                "sound.chapter_bgm.save": self._sound_chapter_bgm_save,
             }
             handler = handlers.get(command)
             if handler is None:
@@ -217,6 +219,8 @@ class PremiumV2Bridge(QObject):
             "sound.cues.get": True,
             "sound.cues.save": True,
             "sound.cues.clear": True,
+            "sound.chapter_bgm.get": True,
+            "sound.chapter_bgm.save": True,
             "reason": "Local import, chapter editing, saved voice selection and preview, character analysis and editing, pronunciation rules, audiobook generation, background jobs, history, playback metadata, local model installation, and settings are connected. Live hardware telemetry remains unavailable.",
         }
 
@@ -1053,6 +1057,7 @@ class PremiumV2Bridge(QObject):
             opening_cue_path=Path(state["opening_cue_path"]) if state.get("opening_cue_path") and Path(state["opening_cue_path"]).is_file() else None,
             page_turn_cue_path=Path(state["page_turn_cue_path"]) if state.get("page_turn_cue_path") and Path(state["page_turn_cue_path"]).is_file() else None,
             ending_cue_path=Path(state["ending_cue_path"]) if state.get("ending_cue_path") and Path(state["ending_cue_path"]).is_file() else None,
+            chapter_bgm_overrides=state.get("chapter_bgm_overrides") if isinstance(state.get("chapter_bgm_overrides"), dict) else {},
         )
         with self._jobs_lock:
             self._generators[job_id] = manager
@@ -1436,6 +1441,92 @@ class PremiumV2Bridge(QObject):
                                    "updated_at": self._now()}
         save_state(project.folder, state)
         return dict(state["sound_manifest"])
+
+    def _sound_chapter_bgm_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Return real chapter records and the persisted BGM policy/overrides."""
+        project = self._active_project()
+        state = load_state(project.folder)
+        catalog = {str(row["path"]): row for row in self._sound_catalog({})}
+        stored = state.get("chapter_bgm_overrides")
+        if not isinstance(stored, dict):
+            stored = {}
+        overrides: dict[str, dict[str, Any]] = {}
+        for key, value in stored.items():
+            if not isinstance(value, dict):
+                continue
+            row = dict(value)
+            raw_path = str(row.get("path") or "")
+            track = catalog.get(raw_path)
+            row["path"] = raw_path if track else None
+            row["title"] = track["title"] if track else None
+            row["available"] = bool(track) if row.get("rule") == "custom" else True
+            overrides[str(key)] = row
+        return {
+            "strategy": str(state.get("chapter_bgm_strategy") or "same"),
+            "default_path": state.get("background_audio_path") or None,
+            "default_volume": float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18),
+            "overrides": overrides,
+            "chapters": [{"number": chapter.number, "title": chapter.title} for chapter in project.chapters],
+        }
+
+    def _sound_chapter_bgm_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist the selected chapter's BGM rule, or change the book-wide strategy."""
+        project = self._active_project()
+        state = load_state(project.folder)
+        strategy = str(payload.get("strategy") or "").strip().lower()
+        if strategy:
+            if strategy not in {"same", "custom"}:
+                raise ValueError("Choose Same BGM or Chapter-based BGM.")
+            state["chapter_bgm_strategy"] = strategy
+            if strategy == "same":
+                state["chapter_bgm_overrides"] = {}
+            state["modified_at"] = self._now()
+            save_state(project.folder, state)
+            return self._sound_chapter_bgm_get({})
+        try:
+            number = int(payload.get("number"))
+        except (TypeError, ValueError):
+            raise ValueError("Choose a valid chapter before saving its BGM.")
+        chapter = next((item for item in project.chapters if item.number == number), None)
+        if chapter is None:
+            raise ValueError("The selected chapter no longer exists. Refresh Chapter Studio.")
+        rule = str(payload.get("rule") or "default").strip().lower()
+        if rule not in {"default", "custom", "none"}:
+            raise ValueError("Choose book default, custom BGM, or no BGM.")
+        path = None
+        title = None
+        if rule == "custom":
+            raw_path = str(payload.get("path") or "").strip()
+            selected = Path(raw_path).expanduser().resolve() if raw_path else None
+            catalog = {str(row["path"]): row for row in self._sound_catalog({})}
+            row = catalog.get(str(selected)) if selected else None
+            if selected is None or not selected.is_file() or row is None:
+                raise ValueError("Choose a custom track from the local Sound Design catalogue.")
+            path, title = str(selected), str(row["title"])
+        try:
+            volume = max(0.0, min(0.50, float(payload.get("volume", 0.18))))
+        except (TypeError, ValueError):
+            raise ValueError("Chapter BGM volume must be between 0 and 50 percent.")
+        start_offset = str(payload.get("start_offset") or "immediate").strip().lower()
+        if start_offset not in {"immediate", "after_first_paragraph", "after_10_seconds"}:
+            raise ValueError("Choose a supported chapter BGM start offset.")
+        end_behavior = str(payload.get("end_behavior") or "fade_before_end").strip().lower()
+        if end_behavior not in {"fade_before_end", "continue_to_transition", "stop_immediately"}:
+            raise ValueError("Choose a supported chapter BGM end behavior.")
+        overrides = state.get("chapter_bgm_overrides")
+        if not isinstance(overrides, dict):
+            overrides = {}
+        overrides[str(number)] = {
+            "rule": rule, "path": path, "volume": volume,
+            "start_offset": start_offset, "end_behavior": end_behavior,
+        }
+        state["chapter_bgm_overrides"] = overrides
+        state["chapter_bgm_strategy"] = "custom"
+        state["modified_at"] = self._now()
+        save_state(project.folder, state)
+        return {"saved": True, "number": number, "title": chapter.title,
+                "rule": rule, "path": path, "track_title": title,
+                "strategy": "custom", "override_count": len(overrides)}
 
     def _sound_cues_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
         """Return persisted book cue assignments, resolving legacy state keys."""
