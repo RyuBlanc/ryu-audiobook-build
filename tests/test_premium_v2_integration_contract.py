@@ -223,8 +223,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("call('sound.cues.clear')", adapter)
         self.assertIn("refreshSoundCues().catch", adapter)
         self.assertIn("Playing assigned cue clips in book order.", adapter)
-        self.assertIn("call('production.preview', {duration_seconds:30, include_sound_design:true})", adapter)
-        self.assertIn("Generating a 30-second narration + music/cue mix preview", adapter)
+        self.assertIn("call('sound.preview_book')", adapter)
+        self.assertIn("Generating the full-book mix preview from saved chapter narration", adapter)
         self.assertIn("def _render_sound_design_preview(", self.host)
         self.assertIn('state["_include_sound_design_preview"] = True', self.host)
 
