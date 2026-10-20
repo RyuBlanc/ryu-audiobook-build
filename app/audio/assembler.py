@@ -243,14 +243,16 @@ def _mix_chapter_bgm(
     bitrate: str = "192k",
 ) -> Path:
     """Mix one chapter-specific music bed under narration without changing duration."""
+    gain = max(0.0, min(1.0, float(volume)))
+    # A zero-gain override means narration-only: don't probe/re-encode the
+    # narration and don't require a music asset that will never be used.
+    if gain <= 0.0:
+        return chapter_file
     track = Path(track_path).expanduser()
     if not track.is_file():
         raise FileNotFoundError(f"Chapter background music was not found: {track}")
     duration_ms = _duration_ms(chapter_file)
     duration_seconds = max(0.1, duration_ms / 1000.0)
-    gain = max(0.0, min(1.0, float(volume)))
-    if gain <= 0.0:
-        return chapter_file
     offset_ms = max(0, min(int(start_offset_ms), max(0, duration_ms - 1)))
     offset_seconds = offset_ms / 1000.0
     fade_in_seconds = max(0.0, min(30.0, float(fade_in)))
