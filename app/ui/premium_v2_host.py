@@ -734,6 +734,11 @@ class PremiumV2Bridge(QObject):
                          daemon=True, name="RyuPremiumPreview").start()
         return {"job_id": job_id, "state": "running", "duration_seconds": seconds, "profile_name": profile.name}
 
+    def _sound_preview_book(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Queue a full-book mix preview from saved narration without re-synthesis."""
+        from app.ui.full_book_preview import start_full_book_preview
+        return start_full_book_preview(self)
+
     def _render_sound_design_preview(self, source: Path, job_id: str, state: dict[str, Any]) -> Path:
         """Render a short audition using the active book's real music/cue assignments."""
         from app.audio.assembler import _concat_audio_files, _duration_ms, _run
