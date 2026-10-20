@@ -98,5 +98,47 @@ class Stage823GenerationControlTests(unittest.TestCase):
             self.assertFalse(output.exists(), "cancelled generation must not package a partial audiobook")
 
 
+    def test_online_voice_outage_stops_remaining_chapters_without_packaging(self):
+        class OnlineTTSNetworkError(RuntimeError):
+            pass
+
+        class OfflineProvider(LocalTestProvider):
+            def __init__(self):
+                self.calls = 0
+
+            def synthesize(self, text, output_path, voice=None):
+                self.calls += 1
+                raise OnlineTTSNetworkError("simulated offline network")
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = root / "offline-book.m4b"
+            provider = OfflineProvider()
+            summaries = []
+            manager = GenerationManager(
+                provider,
+                "Online test voice",
+                [
+                    Chapter(1, "First", "First chapter needs synthesis."),
+                    Chapter(2, "Second", "Second chapter must not retry the outage."),
+                    Chapter(3, "Third", "Third chapter must not retry the outage."),
+                ],
+                root / "working_audio",
+                on_finished=summaries.append,
+            )
+            manager.start(output_path=output, title="Offline Test Book", author="Test Author")
+            manager._thread.join(timeout=10)
+
+            self.assertFalse(manager._thread.is_alive(), "generation did not stop after network outage")
+            self.assertEqual(provider.calls, 1, "network outage should not be retried for every chapter")
+            self.assertEqual(len(summaries), 1)
+            self.assertFalse(summaries[0].cancelled)
+            self.assertEqual(summaries[0].chapters_completed, 0)
+            self.assertEqual(summaries[0].chapters_failed, [1, 2, 3])
+            self.assertIn("simulated offline network", summaries[0].failure_details[1])
+            self.assertIn("unreachable", summaries[0].failure_details[2])
+            self.assertFalse(output.exists(), "an offline/failed generation must not package an audiobook")
+
+
 if __name__ == "__main__":
     unittest.main()
