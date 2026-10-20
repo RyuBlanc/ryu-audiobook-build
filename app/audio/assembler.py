@@ -730,9 +730,13 @@ def assemble_m4b(
         metadata_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         audio_only = temp_dir / "audiobook-audio.m4a"
+        # Re-encode the chapter join instead of stream-copying separately
+        # encoded AAC files. Stream-copy concatenation can lose packet duration
+        # at chapter boundaries (AAC priming/padding), shortening the finished
+        # audiobook even though the chapter cues were correctly inserted.
         _run([
             "-f", "concat", "-safe", "0", "-i", str(concat),
-            "-vn", "-c:a", "copy",
+            "-vn", "-c:a", "aac", "-b:a", audio_bitrate, "-ar", "44100",
             str(audio_only),
         ])
         if not audio_only.exists() or audio_only.stat().st_size == 0:
