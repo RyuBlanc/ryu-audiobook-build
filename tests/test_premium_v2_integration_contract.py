@@ -378,7 +378,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "call('character.delete'",
             "Per-line AI speaker suggestions are still prototype-only",
             "Custom project-library and audio-assets root selection is not implemented",
-            "Sanitized log export is not connected yet",
+            "call('diagnostics.export_logs')",
             "termList.innerHTML = terms.map",
             "call('voice.delete'",
         ):
