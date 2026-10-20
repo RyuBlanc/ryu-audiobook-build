@@ -57,3 +57,9 @@
 - [x] Current known limitations and test evidence updated without claiming full acceptance.
 - [x] Prioritized gap register created with closure criteria and owning roadmap stage.
 - [ ] Broader automation to check every visible control against adapter/host/capability map remains part of implementation, not complete merely because this register exists.
+
+## Stage 2 checkpoint — import integrity
+
+- Exact-content duplicate detection and actionable existing-project guidance are implemented in the host before a new import job is created.
+- Import completion data reports the preserved source path and flags chapter boundaries for review.
+- Still open: parser/chapter fixtures, retry/cancel behavior, malformed-file diagnostics, and edit/save/reload acceptance. Stage 2 is not complete.
