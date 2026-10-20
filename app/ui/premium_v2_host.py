@@ -66,6 +66,7 @@ class PremiumV2Bridge(QObject):
         self._jobs_lock = threading.RLock()
         self._jobs: dict[str, dict[str, Any]] = {}
         self._generators: dict[str, GenerationManager] = {}
+        self._import_cancel_events: dict[str, threading.Event] = {}
         self._load_durable_jobs()
 
     @Slot(str, str, result=str)
@@ -553,21 +554,53 @@ class PremiumV2Bridge(QObject):
                 )
 
         job_id = self._new_job("import", "Import " + title, "Extract text and detect chapters")
+        cancel_event = threading.Event()
+        with self._jobs_lock:
+            self._import_cancel_events[job_id] = cancel_event
         self._job_update(job_id, state="running", started_at=self._now(), stage="Reading source file", progress=5)
-        threading.Thread(target=self._import_worker, args=(job_id, path, title), daemon=True).start()
+        threading.Thread(target=self._import_worker, args=(job_id, path, title, cancel_event), daemon=True).start()
         return {"job_id": job_id, "state": "running", "file_path": str(path)}
 
-    def _import_worker(self, job_id: str, path: Path, title: str) -> None:
+    @staticmethod
+    def _format_import_error(path: Path, error: Exception, stage: str = "extracting") -> str:
+        detail = str(error).strip() or error.__class__.__name__
+        if "PDF text extraction appears incomplete" in detail:
+            return detail
+        if stage != "extracting":
+            return detail[:1200]
+        kind = {".pdf": "PDF", ".epub": "EPUB", ".docx": "Word document", ".txt": "text file"}.get(path.suffix.lower(), "book file")
+        if path.suffix.lower() == ".pdf":
+            advice = "Confirm it opens correctly and contains a searchable text layer; scanned pages may require OCR."
+        elif path.suffix.lower() == ".epub":
+            advice = "Confirm the EPUB is a valid, readable archive; try re-exporting it or importing a TXT/DOCX copy."
+        elif path.suffix.lower() == ".docx":
+            advice = "Confirm it opens in Word or LibreOffice and is not password-protected or damaged."
+        else:
+            advice = "Confirm the file is readable and encoded as UTF-8 or a compatible plain-text format."
+        return f"Could not extract readable text from this {kind}. {advice} Details: {detail[:700]}"
+
+    def _import_worker(self, job_id: str, path: Path, title: str, cancel_event: threading.Event | None = None) -> None:
+        stage = "extracting"
         try:
             self._job_update(job_id, stage="Extracting text", progress=20, message="Extracting readable text and metadata")
             book = extract_text(path)
+            if cancel_event and cancel_event.is_set():
+                self._job_update(job_id, state="cancelled", stage="Import cancelled", progress=0,
+                                 message="Import cancelled before creating a project; the source file was preserved.")
+                return
             text = str(book.text or "")
             if not text.strip():
                 raise ValueError("No readable text was extracted. A scanned PDF may need OCR.")
+            stage = "detecting chapters"
             self._job_update(job_id, stage="Detecting chapters", progress=50, message="Detecting chapter boundaries")
             chapters = detect_chapters(text)
             if not chapters:
                 raise ValueError("The document contains no readable chapter text.")
+            if cancel_event and cancel_event.is_set():
+                self._job_update(job_id, state="cancelled", stage="Import cancelled", progress=0,
+                                 message="Import cancelled before creating a project; the source file was preserved.")
+                return
+            stage = "saving project"
             project = create_project(title, path, chapters)
             self.settings.setValue("project/active_folder", str(project.folder.resolve()))
             self.settings.sync()
@@ -587,8 +620,20 @@ class PremiumV2Bridge(QObject):
                              })
         except Exception as exc:
             log.exception("Premium V2 import failed")
-            self._job_update(job_id, state="failed", stage="Import failed", progress=0, message=str(exc),
-                             error={"code": "import_failed", "message": str(exc)}, recoverable=True)
+            detail = self._format_import_error(path, exc, stage)
+            self._job_update(job_id, state="failed", stage="Import failed", progress=0, message=detail,
+                             error={"code": "import_failed", "message": detail}, recoverable=True)
+        finally:
+            with self._jobs_lock:
+                self._import_cancel_events.pop(job_id, None)
+            # Dropped files are staged under incoming_imports. The durable project
+            # already owns a copied source on success; always clean this temporary copy.
+            try:
+                incoming_root = (app_root() / "incoming_imports").resolve()
+                if incoming_root in path.resolve().parents:
+                    path.unlink(missing_ok=True)
+            except OSError:
+                log.warning("Could not remove temporary import staging file: %s", path, exc_info=True)
 
     def _chapter_clean(self, payload: dict[str, Any]) -> dict[str, Any]:
         text_value = payload.get("text")
@@ -1511,6 +1556,12 @@ class PremiumV2Bridge(QObject):
             manager = self._generators.get(job_id)
             row = self._jobs.get(job_id)
         if manager is None:
+            with self._jobs_lock:
+                import_cancel = self._import_cancel_events.get(job_id)
+            if row and row.get("type") == "import" and import_cancel is not None and row.get("state") in {"queued", "running", "cancel_requested"}:
+                import_cancel.set()
+                return self._job_update(job_id, state="cancel_requested", stage="Cancellation requested",
+                                        message="Import will stop at the next safe extraction/chapter boundary; the source file will be preserved.")
             if row and row.get("state") in {"queued", "running", "paused"}:
                 return self._job_update(job_id, state="cancelled", stage="Cancelled", message="Job cancelled before active processing.")
             raise ValueError("Choose an active background job to cancel.")

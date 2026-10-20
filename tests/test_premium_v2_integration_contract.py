@@ -197,6 +197,25 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertLess(host.index("source_digest = hashlib.sha256(path.read_bytes()).hexdigest()"),
                         host.index('job_id = self._new_job("import", "Import " + title'))
 
+    def test_import_cancel_is_checked_at_safe_boundaries_and_staged_files_are_cleaned(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("self._import_cancel_events: dict[str, threading.Event]", host)
+        self.assertIn("cancel_event.is_set()", host)
+        self.assertIn("Import cancelled before creating a project", host)
+        self.assertIn("self._import_cancel_events.pop(job_id, None)", host)
+        self.assertIn('incoming_root = (app_root() / "incoming_imports").resolve()', host)
+        self.assertIn("const canCancelImport = j.type === 'import'", adapter)
+        self.assertIn("call(commands[b.dataset.jobAction] || 'job.cancel'", adapter)
+
+    def test_malformed_imports_report_actionable_format_specific_diagnostics(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("def _format_import_error(path: Path, error: Exception", host)
+        self.assertIn("scanned pages may require OCR", host)
+        self.assertIn("re-exporting it or importing a TXT/DOCX copy", host)
+        self.assertIn("password-protected or damaged", host)
+        self.assertIn("source file was preserved", host)
+
     def test_import_report_includes_source_and_chapter_review_warning(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn('"source_file": str(project.source_path or path)', host)

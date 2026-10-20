@@ -65,3 +65,11 @@
 - Chapter review status defaults legacy chapters to `needs_review`, persists `reviewed`/`needs_review` with chapter JSON, and drives the existing Review filter.
 - Explicit chapter exclusion now persists as `skip_for_generation`, is available through the contextual chapter action, preserves the chapter text, and excludes only flagged chapters from audiobook generation. Job messages, returned job data, and project state distinguish empty chapters from intentionally excluded chapters; a stale contract test and misleading progress summary were corrected in the same batch.
 - Still open: re-detection protection, parser/chapter fixtures, import retry/cancel behavior, malformed-file diagnostics, and edit/save/reload acceptance. Find selects the first case-insensitive match, Replace confirms and replaces all case-insensitive matches, and chapter undo/redo supports grouped editing with a bounded history (10 snapshots; disabled for chapters over 1,000,000 characters to limit memory use). Stage 2 is not complete.
+
+
+### Import cancellation and diagnostics checkpoint
+
+- Import jobs now expose Cancel in the existing background-job list. Cancellation is checked after extraction and after chapter detection, before project creation; the source is preserved and cancellation is reported only when the worker reaches a safe boundary.
+- Temporary dropped-file staging copies are removed after the import worker exits. Original user-selected source files are never deleted.
+- Extraction failures now provide format-specific recovery guidance (including scanned-PDF/OCR guidance) while retaining bounded underlying error details. Retry remains selecting the source file again after correcting the issue; no silent automatic retry is performed.
+- Stage 2 remains open pending fixture tests, re-detection policy verification, and Windows edit/save/reload acceptance.

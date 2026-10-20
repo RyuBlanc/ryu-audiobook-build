@@ -56,3 +56,11 @@
 - Added case-insensitive find and confirmed replace-all actions through the existing chapter-list contextual menu without changing the approved HTML layout.
 - Added grouped chapter undo/redo, keyboard shortcuts (Ctrl/Cmd+Z and Ctrl/Cmd+Y or Shift+Z), redo invalidation after new edits, a 10-snapshot cap, and a 1,000,000-character limit to bound memory use on low-resource PCs.
 - Added integration-contract coverage for the new editor actions. CI and real Windows edit/save/reload acceptance are still required; Stage 2 remains open.
+
+
+## 2026-10-21 — Stage 2 import cancellation and diagnostics
+
+- Added safe-boundary cancellation for import jobs and exposed Cancel in the existing background-job list for import only. Cancellation does not kill parser threads; it is honored after extraction or chapter detection and before project creation.
+- Temporary drag/drop staging files are cleaned when the worker exits; the original user-selected file and any project source copy remain preserved.
+- Added format-specific import extraction diagnostics with recovery guidance for PDF, EPUB, DOCX, and TXT errors. Retrying is explicit: fix the source or choose it again; there is no blind automatic retry.
+- Added integration-contract coverage for the import cancellation and diagnostic behavior. Fixture-based chapter tests and target-Windows acceptance remain pending.
