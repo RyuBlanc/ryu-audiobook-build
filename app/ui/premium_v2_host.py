@@ -591,7 +591,7 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Choose a chapter after the first; it will be merged into the previous chapter.")
         current = project.chapters[number - 1]
         previous = project.chapters[number - 2]
-        separator = "\\n\\n" if previous.text.strip() and current.text.strip() else ""
+        separator = "\n\n" if previous.text.strip() and current.text.strip() else ""
         previous.text = (previous.text.rstrip() + separator + current.text.lstrip()).strip()
         previous.dialogue_assignments.extend(current.dialogue_assignments or [])
         del project.chapters[number - 1]
