@@ -42,6 +42,12 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("JavascriptCanOpenWindows, False", self.host)
         self.assertIn("def dispatch(", self.host)
 
+    def test_voice_preview_bridge_accepts_every_supported_duration_target(self):
+        # Keep the real desktop bridge aligned with the frontend and duration regression suite.
+        self.assertIn("if seconds not in {10, 20, 30, 45, 60}:", self.host)
+        self.assertIn("Preview duration must be 10, 20, 30, 45, or 60 seconds.", self.host)
+        self.assertIn("for requested_seconds in (10, 20, 30, 45, 60):", (ROOT / "tests" / "test_stage823_preview_duration_acceptance.py").read_text(encoding="utf-8"))
+
     def test_only_real_bridge_commands_are_advertised_as_connected(self):
         self.assertIn('"app.get_info": True', self.host)
         self.assertIn('"project.list": True', self.host)
