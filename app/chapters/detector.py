@@ -14,6 +14,8 @@ class Chapter:
     # Stable character/dialogue assignments are kept with the chapter so manual
     # corrections survive reloads and can later feed the narration director.
     dialogue_assignments: list[dict] = field(default_factory=list)
+    # Review state is persisted with each chapter; older project JSON defaults to needs_review.
+    review_status: str = "needs_review"
 
 
 EXPLICIT_PATTERNS = [
