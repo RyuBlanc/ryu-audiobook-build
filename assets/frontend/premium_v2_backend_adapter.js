@@ -654,8 +654,8 @@
         const selected = chapters.find(chapter => chapter.number === number);
         if (!selected) return;
         const action = window.prompt(
-          'Chapter actions for "' + selected.title + '"\\n' +
-          'Type one: add, rename, delete, up, down, merge\\n' +
+          'Chapter actions for "' + selected.title + '"\n' +
+          'Type one: add, rename, delete, up, down, merge\n' +
           'Merge combines this chapter into the previous chapter.',
           'rename'
         );
