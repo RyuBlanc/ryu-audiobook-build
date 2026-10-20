@@ -87,6 +87,7 @@ class PremiumV2Bridge(QObject):
                 "chapter.add": self._chapter_add,
                 "chapter.delete": self._chapter_delete,
                 "chapter.reorder": self._chapter_reorder,
+                "chapter.merge": self._chapter_merge,
                 "chapter.split": self._chapter_split,
                 "project.rename": self._project_rename,
                 "import.choose_file": self._import_choose_file,
@@ -189,6 +190,7 @@ class PremiumV2Bridge(QObject):
             "chapter.add": True,
             "chapter.delete": True,
             "chapter.reorder": True,
+            "chapter.merge": True,
             "project.rename": True,
             "import.choose_file": True,
             "import.start": True,
@@ -577,6 +579,29 @@ class PremiumV2Bridge(QObject):
             item.number = i
         project.save()
         return {"chapter_count": len(project.chapters), "moved_to": destination}
+
+    def _chapter_merge(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Merge the selected chapter into the immediately preceding chapter."""
+        project = self._active_project()
+        try:
+            number = int(payload.get("number"))
+        except (TypeError, ValueError):
+            raise ValueError("Select a valid chapter to merge.")
+        if number <= 1 or number > len(project.chapters):
+            raise ValueError("Choose a chapter after the first; it will be merged into the previous chapter.")
+        current = project.chapters[number - 1]
+        previous = project.chapters[number - 2]
+        separator = "\\n\\n" if previous.text.strip() and current.text.strip() else ""
+        previous.text = (previous.text.rstrip() + separator + current.text.lstrip()).strip()
+        previous.dialogue_assignments.extend(current.dialogue_assignments or [])
+        del project.chapters[number - 1]
+        for index, chapter in enumerate(project.chapters, 1):
+            chapter.number = index
+        project.save()
+        project_state = load_state(project.folder)
+        project_state["modified_at"] = self._now()
+        save_state(project.folder, project_state)
+        return {"merged": number, "into": number - 1, "chapter_count": len(project.chapters)}
 
     def _chapter_split(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Persist current editor text and split one chapter at the selected cursor."""
