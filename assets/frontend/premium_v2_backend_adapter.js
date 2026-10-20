@@ -641,6 +641,71 @@
       if (window.ryuPremiumSelectedChapter === number && state) state.textContent = automatic ? 'Autosaved just now' : 'Saved just now';
       return result;
     };
+    // Chapter operations missing from the approved visual controls are available
+    // from a contextual action menu on the chapter list; no always-visible UI is added.
+    const chapterListNode = $('chapterList');
+    if (chapterListNode && !chapterListNode.dataset.contextActionsBound) {
+      chapterListNode.dataset.contextActionsBound = '1';
+      chapterListNode.addEventListener('contextmenu', event => {
+        const item = event.target.closest('[data-chapter-number]');
+        if (!item) return;
+        event.preventDefault();
+        const number = Number(item.dataset.chapterNumber);
+        const selected = chapters.find(chapter => chapter.number === number);
+        if (!selected) return;
+        const action = window.prompt(
+          'Chapter actions for "' + selected.title + '"\\n' +
+          'Type one: add, rename, delete, up, down, merge\\n' +
+          'Merge combines this chapter into the previous chapter.',
+          'rename'
+        );
+        if (!action) return;
+        const choice = action.trim().toLowerCase();
+        const run = async () => {
+          if (choice === 'add') {
+            const title = window.prompt('New chapter title:', 'Chapter ' + (chapters.length + 1));
+            if (title === null) return;
+            const created = await call('chapter.add', {title: title.trim() || 'Chapter ' + (chapters.length + 1), text: ''});
+            window.ryuPremiumSelectedChapter = created.number;
+            await refreshChapters();
+            message('New chapter added. Enter its text and save when ready.');
+          } else if (choice === 'rename') {
+            const title = window.prompt('Chapter title:', selected.title);
+            if (title === null) return;
+            if (!title.trim()) throw new Error('Chapter title cannot be empty.');
+            await call('chapter.update', {number, title: title.trim(), text: selected.text || ''});
+            await refreshChapters();
+            message('Chapter renamed and saved.');
+          } else if (choice === 'delete') {
+            if (!window.confirm('Delete "' + selected.title + '" permanently from this project?')) return;
+            await call('chapter.delete', {number});
+            const remaining = await call('chapter.list');
+            chapters = remaining;
+            window.ryuPremiumSelectedChapter = remaining[Math.min(number - 1, remaining.length - 1)]?.number || remaining[0]?.number;
+            await refreshChapters();
+            message('Chapter deleted.');
+          } else if (choice === 'up' || choice === 'down') {
+            const destination = number + (choice === 'up' ? -1 : 1);
+            if (destination < 1 || destination > chapters.length) throw new Error('This chapter cannot move farther in that direction.');
+            await call('chapter.reorder', {number, new_number: destination});
+            window.ryuPremiumSelectedChapter = destination;
+            await refreshChapters();
+            message('Chapter order updated.');
+          } else if (choice === 'merge') {
+            if (number === 1) throw new Error('The first chapter cannot merge into a previous chapter.');
+            if (!window.confirm('Merge "' + selected.title + '" into the previous chapter?')) return;
+            await call('chapter.merge', {number});
+            window.ryuPremiumSelectedChapter = number - 1;
+            await refreshChapters();
+            message('Chapter merged into the previous chapter.');
+          } else {
+            throw new Error('Unknown chapter action. Type add, rename, delete, up, down, or merge.');
+          }
+        };
+        run().catch(error => message(error?.message || String(error), true));
+      });
+    }
+
     if ($('chapterEditor')) $('chapterEditor').addEventListener('input', () => {
       const c = selectedChapter(); if (!c) return;
       if (chapterSaveTimer) clearTimeout(chapterSaveTimer);
