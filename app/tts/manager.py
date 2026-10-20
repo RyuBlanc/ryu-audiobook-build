@@ -59,6 +59,7 @@ class GenerationManager:
         opening_cue_path: Path | None = None,
         page_turn_cue_path: Path | None = None,
         ending_cue_path: Path | None = None,
+        chapter_bgm_overrides: dict[str, dict] | None = None,
     ) -> None:
         self.provider = provider
         self.voice = voice
@@ -93,6 +94,7 @@ class GenerationManager:
         self.opening_cue_path = Path(opening_cue_path) if opening_cue_path else None
         self.page_turn_cue_path = Path(page_turn_cue_path) if page_turn_cue_path else None
         self.ending_cue_path = Path(ending_cue_path) if ending_cue_path else None
+        self.chapter_bgm_overrides = dict(chapter_bgm_overrides or {})
         self.cancel_event = Event()
         self.pause_event = Event()
         self._thread: Thread | None = None
@@ -338,6 +340,7 @@ class GenerationManager:
                     opening_cue_path=self.opening_cue_path,
                     page_turn_cue_path=self.page_turn_cue_path,
                     ending_cue_path=self.ending_cue_path,
+                    chapter_bgm_overrides=self.chapter_bgm_overrides,
                 )
                 self._emit(len(self.chapters), len(self.chapters), 1, "m4b-complete")
                 # Only delete intermediate files after the final M4B has been
