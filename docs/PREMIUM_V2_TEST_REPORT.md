@@ -1,51 +1,46 @@
 # Test Report — Premium V2 Integration
 
-**Status:** Phase 1 static audit only. No end-to-end or packaged-runtime pass is claimed.
+**Audit date:** 20 October 2026
+**Current source commit before Stage 1 audit commit:** `eca9cf1a8330e2dcfce697f66233a73740e25ae0`
 
-## Executed checks
+## Static checks performed for this audit
 
-- Read the full implementation specification.
-- Inspected both attached HTML files and both supplied screenshots.
-- Parsed HTML structure and controls.
-- Confirmed Premium V2 has 15 `data-page` destinations and matching page sections.
-- Counted approximately 387 interactive elements in Premium V2 and approximately 199 in the older HTML.
-- Checked initial DOM IDs for duplicates: none found in either supplied HTML.
-- Counted nine inline script blocks in Premium V2.
-- Static scan found no `fetch()` calls in those scripts, timer-driven demonstration functions, and browser storage use in some pronunciation/sound flows.
-- Inspected repository tree and key existing source files: `app/main.py`, `app/ui/workflow.py`, project/state/parser, TTS manager and voice profile, build workflow, requirements and existing UI acceptance tests.
-
-## Results
-
-| Test | Result | Evidence / next action |
+| Check | Result | Evidence |
 |---|---|---|
-| HTML parse / destination inventory | Pass | 15 destinations found in Premium V2 |
-| Initial duplicate-ID scan | Pass | No duplicate IDs found |
-| Demo/backend integration audit | Needs implementation | Timers and browser storage remain in source HTML |
-| Existing backend function inventory | Partial pass | Service candidates mapped in `PREMIUM_V2_SCREEN_FUNCTION_MAP.md` |
-| Embedded frontend host | Not run | Add WebEngine/WebChannel host using existing PySide6 architecture |
-| Control-to-backend bridge | Not run | Implement typed commands/events and integration tests |
-| SQLite migration/recovery | Not run | Implement versioned schema, backup and restart tests |
-| Visual parity at required sizes | Not run | Capture reference/app comparisons at 1920x1080, 1366x768, 1280x720, tablet and supported mobile |
-| Full 20-step functional acceptance | Not run | Execute on Windows with a real book and installed provider |
-| Installer/portable build with Premium V2 | Not run | CI build and inspect artifact after frontend is packaged |
+| Approved HTML fingerprint | Pass | Local file is 1,436,954 bytes, SHA-256 `e70f630d99e75f07fdd704bb1931910dd972795390ae0af0d29b07b9118abf95`; computed Git blob SHA matches repository frontend blob `0da8d4a60c69530325fff9af7e516d251dc442cd`. |
+| Page inventory | Pass | Exactly 15 `section.page` screens: dashboard, library, import, chapters, voices, characters, pronunciation, sound, generate, player, history, models, performance, settings, help. |
+| Static controls | Pass as inventory only | 384 buttons/inputs/selects/textareas; no duplicate IDs among 279 initial IDs. Count is not an interactive-coverage result. |
+| Prototype/demo residue scan | Gap confirmed | Inline HTML contains timer/demo functions and `localStorage` usage. Every visible action must be checked against the adapter and host. |
+| Bridge/command inventory | Gap confirmed / partially connected | 61 host dispatcher handlers and 54 distinct literal adapter bridge-call names; some UI functions are still guarded or prototype-only. |
+| Capability-map parity | Small defect corrected in this commit | `chapter.split` handler and adapter call existed but the capability map omitted it; the map and contract test are updated. |
+| Python unit test suite in this environment | Not run locally | Repository source was inspected through connected GitHub source tools; the prior Windows CI run is the available full test evidence. |
 
-## Release-blocking acceptance
+## Latest verified CI run before this audit commit
 
-Do not mark release complete until the 20-step workflow in the user specification passes with no hard-coded demo data, all project/job/playback state survives restart, generated output is validated and playable, and logs/backup can be exported.
+- Run: [#731 — Build Windows App](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39397963882)
+- Commit: `eca9cf1a8330e2dcfce697f66233a73740e25ae0`
+- Result: completed successfully.
+- Tests: `Ran 308 tests in 34.431s`.
+- Windows packaging: installer creation and portable application packaging/artifact upload succeeded.
+- Installer artifact: [Ryu-Audiobook-Installer-731](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39397963882/artifacts/12253986738).
+- Portable artifact: [Ryu-Audiobook-Portable-731](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39397963882/artifacts/12254815829).
+- No GitHub Release publication is claimed.
 
-## Additional integration code added after the initial audit
-- Bundled the exact Premium V2 HTML under `assets/frontend/ryu_audiobook_premium_v2.html`.
-- Added an embedded `QWebEngineView` host and `QWebChannel` bridge.
-- The first connected operations are app info, local project listing and settings read. Unimplemented commands explicitly return `not_connected`.
-- Dashboard/library counts and project cards are now refreshed from `project.list`; actions not yet implemented are disabled and labeled as pending.
-- Added `tests/test_premium_v2_integration_contract.py` for the 15-destination HTML, host, bridge capabilities and packaging contract.
+The Stage 1 audit commit changes bridge capability advertisement/tests and documentation, so this CI result must not be represented as testing those new edits. The workflow triggered by the new commit must be inspected before claiming the updated branch passes.
 
-**Important:** The report above records the original audit snapshot. The latest follow-up adds automated contract assertions for sanitized diagnostic export; CI and packaged Windows behavior must still be observed before claiming acceptance.
+## Outstanding acceptance
 
-## 2026-10-20 follow-up — diagnostics export
+| Test | Result | Next action |
+|---|---|---|
+| Embedded WebEngine startup and navigation | Not manually accepted | Launch the exact new package on Windows and visit all 15 pages. |
+| Full control-to-handler coverage | Incomplete | Finish and maintain the control matrix in `PREMIUM_V2_SCREEN_FUNCTION_MAP.md`; guard all demo-only controls. |
+| Import/extraction and chapter boundaries | Not end-to-end accepted | Run supported-format fixtures and long-book tests; preserve story punctuation and manual edits. |
+| Saved voice/profile and exact preview duration | Not end-to-end accepted | Inspect actual preview request, generated duration, audio and playback for saved-profile selection. |
+| Cast assignments and production routing | Partial | Persist speaker-line assignments and verify the chosen character voice is used in synthesis. |
+| Pause/resume/retry/checkpoint and restart recovery | Not fully accepted | Exercise real jobs, verify reused chunks and independent history. |
+| Output validation and player | Not end-to-end accepted | Verify actual audio stream, duration, chapters, metadata, cover and in-app playback. |
+| Models/performance/settings security | Partial/unavailable | Verify connected operations and honest disabled behavior; do not invent measurements or store secrets in plaintext. |
+| Visual comparison at target resolutions | Not run | Compare exact source and packaged app at 1920×1080, 1366×768, 1280×720 and supported narrower widths. |
+| Manual install/uninstall | Not run | Complete only after implementation gates and retain user data unless explicit deletion was chosen. |
 
-- Connected Settings → Diagnostics → Export logs to the allow-listed `diagnostics.export_logs` backend command.
-- Added a real Save dialog, bounded collection of recent local `.log` files, a recent background-job summary, atomic report writing, and sanitization for common credential patterns, bearer tokens, API-key-like strings, email addresses, and the current user home path.
-- Canceling the dialog does not create a file. The success message reports the destination and actual number of log files included.
-- Added regression assertions for command registration, capability advertisement, sanitization, and the frontend call.
-- **Not yet verified:** execution in Windows WebEngine, completeness of redaction against arbitrary third-party log formats, and full application acceptance.
+**Conclusion:** The current source and packaging have a successful automated baseline, but the application is not yet accepted as fully connected or bug-free. See `docs/STAGE_1_GAP_REGISTER.md` for prioritized closure criteria.

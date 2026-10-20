@@ -1,54 +1,53 @@
 # Screen-to-Function Map — Premium V2
 
-**Status:** Phase 1 audit baseline; not an implementation-complete claim.  
-**Visual source:** user attachment `Ryus_Audiobook_Premium_V2.html` (1,436,954 bytes; SHA-256 to be recorded during packaging).  
-**Functional source:** existing PySide6/Python application in this repository.  
-**Previous references:** `docs/prototypes/Ryus_Audiobook_Dragon_Studio_Premium_Final.html` and `docs/prototypes/Ryus_Audiobook_Voice_Studio_Fixed_All_Steps.html` are historical references, not substitutes for Premium V2.
+**Audit snapshot:** 20 October 2026
+**Audited source commit:** `eca9cf1a8330e2dcfce697f66233a73740e25ae0` on `fix/import-qa-speaker-hover-hardware`
+**Visual authority:** `assets/frontend/ryu_audiobook_premium_v2.html`
+**User-supplied visual source fingerprint:** 1,436,954 bytes; SHA-256 `e70f630d99e75f07fdd704bb1931910dd972795390ae0af0d29b07b9118abf95`; Git blob SHA `0da8d4a60c69530325fff9af7e516d251dc442cd`, matching the file in the audited repository commit.
 
-## Audited shell
+## Inventory and status language
 
-The attached Premium V2 has 15 `data-page` destinations and 15 matching page sections: Dashboard, Library, Import Studio, Chapter Studio, Voice Studio, Character Studio, Pronunciation, Sound Design, Production Studio, Audiobooks, History, Models, Performance, Settings, and Help & Guide. The document contains approximately 387 interactive elements, nine inline script blocks, no duplicate IDs in the initial DOM scan, and embedded assets. The older attached HTML has 14 destinations and about 199 interactive elements. Do not silently drop Help & Guide or newer controls.
+The approved HTML contains 15 `section.page` screens, 15 unique navigation destinations, 384 form/button controls (291 buttons, 48 inputs, 40 selects, 5 textareas), 279 unique DOM IDs, and no duplicate IDs in the initial static DOM. The direct `data-go` navigation targets cover 14 destinations; the Help page itself is reachable through the navigation map. These are static inventory counts, not proof that every control works.
 
-## Function map
+- **Connected in source:** a real adapter call and host handler exist. Runtime acceptance may still be outstanding.
+- **Partial:** some data/actions are connected but required controls/state paths are missing or legacy demo handlers remain.
+- **Unavailable / explicitly guarded:** the UI or capability map truthfully reports the operation as unsupported.
+- **Prototype-only risk:** static demo content, timers, browser storage, or a legacy handler remains in the supplied HTML path.
+- **Unverified:** not proven by target-Windows, real-book, real-audio end-to-end acceptance.
 
-| Screen | HTML anchor / important controls | Existing backend candidates | Integration / acceptance requirement |
-|---|---|---|---|
-| Dashboard | `#dashboard`, Continue project, View job, Pause, Import Book | `app/ui/dashboard_page.py`, `app/core/project.py`, `app/core/state.py`, job/generation modules | All metrics from persisted projects/jobs; actions navigate to the selected project or real job. Remove fixed demo percentages. |
-| Library | `#library`, search, All/Active/Completed/Attention, Continue/Listen/Review/Open | `app/ui/library.py`, `app/core/project.py`, `app/core/paths.py` | Persisted library; search/filter/sort, project lifecycle actions, confirmed destructive actions and real job badges. |
-| Import Studio | `#import`, `#fileInput`, `#dropzone`, Browse files, import report | `app/ui/import_page.py`, `app/documents/parser.py`, `app/documents/importer.py`, `app/chapters/detector.py` | Validate actual supported formats; preserve source; extraction/chapter/language analysis; durable job for long operations; retry and truthful errors. |
-| Chapter Studio | `#chapters`, `#chapterEditor`, `#saveChapter`, split/merge/search/cleanup | `app/ui/chapter_editor.py`, `app/chapters/editor.py`, `app/chapters/detector.py`, `app/tts/narration.py` | Project-backed edit, autosave, undo/redo, chapter operations, scans and previews; no fake save state. |
-| Voice Studio | `#voices`, `#voiceWorkspace`, profile steps, provider/model controls, preview/assign/save | `app/ui/voice_page.py`, `app/tts/voice_profile.py`, `app/tts/profile_provider.py`, `app/tts/providers/*`, `app/tts/model_registry.py` | Actual installed/available provider state, real previews, saved profiles, assignment persistence, secure credentials, model-missing recovery. |
-| Character Studio | `#characters`, character library, analysis, aliases, assign voice, edit/save | `app/ui/voice_cast_page.py`, `app/ui/character_review.py`, `app/ui/dialogue_assignment.py`, `app/ui/dialogue_manager.py`, `app/chapters/characters.py`, `app/chapters/dialogue.py` | Analyze real project text; persist characters/aliases/appearances/assignments; report unresolved voices; analysis as a real job. |
-| Pronunciation | `#pronunciation`, dictionary entries, voice test matrix, import/export | `app/tts/pronunciation_suggester.py`, `app/tts/narration.py`, `app/tts/voice_profile.py` | Persist book/series/global rules; actual saved profiles in test matrix; test results per profile; conflicts and affected audio tracked. Inventory indicates parts of the current HTML use browser storage and need backend replacement. |
-| Sound Design | `#sound`, track/effect imports, assignment, gain/fades, preview and manifest | `app/audio/sound_design.py`, `app/audio/preview_mixer.py`, `app/audio/story_events.py`, `app/ui/assembly_page.py` | Real asset files, validated assignments, persisted manifest, actual mix preview/loudness; long operations use shared jobs. |
-| Production Studio | `#generate`, preflight, preview, generate, pause/resume/cancel/retry | `app/ui/generation_page.py`, `app/tts/manager.py`, `app/tts/generator.py`, `app/tts/readiness.py`, `app/tts/resume.py`, `app/audio/assembler.py` | Real preflight and shared durable job states/checkpoints; no timer-based progress; validate final output and M4B chapters. |
-| Audiobooks player | `#player`, `#playerTimeline`, play/pause, chapter list, mini-player | `app/ui/audiobooks_page.py`, `app/audio/assembler.py`, `app/ui/workflow.py` | Load actual generated output; real duration/seek/chapter navigation/playback position; main and mini-player stay synchronized. |
-| History | `#history`, filters, open/retry/log/output | `app/ui/history_page.py`, generation manager/state/logging | Durable audit records independent of task-manager cleanup; real errors, timings, output refs and retry details. |
-| Models | `#models`, install/repair/uninstall/test | `app/ui/models_page.py`, `app/tts/model_registry.py`, provider runtimes and build/model helpers | Filesystem/registry-backed state, checksums, job-backed install/repair, block unsafe uninstall, show missing-model references. |
-| Performance | `#performance`, benchmark, device/memory/cache/diagnostics | `app/ui/hardware_page.py`, `app/hardware/detect.py`, `app/hardware/backend.py`, `app/tts/benchmark.py` | Measured values only; unsupported metrics shown unavailable; benchmark off UI thread; safe cache cleanup and diagnostics export. |
-| Settings | `#settings`, appearance, paths, audio, privacy, diagnostics, About/update log | `app/ui/settings_page.py`, `app/core/paths.py`, `app/core/state.py`, `app/main.py` | Persist settings, paths and preferences; secure credential store; diagnostics/integrity checks must run for real. |
-| Help & Guide | `#help`, workflow topics and guide actions | No dedicated page in the current listed `app/ui/` inventory; candidates are workflow and actual service docs | Implement guide content and links based on real app behavior. Do not fake diagnostic/help actions. |
+## Screen map
 
-## Cross-screen shell and popups
-
-| HTML feature | Existing implementation candidate | Required outcome |
+| Screen | Real backend/service path observed | Current status and required follow-up |
 |---|---|---|
-| Sidebar/header/workflow strip | `app/ui/workflow.py` currently owns the PySide6 desktop shell | Premium V2 is rendered as the frontend, not approximated by a second widget redesign. |
-| Background Jobs popover | `app/tts/manager.py` and durable job service (audit needed) | UI state comes from actual backend job records/events; pause/resume/cancel/retry are safe backend commands. |
-| Toasts, custom dialogs, dropdowns | HTML controls and modal markup | Preserve custom HTML presentation; connect every action; display errors as well as success. |
-| Search, filters, selection, popovers | HTML JavaScript and backend query commands | Preserve interaction and connect state; no browser-only source of truth. |
-| Themes, responsive layout, reduced motion | HTML CSS/JS | Do not restyle; verify widths 1920x1080, 1366x768, 1280x720, tablet and supported mobile. |
-| localStorage/sessionStorage | Inline HTML scripts 5–7 use browser storage | Migrate durable application data to backend persistence; only noncritical UI preferences may remain frontend-local if explicitly documented. |
+| Dashboard | `project.list`, `job.list`; `app/core/project.py`, `app/core/state.py`, job/generation services | **Partial.** Project/job refresh exists, but the source HTML still contains sample metrics, cards and job text. Verify every headline metric and Continue/View/Pause action is derived from the active project and real job ID. |
+| Audiobook Library | `project.list`, `project.open`, `project.get_active`; `app/core/project.py` | **Partial.** Project cards/search/filter refresh from local records. Standalone create, duplicate, archive and delete project commands are absent; import is the supported project-creation path. Validate card actions and filter/sort semantics with multiple real projects. |
+| Import Studio | `import.choose_file`, `import.start`; `app/documents/parser.py`, `app/chapters/detector.py` | **Connected in source; unverified.** File selection and background import are real. Verify file drag/drop, supported extension validation, extraction diagnostics, retry/cancel, metadata, duplicate import behavior and source preservation on Windows. |
+| Chapter Studio | `chapter.list`, `chapter.update`, `chapter.clean`, `chapter.add`, `chapter.delete`, `chapter.reorder`, `chapter.split`; `app/chapters/*`, `app/documents/parser.py` | **Partial.** Listing, editing and split handlers exist. Static scan does not prove all add/delete/reorder/clean controls use those commands. Merge, review state, skip/exclude, find/replace, undo/redo and re-detection-with-edit-preservation are not represented by complete bridge contracts. |
+| Voice Studio | `voice.list`, `voice.save`, `voice.delete`, `voice.import_reference`, `voice.select`, `voice.preview`; `app/tts/voice_profile.py`, `profile_provider.py`, `providers/*`, `preview.py` | **Partial.** Saved-profile and preview commands exist; preview accepts 10/20/30/45/60-second targets. Confirm the currently selected saved profile/provider/model/settings are the exact preview and generation inputs. Premium cloud candidate generation and secure credential entry remain unavailable. |
+| Character Studio | `character.list`, `character.analyze`, `character.assign`, `character.update`, `character.delete`, `character_library.*`; `app/chapters/characters.py`, `dialogue.py` | **Partial.** Book-level cast analysis and saved-character/voice operations exist. Per-line AI speaker suggestions and per-line speaker persistence are still prototype-only/guarded. Analysis confidence, aliases, appearances and narrator fallback require data-contract and real-book verification. |
+| Pronunciation Studio | `pronunciation.list`, `pronunciation.save`, `pronunciation.delete`, `pronunciation.analyze`, `voice.preview`; `app/tts/pronunciation_suggester.py`, narration/profile services | **Partial.** Book dictionary list/save/delete/analyze and single saved-profile preview are present. Test-selected/test-all voice matrix behavior, per-voice result persistence, import/export, conflict reporting and invalidation of previously generated audio are not complete backend operations. |
+| Sound Design Studio | `sound.catalog`, `sound.import`, `sound.assign`, `sound.save_manifest`, `sound.cues.get/save/clear`, `sound.chapter_bgm.get/save`, `sound.preview_book`; `app/audio/sound_design.py`, `preview_mixer.py`, `story_events.py`, `assembler.py` | **Partial to connected in source.** Asset discovery/import and book/chapter/cue persistence commands exist. Validate track playback, license metadata, missing-asset handling, fades/ducking, preview-vs-final parity and final assembly behavior. No source-scan claim establishes audio quality. |
+| Production Studio | `production.preview`, `production.generate_book`, `job.list/pause/resume/cancel`; `app/tts/manager.py`, `generator.py`, `readiness.py`, `resume.py`, `app/audio/assembler.py` | **Partial.** Generation and preview workers are real, and durable job records exist. A dedicated preflight/rebuild/retry command surface, complete stage-by-stage acceptance and interruption/resume verification remain open. Do not infer completion from a green build. |
+| Audiobooks Player | `player.get_active`, `system.open_output`; browser `Audio` playback/seek/speed controls in the adapter | **Partial.** Active output metadata and output-folder opening exist. Verify real-file playback and main/mini-player synchronization. Durable playback-position/bookmark persistence and full chapter-marker navigation are not evidenced by the current bridge. |
+| Generation History | `history.list` | **Partial.** History is currently projected from the same durable job dictionary/file, not a separate immutable audit table. It lacks complete dedicated get-log/retry/resume/export-output operations and must be tested independently from task-manager clearing. |
+| Models Center | `models.list`, `models.install`; `app/tts/model_registry.py`, model runtimes | **Partial.** Local model inventory and Qwen install job are connected. Per-model update/verify/repair/uninstall/default selection/test-generation actions intentionally report unavailable rather than fake success. Check-update/queue actions need contract verification. |
+| Performance Center | `performance.info` capability is `False`; `app/hardware/*`, `app/tts/benchmark.py` are existing backend candidates | **Unavailable/partial.** The screen must not invent CPU/GPU/VRAM. The HTML still contains a timer-style benchmark demo path; ensure it cannot report a fake benchmark completion. Real telemetry and benchmark wiring remain open. |
+| Settings | `settings.get`, `settings.save`, `diagnostics.check`, `diagnostics.export_logs` | **Partial.** Theme/effects/settings fields and a real save-dialog log export exist. Custom storage roots and secure provider-specific credentials are not connected; map each settings field to durable backend state and ensure unsupported actions explain why. |
+| Help & Guide | Static HTML guide and `data-go` navigation | **Navigation connected; behavior content is static.** The guide should reflect actual available features and clearly distinguish unavailable functionality. Quick-start/action prompts need smoke testing. |
 
-## HTML implementation risks found in initial static scan
+## Global shell and cross-screen actions
 
-- Inline script blocks contain `simulateImport` and timer-driven progress/render functions; replace demo behavior with backend job events.
-- No `fetch()` calls were found in the attached HTML scripts. Several features are local-only, not connected to the existing Python application.
-- Browser storage is used by some sound/pronunciation flows, which will not by itself meet the restart-safe shared-data requirement.
-- HTML has 15 destinations while previous desktop acceptance tests assert 14. Those tests must be revised to test the actual Premium V2 baseline without losing existing desktop-only functionality.
-- The current backend uses PySide6 widgets. The existing requirements do not list Qt WebEngine or a WebChannel bridge. A frontend-host integration must be added to the existing framework and packaged; it must not open an external browser or development server.
-- Static inspection is not visual/runtime acceptance. No popup-by-popup Windows run or end-to-end workflow has been claimed by this audit.
+| Feature | Observed behavior | Acceptance requirement |
+|---|---|---|
+| Navigation and workflow strip | HTML navigation uses `data-page`/`data-go`; 15 page sections are present | Exercise every destination and repeat navigation with an open project; no unsaved editor state may be lost. |
+| Backend adapter | `assets/frontend/premium_v2_backend_adapter.js` wraps the allow-listed `window.ryuBackend.invoke` bridge and uses null-safe DOM access | Build a complete control-to-call inventory, not just a screen list; ensure legacy target/bubble click handlers cannot also fire and simulate success. |
+| Background Jobs popover | `job.list` refresh is scheduled at 1.5-second intervals; pause/resume/cancel/clear-completed handlers exist | Confirm state comes from worker/job records; test actual job controls, errors, restart recovery and count updates. Polling is not equivalent to event streaming. |
+| Diagnostics export | `diagnostics.export_logs` uses a save dialog, bounded log inclusion, atomic report writing and best-effort redaction | Verify Windows behavior and inspect exports for leakage; redaction is not a complete security guarantee. |
 
-## Phase exit criteria
+## Known static mismatch
 
-Phase 1 exits only after the new HTML is stored as the packaged app's authoritative frontend, each control has a mapped backend action or a truthful unavailable state, shared persistence design is implemented, and a runnable integration test covers the bridge. Visual parity and full end-to-end tests remain separate release gates.
+`app/ui/premium_v2_host.py` registers `chapter.split` and the adapter invokes it, but the capability map did not advertise it. Stage 1 includes the correction and regression assertion so the UI capability contract agrees with the actual handler.
+
+## Acceptance boundary
+
+This map is a source inspection result. It does not certify all screens or actions as manually accepted. The current known CI result is Run #731 for commit `eca9cf1a8330e2dcfce697f66233a73740e25ae0`: 308 automated tests passed and Windows installer/portable packaging completed. Target-Windows interactive acceptance remains pending.

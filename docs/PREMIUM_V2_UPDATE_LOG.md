@@ -1,46 +1,28 @@
 # Update Log — Premium V2 Integration
 
-## 2026-10-19 — Phase 1 audit baseline
+## 2026-10-20 — Stage 1 gap audit and function mapping
 
-### Added
-- Screen-to-function mapping for all 15 Premium V2 destinations.
-- Typed backend bridge command/event contract covering projects, import, chapters, voices, characters, pronunciation, sound, production/jobs, player, history, models, performance, settings and help.
-- Target local SQLite schema and data-safety constraints.
-- Known-limitations register distinguishing inspected facts from unverified behavior.
+### Verified baseline
+- Audited branch `fix/import-qa-speaker-hover-hardware`, open PR #15, head commit `eca9cf1a8330e2dcfce697f66233a73740e25ae0`.
+- Verified GitHub Actions Run #731 completed successfully on that commit: 308 automated tests reported passing and installer/portable artifacts uploaded.
+- Verified the user-supplied Premium V2 HTML matches the Git blob of `assets/frontend/ryu_audiobook_premium_v2.html` at the audited commit by recomputing the Git blob SHA.
+- Static HTML inventory: 15 page sections, 384 form/button controls and no duplicate initial DOM IDs.
 
-### Inspection findings
-- Latest attached HTML: 1,436,954 bytes; 15 destinations; approximately 387 interactive elements; nine inline scripts; no duplicate IDs found in initial DOM scan.
-- Earlier attached HTML: 873,127 bytes; 14 destinations; approximately 199 interactive elements.
-- Existing app is Python/PySide6 and has reusable service candidates across import, TTS, character/dialogue analysis, sound design, assembly, hardware, model management and existing pages.
-- Premium V2 still contains browser-side demonstration behavior and localStorage usage; those cannot remain authoritative for application data/jobs.
+### Changes made
+- Reconciled the screen map and backend API map against the real adapter/host instead of treating the intended bridge contract as implemented.
+- Added `docs/STAGE_1_GAP_REGISTER.md` with priority, evidence, closure criteria and owning roadmap stage.
+- Updated the integration test report, database-schema status, update log and `KNOWN_LIMITATIONS.md` to distinguish source facts, prior CI evidence and pending Windows manual acceptance.
+- Fixed capability-map drift by advertising `chapter.split` as available because its allow-listed host handler and adapter call already exist; added a regression assertion.
 
-### Not yet completed
-- Premium V2 embedded in the packaged desktop host.
-- Backend bridge implementation and all control connections.
-- SQLite migration and durable job/event service.
-- Visual parity tests and full Windows end-to-end acceptance.
-- Installer artifact built and runtime-verified with Premium V2.
-
-No unsupported success claims are made in this update log.
-
-### Embedded frontend implementation started
-- Added the exact Premium V2 HTML asset at `assets/frontend/ryu_audiobook_premium_v2.html`.
-- Added `app/ui/premium_v2_host.py`, a local Qt WebEngine host and allow-listed JSON bridge.
-- The current bridge has real app-info, local-project-list and settings-read commands; unsupported commands return an explicit `not_connected` error instead of pretending to succeed.
-- The desktop entry point selects the embedded HTML when the bundled asset exists; the historical widget shell remains a fallback for source/build trees missing that asset.
-- Added a Premium V2 integration-contract test file and WebEngine packaging hooks/dependencies.
-- Connected the dashboard/library's initial project listing and headline counts to persisted local project records. Project opening and job operations are explicitly disabled until their commands are connected.
-
-### Current gate
-This is a staged integration, not a complete app. The full 20-step functional acceptance, complete screen wiring, durable jobs/SQLite migration, visual comparison and Windows runtime smoke are still open.
-
-## 2026-10-20 — Stage 8.2.12 implementation follow-up
-
-### Connected
-- Replaced the Settings → Diagnostics “Export logs” placeholder with the real allow-listed `diagnostics.export_logs` bridge command.
-- Added a native save dialog, bounded log collection, a background-job diagnostic summary, atomic output writing, and redaction for common credential/token patterns, API-key-like strings, email addresses, and the current user home path.
-- Added regression assertions for the bridge handler, capability map, sanitizer, and frontend invocation.
+### Confirmed limitations kept explicit
+- Project creation command is unavailable outside the import flow.
+- Hardware telemetry is not connected; performance values must remain unavailable/unmeasured.
+- Per-line AI speaker suggestion/assignment is not persisted.
+- Secure provider-specific credential storage and Premium cloud voice candidate endpoint remain unavailable.
+- Custom storage roots, bulk pronunciation test result persistence, complete per-model actions, SQLite migrations and durable playback-position persistence remain open.
+- Job rows persist to JSON and unfinished rows are marked recoverable/failed after restart; `history.list` currently reflects job records rather than an independent history service.
 
 ### Acceptance state
-- This is a targeted gap closure, not a declaration that all Premium V2 controls are complete.
-- CI must pass after this commit. Packaged Windows execution, redaction review, visual parity, complete control mapping, and end-to-end acceptance remain open until verified.
+- This stage is an audit, mapping and capability-contract correction, not a claim of complete feature parity.
+- The new audit commit's CI run must be checked separately from Run #731.
+- The full Windows end-to-end workflow and visual comparison remain pending.

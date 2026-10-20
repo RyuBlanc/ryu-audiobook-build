@@ -1,53 +1,68 @@
 # Backend API Map — Premium V2
 
-**Status:** Audit contract, Phase 1. Commands below describe the intended typed bridge; they are not represented as already implemented. All mutations must validate inputs and persist before returning success.
+**Audit snapshot:** 20 October 2026
+**Audited source commit:** `eca9cf1a8330e2dcfce697f66233a73740e25ae0`
+**Host:** PySide6/Qt WebEngine + QWebChannel, `app/ui/premium_v2_host.py`
+**Adapter:** `assets/frontend/premium_v2_backend_adapter.js`
 
-## Bridge contract
+## Current bridge contract
 
-Use the existing PySide6/Python runtime and embed the supplied HTML in the desktop process (Qt WebEngine + QWebChannel or an equivalent supported local bridge). The renderer must not invoke arbitrary shell commands. Bridge methods should return structured results and emit real job/state events. Keep custom HTML dialogs and controls; native OS dialogs are permitted only when the HTML has no equivalent and the design spec allows them.
+The dispatcher accepts an allow-listed command name and JSON object payload. Successful calls return `{success: true, data: ...}`; failures return `{success: false, error: {code, message}}`. Unknown commands log a warning and return `not_connected`. The renderer does not receive an arbitrary shell-execution command.
 
-Common response shape:
-- success: boolean
-- data: object or array
-- error: stable code, user-safe message, optional retryable flag
-- request_id: correlation ID
+The current host registers **61 command handlers**. Static adapter inspection found **54 distinct literal `call('command.name')` names**; other actions use delegated handlers/bootstrap or are not yet mapped. These counts are inventories, not acceptance counts.
 
-Common events:
-- `state.changed`
-- `job.created`, `job.updated`, `job.completed`, `job.failed`
-- `project.opened`, `project.updated`
-- `playback.updated`
-- `diagnostics.updated`
+### Registered command inventory
 
-## Command inventory
+| Domain | Registered commands and current status |
+|---|---|
+| Application | `app.get_info` → `_app_info` (connected); `app.get_capabilities` → `_capabilities` (connected). |
+| Project/library | `project.list`, `project.open`, `project.get_active`, `project.rename` have handlers. `project.create` is explicitly unavailable and is not registered; the supported creation path is import. Duplicate/archive/delete/export/backup-restore are not implemented as bridge commands. |
+| Import | `import.choose_file`, `import.start` have real handlers; source parsing/chapter detection use existing Python services. Dedicated validate/report/retry commands are not registered. |
+| Chapters | `chapter.list`, `chapter.update`, `chapter.clean`, `chapter.add`, `chapter.delete`, `chapter.reorder`, `chapter.split` have handlers. `chapter.split` is now explicitly present in the capability map. Merge/re-detect/review-state/skip/undo/redo/find-replace/preview commands are not registered as separate operations. |
+| Voices | `voice.list`, `voice.save`, `voice.delete`, `voice.import_reference`, `voice.select`, `voice.preview` have handlers. Provider readiness, secure credential management and Premium cloud candidate-generation commands are absent/unavailable. |
+| Character cast/library | `character.list`, `character.analyze`, `character.assign`, `character.update`, `character.delete`, `character_library.list`, `character_library.save`, `character_library.delete`, `character_library.import` have handlers. Per-line speaker assignments and the test/merge/validation operations in the full specification are not persisted by this bridge. |
+| Pronunciation | `pronunciation.list`, `pronunciation.save`, `pronunciation.delete`, `pronunciation.analyze` have handlers. There are no registered bulk voice-test matrix, per-profile test-result persistence, import/export or conflict/invalidation commands. |
+| Production/preview | `production.generate_book`, `production.preview`, `sound.preview_book` have handlers. There are no separate registered `production.preflight`, chapter-only generation, package-only rebuild or chapter retry commands in this bridge surface. |
+| Jobs | `job.list`, `job.pause`, `job.resume`, `job.cancel`, `job.clear_completed` have handlers. Retry, set priority, pause all, resume all and dependency-management commands are not registered as independent bridge commands. |
+| History/player | `history.list`, `player.get_active`, `system.open_output` have handlers. History log-detail/export/retry/resume operations and backend playback-position/bookmark commands are not registered. HTML audio controls handle transport, but durable position persistence is not evidenced. |
+| Models/performance | `models.list`, `models.install` are registered; unsupported per-model update/verify/repair/uninstall actions are guarded in the adapter. `performance.info` has a handler but is truthfully advertised with capability `False`; live telemetry remains unavailable. |
+| Settings/diagnostics | `settings.get`, `settings.save`, `diagnostics.check`, `diagnostics.export_logs` have handlers. Custom storage-root selection and secure provider credential actions are not connected. Diagnostic export redaction is best-effort. |
+| Sound design | `sound.catalog`, `sound.import`, `sound.assign`, `sound.save_manifest`, `sound.cues.get`, `sound.cues.save`, `sound.cues.clear`, `sound.chapter_bgm.get`, `sound.chapter_bgm.save` have handlers. Runtime mix/output checks remain acceptance work. |
 
-| Domain | Commands to expose | Existing implementation candidates |
+## Capability map
+
+| Command | Capability state | Evidence / action |
 |---|---|---|
-| App / shell | `app.get_info`, `app.get_capabilities`, `app.navigate`, `app.get_update_log` | `app/main.py`, `app/version.py`, `app/ui/workflow.py` |
-| Project | `project.list`, `project.create`, `project.open`, `project.update_metadata`, `project.duplicate`, `project.archive`, `project.delete`, `project.export`, `project.import_backup`, `project.get_active` | `app/core/project.py`, `app/core/paths.py`, `app/core/state.py`, `app/ui/library.py` |
-| Import | `import.validate`, `import.start`, `import.get_report`, `import.retry` | `app/ui/import_page.py`, `app/documents/parser.py`, `app/documents/importer.py`, `app/chapters/detector.py` |
-| Chapters | `chapter.list`, `chapter.update`, `chapter.rename`, `chapter.reorder`, `chapter.add`, `chapter.split`, `chapter.merge`, `chapter.delete`, `chapter.scan_dialogue`, `chapter.clean_text`, `chapter.preview` | `app/chapters/*`, `app/ui/chapter_editor.py` |
-| Voices | `voice.list_profiles`, `voice.list_available`, `voice.save_profile`, `voice.delete_profile`, `voice.preview`, `voice.assign_narrator`, `voice.provider_status`, `voice.get_model_status` | `app/tts/voice_profile.py`, `app/tts/profile_provider.py`, `app/tts/providers/*`, `app/ui/voice_page.py` |
-| Characters | `character.analyze`, `character.list`, `character.save`, `character.merge`, `character.assign_voice`, `character.validate_assignments`, `character.preview_dialogue` | `app/chapters/characters.py`, `app/chapters/dialogue.py`, `app/ui/character_review.py`, `app/ui/dialogue_assignment.py`, `app/ui/dialogue_manager.py` |
-| Pronunciation | `pronunciation.list`, `pronunciation.add`, `pronunciation.update`, `pronunciation.delete`, `pronunciation.analyze`, `pronunciation.test_voice`, `pronunciation.test_selected_voices`, `pronunciation.test_all_saved_voices`, `pronunciation.import`, `pronunciation.export` | `app/tts/pronunciation_suggester.py`, narration/profile modules |
-| Sound | `sound.assets.list`, `sound.assets.import`, `sound.assets.delete`, `sound.manifest.get`, `sound.manifest.save`, `sound.validate`, `sound.preview_mix`, `sound.analyze_loudness` | `app/audio/sound_design.py`, `app/audio/preview_mixer.py`, `app/audio/story_events.py` |
-| Production/jobs | `production.preflight`, `production.preview`, `production.generate_chapter`, `production.generate_book`, `production.rebuild_package`, `job.list`, `job.pause`, `job.resume`, `job.cancel`, `job.retry`, `job.set_priority`, `job.pause_all`, `job.resume_all` | `app/tts/manager.py`, `app/tts/generator.py`, `app/tts/readiness.py`, `app/tts/resume.py`, `app/audio/assembler.py` |
-| Player | `player.open_output`, `player.play`, `player.pause`, `player.seek`, `player.next_chapter`, `player.previous_chapter`, `player.set_volume`, `player.set_speed`, `player.bookmark`, `player.get_position` | `app/ui/audiobooks_page.py`, audio assembly metadata |
-| History | `history.list`, `history.get`, `history.open_log`, `history.retry`, `history.resume`, `history.open_output`, `history.export_diagnostics` | `app/ui/history_page.py`, job service and logs |
-| Models | `model.list`, `model.install`, `model.pause_install`, `model.resume_install`, `model.verify`, `model.repair`, `model.uninstall`, `model.set_default`, `model.test` | `app/tts/model_registry.py`, model/runtime modules, `app/ui/models_page.py` |
-| Performance | `performance.snapshot`, `performance.benchmark`, `performance.set_device`, `performance.set_limits`, `performance.clear_cache`, `performance.clear_temp_audio`, `diagnostics.export` | `app/hardware/*`, `app/tts/benchmark.py`, `app/ui/hardware_page.py` |
-| Settings | `settings.get`, `settings.update`, `settings.choose_folder`, `settings.export_logs`, `diagnostics.workflow_integrity`, `diagnostics.database_integrity`, `diagnostics.model_integrity` | `app/ui/settings_page.py`, `app/core/paths.py`, `app/core/state.py` |
-| Help | `help.get_topic`, `help.open_workflow`, `help.run_integrity_check` | Must be added or mapped to actual help content. |
+| `project.create` | `False` | No dispatcher handler; create/open through the import flow instead. |
+| `performance.info` | `False` | Handler exists to return unavailable/unmeasured telemetry; no fake CPU/GPU/VRAM values should be surfaced. |
+| `chapter.split` | `True` after Stage 1 correction | Dispatcher handler and adapter call already existed; missing capability flag is corrected and covered by a contract assertion. |
+| Most other registered commands in `_capabilities` | `True` | Means the host advertises the operation as implemented, not that every related UI control or Windows runtime path has passed acceptance. |
 
-## Bridge safety rules
+## State and persistence observed in source
 
-1. File paths are selected/validated in Python; renderer-supplied paths are normalized and checked against allowed roots.
-2. Imported text is data only and never executed as code or commands.
-3. Voice cloning/design actions require explicit authorization acknowledgement and record the consent metadata required by the existing backend.
-4. Provider commands are exposed only when the actual runtime reports the provider available.
-5. Job progress is emitted from real backend callbacks/checkpoints; no front-end timer may claim percentage completion.
-6. The UI receives errors, unsupported capabilities, missing models and offline provider status honestly.
-7. Secrets are never returned to JavaScript or written to project JSON.
-8. Mutating commands are idempotent where possible and use request IDs to avoid duplicate work.
-9. Renderer/backend version and command schema are checked at startup; incompatible bridge versions fail visibly rather than silently.
-10. No command is marked complete until a backend implementation and integration test exist.
+- Project records and chapter content are managed through `app/core/project.py`; editor saves update the project and its state JSON.
+- Active project selection is held in `QSettings` under `project/active_folder`.
+- User settings are read/written by the settings bridge and `QSettings`; do not assume every visible field is wired until mapped individually.
+- Premium V2 job records are stored in `settings_root()/premium_v2_jobs.json` using temporary-file replacement. On startup, jobs recorded as queued/running/pause-requested/cancel-requested/retrying are changed to a recoverable interrupted/failed state. The worker does not simply continue running after process restart.
+- `history.list` currently returns the same in-memory/durable job rows used by the job manager. Clearing completed manager entries marks them hidden, so the history screen is not yet an independently persisted audit subsystem.
+- The repository documents SQLite as a target schema; this audit did not find a deployed SQLite migration/store for Premium V2 project, job and history state.
+- The adapter polls backend jobs every 1.5 seconds. This is backend polling, not a durable event stream.
+
+## Error and safety requirements
+
+1. Validate payload types, lengths and file paths in Python; never trust imported book text as executable content.
+2. Keep secrets out of JavaScript, project JSON and ordinary settings. Secure provider-specific credential storage remains unimplemented.
+3. Report missing providers/models and unsupported actions without simulated success.
+4. Report progress only from backend generation/job data; validate output before showing final completion.
+5. Keep capability flags synchronized with dispatcher handlers and add an integration assertion for command/capability parity.
+6. Keep task-manager clearing separate from durable history retention as a dedicated history service is implemented.
+7. Add request IDs/idempotency, complete schema/error contracts and state-change events where the architecture needs them; these are not complete in the current bridge.
+
+## Immediate implementation order
+
+1. Finish the stage-one screen/control/handler matrix and remove capability drift.
+2. Eliminate legacy demo code paths that can still report success or overwrite backend-fed areas.
+3. Close Stage 2 import/cleanup/chapter operations and persist review/skip state.
+4. Complete Stage 3 speaker assignments and Stage 4 profile/preview consistency.
+5. Complete shared job recovery/history, model actions, player state and settings persistence in the relevant roadmap stages.
+6. Add an explicit integration test for each connected control and manual acceptance for operations that cannot be covered by unit tests.

@@ -55,6 +55,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('"project.open": True', self.host)
         self.assertIn('"chapter.list": True', self.host)
         self.assertIn('"chapter.update": True', self.host)
+        self.assertIn('"chapter.split": True', self.host)
         # New commands must point to real handlers; never preserve the old
         # "not connected" placeholders as release requirements.
         for command, handler in {

@@ -183,6 +183,7 @@ class PremiumV2Bridge(QObject):
             "project.get_active": True,
             "chapter.list": True,
             "chapter.update": True,
+            "chapter.split": True,
             "chapter.clean": True,
             "chapter.add": True,
             "chapter.delete": True,

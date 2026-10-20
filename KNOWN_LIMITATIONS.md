@@ -1,40 +1,48 @@
 # Known Limitations — Ryu's Audiobook Dragon Studio
 
-Last audited against branch `fix/import-qa-speaker-hover-hardware` at the Stage 8.2.11 / Run #724 candidate. This file describes actual gaps surfaced by the frontend adapter and backend capability map. It is not a claim that Windows manual acceptance has passed.
+**Audited:** 20 October 2026
+**Current code baseline:** `eca9cf1a8330e2dcfce697f66233a73740e25ae0` on `fix/import-qa-speaker-hover-hardware`
+**Open PR:** [#15](https://github.com/RyuBlanc/ryu-audiobook-build/pull/15), open and unmerged.
+
+This document records actual source-level limitations. A supported bridge handler does not imply all related UI controls have passed runtime acceptance.
 
 ## Application and integration limitations
 
 | Area | Current behavior | Acceptance implication |
 |---|---|---|
-| Project creation | The backend capability map reports `project.create` as unavailable. The supported workflow is to import a source book and create/open its local project through that path. | Do not advertise a standalone New Project action as connected until a real handler exists. |
-| Hardware telemetry | `performance.info` is unavailable. The Performance screen reports CPU telemetry and GPU/VRAM telemetry as unavailable/not measured rather than inventing values. | Live CPU/GPU/VRAM measurements remain unaccepted. |
-| Secure provider credentials | Credential management is not connected to a secure provider-specific credential store in this build. No API key is requested or saved by the guarded controls. | Do not enter or expect provider API keys to persist through these controls. |
-| Premium cloud voice candidates | Premium cloud candidate generation is not connected to a provider endpoint in this build. The guarded action does not generate mock candidates. | Use supported saved voice profiles and Generate Preview. |
-| Chapter review status | Review status is not yet supplied by the chapter backend. Selecting the Review filter reports this limitation and shows all chapters instead of inventing review flags. | Review-state filtering is not available until review state is persisted by the backend. |
-| Per-line AI speaker suggestions | Per-line AI speaker suggestions are still prototype-only. The current supported workflow assigns a saved character's voice through Character Studio. Dialogue-line speaker assignment is not persisted by the current backend. | Do not treat per-line speaker assignments as saved or production-ready. |
-| Custom storage roots | Custom project-library and audio-assets root selection is not implemented. | Projects and assets use the application's configured local storage roots. |
-| Sanitized log export | Settings → Diagnostics is connected to `diagnostics.export_logs`, with a save dialog, bounded log collection, and best-effort redaction. | Windows runtime behavior and redaction coverage for arbitrary third-party logs still require verification; inspect exports before sharing. |
-| Per-model actions | The model screen's per-model actions are not all connected to backend operations. The local Qwen Voice Studio install/repair action is connected to the real `models.install` job; other unsupported per-model actions must report an unavailable operation. | Do not treat unsupported per-model install/update/remove actions as successful. |
-| Review and capability reporting | The capability map marks supported bridge commands individually; unsupported commands return a truthful `not_connected` error. | A green build is not proof every visible action is available. |
+| Project creation | `project.create` is advertised as unavailable and has no dispatcher handler. The supported path is importing source material, which creates/opens a local project. | Do not describe a standalone New Project action as connected. |
+| Hardware telemetry | `performance.info` is marked unavailable. Do not invent CPU, GPU, VRAM or benchmark values. Legacy HTML benchmark behavior still requires protection from fake-success paths. | Live telemetry and benchmarking remain unaccepted. |
+| Secure provider credentials | Credential management is not connected to a secure provider-specific credential store. | Do not enter or expect API keys to persist through these controls. |
+| Premium cloud voice candidates | Premium cloud candidate generation is not connected to a provider endpoint. Guarded actions must not generate mock candidates. | Use only providers/profiles whose backend path is actually configured. |
+| Chapter review status | Review status is not yet supplied by the chapter backend. | Review filtering cannot be relied on until review state is persisted. |
+| Per-line AI speaker suggestions | Per-line AI speaker suggestions are still prototype-only. | Do not treat line suggestions as confirmed or saved speaker assignments. |
+| Dialogue-line speaker assignment | Dialogue-line speaker assignment is not persisted by the current backend. | Saved cast voice assignments are distinct from assigning a speaker to each dialogue line. |
+| Custom storage roots | Custom project-library and audio-assets root selection is not implemented. | Current roots remain the configured local storage locations. |
+| Per-model actions | The model screen's per-model update/verify/repair/uninstall/default-selection/test actions are not all connected to backend operations. Qwen install/repair uses the real `models.install` job; unsupported actions must remain guarded. | Do not treat unsupported model actions as successful. |
+| SQLite | `docs/PREMIUM_V2_DATABASE_SCHEMA.md` describes a target schema, not a deployed migration. Project data/state and Premium V2 job records currently use existing project/state files, QSettings and `premium_v2_jobs.json`. | Do not claim SQLite persistence or migrations are complete. |
+| Durable jobs/history | Job rows persist and unfinished rows are marked recoverable/failed on restart. `history.list` currently reads the same job rows, not a separate immutable history store. | Restart recovery, checkpoint reuse and history independence still require test coverage. |
+| Player state | Browser audio transport can operate on the selected output, but durable playback position/bookmarks and complete chapter-position recovery are not evidenced. | Verify seek, duration, chapter navigation and restart resume with real generated output. |
+| Prototype leftovers | The approved HTML still contains static example content, legacy demo renderers/timers and some `localStorage` usage. The adapter guards selected operations, not proof that all legacy code paths are gone. | Continue control-by-control mapping and regression tests; never report prototype state as production success. |
+| Sanitized log export | The implementation has a save dialog, bounded log collection, recent-job summary, atomic writing and best-effort redaction of common token/key/email/home-path patterns. | Redaction is not a complete security guarantee. Review actual export files before sharing them. |
 
-## What CI has verified for Run #724
+## CI evidence as of this audit
 
-- The Windows build workflow passed and produced both installer and portable artifacts.
-- The repository test suite reported 305 tests passing.
-- The frozen executable's startup smoke and offline synthesis self-test passed.
-- The live local Audiobook AI smoke test passed.
-- Bundled voice assets and critical modules were checked by the workflow.
+- GitHub Actions [Run #731](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39397963882) completed successfully for commit `eca9cf1a8330e2dcfce697f66233a73740e25ae0`.
+- The run log reports **308 tests passed** (`Ran 308 tests in 34.431s`) and the Windows installer and portable artifacts uploaded successfully.
+- Installer artifact: [Ryu-Audiobook-Installer-731](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39397963882/artifacts/12253986738).
+- Portable artifact: [Ryu-Audiobook-Portable-731](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39397963882/artifacts/12254815829).
+- The installer release-publication step was not run; no GitHub Release is claimed.
 
-## Acceptance still required on a real Windows machine
+## Windows acceptance still pending
 
 CI does not replace interactive Windows acceptance. The following remain pending until performed on the target machine and recorded:
 
-- Install and launch the installer build; separately launch the portable build.
-- Visit all 15 destinations and check that no navigation destination is missing or blocked.
-- Exercise import, chapter edit/split, voice preview, character assignment, pronunciation, sound design, generation, Player, History, Models, Performance, Settings, and Help.
-- Verify a real preview's selected voice and requested duration; generate and play a short audiobook and verify chapter order, actual duration, and output path.
-- Exercise pause, resume, cancel, retry, and recovery from a failed/offline provider.
-- Restart the application and verify project data and settings persist.
-- Record failures with screenshots/logs and rebuild only after fixing confirmed defects.
+- Install and launch both installer and portable builds.
+- Visit all 15 destinations and exercise real project import/edit, voice preview, character assignment, pronunciation, sound design, production, player, history, models, performance, settings and help actions.
+- Verify a real preview uses the selected saved profile and exact requested duration.
+- Generate a short real audiobook; validate chapter order, actual duration, output path, metadata/cover and playback.
+- Exercise pause, resume, cancel, retry and restart recovery with real jobs and installed/offline providers.
+- Verify project/settings/job state after restart and inspect diagnostics exports for data leakage.
+- Compare visual layout at 1920×1080, 1366×768, 1280×720 and resized/narrow supported windows.
 
-**Release rule:** Do not describe Stage 8.2.11 as fully accepted, or Stage 8.2.12 as complete, until these target-machine checks have actually passed.
+**Release gate:** Do not describe Stage 8.2.11 as fully accepted. The current source still requires the Windows manual acceptance above and the remaining items in `docs/STAGE_1_GAP_REGISTER.md`.
