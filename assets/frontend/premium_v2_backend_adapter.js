@@ -810,7 +810,7 @@
             await call('sound.save_manifest', {path:selectedSoundPath || '',enabled:Boolean(selectedSoundPath),volume:Number($('advancedMusicVolume')?.value || 18)/100});
             document.querySelector('[data-page="generate"]')?.click();
           } else if (soundButton.id === 'saveChapterBgm') {
-            throw new Error('Per-chapter BGM overrides are not connected yet. Use Set Book Default Track to save the supported book-wide setting.');
+            await refreshChapterBgm();
           } else if (soundButton.id === 'clearAllCues') {
             await call('sound.cues.clear');
             pendingCueSlot = null;
