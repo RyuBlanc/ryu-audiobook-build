@@ -1057,6 +1057,7 @@ class PremiumV2Bridge(QObject):
             opening_cue_path=Path(state["opening_cue_path"]) if state.get("opening_cue_path") and Path(state["opening_cue_path"]).is_file() else None,
             page_turn_cue_path=Path(state["page_turn_cue_path"]) if state.get("page_turn_cue_path") and Path(state["page_turn_cue_path"]).is_file() else None,
             ending_cue_path=Path(state["ending_cue_path"]) if state.get("ending_cue_path") and Path(state["ending_cue_path"]).is_file() else None,
+            scene_transition_cue_path=Path(state["scene_transition_cue_path"]) if state.get("scene_transition_cue_path") and Path(state["scene_transition_cue_path"]).is_file() else None,
             chapter_bgm_overrides=state.get("chapter_bgm_overrides") if isinstance(state.get("chapter_bgm_overrides"), dict) else {},
         )
         with self._jobs_lock:
@@ -1577,7 +1578,7 @@ class PremiumV2Bridge(QObject):
             }
         cues[slot] = selected_path
         state["sound_cues"] = cues
-        state["chapter_transition_sound"] = any(cues.get(key) for key in ("opening", "chapter", "closing"))
+        state["chapter_transition_sound"] = any(cues.get(key) for key in ("opening", "chapter", "scene", "closing"))
         # These three fields are already consumed by the audiobook assembler.
         if slot == "opening":
             state["opening_cue_path"] = selected_path
@@ -1592,7 +1593,7 @@ class PremiumV2Bridge(QObject):
         state["modified_at"] = self._now()
         save_state(project.folder, state)
         return {"saved": True, "slot": slot, "path": selected_path, "title": selected_title,
-                "generation_supported": slot != "scene"}
+                "generation_supported": True}
 
     def _sound_cues_clear(self, _payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
