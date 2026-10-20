@@ -120,7 +120,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "character.analyze", "character.assign", "character.update", "character.delete", "pronunciation.list",
             "pronunciation.save", "pronunciation.analyze", "production.preview",
             "production.generate_book", "player.get_active", "job.list", "job.pause", "job.resume",
-            "job.cancel", "settings.save", "sound.catalog", "sound.import", "sound.assign", "sound.save_manifest", "models.install",
+            "job.cancel", "settings.save", "sound.catalog", "sound.import", "sound.assign", "sound.save_manifest",
+            "sound.cues.get", "sound.cues.save", "sound.cues.clear", "sound.chapter_bgm.get", "sound.chapter_bgm.save", "models.install",
         ):
             self.assertIn(command, script)
         self.assertIn('adapter_path = frontend_path().with_name("premium_v2_backend_adapter.js")', self.host)
@@ -269,6 +270,23 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
     def test_preview_duration_setting_accepts_every_supported_target(self):
         self.assertIn('if key == "preview_seconds" and int(value) not in {10, 20, 30, 45, 60}:', self.host)
         self.assertIn('Preview duration must be 10, 20, 30, 45, or 60 seconds.', self.host)
+
+    def test_chapter_bgm_and_scene_cues_reach_final_assembly(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        assembler = (ROOT / "app" / "audio" / "assembler.py").read_text(encoding="utf-8")
+        manager = (ROOT / "app" / "tts" / "manager.py").read_text(encoding="utf-8")
+        self.assertIn('"sound.chapter_bgm.get": self._sound_chapter_bgm_get', self.host)
+        self.assertIn('"sound.chapter_bgm.save": self._sound_chapter_bgm_save', self.host)
+        self.assertIn('state["chapter_bgm_overrides"] = overrides', self.host)
+        self.assertIn('chapter_bgm_overrides=state.get("chapter_bgm_overrides")', self.host)
+        self.assertIn("call('sound.chapter_bgm.save'", adapter)
+        self.assertIn("function renderChapterBgm()", adapter)
+        self.assertIn("def _mix_chapter_bgm(", assembler)
+        self.assertIn("chapter_bgm_overrides: dict[str, dict] | None = None", assembler)
+        self.assertIn("mixed-chapter-background-audio", assembler)
+        self.assertIn("scene_transition_cue_path: Path | str | None = None", assembler)
+        self.assertIn("auto-real-scene-cue-", assembler)
+        self.assertIn("scene_transition_cue_path=self.scene_transition_cue_path", manager)
 
     def test_sound_cue_assignments_are_allowlisted_and_persisted(self):
         for command, method in (
