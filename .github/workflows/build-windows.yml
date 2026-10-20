@@ -487,7 +487,7 @@ jobs:
           path: installer/installer-output/Ryu's Audiobook Setup.exe
           if-no-files-found: error
           compression-level: 0
-          retention-days: 3
+          retention-days: 30
 
       - name: Upload portable Windows application
         uses: actions/upload-artifact@v4
@@ -496,7 +496,7 @@ jobs:
           path: dist/Ryu's Audiobook/
           if-no-files-found: error
           compression-level: 0
-          retention-days: 3
+          retention-days: 30
 
       - name: Remove older Windows build runs and artifacts
         if: success()
