@@ -26,3 +26,8 @@
 - This stage is an audit, mapping and capability-contract correction, not a claim of complete feature parity.
 - The new audit commit's CI run must be checked separately from Run #731.
 - The full Windows end-to-end workflow and visual comparison remain pending.
+### Stage 2 — Chapter cleaning integration
+- Routed Premium V2 Clean Text through the real `chapter.clean` bridge operation instead of browser-only whitespace substitutions.
+- Switched the host handler to the existing `clean_import_noise` service so explicit cleanup can remove known URL/watermark/report/page-number noise and reflow text.
+- Returned a `removed_count` and updated the status message to make cleanup transparent to the user.
+- Added/strengthened integration-contract assertions. Existing parser tests already cover common import-noise patterns; Windows end-to-end acceptance remains pending.

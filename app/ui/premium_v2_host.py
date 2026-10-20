@@ -25,7 +25,7 @@ from PySide6.QtGui import QDesktopServices
 
 from app.core.paths import app_root, audiobooks_root, ensure_roots, library_root, settings_root
 from app.core.project import create_project, list_projects
-from app.documents.parser import SUPPORTED_EXTENSIONS, clean_text, extract_text
+from app.documents.parser import SUPPORTED_EXTENSIONS, clean_import_noise, clean_text, extract_text
 from app.chapters.detector import detect_chapters
 from app.chapters.characters import analyze_book
 from app.tts.manager import GenerationManager
@@ -517,8 +517,8 @@ class PremiumV2Bridge(QObject):
         text_value = payload.get("text")
         if not isinstance(text_value, str):
             raise ValueError("Select chapter text before cleaning.")
-        cleaned = clean_text(text_value)
-        return {"text": cleaned, "changed": cleaned != text_value}
+        cleaned, removed = clean_import_noise(text_value)
+        return {"text": cleaned, "changed": cleaned != text_value, "removed_count": len(removed)}
 
     def _chapter_add(self, payload: dict[str, Any]) -> dict[str, Any]:
         from app.chapters.detector import Chapter

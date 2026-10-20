@@ -167,7 +167,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("typeof result.text!=='string'", adapter)
         self.assertIn("def _chapter_clean(self, payload: dict[str, Any])", host)
         self.assertIn('"chapter.clean": self._chapter_clean', host)
-        self.assertIn("clean_text(text_value)", host)
+        self.assertIn("clean_import_noise(text_value)", host)
+        self.assertIn('"removed_count": len(removed)', host)
 
     def test_chapter_split_is_persisted_and_connected_to_visible_control(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")

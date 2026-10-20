@@ -293,6 +293,16 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("preview_duration", source)
         self.assertIn("Qwen3-TTS  ·  VoiceDesign", source)
 
+    def test_premium_v2_chapter_cleaner_uses_import_noise_cleaner(self):
+        from app.documents.parser import clean_import_noise
+        raw = "Story continues.\\nReport\\nwww.asianovel.com\\n\\nAnother paragraph.\\n"
+        cleaned, removed = clean_import_noise(raw)
+        self.assertNotIn("Report", cleaned)
+        self.assertNotIn("www.asianovel.com", cleaned)
+        self.assertIn("Story continues.", cleaned)
+        self.assertIn("Another paragraph.", cleaned)
+        self.assertEqual(removed, ["Report", "www.asianovel.com"])
+
     def test_chapter_cleaner_detects_and_reflows_import_noise(self):
         from app.documents.parser import detect_repeated_book_noise, clean_import_noise, reflow_source_text
         raw = (
