@@ -9,6 +9,7 @@ import urllib.request
 from functools import lru_cache
 
 from app.core.paths import models_root
+from app.version import APP_VERSION
 
 # Qwen3-TTS currently publishes a stable Python 3.12 package/runtime path.
 # The official qwen-tts package is 0.1.1 and supports Python 3.12. We keep this
@@ -102,7 +103,7 @@ def _download_file(url: str, target: Path, progress=None) -> None:
             progress("Downloading the private Qwen runtime's Python 3.12 bootstrap…")
         request = urllib.request.Request(
             url,
-            headers={"User-Agent": "Ryu-Audiobook-QwenRuntime/0.3.7"},
+            headers={"User-Agent": f"Ryu-Audiobook-QwenRuntime/{APP_VERSION}"},
         )
         with urllib.request.urlopen(request, timeout=120) as response, temp.open("wb") as handle:
             total = int(response.headers.get("Content-Length", "0") or 0)

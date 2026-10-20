@@ -267,7 +267,8 @@ jobs:
           Write-Host '=== Verify application version ==='
           $env:PYTHONPATH = (Get-Location).Path
           $version = & $pythonExe -c "from app.version import full_version; print(full_version())"
-          $expected = 'v1.1.1'
+          $semanticVersion = & $pythonExe -c "from app.version import APP_VERSION; print(APP_VERSION)"
+          $expected = "v$semanticVersion"
           if (-not $version.StartsWith($expected) -or -not $version.EndsWith("Build $env:RYU_BUILD_NUMBER")) { throw "Unexpected application version: $version" }
           Write-Host "Application version verified: $version"
 
@@ -379,7 +380,9 @@ jobs:
           if (-not (Test-Path $exe)) { throw "Frozen EXE not found: $exe" }
           $info = (Get-Item $exe).VersionInfo
           Write-Host "EXE FileVersion=$($info.FileVersion) ProductVersion=$($info.ProductVersion)"
-          if (-not $info.ProductVersion.StartsWith('0.3.7.')) { throw "Unexpected frozen EXE product version: $($info.ProductVersion)" }
+          $semanticVersion = & $env:RYU_CI_PYTHON_EXE -c "from app.version import APP_VERSION; print(APP_VERSION)"
+          $expectedProductVersionPrefix = "$semanticVersion."
+          if (-not $info.ProductVersion.StartsWith($expectedProductVersionPrefix)) { throw "Expected frozen EXE product version to start with $expectedProductVersionPrefix but got $($info.ProductVersion)" }
 
           $marker = Join-Path $env:TEMP "RyuAudiobookFrozenSelfTest-$env:GITHUB_RUN_ID.ok"
           Remove-Item -Force $marker -ErrorAction SilentlyContinue
@@ -521,5 +524,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "v0.3.7-build-${{ github.run_number }}"
+          $semanticVersion = & $env:RYU_CI_PYTHON_EXE -c "from app.version import APP_VERSION; print(APP_VERSION)"
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($semanticVersion)) { throw "Could not determine application version for release tag." }
+          $tag = "v$semanticVersion-build-${{ github.run_number }}"
           gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, the Obsidian/Ember dragon-tech interface, global Reduce Motion preference, a local-first audio catalogue with 26 real starter BGM tracks across calm, fantasy, adventure, comedy, action, sci-fi, emotional, mystery, horror and slice-of-life moods, plus six real book opening/page-turn/closing sound cues. Add licensed tracks through Generate > Real BGM catalogue / Real audiobook cue files. Includes Qwen VoiceDesign preset isolation, audiobook AI smoke validation, Chatterbox runtime validation, frozen EXE checks and installer verification. Starter-track source and license notes are included beside the local audio library." --target $env:GITHUB_SHA
