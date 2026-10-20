@@ -380,7 +380,10 @@ jobs:
           if (-not (Test-Path $exe)) { throw "Frozen EXE not found: $exe" }
           $info = (Get-Item $exe).VersionInfo
           Write-Host "EXE FileVersion=$($info.FileVersion) ProductVersion=$($info.ProductVersion)"
-          $semanticVersion = & $env:RYU_CI_PYTHON_EXE -c "from app.version import APP_VERSION; print(APP_VERSION)"
+          $pythonExe = $env:RYU_CI_PYTHON_EXE
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or -not (Test-Path $pythonExe)) { throw "CI Python executable is unavailable for application version verification." }
+          $semanticVersion = & $pythonExe -c "from app.version import APP_VERSION; print(APP_VERSION)"
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($semanticVersion)) { throw "Could not determine application version from app.version." }
           $expectedProductVersionPrefix = "$semanticVersion."
           if (-not $info.ProductVersion.StartsWith($expectedProductVersionPrefix)) { throw "Expected frozen EXE product version to start with $expectedProductVersionPrefix but got $($info.ProductVersion)" }
 
@@ -524,7 +527,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $semanticVersion = & $env:RYU_CI_PYTHON_EXE -c "from app.version import APP_VERSION; print(APP_VERSION)"
+          $pythonExe = $env:RYU_CI_PYTHON_EXE
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or -not (Test-Path $pythonExe)) { throw "CI Python executable is unavailable for release tagging." }
+          $semanticVersion = & $pythonExe -c "from app.version import APP_VERSION; print(APP_VERSION)"
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($semanticVersion)) { throw "Could not determine application version for release tag." }
           $tag = "v$semanticVersion-build-${{ github.run_number }}"
           gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, the Obsidian/Ember dragon-tech interface, global Reduce Motion preference, a local-first audio catalogue with 26 real starter BGM tracks across calm, fantasy, adventure, comedy, action, sci-fi, emotional, mystery, horror and slice-of-life moods, plus six real book opening/page-turn/closing sound cues. Add licensed tracks through Generate > Real BGM catalogue / Real audiobook cue files. Includes Qwen VoiceDesign preset isolation, audiobook AI smoke validation, Chatterbox runtime validation, frozen EXE checks and installer verification. Starter-track source and license notes are included beside the local audio library." --target $env:GITHUB_SHA
