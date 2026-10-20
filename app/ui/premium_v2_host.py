@@ -1662,7 +1662,8 @@ class PremiumV2Bridge(QObject):
         cues[slot] = selected_path
         state["sound_cues"] = cues
         state["chapter_transition_sound"] = any(cues.get(key) for key in ("opening", "chapter", "scene", "closing"))
-        # These three fields are already consumed by the audiobook assembler.
+        # Keep the legacy fields synchronized with the saved cue manifest; the
+        # production assembler consumes all four cue paths, including scene transitions.
         if slot == "opening":
             state["opening_cue_path"] = selected_path
         elif slot == "chapter":
