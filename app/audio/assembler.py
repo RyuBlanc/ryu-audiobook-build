@@ -59,7 +59,7 @@ def _encoding_audio_bitrate(bitrate: int | str | None) -> str:
         # Short/simple synthetic or test narration can average well below a
         # 128k target with AAC. Use a wider safety margin because final output
         # validation measures the encoded stream, not just the requested rate.
-        return "256k"
+        return "320k"
     return requested
 
 
