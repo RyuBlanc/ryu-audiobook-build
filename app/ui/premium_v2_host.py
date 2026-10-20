@@ -123,6 +123,9 @@ class PremiumV2Bridge(QObject):
                 "sound.import": self._sound_import,
                 "sound.assign": self._sound_assign,
                 "sound.save_manifest": self._sound_save_manifest,
+                "sound.cues.get": self._sound_cues_get,
+                "sound.cues.save": self._sound_cues_save,
+                "sound.cues.clear": self._sound_cues_clear,
             }
             handler = handlers.get(command)
             if handler is None:
@@ -211,6 +214,9 @@ class PremiumV2Bridge(QObject):
             "sound.import": True,
             "sound.assign": True,
             "sound.save_manifest": True,
+            "sound.cues.get": True,
+            "sound.cues.save": True,
+            "sound.cues.clear": True,
             "reason": "Local import, chapter editing, saved voice selection and preview, character analysis and editing, pronunciation rules, audiobook generation, background jobs, history, playback metadata, local model installation, and settings are connected. Live hardware telemetry remains unavailable.",
         }
 
@@ -1430,6 +1436,83 @@ class PremiumV2Bridge(QObject):
                                    "updated_at": self._now()}
         save_state(project.folder, state)
         return dict(state["sound_manifest"])
+
+    def _sound_cues_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Return persisted book cue assignments, resolving legacy state keys."""
+        project = self._active_project()
+        state = load_state(project.folder)
+        cues = state.get("sound_cues")
+        if not isinstance(cues, dict):
+            cues = {
+                "opening": state.get("opening_cue_path"),
+                "chapter": state.get("page_turn_cue_path"),
+                "scene": state.get("scene_transition_cue_path"),
+                "closing": state.get("ending_cue_path"),
+            }
+        catalog = {str(row["path"]): row for row in self._sound_catalog({})}
+        result = {}
+        for slot in ("opening", "chapter", "scene", "closing"):
+            raw = cues.get(slot)
+            path = str(raw).strip() if raw else ""
+            row = catalog.get(path)
+            result[slot] = {"path": path if row else None, "title": row["title"] if row else None,
+                            "available": bool(row)}
+        return result
+
+    def _sound_cues_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist one cue assignment and update the supported generation cue fields."""
+        slot = str(payload.get("slot") or "").strip().lower()
+        if slot not in {"opening", "chapter", "scene", "closing"}:
+            raise ValueError("Choose opening, chapter, scene, or closing cue.")
+        raw = str(payload.get("path") or "").strip()
+        selected_path = None
+        selected_title = None
+        if raw:
+            selected = Path(raw).expanduser().resolve()
+            catalog = {str(row["path"]): row for row in self._sound_catalog({})}
+            row = catalog.get(str(selected))
+            if not selected.is_file() or row is None:
+                raise ValueError("Choose a cue from the local Sound Design catalogue.")
+            selected_path, selected_title = str(selected), str(row["title"])
+        project = self._active_project()
+        state = load_state(project.folder)
+        cues = state.get("sound_cues")
+        if not isinstance(cues, dict):
+            cues = {
+                "opening": state.get("opening_cue_path"),
+                "chapter": state.get("page_turn_cue_path"),
+                "scene": state.get("scene_transition_cue_path"),
+                "closing": state.get("ending_cue_path"),
+            }
+        cues[slot] = selected_path
+        state["sound_cues"] = cues
+        # These three fields are already consumed by the audiobook assembler.
+        if slot == "opening":
+            state["opening_cue_path"] = selected_path
+        elif slot == "chapter":
+            state["page_turn_cue_path"] = selected_path
+        elif slot == "closing":
+            state["ending_cue_path"] = selected_path
+        else:
+            # Scene cue assignment is persisted for editing; the current
+            # assembler has no separate scene-transition audio input.
+            state["scene_transition_cue_path"] = selected_path
+        state["modified_at"] = self._now()
+        save_state(project.folder, state)
+        return {"saved": True, "slot": slot, "path": selected_path, "title": selected_title,
+                "generation_supported": slot != "scene"}
+
+    def _sound_cues_clear(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        project = self._active_project()
+        state = load_state(project.folder)
+        state["sound_cues"] = {"opening": None, "chapter": None, "scene": None, "closing": None}
+        state["opening_cue_path"] = None
+        state["page_turn_cue_path"] = None
+        state["scene_transition_cue_path"] = None
+        state["ending_cue_path"] = None
+        state["modified_at"] = self._now()
+        save_state(project.folder, state)
+        return {"saved": True, "cleared": ["opening", "chapter", "scene", "closing"]}
 
     def _settings_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
         self.settings.sync()
