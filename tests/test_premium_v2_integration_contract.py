@@ -243,8 +243,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         # Static command calls from the frontend adapter must all be registered in
         # the desktop bridge dispatch table. Dynamic command maps have separate
         # explicit coverage in their feature-specific tests.
-        commands = set(re.findall(r"\\bcall\\(['\"]([^'\"\\n]+)['\"]", adapter))
-        registered = set(re.findall(r'"([a-z][a-z0-9_.]+)": self\\._[A-Za-z0-9_]+', self.host))
+        commands = set(re.findall(r"\bcall\(['\"]([^'\"\n]+)['\"]", adapter))
+        registered = set(re.findall(r'"([a-z][a-z0-9_.]+)": self\._[A-Za-z0-9_]+', self.host))
         self.assertTrue(commands, "Expected frontend adapter to call backend commands")
         self.assertEqual(commands - registered, set(), "Adapter commands without backend handlers: " + repr(sorted(commands - registered)))
 
