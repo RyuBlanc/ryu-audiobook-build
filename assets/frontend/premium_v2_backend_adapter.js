@@ -662,6 +662,13 @@
         if (!action) return;
         const choice = action.trim().toLowerCase();
         const run = async () => {
+          // Flush pending editor changes before any structural chapter operation.
+          if (chapterSaveTimer) { clearTimeout(chapterSaveTimer); chapterSaveTimer = null; }
+          await chapterSavePromise.catch(() => {});
+          const editor = $('chapterEditor');
+          if (editor && window.ryuPremiumSelectedChapter === number) {
+            await persistChapterSnapshot(number, $('chapterTitle')?.textContent || selected.title, editor.value, false);
+          }
           if (choice === 'add') {
             const title = window.prompt('New chapter title:', 'Chapter ' + (chapters.length + 1));
             if (title === null) return;
