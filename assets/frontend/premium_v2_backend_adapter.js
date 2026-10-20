@@ -140,6 +140,15 @@
     terms = await call('pronunciation.list');
     const list = $('pronDictionaryBody');
     if (list) list.innerHTML = terms.map(t => '<div class="list-item"><b>' + esc(t.written_form || t.word) + '</b><span> → ' + esc(t.spoken_form || t.pronunciation) + '</span></div>').join('') || '<p class="muted">No saved pronunciation rules for this book.</p>';
+    const termList = $('pronTermList');
+    if (termList) {
+      const selected = $('pronWord')?.textContent?.trim();
+      termList.innerHTML = terms.map(t => {
+        const word = String(t.written_form || t.word || '');
+        const spoken = String(t.spoken_form || t.pronunciation || '');
+        return '<button type="button" class="list-item ' + (word === selected ? 'active' : '') + '" data-pron-term="' + esc(word) + '"><b>' + esc(word) + '</b><span>' + esc(spoken) + '</span></button>';
+      }).join('') || '<p class="muted">No saved pronunciation terms yet. Use Analyze book or Add entry.</p>';
+    }
   }
   async function refreshSounds() {
     sounds = await call('sound.catalog');
@@ -1184,6 +1193,142 @@
         return;
       }
     }, true);
+
+
+    // Replace remaining legacy demo click listeners with real bridge actions or explicit
+    // unavailable states. This capture layer runs before prototype target/bubble handlers.
+    document.addEventListener('click', e => {
+      const button = e.target.closest('button');
+      if (!button) return;
+      const label = button.textContent.trim().replace(/\s+/g,' ').toLowerCase();
+      const stop = () => { e.preventDefault(); e.stopImmediatePropagation(); };
+      const invokeAssigned = async fn => { stop(); try { await fn(); } catch (err) { message(err?.message || String(err), true); } };
+      if (['generatePreview','playPreview','stopPreview','useNarrator','assignCharacter','startGenerate','pauseGenerate','cancelJob','previewGenerate','saveProfile','saveDraft','addPremium','saveOnly'].includes(button.id) && typeof button.onclick === 'function') {
+        stop();
+        Promise.resolve(button.onclick()).catch(err => message(err?.message || String(err), true));
+        return;
+      }
+      if (button.id === 'testAssignedVoice') {
+        void invokeAssigned(async () => {
+          const c = characters.find(item => item.name === window.ryuPremiumSelectedCharacter);
+          if (!c) throw new Error('Select a character from the assigned cast first.');
+          const profileName = c.voice_profile || c.voice || '';
+          const profile = voices.find(item => item.name.toLowerCase() === String(profileName).toLowerCase());
+          if (!profile) throw new Error('This character has no matching saved voice profile. Assign one before testing.');
+          await previewSavedProfile(profile, 'Hello, my name is ' + c.name + '.', c.name);
+        });
+        return;
+      }
+      if (button.id === 'editAssignedCharacter') {
+        stop();
+        const c = characters.find(item => item.name === window.ryuPremiumSelectedCharacter);
+        if (!c) { message('Select a character from the assigned cast first.', true); return; }
+        if ($('characterEditorTitle')) $('characterEditorTitle').textContent = 'Edit character';
+        if ($('editCharacterName')) $('editCharacterName').value = c.name || '';
+        if ($('editCharacterVoice')) $('editCharacterVoice').value = c.voice_profile || '';
+        if ($('editCharacterShort')) $('editCharacterShort').value = c.short_description || '';
+        if ($('editCharacterAliases')) $('editCharacterAliases').value = (c.aliases || []).join(', ');
+        if ($('editCharacterScope')) $('editCharacterScope').value = c.scope || 'Current book only';
+        if ($('editCharacterNotes')) $('editCharacterNotes').value = c.notes || '';
+        $('characterEditorModal')?.classList.add('show');
+        return;
+      }
+      if (button.id === 'saveCharacterProfile' && !libraryEditorActive) {
+        void invokeAssigned(async () => {
+          const original = window.ryuPremiumSelectedCharacter;
+          if (!original) throw new Error('Select a character before saving.');
+          const name = $('editCharacterName')?.value.trim() || '';
+          if (!name) throw new Error('Enter a character name before saving.');
+          await call('character.update', {original_name:original,name,short_description:$('editCharacterShort')?.value||'',
+            aliases:$('editCharacterAliases')?.value||'',voice_profile:$('editCharacterVoice')?.value||'',
+            scope:$('editCharacterScope')?.value||'Current book only',notes:$('editCharacterNotes')?.value||''});
+          window.ryuPremiumSelectedCharacter = name;
+          $('characterEditorModal')?.classList.remove('show');
+          await refreshCharacters();
+          message('Character profile saved to the active book.');
+        });
+        return;
+      }
+      if (button.id === 'deleteCharacter' && !libraryEditorActive) {
+        void invokeAssigned(async () => {
+          const name = window.ryuPremiumSelectedCharacter;
+          if (!name) throw new Error('Select a character before deleting.');
+          if (!window.confirm('Remove "' + name + '" from this book’s saved cast?')) return;
+          await call('character.delete', {name});
+          window.ryuPremiumSelectedCharacter = null;
+          $('characterEditorModal')?.classList.remove('show');
+          await refreshCharacters();
+          message('Character removed from the active book.');
+        });
+        return;
+      }
+      if (button.id === 'pronTermList' || button.closest('#pronTermList [data-pron-term]')) {
+        const termButton = button.closest('#pronTermList [data-pron-term]');
+        if (!termButton) return;
+        stop();
+        const term = terms.find(item => String(item.written_form || item.word) === termButton.dataset.pronTerm);
+        if (!term) { message('That pronunciation term is no longer in the saved dictionary.', true); return; }
+        if ($('pronWord')) $('pronWord').textContent = term.written_form || term.word;
+        if ($('pronValue')) $('pronValue').value = term.spoken_form || term.pronunciation || '';
+        if ($('pronScope')) $('pronScope').value = term.scope || 'Current book';
+        if ($('pronHandling')) $('pronHandling').value = term.handling_mode || 'automatic';
+        if ($('pronDetectedLanguage')) $('pronDetectedLanguage').textContent = term.language || 'Auto-detected';
+        if ($('pronConfidence')) $('pronConfidence').textContent = term.confidence == null ? 'Saved rule' : String(term.confidence) + '%';
+        $('pronTermList')?.querySelectorAll('[data-pron-term]').forEach(row => row.classList.toggle('active', row === termButton));
+        return;
+      }
+      if (button.closest('#voices .panel[data-panel="3"]') && label === 'load') {
+        stop();
+        const select = button.closest('.panel')?.querySelector('.toolbar select');
+        const name = select?.value && select.value !== 'Select saved profile' ? select.value : $('profileName')?.value.trim();
+        const profile = voices.find(item => item.name.toLowerCase() === String(name || '').toLowerCase());
+        if (!profile) { message('Choose an existing profile from the saved-profile list before loading.', true); return; }
+        selectedVoice = profile.name; selectedVoiceId = profile.voice_id;
+        if ($('profileName')) $('profileName').value = profile.name;
+        if ($('profileLibrary')) $('profileLibrary').textContent = profile.provider;
+        if ($('profileVoice')) $('profileVoice').textContent = profile.voice_id;
+        if ($('previewProfile')) $('previewProfile').textContent = profile.name;
+        if ($('useNarrator')) $('useNarrator').disabled = false;
+        if ($('saveOnly')) $('saveOnly').disabled = false;
+        document.querySelectorAll('.provider').forEach(panel => panel.classList.toggle('active', panel.dataset.provider === profile.provider));
+        message('Loaded saved voice profile: ' + profile.name);
+        return;
+      }
+      if (button.closest('#voices .panel[data-panel="3"]') && label === 'delete') {
+        void invokeAssigned(async () => {
+          const select = button.closest('.panel')?.querySelector('.toolbar select');
+          const name = select?.value && select.value !== 'Select saved profile' ? select.value : $('profileName')?.value.trim();
+          if (!name) throw new Error('Choose a saved custom profile before deleting.');
+          if (!window.confirm('Delete saved custom voice profile "' + name + '"?')) return;
+          await call('voice.delete', {profile_name:name});
+          await refreshVoices();
+          if ($('profileName')) $('profileName').value = '';
+          message('Deleted saved custom voice profile: ' + name);
+        });
+        return;
+      }
+      if (button.id === 'acceptHighConfidence' || button.id === 'skipAiSuggestion' ||
+          button.id === 'confirmAiCharacter' || button.matches('[data-ai-sentence],[data-ai-line]') ||
+          button.id === 'aiUseLibrary' || button.id === 'aiCreateNew' || button.id === 'createCharacterQuick') {
+        stop();
+        message('Per-line AI speaker suggestions are still prototype-only; this action did not change the saved cast. Use Analyze book with AI for the real backend analysis and assign voices in the saved cast panel.', true);
+        return;
+      }
+      if (button.closest('#settings') && label === 'choose folder') {
+        stop();
+        message('Custom project-library and audio-assets root selection is not implemented in this build; the existing local storage paths were not changed.', true);
+        return;
+      }
+      if (button.closest('#settings') && label === 'export logs') {
+        stop();
+        message('Sanitized log export is not connected yet; no export file was created.', true);
+        return;
+      }
+    }, true);
+    const savedProfileSelect = document.querySelector('#voices .panel[data-panel="3"] .toolbar select');
+    if (savedProfileSelect) {
+      savedProfileSelect.innerHTML = '<option value="">Select saved profile</option>' + voices.map(v => '<option value="' + esc(v.name) + '">' + esc(v.name) + ' · ' + esc(v.provider) + '</option>').join('');
+    }
 
     if (!window.__ryuBackendJobTimer) window.__ryuBackendJobTimer=setInterval(()=>refreshJobs().catch(()=>{}),1500);
     const jobsBox = $('backgroundJobsList');

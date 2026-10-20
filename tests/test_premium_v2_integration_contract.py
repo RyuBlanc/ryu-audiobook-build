@@ -363,6 +363,25 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         ):
             self.assertIn(token, adapter)
 
+    def test_stage829_remaining_demo_actions_are_guarded_and_profile_delete_is_real(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        for token in (
+            "previewSavedProfile(profile, 'Hello, my name is ' + c.name",
+            "call('character.update'",
+            "call('character.delete'",
+            "Per-line AI speaker suggestions are still prototype-only",
+            "Custom project-library and audio-assets root selection is not implemented",
+            "Sanitized log export is not connected yet",
+            "termList.innerHTML = terms.map",
+            "call('voice.delete'",
+        ):
+            self.assertIn(token, adapter)
+        self.assertIn('"voice.delete": self._voice_delete', host)
+        self.assertIn('"voice.delete": True', host)
+        self.assertIn("def _voice_delete(", host)
+        self.assertIn("Built-in voices cannot be deleted", host)
+
     def test_character_library_series_scope_matches_default_filter(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("c?.scope || 'Series · Slime'", adapter)

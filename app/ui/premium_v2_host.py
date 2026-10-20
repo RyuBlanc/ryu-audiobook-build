@@ -92,6 +92,7 @@ class PremiumV2Bridge(QObject):
                 "import.start": self._import_start,
                 "voice.list": self._voice_list,
                 "voice.save": self._voice_save,
+                "voice.delete": self._voice_delete,
                 "voice.import_reference": self._voice_import_reference,
                 "voice.select": self._voice_select,
                 "voice.preview": self._voice_preview,
@@ -190,6 +191,7 @@ class PremiumV2Bridge(QObject):
             "import.start": True,
             "voice.list": True,
             "voice.save": True,
+            "voice.delete": True,
             "voice.import_reference": True,
             "voice.select": True,
             "voice.preview": True,
@@ -701,6 +703,28 @@ class PremiumV2Bridge(QObject):
     def _find_profile(self, name: str | None):
         wanted = str(name or "").strip().casefold()
         return next((p for p in load_profiles() if p.name.strip().casefold() == wanted), None)
+
+    def _voice_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Delete a saved custom profile only when no local project depends on it."""
+        from app.tts.voice_profile import load_saved_profiles, save_profiles
+
+        name = str(payload.get("profile_name") or payload.get("name") or "").strip()
+        if not name:
+            raise ValueError("Choose a saved custom voice profile to delete.")
+        saved = load_saved_profiles()
+        profile = next((item for item in saved if item.name.casefold() == name.casefold()), None)
+        if profile is None:
+            raise ValueError("Built-in voices cannot be deleted. Choose a saved custom profile.")
+        for project in list_projects():
+            state = load_state(project.folder)
+            if str(state.get("voice_profile") or "").casefold() == name.casefold():
+                raise ValueError(f'The profile is the selected narrator for "{project.title}". Select another narrator before deleting it.')
+            assigned = state.get("characters") or []
+            if any(isinstance(item, dict) and str(item.get("voice_profile") or "").casefold() == name.casefold()
+                   for item in assigned):
+                raise ValueError(f'The profile is assigned to a character in "{project.title}". Reassign that character before deleting it.')
+        save_profiles([item for item in saved if item.name.casefold() != name.casefold()])
+        return {"name": name, "deleted": True, "remaining": len(load_saved_profiles())}
 
     def _voice_select(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
