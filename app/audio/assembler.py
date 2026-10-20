@@ -256,12 +256,12 @@ def _mix_chapter_bgm(
     fade_out_start = max(offset_seconds, duration_seconds - fade_out_seconds)
     music_filters = [f"volume={gain:.4f}", "aresample=44100",
                      "aformat=sample_rates=44100:channel_layouts=stereo"]
+    if offset_ms:
+        music_filters.append(f"adelay={offset_ms}|{offset_ms}")
     if fade_in_seconds > 0:
         music_filters.append(f"afade=t=in:st={offset_seconds:.3f}:d={fade_in_seconds:.3f}")
     if fade_out_seconds > 0:
         music_filters.append(f"afade=t=out:st={fade_out_start:.3f}:d={fade_out_seconds:.3f}")
-    if offset_ms:
-        music_filters.append(f"adelay={offset_ms}|{offset_ms}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     _run([
         "-i", str(chapter_file), "-stream_loop", "-1", "-i", str(track),
@@ -629,7 +629,7 @@ def assemble_m4b(
                     continue
                 if rule == "custom" and not Path(str(selected_track)).expanduser().is_file():
                     raise FileNotFoundError(f"Custom BGM for chapter {chapter_index} was not found: {selected_track}")
-                volume = override.get("volume", background_audio_volume) if rule == "custom" else background_audio_volume
+                volume = override.get("volume", background_audio_volume)
                 start_offset = str(override.get("start_offset") or "immediate").strip().lower()
                 offset_ms = 0
                 if start_offset == "after_10_seconds":
