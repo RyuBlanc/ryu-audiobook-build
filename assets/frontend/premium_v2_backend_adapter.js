@@ -1037,6 +1037,154 @@
       const open = e.target.closest('#backgroundJobsButton');
       if (open) { setTimeout(() => refreshJobs().catch(()=>{}), 0); }
     }, true);
+
+    // Stage 8.2.9 integration guard: intercept legacy prototype handlers where a
+    // control now has a real backend action, or explicitly report unsupported work.
+    const waitForTerminalJob = async (jobId, maxAttempts = 240) => {
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const rows = await call('job.list', {include_hidden:true});
+        const job = rows.find(row => String(row.job_id) === String(jobId));
+        if (!job) throw new Error('The background job disappeared. Check Generation History.');
+        if (['completed','failed','cancelled'].includes(job.state)) {
+          if (job.state !== 'completed') throw new Error(job.message || ('Job ' + job.state + '.'));
+          return job;
+        }
+        if (attempt % 5 === 0) message((job.title || job.type || 'Task') + ' · ' + Math.round(Number(job.progress || 0)) + '% · ' + (job.stage || job.state));
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      throw new Error('The task is still running. Check Generation History for its latest state.');
+    };
+    const previewSavedProfile = async (profile, text, label) => {
+      const data = await call('voice.preview', {profile_name:profile.name,text,duration_seconds:10});
+      const job = await waitForTerminalJob(data.job_id);
+      const url = job?.result?.file_url;
+      if (!url) throw new Error((label || profile.name) + ' preview finished without a playable audio file.');
+      if (previewAudio) { previewAudio.pause(); previewAudio = null; }
+      previewAudio = new Audio(url);
+      previewAudio.onerror = () => message((label || profile.name) + ' preview audio could not be played.', true);
+      await previewAudio.play();
+      message('Playing ' + (label || profile.name) + ' · ' + Number(job.result.actual_duration_seconds || 0).toFixed(1) + ' seconds.');
+      return job;
+    };
+    document.addEventListener('click', e => {
+      const button = e.target.closest('button');
+      if (!button) return;
+      const label = button.textContent.trim().replace(/\s+/g,' ').toLowerCase();
+      const stop = () => { e.preventDefault(); e.stopImmediatePropagation(); };
+      if (button.id === 'testSelectedVoices' || button.id === 'testAllVoices') {
+        stop();
+        (async () => {
+          const term = $('pronWord')?.textContent?.trim() || $('pronWord')?.value?.trim() ||
+            $('pronValue')?.value?.trim() || terms[0]?.written_form || terms[0]?.word || '';
+          if (!term) throw new Error('Choose or save a pronunciation term before testing voices.');
+          const selectedName = $('pronQuickVoice')?.value || '';
+          const profiles = button.id === 'testAllVoices'
+            ? voices.slice()
+            : voices.filter(v => v.name === selectedName);
+          if (!profiles.length) throw new Error(button.id === 'testAllVoices'
+            ? 'No saved voice profiles are available to test.'
+            : 'Choose a saved voice profile in the Test term selector first.');
+          for (let i = 0; i < profiles.length; i++) {
+            message('Pronunciation test ' + (i + 1) + ' of ' + profiles.length + ' · ' + profiles[i].name);
+            await previewSavedProfile(profiles[i], term, profiles[i].name);
+          }
+          message('Pronunciation test completed for ' + profiles.length + ' saved voice profile(s).');
+        })().catch(err => message(err?.message || String(err), true));
+        return;
+      }
+      if (button.id === 'generateCandidates' || button.id === 'generateMore' || button.id === 'setKey' ||
+          label === 'get api key' || label === 'manage credentials') {
+        stop();
+        const reason = button.id === 'setKey' || label === 'get api key' || label === 'manage credentials'
+          ? 'Credential management is not connected to a secure provider-specific credential store in this build. No API key was requested or saved.'
+          : 'Premium cloud candidate generation is not connected to a provider endpoint in this build. No mock candidates were generated; choose a supported saved voice profile and use Generate Preview instead.';
+        message(reason, true);
+        return;
+      }
+      if (/^refresh$/.test(label) || label === 'refresh system voices' || label === 'refresh catalogue') {
+        stop();
+        refreshVoices().then(() => message('Loaded ' + voices.length + ' voice profile(s) from the local voice catalogue.'))
+          .catch(err => message(err?.message || String(err), true));
+        return;
+      }
+      if (label.startsWith('install / repair qwen voice studio') || label === 'install / repair engine') {
+        stop();
+        (async () => {
+          const panel = button.closest('.provider');
+          const provider = panel?.dataset.provider || '';
+          const selection = provider === 'voicedesign' ? 'voicedesign' :
+            /clone/i.test(provider) ? 'voiceclone' : 'customvoice';
+          const data = await call('models.install', {selection});
+          message('Started local Qwen Voice Studio installation. Progress is shown in Background Jobs.');
+          await monitorJob(data.job_id, refreshModels);
+        })().catch(err => message(err?.message || String(err), true));
+        return;
+      }
+      if (button.closest('#chapters') && label === 'assign speaker') {
+        stop();
+        if (typeof window.go === 'function') window.go('characters');
+        message('Character Studio opened. Select a saved character and assign its voice profile there.');
+        return;
+      }
+      if (button.closest('#chapters') && label === 'add pronunciation') {
+        stop();
+        const editor = $('chapterEditor');
+        const selected = editor && editor.selectionEnd > editor.selectionStart
+          ? editor.value.slice(editor.selectionStart, editor.selectionEnd).trim() : '';
+        if (selected && $('newPronWritten')) $('newPronWritten').value = selected.slice(0,500);
+        $('pronEntryModal')?.classList.add('show');
+        if (typeof window.go === 'function') window.go('pronunciation');
+        return;
+      }
+      if (button.closest('#chapters') && ['all','review','empty'].includes(label)) {
+        stop();
+        const rows = [...($('chapterList')?.querySelectorAll('[data-chapter-number]') || [])];
+        if (label === 'all') rows.forEach(row => row.hidden = false);
+        else if (label === 'empty') rows.forEach(row => {
+          const chapter = chapters.find(c => c.number === Number(row.dataset.chapterNumber));
+          row.hidden = Boolean(chapter?.text?.trim());
+        });
+        else {
+          rows.forEach(row => row.hidden = false);
+          message('Review status is not yet supplied by the chapter backend; showing all chapters rather than inventing review flags.', true);
+          return;
+        }
+        message(label === 'empty' ? 'Showing empty chapters.' : 'Showing all chapters.');
+        return;
+      }
+      if (button.closest('#player')) {
+        const audioLabel = label.replace(/\s+/g,'');
+        if (['↶15','15↷','0.75×','1×','1.25×','1.5×','◀','▶'].includes(audioLabel)) {
+          stop();
+          (async () => {
+            if (!playerAudio) await openPlayer();
+            if (!playerAudio) throw new Error('No audiobook is loaded in the player.');
+            if (audioLabel === '↶15') playerAudio.currentTime = Math.max(0, playerAudio.currentTime - 15);
+            else if (audioLabel === '15↷') playerAudio.currentTime = Math.min(playerAudio.duration || Infinity, playerAudio.currentTime + 15);
+            else if (['0.75×','1×','1.25×','1.5×'].includes(audioLabel)) {
+              playerAudio.playbackRate = Number(audioLabel.replace('×',''));
+              button.parentElement?.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === button));
+              message('Playback speed set to ' + playerAudio.playbackRate + '×.');
+            } else if (audioLabel === '◀') playerAudio.currentTime = Math.max(0, playerAudio.currentTime - 15);
+            else {
+              if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause();
+            }
+          })().catch(err => message(err?.message || String(err), true));
+          return;
+        }
+      }
+      if (button.id === 'backgroundJobsButton') {
+        stop();
+        $('backgroundJobsModal')?.classList.add('show');
+        refreshJobs().catch(err => message(err?.message || String(err), true));
+        return;
+      }
+      if (button.id === 'openUpdateLog') {
+        // The build update log is local static release information, not a live backend action.
+        return;
+      }
+    }, true);
+
     if (!window.__ryuBackendJobTimer) window.__ryuBackendJobTimer=setInterval(()=>refreshJobs().catch(()=>{}),1500);
     const jobsBox = $('backgroundJobsList');
     if (jobsBox && !window.__ryuBackendJobsObserver) {

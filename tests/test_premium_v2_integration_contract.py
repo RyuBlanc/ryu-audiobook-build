@@ -351,6 +351,18 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("e.target.closest('[data-history-job]')", adapter)
         self.assertIn("call('history.list')", adapter)
 
+    def test_stage829_gap_controls_are_backend_bound_or_explicitly_honest(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        for token in (
+            "waitForTerminalJob", "previewSavedProfile", "testSelectedVoices",
+            "testAllVoices", "call('models.install'", "refreshVoices()",
+            "Credential management is not connected to a secure provider-specific credential store",
+            "Premium cloud candidate generation is not connected to a provider endpoint",
+            "Review status is not yet supplied by the chapter backend",
+            "playerAudio.playbackRate",
+        ):
+            self.assertIn(token, adapter)
+
     def test_character_library_series_scope_matches_default_filter(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("c?.scope || 'Series · Slime'", adapter)
