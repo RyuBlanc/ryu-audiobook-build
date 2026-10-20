@@ -17,6 +17,8 @@
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
   let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve();
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
+  const chapterUndoStacks = new Map(), chapterRedoStacks = new Map();
+  let chapterLastText = '', chapterHistoryGroupOpen = false, chapterHistoryGroupTimer = null, chapterHistoryApplying = false;
   let libraryCharacters = [], libraryEditorId = null, libraryEditorActive = false;
   const selectedChapter = () => chapters.find(c => c.number === window.ryuPremiumSelectedChapter) || chapters[0];
   const renderSelect = (select, rows, value, label) => {
@@ -85,12 +87,17 @@
         window.ryuPremiumSelectedChapter = c.number;
         if (title) title.textContent = c.title; if (editor) editor.value = c.text;
         if ($('wordCount')) $('wordCount').textContent = c.word_count;
+        chapterLastText = c.text || ''; chapterHistoryGroupOpen = false;
+        if (chapterHistoryGroupTimer) { clearTimeout(chapterHistoryGroupTimer); chapterHistoryGroupTimer = null; }
         list.querySelectorAll('.list-item').forEach(x => x.classList.toggle('active', x === el));
       }));
     }
     if (title) title.textContent = current.title;
     if (editor && document.activeElement !== editor) editor.value = current.text;
     if ($('wordCount')) $('wordCount').textContent = current.word_count;
+    chapterLastText = current.text || '';
+    chapterHistoryGroupOpen = false;
+    if (chapterHistoryGroupTimer) { clearTimeout(chapterHistoryGroupTimer); chapterHistoryGroupTimer = null; }
   }
   async function refreshCharacters() {
     characters = await call('character.list');
@@ -632,6 +639,37 @@
         if (file) importDroppedFile(file).catch(err => message(err?.message || String(err), true));
       };
     }
+    const chapterHistoryLimit = 10;
+    const rememberChapterSnapshot = (stack, number, text) => {
+      if (typeof text !== 'string' || text.length > 1_000_000) return;
+      const rows = stack.get(number) || [];
+      if (rows.length && rows[rows.length - 1] === text) return;
+      rows.push(text);
+      if (rows.length > chapterHistoryLimit) rows.splice(0, rows.length - chapterHistoryLimit);
+      stack.set(number, rows);
+    };
+    const changeChapterHistory = async direction => {
+      const chapter = selectedChapter(), editor = $('chapterEditor');
+      if (!chapter || !editor) throw new Error('Open a chapter before using undo/redo.');
+      if (editor.value.length > 1_000_000) throw new Error('Undo/redo is limited to chapters of 1,000,000 characters to protect memory on low-resource PCs.');
+      if (chapterSaveTimer) { clearTimeout(chapterSaveTimer); chapterSaveTimer = null; }
+      if (chapterHistoryGroupTimer) { clearTimeout(chapterHistoryGroupTimer); chapterHistoryGroupTimer = null; }
+      chapterHistoryGroupOpen = false;
+      await chapterSavePromise.catch(() => {});
+      const from = direction === 'undo' ? chapterUndoStacks : chapterRedoStacks;
+      const to = direction === 'undo' ? chapterRedoStacks : chapterUndoStacks;
+      const stack = from.get(chapter.number) || [];
+      if (!stack.length) { message('Nothing to ' + direction + ' in this chapter.'); return; }
+      rememberChapterSnapshot(to, chapter.number, editor.value);
+      const next = stack.pop(); from.set(chapter.number, stack);
+      chapterHistoryApplying = true;
+      editor.value = next;
+      chapterLastText = next;
+      editor.dispatchEvent(new Event('input', {bubbles:true}));
+      chapterHistoryApplying = false;
+      editor.focus();
+      message('Chapter ' + direction + ' applied; changes will autosave shortly.');
+    };
     const persistChapterSnapshot = async (number, title, text, automatic = false) => {
       const state = $('saveState');
       if (state) state.textContent = automatic ? 'Saving…' : 'Saving changes…';
@@ -655,8 +693,8 @@
         if (!selected) return;
         const action = window.prompt(
           'Chapter actions for "' + selected.title + '"\n' +
-          'Type one: add, rename, delete, up, down, merge, review, skip\n' +
-          'Merge combines this chapter into the previous chapter. Review toggles its saved review status. Skip toggles inclusion in audiobook generation.',
+          'Type one: add, rename, delete, up, down, merge, review, skip, find, replace, undo, redo\n' +
+          'Merge combines this chapter into the previous chapter. Review toggles review status; Skip excludes it from generation. Find/replace and undo/redo apply to the open chapter text.',
           'rename'
         );
         if (!action) return;
@@ -715,8 +753,36 @@
             await call('chapter.skip', {number, skip_for_generation:nextSkip});
             await refreshChapters();
             message(nextSkip ? 'Chapter excluded from audiobook generation; its text is preserved.' : 'Chapter included in audiobook generation again.');
+          } else if (choice === 'find' || choice === 'replace') {
+            if (!editor || window.ryuPremiumSelectedChapter !== number) throw new Error('Open this chapter in the editor before using find/replace.');
+            const needle = window.prompt('Find exact text in this chapter:', '');
+            if (needle === null) return;
+            if (!needle) throw new Error('Enter non-empty text to find.');
+            const source = editor.value;
+            const index = source.toLocaleLowerCase().indexOf(needle.toLocaleLowerCase());
+            if (choice === 'find') {
+              if (index < 0) { message('No matching text was found in this chapter.'); return; }
+              editor.focus(); editor.setSelectionRange(index, index + needle.length);
+              message('Match selected in the chapter editor.');
+            } else {
+              const replacement = window.prompt('Replace every case-insensitive match with:', '');
+              if (replacement === null) return;
+              const lowered = source.toLocaleLowerCase(), target = needle.toLocaleLowerCase();
+              let count = 0, cursor = 0, output = '', matchAt = -1;
+              while ((matchAt = lowered.indexOf(target, cursor)) !== -1) {
+                output += source.slice(cursor, matchAt) + replacement;
+                cursor = matchAt + needle.length; count++;
+              }
+              if (!count) { message('No matching text was found; chapter text was not changed.'); return; }
+              if (!window.confirm('Replace ' + count + ' occurrence(s) in this chapter?')) return;
+              editor.value = output + source.slice(cursor);
+              editor.dispatchEvent(new Event('input', {bubbles:true}));
+              message('Replaced ' + count + ' occurrence(s). Changes will autosave shortly.');
+            }
+          } else if (choice === 'undo' || choice === 'redo') {
+            await changeChapterHistory(choice);
           } else {
-            throw new Error('Unknown chapter action. Type add, rename, delete, up, down, merge, review, or skip.');
+            throw new Error('Unknown chapter action. Type add, rename, delete, up, down, merge, review, skip, find, replace, undo, or redo.');
           }
         };
         run().catch(error => message(error?.message || String(error), true));
@@ -725,6 +791,17 @@
 
     if ($('chapterEditor')) $('chapterEditor').addEventListener('input', () => {
       const c = selectedChapter(); if (!c) return;
+      const editorText = $('chapterEditor').value;
+      if (!chapterHistoryApplying && editorText !== chapterLastText) {
+        if (!chapterHistoryGroupOpen) {
+          if (editorText.length <= 1_000_000 && chapterLastText.length <= 1_000_000) rememberChapterSnapshot(chapterUndoStacks, c.number, chapterLastText);
+          chapterRedoStacks.delete(c.number);
+          chapterHistoryGroupOpen = true;
+        }
+        chapterLastText = editorText;
+        if (chapterHistoryGroupTimer) clearTimeout(chapterHistoryGroupTimer);
+        chapterHistoryGroupTimer = setTimeout(() => { chapterHistoryGroupOpen = false; chapterHistoryGroupTimer = null; }, 700);
+      }
       if (chapterSaveTimer) clearTimeout(chapterSaveTimer);
       const number = c.number, title = $('chapterTitle')?.textContent || c.title, text = $('chapterEditor').value;
       if ($('saveState')) $('saveState').textContent = 'Unsaved changes';
@@ -737,6 +814,14 @@
         catch (err) { if ($('saveState') && window.ryuPremiumSelectedChapter === number) $('saveState').textContent = 'Autosave failed'; message('Chapter autosave failed: ' + (err?.message || String(err)), true); }
         finally { if (chapterSavePromise === saveTask) chapterSavePromise = Promise.resolve(); }
       }, 900);
+    });
+    if ($('chapterEditor')) $('chapterEditor').addEventListener('keydown', event => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (key === 'z' || key === 'y') {
+        event.preventDefault();
+        changeChapterHistory(key === 'z' && !event.shiftKey ? 'undo' : 'redo').catch(error => message(error?.message || String(error), true));
+      }
     });
     if ($('cleanText')) $('cleanText').onclick = act(async()=>{const c=selectedChapter();if(!c)throw new Error('Import or open a book first.');const source=$('chapterEditor')?.value||'';const result=await call('chapter.clean',{text:source});if(!result||typeof result.text!=='string')throw new Error('The backend did not return cleaned chapter text.');$('chapterEditor').value=result.text;$('chapterEditor').dispatchEvent(new Event('input',{bubbles:true}));message(result.changed?'Text cleaned; removed '+Number(result.removed_count||0)+' likely page-noise line(s). Changes will autosave shortly.':'No cleanup changes were needed.');});
     if ($('saveChapter')) $('saveChapter').onclick = act(async()=>{const c=selectedChapter();if(!c)throw new Error('Select a chapter first.');if(chapterSaveTimer){clearTimeout(chapterSaveTimer);chapterSaveTimer=null;}await chapterSavePromise.catch(()=>{});const title=$('chapterTitle')?.textContent||c.title;const text=$('chapterEditor')?.value||'';await persistChapterSnapshot(c.number,title,text,false);message('Chapter saved to local project.');await refreshChapters();});

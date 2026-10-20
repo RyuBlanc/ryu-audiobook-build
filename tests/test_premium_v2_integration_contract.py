@@ -213,6 +213,17 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("clean_import_noise(text_value)", host)
         self.assertIn('"removed_count": len(removed)', host)
 
+    def test_chapter_find_replace_and_bounded_undo_redo_are_connected(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("choice === 'find' || choice === 'replace'", adapter)
+        self.assertIn("Replace every case-insensitive match with:", adapter)
+        self.assertIn("chapterUndoStacks", adapter)
+        self.assertIn("chapterRedoStacks", adapter)
+        self.assertIn("changeChapterHistory(key === 'z' && !event.shiftKey ? 'undo' : 'redo')", adapter)
+        self.assertIn("chapterHistoryLimit = 10", adapter)
+        self.assertIn("Undo/redo is limited to chapters of 1,000,000 characters", adapter)
+        self.assertIn("Type one: add, rename, delete, up, down, merge, review, skip, find, replace, undo, redo", adapter)
+
     def test_chapter_split_is_persisted_and_connected_to_visible_control(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn('"chapter.split": self._chapter_split', self.host)

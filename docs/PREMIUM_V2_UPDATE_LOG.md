@@ -49,3 +49,10 @@
 - Added static contract checks for bridge/capability registration, persistence, filtering and compatibility with legacy chapter JSON.
 - Added a separate persisted `skip_for_generation` flag and contextual skip/unskip action. Book generation excludes flagged chapters without deleting their text. Corrected the stale empty-chapter contract test and ensured job progress, returned job data, and project state distinguish empty chapters from intentional exclusions.
 - Find/replace, undo/redo, re-detection protection and Stage 2 runtime acceptance remain open.
+
+
+## 2026-10-20 — Stage 2 chapter editor commands
+
+- Added case-insensitive find and confirmed replace-all actions through the existing chapter-list contextual menu without changing the approved HTML layout.
+- Added grouped chapter undo/redo, keyboard shortcuts (Ctrl/Cmd+Z and Ctrl/Cmd+Y or Shift+Z), redo invalidation after new edits, a 10-snapshot cap, and a 1,000,000-character limit to bound memory use on low-resource PCs.
+- Added integration-contract coverage for the new editor actions. CI and real Windows edit/save/reload acceptance are still required; Stage 2 remains open.
