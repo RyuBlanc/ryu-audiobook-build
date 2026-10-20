@@ -3,7 +3,8 @@ from __future__ import annotations
 from app.build_info import BUILD_NUMBER
 
 APP_NAME = "Ryu's Audiobook"
-APP_VERSION = "0.3.7"
+# Version convention: major stable update.feature/update revision.bug-fix revision.
+APP_VERSION = "1.1.1"
 RELEASE_LABEL = f"v{APP_VERSION} • Build {BUILD_NUMBER}"
 
 
