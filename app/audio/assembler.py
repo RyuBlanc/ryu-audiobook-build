@@ -239,6 +239,7 @@ def _mix_chapter_bgm(
     fade_in: float = 2.0,
     fade_out: float = 3.0,
     start_offset_ms: int = 0,
+    bitrate: str = "192k",
 ) -> Path:
     """Mix one chapter-specific music bed under narration without changing duration."""
     track = Path(track_path).expanduser()
@@ -271,7 +272,7 @@ def _mix_chapter_bgm(
         "[narr][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
         "alimiter=limit=0.95[out]",
         "-map", "[out]", "-vn", "-t", f"{duration_seconds:.3f}",
-        "-c:a", "aac", "-b:a", "192k", "-ar", "44100", str(output_path),
+        "-c:a", "aac", "-b:a", bitrate, "-ar", "44100", str(output_path),
     ])
     if not output_path.exists() or output_path.stat().st_size < 1024:
         raise RuntimeError("FFmpeg did not create chapter-specific BGM audio.")
@@ -662,7 +663,7 @@ def assemble_m4b(
                 chapter_music_files.append(_mix_chapter_bgm(
                     chapter_file, selected_track, mixed, float(volume),
                     fade_in=float(background_audio_fade_in), fade_out=fade_out,
-                    start_offset_ms=offset_ms,
+                    start_offset_ms=offset_ms, bitrate=audio_bitrate,
                 ))
                 if progress:
                     progress(chapter_index, len(chapters), "mixed-chapter-background-audio")
