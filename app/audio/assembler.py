@@ -47,19 +47,17 @@ def normalize_audio_bitrate(bitrate: int | str | None) -> str:
 
 
 def _encoding_audio_bitrate(bitrate: int | str | None) -> str:
-    """Choose an encoder target that reliably clears the 128 kbps output floor.
+    """Choose an encoder target that clears the 128 kbps output floor.
 
-    The AAC encoder can report a stream below a 128k target for short/simple
-    test audio. Keep the user-facing supported range unchanged, but use a
-    160k encoder target for a 128k request so the finished M4B retains margin
-    above the required minimum after AAC/container overhead.
+    The final audiobook join is normalized to stereo, and a 192k target leaves
+    practical margin above the minimum for simple or short narration while
+    avoiding an unnecessarily large 320k encode for a 128k user request.
     """
     requested = normalize_audio_bitrate(bitrate)
     if requested == "128k":
-        # Short/simple synthetic or test narration can average well below a
-        # 128k target with AAC. Use a wider safety margin because final output
-        # validation measures the encoded stream, not just the requested rate.
-        return "320k"
+        # Keep a moderate safety margin; final book audio is normalized
+        # to stereo before encoding so mono source chunks cannot cap the rate.
+        return "192k"
     return requested
 
 
@@ -743,6 +741,7 @@ def assemble_m4b(
         _run([
             "-f", "concat", "-safe", "0", "-i", str(concat),
             "-vn", "-c:a", "aac", "-b:a", audio_bitrate, "-ar", "44100",
+            "-ac", "2",
             str(audio_only),
         ])
         if not audio_only.exists() or audio_only.stat().st_size == 0:
