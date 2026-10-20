@@ -295,7 +295,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_premium_v2_chapter_cleaner_uses_import_noise_cleaner(self):
         from app.documents.parser import clean_import_noise
-        raw = "Story continues.\\nReport\\nwww.asianovel.com\\n\\nAnother paragraph.\\n"
+        raw = "Story continues.\nReport\nwww.asianovel.com\n\nAnother paragraph.\n"
         cleaned, removed = clean_import_noise(raw)
         self.assertNotIn("Report", cleaned)
         self.assertNotIn("www.asianovel.com", cleaned)
