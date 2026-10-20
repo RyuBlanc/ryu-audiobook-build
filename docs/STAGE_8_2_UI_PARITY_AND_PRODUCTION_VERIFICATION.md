@@ -120,3 +120,12 @@ The evidence ledger has begun with passing CI candidates #642 and #644, includin
 - A second contract mismatch was found during review: the Voice Studio preview path supports 10, 20, 30, 45, and 60 seconds, but the persisted Settings bridge accepted only 10, 30, and 60.
 - Updated the Settings validation to accept all five supported preview targets and added a regression guard for the validation/error contract.
 - **Pending:** a new Windows CI run must pass before this correction is considered validated. The fix does not replace real Windows playback verification.
+
+## Stage 8.2.7 — Sound Design cue assignment integration (in progress)
+
+- Build #653 passed after the preview Settings contract was aligned with the supported 10/20/30/45/60-second targets.
+- Added allow-listed backend operations for retrieving, saving, and clearing per-book cue assignments. Assignments are persisted in project state and validated against the real local/bundled audio catalogue.
+- Connected the Sound Design Effects library search/source filters and cue-slot selection to saved backend assignments. Cue-sequence preview plays assigned local clips in opening/chapter/scene/closing order; clear-all persists the cleared state.
+- Opening, chapter/page-turn, and closing assignments update the existing fields consumed by audiobook assembly. Scene transition assignment is saved for editing but is not yet rendered as a distinct scene cue by the assembler.
+- **Still open:** chapter-specific BGM assignments are not connected to actual per-chapter mixing; full-book mix preview is not implemented. Actual generated-audio verification and Windows interaction checks remain mandatory.
+- A new CI run is required to validate this change set; no claim is made that the Sound Design stage is complete until it passes.
