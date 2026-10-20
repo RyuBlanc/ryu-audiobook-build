@@ -160,6 +160,17 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("requested_duration_seconds", adapter)
         self.assertIn("preparePreviewPlayback(job, Number(duration))", adapter)
 
+    def test_chapter_merge_preserves_assignment_offsets_and_final_chapter(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn('if len(project.chapters) <= 1:', host)
+        self.assertIn('A project must keep at least one chapter.', host)
+        self.assertIn('assignment_offset = len(previous_text + separator)', host)
+        self.assertIn('shifted["start"] += assignment_offset', host)
+        self.assertIn('shifted["end"] += assignment_offset', host)
+        self.assertIn('await persistChapterSnapshot(number,', adapter)
+        self.assertIn("await chapterSavePromise.catch(() => {});", adapter)
+
     def test_chapter_operations_missing_from_visual_controls_are_reachable_contextually(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
