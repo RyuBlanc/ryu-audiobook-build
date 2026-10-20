@@ -94,8 +94,60 @@ def _concat_audio_files(first: Path, second: Path, output: Path, bitrate: str) -
     return output
 
 
+def _validate_chunk_wav(path: Path) -> None:
+    if not path.is_file():
+        raise FileNotFoundError(f"Generated chapter chunk is missing: {path.name}")
+    if path.stat().st_size < 1024:
+        raise RuntimeError(f"Generated chapter chunk is incomplete: {path.name}")
+    try:
+        with wave.open(str(path), "rb") as wav_file:
+            frames = wav_file.getnframes()
+            rate = wav_file.getframerate()
+    except (OSError, wave.Error, EOFError, ValueError) as exc:
+        raise RuntimeError(
+            f"Generated chapter chunk is not a valid WAV: {path.name} ({exc})"
+        ) from exc
+    if frames <= 0 or rate <= 0:
+        raise RuntimeError(f"Generated chapter chunk contains no audio frames: {path.name}")
+
+
 def sorted_chunks(chapter_dir: Path) -> list[Path]:
-    return sorted((chapter_dir / "chunks").glob("*.wav"))
+    chunks_dir = chapter_dir / "chunks"
+    manifest_path = chapter_dir / "chunk_manifest.json"
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(
+                f"Cannot validate generated chunks because {manifest_path.name} is unreadable."
+            ) from exc
+        if not isinstance(manifest, dict) or not isinstance(manifest.get("chunks"), list):
+            raise RuntimeError(f"Generated chapter manifest has an invalid chunk list: {manifest_path}")
+        entries = manifest["chunks"]
+        if not entries:
+            raise RuntimeError(f"Generated chapter manifest contains no chunks: {manifest_path}")
+        paths: list[Path] = []
+        seen: set[str] = set()
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise RuntimeError(f"Generated chapter manifest has an invalid chunk entry: {manifest_path}")
+            filename = str(entry.get("file") or "").strip()
+            if not filename or Path(filename).name != filename or Path(filename).suffix.lower() != ".wav":
+                raise RuntimeError(f"Generated chapter manifest contains an unsafe chunk filename: {filename!r}")
+            if filename in seen:
+                raise RuntimeError(f"Generated chapter manifest contains duplicate chunk: {filename}")
+            path = chunks_dir / filename
+            _validate_chunk_wav(path)
+            paths.append(path)
+            seen.add(filename)
+        return paths
+
+    # Legacy working folders do not have a text-to-WAV manifest. Keep their
+    # compatibility path, but still reject missing, malformed, or empty audio.
+    paths = sorted(chunks_dir.glob("*.wav"))
+    for path in paths:
+        _validate_chunk_wav(path)
+    return paths
 
 
 def _ffconcat_path(path: Path) -> str:

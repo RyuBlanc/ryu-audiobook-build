@@ -268,9 +268,11 @@ jobs:
           $env:PYTHONPATH = (Get-Location).Path
           $version = & $pythonExe -c "from app.version import full_version; print(full_version())"
           $semanticVersion = & $pythonExe -c "from app.version import APP_VERSION; print(APP_VERSION)"
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($semanticVersion)) { throw "Could not determine APP_VERSION from the validated source." }
           $expected = "v$semanticVersion"
           if (-not $version.StartsWith($expected) -or -not $version.EndsWith("Build $env:RYU_BUILD_NUMBER")) { throw "Unexpected application version: $version" }
           Write-Host "Application version verified: $version"
+          "RYU_APP_VERSION=$semanticVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
           Write-Host '=== Build Windows application ==='
           & $pythonExe build.py
@@ -380,10 +382,8 @@ jobs:
           if (-not (Test-Path $exe)) { throw "Frozen EXE not found: $exe" }
           $info = (Get-Item $exe).VersionInfo
           Write-Host "EXE FileVersion=$($info.FileVersion) ProductVersion=$($info.ProductVersion)"
-          $pythonExe = $env:RYU_CI_PYTHON_EXE
-          if ([string]::IsNullOrWhiteSpace($pythonExe) -or -not (Test-Path $pythonExe)) { throw "CI Python executable is unavailable for application version verification." }
-          $semanticVersion = & $pythonExe -c "from app.version import APP_VERSION; print(APP_VERSION)"
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($semanticVersion)) { throw "Could not determine application version from app.version." }
+          $semanticVersion = $env:RYU_APP_VERSION
+          if ([string]::IsNullOrWhiteSpace($semanticVersion)) { throw "Application version was not exported by the validated build step." }
           $expectedProductVersionPrefix = "$semanticVersion."
           if (-not $info.ProductVersion.StartsWith($expectedProductVersionPrefix)) { throw "Expected frozen EXE product version to start with $expectedProductVersionPrefix but got $($info.ProductVersion)" }
 
@@ -527,9 +527,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $pythonExe = $env:RYU_CI_PYTHON_EXE
-          if ([string]::IsNullOrWhiteSpace($pythonExe) -or -not (Test-Path $pythonExe)) { throw "CI Python executable is unavailable for release tagging." }
-          $semanticVersion = & $pythonExe -c "from app.version import APP_VERSION; print(APP_VERSION)"
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($semanticVersion)) { throw "Could not determine application version for release tag." }
+          $semanticVersion = $env:RYU_APP_VERSION
+          if ([string]::IsNullOrWhiteSpace($semanticVersion)) { throw "Application version was not exported by the validated build step for release tagging." }
           $tag = "v$semanticVersion-build-${{ github.run_number }}"
           gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, the Obsidian/Ember dragon-tech interface, global Reduce Motion preference, a local-first audio catalogue with 26 real starter BGM tracks across calm, fantasy, adventure, comedy, action, sci-fi, emotional, mystery, horror and slice-of-life moods, plus six real book opening/page-turn/closing sound cues. Add licensed tracks through Generate > Real BGM catalogue / Real audiobook cue files. Includes Qwen VoiceDesign preset isolation, audiobook AI smoke validation, Chatterbox runtime validation, frozen EXE checks and installer verification. Starter-track source and license notes are included beside the local audio library." --target $env:GITHUB_SHA

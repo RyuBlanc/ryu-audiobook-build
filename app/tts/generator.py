@@ -186,6 +186,13 @@ def prepare_chapter_plan(
         state.get("chunks_total") != len(chunks)
         or state.get("generation_signature") != signature
     ):
+        # Source text, voice, or narration settings changed. Old higher-index
+        # WAVs must not leak into assembly, and the previously assembled
+        # chapter must not be reused based only on modification timestamps.
+        for cached_chunk in chunks_dir.glob("*.wav"):
+            cached_chunk.unlink(missing_ok=True)
+        for cache_name in ("chapter.m4a", ".audio-settings"):
+            (chapter_dir / cache_name).unlink(missing_ok=True)
         state = {
             "completed": [],
             "chunks_total": len(chunks),
@@ -197,14 +204,36 @@ def prepare_chapter_plan(
         state.setdefault("generation_signature", signature)
 
     completed: set[int] = set()
+    persisted_indexes: set[int] = set()
     for value in state.get("completed") or []:
         try:
             index = int(value)
         except (TypeError, ValueError):
             continue
+        if 0 <= index < len(chunks):
+            persisted_indexes.add(index)
+
+    invalid_cached_chunk = False
+    for index in sorted(persisted_indexes):
         output = chunks_dir / f"{index + 1:05d}.wav"
-        if 0 <= index < len(chunks) and output.exists():
-            completed.add(index)
+        try:
+            if not output.is_file() or output.stat().st_size < 1024:
+                raise ValueError("cached audio chunk is missing or incomplete")
+            with wave.open(str(output), "rb") as wav_file:
+                if wav_file.getnframes() <= 0 or wav_file.getframerate() <= 0:
+                    raise wave.Error("cached audio chunk has no readable audio frames")
+        except (OSError, wave.Error, EOFError, ValueError):
+            output.unlink(missing_ok=True)
+            invalid_cached_chunk = True
+            continue
+        completed.add(index)
+
+    if state.get("completed") != sorted(completed):
+        state["completed"] = sorted(completed)
+        save_state(chapter_dir, state)
+    if invalid_cached_chunk:
+        for cache_name in ("chapter.m4a", ".audio-settings"):
+            (chapter_dir / cache_name).unlink(missing_ok=True)
 
     return ChapterPlan(
         chapter_dir=chapter_dir,
