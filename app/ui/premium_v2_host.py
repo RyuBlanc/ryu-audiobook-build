@@ -748,7 +748,7 @@ class PremiumV2Bridge(QObject):
         music_path = None
         volume = max(0.0, min(0.50, float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18)))
         first_override = (state.get("chapter_bgm_overrides") or {}).get("1", {})
-        if isinstance(first_override, dict):
+        if str(state.get("background_audio_mode") or "off").lower() == "manual" and isinstance(first_override, dict):
             rule = str(first_override.get("rule") or "default").lower()
             if rule == "none":
                 music_path = None
