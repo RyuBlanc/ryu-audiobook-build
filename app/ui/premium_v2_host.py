@@ -781,10 +781,10 @@ class PremiumV2Bridge(QObject):
             _run([
                 "-i", str(audio_source), "-stream_loop", "-1", "-i", str(music_path),
                 "-filter_complex",
-                "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[narr];"
+                "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo,asplit=2[narr_mix][narr_sc];"
                 f"[1:a]{','.join(music_filters)}[bed];"
-                "[bed][narr]sidechaincompress=threshold=0.025:ratio=7:attack=22:release=420:makeup=1[ducked];"
-                "[narr][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[out]",
+                "[bed][narr_sc]sidechaincompress=threshold=0.025:ratio=7:attack=22:release=420:makeup=1[ducked];"
+                "[narr_mix][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[out]",
                 "-map", "[out]", "-vn", "-t", f"{duration_seconds:.3f}",
                 "-c:a", "aac", "-b:a", "192k", "-ar", "44100", str(output),
             ])
