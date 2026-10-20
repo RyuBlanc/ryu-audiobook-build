@@ -341,6 +341,13 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("monitorJob(data.job_id, async job=>", adapter)
         self.assertIn("await previewAudio.play()", adapter)
 
+    def test_character_library_series_scope_matches_default_filter(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("c?.scope || 'Series · Slime'", adapter)
+        self.assertIn("const series = /^Series\\s*[·:-]\\s*Slime$/i.test(scope) ? 'Slime series' : scope;", adapter)
+        self.assertIn("librarySeriesName(c) === series", adapter)
+        self.assertIn("return /^Series\\s*[·:-]\\s*Slime$/i.test(raw) ? 'Slime series' : raw;", adapter)
+
     def test_reusable_character_library_is_persisted_and_connected(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")

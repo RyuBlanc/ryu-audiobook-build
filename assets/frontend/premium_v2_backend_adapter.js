@@ -109,11 +109,12 @@
       window.ryuPremiumSelectedCharacter = c.name;
     }));
   }
+  const librarySeriesName = c => { const raw = String(c?.series || c?.scope || '').trim(); return /^Series\s*[·:-]\s*Slime$/i.test(raw) ? 'Slime series' : raw; };
   async function refreshCharacterLibrary() {
     libraryCharacters = await call('character_library.list');
     const grid = $('characterLibraryGrid'), query = ($('characterLibrarySearch')?.value || '').trim().toLowerCase(), series = $('characterSeriesFilter')?.value || 'All series';
-    const rows = libraryCharacters.filter(c => (!query || [c.name,c.short,c.voice,c.series,c.scope,...(c.aliases||[])].join(' ').toLowerCase().includes(query)) && (series === 'All series' || c.series === series || c.scope === series));
-    if (grid) grid.innerHTML = rows.map(c => '<article class="library-character-card" data-library-id="'+esc(c.id)+'"><div class="library-character-top"><span class="avatar">'+esc((c.short||c.name||'?').slice(0,1))+'</span><div><h3>'+esc(c.name)+'</h3><p>'+esc(c.series||c.scope||'Global')+' · '+esc(c.voice||'Unassigned')+'</p></div></div><div class="alias-row">'+((c.aliases||[]).map(x=>'<span class="alias-tag">'+esc(x)+'</span>').join('')||'<span class="alias-tag">No aliases</span>')+'</div><div class="library-character-meta"><span>'+Number(c.lines||0)+' assigned lines</span><span>'+Number(c.chapters||0)+' chapters</span><span>'+Number(c.confidence??100)+'% confidence</span><span>'+esc(c.scope||'Global character library')+'</span></div><div class="library-character-actions"><button class="btn small secondary" data-test-library="'+esc(c.id)+'">▶ Test</button><button class="btn small secondary" data-edit-library="'+esc(c.id)+'">Edit</button><button class="btn small ghost library-delete" data-delete-library="'+esc(c.id)+'">Delete</button></div></article>').join('') || '<div class="card"><b>No characters found</b><p class="muted">Import a cast or add a character to begin your reusable library.</p></div>';
+    const rows = libraryCharacters.filter(c => (!query || [c.name,c.short,c.voice,c.series,c.scope,...(c.aliases||[])].join(' ').toLowerCase().includes(query)) && (series === 'All series' || librarySeriesName(c) === series || c.scope === series));
+    if (grid) grid.innerHTML = rows.map(c => '<article class="library-character-card" data-library-id="'+esc(c.id)+'"><div class="library-character-top"><span class="avatar">'+esc((c.short||c.name||'?').slice(0,1))+'</span><div><h3>'+esc(c.name)+'</h3><p>'+esc(librarySeriesName(c)||'Global')+' · '+esc(c.voice||'Unassigned')+'</p></div></div><div class="alias-row">'+((c.aliases||[]).map(x=>'<span class="alias-tag">'+esc(x)+'</span>').join('')||'<span class="alias-tag">No aliases</span>')+'</div><div class="library-character-meta"><span>'+Number(c.lines||0)+' assigned lines</span><span>'+Number(c.chapters||0)+' chapters</span><span>'+Number(c.confidence??100)+'% confidence</span><span>'+esc(c.scope||'Global character library')+'</span></div><div class="library-character-actions"><button class="btn small secondary" data-test-library="'+esc(c.id)+'">▶ Test</button><button class="btn small secondary" data-edit-library="'+esc(c.id)+'">Edit</button><button class="btn small ghost library-delete" data-delete-library="'+esc(c.id)+'">Delete</button></div></article>').join('') || '<div class="card"><b>No characters found</b><p class="muted">Import a cast or add a character to begin your reusable library.</p></div>';
     return libraryCharacters;
   }
   function openLibraryEditor(c) {
@@ -121,13 +122,14 @@
     if ($('characterEditorTitle')) $('characterEditorTitle').textContent = c ? 'Edit character' : 'Add new character';
     if ($('editCharacterName')) $('editCharacterName').value = c?.name || ''; if ($('editCharacterShort')) $('editCharacterShort').value = c?.short || '';
     if ($('editCharacterAliases')) $('editCharacterAliases').value = (c?.aliases||[]).join(', '); if ($('editCharacterVoice')) $('editCharacterVoice').value = c?.voice || (voices[0]?.name || 'Unassigned');
-    if ($('editCharacterScope')) $('editCharacterScope').value = c?.scope || 'Global character library'; if ($('editCharacterNotes')) $('editCharacterNotes').value = c?.notes || '';
+    if ($('editCharacterScope')) $('editCharacterScope').value = c?.scope || 'Series · Slime'; if ($('editCharacterNotes')) $('editCharacterNotes').value = c?.notes || '';
     if ($('deleteCharacter')) $('deleteCharacter').style.visibility = c ? 'visible' : 'hidden'; $('characterEditorModal')?.classList.add('show');
   }
   async function saveLibraryEditor() {
     const name = $('editCharacterName')?.value.trim() || ''; if (!name) throw new Error('Enter a character name before saving it to the Character Library.');
     const scope = $('editCharacterScope')?.value || 'Global character library';
-    const result = await call('character_library.save', {id:libraryEditorId||'',name,short:$('editCharacterShort')?.value||'',aliases:$('editCharacterAliases')?.value||'',voice:$('editCharacterVoice')?.value||'Unassigned',scope,series:scope,notes:$('editCharacterNotes')?.value||''});
+    const series = /^Series\s*[·:-]\s*Slime$/i.test(scope) ? 'Slime series' : scope;
+    const result = await call('character_library.save', {id:libraryEditorId||'',name,short:$('editCharacterShort')?.value||'',aliases:$('editCharacterAliases')?.value||'',voice:$('editCharacterVoice')?.value||'Unassigned',scope,series,notes:$('editCharacterNotes')?.value||''});
     libraryEditorId = result.character.id; libraryEditorActive = false; $('characterEditorModal')?.classList.remove('show'); await refreshCharacterLibrary(); message('Character saved to the reusable local Character Library.');
   }
   function importCharacterLibraryFile() {
