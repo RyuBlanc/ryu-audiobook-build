@@ -307,7 +307,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('state["opening_cue_path"] = selected_path', worker)
         self.assertIn('state["page_turn_cue_path"] = selected_path', worker)
         self.assertIn('state["ending_cue_path"] = selected_path', worker)
-        self.assertIn('"generation_supported": slot != "scene"', worker)
+        self.assertIn('"generation_supported": True', worker)
         self.assertIn('state["sound_cues"] = {"opening": None, "chapter": None, "scene": None, "closing": None}', self.host)
 
 
