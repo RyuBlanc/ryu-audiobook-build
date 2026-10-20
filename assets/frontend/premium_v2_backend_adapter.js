@@ -655,8 +655,8 @@
         if (!selected) return;
         const action = window.prompt(
           'Chapter actions for "' + selected.title + '"\n' +
-          'Type one: add, rename, delete, up, down, merge\n' +
-          'Merge combines this chapter into the previous chapter.',
+          'Type one: add, rename, delete, up, down, merge, review\n' +
+          'Merge combines this chapter into the previous chapter. Review toggles its saved review status.',
           'rename'
         );
         if (!action) return;
@@ -705,8 +705,13 @@
             window.ryuPremiumSelectedChapter = number - 1;
             await refreshChapters();
             message('Chapter merged into the previous chapter.');
+          } else if (choice === 'review') {
+            const nextStatus = selected.review_status === 'reviewed' ? 'needs_review' : 'reviewed';
+            await call('chapter.review', {number, review_status:nextStatus});
+            await refreshChapters();
+            message(nextStatus === 'reviewed' ? 'Chapter marked reviewed and saved.' : 'Chapter returned to the review queue.');
           } else {
-            throw new Error('Unknown chapter action. Type add, rename, delete, up, down, or merge.');
+            throw new Error('Unknown chapter action. Type add, rename, delete, up, down, merge, or review.');
           }
         };
         run().catch(error => message(error?.message || String(error), true));
@@ -1225,12 +1230,11 @@
           const chapter = chapters.find(c => c.number === Number(row.dataset.chapterNumber));
           row.hidden = Boolean(chapter?.text?.trim());
         });
-        else {
-          rows.forEach(row => row.hidden = false);
-          message('Review status is not yet supplied by the chapter backend; showing all chapters rather than inventing review flags.', true);
-          return;
-        }
-        message(label === 'empty' ? 'Showing empty chapters.' : 'Showing all chapters.');
+        else if (label === 'review') rows.forEach(row => {
+          const chapter = chapters.find(c => c.number === Number(row.dataset.chapterNumber));
+          row.hidden = chapter?.review_status === 'reviewed';
+        });
+        message(label === 'empty' ? 'Showing empty chapters.' : label === 'review' ? 'Showing chapters that still need review.' : 'Showing all chapters.');
         return;
       }
       if (button.closest('#player')) {
