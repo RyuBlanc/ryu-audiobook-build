@@ -835,7 +835,30 @@
             message('Playing assigned cue clips in book order.');
 
           } else if (soundButton.id === 'soundPreviewBook') {
-            throw new Error('Full-book mix preview is not connected yet. You can preview an individual local track.');
+            if (soundPreviewAudio) { soundPreviewAudio.pause(); soundPreviewAudio = null; }
+            const started = await call('production.preview', {duration_seconds:30, include_sound_design:true});
+            message('Generating a 30-second narration + music/cue mix preview…');
+            let finished = false;
+            for (let attempt = 0; attempt < 240; attempt++) {
+              await new Promise(resolve => setTimeout(resolve, 1500));
+              const rows = await call('job.list', {include_hidden:false});
+              const job = rows.find(item => item.job_id === started.job_id);
+              if (!job) throw new Error('The Sound Design preview job disappeared. Check Generation History.');
+              if (job.state === 'failed' || job.state === 'cancelled') throw new Error(job.message || 'Sound Design preview failed.');
+              if (job.state === 'completed') {
+                const fileUrl = job.result?.file_url || (job.output_path ? 'file:///' + String(job.output_path).replace(/\\/g, '/') : '');
+                if (!fileUrl) throw new Error('The Sound Design preview finished without an audio file.');
+                soundPreviewAudio = new Audio(fileUrl);
+                soundPreviewAudio.onended = () => { soundPreviewAudio = null; };
+                soundPreviewAudio.onerror = () => { soundPreviewAudio = null; message('The Sound Design mix preview could not be played.', true); };
+                await soundPreviewAudio.play();
+                message('Playing the generated Sound Design mix preview.');
+                finished = true;
+                break;
+              }
+              if (attempt % 4 === 0) message('Sound Design preview · ' + Number(job.progress || 0) + '% · ' + (job.stage || 'Generating audio'));
+            }
+            if (!finished) throw new Error('Sound Design preview timed out. Check Generation History for its status.');
           }
         } catch (err) { message(err?.message || String(err), true); }
         return;
