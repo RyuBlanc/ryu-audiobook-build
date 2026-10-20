@@ -25,7 +25,7 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         self.assertIn('chapter_dirs, output, title, author, cover, chapter_titles', source)
 
     def test_full_book_preview_uses_the_production_sound_design_assignments(self):
-        source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        source = Path("app/ui/full_book_preview.py").read_text(encoding="utf-8")
         for setting in (
             "background_audio_mode=", "background_audio_path=", "background_audio_volume=",
             "ambience_audio_path=", "ambience_audio_volume=", "chapter_transition_sound=",
