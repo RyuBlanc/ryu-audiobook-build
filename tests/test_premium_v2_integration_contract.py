@@ -292,6 +292,16 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("auto-real-scene-cue-", assembler)
         self.assertIn("scene_transition_cue_path=self.scene_transition_cue_path", manager)
 
+    def test_performance_screen_never_displays_unmeasured_hardware_as_fact(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("async function refreshPerformance()", adapter)
+        self.assertIn("await refreshPerformance().catch(()=>{});", adapter)
+        self.assertIn("CPU telemetry unavailable", adapter)
+        self.assertIn("GPU / VRAM telemetry unavailable", adapter)
+        self.assertIn("section?.querySelectorAll('.ready-list .ready b').forEach(node => { node.textContent = 'Not measured'; });", adapter)
+        self.assertIn("const result=await refreshPerformance();", adapter)
+        self.assertIn('"performance.info": False', (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8"))
+
     def test_scene_cue_feedback_matches_current_assembly_support(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("Scene transition cue saved to this book and will be included during audiobook assembly.", adapter)

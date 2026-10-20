@@ -422,6 +422,35 @@
     }
     return rows;
   }
+    async function refreshPerformance() {
+    let result;
+    try {
+      result = await call('performance.info');
+    } catch (error) {
+      result = {available:false, reason:error?.message || 'Live hardware telemetry is unavailable in this build.'};
+    }
+    const section = $('performance');
+    if (!result.available) {
+      const metrics = section?.querySelectorAll('.grid.metrics .metric');
+      const labels = [
+        ['Unavailable', 'CPU telemetry unavailable'],
+        ['Unavailable', 'GPU / VRAM telemetry unavailable'],
+        ['Not tested', 'Generation performance'],
+        ['Unavailable', 'Recommended backend']
+      ];
+      metrics?.forEach((metric, index) => {
+        const strong = metric.querySelector('strong');
+        const detail = metric.querySelector('span');
+        if (strong && labels[index]) strong.textContent = labels[index][0];
+        if (detail && labels[index]) detail.textContent = labels[index][1];
+      });
+      section?.querySelectorAll('.ready-list .ready b').forEach(node => { node.textContent = 'Not measured'; });
+      if ($('benchmarkResult')) $('benchmarkResult').textContent = 'Unavailable';
+      const note = $('benchmarkResult')?.parentElement?.querySelector('p.muted');
+      if (note) note.textContent = result.reason || 'Live hardware telemetry and benchmark results are not connected in this build.';
+    }
+    return result;
+  }
   async function refreshModels() {
     const rows = await call('models.list');
     const grid = $('modelGrid');
@@ -453,7 +482,7 @@
   async function wire() {
     await call('app.get_info');
     await refreshProjects().catch(()=>{}); await refreshVoices().catch(()=>{}); await refreshChapters().catch(()=>{});
-    await refreshCharacters().catch(()=>{}); await refreshTerms().catch(()=>{}); await refreshSounds().catch(()=>{}); await refreshSoundCues().catch(()=>{}); await refreshChapterBgm().catch(()=>{}); await refreshJobs().catch(()=>{}); await refreshHistory().catch(()=>{}); await refreshModels().catch(()=>{}); await loadSettings().catch(()=>{});
+    await refreshCharacters().catch(()=>{}); await refreshTerms().catch(()=>{}); await refreshSounds().catch(()=>{}); await refreshSoundCues().catch(()=>{}); await refreshChapterBgm().catch(()=>{}); await refreshJobs().catch(()=>{}); await refreshHistory().catch(()=>{}); await refreshModels().catch(()=>{}); await refreshPerformance().catch(()=>{}); await loadSettings().catch(()=>{});
     document.addEventListener('click', e => { const b=e.target.closest('[data-voice]'); if(b){selectedVoiceId=b.dataset.voice;const label=b.dataset.voice;if($('profileVoice'))$('profileVoice').textContent=label;if($('premiumName')&&!$('premiumName').value.trim())$('premiumName').value=label+' Custom';if($('profileName')&&!$('profileName').value.trim())$('profileName').value=label+' Custom';return;}if(e.target.closest('.provider'))selectedVoiceId=null; });
     if ($('historyFilters')) $('historyFilters').querySelectorAll('button').forEach(button => button.addEventListener('click', () => {
       $('historyFilters').querySelectorAll('button').forEach(b=>b.classList.toggle('active',b===button));
@@ -475,8 +504,7 @@
     if ($('clearModelQueue')) $('clearModelQueue').onclick=act(async()=>{await call('job.clear_completed');await refreshJobs();await refreshHistory();message('Completed background jobs cleared from the active queue.');});
     if ($('runIntegrityCheck')) $('runIntegrityCheck').onclick=act(runDiagnostics);
     if ($('runBenchmark')) $('runBenchmark').onclick=act(async()=>{
-      const result=await call('performance.info');
-      if($('benchmarkResult'))$('benchmarkResult').textContent=result.available?'Benchmark available':'Not connected';
+      const result=await refreshPerformance();
       message(result.reason||'Hardware benchmark is not available in this build.',!result.available);
     });
     if ($('chapterSearch')) $('chapterSearch').oninput=()=>{
