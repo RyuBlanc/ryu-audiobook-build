@@ -1363,8 +1363,10 @@ class RegressionTests(unittest.TestCase):
                 chapters.append(chapter_dir)
             default_music = root / "default.wav"
             custom_music = root / "custom.wav"
+            scene_cue = root / "scene.wav"
             _write_wav(default_music, 1.0)
             _write_wav(custom_music, 1.0)
+            _write_wav(scene_cue, 0.4)
             output = root / "chapter-bgm-test.m4b"
 
             assemble_m4b(
@@ -1375,6 +1377,8 @@ class RegressionTests(unittest.TestCase):
                 background_audio_path=default_music,
                 background_audio_volume=0.18,
                 background_audio_mode="manual",
+                chapter_transition_sound=True,
+                scene_transition_cue_path=scene_cue,
                 chapter_bgm_overrides={
                     "1": {"rule": "custom", "path": str(custom_music), "volume": 0.22},
                     "2": {"rule": "none", "volume": 0.18},
@@ -1383,8 +1387,8 @@ class RegressionTests(unittest.TestCase):
 
             self.assertTrue(output.is_file())
             self.assertGreater(output.stat().st_size, 1024)
-            self.assertGreaterEqual(_duration_ms(output), 4000)
-            self.assertLessEqual(_duration_ms(output), 6000)
+            self.assertGreaterEqual(_duration_ms(output), 5000)
+            self.assertLessEqual(_duration_ms(output), 7000)
 
     def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
         from app.tts.pacing import pause_after_ms
