@@ -31,3 +31,11 @@
 - Switched the host handler to the existing `clean_import_noise` service so explicit cleanup can remove known URL/watermark/report/page-number noise and reflow text.
 - Returned a `removed_count` and updated the status message to make cleanup transparent to the user.
 - Added/strengthened integration-contract assertions. Existing parser tests already cover common import-noise patterns; Windows end-to-end acceptance remains pending.
+
+
+## Stage 2 — import integrity checkpoint
+
+- Added exact-content duplicate detection before an import job is created. The backend hashes the selected source and compares it against preserved source files in existing local projects; a duplicate receives an actionable error naming the existing project rather than silently creating a second copy.
+- Import completion data now includes the preserved source-file path and an explicit chapter-boundary review warning. This is a truthful review reminder, not a claim that automatic chapter detection is perfect.
+- Added integration-contract checks for duplicate detection ordering, source preservation and the import report fields.
+- The approved HTML/CSS remains untouched. Stage 2 remains open pending parser/chapter fixture coverage and runtime acceptance for retries, malformed files, duplicate files and edit/save/reload behavior.
