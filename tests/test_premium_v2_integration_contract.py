@@ -264,7 +264,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("if not chapters:", worker)
         self.assertIn("No chapters contain narration text. Restore chapter text before generating.", worker)
         self.assertIn('"empty_chapters_skipped": skipped', worker)
-        self.assertIn("Render {len(chapters)} non-empty chapter(s)", wo
+        self.assertIn("Render {len(chapters)} non-empty chapter(s)", worker)
 
     def test_preview_duration_setting_accepts_every_supported_target(self):
         self.assertIn('if key == "preview_seconds" and int(value) not in {10, 20, 30, 45, 60}:', self.host)
@@ -293,9 +293,3 @@ rker)
 
 if __name__ == "__main__":
     unittest.main()
-
-
-    def test_preview_duration_setting_accepts_every_supported_target(self):
-        self.assertIn('if key == "preview_seconds" and int(value) not in {10, 20, 30, 45, 60}:', self.host)
-        self.assertIn('Preview duration must be 10, 20, 30, 45, or 60 seconds.', self.host)
-
