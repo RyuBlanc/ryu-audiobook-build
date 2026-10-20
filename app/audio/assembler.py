@@ -390,6 +390,7 @@ def assemble_m4b(
                     if scene_cue is not None:
                         scene_prefixed = temp_dir / f"auto-real-scene-cue-{index:05d}.m4a"
                         _concat_audio_files(scene_cue, current_audio, scene_prefixed, audio_bitrate)
+                        cue_offset_by_chapter[index] = cue_offset_by_chapter.get(index, 0) + _duration_ms(scene_cue)
                         current_audio = scene_prefixed
 
                 duration_ms = _duration_ms(current_audio)
@@ -456,6 +457,7 @@ def assemble_m4b(
                     if scene_cue is not None:
                         scene_prefixed = temp_dir / f"{effective_audio_mode}-real-scene-cue-{index:05d}.m4a"
                         _concat_audio_files(scene_cue, current_audio, scene_prefixed, audio_bitrate)
+                        cue_offset_by_chapter[index] = cue_offset_by_chapter.get(index, 0) + _duration_ms(scene_cue)
                         current_audio = scene_prefixed
                 if index==len(chapters):
                     closing=_resolve_cue_audio(temp_dir,"ending","library",variation,mood,ending_cue_path)
