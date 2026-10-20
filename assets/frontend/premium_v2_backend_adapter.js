@@ -655,8 +655,8 @@
         if (!selected) return;
         const action = window.prompt(
           'Chapter actions for "' + selected.title + '"\n' +
-          'Type one: add, rename, delete, up, down, merge, review\n' +
-          'Merge combines this chapter into the previous chapter. Review toggles its saved review status.',
+          'Type one: add, rename, delete, up, down, merge, review, skip\n' +
+          'Merge combines this chapter into the previous chapter. Review toggles its saved review status. Skip toggles inclusion in audiobook generation.',
           'rename'
         );
         if (!action) return;
@@ -710,8 +710,13 @@
             await call('chapter.review', {number, review_status:nextStatus});
             await refreshChapters();
             message(nextStatus === 'reviewed' ? 'Chapter marked reviewed and saved.' : 'Chapter returned to the review queue.');
+          } else if (choice === 'skip') {
+            const nextSkip = !Boolean(selected.skip_for_generation);
+            await call('chapter.skip', {number, skip_for_generation:nextSkip});
+            await refreshChapters();
+            message(nextSkip ? 'Chapter excluded from audiobook generation; its text is preserved.' : 'Chapter included in audiobook generation again.');
           } else {
-            throw new Error('Unknown chapter action. Type add, rename, delete, up, down, merge, or review.');
+            throw new Error('Unknown chapter action. Type add, rename, delete, up, down, merge, review, or skip.');
           }
         };
         run().catch(error => message(error?.message || String(error), true));

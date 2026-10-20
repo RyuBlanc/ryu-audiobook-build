@@ -47,4 +47,5 @@
 - Added the allow-listed `chapter.review` bridge command, which validates and saves `reviewed` or `needs_review` status into the project's chapter JSON.
 - Connected the existing Review filter to the persisted status and exposed a contextual `review` action on the chapter list. The approved HTML file remains unchanged.
 - Added static contract checks for bridge/capability registration, persistence, filtering and compatibility with legacy chapter JSON.
-- This closes review-state plumbing only; skipped/excluded generation behavior, find/replace, undo/redo, re-detection protection and Stage 2 runtime acceptance remain open.
+- Added a separate persisted `skip_for_generation` flag and contextual skip/unskip action. Book generation now excludes flagged chapters without deleting their text and records intentional exclusions separately from empty chapters.
+- Find/replace, undo/redo, re-detection protection and Stage 2 runtime acceptance remain open.

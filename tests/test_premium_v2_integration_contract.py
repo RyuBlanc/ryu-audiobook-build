@@ -499,10 +499,25 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("row.hidden = chapter?.review_status === 'reviewed'", adapter)
         self.assertNotIn("Review status is not yet supplied by the chapter backend", adapter)
 
-    def test_legacy_chapter_json_remains_compatible_with_review_default(self):
+    def test_chapter_generation_exclusion_is_persisted_and_applied(self):
+        detector = (ROOT / "app" / "chapters" / "detector.py").read_text(encoding="utf-8")
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("skip_for_generation: bool = False", detector)
+        self.assertIn('"chapter.skip": self._chapter_skip', host)
+        self.assertIn('"chapter.skip": True', host)
+        self.assertIn('"skip_for_generation": getattr(c, "skip_for_generation", False)', host)
+        self.assertIn("chapter.skip_for_generation = value", host)
+        self.assertIn('not getattr(c, "skip_for_generation", False)', host)
+        self.assertIn('"excluded_chapters_skipped": excluded_skipped', host)
+        self.assertIn("call('chapter.skip', {number, skip_for_generation:nextSkip})", adapter)
+        self.assertIn("Chapter included in audiobook generation again.", adapter)
+
+    def test_legacy_chapter_json_remains_compatible_with_review_and_skip_defaults(self):
         detector = (ROOT / "app" / "chapters" / "detector.py").read_text(encoding="utf-8")
         project = (ROOT / "app" / "core" / "project.py").read_text(encoding="utf-8")
         self.assertIn('review_status: str = "needs_review"', detector)
+        self.assertIn("skip_for_generation: bool = False", detector)
         self.assertIn("chapters = [Chapter(**item) for item in chapter_data]", project)
 
 

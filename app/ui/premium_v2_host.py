@@ -84,6 +84,7 @@ class PremiumV2Bridge(QObject):
                 "chapter.list": self._chapter_list,
                 "chapter.update": self._chapter_update,
                 "chapter.review": self._chapter_review,
+                "chapter.skip": self._chapter_skip,
                 "chapter.clean": self._chapter_clean,
                 "chapter.add": self._chapter_add,
                 "chapter.delete": self._chapter_delete,
@@ -187,6 +188,7 @@ class PremiumV2Bridge(QObject):
             "chapter.list": True,
             "chapter.update": True,
             "chapter.review": True,
+            "chapter.skip": True,
             "chapter.split": True,
             "chapter.clean": True,
             "chapter.add": True,
@@ -308,7 +310,8 @@ class PremiumV2Bridge(QObject):
         return [{"number": c.number, "title": c.title, "text": c.text,
                  "word_count": len(c.text.split()),
                  "dialogue_assignments": c.dialogue_assignments,
-                 "review_status": getattr(c, "review_status", "needs_review")}
+                 "review_status": getattr(c, "review_status", "needs_review"),
+                 "skip_for_generation": getattr(c, "skip_for_generation", False)}
                 for c in project.chapters]
 
     def _chapter_update(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -358,6 +361,30 @@ class PremiumV2Bridge(QObject):
         state["modified_at"] = self._now()
         save_state(project.folder, state)
         return {"number": chapter.number, "review_status": chapter.review_status, "saved": True}
+
+    def _chapter_skip(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist whether a chapter is excluded from audiobook generation."""
+        project = self._active_project()
+        try:
+            number = int(payload.get("number"))
+        except (TypeError, ValueError):
+            raise ValueError("Select a valid chapter before changing generation inclusion.")
+        chapter = next((c for c in project.chapters if c.number == number), None)
+        if chapter is None:
+            raise ValueError("The selected chapter no longer exists.")
+        value = payload.get("skip_for_generation")
+        if not isinstance(value, bool):
+            raise ValueError("skip_for_generation must be true or false.")
+        chapter.skip_for_generation = value
+        project.save()
+        state = load_state(project.folder)
+        state["modified_at"] = self._now()
+        save_state(project.folder, state)
+        return {
+            "number": chapter.number,
+            "skip_for_generation": chapter.skip_for_generation,
+            "saved": True,
+        }
 
     @staticmethod
     def _now() -> str:
@@ -1254,10 +1281,12 @@ class PremiumV2Bridge(QObject):
 
     def _production_generate_book(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
-        chapters = [c for c in project.chapters if (c.text or "").strip()]
+        chapters = [c for c in project.chapters if not getattr(c, "skip_for_generation", False) and (c.text or "").strip()]
         skipped = len(project.chapters) - len(chapters)
+        empty_skipped = sum(1 for c in project.chapters if not (c.text or "").strip())
+        excluded_skipped = sum(1 for c in project.chapters if getattr(c, "skip_for_generation", False) and (c.text or "").strip())
         if not chapters:
-            raise ValueError("No chapters contain narration text. Restore chapter text before generating.")
+            raise ValueError("No chapters are eligible for generation. Restore chapter text or re-include a skipped chapter.")
         state = load_state(project.folder)
         profile_name = str(payload.get("profile_name") or state.get("voice_profile") or "").strip()
         profile = self._find_profile(profile_name)
@@ -1312,14 +1341,15 @@ class PremiumV2Bridge(QObject):
         if not 128 <= bitrate <= 320:
             raise ValueError("Select a bitrate from 128 through 320 kbps.")
         job_id = self._new_job("audiobook-generation", "Generate " + project.title,
-                               f"Render {len(chapters)} non-empty chapter(s)", project)
+                               f"Render {len(chapters)} eligible chapter(s); skip {skipped} empty/excluded chapter(s)", project)
         # While a new generation is running, do not expose a prior file at the
         # same destination as the current audiobook. Keep the intended destination
         # separately; only publish output_path after the final file validates.
         state.update({"voice_profile": profile.name, "voice_id": profile.voice_id,
                       "output_path": None, "generation_target_path": str(output),
                       "status": "generating", "audio_bitrate": bitrate, "generation_job_id": job_id,
-                      "generation_started_at": self._now(), "empty_chapters_skipped": skipped})
+                      "generation_started_at": self._now(), "empty_chapters_skipped": empty_skipped,
+                      "excluded_chapters_skipped": excluded_skipped, "chapters_skipped_for_generation": skipped})
         save_state(project.folder, state)
         metadata = {"title": str(payload.get("title") or project.title),
                     "author": str(payload.get("author") or state.get("author") or ""),

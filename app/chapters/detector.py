@@ -16,6 +16,8 @@ class Chapter:
     dialogue_assignments: list[dict] = field(default_factory=list)
     # Review state is persisted with each chapter; older project JSON defaults to needs_review.
     review_status: str = "needs_review"
+    # Explicitly exclude this chapter from audiobook generation while keeping its text.
+    skip_for_generation: bool = False
 
 
 EXPLICIT_PATTERNS = [
