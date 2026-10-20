@@ -238,6 +238,16 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("call('job.resume', {job_id:job.job_id})", adapter)
         self.assertIn("No active audiobook generation jobs support pause or resume.", adapter)
 
+    def test_every_static_adapter_backend_call_has_an_allowlisted_handler(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        # Static command calls from the frontend adapter must all be registered in
+        # the desktop bridge dispatch table. Dynamic command maps have separate
+        # explicit coverage in their feature-specific tests.
+        commands = set(re.findall(r"\\bcall\\(['\"]([^'\"\\n]+)['\"]", adapter))
+        registered = set(re.findall(r'"([a-z][a-z0-9_.]+)": self\\._[A-Za-z0-9_]+', self.host))
+        self.assertTrue(commands, "Expected frontend adapter to call backend commands")
+        self.assertEqual(commands - registered, set(), "Adapter commands without backend handlers: " + repr(sorted(commands - registered)))
+
     def test_frontend_is_packaged_and_selected_by_desktop_entrypoint(self):
         self.assertIn("ryu_audiobook_premium_v2.html", self.build)
         self.assertIn("PremiumV2Window", self.main)
