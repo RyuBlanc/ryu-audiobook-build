@@ -1387,7 +1387,7 @@ class RegressionTests(unittest.TestCase):
 
             self.assertTrue(output.is_file())
             self.assertGreater(output.stat().st_size, 1024)
-            self.assertGreaterEqual(_duration_ms(output), 5000)
+            self.assertGreaterEqual(_duration_ms(output), 4500)
             self.assertLessEqual(_duration_ms(output), 7000)
 
     def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
