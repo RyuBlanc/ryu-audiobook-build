@@ -83,6 +83,7 @@ class PremiumV2Bridge(QObject):
                 "project.get_active": self._project_get_active,
                 "chapter.list": self._chapter_list,
                 "chapter.update": self._chapter_update,
+                "chapter.review": self._chapter_review,
                 "chapter.clean": self._chapter_clean,
                 "chapter.add": self._chapter_add,
                 "chapter.delete": self._chapter_delete,
@@ -185,6 +186,7 @@ class PremiumV2Bridge(QObject):
             "project.get_active": True,
             "chapter.list": True,
             "chapter.update": True,
+            "chapter.review": True,
             "chapter.split": True,
             "chapter.clean": True,
             "chapter.add": True,
@@ -305,7 +307,8 @@ class PremiumV2Bridge(QObject):
         project = self._active_project()
         return [{"number": c.number, "title": c.title, "text": c.text,
                  "word_count": len(c.text.split()),
-                 "dialogue_assignments": c.dialogue_assignments}
+                 "dialogue_assignments": c.dialogue_assignments,
+                 "review_status": getattr(c, "review_status", "needs_review")}
                 for c in project.chapters]
 
     def _chapter_update(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -335,6 +338,26 @@ class PremiumV2Bridge(QObject):
                 "word_count": len((chapter.text or "").split()),
                 "character_count": len(chapter.text or ""),
                 "empty": not bool((chapter.text or "").strip()), "saved": True}
+
+    def _chapter_review(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist the explicit human review state for a chapter."""
+        project = self._active_project()
+        try:
+            number = int(payload.get("number"))
+        except (TypeError, ValueError):
+            raise ValueError("Select a valid chapter before changing review status.")
+        chapter = next((c for c in project.chapters if c.number == number), None)
+        if chapter is None:
+            raise ValueError("The selected chapter no longer exists.")
+        status = str(payload.get("review_status") or "").strip().lower()
+        if status not in {"needs_review", "reviewed"}:
+            raise ValueError("Review status must be needs_review or reviewed.")
+        chapter.review_status = status
+        project.save()
+        state = load_state(project.folder)
+        state["modified_at"] = self._now()
+        save_state(project.folder, state)
+        return {"number": chapter.number, "review_status": chapter.review_status, "saved": True}
 
     @staticmethod
     def _now() -> str:
