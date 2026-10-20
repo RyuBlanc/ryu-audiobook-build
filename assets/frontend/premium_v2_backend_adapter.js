@@ -16,7 +16,7 @@
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
   let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve();
-  let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {};
+  let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
   const selectedChapter = () => chapters.find(c => c.number === window.ryuPremiumSelectedChapter) || chapters[0];
   const renderSelect = (select, rows, value, label) => {
     if (!select) return;
@@ -149,6 +149,48 @@
     grid.innerHTML = visible.map(t => '<button type="button" class="cue-track card" data-cue-path="' + esc(t.path) + '"><b>' + esc(t.title) + '</b><small>' + esc(t.source) + ' · ' + esc(t.format) + '</small></button>').join('') ||
       '<p class="muted">No matching local cue clips. Import licensed audio clips to use them here.</p>';
     return cueAssignments;
+  }
+  function renderChapterBgm() {
+    const list = $('chapterBgmList'), picker = $('chapterTrackPicker');
+    const rows = chapterBgmState.chapters || chapters.map(ch => ({number:ch.number,title:ch.title}));
+    if (!rows.length) {
+      if (list) list.innerHTML = '<p class="muted">Import a book to assign chapter music.</p>';
+      if (picker) picker.innerHTML = '<p class="muted">No chapters are available.</p>';
+      return;
+    }
+    if (!rows.some(ch => Number(ch.number) === Number(selectedBgmChapter))) selectedBgmChapter = Number(rows[0].number);
+    const overrides = chapterBgmState.overrides || {};
+    if (list) list.innerHTML = rows.map(ch => {
+      const o = overrides[String(ch.number)] || {};
+      const rule = o.rule || 'default';
+      const label = rule === 'custom' ? (o.title || (o.available === false ? 'Missing custom track' : 'Custom track')) : rule === 'none' ? 'No BGM' : 'Book default';
+      return '<button type="button" class="chapter-bgm-item ' + (Number(ch.number) === Number(selectedBgmChapter) ? 'active' : '') + (rule === 'custom' ? ' override' : '') + '" data-chapter-bgm="' + Number(ch.number) + '"><b>' + esc('Chapter ' + ch.number + ' · ' + ch.title) + '</b><small>' + esc(label) + '</small></button>';
+    }).join('');
+    const chapter = rows.find(ch => Number(ch.number) === Number(selectedBgmChapter)) || rows[0];
+    const current = overrides[String(chapter.number)] || {};
+    const rule = current.rule || 'default';
+    selectedBgmTrackPath = current.path || null;
+    if ($('chapterBgmTitle')) $('chapterBgmTitle').textContent = 'Chapter ' + chapter.number + ' · ' + chapter.title;
+    document.querySelectorAll('#sound [data-bgm-strategy]').forEach(b => b.classList.toggle('active', b.dataset.bgmStrategy === (chapterBgmState.strategy || 'same')));
+    document.querySelectorAll('#sound .chapter-rule [data-chapter-rule]').forEach(b => b.classList.toggle('active', b.dataset.chapterRule === rule));
+    if ($('chapterVolume')) $('chapterVolume').value = Math.round(Number(current.volume ?? chapterBgmState.default_volume ?? 0.18) * 100);
+    const selects = document.querySelectorAll('#sound [data-sound-view="chapters"] .chapter-mix-row select');
+    if (selects[0]) selects[0].selectedIndex = ({immediate:0,after_first_paragraph:1,after_10_seconds:2})[current.start_offset || 'immediate'] ?? 0;
+    if (selects[1]) selects[1].selectedIndex = ({fade_before_end:0,continue_to_transition:1,stop_immediately:2})[current.end_behavior || 'fade_before_end'] ?? 0;
+    if (picker) {
+      const visible = sounds;
+      picker.innerHTML = visible.map(t => '<button type="button" class="chapter-track-option ' + (t.path === selectedBgmTrackPath ? 'active' : '') + '" data-chapter-track="' + esc(t.path) + '"><b>' + esc(t.title) + '</b><small>' + esc(t.source) + ' · ' + esc(t.format) + '</small></button>').join('') ||
+        '<p class="muted">No local music tracks found. Import a licensed audio file first.</p>';
+    }
+    const mixStrategy = $('mixStrategy');
+    if (mixStrategy) mixStrategy.textContent = chapterBgmState.strategy === 'custom' ? 'Chapter-based BGM' : 'Same BGM';
+    const mixOverrides = $('mixOverrides');
+    if (mixOverrides) mixOverrides.textContent = Object.values(overrides).filter(o => o.rule === 'custom' || o.rule === 'none').length + ' chapters';
+  }
+  async function refreshChapterBgm() {
+    chapterBgmState = await call('sound.chapter_bgm.get');
+    renderChapterBgm();
+    return chapterBgmState;
   }
   let backendJobFilter = 'active';
   async function refreshJobs() {
@@ -411,7 +453,7 @@
   async function wire() {
     await call('app.get_info');
     await refreshProjects().catch(()=>{}); await refreshVoices().catch(()=>{}); await refreshChapters().catch(()=>{});
-    await refreshCharacters().catch(()=>{}); await refreshTerms().catch(()=>{}); await refreshSounds().catch(()=>{}); await refreshSoundCues().catch(()=>{}); await refreshJobs().catch(()=>{}); await refreshHistory().catch(()=>{}); await refreshModels().catch(()=>{}); await loadSettings().catch(()=>{});
+    await refreshCharacters().catch(()=>{}); await refreshTerms().catch(()=>{}); await refreshSounds().catch(()=>{}); await refreshSoundCues().catch(()=>{}); await refreshChapterBgm().catch(()=>{}); await refreshJobs().catch(()=>{}); await refreshHistory().catch(()=>{}); await refreshModels().catch(()=>{}); await loadSettings().catch(()=>{});
     document.addEventListener('click', e => { const b=e.target.closest('[data-voice]'); if(b){selectedVoiceId=b.dataset.voice;const label=b.dataset.voice;if($('profileVoice'))$('profileVoice').textContent=label;if($('premiumName')&&!$('premiumName').value.trim())$('premiumName').value=label+' Custom';if($('profileName')&&!$('profileName').value.trim())$('profileName').value=label+' Custom';return;}if(e.target.closest('.provider'))selectedVoiceId=null; });
     if ($('historyFilters')) $('historyFilters').querySelectorAll('button').forEach(button => button.addEventListener('click', () => {
       $('historyFilters').querySelectorAll('button').forEach(b=>b.classList.toggle('active',b===button));
@@ -601,6 +643,54 @@
       }
     }, true);
     document.addEventListener('click', async e => {
+      const chapterBgmItem = e.target.closest('#chapterBgmList [data-chapter-bgm]');
+      if (chapterBgmItem) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        selectedBgmChapter = Number(chapterBgmItem.dataset.chapterBgm);
+        renderChapterBgm();
+        return;
+      }
+      const chapterStrategy = e.target.closest('#sound [data-bgm-strategy]');
+      if (chapterStrategy) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        try {
+          await call('sound.chapter_bgm.save', {strategy:chapterStrategy.dataset.bgmStrategy});
+          await refreshChapterBgm();
+          message(chapterBgmState.strategy === 'same' ? 'Same book-wide BGM strategy saved; chapter overrides cleared.' : 'Chapter-based BGM strategy enabled.');
+        } catch (err) { message(err?.message || String(err), true); }
+        return;
+      }
+      const chapterRuleButton = e.target.closest('#sound .chapter-rule [data-chapter-rule]');
+      if (chapterRuleButton) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        document.querySelectorAll('#sound .chapter-rule [data-chapter-rule]').forEach(b => b.classList.toggle('active', b === chapterRuleButton));
+        return;
+      }
+      const chapterTrack = e.target.closest('#chapterTrackPicker [data-chapter-track]');
+      if (chapterTrack) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        selectedBgmTrackPath = chapterTrack.dataset.chapterTrack;
+        document.querySelectorAll('#chapterTrackPicker [data-chapter-track]').forEach(b => b.classList.toggle('active', b === chapterTrack));
+        return;
+      }
+      if (e.target.closest('#saveChapterBgm')) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        try {
+          const rule = document.querySelector('#sound .chapter-rule [data-chapter-rule].active')?.dataset.chapterRule || 'default';
+          if (rule === 'custom' && !selectedBgmTrackPath) throw new Error('Choose a custom music track for this chapter first.');
+          const selects = document.querySelectorAll('#sound [data-sound-view="chapters"] .chapter-mix-row select');
+          const startOffset = ['immediate','after_first_paragraph','after_10_seconds'][selects[0]?.selectedIndex || 0];
+          const endBehavior = ['fade_before_end','continue_to_transition','stop_immediately'][selects[1]?.selectedIndex || 0];
+          await call('sound.chapter_bgm.save', {
+            number:selectedBgmChapter, rule, path:rule === 'custom' ? selectedBgmTrackPath : null,
+            volume:Number($('chapterVolume')?.value || 18)/100,
+            start_offset:startOffset, end_behavior:endBehavior
+          });
+          await refreshChapterBgm();
+          message('Saved BGM assignment for Chapter ' + selectedBgmChapter + '.');
+        } catch (err) { message(err?.message || String(err), true); }
+        return;
+      }
       const recentProject = e.target.closest('#dashboard .recent-grid [data-project-folder]');
       if (recentProject) {
         e.preventDefault(); e.stopImmediatePropagation();
