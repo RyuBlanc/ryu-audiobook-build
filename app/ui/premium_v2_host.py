@@ -562,6 +562,8 @@ class PremiumV2Bridge(QObject):
         index = next((i for i, c in enumerate(project.chapters) if c.number == number), None)
         if index is None:
             raise ValueError("Select an existing chapter to delete.")
+        if len(project.chapters) <= 1:
+            raise ValueError("A project must keep at least one chapter. Clear the chapter text if you need an empty draft.")
         del project.chapters[index]
         for i, chapter in enumerate(project.chapters, 1):
             chapter.number = i
@@ -591,9 +593,18 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Choose a chapter after the first; it will be merged into the previous chapter.")
         current = project.chapters[number - 1]
         previous = project.chapters[number - 2]
-        separator = "\n\n" if previous.text.strip() and current.text.strip() else ""
-        previous.text = (previous.text.rstrip() + separator + current.text.lstrip()).strip()
-        previous.dialogue_assignments.extend(current.dialogue_assignments or [])
+        previous_text = previous.text.rstrip()
+        current_text = current.text.lstrip()
+        separator = "\n\n" if previous_text and current_text else ""
+        assignment_offset = len(previous_text + separator)
+        previous.text = (previous_text + separator + current_text).strip()
+        for assignment in current.dialogue_assignments or []:
+            shifted = dict(assignment)
+            if isinstance(shifted.get("start"), int):
+                shifted["start"] += assignment_offset
+            if isinstance(shifted.get("end"), int):
+                shifted["end"] += assignment_offset
+            previous.dialogue_assignments.append(shifted)
         del project.chapters[number - 1]
         for index, chapter in enumerate(project.chapters, 1):
             chapter.number = index
