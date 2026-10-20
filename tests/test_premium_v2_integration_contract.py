@@ -292,6 +292,13 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("auto-real-scene-cue-", assembler)
         self.assertIn("scene_transition_cue_path=self.scene_transition_cue_path", manager)
 
+    def test_scene_cue_feedback_matches_current_assembly_support(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("Scene transition cue saved to this book and will be included during audiobook assembly.", adapter)
+        self.assertIn("const assignedSlot = pendingCueSlot;", adapter)
+        self.assertNotIn("current audiobook assembly does not yet render a separate scene cue", adapter)
+        self.assertIn("scene_transition_cue_path=self.scene_transition_cue_path", (ROOT / "app" / "tts" / "manager.py").read_text(encoding="utf-8"))
+
     def test_sound_cue_assignments_are_allowlisted_and_persisted(self):
         for command, method in (
             ("sound.cues.get", "_sound_cues_get"),

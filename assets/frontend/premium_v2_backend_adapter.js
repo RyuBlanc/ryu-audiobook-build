@@ -768,10 +768,11 @@
         try {
           const path = cueTrack.dataset.cuePath;
           if (pendingCueSlot) {
-            const result = await call('sound.cues.save', {slot:pendingCueSlot,path});
+            const assignedSlot = pendingCueSlot;
+            const result = await call('sound.cues.save', {slot:assignedSlot,path});
             pendingCueSlot = null;
             await refreshSoundCues();
-            message(result.generation_supported ? 'Cue assignment saved to this book.' : 'Scene cue assignment saved for editing; current audiobook assembly does not yet render a separate scene cue.');
+            message(result.generation_supported ? (assignedSlot === 'scene' ? 'Scene transition cue saved to this book and will be included during audiobook assembly.' : 'Cue assignment saved to this book.') : 'Cue assignment saved, but this build reports that the selected cue is not used during audiobook assembly.');
           } else {
             selectedSoundPath = path;
             message('Cue clip selected. Choose Change beside a cue slot, then select this clip to assign it.');
