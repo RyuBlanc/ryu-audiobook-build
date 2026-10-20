@@ -39,3 +39,12 @@
 - Import completion data now includes the preserved source-file path and an explicit chapter-boundary review warning. This is a truthful review reminder, not a claim that automatic chapter detection is perfect.
 - Added integration-contract checks for duplicate detection ordering, source preservation and the import report fields.
 - The approved HTML/CSS remains untouched. Stage 2 remains open pending parser/chapter fixture coverage and runtime acceptance for retries, malformed files, duplicate files and edit/save/reload behavior.
+
+
+## Stage 2 — persisted chapter review state
+
+- Added a backward-compatible `review_status` field to the chapter record with `needs_review` as the default for existing projects.
+- Added the allow-listed `chapter.review` bridge command, which validates and saves `reviewed` or `needs_review` status into the project's chapter JSON.
+- Connected the existing Review filter to the persisted status and exposed a contextual `review` action on the chapter list. The approved HTML file remains unchanged.
+- Added static contract checks for bridge/capability registration, persistence, filtering and compatibility with legacy chapter JSON.
+- This closes review-state plumbing only; skipped/excluded generation behavior, find/replace, undo/redo, re-detection protection and Stage 2 runtime acceptance remain open.
