@@ -1351,6 +1351,41 @@ class RegressionTests(unittest.TestCase):
             self.assertGreaterEqual(duration, 6000)
             self.assertLessEqual(duration, 7000)
 
+    def test_chapter_specific_bgm_override_is_mixed_before_book_concat(self):
+        from app.audio.assembler import _duration_ms
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapters = []
+            for number, title in ((1, "First"), (2, "Second")):
+                chapter_dir = root / f"{number:03d}_{title}"
+                _write_wav(chapter_dir / "chunks" / "00001.wav", 2.2)
+                chapters.append(chapter_dir)
+            default_music = root / "default.wav"
+            custom_music = root / "custom.wav"
+            _write_wav(default_music, 1.0)
+            _write_wav(custom_music, 1.0)
+            output = root / "chapter-bgm-test.m4b"
+
+            assemble_m4b(
+                chapters,
+                output,
+                "Chapter BGM overrides",
+                chapter_titles=["First", "Second"],
+                background_audio_path=default_music,
+                background_audio_volume=0.18,
+                background_audio_mode="manual",
+                chapter_bgm_overrides={
+                    "1": {"rule": "custom", "path": str(custom_music), "volume": 0.22},
+                    "2": {"rule": "none", "volume": 0.18},
+                },
+            )
+
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 1024)
+            self.assertGreaterEqual(_duration_ms(output), 4000)
+            self.assertLessEqual(_duration_ms(output), 6000)
+
     def test_pause_profiles_keep_sentence_and_dialogue_turns_natural(self):
         from app.tts.pacing import pause_after_ms
         self.assertGreaterEqual(pause_after_ms("That is the end.", "natural"), 280)
