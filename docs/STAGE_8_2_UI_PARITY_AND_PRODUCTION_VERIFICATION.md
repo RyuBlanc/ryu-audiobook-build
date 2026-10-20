@@ -112,3 +112,11 @@ The evidence ledger has begun with passing CI candidates #642 and #644, includin
 - Preserve the approved HTML without redesign; this test checks the adapter/bridge boundary, not pixel parity or real interaction.
 - Next focus: run this guard in Windows CI, then continue the screen-by-screen acceptance work. Sound Design gaps remain explicit: per-chapter BGM overrides, persistent story-cue assignments, cue-sequence preview, and full-book mix preview are not connected. Do not mark these features complete or imply their buttons work.
 - Manual gates remain open: actual Windows voice preview/playback, installer and portable launch, generation pause/resume/cancel/retry and offline behavior, all 15 destinations at normal/reduced window sizes, and real-project persistence checks.
+
+
+### Stage 8.2.6 follow-up — Preview setting contract
+
+- Build #650 passed the static adapter-command-to-bridge-handler guard and completed the Windows CI packaging workflow.
+- A second contract mismatch was found during review: the Voice Studio preview path supports 10, 20, 30, 45, and 60 seconds, but the persisted Settings bridge accepted only 10, 30, and 60.
+- Updated the Settings validation to accept all five supported preview targets and added a regression guard for the validation/error contract.
+- **Pending:** a new Windows CI run must pass before this correction is considered validated. The fix does not replace real Windows playback verification.
