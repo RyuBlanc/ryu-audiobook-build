@@ -1330,6 +1330,84 @@
       savedProfileSelect.innerHTML = '<option value="">Select saved profile</option>' + voices.map(v => '<option value="' + esc(v.name) + '">' + esc(v.name) + ' · ' + esc(v.provider) + '</option>').join('');
     }
 
+
+    // Last high-value Stage 8.2.9 guards: bind the legacy pronunciation modal and
+    // voice-test matrix to saved backend data; never let mock model actions claim success.
+    document.addEventListener('click', e => {
+      const button = e.target.closest('button');
+      if (!button) return;
+      const stop = () => { e.preventDefault(); e.stopImmediatePropagation(); };
+      const run = async fn => { stop(); try { await fn(); } catch (err) { message(err?.message || String(err), true); } };
+      if (button.id === 'addPronunciationAdvanced') {
+        stop();
+        if ($('modalTitle')) $('modalTitle').textContent = 'Add pronunciation';
+        $('modalBack')?.classList.add('show');
+        $('modalWord')?.focus();
+        return;
+      }
+      if (button.id === 'modalSave') {
+        void run(async () => {
+          const written = $('modalWord')?.value.trim() || '';
+          const spoken = $('modalPron')?.value.trim() || '';
+          if (!written || !spoken) throw new Error('Enter both the written term and its pronunciation.');
+          await call('pronunciation.save', {written_form:written,spoken_form:spoken,scope:'current_book',handling_mode:'automatic'});
+          await refreshTerms();
+          $('modalBack')?.classList.remove('show');
+          message('Pronunciation entry saved to the active book.');
+        });
+        return;
+      }
+      if (button.id === 'modalCancel') { stop(); $('modalBack')?.classList.remove('show'); return; }
+      if (button.matches('[data-test-pron]')) {
+        void run(async () => {
+          const card = button.closest('.pron-profile-card, .voice-card, article');
+          const name = card?.querySelector('h3')?.textContent?.trim() || '';
+          const profile = voices.find(v => v.name.toLowerCase() === name.toLowerCase() ||
+            String(v.voice_id || '').toLowerCase() === String(button.dataset.testPron || '').toLowerCase() ||
+            String(v.name || '').toLowerCase() === String(button.dataset.testPron || '').toLowerCase());
+          if (!profile) throw new Error('This preview card does not map to a saved backend voice profile. Choose a saved profile in Pronunciation Studio.');
+          const word = $('pronWord')?.textContent?.trim() || '';
+          if (!word) throw new Error('Select a saved pronunciation term before testing a voice.');
+          await previewSavedProfile(profile, word, profile.name);
+        });
+        return;
+      }
+      if (button.matches('[data-qwen-install]')) {
+        void run(async () => {
+          const card = button.closest('.model-card');
+          const name = card?.querySelector('h2')?.textContent?.trim() || '';
+          const selection = /voicedesign/i.test(name) ? 'voicedesign' : /clone/i.test(name) ? 'voiceclone' : 'customvoice';
+          const result = await call('models.install', {selection});
+          message('Started ' + name + ' installation. Progress is shown in Background Jobs.');
+          await monitorJob(result.job_id, refreshModels);
+        });
+        return;
+      }
+      if (button.matches('[data-model-update], [data-model-repair], [data-model-verify], [data-model-uninstall]')) {
+        void run(async () => {
+          const action = button.hasAttribute('data-model-update') ? 'update' :
+            button.hasAttribute('data-model-repair') ? 'repair' :
+            button.hasAttribute('data-model-verify') ? 'verify' : 'uninstall';
+          const id = button.getAttribute('data-model-update') || button.getAttribute('data-model-repair') ||
+            button.getAttribute('data-model-verify') || button.getAttribute('data-model-uninstall') || '';
+          throw new Error('Per-model ' + action + ' is not connected to a backend operation for "' + id + '". No model state was changed.');
+        });
+        return;
+      }
+      if (button.matches('[data-assign-character]')) {
+        void run(async () => {
+          throw new Error('Dialogue-line speaker assignment is not persisted by the current backend. No cast or chapter data was changed.');
+        });
+        return;
+      }
+      if (button.id === 'notifyBtn') {
+        stop();
+        $('backgroundJobsModal')?.classList.add('show');
+        refreshJobs().catch(err => message(err?.message || String(err), true));
+        return;
+      }
+    }, true);
+
     if (!window.__ryuBackendJobTimer) window.__ryuBackendJobTimer=setInterval(()=>refreshJobs().catch(()=>{}),1500);
     const jobsBox = $('backgroundJobsList');
     if (jobsBox && !window.__ryuBackendJobsObserver) {

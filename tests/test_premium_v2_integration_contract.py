@@ -382,6 +382,19 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("def _voice_delete(", host)
         self.assertIn("Built-in voices cannot be deleted", host)
 
+    def test_stage829_pronunciation_matrix_and_model_registry_never_fake_success(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        for token in (
+            "button.id === 'addPronunciationAdvanced'",
+            "button.id === 'modalSave'",
+            "call('pronunciation.save'",
+            "button.matches('[data-test-pron]')",
+            "button.matches('[data-qwen-install]')",
+            "Per-model ' + action + ' is not connected to a backend operation",
+            "Dialogue-line speaker assignment is not persisted by the current backend",
+        ):
+            self.assertIn(token, adapter)
+
     def test_character_library_series_scope_matches_default_filter(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("c?.scope || 'Series · Slime'", adapter)
