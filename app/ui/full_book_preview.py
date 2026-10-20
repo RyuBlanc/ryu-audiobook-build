@@ -10,7 +10,8 @@ from typing import Any
 
 def start_full_book_preview(host) -> dict[str, Any]:
     project = host._active_project()
-    state = host._load_project_state_for_sound_preview(project)
+    from app.core.state import load_state
+    state = load_state(project.folder)
     chapters = sorted(project.chapters, key=lambda chapter: chapter.number)
     if not chapters:
         raise ValueError("Add chapters to this book before previewing its mix.")
