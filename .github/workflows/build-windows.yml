@@ -485,7 +485,14 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $pythonExe = $env:RYU_CI_PYTHON_EXE
-          if (-not $pythonExe) { $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source }
+          if (-not $pythonExe -or -not (Test-Path -LiteralPath $pythonExe)) {
+            $pythonExe = Join-Path $env:pythonLocation 'python.exe'
+          }
+          if (-not (Test-Path -LiteralPath $pythonExe)) {
+            $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          }
+          if (-not (Test-Path -LiteralPath $pythonExe)) { throw "Python interpreter not found for release integrity checks: $pythonExe" }
+          Write-Host "Using Python for logo/hash validation: $pythonExe"
           & $pythonExe -c @'
           from pathlib import Path
           from PIL import Image
