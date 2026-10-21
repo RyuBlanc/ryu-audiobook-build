@@ -673,5 +673,20 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertNotRegex(self.html, r'<span class="flow-link (?:is-current|is-done|has-warning)')
 
 
+    def test_job_polling_updates_existing_rows_without_rebuilding_hidden_panel(self):
+        """Job polling should not repeatedly replace DOM rows and trigger visible flicker."""
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        start = adapter.index("async function refreshJobs()")
+        end = adapter.index("async function monitorJob(", start)
+        refresh_jobs = adapter[start:end]
+        self.assertIn("const panelVisible = Boolean($('backgroundJobsModal')?.classList.contains('show'))", refresh_jobs)
+        self.assertIn("if (box && panelVisible)", refresh_jobs)
+        self.assertIn("box.dataset.backendJobsSignature !== signature", refresh_jobs)
+        self.assertIn("row.querySelector('[data-job-progress]')", refresh_jobs)
+        self.assertIn("progress.style.width = pct + '%'", refresh_jobs)
+
+
 if __name__ == "__main__":
     unittest.main()
