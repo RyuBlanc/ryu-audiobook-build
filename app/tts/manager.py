@@ -118,6 +118,28 @@ class GenerationManager:
     ) -> None:
         if self._thread and self._thread.is_alive():
             raise RuntimeError("Generation is already running.")
+        if not self.chapters:
+            raise ValueError("No chapters are available for generation. Import a book or restore its chapters, then retry.")
+        empty_chapters = [
+            chapter for chapter in self.chapters
+            if not str(getattr(chapter, "text", "") or "").strip()
+        ]
+        if empty_chapters:
+            numbers = ", ".join(
+                str(getattr(chapter, "number", index + 1))
+                for index, chapter in enumerate(self.chapters)
+                if chapter in empty_chapters
+            )
+            if len(empty_chapters) == len(self.chapters):
+                raise ValueError(
+                    "All chapters are empty. Add or restore chapter text, or exclude the empty chapters "
+                    "from generation before retrying."
+                )
+            raise ValueError(
+                f"Cannot start audiobook generation because chapter(s) {numbers} are empty. "
+                "Review those chapters, restore their text, or mark them to skip before retrying. "
+                "No audio was generated."
+            )
         self.cancel_event.clear()
         self.pause_event.clear()
         effective_metadata = dict(self.metadata)
