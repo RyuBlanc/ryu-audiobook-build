@@ -20,7 +20,7 @@
 
 ## Stage 5 — Voice-profile identity and cast-to-synthesis consistency
 
-**Implementation in progress:** commit `9deba8b0` now includes narrator-profile identity and reference-audio content digests in the cast-aware generation signature. Dedicated regression tests are added; validation is pending the next CI run.
+**Automated gate passed:** Run 825 passed on commit `17569d62`; the profile-identity regression suite covers narrator-only and cast-aware cache invalidation, saved profile round-trip, and reference-audio digest changes. Packaged restart and real multi-speaker acceptance remain open.
 
 - [ ] Verify saved profile fields survive save → app restart → reload → preview → narrator selection → character assignment.
 - [ ] Confirm the same provider, model/backend, voice ID, language, reference audio and provider-specific parameters are used after reload; do not silently substitute a different voice.
@@ -28,12 +28,15 @@
 - [x] Include narrator profile identity, cast assignments and profile synthesis settings in generation signatures so changed voice settings invalidate stale chunks; add reference/anchor audio content digests. Automated regression tests cover provider changes, cast prompt edits and reference-file replacement. CI verification is pending.
 - [x] Add focused regression tests for narrator profile changes, cast prompt changes, reference audio replacement and missing-reference state. Existing Stage 3 tests cover aliases, stale offsets, manual assignments and alternating voices. Packaged restart/multi-speaker acceptance remains pending.
 - [ ] Mark unsupported providers, credentials, models, or hardware paths unavailable with actionable messages rather than simulated readiness.
-- [ ] Run CI and test the exact packaged build against a small multi-speaker book.
+- [x] Run CI for profile-identity/cache invalidation changes (Run 825 passed). Test the exact packaged build against a small multi-speaker book remains pending.
 
 **Exit gate:** saved voice identity is stable across restart and every preview/generation path; changed voice/cast settings cannot reuse incompatible audio chunks; unavailable profiles fail safely with recovery instructions.
 
 ## Stage 6 — Production reliability and release acceptance
 
+**Status:** implementation started on 21 October 2026. First hardening change adds a backend-level generation preflight that rejects an empty chapter list, an all-empty book, or a mixed book containing blank chapters before a worker starts. New tests cover each rejection and verify valid non-empty input can proceed. CI for the Stage 6 commit is pending.
+
+- [x] Add backend-level empty-chapter preflight with actionable recovery guidance; add regression tests for empty, mixed, and valid chapter sets.
 - [ ] Validate the full path: import → chapter review → narrator/cast → pronunciation → sound design → preview → selected/full generation → M4B validation → in-app playback/history.
 - [ ] Confirm real progress/stage/current chapter, elapsed time, ETA where measurable, failure state and output location come from backend jobs, not timer-only UI behavior.
 - [ ] Exercise pause/resume/cancel at safe checkpoints, retry after provider failure, restart recovery, and valid completed-chunk reuse.
