@@ -72,3 +72,10 @@
 - Added a filesystem round-trip test for manually edited chapter text, review status, generation exclusion, and dialogue assignments.
 - Confirmed there is no Premium V2 re-detection command to overwrite chapter edits: importing runs detection only while creating a new project. Re-detection remains unavailable until a safe, explicit workflow can be designed without changing the approved UI.
 - Runtime Windows acceptance for import cancellation, failure/retry, and edit/save/reopen remains pending.
+
+
+## 2026-10-21 — Stage 3 explicit dialogue assignment
+
+- Added an allow-listed `chapter.dialogue.assign` bridge command and persisted explicit speaker assignments to chapter data using original source offsets. Only saved characters/aliases can be selected; ambiguous or stale passages are rejected without mutation.
+- Wired individual dialogue confirmation in the existing review modal to real saved cast records. Static confidence scores are not treated as evidence; bulk acceptance and prototype queue actions remain guarded.
+- Added focused regression coverage for exact/whitespace-wrapped matching, stale text, duplicate occurrences, overlaps, reassignment, and multi-speaker compatibility. CI and Windows acceptance are pending.

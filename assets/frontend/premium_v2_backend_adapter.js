@@ -1474,11 +1474,46 @@
         });
         return;
       }
-      if (button.id === 'acceptHighConfidence' || button.id === 'skipAiSuggestion' ||
-          button.id === 'confirmAiCharacter' || button.matches('[data-ai-sentence],[data-ai-line]') ||
-          button.id === 'aiUseLibrary' || button.id === 'aiCreateNew' || button.id === 'createCharacterQuick') {
+      if (button.matches('[data-ai-sentence]')) {
         stop();
-        message('Per-line AI speaker suggestions are still prototype-only; this action did not change the saved cast. Use Analyze book with AI for the real backend analysis and assign voices in the saved cast panel.', true);
+        (async () => {
+          const label = button.querySelector('.ai-speaker')?.textContent || '';
+          const dialogueText = button.textContent.slice(label.length).trim();
+          if (!dialogueText) throw new Error('Select a dialogue passage first.');
+          const savedCharacters = await call('character.list');
+          if (!savedCharacters.length) throw new Error('Run Analyze book with AI and save character candidates before assigning dialogue.');
+          window.ryuPremiumPendingDialogueText = dialogueText;
+          if ($('aiSelectedSentence')) $('aiSelectedSentence').textContent = dialogueText;
+          if ($('predictionList')) $('predictionList').innerHTML = savedCharacters
+            .filter(c => c && c.name)
+            .map((c, i) => '<button class="prediction-option ' + (i === 0 ? 'active' : '') +
+              '" data-prediction="' + esc(c.name) + '"><b>' + esc(c.name) +
+              '</b><span>Saved character · explicit selection</span></button>').join('');
+          if ($('confirmAiCharacter')) $('confirmAiCharacter').disabled = !savedCharacters.length;
+          $('aiPredictionModal')?.classList.add('show');
+          message('Choose a saved character to assign this passage. The displayed confidence score is not treated as verified evidence.');
+        })().catch(err => message(err?.message || String(err), true));
+        return;
+      }
+      if (button.id === 'confirmAiCharacter') {
+        stop();
+        (async () => {
+          const selected = $('predictionList')?.querySelector('.prediction-option.active')?.dataset.prediction || '';
+          const dialogueText = String(window.ryuPremiumPendingDialogueText || '');
+          if (!selected || !dialogueText) throw new Error('Choose a saved character and dialogue passage before confirming.');
+          const result = await call('chapter.dialogue.assign', {dialogue_text:dialogueText, speakers:[selected]});
+          $('aiPredictionModal')?.classList.remove('show');
+          window.ryuPremiumPendingDialogueText = '';
+          await refreshChapters();
+          message('Saved speaker assignment for Chapter ' + result.chapter_number + '.');
+        })().catch(err => message(err?.message || String(err), true));
+        return;
+      }
+      if (button.id === 'acceptHighConfidence' || button.id === 'skipAiSuggestion' ||
+          button.matches('[data-ai-line]') || button.id === 'aiUseLibrary' ||
+          button.id === 'aiCreateNew' || button.id === 'createCharacterQuick') {
+        stop();
+        message('Bulk acceptance and queue predictions are not connected to verified source passages. Select an individual dialogue passage and explicitly assign a saved character instead.', true);
         return;
       }
       if (button.closest('#settings') && label === 'choose folder') {

@@ -146,3 +146,54 @@ def format_character_registry_entry(entry: dict) -> str:
     if source and chapters:
         return f"{entry['name']}  ·  {location}  ·  {voice_note}  ·  {source}"
     return f"{entry['name']}  ·  {location}  ·  {voice_note}"
+
+
+
+def assign_dialogue_to_chapters(chapters, dialogue_text: str, speakers: list[str],
+                                chapter_number: int | None = None, mode: str = "single") -> dict:
+    """Persist an explicit speaker choice against one uniquely matched source span."""
+    import re
+    requested = str(dialogue_text or "").strip()
+    names = list(dict.fromkeys(str(value).strip() for value in (speakers or []) if str(value).strip()))
+    if not requested:
+        raise ValueError("Select a dialogue passage before assigning a speaker.")
+    if not names:
+        raise ValueError("Select at least one saved character.")
+    if len(requested) > 5000:
+        raise ValueError("The selected dialogue passage is too long to assign safely.")
+    candidates = []
+    for chapter in chapters or []:
+        if chapter_number is not None and int(getattr(chapter, "number", 0)) != int(chapter_number):
+            continue
+        source = str(getattr(chapter, "text", "") or "")
+        pieces = re.split(r"\s+", requested)
+        pattern = r"\s+".join(re.escape(piece) for piece in pieces if piece)
+        if pattern:
+            for match in re.finditer(pattern, source):
+                candidates.append((chapter, match.start(), match.end(), source[match.start():match.end()]))
+    if not candidates:
+        raise ValueError("The selected dialogue text was not found in the saved chapter text. Refresh the chapter and select a passage from the imported book; no assignment was saved.")
+    if len(candidates) != 1:
+        raise ValueError("That dialogue passage appears more than once. Select its specific chapter or a longer unique passage; no assignment was saved.")
+    chapter, start, end, exact_text = candidates[0]
+    existing = list(getattr(chapter, "dialogue_assignments", []) or [])
+    overlapping = [item for item in existing if isinstance(item, dict)
+        and isinstance(item.get("start"), int) and isinstance(item.get("end"), int)
+        and item["start"] < end and item["end"] > start
+        and not (item["start"] == start and item["end"] == end)]
+    if overlapping:
+        raise ValueError("The selected passage overlaps another saved speaker assignment. Edit or remove the existing assignment first.")
+    base = next((dict(item) for item in existing if isinstance(item, dict)
+                 and item.get("start") == start and item.get("end") == end),
+                {"start": start, "end": end, "text": exact_text, "source": "manual"})
+    base.update({"start": start, "end": end, "text": exact_text, "source": "manual"})
+    normalized = normalize_assignment(base, names, mode)
+    normalized["source"] = "manual"
+    normalized["confidence"] = 1.0
+    existing = [item for item in existing if not (isinstance(item, dict)
+                and item.get("start") == start and item.get("end") == end)]
+    existing.append(normalized)
+    existing.sort(key=lambda item: (int(item.get("start", 0)), int(item.get("end", 0))))
+    chapter.dialogue_assignments = existing
+    return {"chapter_number": chapter.number, "start": start, "end": end, "text": exact_text,
+            "speakers": names, "source": "manual", "confidence": 1.0, "saved": True}

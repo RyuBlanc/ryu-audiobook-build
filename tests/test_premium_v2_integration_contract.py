@@ -564,6 +564,22 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("project = create_project(title, path, chapters)", worker)
         self.assertNotIn("existing_project.chapters", worker)
 
+    def test_explicit_dialogue_assignment_is_registered_persisted_and_source_validated(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        helper = (ROOT / "app" / "chapters" / "assignment_utils.py").read_text(encoding="utf-8")
+        self.assertIn('"chapter.dialogue.assign": self._chapter_dialogue_assign', host)
+        self.assertIn('"chapter.dialogue.assign": True', host)
+        self.assertIn("def _chapter_dialogue_assign(", host)
+        self.assertIn("assign_dialogue_to_chapters(", host)
+        self.assertIn("call('chapter.dialogue.assign'", adapter)
+        self.assertIn("window.ryuPremiumPendingDialogueText", adapter)
+        self.assertIn("savedCharacters.filter(c => c && c.name)", adapter)
+        self.assertIn("def assign_dialogue_to_chapters(", helper)
+        self.assertIn("no assignment was saved", helper)
+        self.assertIn('normalized["source"] = "manual"', helper)
+        self.assertIn('normalized["confidence"] = 1.0', helper)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -84,6 +84,7 @@ class PremiumV2Bridge(QObject):
                 "project.get_active": self._project_get_active,
                 "chapter.list": self._chapter_list,
                 "chapter.update": self._chapter_update,
+                "chapter.dialogue.assign": self._chapter_dialogue_assign,
                 "chapter.review": self._chapter_review,
                 "chapter.skip": self._chapter_skip,
                 "chapter.clean": self._chapter_clean,
@@ -188,6 +189,7 @@ class PremiumV2Bridge(QObject):
             "project.get_active": True,
             "chapter.list": True,
             "chapter.update": True,
+            "chapter.dialogue.assign": True,
             "chapter.review": True,
             "chapter.skip": True,
             "chapter.split": True,
@@ -342,6 +344,55 @@ class PremiumV2Bridge(QObject):
                 "word_count": len((chapter.text or "").split()),
                 "character_count": len(chapter.text or ""),
                 "empty": not bool((chapter.text or "").strip()), "saved": True}
+
+    def _chapter_dialogue_assign(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist an explicit speaker choice only when its text uniquely matches source."""
+        from app.chapters.assignment_utils import assign_dialogue_to_chapters
+        project = self._active_project()
+        dialogue_text = str(payload.get("dialogue_text") or "")
+        raw_speakers = payload.get("speakers")
+        if isinstance(raw_speakers, str):
+            raw_speakers = [raw_speakers]
+        if not isinstance(raw_speakers, list):
+            raise ValueError("Choose a saved character before confirming the assignment.")
+        state = load_state(project.folder)
+        characters = [item for item in (state.get("characters") or []) if isinstance(item, dict)]
+        canonical_by_name: dict[str, str] = {}
+        for item in characters:
+            name = str(item.get("name") or "").strip()
+            if name:
+                canonical_by_name[name.casefold()] = name
+            aliases = item.get("aliases") or []
+            if isinstance(aliases, list):
+                for alias in aliases:
+                    alias = str(alias).strip()
+                    if alias:
+                        canonical_by_name[alias.casefold()] = name
+        speakers = []
+        for raw_name in raw_speakers:
+            name = str(raw_name or "").strip()
+            canonical = canonical_by_name.get(name.casefold())
+            if not canonical:
+                raise ValueError(f"'{name or 'Unknown'}' is not in the saved character list. Run book analysis or select a saved character.")
+            if canonical not in speakers:
+                speakers.append(canonical)
+        if not speakers:
+            raise ValueError("Select at least one saved character.")
+        chapter_number = payload.get("chapter_number")
+        try:
+            chapter_number = int(chapter_number) if chapter_number not in (None, "") else None
+        except (TypeError, ValueError):
+            raise ValueError("Choose a valid chapter number.")
+        mode = str(payload.get("mode") or "single").strip().lower()
+        if mode not in {"single", "chorus", "alternating"}:
+            raise ValueError("Assignment mode must be single, chorus, or alternating.")
+        result = assign_dialogue_to_chapters(project.chapters, dialogue_text, speakers,
+                                             chapter_number=chapter_number, mode=mode)
+        project.save()
+        project_state = load_state(project.folder)
+        project_state["modified_at"] = self._now()
+        save_state(project.folder, project_state)
+        return result
 
     def _chapter_review(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Persist the explicit human review state for a chapter."""
