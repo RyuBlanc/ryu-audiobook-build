@@ -223,6 +223,7 @@ class CastAwareProvider(TTSProvider):
         parts = []
         cursor = 0
         last_speaker = None
+        alternating_voice_index = 0
         for start, end, _dialogue in spans:
             if start > cursor:
                 parts.append((text[cursor:start], fallback_voice))
@@ -240,11 +241,15 @@ class CastAwareProvider(TTSProvider):
                 if self.assignments.get(speaker.casefold())
             ]
             if assigned_voices:
-                voice = (
-                    assigned_voices
-                    if len(assigned_voices) > 1 and multi_mode != "sequential"
-                    else assigned_voices[0]
-                )
+                if len(assigned_voices) > 1 and multi_mode == "alternating":
+                    # Alternate one configured voice per dialogue span; do not
+                    # duplicate the same line or send an unsupported voice list.
+                    voice = assigned_voices[alternating_voice_index % len(assigned_voices)]
+                    alternating_voice_index += 1
+                elif len(assigned_voices) > 1 and multi_mode != "sequential":
+                    voice = assigned_voices
+                else:
+                    voice = assigned_voices[0]
             else:
                 voice = fallback_voice
             if speakers:

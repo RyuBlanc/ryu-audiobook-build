@@ -118,6 +118,41 @@ class DialogueAssignmentPersistenceTests(unittest.TestCase):
         self.assertTrue(any("Narration first." in text and voice == "Narrator" for text, voice in parts))
         cast.close()
 
+    def test_alternating_multi_speaker_assignment_rotates_voice_per_dialogue(self):
+        from app.tts.cast_provider import CastAwareProvider
+        from app.tts.voice_profile import VoiceProfile
+
+        class DummyProvider:
+            recommended_chunk_chars = 1400
+            recommended_chunk_sentences = 2
+
+            def synthesize(self, text, output_path, voice=None):
+                return output_path
+
+        source = '“First line.” Then narration. “Second line.”'
+        first_start = source.index('“')
+        first_end = source.index('”') + 1
+        second_start = source.index('“', first_end)
+        second_end = source.index('”', second_start) + 1
+        cast = CastAwareProvider(
+            DummyProvider(), "Narrator",
+            profiles={
+                "Rimuru Voice": VoiceProfile("Rimuru Voice", "piper", "rimuru"),
+                "Benimaru Voice": VoiceProfile("Benimaru Voice", "piper", "benimaru"),
+            },
+            assignments={"Rimuru": "Rimuru Voice", "Benimaru": "Benimaru Voice"},
+        )
+        assignments = [
+            {"start": first_start, "end": first_end, "text": source[first_start:first_end],
+             "speakers": ["Rimuru", "Benimaru"], "speaker": "Rimuru", "multi_speaker_mode": "alternating"},
+            {"start": second_start, "end": second_end, "text": source[second_start:second_end],
+             "speakers": ["Rimuru", "Benimaru"], "speaker": "Rimuru", "multi_speaker_mode": "alternating"},
+        ]
+        parts = cast.split_for_cast(source, "Narrator", dialogue_assignments=assignments)
+        dialogue_parts = [(text, voice) for text, voice in parts if "line." in text]
+        self.assertEqual(dialogue_parts, [("First line.", "Rimuru Voice"), ("Second line.", "Benimaru Voice")])
+        cast.close()
+
     def test_dialogue_review_uses_saved_chapter_passages_and_scopes_duplicate_quotes(self):
         adapter = (Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("function renderDialogueReview()", adapter)
