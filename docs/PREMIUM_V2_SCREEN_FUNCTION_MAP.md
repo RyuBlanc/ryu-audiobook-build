@@ -1,7 +1,7 @@
 # Screen-to-Function Map — Premium V2
 
 **Audit snapshot:** 21 October 2026
-**Current review checkpoint:** code checkpoint Run #775 (`7b8176ac`); command-parity regression added in commit `6fa61f0d` and is being validated by [Run #780](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39579474613). This map is a source audit, not manual runtime acceptance.
+**Current review checkpoint:** [Run #782](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39583746634) passed on `a7c6baa4`; the Premium V2 adapter/dispatcher/capability parity regression now passes. The earlier Run #780 was cancelled and Run #781 failed because the new test's regex was over-escaped; that test-only defect was corrected in #782. This map is a source audit, not manual runtime acceptance.
 **Visual authority:** `assets/frontend/ryu_audiobook_premium_v2.html`
 **User-supplied visual source fingerprint:** 1,436,954 bytes; SHA-256 `e70f630d99e75f07fdd704bb1931910dd972795390ae0af0d29b07b9118abf95`; Git blob SHA `0da8d4a60c69530325fff9af7e516d251dc442cd`, matching the file in the audited repository commit.
 
