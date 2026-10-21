@@ -83,10 +83,10 @@ class VoiceIdentitySignatureTests(unittest.TestCase):
                 qwen_profile_id="stable-profile-identity",
                 authorized=True,
             )
-            with patch("app.tts.voice_profile.voices_root", return_value=root), \\
-                 patch("app.tts.voice_profile.builtin_voice_profiles", return_value=[]):
-                save_profiles([profile])
-                loaded = load_saved_profiles()
+            with patch("app.tts.voice_profile.voices_root", return_value=root):
+                with patch("app.tts.voice_profile.builtin_voice_profiles", return_value=[]):
+                    save_profiles([profile])
+                    loaded = load_saved_profiles()
 
         self.assertEqual(len(loaded), 1)
         restored = loaded[0]
