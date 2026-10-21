@@ -390,7 +390,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
     def test_performance_screen_never_displays_unmeasured_hardware_as_fact(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("async function refreshPerformance()", adapter)
-        self.assertIn("await refreshPerformance().catch(()=>{});", adapter)
+        self.assertNotIn("await refreshPerformance().catch(()=>{});", adapter)
         self.assertIn("CPU telemetry unavailable", adapter)
         self.assertIn("GPU / VRAM telemetry unavailable", adapter)
         self.assertIn("section?.querySelectorAll('.ready-list .ready b').forEach(node => { node.textContent = 'Not measured'; });", adapter)
@@ -747,7 +747,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("[refreshJobs, refreshHistory, refreshModels]", hydration)
         self.assertIn("await new Promise(resolve => setTimeout(resolve, 0))", hydration)
         self.assertIn("void hydrateInitialState()", hydration)
-        self.assertNotIn("await refreshPerformance()", adapter[wire_start:wire_end])
+        self.assertNotIn("refreshPerformance", hydration)
 
     def test_job_polling_updates_existing_rows_without_rebuilding_hidden_panel(self):
         """Job polling should not repeatedly replace DOM rows and trigger visible flicker."""
