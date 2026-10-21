@@ -590,22 +590,22 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         HTML controls have been manually exercised in the packaged app.
         """
         handler_match = re.search(
-            r"handlers\\s*=\\s*\\{([\\s\\S]*?)\\n\\s*\\}\\n\\s*handler\\s*=",
+            r"handlers\s*=\s*\{([\s\S]*?)\n\s*\}\n\s*handler\s*=",
             self.host,
         )
         self.assertIsNotNone(handler_match, "Could not find the allow-listed dispatcher table.")
         handler_commands = set(re.findall(
-            r"""["']([^"']+)["']\\s*:\\s*self\\._[A-Za-z0-9_]+""",
+            r"""["']([^"']+)["']\s*:\s*self\._[A-Za-z0-9_]+""",
             handler_match.group(1),
         ))
 
         capability_match = re.search(
-            r"def _capabilities[\\s\\S]*?return\\s*\\{([\\s\\S]*?)\\n\\s*\\}",
+            r"def _capabilities[\s\S]*?return\s*\{([\s\S]*?)\n\s*\}",
             self.host,
         )
         self.assertIsNotNone(capability_match, "Could not find the capability map.")
         capabilities = dict(re.findall(
-            r"""["']([^"']+)["']\\s*:\\s*(True|False)""",
+            r"""["']([^"']+)["']\s*:\s*(True|False)""",
             capability_match.group(1),
         ))
 
@@ -613,7 +613,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             encoding="utf-8"
         )
         adapter_commands = set(re.findall(
-            r"""\\bcall\\(\\s*['"]([^'"]+)['"]""",
+            r"""\bcall\(\s*['"]([^'"]+)['"]""",
             adapter,
         ))
 
