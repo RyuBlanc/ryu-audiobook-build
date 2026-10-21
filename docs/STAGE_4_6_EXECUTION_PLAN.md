@@ -34,9 +34,12 @@
 
 ## Stage 6 — Production reliability and release acceptance
 
-**Status:** implementation started on 21 October 2026. First hardening change adds a backend-level generation preflight that rejects an empty chapter list, an all-empty book, or a mixed book containing blank chapters before a worker starts. New tests cover each rejection and verify valid non-empty input can proceed. CI for the Stage 6 commit is pending.
+**Status:** implementation in progress on 21 October 2026. Run 829 passed on commit `06e980bb`, including regression tests, frozen application checks, bundled voice-asset checks, installer compilation, and portable packaging. Backend generation preflight rejects empty chapter sets before a worker starts. The installer script now styles its wizard using the Premium V2 near-black/slate and warm-gold palette, Segoe UI typography, branded welcome/finish copy, and the existing app icon. User books, voice profiles, models, and settings remain outside the install directory and are not removed by uninstall. A new CI run is required to validate the installer styling and its contract tests.
 
 - [x] Add backend-level empty-chapter preflight with actionable recovery guidance; add regression tests for empty, mixed, and valid chapter sets.
+- [x] Apply Premium V2 visual identity to the Windows setup wizard (near-black/slate surfaces, warm-gold headings, Segoe UI, branded welcome/finish copy) while retaining the native wizard flow and app icon.
+- [x] Add installer contract tests for visual branding, standard launch/shortcut behavior, and preservation of user data on uninstall.
+- [ ] Rebuild the installer and verify the actual wizard renders as intended on Windows; automated build/contract validation is pending.
 - [ ] Validate the full path: import → chapter review → narrator/cast → pronunciation → sound design → preview → selected/full generation → M4B validation → in-app playback/history.
 - [ ] Confirm real progress/stage/current chapter, elapsed time, ETA where measurable, failure state and output location come from backend jobs, not timer-only UI behavior.
 - [ ] Exercise pause/resume/cancel at safe checkpoints, retry after provider failure, restart recovery, and valid completed-chunk reuse.
@@ -44,7 +47,7 @@
 - [ ] Validate M4B duration, stream metadata/bitrate, chapter markers, title/author/narrator and cover; reject empty or corrupt outputs.
 - [ ] Verify history remains useful after completed-job cleanup and app restart; keep failure details and recovery guidance.
 - [ ] Compare all 15 Premium V2 destinations and critical controls with the approved HTML at 1920×1080, 1366×768 and 1280×720, without changing the source design.
-- [ ] Test both installer and portable artifacts from the same accepted commit; record Windows launch, core workflow, offline/local-first, and uninstall/data-preservation results.
+- [ ] Test both installer and portable artifacts from the same accepted commit; record Windows launch, core workflow, offline/local-first, and uninstall/data-preservation results. The installer must retain the approved Premium V2 dark/gold/dragon visual identity, standard install/launch controls, and user-data preservation.
 - [ ] Audit remaining prototype-only handlers and disable or connect every visible action; update known limitations and the test report.
 - [ ] Preserve source and required assets; remove only stale generated build artifacts after the current verified artifacts are available.
 
