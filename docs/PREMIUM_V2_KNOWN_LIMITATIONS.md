@@ -1,6 +1,6 @@
 # Known Limitations — Premium V2 Integration
 
-**Status date:** 2026-10-21. This is a live release-gate list, not a claim of completed implementation.
+**Status date:** 2026-10-21. This is a live release-gate list, not a claim of completed implementation. Run 841 passed its configured build, frozen-app checks, voice-asset checks, installer compilation and artifact uploads; the newer security/asset-integrity gate is being validated by the latest run.
 
 ## Confirmed by inspection
 
@@ -23,6 +23,15 @@
 - Full functional acceptance workflow from import through M4B playback/history/diagnostic export.
 - Installer/portable package launch and uninstall behavior for a build containing Premium V2. Run 835 proves compilation/upload only; it does not prove that the packaged UI launches or that uninstall preserves user data.
 - Provider-specific model downloads, custom voice workflows and GPU readings on the target Windows machines.
+
+## Security and visual release hold (2026-10-21)
+
+- The user's Windows Security screenshots report `Trojan:Win32/Bearfoos.A!ml` against the installed `Ryu's Audiobook.exe`, and show both blocked/removed and restored/allowed history entries. This is a serious alert; the available screenshot alone cannot determine whether it is a false positive or a real threat. Do not advise restoring the file, disabling Defender, or adding an exclusion.
+- Run 841 succeeded before the new security gate was added. It is not evidence that the Run 841 executable is Defender-clean.
+- A new workflow gate is being added before artifact upload: check that the original-logo PNG has alpha transparency, check multi-size ICO presence, generate SHA-256 hashes for the installer/EXE/logo assets, and scan the installer and main EXE with Microsoft Defender. A failed/unavailable scan must block artifact publication. The gate's actual result must be confirmed from the next completed workflow run.
+- The logo source remains `assets/ryu_audiobook_logo.svg`; no logo redraw or intentional background addition was made. Generated PNG/ICO quality/transparency still needs to pass the new automated checks and be visually inspected on Windows.
+- The latest installer source fixes label contrast against dark surfaces, but a screenshot/visual acceptance of the rebuilt installer is still required.
+- A clean CI Defender scan would be useful evidence, not a guarantee of safety on all machines or proof the user's exact alert is resolved. The exact detected binary should be submitted to Microsoft's Security Intelligence file submission portal for analysis, and the detection should be retested with a fresh build after review.
 
 ## Constraints
 
