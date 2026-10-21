@@ -42,3 +42,7 @@ Voice library now exposes the offline Qwen character catalogue before installati
 ## Premium V2 frontend integration status
 
 The approved HTML source is stored at `assets/frontend/ryu_audiobook_premium_v2.html` and is loaded inside the desktop process using Qt WebEngine when that asset is present. The embedded bridge currently connects app information, persisted local project listing and settings reads. Other actions return a truthful `not_connected` result until each screen's backend command is implemented and tested. See `docs/PREMIUM_V2_SCREEN_FUNCTION_MAP.md`, `docs/PREMIUM_V2_BACKEND_API_MAP.md`, `docs/PREMIUM_V2_DATABASE_SCHEMA.md`, `docs/PREMIUM_V2_KNOWN_LIMITATIONS.md` and `docs/PREMIUM_V2_TEST_REPORT.md`. The integration is in progress; this note is not a release-complete claim.
+
+## Project history and completion workflow
+
+The reconstructed project history, current stage, verified CI results, remaining acceptance work, and release checklist are maintained in the [Project History Wiki document](docs/PROJECT_HISTORY_WIKI.md). This is repository documentation on the active implementation branch; it is not a claim that the separate GitHub Wiki pages were directly edited.
