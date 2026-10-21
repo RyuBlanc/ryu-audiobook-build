@@ -26,7 +26,7 @@ PrivilegesRequired=admin
 CloseApplications=yes
 CloseApplicationsFilter=Ryu's Audiobook.exe
 UninstallDisplayName={#MyAppName}
-UninstallDisplayIcon={app}\Ryu's Audiobook.exe
+UninstallDisplayIcon={app}\{#MyAppExeName}
 VersionInfoVersion={#MyAppVersion}
 VersionInfoProductVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
@@ -60,24 +60,28 @@ procedure InitializeWizard();
 var
   I: Integer;
 begin
-  { Match the approved Premium V2 palette: near-black canvas, slate panels,
-    warm gold headings, and soft neutral body text. Keep native wizard controls
-    and standard Windows accessibility/keyboard behavior. }
+  { Premium V2-inspired dark canvas and warm crimson/gold identity.
+    Set every wizard label explicitly so default black text cannot disappear
+    against the dark page surfaces. Keep native controls and keyboard support. }
   WizardForm.Color := $000F0A09;
   WizardForm.MainPanel.Color := $001A130F;
   WizardForm.InnerPage.Color := $001A130F;
-  WizardForm.PageNameLabel.Font.Color := $006AB0D6;
-  WizardForm.PageDescriptionLabel.Font.Color := $00B8ACA5;
-  WizardForm.WelcomeLabel1.Font.Color := $006AB0D6;
-  WizardForm.WelcomeLabel2.Font.Color := $00B8ACA5;
-  WizardForm.FinishedHeadingLabel.Font.Color := $006AB0D6;
-  WizardForm.FinishedLabel.Font.Color := $00B8ACA5;
   WizardForm.Font.Name := 'Segoe UI';
+
   for I := 0 to WizardForm.ComponentCount - 1 do
   begin
     if WizardForm.Components[I] is TLabel then
     begin
       TLabel(WizardForm.Components[I]).Font.Name := 'Segoe UI';
+      TLabel(WizardForm.Components[I]).Font.Color := $00B8ACA5;
     end;
   end;
+
+  { Restore higher-contrast gold for page and completion headings. }
+  WizardForm.PageNameLabel.Font.Color := $006AB0D6;
+  WizardForm.WelcomeLabel1.Font.Color := $006AB0D6;
+  WizardForm.FinishedHeadingLabel.Font.Color := $006AB0D6;
+  WizardForm.PageDescriptionLabel.Font.Color := $00E0D7D0;
+  WizardForm.WelcomeLabel2.Font.Color := $00E0D7D0;
+  WizardForm.FinishedLabel.Font.Color := $00E0D7D0;
 end;
