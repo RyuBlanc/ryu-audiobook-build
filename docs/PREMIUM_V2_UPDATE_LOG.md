@@ -118,3 +118,10 @@
 - Added regression tests for narrator-provider changes, cast prompt changes, reference audio replacement and missing-reference state.
 - Run 819 passed on the Stage 4 integrity commit. Actual Windows preview acceptance remains outstanding; Stage 4 is CI-green, but its full manual exit gate is not yet signed off.
 - Stage 5 CI status is pending until the combined source and test commit is built.
+
+
+## 2026-10-21 — Stage 5 automated gate passed; Stage 6 started
+
+- Run 825 completed successfully on commit `17569d62`; narrator-only and cast-aware profile identity/cache invalidation regression coverage is CI-green. Packaged Windows restart and real multi-speaker acceptance remain open, so Stage 5's automated gate is green but its full manual acceptance is not signed off.
+- Began Stage 6 production reliability work with backend-level generation preflight. `GenerationManager.start()` now rejects an empty chapter list, an all-empty book, and mixed chapter sets containing blank text before launching a worker, with actionable recovery guidance and no partial generation.
+- Added `tests/test_stage6_generation_preflight.py` for empty input, all-empty input, mixed empty/non-empty input, and a valid non-empty chapter set. CI for these Stage 6 changes is pending.
