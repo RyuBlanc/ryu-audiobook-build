@@ -125,3 +125,12 @@
 - Run 825 completed successfully on commit `17569d62`; narrator-only and cast-aware profile identity/cache invalidation regression coverage is CI-green. Packaged Windows restart and real multi-speaker acceptance remain open, so Stage 5's automated gate is green but its full manual acceptance is not signed off.
 - Began Stage 6 production reliability work with backend-level generation preflight. `GenerationManager.start()` now rejects an empty chapter list, an all-empty book, and mixed chapter sets containing blank text before launching a worker, with actionable recovery guidance and no partial generation.
 - Added `tests/test_stage6_generation_preflight.py` for empty input, all-empty input, mixed empty/non-empty input, and a valid non-empty chapter set. CI for these Stage 6 changes is pending.
+
+
+## 2026-10-21 — Stage 6: setup wizard visual identity
+
+- Verified Run 829 succeeded: the Windows workflow passed regression tests, frozen-app checks, bundled voice asset/module checks, Inno Setup compilation, installer artifact upload, and portable app artifact upload.
+- Added a backend generation preflight that blocks empty chapter lists, all-empty books, and mixed books containing blank chapters before worker startup. Four regression tests cover rejection paths and valid input.
+- Updated `installer/RyuAudiobook.iss` to align the native setup wizard with Premium V2 branding: near-black/slate surfaces, warm gold headings, Segoe UI typography, branded welcome/finish text, and the existing Ryu's Audiobook icon. Kept the standard install path, desktop shortcut option, post-install launch, and native wizard controls.
+- Explicitly preserved user books, voice profiles, models, and settings outside the application install directory; the uninstaller does not delete those user-data locations.
+- Added `tests/test_stage6_installer_branding.py` to check installer palette/typography, icon, launch/shortcut behavior, and user-data preservation. The next CI run must compile the modified installer and execute these tests before the change is considered validated.
