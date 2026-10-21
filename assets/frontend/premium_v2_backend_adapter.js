@@ -491,20 +491,33 @@
   }
   function preparePreviewPlayback(job, requestedSeconds) {
     const url = job?.result?.file_url;
-    if (!url) { if ($('validation')) $('validation').textContent = 'Preview completed, but the backend did not return a playable local file URL.'; return; }
+    const actual = Number(job?.result?.actual_duration_seconds);
+    const requested = Number(requestedSeconds || job?.result?.requested_duration_seconds || 0);
+    const play = $('playPreview');
+    if (!url || !Number.isFinite(actual) || actual <= 0) {
+      if (play) play.disabled = true;
+      if ($('previewState')) $('previewState').textContent = 'Failed';
+      if ($('validation')) $('validation').textContent = !url
+        ? 'Preview job completed without a playable local audio file. Check the job details and retry.'
+        : 'Preview job completed without a valid measured audio duration. The result cannot be marked ready.';
+      return false;
+    }
     if (previewAudio) { previewAudio.pause(); previewAudio = null; }
     previewAudio = new Audio(url);
     previewAudio.preload = 'auto';
-    previewAudio.onended = () => { if ($('playPreview')) $('playPreview').textContent = '▶ Play'; };
-    previewAudio.onerror = () => { if ($('validation')) $('validation').textContent = 'The preview file exists but the embedded player could not open it. Use the preview output path from job details.'; };
-    if ($('playPreview')) $('playPreview').disabled = false;
-    const actual = Number(job.result.actual_duration_seconds || 0);
-    const requested = Number(requestedSeconds || job.result.requested_duration_seconds || 0);
+    previewAudio.onended = () => { if (play) play.textContent = '▶ Play'; };
+    previewAudio.onerror = () => {
+      if (play) play.disabled = true;
+      if ($('previewState')) $('previewState').textContent = 'Playback error';
+      if ($('validation')) $('validation').textContent = 'The preview file exists but the embedded player could not open it. Use the preview output path from job details.';
+    };
+    if (play) play.disabled = false;
     if ($('validation')) {
       $('validation').textContent = requested > 0 && actual + 1.5 < requested
         ? 'Preview shorter than requested · ' + actual.toFixed(1) + 's of ' + requested.toFixed(0) + 's. The source text or voice provider produced less audio than requested; try a longer passage and check the selected voice.'
         : 'Preview ready · ' + actual.toFixed(1) + ' seconds' + (requested > 0 ? ' (requested ' + requested.toFixed(0) + 's)' : '');
     }
+    return true;
   }
   async function previewVoice() {
     const name = (selectedVoice || $('profileName')?.value || '').trim();
@@ -524,9 +537,15 @@
     }
     if (!previewText.trim()) throw new Error('The selected preview text is empty.');
     const data = await call('voice.preview', {profile_name:name,text:previewText,duration_seconds:Number(duration),chapter_number:c?.number});
-    if ($('previewState')) $('previewState').textContent = 'Generating';
+    if (previewAudio) { previewAudio.pause(); previewAudio = null; }
+    if ($('playPreview')) { $('playPreview').disabled = true; $('playPreview').textContent = '▶ Play'; }
+    if ($('previewProgress')) $('previewProgress').style.width = '0%';
+    if ($('previewState')) $('previewState').textContent = 'Queued';
     if ($('validation')) $('validation').textContent = 'Preview job ' + data.job_id + ' is running locally.';
-    await monitorJob(data.job_id, async job => { if ($('previewState')) $('previewState').textContent = 'Ready'; preparePreviewPlayback(job, Number(duration)); });
+    await monitorJob(data.job_id, async job => {
+      const playable = preparePreviewPlayback(job, Number(duration));
+      if ($('previewState') && playable) $('previewState').textContent = 'Ready';
+    });
   }
   async function openPlayer() {
     const data = await call('player.get_active');
