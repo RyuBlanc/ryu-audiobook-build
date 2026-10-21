@@ -317,19 +317,54 @@
       (backendJobFilter === 'failed' ? j.state === 'failed' :
       !['completed','failed','cancelled'].includes(j.state))));
     const box = $('backgroundJobsList');
-    if (box) {
-      box.innerHTML = jobs.map(j => {
-        const id = esc(j.job_id || ''), state = String(j.state || 'unknown');
-        const action = (name,label,cls) => '<button class="btn small ' + cls + '" data-job-action="' + name + '" data-job-id="' + id + '">' + label + '</button>';
-        const canControlGeneration = j.type === 'audiobook-generation';
-        const canCancelImport = j.type === 'import';
-        const actions = (canControlGeneration && ['running','pause_requested'].includes(state) ? action('pause','Pause','secondary') : '') +
-          (canControlGeneration && ['paused','pause_requested'].includes(state) ? action('resume','Resume','') : '') +
-          ((state === 'queued' || (canControlGeneration && ['running','paused','pause_requested','cancel_requested'].includes(state)) || (canCancelImport && ['running','cancel_requested'].includes(state))) ? action('cancel','Cancel','ghost') : '') +
-          (state === 'failed' && j.recoverable ? '<small>Retry by restarting this operation from its screen.</small>' : '') +
-          (['running','pause_requested'].includes(state) && !canControlGeneration && !canCancelImport ? '<small>Cancellation and pause are not supported for this operation.</small>' : '');
-        return '<article class="job-row" data-backend-job="' + id + '"><b>' + esc(j.title || j.type || id) + '</b><p>' + esc(j.stage || j.message || state) + '</p><div class="progress"><i style="width:' + Math.max(0,Math.min(100,Number(j.progress || 0))) + '%"></i></div><small>' + esc(state) + ' · ' + Math.round(Number(j.progress || 0)) + '%</small>' + (j.message ? '<p>' + esc(j.message) + '</p>' : '') + (j.error?.message ? '<p class="muted">' + esc(j.error.message) + '</p>' : '') + '<div class="toolbar">' + actions + '</div></article>';
-      }).join('') || '<p class="muted" data-backend-empty="1">No backend jobs in this view.</p>';
+    // The jobs modal is normally hidden. Avoid rebuilding its DOM on every poll;
+    // when open, preserve row nodes and update only changing fields/progress.
+    const panelVisible = Boolean($('backgroundJobsModal')?.classList.contains('show'));
+    if (box && panelVisible) {
+      const signature = jobs.map(j => [
+        j.job_id, j.state, j.type, j.title, Boolean(j.recoverable),
+        Boolean(j.message), Boolean(j.error?.message)
+      ].join('\u001f')).join('\u001e');
+      if (box.dataset.backendJobsSignature !== signature) {
+        box.innerHTML = jobs.map(j => {
+          const id = esc(j.job_id || ''), state = String(j.state || 'unknown');
+          const action = (name,label,cls) => '<button class="btn small ' + cls + '" data-job-action="' + name + '" data-job-id="' + id + '">' + label + '</button>';
+          const canControlGeneration = j.type === 'audiobook-generation';
+          const canCancelImport = j.type === 'import';
+          const actions = (canControlGeneration && ['running','pause_requested'].includes(state) ? action('pause','Pause','secondary') : '') +
+            (canControlGeneration && ['paused','pause_requested'].includes(state) ? action('resume','Resume','') : '') +
+            ((state === 'queued' || (canControlGeneration && ['running','paused','pause_requested','cancel_requested'].includes(state)) || (canCancelImport && ['running','cancel_requested'].includes(state))) ? action('cancel','Cancel','ghost') : '') +
+            (state === 'failed' && j.recoverable ? '<small>Retry by restarting this operation from its screen.</small>' : '') +
+            (['running','pause_requested'].includes(state) && !canControlGeneration && !canCancelImport ? '<small>Cancellation and pause are not supported for this operation.</small>' : '');
+          return '<article class="job-row" data-backend-job="' + id + '">' +
+            '<b data-job-title>' + esc(j.title || j.type || id) + '</b>' +
+            '<p data-job-stage>' + esc(j.stage || j.message || state) + '</p>' +
+            '<div class="progress"><i data-job-progress style="width:' + Math.max(0,Math.min(100,Number(j.progress || 0))) + '%"></i></div>' +
+            '<small data-job-state>' + esc(state) + ' · ' + Math.round(Number(j.progress || 0)) + '%</small>' +
+            '<p data-job-message' + (j.message ? '' : ' hidden') + '>' + esc(j.message || '') + '</p>' +
+            '<p class="muted" data-job-error' + (j.error?.message ? '' : ' hidden') + '>' + esc(j.error?.message || '') + '</p>' +
+            '<div class="toolbar">' + actions + '</div></article>';
+        }).join('') || '<p class="muted" data-backend-empty="1">No backend jobs in this view.</p>';
+        box.dataset.backendJobsSignature = signature;
+      } else {
+        jobs.forEach(j => {
+          const row = [...box.querySelectorAll('[data-backend-job]')].find(el => el.dataset.backendJob === String(j.job_id || ''));
+          if (!row) return;
+          const pct = Math.max(0, Math.min(100, Number(j.progress || 0)));
+          const stage = row.querySelector('[data-job-stage]');
+          const progress = row.querySelector('[data-job-progress]');
+          const state = row.querySelector('[data-job-state]');
+          const messageNode = row.querySelector('[data-job-message]');
+          const errorNode = row.querySelector('[data-job-error]');
+          if (stage) stage.textContent = j.stage || j.message || j.state || 'unknown';
+          if (progress) progress.style.width = pct + '%';
+          if (state) state.textContent = String(j.state || 'unknown') + ' · ' + Math.round(pct) + '%';
+          if (messageNode) messageNode.textContent = j.message || '';
+          if (messageNode) messageNode.hidden = !j.message;
+          if (errorNode) errorNode.textContent = j.error?.message || '';
+          if (errorNode) errorNode.hidden = !j.error?.message;
+        });
+      }
       box.dataset.backendJobsRendered = '1';
     }
     if ($('jobsRunningCount')) $('jobsRunningCount').textContent = allJobs.filter(j => ['running','pause_requested','cancel_requested'].includes(j.state)).length;
