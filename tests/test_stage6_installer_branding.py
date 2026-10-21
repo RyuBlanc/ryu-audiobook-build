@@ -21,7 +21,8 @@ class InstallerBrandingContractTests(unittest.TestCase):
 
     def test_setup_keeps_standard_install_launch_and_shortcut_paths(self):
         self.assertIn('DefaultDirName={autopf}\\Ryu\'s Audiobook', self.script)
-        self.assertIn('Filename: "{app}\\Ryu\'s Audiobook.exe"', self.script)
+        self.assertIn('#define MyAppExeName "Ryu\'s Audiobook.exe"', self.script)
+        self.assertIn('Filename: "{app}\\{#MyAppExeName}"', self.script)
         self.assertIn('Flags: nowait postinstall skipifsilent', self.script)
         self.assertIn('Name: "{autodesktop}\\{#MyAppName}"', self.script)
 
