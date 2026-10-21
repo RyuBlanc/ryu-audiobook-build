@@ -817,9 +817,6 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("progress.style.width = pct + '%'", refresh_jobs)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
     def test_unavailable_prototype_actions_are_disabled_with_truthful_reasons(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         start = adapter.index("function applyUnavailableControlStates()")
@@ -841,3 +838,7 @@ if __name__ == "__main__":
         self.assertIn("Changing the application storage root is not implemented", guard)
         self.assertIn("performance is intentionally marked Not tested", guard)
         self.assertIn("applyUnavailableControlStates();", adapter[adapter.index("async function wire()"):])
+
+
+if __name__ == "__main__":
+    unittest.main()
