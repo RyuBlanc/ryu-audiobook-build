@@ -21,6 +21,7 @@ class VoicePreviewContractTests(unittest.TestCase):
                     _new_job=Mock(return_value="preview-job"),
                     _job_update=Mock(),
                     _now=premium_v2_host.PremiumV2Bridge._now,
+                    _preview_worker=premium_v2_host.PremiumV2Bridge._preview_worker,
                 )
                 with patch.object(premium_v2_host, "load_state", return_value={}), \
                      patch.object(premium_v2_host.threading, "Thread", return_value=thread) as thread_factory:
