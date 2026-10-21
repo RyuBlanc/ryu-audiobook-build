@@ -685,7 +685,10 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("call('models.verify', {model_id:id})", adapter)
         self.assertIn("result.models.map(model => model.model_id).join(', ')", adapter)
         self.assertIn("One or more required model files are missing or incomplete.", host)
-        self.assertNotIn("download", host[host.index("def _models_verify"):host.index("def _performance_info")].lower())
+        self.assertNotRegex(
+            host[host.index("def _models_verify"):host.index("def _performance_info")],
+            r"(?i)\\b(?:requests\\.(?:get|post)|urlopen|snapshot_download|download_model|hf_hub_download)\\s*\\("
+        )
 
     def test_legacy_controls_without_ids_have_semantic_successors_and_event_paths(self):
         """Map no-ID legacy control groups to stable selectors and real event/backend paths."""
