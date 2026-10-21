@@ -20,6 +20,7 @@ class VoicePreviewContractTests(unittest.TestCase):
                     _find_profile=lambda name: profile if name == profile.name else None,
                     _new_job=Mock(return_value="preview-job"),
                     _job_update=Mock(),
+                    _now=premium_v2_host.PremiumV2Bridge._now,
                 )
                 with patch.object(premium_v2_host, "load_state", return_value={}), \
                      patch.object(premium_v2_host.threading, "Thread", return_value=thread) as thread_factory:
@@ -44,6 +45,7 @@ class VoicePreviewContractTests(unittest.TestCase):
             _find_profile=lambda _name: profile,
             _new_job=Mock(),
             _job_update=Mock(),
+            _now=premium_v2_host.PremiumV2Bridge._now,
         )
         with patch.object(premium_v2_host, "load_state", return_value={}), \
              patch.object(premium_v2_host.threading, "Thread") as thread_factory:
