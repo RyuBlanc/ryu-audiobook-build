@@ -466,7 +466,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "previewSavedProfile(profile, 'Hello, my name is ' + c.name",
             "call('character.update'",
             "call('character.delete'",
-            "Per-line AI speaker suggestions are still prototype-only",
+            "Automatic per-line AI speaker suggestions remain prototype-only",
             "Custom project-library and audio-assets root selection is not implemented",
             "call('diagnostics.export_logs')",
             "termList.innerHTML = terms.map",
@@ -487,7 +487,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "button.matches('[data-test-pron]')",
             "button.matches('[data-qwen-install]')",
             "Per-model ' + action + ' is not connected to a backend operation",
-            "Dialogue-line speaker assignment is not persisted by the current backend",
+            "call('chapter.dialogue.assign'",
         ):
             self.assertIn(token, adapter)
 
@@ -575,6 +575,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("call('chapter.dialogue.assign'", adapter)
         self.assertIn("window.ryuPremiumPendingDialogueText", adapter)
         self.assertIn("savedCharacters.filter(c => c && c.name)", adapter)
+        self.assertIn("button.matches('[data-assign-character]')", adapter)
+        self.assertNotIn("Dialogue-line speaker assignment is not persisted by the current backend", adapter)
         self.assertIn("def assign_dialogue_to_chapters(", helper)
         self.assertIn("no assignment was saved", helper)
         self.assertIn('normalized["source"] = "manual"', helper)

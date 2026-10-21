@@ -22,8 +22,8 @@ class KnownLimitationsContractTests(unittest.TestCase):
             "secure provider-specific credential store",
             "Premium cloud candidate generation",
             "Review status is persisted in `chapters.json`",
-            "Per-line AI speaker suggestions are still prototype-only",
-            "Dialogue-line speaker assignment is not persisted by the current backend",
+            "Automatic per-line AI speaker suggestions remain prototype-only",
+            "Manual source-backed dialogue speaker assignments are persisted",
             "Custom project-library and audio-assets root selection is not implemented",
             "Per-model actions",
         ):
@@ -43,9 +43,9 @@ class KnownLimitationsContractTests(unittest.TestCase):
         for phrase in (
             "Credential management is not connected to a secure provider-specific credential store",
             "Premium cloud candidate generation is not connected to a provider endpoint",
-            "Per-line AI speaker suggestions are still prototype-only",
+            "Automatic per-line AI speaker suggestions remain prototype-only",
             "Custom project-library and audio-assets root selection is not implemented",
-            "Dialogue-line speaker assignment is not persisted by the current backend",
+            "Manual source-backed dialogue speaker assignments are persisted",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, self.adapter)

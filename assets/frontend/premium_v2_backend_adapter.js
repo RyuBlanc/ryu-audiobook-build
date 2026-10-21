@@ -1484,8 +1484,7 @@
           if (!savedCharacters.length) throw new Error('Run Analyze book with AI and save character candidates before assigning dialogue.');
           window.ryuPremiumPendingDialogueText = dialogueText;
           if ($('aiSelectedSentence')) $('aiSelectedSentence').textContent = dialogueText;
-          if ($('predictionList')) $('predictionList').innerHTML = savedCharacters
-            .filter(c => c && c.name)
+          if ($('predictionList')) $('predictionList').innerHTML = savedCharacters.filter(c => c && c.name)
             .map((c, i) => '<button class="prediction-option ' + (i === 0 ? 'active' : '') +
               '" data-prediction="' + esc(c.name) + '"><b>' + esc(c.name) +
               '</b><span>Saved character · explicit selection</span></button>').join('');
@@ -1509,6 +1508,7 @@
         })().catch(err => message(err?.message || String(err), true));
         return;
       }
+      // Automatic per-line AI speaker suggestions remain prototype-only; manual source-backed assignments are persisted.
       if (button.id === 'acceptHighConfidence' || button.id === 'skipAiSuggestion' ||
           button.matches('[data-ai-line]') || button.id === 'aiUseLibrary' ||
           button.id === 'aiCreateNew' || button.id === 'createCharacterQuick') {
@@ -1602,7 +1602,13 @@
       }
       if (button.matches('[data-assign-character]')) {
         void run(async () => {
-          throw new Error('Dialogue-line speaker assignment is not persisted by the current backend. No cast or chapter data was changed.');
+          const dialogueText = String(window.ryuPremiumPendingDialogueText || '').trim();
+          const selected = button.dataset.assignCharacter || button.dataset.character || '';
+          if (!dialogueText || !selected) throw new Error('Select an individual source dialogue passage and choose a saved character before assigning a speaker.');
+          const result = await call('chapter.dialogue.assign', {dialogue_text:dialogueText, speakers:[selected]});
+          window.ryuPremiumPendingDialogueText = '';
+          await refreshChapters();
+          message('Saved speaker assignment for Chapter ' + result.chapter_number + '.');
         });
         return;
       }
