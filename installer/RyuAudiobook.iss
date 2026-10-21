@@ -66,7 +66,6 @@ begin
   WizardForm.Color := $000F0A09;
   WizardForm.MainPanel.Color := $001A130F;
   WizardForm.InnerPage.Color := $001A130F;
-  WizardForm.OuterNotebook.Color := $001A130F;
   WizardForm.PageNameLabel.Font.Color := $006AB0D6;
   WizardForm.PageDescriptionLabel.Font.Color := $00B8ACA5;
   WizardForm.WelcomeLabel1.Font.Color := $006AB0D6;
