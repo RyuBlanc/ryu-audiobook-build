@@ -5,7 +5,7 @@
 
 ## Stage 4 — Voice preview correctness and honest readiness
 
-**Current focus:** duration and playable-output integrity.
+**Current focus:** duration and playable-output integrity. CI Run 819 passed on commit `66c88b29`; packaged Windows preview acceptance remains pending.
 
 - [x] Preserve the selected profile and supported 10/20/30/45/60-second target through the preview job request.
 - [x] Measure and return the actual generated duration.
@@ -16,9 +16,11 @@
 - [ ] Run actual previews with representative local and custom voices at 10/30/60 seconds on Windows; compare requested versus measured duration, confirm in-app playback and transport, and record any provider-specific shortfall.
 - [ ] Verify preview text modes (current chapter, selected passage, custom text), permission/model errors, and retry behavior on the packaged build.
 
-**Exit gate:** latest CI green; actual preview file opens in the embedded player; the chosen voice is used; measured duration is displayed; short output is clearly disclosed and never mislabeled as the requested duration.
+**Exit gate:** latest CI green (Run 819 passed); actual preview file opens in the embedded player; the chosen voice is used; measured duration is displayed; short output is clearly disclosed and never mislabeled as the requested duration. Manual Windows acceptance remains open.
 
 ## Stage 5 — Voice-profile identity and cast-to-synthesis consistency
+
+**Implementation in progress:** commit `9deba8b0` now includes narrator-profile identity and reference-audio content digests in the cast-aware generation signature. Dedicated regression tests are added; validation is pending the next CI run.
 
 - [ ] Verify saved profile fields survive save → app restart → reload → preview → narrator selection → character assignment.
 - [ ] Confirm the same provider, model/backend, voice ID, language, reference audio and provider-specific parameters are used after reload; do not silently substitute a different voice.
