@@ -5,6 +5,47 @@
 **Working branch:** `fix/import-qa-speaker-hover-hardware`
 **Rule:** status is based on source inspection or named test evidence. A registered handler or successful build alone does not mean the user-facing workflow is accepted.
 
+## Follow-up audit — previous UI comparison and interaction polish (21 October 2026)
+
+### Confirmed frontend findings
+
+- The previous full-app prototype has 14 sidebar destinations; Premium V2 has 15 (adds Help & Guide). The new screen contains more controls, so raw ID changes are not evidence that a feature was removed.
+- Previous control IDs that no longer exist include `voiceGrid`, `voiceWave`, `voicePlay`, `voiceStop`, `selectedVoice`, `characterList`, `characterName`, `characterVoice`, `characterVoiceSelect`, `assignVoice`, `addPronunciation`, `pronSearch`, `pronTable`, `saveSoundPreset`, `trackGrid`, `selectedTrack`, `musicVolumeValue`, `musicVolume`, `saveSettings`, and `themeSelect`. Several have likely equivalents in the expanded UI (for example, advanced Voice Studio, Character Studio, Pronunciation Studio, Sound Design, and advanced Settings), but each needs a semantic parity check before classifying it as truly removed.
+- The Import → Chapters → Narrator → Characters → Pronunciation → Sound → Generate tracker initially had static `is-done`, `has-warning`, and `is-current` classes. This could show Generate as active regardless of the page and sample completion/review states regardless of the current project. The frontend has now been changed so the tracker follows the current screen, and static sample completion/warning states are cleared. A regression test was added; CI verification is pending.
+- The sidebar already toggles its active navigation class in `go(id)`; the top workflow tracker did not reliably follow navigation.
+- The HTML has legacy timer-driven import/generation/benchmark/player behavior and sample dashboard data. The adapter intercepts some actions, not every control. Remaining prototype paths must be audited and neutralized individually; do not use blanket event suppression that could break legitimate interactions.
+- The adapter polls jobs every 1.5 seconds and rebuilds the background-job list with `innerHTML`. This is a confirmed unnecessary DOM replacement path and a potential flicker source, particularly while the job panel is open. Main-screen flicker still requires profiling in the packaged WebEngine app before assigning a single root cause.
+- Startup `wire()` performs a sequence of broad refreshes across projects, voices, chapters, characters, pronunciation, sound, jobs, history, models, performance and settings. This creates a heavy startup burst; measure and stage these reads rather than indiscriminately refreshing all screens.
+
+### Backend gaps already confirmed by source audit
+
+1. Project lifecycle: `project.create` is unavailable as a standalone command; duplicate/archive/delete/export and backup/restore commands are not exposed.
+2. Chapter editing: find/replace, undo/redo and safe re-detection protection remain incomplete or UI-local; verify persistence and conflict handling.
+3. Dialogue/casting: source-backed manual assignment exists, but bulk AI acceptance/prediction remains guarded; confirm assign/unassign visibility and actual synthesis routing in Windows.
+4. Voice provider: preview/profile commands exist, but provider/model/voice ID/duration need real-provider acceptance. Premium cloud candidate generation and secure provider credential management are explicitly not connected.
+5. Production: dedicated preflight, retry/rebuild, immutable history detail and durable checkpoint recovery are incomplete/unverified.
+6. Pronunciation: import/export, conflict tracking, per-profile test-result storage and invalidation of affected audio are not complete.
+7. Sound: catalog/import/assignment commands exist; licensing, real playback, loudness, missing files, ducking/fades and preview-vs-final mix remain unaccepted.
+8. Player: output metadata and transport exist; persisted resume position/bookmarks and robust chapter timeline persistence are not evidenced.
+9. Models: install/list exist; update/verify/repair/uninstall/default/test actions are guarded as unavailable where no backend implementation exists.
+10. Performance: `performance.info` remains unavailable by capability design; do not show timer-based benchmark output as measured hardware performance.
+11. Settings/storage: custom roots and secure credential storage are incomplete; project/job data currently uses JSON/filesystem/QSettings rather than the documented SQLite target. Restart recovery is not accepted.
+12. Diagnostics and packaging: diagnostic redaction is best-effort; branding, install/upgrade/uninstall and manual packaged-app smoke tests remain release gates.
+
+### Flicker / responsiveness remediation plan
+
+- Stop rebuilding job-list DOM when its panel is closed; when open, update existing rows/progress nodes in place rather than replacing the entire list on every poll.
+- Reduce startup contention by loading critical project/navigation state first and deferring noncritical models, performance and catalog refreshes until their screens are opened.
+- Prevent duplicate event-handler installation and duplicate poll timers after bridge reconnect/reinitialization.
+- Remove/guard legacy timer-based prototype behavior only where a real backend handler owns that control; ensure unsupported controls report unavailable instead of faking progress/success.
+- Profile DOM mutations, navigation latency, CPU, and WebEngine responsiveness in the exact packaged build. Do not claim flicker is fixed until verified on Windows.
+
+### Flow / UI decisions
+
+- Keep the seven-step production tracker visually neutral by default and highlight only the step corresponding to the active page. Do not show a step as completed or warning unless backed by real saved project state.
+- Dashboard, Library, Player, History, Models, Performance, Settings and Help remain accessible through the sidebar without forcing the production sequence.
+- Preserve the current visual system; use existing styles for the active step rather than redesigning the tracker.
+
 ## P0 — correctness risks before production acceptance
 
 | ID | Gap / evidence | Required closure | Roadmap stage |
