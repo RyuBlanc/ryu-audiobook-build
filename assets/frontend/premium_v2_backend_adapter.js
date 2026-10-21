@@ -652,6 +652,7 @@
       (m.voice_cloning ? 'Voice cloning capable' : 'Narration / speech') + '</p><p class="muted">' +
       esc(m.notes || (m.multilingual ? 'Multilingual support' : 'Local voice model')) + '</p></div></article>').join('') ||
       '<p class="muted">No model catalogue entries were returned by the local backend.</p>';
+    applyUnavailableControlStates();
     const heading = $('models')?.querySelector('.model-runtime h2');
     if (heading) heading.textContent = rows.filter(m => m.installed).length + ' installed · ' + rows.filter(m => !m.installed).length + ' available in catalogue';
     return rows;
@@ -671,8 +672,32 @@
     message(result.passed ? 'Local integrity checks passed.' : 'Some local integrity checks need attention.', !result.passed);
     return result;
   }
+  function applyUnavailableControlStates() {
+    const disable = (element, reason) => {
+      if (!element || element.dataset.backendUnavailable === 'true') return;
+      element.disabled = true;
+      element.setAttribute('aria-disabled', 'true');
+      element.dataset.backendUnavailable = 'true';
+      element.title = reason;
+      const label = (element.getAttribute('aria-label') || element.textContent || element.id || 'Control').trim();
+      element.setAttribute('aria-label', label + '. Unavailable: ' + reason);
+    };
+    const dialogueReason = 'Bulk AI predictions are not verified against source passages in this build. Select an individual source-backed dialogue passage to assign a saved character.';
+    document.querySelectorAll('#acceptHighConfidence, #skipAiSuggestion, #aiUseLibrary, #aiCreateNew, #createCharacterQuick, [data-ai-line]:not([data-dialogue-id])')
+      .forEach(element => disable(element, dialogueReason));
+    document.querySelectorAll('[data-model-update], [data-model-repair], [data-model-uninstall]')
+      .forEach(element => disable(element, 'Per-model update, repair, and uninstall are not implemented. No model files will be changed by these controls.'));
+    document.querySelectorAll('#settings button').forEach(element => {
+      if ((element.textContent || '').trim().toLowerCase() === 'choose folder') {
+        disable(element, 'Changing the application storage root is not implemented. Existing project and asset paths remain unchanged.');
+      }
+    });
+    disable($('runBenchmark'), 'Live hardware telemetry and repeatable benchmark execution are not implemented in this build; performance is intentionally marked Not tested.');
+  }
+
   async function wire() {
     await call('app.get_info');
+    applyUnavailableControlStates();
     // Register navigation and action handlers before hydration. A slow local model,
     // history, or sound-library query must not delay the first interactive frame.
     document.addEventListener('click', e => {
@@ -1866,6 +1891,7 @@
       }
     };
     void hydrateInitialState();
+    applyUnavailableControlStates();
 
     if (!window.__ryuBackendJobTimer) window.__ryuBackendJobTimer=setInterval(()=>refreshJobs().catch(()=>{}),1500);
     const jobsBox = $('backgroundJobsList');
