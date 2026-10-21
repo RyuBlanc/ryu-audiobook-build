@@ -108,6 +108,7 @@ class PremiumV2Bridge(QObject):
                 "chapter.list": self._chapter_list,
                 "chapter.update": self._chapter_update,
                 "chapter.dialogue.assign": self._chapter_dialogue_assign,
+                "chapter.dialogue.unassign": self._chapter_dialogue_unassign,
                 "chapter.review": self._chapter_review,
                 "chapter.skip": self._chapter_skip,
                 "chapter.clean": self._chapter_clean,
@@ -214,6 +215,7 @@ class PremiumV2Bridge(QObject):
             "chapter.list": True,
             "chapter.update": True,
             "chapter.dialogue.assign": True,
+            "chapter.dialogue.unassign": True,
             "chapter.review": True,
             "chapter.skip": True,
             "chapter.split": True,
@@ -413,6 +415,28 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Assignment mode must be single, chorus, or alternating.")
         result = assign_dialogue_to_chapters(project.chapters, dialogue_text, speakers,
                                              chapter_number=chapter_number, mode=mode)
+        project.save()
+        project_state = load_state(project.folder)
+        project_state["modified_at"] = self._now()
+        save_state(project.folder, project_state)
+        return result
+
+    def _chapter_dialogue_unassign(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Remove one assignment only when the original chapter span still matches exactly."""
+        from app.chapters.assignment_utils import unassign_dialogue_from_chapters
+
+        project = self._active_project()
+        try:
+            chapter_number = int(payload.get("chapter_number"))
+            start = int(payload.get("start"))
+            end = int(payload.get("end"))
+        except (TypeError, ValueError):
+            raise ValueError("Refresh the dialogue review and select a valid saved passage.")
+        if any(isinstance(payload.get(key), bool) for key in ("chapter_number", "start", "end")):
+            raise ValueError("Dialogue offsets must be valid integer positions.")
+        result = unassign_dialogue_from_chapters(
+            project.chapters, chapter_number, start, end, str(payload.get("dialogue_text") or "")
+        )
         project.save()
         project_state = load_state(project.folder)
         project_state["modified_at"] = self._now()

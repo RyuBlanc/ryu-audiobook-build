@@ -149,6 +149,34 @@ def format_character_registry_entry(entry: dict) -> str:
 
 
 
+def unassign_dialogue_from_chapters(chapters, chapter_number: int, start: int, end: int, dialogue_text: str) -> dict:
+    """Remove a single assignment only after verifying its exact source span."""
+    if isinstance(chapter_number, bool) or not isinstance(chapter_number, int):
+        raise ValueError("Choose a valid chapter number before removing an assignment.")
+    if isinstance(start, bool) or not isinstance(start, int) or isinstance(end, bool) or not isinstance(end, int):
+        raise ValueError("Dialogue offsets must be integer positions.")
+    requested = str(dialogue_text or "")
+    if not requested or len(requested) > 5000 or start < 0 or end <= start:
+        raise ValueError("Select a valid dialogue passage before removing its assignment.")
+    matches = [c for c in (chapters or []) if getattr(c, "number", None) == chapter_number]
+    if len(matches) != 1:
+        raise ValueError("The selected chapter no longer exists or is ambiguous. Refresh the dialogue review.")
+    chapter = matches[0]
+    source = str(getattr(chapter, "text", "") or "")
+    if end > len(source) or source[start:end] != requested:
+        raise ValueError("The saved chapter text changed since this passage was selected. Refresh the dialogue review; no assignment was removed.")
+    assignments = list(getattr(chapter, "dialogue_assignments", []) or [])
+    indices = [i for i, item in enumerate(assignments) if isinstance(item, dict) and item.get("start") == start and item.get("end") == end]
+    if len(indices) != 1:
+        raise ValueError("No unique saved speaker assignment exists for this exact passage. Refresh the dialogue review; no assignment was removed.")
+    assignment = assignments[indices[0]]
+    if assignment.get("text") is not None and assignment.get("text") != requested:
+        raise ValueError("The saved assignment no longer matches the selected source passage. Refresh the dialogue review; no assignment was removed.")
+    del assignments[indices[0]]
+    chapter.dialogue_assignments = assignments
+    return {"chapter_number": chapter_number, "start": start, "end": end, "text": requested, "removed": True, "saved": True}
+
+
 def assign_dialogue_to_chapters(chapters, dialogue_text: str, speakers: list[str],
                                 chapter_number: int | None = None, mode: str = "single") -> dict:
     """Persist an explicit speaker choice against one uniquely matched source span."""

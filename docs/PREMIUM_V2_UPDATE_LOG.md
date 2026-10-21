@@ -91,3 +91,12 @@
 
 - Run 810 executed 352 tests: all four new streaming/staging tests passed, while one static source-contract assertion failed because it expected the empty-bytes literal with single quotes and the helper uses equivalent double quotes.
 - Corrected the assertion to match the actual source expression. Run 811 must pass before this patch is considered CI-validated; packaged Windows interaction acceptance is still separate.
+
+
+## 2026-10-21 — Stage 3 assignment lifecycle hardening
+
+- Added a persisted removal command for one saved dialogue-speaker assignment. Removal requires exact chapter number, source offsets, source text and a unique assignment record; stale text or ambiguous records fail without mutation.
+- Added a Remove saved assignment action to the existing dialogue-review modal at runtime. The approved Premium V2 HTML source remains unchanged.
+- Tightened dialogue-review rendering to match saved assignments only by validated source offsets, avoiding normalized-text fallback that could attach old assignments to repeated or edited quotes.
+- Added regression coverage for exact removal, stale-source rejection, duplicate-record rejection, bridge registration and strict UI matching.
+- Packaged Windows acceptance and end-to-end synthesis checks remain required before Stage 3 can be marked fully accepted. CI validation for this change is pending.

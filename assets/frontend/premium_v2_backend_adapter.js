@@ -21,6 +21,20 @@
   let chapterLastText = '', chapterHistoryGroupOpen = false, chapterHistoryGroupTimer = null, chapterHistoryApplying = false;
   let libraryCharacters = [], libraryEditorId = null, libraryEditorActive = false;
   const selectedChapter = () => chapters.find(c => c.number === window.ryuPremiumSelectedChapter) || chapters[0];
+  function ensureDialogueUnassignButton() {
+    const confirmButton = $('confirmAiCharacter');
+    if (!confirmButton) return null;
+    let button = $('removeAiCharacterAssignment');
+    if (!button) {
+      button = document.createElement('button');
+      button.id = 'removeAiCharacterAssignment';
+      button.type = 'button';
+      button.className = confirmButton.className || 'btn small secondary';
+      button.textContent = 'Remove saved assignment';
+      confirmButton.insertAdjacentElement('afterend', button);
+    }
+    return button;
+  }
   function renderDialogueReview() {
     const queue = $('aiQueue');
     const storyDocument = documentRef();
@@ -40,11 +54,12 @@
       while ((match = quotePattern.exec(source)) && items.length < 250) {
         const text = match[0].trim();
         if (text.length < 4) continue;
-        const assignment = (chapter.dialogue_assignments || []).find(item => {
-          if (!item || typeof item !== 'object') return false;
-          if (Number(item.start) === match.index && Number(item.end) === match.index + match[0].length) return true;
-          return normalize(item.text) === normalize(text);
-        });
+        const assignment = (chapter.dialogue_assignments || []).find(item =>
+          item && typeof item === 'object' &&
+          Number.isInteger(item.start) && Number.isInteger(item.end) &&
+          item.start === match.index && item.end === match.index + match[0].length &&
+          source.slice(item.start, item.end) === String(item.text || '')
+        );
         const names = assignment
           ? (Array.isArray(assignment.speakers) && assignment.speakers.length
               ? assignment.speakers : [assignment.speaker]).filter(Boolean)
@@ -54,7 +69,7 @@
           chapterNumber: Number(chapter.number),
           chapterTitle: String(chapter.title || ('Chapter ' + chapter.number)),
           text, start: match.index, end: match.index + match[0].length,
-          speakers: names, assigned: Boolean(names.length)
+          speakers: names, assigned: Boolean(names.length), assignmentPresent: Boolean(assignment)
         });
       }
     }
@@ -1605,21 +1620,52 @@
       if (button.matches('[data-ai-sentence]')) {
         stop();
         (async () => {
-          const label = button.querySelector('.ai-speaker')?.textContent || '';
-          const dialogueText = button.textContent.slice(label.length).trim();
-          if (!dialogueText) throw new Error('Select a dialogue passage first.');
+          const item = (window.ryuPremiumDialogueReviewItems || []).find(row => row.id === button.dataset.dialogueId);
+          if (!item || !item.text) throw new Error('This dialogue passage is stale. Refresh the chapter list and select it again.');
           const savedCharacters = await call('character.list');
           if (!savedCharacters.length) throw new Error('Run Analyze book with AI and save character candidates before assigning dialogue.');
-          window.ryuPremiumPendingDialogueText = dialogueText;
-          window.ryuPremiumPendingDialogueChapter = Number(button.dataset.chapterNumber) || null;
-          if ($('aiSelectedSentence')) $('aiSelectedSentence').textContent = dialogueText;
+          window.ryuPremiumPendingDialogueText = item.text;
+          window.ryuPremiumPendingDialogueChapter = item.chapterNumber;
+          window.ryuPremiumPendingDialogueStart = item.start;
+          window.ryuPremiumPendingDialogueEnd = item.end;
+          window.ryuPremiumPendingDialogueId = item.id;
+          if ($('aiSelectedSentence')) $('aiSelectedSentence').textContent = item.text;
           if ($('predictionList')) $('predictionList').innerHTML = savedCharacters.filter(c => c && c.name)
-            .map((c, i) => '<button class="prediction-option ' + (i === 0 ? 'active' : '') +
+            .map((c, i) => '<button class="prediction-option ' + (item.speakers.includes(c.name) ? 'active' : (i === 0 && !item.assigned ? 'active' : '')) +
               '" data-prediction="' + esc(c.name) + '"><b>' + esc(c.name) +
               '</b><span>Saved character · explicit selection</span></button>').join('');
           if ($('confirmAiCharacter')) $('confirmAiCharacter').disabled = !savedCharacters.length;
+          const removeButton = ensureDialogueUnassignButton();
+          if (removeButton) removeButton.hidden = !item.assignmentPresent;
           $('aiPredictionModal')?.classList.add('show');
-          message('Choose a saved character to assign this passage. The displayed confidence score is not treated as verified evidence.');
+          message(item.assignmentPresent
+            ? 'Change the saved speaker or remove this passage assignment.'
+            : 'Choose a saved character to assign this passage. The displayed confidence score is not treated as verified evidence.');
+        })().catch(err => message(err?.message || String(err), true));
+        return;
+      }
+      if (button.id === 'removeAiCharacterAssignment') {
+        stop();
+        (async () => {
+          const dialogueText = String(window.ryuPremiumPendingDialogueText || '');
+          const chapterNumber = window.ryuPremiumPendingDialogueChapter;
+          const start = window.ryuPremiumPendingDialogueStart;
+          const end = window.ryuPremiumPendingDialogueEnd;
+          if (!dialogueText || !Number.isInteger(chapterNumber) || !Number.isInteger(start) || !Number.isInteger(end)) {
+            throw new Error('Select a saved dialogue assignment before removing it.');
+          }
+          if (!window.confirm('Remove the saved speaker assignment for this exact dialogue passage?')) return;
+          const result = await call('chapter.dialogue.unassign', {
+            chapter_number:chapterNumber, start, end, dialogue_text:dialogueText
+          });
+          $('aiPredictionModal')?.classList.remove('show');
+          window.ryuPremiumPendingDialogueText = '';
+          window.ryuPremiumPendingDialogueChapter = null;
+          window.ryuPremiumPendingDialogueStart = null;
+          window.ryuPremiumPendingDialogueEnd = null;
+          window.ryuPremiumPendingDialogueId = null;
+          await refreshChapters();
+          message('Removed the saved speaker assignment for Chapter ' + result.chapter_number + '.');
         })().catch(err => message(err?.message || String(err), true));
         return;
       }
@@ -1635,6 +1681,9 @@
           $('aiPredictionModal')?.classList.remove('show');
           window.ryuPremiumPendingDialogueText = '';
           window.ryuPremiumPendingDialogueChapter = null;
+          window.ryuPremiumPendingDialogueStart = null;
+          window.ryuPremiumPendingDialogueEnd = null;
+          window.ryuPremiumPendingDialogueId = null;
           await refreshChapters();
           message('Saved speaker assignment for Chapter ' + result.chapter_number + '.');
         })().catch(err => message(err?.message || String(err), true));

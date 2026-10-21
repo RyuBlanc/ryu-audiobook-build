@@ -153,6 +153,47 @@ class DialogueAssignmentPersistenceTests(unittest.TestCase):
         self.assertEqual(dialogue_parts, [("First line.", "Rimuru Voice"), ("Second line.", "Benimaru Voice")])
         cast.close()
 
+    def test_unassignment_removes_only_the_exact_saved_source_span(self):
+        from app.chapters.assignment_utils import unassign_dialogue_from_chapters
+
+        source = 'Narration. “First line.” Then “Second line.”'
+        chapter = Chapter(1, "One", source)
+        assign_dialogue_to_chapters([chapter], "“First line.”", ["Rimuru"])
+        assign_dialogue_to_chapters([chapter], "“Second line.”", ["Benimaru"])
+        start = source.index("“")
+        end = source.index("”") + 1
+        result = unassign_dialogue_from_chapters([chapter], 1, start, end, source[start:end])
+        self.assertTrue(result["removed"])
+        self.assertEqual(len(chapter.dialogue_assignments), 1)
+        self.assertEqual(chapter.dialogue_assignments[0]["text"], "“Second line.”")
+
+    def test_unassignment_rejects_stale_text_and_duplicate_records_without_mutation(self):
+        from app.chapters.assignment_utils import unassign_dialogue_from_chapters
+
+        source = '“The eastern route is clear.”'
+        chapter = Chapter(1, "One", source)
+        assign_dialogue_to_chapters([chapter], source, ["Souei"])
+        saved = list(chapter.dialogue_assignments)
+        with self.assertRaisesRegex(ValueError, "changed since"):
+            unassign_dialogue_from_chapters([chapter], 1, 0, len(source), "“The eastern route is blocked.”")
+        self.assertEqual(chapter.dialogue_assignments, saved)
+        chapter.dialogue_assignments.append(dict(saved[0]))
+        with self.assertRaisesRegex(ValueError, "No unique saved"):
+            unassign_dialogue_from_chapters([chapter], 1, 0, len(source), source)
+        self.assertEqual(len(chapter.dialogue_assignments), 2)
+
+    def test_unassignment_bridge_and_ui_contract(self):
+        root = Path(__file__).resolve().parents[1]
+        host = (root / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (root / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn('"chapter.dialogue.unassign": self._chapter_dialogue_unassign', host)
+        self.assertIn('"chapter.dialogue.unassign": True', host)
+        self.assertIn("unassign_dialogue_from_chapters(", host)
+        self.assertIn("chapter.dialogue.unassign", adapter)
+        self.assertIn("removeAiCharacterAssignment", adapter)
+        self.assertIn("Number.isInteger(item.start) && Number.isInteger(item.end)", adapter)
+        self.assertNotIn("return normalize(item.text) === normalize(text)", adapter)
+
     def test_dialogue_review_uses_saved_chapter_passages_and_scopes_duplicate_quotes(self):
         adapter = (Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("function renderDialogueReview()", adapter)
