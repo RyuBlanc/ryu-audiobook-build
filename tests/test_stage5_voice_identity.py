@@ -64,6 +64,49 @@ class VoiceIdentitySignatureTests(unittest.TestCase):
                                    {"Hero": "Clone"}, narrator_profile=VoiceProfile("Narrator", "piper", "amy"))
         self.assertNotEqual(signature_missing, second.generation_signature())
 
+    def test_saved_profile_round_trips_voice_identity_and_synthesis_settings(self):
+        from unittest.mock import patch
+        from app.tts.voice_profile import load_saved_profiles, save_profiles
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "voices"
+            profile = VoiceProfile(
+                name="Persisted Qwen Character",
+                provider="qwen-character",
+                voice_id="Ryan",
+                model_id="qwen3-customvoice",
+                backend="cuda",
+                language="English",
+                qwen_mode="custom",
+                qwen_prompt="warm, clear audiobook voice",
+                qwen_seed=7741,
+                qwen_profile_id="stable-profile-identity",
+                authorized=True,
+            )
+            with patch("app.tts.voice_profile.voices_root", return_value=root), \\
+                 patch("app.tts.voice_profile.builtin_voice_profiles", return_value=[]):
+                save_profiles([profile])
+                loaded = load_saved_profiles()
+
+        self.assertEqual(len(loaded), 1)
+        restored = loaded[0]
+        self.assertEqual(restored.provider, profile.provider)
+        self.assertEqual(restored.voice_id, profile.voice_id)
+        self.assertEqual(restored.model_id, profile.model_id)
+        self.assertEqual(restored.backend, profile.backend)
+        self.assertEqual(restored.language, profile.language)
+        self.assertEqual(restored.qwen_prompt, profile.qwen_prompt)
+        self.assertEqual(restored.qwen_seed, profile.qwen_seed)
+        self.assertEqual(restored.qwen_profile_id, profile.qwen_profile_id)
+
+    def test_audiobook_generation_passes_the_selected_narrator_profile_into_cast_signature(self):
+        host = (Path(__file__).resolve().parents[1] / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        cast = (Path(__file__).resolve().parents[1] / "app" / "tts" / "cast_provider.py").read_text(encoding="utf-8")
+        self.assertIn("narrator_profile=profile", host)
+        self.assertIn('"narrator_profile": self._profile_signature(self.narrator_profile)', cast)
+        self.assertIn('"sample_audio_sha256"', cast)
+        self.assertIn('"anchor_audio_sha256"', cast)
+
 
 if __name__ == "__main__":
     unittest.main()
