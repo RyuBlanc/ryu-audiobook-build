@@ -129,6 +129,7 @@ class PremiumV2Bridge(QObject):
                 "settings.save": self._settings_save,
                 "models.list": self._models_list,
                 "models.install": self._models_install,
+                "models.verify": self._models_verify,
                 "performance.info": self._performance_info,
                 "diagnostics.check": self._diagnostics_check,
                 "diagnostics.export_logs": self._diagnostics_export_logs,
@@ -234,6 +235,7 @@ class PremiumV2Bridge(QObject):
             "settings.save": True,
             "models.list": True,
             "models.install": True,
+            "models.verify": True,
             "performance.info": False,
             "diagnostics.check": True,
             "diagnostics.export_logs": True,
@@ -1747,6 +1749,48 @@ class PremiumV2Bridge(QObject):
                  "voice_cloning": m.voice_cloning, "multilingual": m.multilingual,
                  "installed": m.model_id in installed, "preferred_backends": list(m.preferred_backends),
                  "notes": m.notes} for m in BUILTIN_CATALOG]
+
+    def _models_verify(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Verify installed Qwen model files from disk without downloading or loading ML runtimes."""
+        from app.tts.qwen_character_runtime import MODEL_IDS, MODEL_DIRS, model_installed
+
+        requested = str(payload.get("model_id") or "").strip().lower()
+        aliases = {
+            "customvoice": ("custom-0.6b", "custom-1.7b"),
+            "custom-voice": ("custom-0.6b", "custom-1.7b"),
+            "voicedesign": ("design-1.7b", "base-0.6b", "base-1.7b"),
+            "voice-design": ("design-1.7b", "base-0.6b", "base-1.7b"),
+            "voiceclone": ("base-0.6b", "base-1.7b"),
+            "voice-clone": ("base-0.6b", "base-1.7b"),
+        }
+        if requested in aliases:
+            kinds = aliases[requested]
+        elif requested in MODEL_IDS:
+            kinds = (requested,)
+        else:
+            raise ValueError("Choose a supported Qwen model ID or CustomVoice, VoiceDesign, or Voice Clone.")
+
+        models = [{
+            "model_id": kind,
+            "name": MODEL_IDS[kind],
+            "path": str(MODEL_DIRS[kind]),
+            "installed": bool(model_installed(kind)),
+        } for kind in kinds]
+        if requested in {"customvoice", "custom-voice"}:
+            ready = any(item["installed"] for item in models)
+        elif requested in {"voicedesign", "voice-design"}:
+            ready = models[0]["installed"] and any(item["installed"] for item in models[1:])
+        elif requested in {"voiceclone", "voice-clone"}:
+            ready = any(item["installed"] for item in models)
+        else:
+            ready = models[0]["installed"]
+        return {
+            "model_id": requested,
+            "available": ready,
+            "models": models,
+            "detail": ("Required model files are present." if ready else
+                       "One or more required model files are missing or incomplete. Use the supported Models installer, then verify again."),
+        }
 
     def _performance_info(self, _payload: dict[str, Any]) -> dict[str, Any]:
         return {"available": False, "reason": "Live CPU, GPU and VRAM telemetry is not connected to Premium V2 yet."}
