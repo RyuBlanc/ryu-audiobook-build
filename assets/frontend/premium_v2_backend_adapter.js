@@ -1740,6 +1740,14 @@
             button.hasAttribute('data-model-verify') ? 'verify' : 'uninstall';
           const id = button.getAttribute('data-model-update') || button.getAttribute('data-model-repair') ||
             button.getAttribute('data-model-verify') || button.getAttribute('data-model-uninstall') || '';
+          if (action === 'verify') {
+            const result = await call('models.verify', {model_id:id});
+            await refreshModels();
+            message((result.available ? 'Model verification passed. ' : 'Model verification found missing files. ') +
+              result.detail + ' Checked: ' + result.models.map(model => model.model_id).join(', '),
+              !result.available);
+            return;
+          }
           throw new Error('Per-model ' + action + ' is not connected to a backend operation for "' + id + '". No model state was changed.');
         });
         return;
