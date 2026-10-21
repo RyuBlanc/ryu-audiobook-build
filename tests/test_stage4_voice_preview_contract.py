@@ -110,14 +110,14 @@ class VoicePreviewContractTests(unittest.TestCase):
                 output_path.write_bytes(b"not-a-readable-audio-file")
                 return SimpleNamespace(output_path=output_path, voices_used=("voice-id",), segments=1)
 
-            with patch.object(premium_v2_host, "provider_from_profile", return_value=(provider, "voice-id")), \\
-                 patch.object(premium_v2_host, "load_profiles", return_value=[]), \\
-                 patch.object(premium_v2_host, "app_root", return_value=root), \\
-                 patch.object(premium_v2_host, "build_voice_preview", side_effect=fake_build), \\
-                 patch("app.audio.assembler._duration_ms", side_effect=RuntimeError("probe unavailable")):
-                premium_v2_host.PremiumV2Bridge._preview_worker(
-                    bridge, "preview-job", profile, "A longer source passage.", 30, {}
-                )
+            with patch.object(premium_v2_host, "provider_from_profile", return_value=(provider, "voice-id")):
+                with patch.object(premium_v2_host, "load_profiles", return_value=[]):
+                    with patch.object(premium_v2_host, "app_root", return_value=root):
+                        with patch.object(premium_v2_host, "build_voice_preview", side_effect=fake_build):
+                            with patch("app.audio.assembler._duration_ms", side_effect=RuntimeError("probe unavailable")):
+                                premium_v2_host.PremiumV2Bridge._preview_worker(
+                                    bridge, "preview-job", profile, "A longer source passage.", 30, {}
+                                )
 
         self.assertFalse(any(item.get("state") == "completed" for item in updates))
         failed = next(item for item in updates if item.get("state") == "failed")
