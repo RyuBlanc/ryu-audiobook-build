@@ -693,6 +693,26 @@
       $('pronDictionaryBody')?.querySelectorAll('tr,[data-pron-row]').forEach(el=>el.hidden=!el.textContent.toLowerCase().includes(q));
     };
     if ($('librarySearch')) $('librarySearch').oninput = () => refreshProjects().catch(e=>message(e.message,true));
+    // Dashboard recent cards are re-rendered from backend project records. Delegate
+    // clicks from the stable dashboard container so refreshed cards open their own project.
+    if ($('dashboard')) $('dashboard').addEventListener('click', async e => {
+      const card = e.target.closest('.recent-grid [data-project-folder]');
+      if (!card) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const folder = card.dataset.projectFolder;
+      if (!folder) { message('This dashboard card has no local project folder.', true); return; }
+      try {
+        const opened = await call('project.open', {folder});
+        await refreshProjects();
+        await refreshChapters();
+        await refreshCharacters();
+        if (typeof window.go === 'function') window.go('chapters');
+        message('Opened local project: ' + (opened.title || opened.folder || 'project'));
+      } catch (err) {
+        message(err?.message || String(err), true);
+      }
+    });
     if ($('libraryGrid')) $('libraryGrid').addEventListener('click', async e => {
       const button = e.target.closest('[data-open-project]'); if (!button) return;
       button.disabled = true;
