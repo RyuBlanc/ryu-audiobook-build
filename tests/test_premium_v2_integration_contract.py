@@ -690,14 +690,17 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
     def test_legacy_controls_without_ids_have_semantic_successors_and_event_paths(self):
         """Map no-ID legacy control groups to stable selectors and real event/backend paths."""
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        soup = BeautifulSoup(self.html, "html.parser")
         # Navigation and workflow strip are delegated by stable data attributes, not per-button IDs.
         for selector in ('button.nav-btn[data-page]', '[data-go]', '#voices .toolbar', '#voices .seg'):
-            self.assertIn(selector, self.html)
+            self.assertTrue(soup.select(selector), selector)
         self.assertIn("function go(id){", self.html)
         self.assertIn("b.dataset.go===currentWorkflowStage", self.html)
         # Provider cards, sound filters/tracks, and background jobs use semantic data attributes.
-        for selector in ('data-provider=', '#soundSourceFilter', '[data-source=', '#soundTrackGrid', '[data-select-sound=', '[data-job-action=', '[data-job-id='):
-            self.assertIn(selector, self.html + adapter)
+        for selector in ('[data-provider]', '#soundSourceFilter', '[data-source]', '#soundTrackGrid', '#previewSelectedTrack', '#soundPreviewBook', '#backgroundJobsButton'):
+            self.assertTrue(soup.select(selector), selector)
+        for marker in ('data-select-sound=', 'data-job-action=', 'data-job-id='):
+            self.assertIn(marker, self.html + adapter)
         self.assertIn("button.closest('.provider')", adapter)
         self.assertIn("document.querySelector('#soundSourceFilter [data-source].active')", adapter)
         self.assertIn("box.innerHTML = jobs.map(j =>", adapter)
