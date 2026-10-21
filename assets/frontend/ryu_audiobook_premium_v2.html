@@ -415,32 +415,32 @@ html[data-theme='light'] .pron-tabs,html[data-theme='light'] .pron-profile,html[
 <span class="flow-node"><span class="flow-number">1</span><span class="flow-check">✓</span></span>
 <span class="flow-copy"><b>Import</b><small>Book &amp; metadata</small></span>
 </button>
-<span class="flow-link is-done"></span>
+<span class="flow-link"></span>
 <button class="flow-stage" data-go="chapters" title="Review chapter structure and clean the manuscript">
 <span class="flow-node"><span class="flow-number">2</span><span class="flow-check">✓</span></span>
 <span class="flow-copy"><b>Chapters</b><small>Structure &amp; text</small></span>
 </button>
-<span class="flow-link is-done"></span>
+<span class="flow-link"></span>
 <button class="flow-stage" data-go="voices" title="Choose and validate the audiobook narrator">
 <span class="flow-node"><span class="flow-number">3</span><span class="flow-check">✓</span></span>
 <span class="flow-copy"><b>Narrator</b><small>Voice profile</small></span>
 </button>
-<span class="flow-link is-done"></span>
+<span class="flow-link"></span>
 <button class="flow-stage" data-go="characters" title="Review detected speakers and complete character casting">
 <span class="flow-node"><span class="flow-number">4</span><span class="flow-check">!</span></span>
 <span class="flow-copy"><b>Characters</b><small>3 need review</small></span>
 </button>
-<span class="flow-link has-warning"></span>
+<span class="flow-link"></span>
 <button class="flow-stage" data-go="pronunciation" title="Verify names and book-specific pronunciations">
 <span class="flow-node"><span class="flow-number">5</span><span class="flow-check">✓</span></span>
 <span class="flow-copy"><b>Pronunciation</b><small>Names &amp; terms</small></span>
 </button>
-<span class="flow-link is-done"></span>
+<span class="flow-link"></span>
 <button class="flow-stage" data-go="sound" title="Assign music, ambience and transition sounds">
 <span class="flow-node"><span class="flow-number">6</span><span class="flow-check">✓</span></span>
 <span class="flow-copy"><b>Sound</b><small>Music &amp; effects</small></span>
 </button>
-<span class="flow-link is-current"></span>
+<span class="flow-link"></span>
 <button class="flow-stage" data-go="generate" title="Preview, generate and validate the final audiobook">
 <span class="flow-node"><span class="flow-number">7</span><span class="flow-check">▶</span></span>
 <span class="flow-copy"><b>Generate</b><small>Build audiobook</small></span>
@@ -582,7 +582,7 @@ Hyoudo Issei — that is my name. My parents and guys at school call me “Ise�
 <script>
 const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
 const titles={dashboard:'Dashboard',library:'Audiobook Library',import:'Import Studio',chapters:'Chapter Studio',voices:'Voice Studio',characters:'Character Studio',pronunciation:'Pronunciation Studio',sound:'Sound Design Studio',generate:'Production Studio',player:'Audiobooks',history:'Generation History',models:'Models Center',performance:'Performance Center',settings:'Settings',help:'Help & Guide'};
-function go(id){$('.page').forEach(p=>p.classList.toggle('active',p.id===id));$('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.page===id));const workflowStageForPage={import:'import',chapters:'chapters',voices:'voices',characters:'characters',pronunciation:'pronunciation',sound:'sound',generate:'generate'};const currentWorkflowStage=workflowStageForPage[id]||null;$('.flow-stage').forEach(b=>{b.classList.toggle('is-current',Boolean(currentWorkflowStage)&&b.dataset.go===currentWorkflowStage);b.classList.remove('is-done','has-warning')});$('.flow-link').forEach(link=>link.classList.remove('is-done','is-current','has-warning'));$('#pageTitle').textContent=titles[id]||id;$('#workspace').scrollTop=0;if(innerWidth<801)$('#sidebar').classList.remove('open');(()=>{try{if(['http:','https:','file:'].includes(location.protocol))history.replaceState(null,'','#'+id)}catch(_){}})()}
+function go(id){$$('.page').forEach(p=>p.classList.toggle('active',p.id===id));$$('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.page===id));const workflowStageForPage={import:'import',chapters:'chapters',voices:'voices',characters:'characters',pronunciation:'pronunciation',sound:'sound',generate:'generate'};const currentWorkflowStage=workflowStageForPage[id]||null;$$('.flow-stage').forEach(b=>{b.classList.toggle('is-current',Boolean(currentWorkflowStage)&&b.dataset.go===currentWorkflowStage);b.classList.remove('is-done','has-warning')});$$('.flow-link').forEach(link=>link.classList.remove('is-done','is-current','has-warning'));$('#pageTitle').textContent=titles[id]||id;$('#workspace').scrollTop=0;if(innerWidth<801)$('#sidebar').classList.remove('open');(()=>{try{if(['http:','https:','file:'].includes(location.protocol))history.replaceState(null,'','#'+id)}catch(_){}})()}
 $$('[data-page]').forEach(b=>b.onclick=()=>go(b.dataset.page));$$('[data-go]').forEach(b=>b.onclick=e=>{e.stopPropagation();go(b.dataset.go)});
 $('#menuToggle').onclick=()=>innerWidth<801?$('#sidebar').classList.toggle('open'):$('#app').classList.toggle('collapsed');
 $('#themeToggle').onclick=()=>{let n=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=n;toast(n==='dark'?'Obsidian dark theme enabled':'Cream light theme enabled')};
