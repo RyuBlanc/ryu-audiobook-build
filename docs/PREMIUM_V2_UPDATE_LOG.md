@@ -100,3 +100,12 @@
 - Tightened dialogue-review rendering to match saved assignments only by validated source offsets, avoiding normalized-text fallback that could attach old assignments to repeated or edited quotes.
 - Added regression coverage for exact removal, stale-source rejection, duplicate-record rejection, bridge registration and strict UI matching.
 - Packaged Windows acceptance and end-to-end synthesis checks remain required before Stage 3 can be marked fully accepted. CI validation for this change is pending.
+
+
+## 2026-10-21 — Stage 4 voice-preview integrity hardening
+
+- Kept the selected saved voice profile and all supported preview targets (10, 20, 30, 45 and 60 seconds) flowing into the backend worker.
+- Changed preview completion to fail closed if the generated audio has no measurable positive duration; a generated file without valid duration is no longer reported as a successful ready preview.
+- Tightened the frontend ready-state gate: it requires a playable local file URL and a finite, positive measured duration. Missing/invalid output disables preview playback and leaves an actionable validation message instead of showing Ready.
+- New preview requests stop any prior preview playback, disable Play while generation is running, and reset the visible progress bar before polling the real job status.
+- Added regression tests for unmeasurable output duration and frontend ready-state conditions. Run 812 succeeded on the preceding Stage 3 commit; the new Stage 4 commit's CI result is still pending. Actual provider playback and duration acceptance on the target Windows machine remain required.
