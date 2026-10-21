@@ -673,6 +673,20 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertNotRegex(self.html, r'<span class="flow-link (?:is-current|is-done|has-warning)')
 
 
+    def test_model_verification_uses_real_local_file_checks(self):
+        """The Models screen's Verify action must inspect installed files, not report fake success."""
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn('"models.verify": True', host)
+        self.assertIn('"models.verify": self._models_verify', host)
+        self.assertIn("def _models_verify(self, payload: dict[str, Any])", host)
+        self.assertIn("from app.tts.qwen_character_runtime import MODEL_IDS, MODEL_DIRS, model_installed", host)
+        self.assertIn('if action === \'verify\'', adapter)
+        self.assertIn("call('models.verify', {model_id:id})", adapter)
+        self.assertIn("result.models.map(model => model.model_id).join(', ')", adapter)
+        self.assertIn("One or more required model files are missing or incomplete.", host)
+        self.assertNotIn("download", host[host.index("def _models_verify"):host.index("def _performance_info")].lower())
+
     def test_legacy_control_ids_are_preserved_or_have_named_successors(self):
         """Guard the old UI ID inventory against silent markup regressions."""
         soup = BeautifulSoup(self.html, "html.parser")
