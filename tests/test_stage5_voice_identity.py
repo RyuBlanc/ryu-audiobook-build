@@ -99,6 +99,15 @@ class VoiceIdentitySignatureTests(unittest.TestCase):
         self.assertEqual(restored.qwen_seed, profile.qwen_seed)
         self.assertEqual(restored.qwen_profile_id, profile.qwen_profile_id)
 
+    def test_narrator_only_profile_changes_invalidate_generation_signature(self):
+        from app.tts.profile_provider import ProfileBoundProvider
+        provider = DummyProvider()
+        first_profile = VoiceProfile("Narrator", "piper", "amy", model_id="piper", qwen_prompt="calm")
+        second_profile = VoiceProfile("Narrator", "piper", "amy", model_id="piper", qwen_prompt="expressive")
+        first = ProfileBoundProvider(provider, first_profile)
+        second = ProfileBoundProvider(provider, second_profile)
+        self.assertNotEqual(first.generation_signature(), second.generation_signature())
+
     def test_audiobook_generation_passes_the_selected_narrator_profile_into_cast_signature(self):
         host = (Path(__file__).resolve().parents[1] / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         cast = (Path(__file__).resolve().parents[1] / "app" / "tts" / "cast_provider.py").read_text(encoding="utf-8")

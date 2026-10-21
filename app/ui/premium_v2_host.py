@@ -1456,6 +1456,10 @@ class PremiumV2Bridge(QObject):
         if profile is None:
             raise ValueError("No narrator is saved. Open Voice Studio, select an installed voice, and save it as narrator.")
         provider, voice = provider_from_profile(profile)
+        # Include the full selected narrator profile in resumable chunk identity
+        # even when this book has no character-specific voice assignments.
+        from app.tts.profile_provider import ProfileBoundProvider
+        provider = ProfileBoundProvider(provider, profile)
         # Character Studio assignments must affect actual synthesis, not only the
         # roster UI. Wrap the narrator with the existing cast-aware router when
         # at least one saved character has a valid voice assignment.
