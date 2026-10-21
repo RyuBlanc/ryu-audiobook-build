@@ -86,3 +86,8 @@
 - Fixed an early-failure path where a duplicate drag-and-drop import could leave its temporary staging copy behind before a background worker existed.
 - Added regression coverage for streamed hashing, cleanup of temporary drop files, idempotent cleanup, and preservation of user-selected source files outside the managed staging directory.
 - Windows CI validation and manual import cancellation, duplicate, failure/retry, and edit/save/reopen acceptance remain release gates.
+
+## 2026-10-21 — Run 810 regression failure diagnosis
+
+- Run 810 executed 352 tests: all four new streaming/staging tests passed, while one static source-contract assertion failed because it expected the empty-bytes literal with single quotes and the helper uses equivalent double quotes.
+- Corrected the assertion to match the actual source expression. Run 811 must pass before this patch is considered CI-validated; packaged Windows interaction acceptance is still separate.

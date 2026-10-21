@@ -191,7 +191,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn("import hashlib", host)
         self.assertIn("def _sha256_file(path: Path", host)
-        self.assertIn("for chunk in iter(lambda: handle.read(chunk_size), b'')", host)
+        self.assertIn('for chunk in iter(lambda: handle.read(chunk_size), b"")', host)
         self.assertIn("def _cleanup_staged_import_file(path: Path | None)", host)
         self.assertIn("source_digest = _sha256_file(path)", host)
         self.assertIn("existing_digest = _sha256_file(existing_source)", host)
