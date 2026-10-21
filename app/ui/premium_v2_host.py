@@ -1488,6 +1488,7 @@ class PremiumV2Bridge(QObject):
                 provider, voice, cast_profiles, cast_assignments,
                 narrating_character=str(state.get("narrating_character") or ""),
                 backend_override=str(state.get("backend") or "automatic"),
+                narrator_profile=profile,
             )
         output_text = str(payload.get("output_path") or state.get("output_path") or state.get("generation_target_path") or "").strip()
         if output_text:

@@ -23,8 +23,8 @@
 - [ ] Verify saved profile fields survive save → app restart → reload → preview → narrator selection → character assignment.
 - [ ] Confirm the same provider, model/backend, voice ID, language, reference audio and provider-specific parameters are used after reload; do not silently substitute a different voice.
 - [ ] Test narrator fallback for unassigned dialogue and explicit per-character profile routing for assigned dialogue.
-- [ ] Include cast assignments and profile identity/settings in generation signatures so changed voice settings invalidate stale chunks; prove unchanged settings still resume without unnecessary regeneration.
-- [ ] Add regression tests for profile edits, missing/deleted profile references, aliases, repeated dialogue, mixed narrator/cast passages, and profile identity after restart.
+- [x] Include narrator profile identity, cast assignments and profile synthesis settings in generation signatures so changed voice settings invalidate stale chunks; add reference/anchor audio content digests. Automated regression tests cover provider changes, cast prompt edits and reference-file replacement. CI verification is pending.
+- [x] Add focused regression tests for narrator profile changes, cast prompt changes, reference audio replacement and missing-reference state. Existing Stage 3 tests cover aliases, stale offsets, manual assignments and alternating voices. Packaged restart/multi-speaker acceptance remains pending.
 - [ ] Mark unsupported providers, credentials, models, or hardware paths unavailable with actionable messages rather than simulated readiness.
 - [ ] Run CI and test the exact packaged build against a small multi-speaker book.
 

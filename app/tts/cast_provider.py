@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from pathlib import Path
 
 from app.chapters.characters import infer_speaker_for_quote, _all_dialogue_spans
 from app.chapters.assignment_utils import assignment_speakers
@@ -30,9 +31,11 @@ class CastAwareProvider(TTSProvider):
         assignments: dict[str, str],
         narrating_character: str | None = None,
         backend_override: str = "automatic",
+        narrator_profile: VoiceProfile | None = None,
     ):
         self.narrator_provider = narrator_provider
         self.narrator_voice = narrator_voice
+        self.narrator_profile = narrator_profile
         self.profiles = {k.casefold(): v for k, v in profiles.items()}
         self.assignments = {k.casefold(): v for k, v in assignments.items() if v}
         self.narrating_character = (narrating_character or "").casefold()
@@ -107,43 +110,79 @@ class CastAwareProvider(TTSProvider):
                 except Exception:
                     pass
 
+    @staticmethod
+    def _profile_signature(profile: VoiceProfile | None) -> dict | None:
+        if profile is None:
+            return None
+        data = {
+            "name": profile.name,
+            "provider": profile.provider,
+            "voice_id": profile.voice_id,
+            "sample_path": profile.sample_path,
+            "model_id": profile.model_id,
+            "backend": profile.backend,
+            "language": profile.language,
+            "notes": profile.notes,
+            "authorized": profile.authorized,
+            "exaggeration": profile.exaggeration,
+            "cfg_weight": profile.cfg_weight,
+            "style_preset": profile.style_preset,
+            "qwen_mode": profile.qwen_mode,
+            "qwen_prompt": profile.qwen_prompt,
+            "qwen_seed": profile.qwen_seed,
+            "reference_text": profile.reference_text,
+            "qwen_anchor_path": profile.qwen_anchor_path,
+            "qwen_anchor_text": profile.qwen_anchor_text,
+            "qwen_profile_id": profile.qwen_profile_id,
+        }
+        # A reference can be replaced in-place while its path stays the same.
+        # Include content digests so resumed chunks cannot silently keep audio
+        # rendered with the previous reference recording.
+        for key, raw_path in (("sample_audio_sha256", profile.sample_path),
+                              ("anchor_audio_sha256", profile.qwen_anchor_path)):
+            digest = None
+            if raw_path:
+                path = Path(raw_path).expanduser()
+                if path.is_file():
+                    hasher = hashlib.sha256()
+                    try:
+                        with path.open("rb") as handle:
+                            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                                hasher.update(block)
+                        digest = hasher.hexdigest()
+                    except OSError:
+                        digest = "unreadable"
+                else:
+                    digest = "missing"
+            data[key] = digest
+        return data
+
     def generation_signature(self) -> str:
+        narrator_provider_signature = getattr(self.narrator_provider, "generation_signature", None)
+        if callable(narrator_provider_signature):
+            narrator_engine = narrator_provider_signature()
+        else:
+            narrator_engine = {
+                "class": f"{self.narrator_provider.__class__.__module__}.{self.narrator_provider.__class__.__qualname__}",
+                "voice": self.narrator_voice,
+            }
         payload = {
             "narrator": self.narrator_voice,
+            "narrator_profile": self._profile_signature(self.narrator_profile),
+            "narrator_engine": narrator_engine,
             "assignments": sorted(self.assignments.items()),
             "profiles": sorted(
                 (
-                    name.casefold(),
-                    profile.provider,
-                    profile.voice_id,
-                    profile.sample_path,
-                    profile.model_id,
-                    profile.backend,
-                    profile.language,
-                    profile.qwen_mode,
-                    profile.qwen_prompt,
-                    profile.qwen_seed,
-                    profile.qwen_anchor_path,
-                    profile.qwen_anchor_text,
-                    profile.reference_text,
-                    # Voice identity and synthesis controls must participate in
-                    # the generation signature so edits to a saved custom voice
-                    # cannot silently reuse audio rendered with its old profile.
-                    profile.qwen_profile_id,
-                    profile.authorized,
-                    profile.exaggeration,
-                    profile.cfg_weight,
-                    profile.style_preset,
-                )
-                for name in sorted(set(self.assignments.values()), key=str.casefold)
-                for profile in [self.profiles.get(name.casefold())]
-                if profile is not None
+                    self._profile_signature(self.profiles.get(name.casefold()))
+                    for name in set(self.assignments.values())
+                ),
+                key=lambda item: str((item or {}).get("name", "")).casefold(),
             ),
             "narrating_character": self.narrating_character,
             "backend_override": self.backend_override,
         }
         return hashlib.sha256(
-            json.dumps(payload, sort_keys=True).encode("utf-8")
+            json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
         ).hexdigest()
 
     def _assignment_for_span(self, text: str, start: int, end: int, dialogue_assignments) -> dict | None:

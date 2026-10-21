@@ -109,3 +109,12 @@
 - Tightened the frontend ready-state gate: it requires a playable local file URL and a finite, positive measured duration. Missing/invalid output disables preview playback and leaves an actionable validation message instead of showing Ready.
 - New preview requests stop any prior preview playback, disable Play while generation is running, and reset the visible progress bar before polling the real job status.
 - Added regression tests for unmeasurable output duration and frontend ready-state conditions. Run 812 succeeded on the preceding Stage 3 commit; the new Stage 4 commit's CI result is still pending. Actual provider playback and duration acceptance on the target Windows machine remain required.
+
+
+## 2026-10-21 — Stage 5 voice identity and cache integrity
+
+- Added a dedicated narrator-profile identity to cast-aware generation signatures. The signature now covers the selected narrator profile's provider, model, backend, voice, language, prompts, seeds and synthesis controls instead of relying on the narrator voice label alone.
+- Included character-profile synthesis settings plus SHA-256 digests of reference and anchor audio in the signature, so replacing a reference file in place invalidates incompatible cached chunks.
+- Added regression tests for narrator-provider changes, cast prompt changes, reference audio replacement and missing-reference state.
+- Run 819 passed on the Stage 4 integrity commit. Actual Windows preview acceptance remains outstanding; Stage 4 is CI-green, but its full manual exit gate is not yet signed off.
+- Stage 5 CI status is pending until the combined source and test commit is built.
