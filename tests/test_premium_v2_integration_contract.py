@@ -643,5 +643,21 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         )
 
 
+    def test_dashboard_recent_project_cards_open_real_local_project(self):
+        """Dashboard cards must open their own backend project, not a prototype card."""
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "if ($('dashboard')) $('dashboard').addEventListener('click', async e => {",
+            adapter,
+        )
+        self.assertIn("e.target.closest('.recent-grid [data-project-folder]')", adapter)
+        self.assertIn("call('project.open', {folder})", adapter)
+        self.assertIn("await refreshChapters()", adapter)
+        self.assertIn("await refreshCharacters()", adapter)
+        self.assertIn("window.go('chapters')", adapter)
+
+
 if __name__ == "__main__":
     unittest.main()
