@@ -405,8 +405,12 @@
         await refreshJobs();
         if (['completed','failed','cancelled'].includes(job.state)) {
           clearInterval(poll); poll = null;
-          if (job.state === 'completed' && done) await done(job);
-          message(job.message || ((job.title || 'Job') + ' ' + job.state), job.state !== 'completed');
+          const completionResult = job.state === 'completed' && done ? await done(job) : undefined;
+          if (completionResult === false) {
+            message('The preview job ended, but its output did not pass playback validation. Check the preview status and retry.', true);
+          } else {
+            message(job.message || ((job.title || 'Job') + ' ' + job.state), job.state !== 'completed');
+          }
           if (job.state === 'completed') { await refreshChapters().catch(()=>{}); await refreshCharacters().catch(()=>{}); }
         }
       } catch (e) { console.error(e); }
@@ -545,6 +549,7 @@
     await monitorJob(data.job_id, async job => {
       const playable = preparePreviewPlayback(job, Number(duration));
       if ($('previewState') && playable) $('previewState').textContent = 'Ready';
+      return playable;
     });
   }
   async function openPlayer() {
