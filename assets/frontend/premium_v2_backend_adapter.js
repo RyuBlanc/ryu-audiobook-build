@@ -30,8 +30,8 @@
     const progressBar = $('aiProgressBar');
     const progressLabel = $('aiProgressText')?.parentElement?.querySelector('span');
     const pendingBadge = $('aiQueue')?.closest('.ai-queue-panel')?.querySelector('.badge.warn');
-    const quotePattern = /“[^”]{2,}”|「[^」]{2,}」|『[^』]{2,}』|"[^"\\n]{2,}"/g;
-    const normalize = value => String(value || '').replace(/[^\\p{L}\\p{N}]+/gu, ' ').toLocaleLowerCase().trim();
+    const quotePattern = /“[^”]{2,}”|「[^」]{2,}」|『[^』]{2,}』|"[^"\n]{2,}"/g;
+    const normalize = value => String(value || '').replace(/[^\p{L}\p{N}]+/gu, ' ').toLocaleLowerCase().trim();
     const items = [];
     for (const chapter of chapters) {
       const source = String(chapter.text || '');
@@ -90,7 +90,7 @@
     }
   }
   function documentRef() {
-    return document.querySelector('#chapters #aiQueue')?.closest('.ai-layout')?.querySelector('.ai-story .ai-document') ||
+    return document.querySelector('.char-view[data-char-view="ai"] .ai-document') ||
       document.querySelector('#chapters .ai-document');
   }
   const renderSelect = (select, rows, value, label) => {
