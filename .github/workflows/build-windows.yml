@@ -480,6 +480,87 @@ jobs:
           if (-not (Test-Path $installer)) { throw "Installer was not produced: $installer" }
           Write-Host "Installer created: $installer"
 
+      - name: Verify original logo transparency and generate release hashes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = $env:RYU_CI_PYTHON_EXE
+          if (-not $pythonExe) { $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source }
+          & $pythonExe -c @'
+          from pathlib import Path
+          from PIL import Image
+          import hashlib
+          import json
+          root = Path.cwd()
+          png = root / "assets" / "ryu_audiobook_logo.png"
+          ico = root / "assets" / "ryu_audiobook_logo.ico"
+          if not png.is_file() or not ico.is_file():
+              raise SystemExit("Generated original logo PNG/ICO is missing.")
+          with Image.open(png) as im:
+              rgba = im.convert("RGBA")
+              alpha = rgba.getchannel("A")
+              lo, hi = alpha.getextrema()
+              transparent = sum(1 for a in alpha.getdata() if a == 0)
+              opaque = sum(1 for a in alpha.getdata() if a > 0)
+              total = rgba.width * rgba.height
+              if lo != 0 or hi == 0 or transparent < total * 0.001 or opaque < total * 0.1:
+                  raise SystemExit(f"Logo transparency/content contract failed: alpha={lo,hi}, transparent={transparent}, opaque={opaque}")
+              print(f"Original logo PNG: {rgba.width}x{rgba.height}; transparent pixels={transparent}; alpha preserved.")
+          with Image.open(ico) as im:
+              sizes = sorted(im.info.get("sizes", set()))
+              if (256, 256) not in sizes or (16, 16) not in sizes:
+                  raise SystemExit(f"ICO lacks required Windows sizes: {sizes}")
+              for size in [(16,16),(32,32),(48,48),(256,256)]:
+                  frame = im.copy()
+                  frame.thumbnail(size)
+                  if frame.convert("RGBA").getchannel("A").getextrema()[1] == 0:
+                      raise SystemExit(f"ICO frame {size} is fully transparent.")
+              print(f"Original logo ICO contains multi-size Windows icon frames: {sizes}")
+          files = [
+              root / "installer" / "installer-output" / "Ryu's Audiobook Setup.exe",
+              root / "dist" / "Ryu's Audiobook" / "Ryu's Audiobook.exe",
+              png, ico,
+          ]
+          manifest = []
+          for path in files:
+              if not path.is_file():
+                  raise SystemExit(f"Release file missing for hash manifest: {path}")
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              manifest.append({"file": str(path.relative_to(root)), "size_bytes": path.stat().st_size, "sha256": digest})
+              print(f"SHA256 {digest}  {path.relative_to(root)}")
+          (root / "release-sha256-manifest.json").write_text(json.dumps(manifest, indent=2) + "\\n", encoding="utf-8")
+          '@
+          if ($LASTEXITCODE -ne 0) { throw "Logo integrity or release hash verification failed with exit code $LASTEXITCODE." }
+
+      - name: Scan release executables with Microsoft Defender
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path (Get-Location) "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
+          $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
+          foreach ($path in @($exe, $installer)) {
+            if (-not (Test-Path $path)) { throw "Release executable missing for security scan: $path" }
+          }
+          $status = Get-MpComputerStatus -ErrorAction Stop
+          if (-not $status.AntivirusEnabled -or -not $status.AMServiceEnabled) {
+            throw 'Microsoft Defender Antivirus is not active on the build runner; refusing to publish unscanned executables.'
+          }
+          $mp = Join-Path $env:ProgramFiles 'Windows Defender\MpCmdRun.exe'
+          if (-not (Test-Path $mp)) {
+            $mp = Get-ChildItem "$env:ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe" -ErrorAction SilentlyContinue |
+              Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $mp -or -not (Test-Path $mp)) { throw 'Microsoft Defender command-line scanner was not found.' }
+          foreach ($path in @($exe, $installer)) {
+            Write-Host "Microsoft Defender custom scan: $path"
+            & $mp -Scan -ScanType 3 -File $path
+            $scanExit = $LASTEXITCODE
+            if ($scanExit -ne 0) {
+              throw "Microsoft Defender did not return a clean scan for '$path' (exit code $scanExit). No release artifacts will be uploaded."
+            }
+          }
+          Write-Host 'Microsoft Defender returned clean scan results for both release executables.'
+
       - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4
         with:
@@ -487,6 +568,14 @@ jobs:
           path: installer/installer-output/Ryu's Audiobook Setup.exe
           if-no-files-found: error
           compression-level: 0
+          retention-days: 30
+
+      - name: Upload release SHA-256 manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Audiobook-Release-SHA256-${{ github.run_number }}
+          path: release-sha256-manifest.json
+          if-no-files-found: error
           retention-days: 30
 
       - name: Upload portable Windows application
