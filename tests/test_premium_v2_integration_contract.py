@@ -555,6 +555,15 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("skip_for_generation: bool = False", detector)
         self.assertIn("chapters = [Chapter(**item) for item in chapter_data]", project)
 
+    def test_import_has_no_re_detection_command_that_can_replace_manual_edits(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertNotIn('"chapter.redetect":', host)
+        self.assertNotIn("def _chapter_redetect(", host)
+        worker = host[host.index("def _import_worker("):host.index("def _chapter_clean(", host.index("def _import_worker("))]
+        self.assertIn("chapters = detect_chapters(text)", worker)
+        self.assertIn("project = create_project(title, path, chapters)", worker)
+        self.assertNotIn("existing_project.chapters", worker)
+
 
 if __name__ == "__main__":
     unittest.main()

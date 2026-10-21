@@ -64,3 +64,11 @@
 - Temporary drag/drop staging files are cleaned when the worker exits; the original user-selected file and any project source copy remain preserved.
 - Added format-specific import extraction diagnostics with recovery guidance for PDF, EPUB, DOCX, and TXT errors. Retrying is explicit: fix the source or choose it again; there is no blind automatic retry.
 - Added integration-contract coverage for the import cancellation and diagnostic behavior. Fixture-based chapter tests and target-Windows acceptance remain pending.
+
+
+## 2026-10-21 — Stage 2 deterministic chapter fixtures
+
+- Added repeatable chapter-detector coverage for preamble attachment, empty heading boundaries, plain-text fallback, and `Life.0` heading recognition.
+- Added a filesystem round-trip test for manually edited chapter text, review status, generation exclusion, and dialogue assignments.
+- Confirmed there is no Premium V2 re-detection command to overwrite chapter edits: importing runs detection only while creating a new project. Re-detection remains unavailable until a safe, explicit workflow can be designed without changing the approved UI.
+- Runtime Windows acceptance for import cancellation, failure/retry, and edit/save/reopen remains pending.

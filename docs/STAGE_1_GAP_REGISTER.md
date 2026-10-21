@@ -64,7 +64,7 @@
 - Import completion data reports the preserved source path and flags chapter boundaries for review.
 - Chapter review status defaults legacy chapters to `needs_review`, persists `reviewed`/`needs_review` with chapter JSON, and drives the existing Review filter.
 - Explicit chapter exclusion now persists as `skip_for_generation`, is available through the contextual chapter action, preserves the chapter text, and excludes only flagged chapters from audiobook generation. Job messages, returned job data, and project state distinguish empty chapters from intentionally excluded chapters; a stale contract test and misleading progress summary were corrected in the same batch.
-- Still open: re-detection protection, parser/chapter fixtures, import retry/cancel behavior, malformed-file diagnostics, and edit/save/reload acceptance. Find selects the first case-insensitive match, Replace confirms and replaces all case-insensitive matches, and chapter undo/redo supports grouped editing with a bounded history (10 snapshots; disabled for chapters over 1,000,000 characters to limit memory use). Stage 2 is not complete.
+- Still open: parser/chapter fixtures, runtime import retry/cancel/failure acceptance, and Windows edit/save/reload acceptance. Import cancellation, format-specific diagnostics, and staged-file cleanup now have source-contract checks. Premium V2 currently has no re-detect command; importing creates a new project and does not replace chapters in an existing project. If re-detection is added later, it must require explicit confirmation and preserve manual edits or provide a before/after review. Find selects the first case-insensitive match, Replace confirms and replaces all case-insensitive matches, and chapter undo/redo supports grouped editing with a bounded history (10 snapshots; disabled for chapters over 1,000,000 characters to limit memory use). Stage 2 is not complete.
 
 
 ### Import cancellation and diagnostics checkpoint
@@ -72,4 +72,12 @@
 - Import jobs now expose Cancel in the existing background-job list. Cancellation is checked after extraction and after chapter detection, before project creation; the source is preserved and cancellation is reported only when the worker reaches a safe boundary.
 - Temporary dropped-file staging copies are removed after the import worker exits. Original user-selected source files are never deleted.
 - Extraction failures now provide format-specific recovery guidance (including scanned-PDF/OCR guidance) while retaining bounded underlying error details. Retry remains selecting the source file again after correcting the issue; no silent automatic retry is performed.
-- Stage 2 remains open pending fixture tests, re-detection policy verification, and Windows edit/save/reload acceptance.
+- Stage 2 remains open pending fixture tests, runtime import retry/cancel/failure acceptance, and Windows edit/save/reload acceptance. Re-detection policy is currently: no re-detection feature is exposed, and import creates a new project rather than replacing existing chapters.
+
+
+### 2026-10-21 — reproducible chapter fixture coverage
+
+- Added deterministic fixtures for heading-based chapters with preamble text, empty chapter headings, plain text with no headings, and the supported `Life.0` heading family.
+- Added a project save/reload round-trip test to verify edited chapter text, review status, generation exclusion, and dialogue assignments remain intact.
+- Verified by source inspection that Premium V2 has no re-detect command today; its import path detects chapters for a newly created project and does not replace chapter text in an existing project. Re-detection is therefore unavailable rather than silently destructive. Any future re-detect feature must require explicit user intent and protect manual edits.
+- These are automated unit/contract tests; they do not replace actual import-cancel/retry/failure or Windows GUI acceptance. Stage 2 remains open.
