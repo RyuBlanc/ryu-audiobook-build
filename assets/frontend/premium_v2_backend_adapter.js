@@ -634,8 +634,8 @@
   }
   async function wire() {
     await call('app.get_info');
-    await refreshProjects().catch(()=>{}); await refreshVoices().catch(()=>{}); await refreshChapters().catch(()=>{});
-    await refreshCharacters().catch(()=>{}); await refreshCharacterLibrary().catch(()=>{}); await refreshTerms().catch(()=>{}); await refreshSounds().catch(()=>{}); await refreshSoundCues().catch(()=>{}); await refreshChapterBgm().catch(()=>{}); await refreshJobs().catch(()=>{}); await refreshHistory().catch(()=>{}); await refreshModels().catch(()=>{}); await refreshPerformance().catch(()=>{}); await loadSettings().catch(()=>{});
+    // Register navigation and action handlers before hydration. A slow local model,
+    // history, or sound-library query must not delay the first interactive frame.
     document.addEventListener('click', e => {
       const button = e.target.closest('button');
       const buttonLabel = button?.textContent?.trim().toLowerCase() || '';
@@ -1766,6 +1766,25 @@
         return;
       }
     }, true);
+
+    // Hydrate the visible workflow first, then load secondary panels with a paint
+    // opportunity between requests. Keep failures local so one unavailable optional
+    // subsystem cannot block the rest of the UI from becoming usable.
+    const hydrateInitialState = async () => {
+      const phases = [
+        [refreshProjects, refreshVoices, refreshChapters, loadSettings],
+        [refreshCharacters, refreshCharacterLibrary, refreshTerms],
+        [refreshSounds, refreshSoundCues, refreshChapterBgm],
+        [refreshJobs, refreshHistory, refreshModels]
+      ];
+      for (const phase of phases) {
+        for (const refresh of phase) {
+          try { await refresh(); } catch (error) { console.warn('[Ryu hydration]', error); }
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+      }
+    };
+    void hydrateInitialState();
 
     if (!window.__ryuBackendJobTimer) window.__ryuBackendJobTimer=setInterval(()=>refreshJobs().catch(()=>{}),1500);
     const jobsBox = $('backgroundJobsList');
