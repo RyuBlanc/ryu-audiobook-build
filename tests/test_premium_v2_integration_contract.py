@@ -696,12 +696,12 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("function go(id){", self.html)
         self.assertIn("b.dataset.go===currentWorkflowStage", self.html)
         # Provider cards, sound filters/tracks, and background jobs use semantic data attributes.
-        for selector in ('.provider[data-provider=', '#soundSourceFilter', '[data-source=', '#soundTrackGrid', '[data-select-sound=', '[data-job-action=', '[data-job-id='):
+        for selector in ('data-provider=', '#soundSourceFilter', '[data-source=', '#soundTrackGrid', '[data-select-sound=', '[data-job-action=', '[data-job-id='):
             self.assertIn(selector, self.html + adapter)
         self.assertIn("button.closest('.provider')", adapter)
         self.assertIn("document.querySelector('#soundSourceFilter [data-source].active')", adapter)
         self.assertIn("box.innerHTML = jobs.map(j =>", adapter)
-        self.assertIn("button.matches('[data-job-action]')", adapter)
+        self.assertIn("dataset.jobAction", adapter)
         # Player transport controls intentionally use visible labels; bind them to the real Audio element.
         self.assertIn("playerAudio.playbackRate = Number(audioLabel.replace('×',''))", adapter)
         self.assertIn("playerAudio.currentTime = Math.max(0, playerAudio.currentTime - 15)", adapter)
