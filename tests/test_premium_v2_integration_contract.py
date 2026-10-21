@@ -673,6 +673,27 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertNotRegex(self.html, r'<span class="flow-link (?:is-current|is-done|has-warning)')
 
 
+    def test_initial_backend_hydration_does_not_block_ui_handler_registration(self):
+        """Optional backend panels hydrate after handlers are registered and yield between calls."""
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        wire_start = adapter.index("async function wire()")
+        hydration_start = adapter.index("const hydrateInitialState = async () =>", wire_start)
+        first_handler = adapter.index("document.addEventListener('click', e => {", wire_start)
+        timer_start = adapter.index("if (!window.__ryuBackendJobTimer)", hydration_start)
+        wire_end = adapter.index("message('Premium V2 local backend connected.')", timer_start)
+        self.assertLess(first_handler, hydration_start)
+        self.assertLess(hydration_start, timer_start)
+        hydration = adapter[hydration_start:timer_start]
+        self.assertIn("[refreshProjects, refreshVoices, refreshChapters, loadSettings]", hydration)
+        self.assertIn("[refreshCharacters, refreshCharacterLibrary, refreshTerms]", hydration)
+        self.assertIn("[refreshSounds, refreshSoundCues, refreshChapterBgm]", hydration)
+        self.assertIn("[refreshJobs, refreshHistory, refreshModels]", hydration)
+        self.assertIn("await new Promise(resolve => setTimeout(resolve, 0))", hydration)
+        self.assertIn("void hydrateInitialState()", hydration)
+        self.assertNotIn("await refreshPerformance()", adapter[wire_start:wire_end])
+
     def test_job_polling_updates_existing_rows_without_rebuilding_hidden_panel(self):
         """Job polling should not repeatedly replace DOM rows and trigger visible flicker."""
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
