@@ -1,6 +1,6 @@
 # Known Limitations — Premium V2 Integration
 
-**Status date:** 2026-10-19. This is a live release-gate list, not a claim of completed implementation.
+**Status date:** 2026-10-21. This is a live release-gate list, not a claim of completed implementation.
 
 ## Confirmed by inspection
 
@@ -16,12 +16,12 @@
 
 ## Not yet verified
 
-- Current commit's Windows CI run and regression results, including the new drag/drop import test.
+- Follow-up Windows CI run for the post-Run-835 unavailable-control hardening commit (pending). Run 835 on its parent commit passed 371 tests and produced installer/portable artifacts.
 - Exact same-to-same visual parity in an embedded desktop WebEngine window at all specified dimensions.
-- Complete control-to-backend wiring, custom modal behavior, responsive behavior and keyboard/focus accessibility.
+- Complete control-to-backend wiring, custom modal behavior, responsive behavior and keyboard/focus accessibility. Known unsupported prototype actions are now disabled with accessible reasons, but a full control-by-control audit remains open.
 - SQLite migration, restart recovery for projects/jobs/playback, or durable event streaming.
 - Full functional acceptance workflow from import through M4B playback/history/diagnostic export.
-- Installer/portable package launch and uninstall behavior for a build containing Premium V2.
+- Installer/portable package launch and uninstall behavior for a build containing Premium V2. Run 835 proves compilation/upload only; it does not prove that the packaged UI launches or that uninstall preserves user data.
 - Provider-specific model downloads, custom voice workflows and GPU readings on the target Windows machines.
 
 ## Constraints
@@ -30,5 +30,5 @@
 - Do not simulate job progress or report success before the backend confirms completion.
 - Do not delete old HTML references or desktop features until their functions are mapped and preserved.
 - Do not embed credentials in HTML, JavaScript, project JSON, or logs.
-- Do not claim the final installer exists until a current CI artifact has completed and the exact artifact has been verified.
+- Run 835 produced current installer and portable artifacts: [Run 835 artifacts](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39632819459). The subsequent source hardening requires a fresh successful build before its artifacts can be treated as the current release candidate.
 - Diagnostic export is a best-effort sanitizer, not a guarantee that every possible secret format is recognized; inspect the report before sharing it externally.
