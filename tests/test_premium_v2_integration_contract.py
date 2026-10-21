@@ -720,7 +720,6 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "themeSelect": {"themeSelectAdvanced"},
         }
         self.assertEqual(89, len(legacy_ids))
-        self.assertFalse(legacy_ids & (current_ids ^ current_ids), "Unreachable guard")
         missing_ids = legacy_ids - current_ids
         self.assertEqual(set(successors), missing_ids)
         for old_id, candidates in successors.items():
