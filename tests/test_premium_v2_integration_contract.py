@@ -659,5 +659,19 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("window.go('chapters')", adapter)
 
 
+    def test_workflow_tracker_highlights_only_the_active_screen(self):
+        """The Import-to-Generate tracker must follow navigation, not static demo states."""
+        go_start = self.html.index("function go(id){")
+        go_end = self.html.index("\n$$('[data-page]')", go_start)
+        go = self.html[go_start:go_end]
+        for page in ("import", "chapters", "voices", "characters", "pronunciation", "sound", "generate"):
+            self.assertIn(f"{page}:'{page}'", go)
+        self.assertIn("b.classList.toggle('is-current',Boolean(currentWorkflowStage)&&b.dataset.go===currentWorkflowStage)", go)
+        self.assertIn("b.classList.remove('is-done','has-warning')", go)
+        self.assertIn("link.classList.remove('is-done','is-current','has-warning')", go)
+        self.assertNotRegex(self.html, r'<button class="flow-stage (?:is-current|is-done|has-warning)')
+        self.assertNotRegex(self.html, r'<span class="flow-link (?:is-current|is-done|has-warning)')
+
+
 if __name__ == "__main__":
     unittest.main()
