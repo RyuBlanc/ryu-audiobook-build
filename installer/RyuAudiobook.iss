@@ -48,3 +48,37 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: no
 
 [UninstallDelete]
 ; Deliberately do not remove user data outside {app}.
+
+[Messages]
+WelcomeLabel1=Welcome to [name/ver]
+WelcomeLabel2=Install Ryu's Audiobook Dragon Studio on this computer.\n\nYour books, voice profiles, models, and settings are kept in your user profile and are not removed by uninstalling the application.
+FinishedHeadingLabel=Ryu's Audiobook is ready
+FinishedLabel=Setup has finished installing Ryu's Audiobook. Launch Dragon Studio to continue your audiobook projects.
+
+[Code]
+procedure InitializeWizard();
+var
+  I: Integer;
+begin
+  { Match the approved Premium V2 palette: near-black canvas, slate panels,
+    warm gold headings, and soft neutral body text. Keep native wizard controls
+    and standard Windows accessibility/keyboard behavior. }
+  WizardForm.Color := $000F0A09;
+  WizardForm.MainPanel.Color := $001A130F;
+  WizardForm.InnerPage.Color := $001A130F;
+  WizardForm.OuterNotebook.Color := $001A130F;
+  WizardForm.PageNameLabel.Font.Color := $006AB0D6;
+  WizardForm.PageDescriptionLabel.Font.Color := $00B8ACA5;
+  WizardForm.WelcomeLabel1.Font.Color := $006AB0D6;
+  WizardForm.WelcomeLabel2.Font.Color := $00B8ACA5;
+  WizardForm.FinishedHeadingLabel.Font.Color := $006AB0D6;
+  WizardForm.FinishedLabel.Font.Color := $00B8ACA5;
+  WizardForm.Font.Name := 'Segoe UI';
+  for I := 0 to WizardForm.ComponentCount - 1 do
+  begin
+    if WizardForm.Components[I] is TLabel then
+    begin
+      TLabel(WizardForm.Components[I]).Font.Name := 'Segoe UI';
+    end;
+  end;
+end;
