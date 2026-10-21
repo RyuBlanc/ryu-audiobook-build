@@ -1,4 +1,5 @@
 """Stage 3 tests for explicit, source-backed dialogue speaker assignments."""
+from pathlib import Path
 import unittest
 from app.chapters.detector import Chapter
 from app.chapters.assignment_utils import assign_dialogue_to_chapters
