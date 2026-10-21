@@ -819,3 +819,25 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_unavailable_prototype_actions_are_disabled_with_truthful_reasons(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("function applyUnavailableControlStates()")
+        end = adapter.index("async function wire()", start)
+        guard = adapter[start:end]
+        for selector in (
+            "#acceptHighConfidence", "#skipAiSuggestion", "#aiUseLibrary",
+            "#aiCreateNew", "#createCharacterQuick",
+            "[data-ai-line]:not([data-dialogue-id])",
+            "[data-model-update]", "[data-model-repair]", "[data-model-uninstall]",
+            "#settings button", "$('runBenchmark')",
+        ):
+            self.assertIn(selector, guard)
+        self.assertIn("element.disabled = true", guard)
+        self.assertIn("element.setAttribute('aria-disabled', 'true')", guard)
+        self.assertIn("element.title = reason", guard)
+        self.assertIn("Bulk AI predictions are not verified against source passages", guard)
+        self.assertIn("Per-model update, repair, and uninstall are not implemented", guard)
+        self.assertIn("Changing the application storage root is not implemented", guard)
+        self.assertIn("performance is intentionally marked Not tested", guard)
+        self.assertIn("applyUnavailableControlStates();", adapter[adapter.index("async function wire()"):])
