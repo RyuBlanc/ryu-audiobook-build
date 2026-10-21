@@ -673,6 +673,62 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertNotRegex(self.html, r'<span class="flow-link (?:is-current|is-done|has-warning)')
 
 
+    def test_legacy_control_ids_are_preserved_or_have_named_successors(self):
+        """Guard the old UI ID inventory against silent markup regressions."""
+        soup = BeautifulSoup(self.html, "html.parser")
+        current_ids = {node.get("id") for node in soup.select("[id]") if node.get("id")}
+        legacy_ids = {
+            "app", "sidebar", "nav", "menuToggle", "pageTitle", "globalSearch",
+            "themeToggle", "notifyBtn", "workspace", "dashboard", "pauseDash",
+            "library", "librarySearch", "libraryFilters", "libraryGrid", "import",
+            "dropzone", "fileInput", "browseBtn", "importStatus", "importBar",
+            "chapters", "cleanText", "saveChapter", "chapterSearch", "chapterList",
+            "chapterTitle", "chapterEditor", "saveState", "wordCount", "voices",
+            "saveProfile", "voiceGrid", "voiceWave", "voicePlay", "voiceStop",
+            "selectedVoice", "characters", "analyzeCharacters", "characterList",
+            "characterName", "characterVoice", "characterVoiceSelect", "assignVoice",
+            "pronunciation", "addPronunciation", "pronSearch", "pronTable", "sound",
+            "saveSoundPreset", "trackGrid", "selectedTrack", "musicVolumeValue",
+            "musicVolume", "generate", "cancelJob", "genRing", "genPercent",
+            "genStage", "genChapter", "elapsed", "remaining", "previewGenerate",
+            "startGenerate", "pauseGenerate", "player", "playerTimeline", "currentTime",
+            "mainPlay", "history", "historyFilters", "models", "performance",
+            "runBenchmark", "benchmarkResult", "settings", "saveSettings", "themeSelect",
+            "miniPlayer", "miniPlay", "miniProgress", "hideMini", "toasts", "modalBack",
+            "modalTitle", "modalWord", "modalPron", "modalCancel", "modalSave",
+        }
+        successors = {
+            "voiceGrid": {"voiceWorkspace", "profileLibrary"},
+            "voiceWave": {"wave", "assignedWave", "soundWave"},
+            "voicePlay": {"playPreview"},
+            "voiceStop": {"stopPreview"},
+            "selectedVoice": {"profileVoice", "previewVoice", "previewProvider"},
+            "characterList": {"assignedCharacterList", "quickCharacterList", "manualStory"},
+            "characterName": {"editCharacterName"},
+            "characterVoice": {"editCharacterVoice", "assignCharacter"},
+            "characterVoiceSelect": {"editCharacterVoice"},
+            "assignVoice": {"assignCharacter", "confirmAiCharacter"},
+            "addPronunciation": {"addPronunciationAdvanced", "saveNewPron"},
+            "pronSearch": {"pronTermSearch", "pronSearchAdvanced"},
+            "pronTable": {"pronDictionaryBody"},
+            "saveSoundPreset": {"saveSoundPresetAdvanced", "applySoundToProduction"},
+            "trackGrid": {"soundTrackGrid", "cueGrid"},
+            "selectedTrack": {"selectedSoundTitle", "selectedSoundMeta"},
+            "musicVolumeValue": {"advancedMusicVolumeValue"},
+            "musicVolume": {"advancedMusicVolume"},
+            "saveSettings": {"saveSettingsAdvanced"},
+            "themeSelect": {"themeSelectAdvanced"},
+        }
+        self.assertEqual(89, len(legacy_ids))
+        self.assertFalse(legacy_ids & (current_ids ^ current_ids), "Unreachable guard")
+        missing_ids = legacy_ids - current_ids
+        self.assertEqual(set(successors), missing_ids)
+        for old_id, candidates in successors.items():
+            self.assertTrue(
+                candidates & current_ids,
+                f"Legacy control {old_id} has no markup successor from {sorted(candidates)}",
+            )
+
     def test_initial_backend_hydration_does_not_block_ui_handler_registration(self):
         """Optional backend panels hydrate after handlers are registered and yield between calls."""
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
