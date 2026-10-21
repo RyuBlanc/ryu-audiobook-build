@@ -61,13 +61,14 @@ Recent commits on the active branch include:
 - `7b8176ac` — test assigned character profile reaching the synthesis provider.
 
 ### Latest build result
-Workflow [#775](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39569947473) passed on 21 October 2026 at commit `7b8176acea39a0f389e211ffb9268079c1c3b0`. Automated regression testing, frozen application checks, bundled voice assets/critical modules, installer build, portable artifact upload, and cleanup passed. Publishing a public release was skipped. This run does not prove the installer or portable app was manually installed/launched and exercised on a Windows PC.
+Workflow [#782](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39583746634) passed on 21 October 2026 at commit `a7c6baa4a2552600af6395ab0abad9766d9a650f`. The workflow passed regression tests (341 tests), frozen application checks, bundled voice assets/critical modules, installer build, portable artifact upload, and cleanup. The adapter/dispatcher/capability parity regression passed after a test-only regex escaping fix. Publishing a public release was skipped. This run does not prove the installer or portable app was manually installed/launched and exercised on a Windows PC.
 
 ## Current stage
 
 - **Overall 10-stage tracker:** Stage 10 — Regression and Final Release, IN PROGRESS.
-- **Technical substage:** Stage 8.2.10 — Generation Reliability, IN PROGRESS.
-- The numbering differs: Stage 10 is the user's high-level tracker; Stage 8.2.10 is the repository's detailed technical roadmap.
+- **Technical substage:** Stage 8.2.9 — Frontend/backend parity, IN PROGRESS. The adapter-to-dispatcher/capability static contract now passes in Run #782; control-by-control legacy-handler audit and Windows interaction acceptance remain open.
+- Stage 8.2.8 sound design still needs manual audio acceptance; Stage 8.2.10 generation reliability has automated coverage but still needs real-book/recovery acceptance.
+- The numbering differs: Stage 10 is the user's high-level tracker; Stage 8.2.9 is the current repository technical substage.
 
 Active reliability work concerns saved character voice profiles reaching synthesis, correct preview voice and requested duration, dialogue assignments/offsets, progress and cancellation/recovery, output integrity, and persistence across restarts.
 
@@ -118,7 +119,7 @@ Do not mark any stage fully complete until all of its acceptance criteria have e
 
 1. **Stage 8.2.7 — CI stabilization:** keep regression and integration-contract checks passing.
 2. **Stage 8.2.8 — Sound Design:** connect chapter BGM rules, scene cues, and an actual narration/music preview through assembly; verify real audio behavior.
-3. **Stage 8.2.9 — Frontend/backend parity:** audit all destinations and controls for real actions, state, progress, errors, and responsive behavior.
+3. **Stage 8.2.9 — Frontend/backend parity:** audit all destinations and controls for real actions, state, progress, errors, and responsive behavior. The adapter command-name/capability check passed in #782; next is control-level prototype/legacy handler coverage.
 4. **Stage 8.2.10 — Generation reliability:** verify preview duration/voice routing, progress, pause/resume/cancel/retry, provider failures, recovery, and output integrity.
 5. **Stage 8.2.11 — Windows release validation:** build installer and portable packages from the same commit; manually test launch, assets, playback, and compact-window behavior.
 6. **Stage 8.2.12 — Final acceptance/release:** final regression/packaging, screen parity review, evidence capture, blocker closure, and verified release.
