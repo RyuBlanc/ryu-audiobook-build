@@ -583,5 +583,65 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('normalized["confidence"] = 1.0', helper)
 
 
+    def test_adapter_calls_match_dispatcher_and_capability_map(self):
+        """Every literal adapter call must be routed or deliberately disabled.
+
+        This guards the frontend/backend boundary. It does not claim that all
+        HTML controls have been manually exercised in the packaged app.
+        """
+        handler_match = re.search(
+            r"handlers\\s*=\\s*\\{([\\s\\S]*?)\\n\\s*\\}\\n\\s*handler\\s*=",
+            self.host,
+        )
+        self.assertIsNotNone(handler_match, "Could not find the allow-listed dispatcher table.")
+        handler_commands = set(re.findall(
+            r"""["']([^"']+)["']\\s*:\\s*self\\._[A-Za-z0-9_]+""",
+            handler_match.group(1),
+        ))
+
+        capability_match = re.search(
+            r"def _capabilities[\\s\\S]*?return\\s*\\{([\\s\\S]*?)\\n\\s*\\}",
+            self.host,
+        )
+        self.assertIsNotNone(capability_match, "Could not find the capability map.")
+        capabilities = dict(re.findall(
+            r"""["']([^"']+)["']\\s*:\\s*(True|False)""",
+            capability_match.group(1),
+        ))
+
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        adapter_commands = set(re.findall(
+            r"""\\bcall\\(\\s*['"]([^'"]+)['"]""",
+            adapter,
+        ))
+
+        self.assertFalse(
+            adapter_commands - handler_commands,
+            "Adapter calls without registered dispatcher handlers: "
+            + ", ".join(sorted(adapter_commands - handler_commands)),
+        )
+        self.assertFalse(
+            handler_commands - set(capabilities),
+            "Registered handlers missing capability entries: "
+            + ", ".join(sorted(handler_commands - set(capabilities))),
+        )
+        advertised_without_handler = {
+            command for command, enabled in capabilities.items()
+            if enabled == "True" and command not in handler_commands
+        }
+        self.assertFalse(
+            advertised_without_handler,
+            "Capabilities advertised as connected without handlers: "
+            + ", ".join(sorted(advertised_without_handler)),
+        )
+        self.assertEqual(
+            capabilities.get("performance.info"),
+            "False",
+            "Unmeasured hardware telemetry must remain truthfully unavailable.",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
