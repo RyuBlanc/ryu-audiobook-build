@@ -151,7 +151,12 @@ class CastAwareProvider(TTSProvider):
         if not assignments:
             return None
 
-        # Prefer exact/nearby source offsets, then normalized dialogue text.
+        # Generation text may change length during typography cleanup or
+        # pronunciation substitution. Overlap alone is not evidence that a
+        # saved speaker belongs to this quote: it can silently assign a nearby
+        # line to the wrong character. Accept an exact source span, or a
+        # normalized exact-text match (with offsets only breaking duplicate
+        # quote ties).
         candidates = []
         raw = text[start:end].strip()
         normalized_raw = re.sub(r"[^\w]+", " ", raw, flags=re.UNICODE).casefold().strip()
@@ -168,25 +173,18 @@ class CastAwareProvider(TTSProvider):
 
             item_text = str(item.get("text") or "").strip()
             normalized_item = re.sub(r"[^\w]+", " ", item_text, flags=re.UNICODE).casefold().strip()
-            overlap = 0
-            if a_start >= 0 and a_end > a_start:
-                overlap = max(0, min(end, a_end) - max(start, a_start))
-
-            score = float(overlap)
-            if normalized_item and normalized_item == normalized_raw:
-                score += 100000.0
-            elif normalized_item and (
-                normalized_item in normalized_raw or normalized_raw in normalized_item
-            ):
-                score += 1000.0
-            if a_start >= 0:
-                score -= abs(start - a_start) * 0.01
+            if a_start == start and a_end == end:
+                score = 200000.0
+            elif normalized_item and normalized_item == normalized_raw:
+                score = 100000.0 - (abs(start - a_start) * 0.01 if a_start >= 0 else 0.0)
+            else:
+                continue
             candidates.append((score, item))
 
         if not candidates:
             return None
-        score, item = max(candidates, key=lambda value: value[0])
-        return item if score > 0 else None
+        _score, item = max(candidates, key=lambda value: value[0])
+        return item
 
     def _speakers_for(
         self,

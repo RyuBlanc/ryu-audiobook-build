@@ -62,6 +62,62 @@ class DialogueAssignmentPersistenceTests(unittest.TestCase):
 
 
 
+    def test_cast_router_does_not_apply_stale_offsets_to_a_different_quote(self):
+        from app.tts.cast_provider import CastAwareProvider
+        from app.tts.voice_profile import VoiceProfile
+
+        class DummyProvider:
+            recommended_chunk_chars = 1400
+            recommended_chunk_sentences = 2
+
+            def synthesize(self, text, output_path, voice=None):
+                return output_path
+
+        profile = VoiceProfile("Souei Voice", "piper", "souei")
+        cast = CastAwareProvider(
+            DummyProvider(), "Narrator",
+            profiles={"Souei Voice": profile},
+            assignments={"Souei": "Souei Voice"},
+        )
+        original = '“The eastern route is clear.”'
+        transformed = '“The eastern route is blocked.”'
+        saved = [{
+            "start": 0, "end": len(original), "text": original,
+            "speaker": "Souei", "speakers": ["Souei"], "source": "manual",
+        }]
+        parts = cast.split_for_cast(transformed, "Narrator", dialogue_assignments=saved)
+        dialogue = next((voice for text, voice in parts if "eastern route" in text), None)
+        self.assertEqual(dialogue, "Narrator")
+        cast.close()
+
+    def test_cast_router_uses_manual_assignment_to_select_saved_character_voice(self):
+        from app.tts.cast_provider import CastAwareProvider
+        from app.tts.voice_profile import VoiceProfile
+
+        class DummyProvider:
+            recommended_chunk_chars = 1400
+            recommended_chunk_sentences = 2
+
+            def synthesize(self, text, output_path, voice=None):
+                return output_path
+
+        source = 'Narration first. “Rimuru, the eastern route is clear.” Then silence.'
+        start = source.index("“")
+        end = source.index("”") + 1
+        profile = VoiceProfile("Souei Voice", "piper", "souei")
+        cast = CastAwareProvider(
+            DummyProvider(), "Narrator",
+            profiles={"Souei Voice": profile},
+            assignments={"Souei": "Souei Voice"},
+        )
+        parts = cast.split_for_cast(source, "Narrator", dialogue_assignments=[{
+            "start": start, "end": end, "text": source[start:end],
+            "speaker": "Souei", "speakers": ["Souei"], "source": "manual",
+        }])
+        self.assertIn(("Rimuru, the eastern route is clear.", "Souei Voice"), parts)
+        self.assertTrue(any("Narration first." in text and voice == "Narrator" for text, voice in parts))
+        cast.close()
+
     def test_dialogue_review_uses_saved_chapter_passages_and_scopes_duplicate_quotes(self):
         adapter = (Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("function renderDialogueReview()", adapter)
