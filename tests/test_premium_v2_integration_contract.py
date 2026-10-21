@@ -681,11 +681,39 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('"models.verify": self._models_verify', host)
         self.assertIn("def _models_verify(self, payload: dict[str, Any])", host)
         self.assertIn("from app.tts.qwen_character_runtime import MODEL_IDS, MODEL_DIRS, model_installed", host)
-        self.assertIn('if action === \'verify\'', adapter)
+        self.assertIn("if (action === 'verify')", adapter)
         self.assertIn("call('models.verify', {model_id:id})", adapter)
         self.assertIn("result.models.map(model => model.model_id).join(', ')", adapter)
         self.assertIn("One or more required model files are missing or incomplete.", host)
         self.assertNotIn("download", host[host.index("def _models_verify"):host.index("def _performance_info")].lower())
+
+    def test_legacy_controls_without_ids_have_semantic_successors_and_event_paths(self):
+        """Map no-ID legacy control groups to stable selectors and real event/backend paths."""
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        # Navigation and workflow strip are delegated by stable data attributes, not per-button IDs.
+        for selector in ('button.nav-btn[data-page]', '[data-go]', '#voices .toolbar', '#voices .seg'):
+            self.assertIn(selector, self.html)
+        self.assertIn("function go(id){", self.html)
+        self.assertIn("b.dataset.go===currentWorkflowStage", self.html)
+        # Provider cards, sound filters/tracks, and background jobs use semantic data attributes.
+        for selector in ('.provider[data-provider=', '#soundSourceFilter', '[data-source=', '#soundTrackGrid', '[data-select-sound=', '[data-job-action=', '[data-job-id='):
+            self.assertIn(selector, self.html + adapter)
+        self.assertIn("button.closest('.provider')", adapter)
+        self.assertIn("document.querySelector('#soundSourceFilter [data-source].active')", adapter)
+        self.assertIn("box.innerHTML = jobs.map(j =>", adapter)
+        self.assertIn("button.matches('[data-job-action]')", adapter)
+        # Player transport controls intentionally use visible labels; bind them to the real Audio element.
+        self.assertIn("playerAudio.playbackRate = Number(audioLabel.replace('×',''))", adapter)
+        self.assertIn("playerAudio.currentTime = Math.max(0, playerAudio.currentTime - 15)", adapter)
+        self.assertIn("playerAudio.currentTime = Math.min(playerAudio.duration || Infinity, playerAudio.currentTime + 15)", adapter)
+        self.assertIn("const lengthGroup = [...document.querySelectorAll('#voices .toolbar')]", adapter)
+        self.assertIn("const duration = lengthGroup?.querySelector('.seg button.active')?.textContent.match(/\\d+/)?.[0] || '30'", adapter)
+        # Chapter context actions and track selection have source-backed host calls.
+        self.assertIn("Type one: add, rename, delete, up, down, merge, review, skip, find, replace, undo, redo", adapter)
+        for command in ("chapter.add", "chapter.delete", "chapter.reorder", "chapter.merge", "sound.catalog", "sound.assign", "sound.save_manifest"):
+            self.assertIn("call('" + command + "'", adapter)
+        self.assertIn("call('player.get_active')", adapter)
+
 
     def test_legacy_control_ids_are_preserved_or_have_named_successors(self):
         """Guard the old UI ID inventory against silent markup regressions."""
