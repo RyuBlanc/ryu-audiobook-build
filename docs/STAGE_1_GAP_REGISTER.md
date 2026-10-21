@@ -129,3 +129,118 @@
 - Added `chapter.dialogue.assign` to the allow-listed bridge and capability map. It accepts only a saved character or alias, validates that the selected dialogue text occurs exactly once in the saved chapter text (unless a chapter number is explicitly provided), and saves original text offsets, manual source, confidence 1.0, and backward-compatible single/multi-speaker fields. Ambiguous, stale, overlapping, or unsaved-character assignments are rejected without writing chapter state.
 - Wired individual dialogue confirmation in the existing AI Story Review modal to the saved character list and backend assignment. Displayed prototype confidence is explicitly not used as evidence. Bulk acceptance and queue predictions remain blocked until they can be tied to real source passages.
 - Added deterministic tests for exact and whitespace-wrapped matching, stale sample rejection, duplicates, reassignment, overlaps, and multi-speaker compatibility. Stage 3 remains open pending CI, packaged Windows UI acceptance, and proof that saved line assignments affect synthesis as intended.
+
+
+## Legacy control parity inventory — 21 October 2026
+
+**Basis:** old prototype `docs/prototypes/Ryus_Audiobook_Dragon_Studio_Premium_Final.html` compared against the approved Premium V2 HTML `assets/frontend/ryu_audiobook_premium_v2.html` control IDs. This is a *markup/semantic successor* audit, not proof that every control's runtime behavior is accepted. Every row marked preserved or replaced still requires the relevant interaction test or Windows acceptance.
+
+**ID audit result:** 89 unique old control IDs; 69 IDs are retained verbatim; 20 IDs have been replaced by newer controls. No old ID is classified as confirmed missing solely because its ID changed. Backend gaps remain separately tracked below.
+
+| Old control ID | Classification | Current control / successor | Runtime status / note |
+|---|---|---|---|
+| `app` | Preserved | `app` | Shell; Windows interaction not yet verified |
+| `sidebar` | Preserved | `sidebar` | Navigation shell; visual parity and keyboard behavior not yet verified |
+| `nav` | Preserved | `nav` | Navigation container; all destinations need acceptance |
+| `menuToggle` | Preserved | `menuToggle` | Responsive menu behavior not yet verified |
+| `pageTitle` | Preserved | `pageTitle` | Dynamic title behavior not yet verified |
+| `globalSearch` | Preserved | `globalSearch` | Search behavior requires control-level verification |
+| `themeToggle` | Preserved | `themeToggle` | Theme persistence requires restart test |
+| `notifyBtn` | Preserved | `notifyBtn` | Notification/jobs action; verified only by source inspection |
+| `workspace` | Preserved | `workspace` | Main workspace container |
+| `dashboard` | Preserved | `dashboard` | Real project-card opening has a regression test |
+| `pauseDash` | Preserved | `pauseDash` | Pause action is limited to supported generation jobs |
+| `library` | Preserved | `library` | Library page; project lifecycle gaps remain |
+| `librarySearch` | Preserved | `librarySearch` | Backend project search wired; runtime not yet accepted |
+| `libraryFilters` | Preserved | `libraryFilters` | Filter semantics need runtime acceptance |
+| `libraryGrid` | Preserved | `libraryGrid` | Populated from local project records |
+| `import` | Preserved | `import` | Import flow needs real-file and recovery acceptance |
+| `dropzone` | Preserved | `dropzone` | Drag/drop and browse parity need Windows acceptance |
+| `fileInput` | Preserved | `fileInput` | File selection requires packaged-build acceptance |
+| `browseBtn` | Preserved | `browseBtn` | Browse/import handler requires runtime acceptance |
+| `importStatus` | Preserved | `importStatus` | Status messaging is shared; visual flicker still being profiled |
+| `importBar` | Preserved | `importBar` | Progress source is backend job state |
+| `chapters` | Preserved | `chapters` | Chapter editor exists; full editing edge cases remain |
+| `cleanText` | Preserved | `cleanText` | Must be checked against source-preserving behavior |
+| `saveChapter` | Preserved | `saveChapter` | Save path exists; crash/restart durability not accepted |
+| `chapterSearch` | Preserved | `chapterSearch` | Client-side chapter filter |
+| `chapterList` | Preserved | `chapterList` | Backend chapter records; split/re-detection protection still open |
+| `chapterTitle` | Preserved | `chapterTitle` | Edit/save behavior requires runtime acceptance |
+| `chapterEditor` | Preserved | `chapterEditor` | Undo/redo and safe autosave still require acceptance |
+| `saveState` | Preserved | `saveState` | Save indicator needs failure/restart testing |
+| `wordCount` | Preserved | `wordCount` | Count accuracy requires acceptance |
+| `voices` | Preserved | `voices` | Voice Studio exists; provider/credential gaps remain |
+| `saveProfile` | Preserved | `saveProfile` | Save/update profile behavior needs provider-specific testing |
+| `voiceGrid` | Replaced | `voiceWorkspace`, `profileLibrary` | New multi-step voice workspace; old grid parity not yet accepted |
+| `voiceWave` | Replaced | `wave`, `assignedWave`, `soundWave` | Waveform successor identified; waveform source/accuracy not yet verified |
+| `voicePlay` | Replaced | `playPreview` | New preview control; audio identity/duration must be accepted |
+| `voiceStop` | Replaced | `stopPreview` | Stop/cancel behavior must be tested during generation and playback |
+| `selectedVoice` | Replaced | `profileVoice`, `previewVoice`, `previewProvider` | Selection state is spread across profile and preview controls; consistency test needed |
+| `characters` | Preserved | `characters` | Character Studio exists; full source-backed casting acceptance remains |
+| `analyzeCharacters` | Preserved | `analyzeCharacters` | Real analysis job exists; output accuracy and recovery remain |
+| `characterList` | Replaced | `assignedCharacterList`, `quickCharacterList`, `manualStory` | Split into assignment/library/story views; parity test needed |
+| `characterName` | Replaced | `editCharacterName` | New character editor; persistence and alias behavior need acceptance |
+| `characterVoice` | Replaced | `editCharacterVoice`, `assignCharacter` | Assignment flow replaced; real synthesis routing needs Windows test |
+| `characterVoiceSelect` | Replaced | `editCharacterVoice` | Voice selector moved into editor; manual assignment regression test needed |
+| `assignVoice` | Replaced | `assignCharacter`, `confirmAiCharacter` | New manual/AI assignment paths; both need end-to-end acceptance |
+| `pronunciation` | Preserved | `pronunciation` | Pronunciation Studio exists; dictionary import/export and conflict handling remain open |
+| `addPronunciation` | Replaced | `addPronunciationAdvanced`, `saveNewPron` | New entry flow; validation and persistence require acceptance |
+| `pronSearch` | Replaced | `pronTermSearch`, `pronSearchAdvanced` | Search split by term and dictionary views; behavior parity needs test |
+| `pronTable` | Replaced | `pronDictionaryBody` | Dictionary table replaced; import/export/conflict behavior remains open |
+| `sound` | Preserved | `sound` | Sound Design exists; final mix consistency and licensed assets remain open |
+| `saveSoundPreset` | Replaced | `saveSoundPresetAdvanced`, `applySoundToProduction` | Preset save/sync split into save and production handoff; end-to-end sync needs acceptance |
+| `trackGrid` | Replaced | `soundTrackGrid`, `cueGrid` | Music/effects separated; filter and selection parity needs acceptance |
+| `selectedTrack` | Replaced | `selectedSoundTitle`, `selectedSoundMeta` | Selection metadata replaced; preview and assignment consistency needs acceptance |
+| `musicVolumeValue` | Replaced | `advancedMusicVolumeValue` | New volume value control; persisted mix needs acceptance |
+| `musicVolume` | Replaced | `advancedMusicVolume` | New volume control; output loudness and final-mix behavior remain open |
+| `generate` | Preserved | `generate` | Production Studio exists; complete preflight/recovery flow remains open |
+| `cancelJob` | Preserved | `cancelJob` | Cancellation is job-type/state limited; terminal-state handling needs acceptance |
+| `genRing` | Preserved | `genRing` | Progress display; backend percentage and duration accuracy need real-book test |
+| `genPercent` | Preserved | `genPercent` | Progress display; actual generation progress must be checked |
+| `genStage` | Preserved | `genStage` | Stage text is sourced from backend job state |
+| `genChapter` | Preserved | `genChapter` | Chapter progress needs real-book acceptance |
+| `elapsed` | Preserved | `elapsed` | Timing accuracy not yet verified |
+| `remaining` | Preserved | `remaining` | ETA accuracy not yet verified |
+| `previewGenerate` | Preserved | `previewGenerate` | Preview duration and audio identity must be tested at 10/30/60 seconds |
+| `startGenerate` | Preserved | `startGenerate` | Full generation must pass preflight, resume, retry, and real-book acceptance |
+| `pauseGenerate` | Preserved | `pauseGenerate` | Pause/resume is generation-only; checkpoint recovery needs acceptance |
+| `player` | Preserved | `player` | Player exists; resume/bookmarks persistence not evidenced |
+| `playerTimeline` | Preserved | `playerTimeline` | Seek accuracy and timeline persistence need acceptance |
+| `currentTime` | Preserved | `currentTime` | Playback time needs acceptance |
+| `mainPlay` | Preserved | `mainPlay` | Real output playback and source URL need acceptance |
+| `history` | Preserved | `history` | History exists; immutable details and recovery links remain open |
+| `historyFilters` | Preserved | `historyFilters` | Filter behavior has source wiring; full history acceptance remains open |
+| `models` | Preserved | `models` | Model Center exists; update/verify/repair/uninstall are not fully connected |
+| `performance` | Preserved | `performance` | Page exists; hardware telemetry is explicitly unavailable when not measured |
+| `runBenchmark` | Preserved | `runBenchmark` | Control exists, but `performance.info` is intentionally unsupported; do not present a fake benchmark |
+| `benchmarkResult` | Preserved | `benchmarkResult` | Must clearly communicate unavailable capability without fabricated values |
+| `settings` | Preserved | `settings` | Settings page exists; custom roots/credential security and restart persistence remain open |
+| `saveSettings` | Replaced | `saveSettingsAdvanced` | New advanced settings save; persistence and restart test needed |
+| `themeSelect` | Replaced | `themeSelectAdvanced` | New theme selector; persistence and visual parity need acceptance |
+| `miniPlayer` | Preserved | `miniPlayer` | Mini-player exists; background playback/resume needs acceptance |
+| `miniPlay` | Preserved | `miniPlay` | Mini-player playback needs real-output acceptance |
+| `miniProgress` | Preserved | `miniProgress` | Progress synchronization needs acceptance |
+| `hideMini` | Preserved | `hideMini` | Hide/restore behavior needs acceptance |
+| `toasts` | Preserved | `toasts` | Toast lifecycle/overlap contributes to flicker investigation |
+| `modalBack` | Preserved | `modalBack` | Modal behavior needs keyboard/close acceptance |
+| `modalTitle` | Preserved | `modalTitle` | Pronunciation modal content |
+| `modalWord` | Preserved | `modalWord` | Pronunciation modal content |
+| `modalPron` | Preserved | `modalPron` | Pronunciation modal content |
+| `modalCancel` | Preserved | `modalCancel` | Cancel behavior needs acceptance |
+| `modalSave` | Preserved | `modalSave` | Save behavior needs persistence acceptance |
+
+### Controls without stable IDs
+
+The old prototype also has navigation items, duration buttons, provider cards, filters, track previews, playback-speed controls, seek/skip buttons, and chapter/context actions without unique IDs. The new UI has corresponding control groups, but these cannot be classified safely from IDs alone. Their **semantic mapping is not yet verified** until each old control is matched to a new selector and an event-handler/test path. Do not treat the ID count above as proof of feature parity.
+
+### Additional Premium V2 controls
+
+Premium V2 adds controls for AI dialogue review and assignment, reusable Character Library, multi-step voice creation, premium voice candidates, pronunciation test matrix, per-chapter BGM and cue assignment, production mix preview/sync, job recovery, diagnostics, settings sections, and Help & Guide. These are additive; their existence does not replace the obligation to preserve the older controls' behavior.
+
+### Explicit release classification
+
+- **Preserved:** old control ID still exists in the approved Premium V2 markup. This is not a claim that runtime behavior is fully accepted.
+- **Replaced:** old ID is absent but a named Premium V2 successor exists. The successor's semantics and end-to-end behavior still need tests.
+- **Missing:** no successor can be demonstrated after semantic and event-handler inspection. No old feature should be declared missing based only on an ID change.
+- **Unsupported:** UI may exist, but a backend operation is explicitly unavailable (example: hardware benchmark telemetry).
+- **Not yet verified:** mapping, persistence, real audio, recovery, or packaged Windows behavior lacks sufficient evidence.
