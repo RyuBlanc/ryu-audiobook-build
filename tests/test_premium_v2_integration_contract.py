@@ -687,7 +687,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("One or more required model files are missing or incomplete.", host)
         self.assertNotRegex(
             host[host.index("def _models_verify"):host.index("def _performance_info")],
-            r"(?i)\\b(?:requests\\.(?:get|post)|urlopen|snapshot_download|download_model|hf_hub_download)\\s*\\("
+            r"(?i)\b(?:requests\.(?:get|post)|urlopen|snapshot_download|download_model|hf_hub_download)\s*\("
         )
 
     def test_legacy_controls_without_ids_have_semantic_successors_and_event_paths(self):
