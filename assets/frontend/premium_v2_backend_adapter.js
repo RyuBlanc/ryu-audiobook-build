@@ -1508,7 +1508,7 @@
         })().catch(err => message(err?.message || String(err), true));
         return;
       }
-      // Automatic per-line AI speaker suggestions remain prototype-only; manual source-backed assignments are persisted.
+      // Automatic per-line AI speaker suggestions remain prototype-only. Manual source-backed dialogue speaker assignments are persisted.
       if (button.id === 'acceptHighConfidence' || button.id === 'skipAiSuggestion' ||
           button.matches('[data-ai-line]') || button.id === 'aiUseLibrary' ||
           button.id === 'aiCreateNew' || button.id === 'createCharacterQuick') {
