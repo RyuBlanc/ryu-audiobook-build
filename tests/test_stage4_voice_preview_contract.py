@@ -92,6 +92,47 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertEqual(completed["result"]["voices_used"], ["voice-id"])
         self.assertEqual(completed["result"]["segments"], 3)
 
+    def test_preview_worker_fails_closed_when_duration_cannot_be_measured(self):
+        profile = SimpleNamespace(name="Saved Narrator")
+        provider = object()
+        updates = []
+
+        def update(_job_id, **kwargs):
+            updates.append(kwargs)
+            return kwargs
+
+        bridge = SimpleNamespace(_job_update=update)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+
+            def fake_build(_text, _provider, _voice, output_path, **kwargs):
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(b"not-a-readable-audio-file")
+                return SimpleNamespace(output_path=output_path, voices_used=("voice-id",), segments=1)
+
+            with patch.object(premium_v2_host, "provider_from_profile", return_value=(provider, "voice-id")), \\
+                 patch.object(premium_v2_host, "load_profiles", return_value=[]), \\
+                 patch.object(premium_v2_host, "app_root", return_value=root), \\
+                 patch.object(premium_v2_host, "build_voice_preview", side_effect=fake_build), \\
+                 patch("app.audio.assembler._duration_ms", side_effect=RuntimeError("probe unavailable")):
+                premium_v2_host.PremiumV2Bridge._preview_worker(
+                    bridge, "preview-job", profile, "A longer source passage.", 30, {}
+                )
+
+        self.assertFalse(any(item.get("state") == "completed" for item in updates))
+        failed = next(item for item in updates if item.get("state") == "failed")
+        self.assertIn("duration could not be measured", failed["message"])
+        self.assertTrue(failed["recoverable"])
+
+    def test_frontend_does_not_mark_unplayable_or_unmeasured_preview_ready(self):
+        adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        source = adapter.read_text(encoding="utf-8")
+        self.assertIn("Number.isFinite(actual) || actual <= 0", source)
+        self.assertIn("return false;", source)
+        self.assertIn("const playable = preparePreviewPlayback(job, Number(duration));", source)
+        self.assertIn("if ($('previewState') && playable) $('previewState').textContent = 'Ready';", source)
+        self.assertIn("Preview job completed without a valid measured audio duration", source)
+
 
 if __name__ == "__main__":
     unittest.main()
