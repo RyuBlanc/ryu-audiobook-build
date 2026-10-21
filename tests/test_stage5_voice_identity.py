@@ -1,4 +1,6 @@
-"""Stage 5 regression tests for voice identity and synthesis cache signatures."""
+"""Stage 5 regression tests for voice identity and synthesis cache signatures.
+
+These tests guard narrator profile persistence and stale chunk invalidation."""
 from pathlib import Path
 import tempfile
 import unittest
