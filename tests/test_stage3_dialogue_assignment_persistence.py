@@ -60,5 +60,19 @@ class DialogueAssignmentPersistenceTests(unittest.TestCase):
         self.assertEqual(item["multi_speaker_mode"], "chorus")
 
 
+
+    def test_dialogue_review_uses_saved_chapter_passages_and_scopes_duplicate_quotes(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("function renderDialogueReview()", adapter)
+        self.assertIn("const source = String(chapter.text || '')", adapter)
+        self.assertIn("chapter.dialogue_assignments || []", adapter)
+        self.assertIn("data-chapter-number", adapter)
+        self.assertIn("chapter_number:window.ryuPremiumPendingDialogueChapter", adapter)
+        self.assertIn("dialogue passages assigned", adapter)
+        self.assertIn("data-dialogue-id", adapter)
+        html = (ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
+        self.assertIn("The eastern route is clear…", html)  # approved visual baseline remains untouched
+
+
 if __name__ == "__main__":
     unittest.main()

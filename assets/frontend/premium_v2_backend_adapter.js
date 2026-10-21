@@ -21,6 +21,78 @@
   let chapterLastText = '', chapterHistoryGroupOpen = false, chapterHistoryGroupTimer = null, chapterHistoryApplying = false;
   let libraryCharacters = [], libraryEditorId = null, libraryEditorActive = false;
   const selectedChapter = () => chapters.find(c => c.number === window.ryuPremiumSelectedChapter) || chapters[0];
+  function renderDialogueReview() {
+    const queue = $('aiQueue');
+    const storyDocument = documentRef();
+    const title = $('aiQueue')?.closest('.ai-layout')?.querySelector('.ai-story .story-head h2');
+    const subtitle = $('aiQueue')?.closest('.ai-layout')?.querySelector('.ai-story .story-head p');
+    const progressText = $('aiProgressText');
+    const progressBar = $('aiProgressBar');
+    const progressLabel = $('aiProgressText')?.parentElement?.querySelector('span');
+    const pendingBadge = $('aiQueue')?.closest('.ai-queue-panel')?.querySelector('.badge.warn');
+    const quotePattern = /“[^”]{2,}”|「[^」]{2,}」|『[^』]{2,}』|"[^"\\n]{2,}"/g;
+    const normalize = value => String(value || '').replace(/[^\\p{L}\\p{N}]+/gu, ' ').toLocaleLowerCase().trim();
+    const items = [];
+    for (const chapter of chapters) {
+      const source = String(chapter.text || '');
+      quotePattern.lastIndex = 0;
+      let match;
+      while ((match = quotePattern.exec(source)) && items.length < 250) {
+        const text = match[0].trim();
+        if (text.length < 4) continue;
+        const assignment = (chapter.dialogue_assignments || []).find(item => {
+          if (!item || typeof item !== 'object') return false;
+          if (Number(item.start) === match.index && Number(item.end) === match.index + match[0].length) return true;
+          return normalize(item.text) === normalize(text);
+        });
+        const names = assignment
+          ? (Array.isArray(assignment.speakers) && assignment.speakers.length
+              ? assignment.speakers : [assignment.speaker]).filter(Boolean)
+          : [];
+        items.push({
+          id: 'dialogue-' + chapter.number + '-' + match.index,
+          chapterNumber: Number(chapter.number),
+          chapterTitle: String(chapter.title || ('Chapter ' + chapter.number)),
+          text, start: match.index, end: match.index + match[0].length,
+          speakers: names, assigned: Boolean(names.length)
+        });
+      }
+    }
+    window.ryuPremiumDialogueReviewItems = items;
+    const assignedCount = items.filter(item => item.assigned).length;
+    const remaining = Math.max(0, items.length - assignedCount);
+    const percent = items.length ? Math.round(assignedCount / items.length * 100) : 0;
+    if (progressText) progressText.textContent = assignedCount + ' of ' + items.length + ' dialogue passages assigned';
+    if (progressBar) progressBar.style.width = percent + '%';
+    if (progressLabel) progressLabel.textContent = percent + '% assigned';
+    if (pendingBadge) pendingBadge.textContent = remaining + ' left';
+    if (title) title.textContent = items.length
+      ? 'Chapter ' + items[0].chapterNumber + ' · ' + items[0].chapterTitle
+      : 'Dialogue review';
+    if (subtitle) subtitle.textContent = items.length
+      ? 'Select a real dialogue passage from the imported chapters to assign or change its saved speaker.'
+      : 'Import a book with quoted dialogue to review source-backed speaker assignments.';
+    if (queue) queue.innerHTML = items.slice(0, 40).map(item => {
+      const preview = item.text.length > 62 ? item.text.slice(0, 59) + '…' : item.text;
+      const status = item.assigned ? 'Saved: ' + item.speakers.join(', ') : 'Needs speaker assignment';
+      return '<button class="ai-queue-item" data-ai-line="' + esc(item.id) + '" data-dialogue-id="' + esc(item.id) + '">' +
+        '<span>Chapter ' + item.chapterNumber + '</span><b>' + esc(preview) + '</b><small>' +
+        esc(status) + '</small></button>';
+    }).join('') || '<p class="muted">No quoted dialogue passages found in the saved chapters.</p>';
+    if (storyDocument) {
+      storyDocument.innerHTML = items.slice(0, 120).map(item => {
+        const speakerLabel = item.assigned ? item.speakers.join(' + ') + ' · saved' : 'Unassigned · select to assign';
+        const classes = 'ai-sentence ' + (item.assigned ? 'confirmed' : 'review');
+        return '<button class="' + classes + '" data-ai-sentence="source-backed" data-dialogue-id="' + esc(item.id) +
+          '" data-chapter-number="' + item.chapterNumber + '"><span class="ai-speaker">' + esc(speakerLabel) +
+          '</span>' + esc(item.text) + '</button>';
+      }).join('') || '<p class="muted">No quoted dialogue passages found in the saved chapters.</p>';
+    }
+  }
+  function documentRef() {
+    return document.querySelector('#chapters #aiQueue')?.closest('.ai-layout')?.querySelector('.ai-story .ai-document') ||
+      document.querySelector('#chapters .ai-document');
+  }
   const renderSelect = (select, rows, value, label) => {
     if (!select) return;
     const previous = select.value;
@@ -77,7 +149,7 @@
   }
   async function refreshChapters() {
     chapters = await call('chapter.list'); window.ryuPremiumChapters = chapters;
-    if (!chapters.length) return;
+    if (!chapters.length) { renderDialogueReview(); return; }
     if (!chapters.some(c => c.number === window.ryuPremiumSelectedChapter)) window.ryuPremiumSelectedChapter = chapters[0].number;
     const current = selectedChapter(), list = $('chapterList'), editor = $('chapterEditor'), title = $('chapterTitle');
     if (list) {
@@ -98,6 +170,7 @@
     chapterLastText = current.text || '';
     chapterHistoryGroupOpen = false;
     if (chapterHistoryGroupTimer) { clearTimeout(chapterHistoryGroupTimer); chapterHistoryGroupTimer = null; }
+    renderDialogueReview();
   }
   async function refreshCharacters() {
     characters = await call('character.list');
@@ -1483,6 +1556,7 @@
           const savedCharacters = await call('character.list');
           if (!savedCharacters.length) throw new Error('Run Analyze book with AI and save character candidates before assigning dialogue.');
           window.ryuPremiumPendingDialogueText = dialogueText;
+          window.ryuPremiumPendingDialogueChapter = Number(button.dataset.chapterNumber) || null;
           if ($('aiSelectedSentence')) $('aiSelectedSentence').textContent = dialogueText;
           if ($('predictionList')) $('predictionList').innerHTML = savedCharacters.filter(c => c && c.name)
             .map((c, i) => '<button class="prediction-option ' + (i === 0 ? 'active' : '') +
@@ -1500,15 +1574,30 @@
           const selected = $('predictionList')?.querySelector('.prediction-option.active')?.dataset.prediction || '';
           const dialogueText = String(window.ryuPremiumPendingDialogueText || '');
           if (!selected || !dialogueText) throw new Error('Choose a saved character and dialogue passage before confirming.');
-          const result = await call('chapter.dialogue.assign', {dialogue_text:dialogueText, speakers:[selected]});
+          const result = await call('chapter.dialogue.assign', {
+            dialogue_text:dialogueText, speakers:[selected], chapter_number:window.ryuPremiumPendingDialogueChapter
+          });
           $('aiPredictionModal')?.classList.remove('show');
           window.ryuPremiumPendingDialogueText = '';
+          window.ryuPremiumPendingDialogueChapter = null;
           await refreshChapters();
           message('Saved speaker assignment for Chapter ' + result.chapter_number + '.');
         })().catch(err => message(err?.message || String(err), true));
         return;
       }
       // Automatic per-line AI speaker suggestions remain prototype-only. Manual source-backed dialogue speaker assignments are persisted.
+      if (button.matches('[data-ai-line][data-dialogue-id]')) {
+        stop();
+        const target = [...document.querySelectorAll('[data-ai-sentence][data-dialogue-id]')]
+          .find(node => node.dataset.dialogueId === button.dataset.dialogueId);
+        if (target) {
+          document.querySelectorAll('[data-ai-sentence].active').forEach(node => node.classList.remove('active'));
+          target.classList.add('active');
+          target.scrollIntoView({block:'nearest', behavior:'smooth'});
+          target.focus({preventScroll:true});
+        }
+        return;
+      }
       if (button.id === 'acceptHighConfidence' || button.id === 'skipAiSuggestion' ||
           button.matches('[data-ai-line]') || button.id === 'aiUseLibrary' ||
           button.id === 'aiCreateNew' || button.id === 'createCharacterQuick') {
@@ -1605,8 +1694,11 @@
           const dialogueText = String(window.ryuPremiumPendingDialogueText || '').trim();
           const selected = button.dataset.assignCharacter || button.dataset.character || '';
           if (!dialogueText || !selected) throw new Error('Select an individual source dialogue passage and choose a saved character before assigning a speaker.');
-          const result = await call('chapter.dialogue.assign', {dialogue_text:dialogueText, speakers:[selected]});
+          const result = await call('chapter.dialogue.assign', {
+            dialogue_text:dialogueText, speakers:[selected], chapter_number:window.ryuPremiumPendingDialogueChapter
+          });
           window.ryuPremiumPendingDialogueText = '';
+          window.ryuPremiumPendingDialogueChapter = null;
           await refreshChapters();
           message('Saved speaker assignment for Chapter ' + result.chapter_number + '.');
         });
