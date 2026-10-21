@@ -244,3 +244,20 @@ Premium V2 adds controls for AI dialogue review and assignment, reusable Charact
 - **Missing:** no successor can be demonstrated after semantic and event-handler inspection. No old feature should be declared missing based only on an ID change.
 - **Unsupported:** UI may exist, but a backend operation is explicitly unavailable (example: hardware benchmark telemetry).
 - **Not yet verified:** mapping, persistence, real audio, recovery, or packaged Windows behavior lacks sufficient evidence.
+
+
+## Stage 2 implementation log — real backend actions
+
+### Implemented: Models → Verify (21 October 2026)
+
+- Added allow-listed `models.verify` to the desktop bridge capability map and dispatcher.
+- Verification checks actual Qwen model directories and required `config.json`/Safetensors files on disk. It does not download models, load the ML runtime, or claim success when files are absent.
+- Supports individual known Qwen model IDs and CustomVoice, VoiceDesign, and Voice Clone capability aliases. Composite capabilities report ready only when their required model-file combination is present.
+- Connected the existing Models screen Verify control to the backend operation; the UI reports passed/missing file status and the exact model IDs checked.
+- Added an integration-contract regression test for capability registration, dispatch wiring, real local-file check usage, and no-download behavior.
+- **Still unsupported:** per-model Update, Repair and Uninstall remain explicitly unavailable; this change does not pretend those actions are connected. General non-Qwen model verification also remains limited until provider-specific on-disk rules exist.
+- **Validation:** commit `2acae5040e035d967201b7c599812d66f93505a6` triggers CI Run #801. Do not mark this implementation validated until that run finishes successfully.
+
+### Stage 1 closure boundary
+
+The initial legacy-ID inventory now classifies all 89 old IDs as retained (69) or mapped to named Premium V2 successors (20), and a regression test guards that inventory. This completes the **ID inventory baseline**, not the entire Stage 1 sign-off: controls that have no stable IDs still require semantic mapping, and runtime equivalence must be verified through Stage 2 integration tests and Stage 6 Windows acceptance. Keep Stage 1 open until those remaining controls are mapped; do not interpret an ID successor as proof that the old behavior is preserved.
