@@ -97,7 +97,8 @@
 - [x] Explicit capability mismatch found and corrected (`chapter.split`).
 - [x] Current known limitations and test evidence updated without claiming full acceptance.
 - [x] Prioritized gap register created with closure criteria and owning roadmap stage.
-- [ ] Broader automation to check every visible control against adapter/host/capability map remains part of implementation, not complete merely because this register exists.
+- [x] Source-level semantic mapping added for legacy no-ID control groups; representative selectors/event paths/backend calls are guarded by `test_legacy_controls_without_ids_have_semantic_successors_and_event_paths`.
+- [ ] Stage 6 still requires manual target-Windows interaction acceptance; this is not a Stage 1 source-audit blocker.
 
 ## Stage 2 checkpoint — import integrity
 
@@ -233,6 +234,30 @@
 
 The old prototype also has navigation items, duration buttons, provider cards, filters, track previews, playback-speed controls, seek/skip buttons, and chapter/context actions without unique IDs. The new UI has corresponding control groups, but these cannot be classified safely from IDs alone. Their **semantic mapping is not yet verified** until each old control is matched to a new selector and an event-handler/test path. Do not treat the ID count above as proof of feature parity.
 
+### Semantic map for legacy controls without stable IDs — 21 October 2026
+
+This closes the **source-level mapping** gap noted above. Selectors are based on the current approved Premium V2 HTML and adapter; labels and selectors are not treated as proof of Windows runtime acceptance.
+
+| Legacy control group | Premium V2 selector / locator | Event path and backend contract | Source-audit result |
+|---|---|---|---|
+| Sidebar navigation | `.nav-btn[data-page]` | HTML `go(id)` navigation; `data-page` maps to the 15 destination sections | Mapped; destination smoke test remains a Stage 6 acceptance item |
+| Production workflow strip | `[data-go]`, `.flow-stage` | `go(id)` updates the current workflow step; backend project state is not inferred from decorative step text | Mapped; active-step contract is regression-tested |
+| Voice preview duration | `#voices .toolbar` then `.seg button.active` | Adapter reads the selected seconds and sends `duration_seconds` through `voice.preview`; requested and actual duration are compared in the result UI | Mapped; real-provider duration/playback still requires Windows acceptance |
+| Voice preview mode | `#voices .seg` button groups | Adapter resolves Current Chapter / Selected Passage / Custom Text, validates selected text, and sends the chosen preview text | Mapped; text-selection edge cases remain runtime acceptance |
+| Voice provider/model cards | `.provider[data-provider]` | Delegated click path reads `button.closest('.provider').dataset.provider`; model installation calls `models.install` and tracks the returned job | Mapped; provider candidate/credential features not backed by services remain unavailable |
+| Library filters/search | `#libraryFilters button`, `#librarySearch` | `refreshProjects()` filters backend `project.list` results; search input triggers refresh | Mapped; filter correctness with multiple real projects remains acceptance |
+| Chapter selection/filter/search | `[data-chapter-number]`, `#chapterSearch`, `#manualChapterSearch`, `#chapterFilters` | Adapter selects a saved chapter; search narrows chapter rows. Review/skip/add/rename/delete/reorder/merge/split/find/replace/undo/redo paths are implemented through the chapter adapter actions where supported | Mapped; persistence and conflict cases remain acceptance |
+| Sound source filters | `#soundSourceFilter [data-source]` | `refreshSounds()` filters the real `sound.catalog` results by bundled/imported source and search text | Mapped; catalog/licence accuracy remains acceptance |
+| Sound track selection and preview | `#soundTrackGrid [data-select-sound]`, `#previewSelectedTrack`, `#soundPreviewBook` | Track selection records a real catalog path; preview uses local audio or the sound-preview backend job; production sync calls `sound.save_manifest` | Mapped; final mix parity and playback remain acceptance |
+| Background job actions | `[data-job-action][data-job-id]` | Adapter renders actions from durable job records and dispatches supported pause/resume/cancel commands by job ID | Mapped; state transitions/restart recovery remain acceptance |
+| Player seek/skip/speed | Player transport buttons identified by their visible labels (`↶15`, `15↷`, `0.75×`, `1×`, `1.25×`, `1.5×`) | Adapter changes `playerAudio.currentTime` / `playbackRate` and synchronizes player and mini-player indicators | Mapped; seek precision and restart-resume remain acceptance |
+| Chapter contextual actions | `[data-chapter-number]` in the chapter list | Context prompt routes supported actions to `chapter.add/delete/reorder/merge/split/review/skip` and persists text snapshots before structural changes | Mapped; action-level persistence still needs Windows acceptance |
+| Modal controls | `#modalSave`, `#modalCancel`, `#modalBack` | Pronunciation save/cancel uses the existing modal and `pronunciation.save` / `pronunciation.list` backend operations | Mapped; keyboard/focus behavior remains acceptance |
+| Responsive navigation | `#menuToggle` and `.nav-btn[data-page]` | Existing shell toggles the responsive menu and routes navigation without adding new visual controls | Mapped; compact-window acceptance remains Stage 6 |
+| Notifications / job panel | `#notifyBtn`, `#backgroundJobsButton` | Opens the existing job panel and refreshes `job.list`; polling updates backend state | Mapped; flicker/latency must be measured in the packaged app |
+
+The regression test `test_legacy_controls_without_ids_have_semantic_successors_and_event_paths` now guards representative selectors, delegated event paths, preview duration, player transport, contextual chapter actions, and corresponding backend calls. Controls whose service operation is unavailable are documented as unsupported rather than counted as functional parity. Stage 1 is complete at the source-audit level; target-Windows interaction acceptance remains a separate Stage 6 gate.
+
 ### Additional Premium V2 controls
 
 Premium V2 adds controls for AI dialogue review and assignment, reusable Character Library, multi-step voice creation, premium voice candidates, pronunciation test matrix, per-chapter BGM and cue assignment, production mix preview/sync, job recovery, diagnostics, settings sections, and Help & Guide. These are additive; their existence does not replace the obligation to preserve the older controls' behavior.
@@ -260,4 +285,4 @@ Premium V2 adds controls for AI dialogue review and assignment, reusable Charact
 
 ### Stage 1 closure boundary
 
-The initial legacy-ID inventory now classifies all 89 old IDs as retained (69) or mapped to named Premium V2 successors (20), and a regression test guards that inventory. This completes the **ID inventory baseline**, not the entire Stage 1 sign-off: controls that have no stable IDs still require semantic mapping, and runtime equivalence must be verified through Stage 2 integration tests and Stage 6 Windows acceptance. Keep Stage 1 open until those remaining controls are mapped; do not interpret an ID successor as proof that the old behavior is preserved.
+The **source-level control audit is now closed** for the currently inventoried legacy control groups: all 89 old IDs are classified (69 retained, 20 mapped to named successors), and the no-ID groups below are mapped to stable selectors plus their event/backend paths. Regression tests guard both inventories. This closes the source audit, not manual acceptance: successor IDs and source handlers do not prove equivalent runtime behavior. Stage 6 must still verify interactions, persistence, responsiveness and real audio in the packaged Windows build.
