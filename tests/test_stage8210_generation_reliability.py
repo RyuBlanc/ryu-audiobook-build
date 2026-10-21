@@ -52,6 +52,42 @@ class Stage8210GenerationReliabilityTests(unittest.TestCase):
         self.assertIn("elapsed >= 5 and progress >= 5 and progress < 100", source)
         self.assertIn('row["eta_seconds"] = 0', source)
 
+    def test_assigned_saved_character_profile_is_used_for_actual_synthesis(self):
+        from unittest.mock import patch
+
+        from app.tts.cast_provider import CastAwareProvider
+        from app.tts.voice_profile import VoiceProfile
+
+        class RecordingProvider:
+            recommended_chunk_chars = 1400
+            recommended_chunk_sentences = 2
+
+            def __init__(self):
+                self.calls = []
+
+            def synthesize(self, text, output_path, voice=None):
+                self.calls.append((text, voice))
+                return output_path
+
+        narrator = RecordingProvider()
+        assigned = RecordingProvider()
+        profile = VoiceProfile("Souei Voice", "piper", "souei")
+        cast = CastAwareProvider(
+            narrator,
+            "Narrator",
+            profiles={"Souei Voice": profile},
+            assignments={"Souei": "Souei Voice"},
+        )
+        output = Path("dialogue.wav")
+        try:
+            with patch("app.tts.cast_provider.provider_from_profile", return_value=(assigned, "resolved-souei-voice")):
+                result = cast.synthesize("The eastern route is clear.", output, "Souei Voice")
+            self.assertEqual(result, output)
+            self.assertEqual(assigned.calls, [("The eastern route is clear.", "resolved-souei-voice")])
+            self.assertEqual(narrator.calls, [], "assigned character dialogue must not fall back to narrator synthesis")
+        finally:
+            cast.close()
+
     def test_last_chapter_cancel_is_checked_before_packaging(self):
         source = Path("app/tts/manager.py").read_text(encoding="utf-8")
         self.assertIn("if self.cancel_event.is_set():\n            cancelled = True\n        if not cancelled and self._wait_if_paused", source)
