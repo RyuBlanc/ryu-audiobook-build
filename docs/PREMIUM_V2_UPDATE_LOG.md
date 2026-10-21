@@ -79,3 +79,10 @@
 - Added an allow-listed `chapter.dialogue.assign` bridge command and persisted explicit speaker assignments to chapter data using original source offsets. Only saved characters/aliases can be selected; ambiguous or stale passages are rejected without mutation.
 - Wired individual dialogue confirmation in the existing review modal to real saved cast records. Static confidence scores are not treated as evidence; bulk acceptance and prototype queue actions remain guarded.
 - Added focused regression coverage for exact/whitespace-wrapped matching, stale text, duplicate occurrences, overlaps, reassignment, and multi-speaker compatibility. CI and Windows acceptance are pending.
+
+## 2026-10-21 — Stage 2 import staging integrity
+
+- Changed exact duplicate-import hashing to read files incrementally, avoiding a full in-memory copy of large source books during duplicate checks.
+- Fixed an early-failure path where a duplicate drag-and-drop import could leave its temporary staging copy behind before a background worker existed.
+- Added regression coverage for streamed hashing, cleanup of temporary drop files, idempotent cleanup, and preservation of user-selected source files outside the managed staging directory.
+- Windows CI validation and manual import cancellation, duplicate, failure/retry, and edit/save/reopen acceptance remain release gates.

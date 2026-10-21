@@ -56,6 +56,29 @@ def _json_result(*, success: bool, data: Any = None, error: str | None = None,
     return json.dumps(payload, ensure_ascii=False, default=str)
 
 
+def _sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
+    """Hash large book files incrementally so duplicate checks do not load them fully into RAM."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(chunk_size), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _cleanup_staged_import_file(path: Path | None) -> None:
+    """Remove only temporary drag/drop files under the app-owned incoming directory."""
+    if path is None:
+        return
+    try:
+        incoming_root = (app_root() / "incoming_imports").resolve()
+        candidate = path.resolve()
+        if incoming_root not in candidate.parents:
+            return
+        candidate.unlink(missing_ok=True)
+    except OSError:
+        log.warning("Could not remove temporary import staging file: %s", path, exc_info=True)
+
+
 class PremiumV2Bridge(QObject):
     """Narrow, allow-listed JSON bridge; renderer content cannot execute shell commands."""
 
@@ -567,7 +590,13 @@ class PremiumV2Bridge(QObject):
             incoming = app_root() / "incoming_imports"
             incoming.mkdir(parents=True, exist_ok=True)
             path = incoming / (uuid.uuid4().hex + suffix)
-            path.write_bytes(content)
+            try:
+                path.write_bytes(content)
+            except OSError as exc:
+                _cleanup_staged_import_file(path)
+                raise ValueError(
+                    "The dropped file could not be staged in local storage. Check available disk space and permissions."
+                ) from exc
             title = str(payload.get("title") or Path(file_name).stem).strip()[:300] or Path(file_name).stem
         else:
             value = str(payload.get("file_path") or payload.get("path") or "").strip()
@@ -583,28 +612,35 @@ class PremiumV2Bridge(QObject):
             if path.stat().st_size > 250 * 1024 * 1024:
                 raise ValueError("The selected book exceeds the 250 MB import limit.")
             title = str(payload.get("title") or path.stem).strip()[:300] or path.stem
-        # Detect exact-content duplicates before creating a new project/job. The original
-        # source is copied into each project folder, so compare those preserved files,
-        # not only the incoming filename or path.
+        # Detect exact-content duplicates before creating a new project/job. Hash in chunks
+        # because books can be large; comparing file contents must not duplicate the entire
+        # manuscript in RAM. A dropped-file staging copy is removed on every early failure.
         try:
-            source_digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        except OSError as exc:
-            raise ValueError("The selected source file could not be read. Check its permissions and try again.") from exc
-        for existing_project in list_projects():
-            existing_source = existing_project.source_path
-            if not existing_source or not existing_source.is_file():
-                continue
             try:
-                existing_digest = hashlib.sha256(existing_source.read_bytes()).hexdigest()
-            except OSError:
-                # A missing/unreadable historical source should not block importing a
-                # different book; its integrity is reported by the project itself.
-                continue
-            if source_digest == existing_digest:
+                source_digest = _sha256_file(path)
+            except OSError as exc:
                 raise ValueError(
-                    f"This file is already imported as “{existing_project.title}”. "
-                    "Open that project from Audiobook Library instead of importing a duplicate."
-                )
+                    "The selected source file could not be read. Check its permissions and try again."
+                ) from exc
+            for existing_project in list_projects():
+                existing_source = existing_project.source_path
+                if not existing_source or not existing_source.is_file():
+                    continue
+                try:
+                    existing_digest = _sha256_file(existing_source)
+                except OSError:
+                    # A missing/unreadable historical source should not block importing a
+                    # different book; its integrity is reported by the project itself.
+                    continue
+                if source_digest == existing_digest:
+                    raise ValueError(
+                        f"This file is already imported as “{existing_project.title}”. "
+                        "Open that project from Audiobook Library instead of importing a duplicate."
+                    )
+        except Exception:
+            if encoded is not None:
+                _cleanup_staged_import_file(path)
+            raise
 
         job_id = self._new_job("import", "Import " + title, "Extract text and detect chapters")
         cancel_event = threading.Event()
