@@ -14,6 +14,7 @@ from app.chapters.assignment_utils import (
 from app.chapters.characters import analyze_book, merge_character_analysis_record
 from app.chapters.detector import Chapter
 from app.tts.voice_profile import VoiceProfile, load_saved_profiles, save_profiles
+from app.tts.cast_provider import CastAwareProvider
 
 
 
@@ -180,6 +181,64 @@ class Stage3CharacterAnalysisTests(unittest.TestCase):
         self.assertIn("mira", names)
         self.assertIn("ren", names)
         self.assertGreaterEqual(result.dialogue_total, 2)
+
+
+class _RecordingNarratorProvider:
+    def __init__(self):
+        self.calls = []
+
+    def synthesize(self, text, output_path, voice=None):
+        self.calls.append((text, voice))
+        return Path(output_path)
+
+
+class Stage3CastRoutingTests(unittest.TestCase):
+    def test_dialogue_routes_to_assigned_cast_voice_and_narration_to_narrator(self):
+        narrator = _RecordingNarratorProvider()
+        profiles = {
+            "Mira Voice": VoiceProfile(name="Mira Voice", provider="piper", voice_id="mira"),
+            "Ren Voice": VoiceProfile(name="Ren Voice", provider="piper", voice_id="ren"),
+        }
+        provider = CastAwareProvider(
+            narrator, "Narrator", profiles,
+            {"Mira": "Mira Voice", "Ren": "Ren Voice"},
+        )
+        text = 'Mira said, “Wait here.” Ren answered, “I will.”'
+        assignments = [
+            {"start": text.index("Wait here."), "end": text.index("Wait here.") + len("Wait here."),
+             "text": "Wait here.", "speaker": "Mira"},
+            {"start": text.index("I will."), "end": text.index("I will.") + len("I will."),
+             "text": "I will.", "speaker": "Ren"},
+        ]
+
+        parts = provider.split_for_cast(text, "Narrator", dialogue_assignments=assignments)
+
+        self.assertTrue(any("Wait here." in spoken and voice == "Mira Voice" for spoken, voice in parts))
+        self.assertTrue(any("I will." in spoken and voice == "Ren Voice" for spoken, voice in parts))
+        self.assertTrue(any("Mira said" in spoken and voice == "Narrator" for spoken, voice in parts))
+        self.assertTrue(any("Ren answered" in spoken and voice == "Narrator" for spoken, voice in parts))
+
+    def test_missing_assigned_cast_profile_fails_instead_of_using_narrator(self):
+        narrator = _RecordingNarratorProvider()
+        provider = CastAwareProvider(
+            narrator, "Narrator", {}, {"Mira": "Deleted Mira Voice"}
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "assigned character voice profile.*unavailable"):
+            provider.synthesize("Wait here.", Path("unused.wav"), "Deleted Mira Voice")
+
+        self.assertEqual(narrator.calls, [])
+
+    def test_unassigned_narration_still_uses_narrator_provider(self):
+        narrator = _RecordingNarratorProvider()
+        provider = CastAwareProvider(
+            narrator, "Narrator", {}, {"Mira": "Mira Voice"}
+        )
+
+        result = provider.synthesize("Narration text.", Path("narration.wav"), "Narrator")
+
+        self.assertEqual(result, Path("narration.wav"))
+        self.assertEqual(narrator.calls, [("Narration text.", "Narrator")])
 
 
 if __name__ == "__main__":
