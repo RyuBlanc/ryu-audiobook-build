@@ -336,6 +336,26 @@ def _mix_chapter_bgm(
     return output_path
 
 
+
+def _chapter_number_for_bgm(chapter_dir: Path, fallback: int) -> int:
+    """Resolve the source chapter number so skipped/reordered chapters keep their overrides."""
+    try:
+        payload = json.loads((chapter_dir / "narration.json").read_text(encoding="utf-8"))
+        number = int(payload.get("chapter") or 0)
+        if number > 0:
+            return number
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    match = re.match(r"^(\\d+)_", chapter_dir.name)
+    if match:
+        try:
+            number = int(match.group(1))
+            if number > 0:
+                return number
+        except ValueError:
+            pass
+    return int(fallback)
+
 def assemble_m4b(
     chapter_dirs: list[Path],
     output_path: Path,
@@ -717,7 +737,8 @@ def assemble_m4b(
         if chapter_scoped_bgm:
             chapter_music_files: list[Path] = []
             for chapter_index, (chapter_file, chapter_dir) in enumerate(zip(chapters, chapter_dirs), start=1):
-                override = effective_overrides.get(str(chapter_index), {})
+                source_chapter_number = _chapter_number_for_bgm(chapter_dir, chapter_index)
+                override = effective_overrides.get(str(source_chapter_number), {})
                 if not isinstance(override, dict):
                     override = {}
                 rule = str(override.get("rule") or "default").strip().lower()
