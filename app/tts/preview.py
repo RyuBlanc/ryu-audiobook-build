@@ -20,7 +20,6 @@ class _PreviewUnits(list):
         self.rule_counts: list[dict[str, int]] = []
 
 
-@dataclass(frozen=True)
 class PreviewCancelledError(RuntimeError):
     """Raised when a user cancels a preview at a safe synthesis boundary."""
 
