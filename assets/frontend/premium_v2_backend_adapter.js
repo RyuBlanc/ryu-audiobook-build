@@ -231,17 +231,33 @@
     const picker=document.createElement('input'); picker.type='file'; picker.accept='.json,application/json';
     picker.onchange=async()=>{const file=picker.files?.[0];if(!file)return;if(file.size>10*1024*1024){message('Character Library imports are limited to 10 MB.',true);return;}try{const data=JSON.parse(await file.text()), rows=Array.isArray(data)?data:data?.characters;if(!Array.isArray(rows))throw new Error('JSON must be an array or contain a characters array.');const result=await call('character_library.import',{characters:rows});await refreshCharacterLibrary();message('Imported '+result.imported+' character(s) into the local Character Library.');}catch(error){message(error?.message||String(error),true);}}; picker.click();
   }
+  function pronunciationScopeKey(term) {
+    return String(term.scope_type || 'current_book') + ':' + String(term.scope_id || '');
+  }
   async function refreshTerms() {
     terms = await call('pronunciation.list');
     const list = $('pronDictionaryBody');
-    if (list) list.innerHTML = terms.map(t => '<div class="list-item"><b>' + esc(t.written_form || t.word) + '</b><span> → ' + esc(t.spoken_form || t.pronunciation) + '</span></div>').join('') || '<p class="muted">No saved pronunciation rules for this book.</p>';
+    if (list) list.innerHTML = terms.map(t => {
+      const word = String(t.written_form || t.word || '');
+      const spoken = String(t.spoken_form || t.pronunciation || '');
+      const scope = String(t.scope || 'Current book');
+      const scopeKey = pronunciationScopeKey(t);
+      const language = String(t.language || 'Auto');
+      const status = t.enabled === false ? 'Disabled' : 'Enabled';
+      return '<tr><td><button type="button" class="btn small ghost" data-pron-table-term="' + esc(word) + '" data-pron-scope-key="' + esc(scopeKey) + '">' + esc(word) + '</button></td>' +
+        '<td>' + esc(spoken) + '</td><td>' + esc(language) + '</td><td>' + esc(scope) + '</td>' +
+        '<td>' + esc(t.test_status || 'Not tested') + '</td><td><span>' + status + '</span> ' +
+        '<button type="button" class="btn small ghost" data-delete-pron="' + esc(word) + '" data-delete-scope="' + esc(scope) + '" data-delete-scope-id="' + esc(String(t.scope_id || '')) + '" aria-label="Delete pronunciation rule for ' + esc(word) + '">Delete</button></td></tr>';
+    }).join('') || '<tr><td colspan="6" class="muted">No saved pronunciation rules for this book.</td></tr>';
     const termList = $('pronTermList');
     if (termList) {
       const selected = $('pronWord')?.textContent?.trim();
+      const selectedKey = window.ryuPremiumSelectedPronunciationScopeKey || '';
       termList.innerHTML = terms.map(t => {
         const word = String(t.written_form || t.word || '');
         const spoken = String(t.spoken_form || t.pronunciation || '');
-        return '<button type="button" class="list-item ' + (word === selected ? 'active' : '') + '" data-pron-term="' + esc(word) + '"><b>' + esc(word) + '</b><span>' + esc(spoken) + '</span></button>';
+        const scopeKey = pronunciationScopeKey(t);
+        return '<button type="button" class="list-item ' + (word === selected && scopeKey === selectedKey ? 'active' : '') + '" data-pron-term="' + esc(word) + '" data-pron-scope-key="' + esc(scopeKey) + '"><b>' + esc(word) + '</b><span>' + esc(spoken) + ' · ' + esc(t.scope || 'Current book') + '</span></button>';
       }).join('') || '<p class="muted">No saved pronunciation terms yet. Use Analyze book or Add entry.</p>';
     }
   }
@@ -1068,7 +1084,7 @@
         catch (error) { message(error?.message || 'The pronunciation preview could not be played.', true); }
       });
     });
-    if ($('savePronTerm')) $('savePronTerm').onclick=act(async()=>{await call('pronunciation.save',{written_form:$('pronWord')?.textContent?.trim()||'',spoken_form:$('pronValue')?.value||'',scope:$('pronScope')?.value||'current_book',handling_mode:$('pronHandling')?.value||'automatic'});await refreshTerms();message('Pronunciation rule saved locally.');});
+    if ($('savePronTerm')) $('savePronTerm').onclick=act(async()=>{const result=await call('pronunciation.save',{written_form:$('pronWord')?.textContent?.trim()||'',spoken_form:$('pronValue')?.value||'',scope:$('pronScope')?.value||'Current book',handling_mode:$('pronHandling')?.value||'automatic',language:$('pronDetectedLanguage')?.textContent||'Auto'});window.ryuPremiumSelectedPronunciationScopeKey=pronunciationScopeKey(result.entry||{});await refreshTerms();message(result.conflict_resolved?'Pronunciation rule updated; the previous reading was replaced.':'Pronunciation rule saved locally.');});
     if ($('saveNewPron')) $('saveNewPron').onclick=act(async()=>{await call('pronunciation.save',{written_form:$('newPronWritten')?.value||'',spoken_form:$('newPronValue')?.value||'',language:$('newPronLanguage')?.value||'Auto',scope:$('newPronScope')?.value||'current_book'});await refreshTerms();$('pronEntryModal')?.classList.remove('show');message('Pronunciation entry saved.');});
     if ($('analyzePronunciation')) $('analyzePronunciation').onclick=act(async()=>{const r=await call('pronunciation.analyze');const list=$('pronDictionaryBody');if(list)list.innerHTML=(r.suggestions||[]).map(t=>'<div class="list-item"><b>'+esc(t.written_form)+'</b><span> → '+esc(t.spoken_form)+'</span></div>').join('')||'<p class="muted">No new suggestions found.</p>';message('Found '+(r.suggestions||[]).length+' suggestions to review.');});
     if ($('editAssignedCharacter')) $('editAssignedCharacter').onclick=()=>{
@@ -1628,15 +1644,19 @@
         });
         return;
       }
-      if (button.id === 'pronTermList' || button.closest('#pronTermList [data-pron-term]')) {
-        const termButton = button.closest('#pronTermList [data-pron-term]');
+      if (button.id === 'pronTermList' || button.closest('#pronTermList [data-pron-term]') || button.closest('#pronDictionaryBody [data-pron-table-term]')) {
+        const termButton = button.closest('#pronTermList [data-pron-term]') || button.closest('#pronDictionaryBody [data-pron-table-term]');
         if (!termButton) return;
         stop();
-        const term = terms.find(item => String(item.written_form || item.word) === termButton.dataset.pronTerm);
+        const selectedWord = termButton.dataset.pronTerm || termButton.dataset.pronTableTerm;
+        const selectedScopeKey = termButton.dataset.pronScopeKey || '';
+        const term = terms.find(item => String(item.written_form || item.word) === selectedWord &&
+          (!selectedScopeKey || pronunciationScopeKey(item) === selectedScopeKey));
         if (!term) { message('That pronunciation term is no longer in the saved dictionary.', true); return; }
         if ($('pronWord')) $('pronWord').textContent = term.written_form || term.word;
         if ($('pronValue')) $('pronValue').value = term.spoken_form || term.pronunciation || '';
         if ($('pronScope')) $('pronScope').value = term.scope || 'Current book';
+        window.ryuPremiumSelectedPronunciationScopeKey = pronunciationScopeKey(term);
         if ($('pronHandling')) $('pronHandling').value = term.handling_mode || 'automatic';
         if ($('pronDetectedLanguage')) $('pronDetectedLanguage').textContent = term.language || 'Auto-detected';
         if ($('pronConfidence')) $('pronConfidence').textContent = term.confidence == null ? 'Saved rule' : String(term.confidence) + '%';
@@ -1793,6 +1813,25 @@
       if (!button) return;
       const stop = () => { e.preventDefault(); e.stopImmediatePropagation(); };
       const run = async fn => { stop(); try { await fn(); } catch (err) { message(err?.message || String(err), true); } };
+      if (button.matches('[data-delete-pron]')) {
+        void run(async () => {
+          const written = button.getAttribute('data-delete-pron') || '';
+          const scope = button.getAttribute('data-delete-scope') || 'Current book';
+          const scope_id = button.getAttribute('data-delete-scope-id') || '';
+          if (!written) throw new Error('Choose a saved pronunciation rule before deleting.');
+          if (!window.confirm('Delete the pronunciation rule for "' + written + '" from ' + scope + '?')) return;
+          const result = await call('pronunciation.delete', {written_form:written,scope,scope_id});
+          await refreshTerms();
+          if (Number(result.deleted || 0) > 0 && $('pronWord')?.textContent?.trim() === written &&
+              window.ryuPremiumSelectedPronunciationScopeKey === result.scope_type + ':' + String(result.scope_id || '')) {
+            if ($('pronWord')) $('pronWord').textContent = 'Select a pronunciation term';
+            if ($('pronValue')) $('pronValue').value = '';
+            window.ryuPremiumSelectedPronunciationScopeKey = '';
+          }
+          message(result.deleted ? 'Pronunciation rule deleted.' : 'No matching rule existed in that scope.', !result.deleted);
+        });
+        return;
+      }
       if (button.id === 'addPronunciationAdvanced') {
         stop();
         if ($('modalTitle')) $('modalTitle').textContent = 'Add pronunciation';

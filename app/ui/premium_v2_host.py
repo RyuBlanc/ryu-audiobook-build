@@ -11,7 +11,9 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
+import unicodedata
 import uuid
 import wave
 from datetime import datetime, timezone
@@ -54,6 +56,121 @@ def _json_result(*, success: bool, data: Any = None, error: str | None = None,
     if error:
         payload["error"] = {"code": code or "operation_failed", "message": error}
     return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+def _normalize_pronunciation_text(value: Any, field: str, limit: int) -> str:
+    """Validate and NFC-normalize a saved pronunciation field."""
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be text.")
+    normalized = unicodedata.normalize("NFC", value).strip()
+    if not normalized:
+        raise ValueError(f"{field} is required.")
+    if len(normalized) > limit:
+        raise ValueError(f"{field} must be {limit} characters or fewer.")
+    if any(ord(char) < 32 or ord(char) == 127 for char in normalized):
+        raise ValueError(f"{field} cannot contain control characters.")
+    return normalized
+
+
+def _parse_pronunciation_scope(value: Any, scope_id: Any = None) -> tuple[str, str, str]:
+    """Return scope type, scope id, and stable UI label; reject unsupported scope text."""
+    raw = unicodedata.normalize("NFC", str(value or "current_book")).strip()
+    folded = raw.casefold().replace("_", " ").replace("-", " ")
+    if folded in {"current book", "book", "current"}:
+        return "current_book", "", "Current book"
+    if folded in {"global library", "global", "library"}:
+        return "global_library", "", "Global library"
+    series_name = str(scope_id or "").strip()
+    match = re.fullmatch(r"series\s*[·:]\s*(.+)", raw, flags=re.IGNORECASE)
+    if match:
+        series_name = match.group(1).strip()
+    elif folded == "series" and series_name:
+        pass
+    else:
+        raise ValueError("Choose Current book, Global library, or a named Series scope.")
+    series_name = _normalize_pronunciation_text(series_name, "Series name", 120)
+    return "series", series_name, f"Series · {series_name}"
+
+
+def _pronunciation_scope_path(scope_type: str, scope_id: str = "") -> Path:
+    """Return an app-owned persistent dictionary file for non-project scopes."""
+    root = settings_root()
+    if scope_type == "global_library":
+        return root / "pronunciation_dictionary_global.json"
+    if scope_type == "series":
+        key = hashlib.sha256(unicodedata.normalize("NFC", scope_id).casefold().encode("utf-8")).hexdigest()
+        return root / "pronunciation_dictionary_series" / f"{key}.json"
+    raise ValueError("Project-scoped pronunciation entries are stored in the project state.")
+
+
+def _read_pronunciation_store(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"The saved pronunciation dictionary could not be read: {path.name}. It was not overwritten.") from exc
+    if not isinstance(value, list):
+        raise ValueError(f"The saved pronunciation dictionary is invalid: {path.name}. It was not overwritten.")
+    return [row for row in value if isinstance(row, dict)]
+
+
+def _write_pronunciation_store(path: Path, entries: list[dict[str, Any]]) -> None:
+    """Atomically persist global/series dictionary files without risking a partial JSON write."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent), text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(entries, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        Path(temp_name).replace(path)
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        Path(temp_name).unlink(missing_ok=True)
+        raise
+
+
+def _clean_pronunciation_entries(entries: list[dict[str, Any]], scope_type: str, scope_id: str = "") -> list[dict[str, Any]]:
+    """Normalize legacy rows and collapse duplicate written forms deterministically."""
+    clean: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in entries:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            written_value = raw.get("written_form") or raw.get("written") or raw.get("word")
+            spoken_value = raw.get("spoken_form") or raw.get("spoken") or raw.get("pronunciation")
+            written = _normalize_pronunciation_text(written_value, "Written term", 500)
+            spoken = _normalize_pronunciation_text(spoken_value, "Pronunciation", 1000)
+        except ValueError:
+            # Older projects may contain incomplete rows. Ignore them in the
+            # editor/runtime view without destroying the original until a save.
+            continue
+        key = written.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        row = dict(raw)
+        row.update({
+            "written_form": written,
+            "spoken_form": spoken,
+            "scope_type": scope_type,
+            "scope_id": scope_id,
+            "scope": "Current book" if scope_type == "current_book" else (
+                "Global library" if scope_type == "global_library" else f"Series · {scope_id}"
+            ),
+            "enabled": raw.get("enabled", True) is not False,
+        })
+        row.pop("written", None)
+        row.pop("spoken", None)
+        row.pop("word", None)
+        row.pop("pronunciation", None)
+        clean.append(row)
+    return clean
 
 
 def _sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
@@ -1422,41 +1539,116 @@ class PremiumV2Bridge(QObject):
         self._character_library_write(rows)
         return {"imported": imported, "count": len(rows), "merged_by_name": True}
     def _pronunciation_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        entries = load_state(self._active_project().folder).get("pronunciation_dictionary") or []
-        return entries if isinstance(entries, list) else []
+        project = self._active_project()
+        state = load_state(project.folder)
+        # Legacy scope labels were stored inside project state but were never
+        # shared across projects. Keep those rows book-local during migration.
+        entries = _clean_pronunciation_entries(
+            state.get("pronunciation_dictionary") if isinstance(state.get("pronunciation_dictionary"), list) else [],
+            "current_book",
+        )
+        entries.extend(_clean_pronunciation_entries(
+            _read_pronunciation_store(_pronunciation_scope_path("global_library")),
+            "global_library",
+        ))
+        series_dir = settings_root() / "pronunciation_dictionary_series"
+        if series_dir.exists():
+            for path in sorted(series_dir.glob("*.json")):
+                for row in _read_pronunciation_store(path):
+                    try:
+                        scope_type, scope_id, _label = _parse_pronunciation_scope(
+                            row.get("scope") or "series", row.get("scope_id")
+                        )
+                    except ValueError:
+                        continue
+                    if scope_type == "series":
+                        entries.extend(_clean_pronunciation_entries([row], "series", scope_id))
+        return entries
 
     def _pronunciation_save(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
-        word = str(payload.get("written_form") or payload.get("word") or "").strip()
-        spoken = str(payload.get("spoken_form") or payload.get("pronunciation") or "").strip()
-        if not word or not spoken:
-            raise ValueError("Enter a written term and its intended pronunciation.")
-        if len(word) > 500 or len(spoken) > 1000:
-            raise ValueError("The term or pronunciation is too long.")
-        state = load_state(project.folder)
-        entries = list(state.get("pronunciation_dictionary") or [])
-        item = next((e for e in entries if str(e.get("written_form") or e.get("word") or "").casefold() == word.casefold()), None)
-        value = {"written_form": word, "spoken_form": spoken,
-                 "language": str(payload.get("language") or "Auto"),
-                 "handling_mode": str(payload.get("handling_mode") or payload.get("mode") or "automatic"),
-                 "scope": str(payload.get("scope") or "current_book"), "enabled": bool(payload.get("enabled", True)),
-                 "updated_at": self._now()}
-        if item is None:
-            entries.append(value)
+        word = _normalize_pronunciation_text(payload.get("written_form", payload.get("word", "")), "Written term", 500)
+        spoken = _normalize_pronunciation_text(payload.get("spoken_form", payload.get("pronunciation", "")), "Pronunciation", 1000)
+        scope_type, scope_id, scope_label = _parse_pronunciation_scope(
+            payload.get("scope") or "current_book", payload.get("scope_id")
+        )
+        language = _normalize_pronunciation_text(payload.get("language") or "Auto", "Language", 100)
+        handling_mode = _normalize_pronunciation_text(
+            payload.get("handling_mode") or payload.get("mode") or "automatic", "Handling mode", 100
+        )
+        enabled = payload.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise ValueError("Enabled must be a boolean.")
+        if scope_type == "current_book":
+            state = load_state(project.folder)
+            raw_entries = state.get("pronunciation_dictionary")
+            raw_entries = raw_entries if isinstance(raw_entries, list) else []
+            raw_match_count = sum(
+                1 for row in raw_entries if isinstance(row, dict) and
+                unicodedata.normalize("NFC", str(row.get("written_form") or row.get("written") or row.get("word") or "")).strip().casefold() == word.casefold()
+            )
+            entries = _clean_pronunciation_entries(raw_entries, "current_book")
         else:
-            item.update(value)
-        state["pronunciation_dictionary"] = entries
-        save_state(project.folder, state)
-        return {"entry": value, "count": len(entries), "saved": True}
+            path = _pronunciation_scope_path(scope_type, scope_id)
+            raw_entries = _read_pronunciation_store(path)
+            raw_match_count = sum(
+                1 for row in raw_entries if
+                unicodedata.normalize("NFC", str(row.get("written_form") or row.get("written") or row.get("word") or "")).strip().casefold() == word.casefold()
+            )
+            entries = _clean_pronunciation_entries(raw_entries, scope_type, scope_id)
+        key = word.casefold()
+        matching = [row for row in entries if row["written_form"].casefold() == key]
+        old_spoken = matching[0]["spoken_form"] if matching else None
+        value = {
+            "written_form": word,
+            "spoken_form": spoken,
+            "language": language,
+            "handling_mode": handling_mode,
+            "scope_type": scope_type,
+            "scope_id": scope_id,
+            "scope": scope_label,
+            "enabled": enabled,
+            "updated_at": self._now(),
+        }
+        entries = [row for row in entries if row["written_form"].casefold() != key]
+        entries.append(value)
+        if scope_type == "current_book":
+            state["pronunciation_dictionary"] = entries
+            save_state(project.folder, state)
+        else:
+            _write_pronunciation_store(_pronunciation_scope_path(scope_type, scope_id), entries)
+        return {
+            "entry": value,
+            "count": len(entries),
+            "saved": True,
+            "updated_existing": bool(matching),
+            "conflict_resolved": bool(matching and old_spoken != spoken),
+            "duplicate_rows_collapsed": max(0, raw_match_count - 1),
+        }
 
     def _pronunciation_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
-        word = str(payload.get("written_form") or payload.get("word") or "").casefold()
-        state = load_state(project.folder)
-        entries = list(state.get("pronunciation_dictionary") or [])
-        state["pronunciation_dictionary"] = [e for e in entries if str(e.get("written_form") or e.get("word") or "").casefold() != word]
-        save_state(project.folder, state)
-        return {"count": len(state["pronunciation_dictionary"]), "deleted": len(entries) - len(state["pronunciation_dictionary"])}
+        word = _normalize_pronunciation_text(payload.get("written_form", payload.get("word", "")), "Written term", 500)
+        scope_type, scope_id, _scope_label = _parse_pronunciation_scope(
+            payload.get("scope") or "current_book", payload.get("scope_id")
+        )
+        if scope_type == "current_book":
+            state = load_state(project.folder)
+            raw_entries = state.get("pronunciation_dictionary")
+            entries = _clean_pronunciation_entries(raw_entries if isinstance(raw_entries, list) else [], "current_book")
+        else:
+            entries = _clean_pronunciation_entries(
+                _read_pronunciation_store(_pronunciation_scope_path(scope_type, scope_id)), scope_type, scope_id
+            )
+        key = word.casefold()
+        kept = [row for row in entries if row["written_form"].casefold() != key]
+        deleted = len(entries) - len(kept)
+        if scope_type == "current_book":
+            state["pronunciation_dictionary"] = kept
+            save_state(project.folder, state)
+        elif deleted:
+            _write_pronunciation_store(_pronunciation_scope_path(scope_type, scope_id), kept)
+        return {"count": len(kept), "deleted": deleted, "scope_type": scope_type, "scope_id": scope_id}
 
     def _pronunciation_analyze(self, _payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
