@@ -229,6 +229,37 @@ def resolve_music_track(mood,selected_track=None,*,seed_text=""):
  if not candidates:return None
  return candidates[_seed_index(seed_text,len(candidates))].path
 
+def validate_saved_audio_paths(state):
+ """Fail clearly when a saved sound-design assignment points to a missing file."""
+ fields=(
+  ("background_audio_path","book background music"),
+  ("ambience_audio_path","book ambience"),
+  ("opening_cue_path","opening cue"),
+  ("page_turn_cue_path","chapter transition cue"),
+  ("scene_transition_cue_path","scene transition cue"),
+  ("ending_cue_path","closing cue"),
+ )
+ for key,label in fields:
+  raw=state.get(key)
+  if not raw: continue
+  path=Path(str(raw)).expanduser()
+  if not path.is_file():
+   raise FileNotFoundError(f"Saved {label} is missing: {path}. Reassign it in Sound Design.")
+  if path.suffix.casefold() not in AUDIO_EXTENSIONS:
+   raise ValueError(f"Saved {label} has an unsupported audio format: {path.name}")
+ overrides=state.get("chapter_bgm_overrides")
+ if isinstance(overrides,dict):
+  for chapter,override in overrides.items():
+   if not isinstance(override,dict) or str(override.get("rule") or "").casefold()!="custom": continue
+   raw=override.get("path")
+   if not raw:
+    raise ValueError(f"Chapter {chapter} uses custom BGM but no track is saved. Reassign it in Sound Design.")
+   path=Path(str(raw)).expanduser()
+   if not path.is_file():
+    raise FileNotFoundError(f"Saved custom BGM for chapter {chapter} is missing: {path}. Reassign it in Sound Design.")
+   if path.suffix.casefold() not in AUDIO_EXTENSIONS:
+    raise ValueError(f"Saved custom BGM for chapter {chapter} has an unsupported audio format: {path.name}")
+
 def resolve_cue_track(kind,selected_path=None,*,seed_text=""):
  if selected_path:
   p=Path(selected_path).expanduser()
