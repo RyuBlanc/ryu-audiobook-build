@@ -1211,7 +1211,9 @@ class PremiumV2Bridge(QObject):
                                ("Sound Design mix preview · " if include_sound_design else "Preview · ") + profile.name,
                                f"Generate up to {seconds} seconds using the selected provider", project)
         cancel_event = threading.Event()
-        with self._jobs_lock:
+        if not hasattr(self, "_preview_cancel_events"):
+            self._preview_cancel_events = {}
+        with getattr(self, "_jobs_lock", threading.RLock()):
             self._preview_cancel_events[job_id] = cancel_event
         self._job_update(job_id, state="running", started_at=self._now(), stage="Preparing preview", progress=2)
         threading.Thread(target=self._preview_worker, args=(job_id, profile, text_value, seconds, state, cancel_event),
@@ -1287,6 +1289,8 @@ class PremiumV2Bridge(QObject):
             raise RuntimeError("The Sound Design mix preview could not be rendered.")
         if abs(_duration_ms(output) - duration_ms) > 1800:
             raise RuntimeError("The Sound Design mix preview changed duration unexpectedly.")
+        if audio_source != Path(source).resolve():
+            audio_source.unlink(missing_ok=True)
         return output
 
     def _preview_worker(self, job_id: str, profile, text_value: str, seconds: int, state: dict[str, Any], cancel_event=None) -> None:
