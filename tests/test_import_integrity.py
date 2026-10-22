@@ -163,7 +163,7 @@ class ImportIntegrityTests(unittest.TestCase):
         result = reflow_source_text(source)
 
         self.assertIn("Chapter 1: Arrival\nThe international train slowed near the station.", result)
-        self.assertIn("“Stay here,” she said.\n“ I will.”".replace("“ ", "“"), result)
+        self.assertIn("“Stay here,” she said.\n“I will.”", result)
         self.assertIn("Chapter 2: Departure\nThe next part begins.", result)
         self.assertNotIn("Arrival The", result)
         self.assertNotIn("Chapter 1: Arrival Chapter 2: Departure", result)
