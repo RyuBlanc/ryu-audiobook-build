@@ -1,0 +1,66 @@
+# Stage 4 Plan — Pronunciation and Sound Design
+
+**Working branch:** `stage-4-pronunciation-sound-design`  
+**Baseline:** Stage 3 implementation head `d5d17f41393910596ad793dfe8df8753c6a1a836` (Stage 3 PR #18 remains open)  
+**UI rule:** preserve the approved Premium V2 HTML and all existing control layout. Fix backend behavior and tests; no redesign, simulated results, or replacement of real audio with demo data.
+
+## Stage 4 objective
+
+Make pronunciation handling and story-aware sound design predictable, persistent, safely applied to real synthesis, and verifiable in the packaged Windows application. Keep audio generation resumable and preserve chapter timing, source text, and existing projects.
+
+## 4.1 Pronunciation dictionary and text preparation
+
+- [ ] Audit pronunciation dictionary data shape, normalization, duplicate/conflicting entries, case sensitivity, Unicode, and invalid/empty entries.
+- [ ] Add regression tests for save/reload persistence, edit/delete, deterministic matching, and project isolation.
+- [ ] Verify replacements apply to synthesis text only; never mutate saved chapter source text or chapter offsets.
+- [ ] Test overlapping terms, word boundaries, punctuation, repeated matches, Unicode names, and replacement loops.
+- [ ] Ensure dictionary edits invalidate only affected generation signatures/checkpoints; no stale chunks after a pronunciation change.
+- [ ] Verify errors and applied-rule counts are exposed through actual backend/UI status.
+
+## 4.2 Sound-design catalogue and story assignments
+
+- [ ] Audit cue/BGM catalogue records, asset paths, missing files, metadata, and safe defaults.
+- [ ] Test chapter-level BGM overrides, opening/closing cues, transition cues, SFX cues, and the behavior when BGM is disabled.
+- [ ] Test malformed, missing, unsupported, or unreadable audio assets: provide clear errors and never corrupt source audio or silently produce a misleading mix.
+- [ ] Verify story-aware recommendations/assignments persist and can be edited, cleared, and reloaded.
+- [ ] Verify mix controls (gain/volume, fades, ducking, chapter boundaries, transitions) remain within safe bounds and preserve intended duration.
+- [ ] Check that user-specified assets and existing project paths are not overwritten by preview or mix rendering.
+
+## 4.3 Preview, synthesis and audio assembly
+
+- [ ] Test voice preview with pronunciation rules enabled and disabled, and verify the selected profile/provider is the one requested.
+- [ ] Test sound-design preview uses real assigned cues/music, reports the actual rendered duration, and cleans up temporary files.
+- [ ] Verify chapter transitions and opening/closing cues are applied once at the correct boundaries, including when BGM is off.
+- [ ] Test cancellation, provider/FFmpeg failures, retry, cleanup, and resumability for preview and final assembly.
+- [ ] Test generation signatures/checkpoints change when pronunciation rules or sound-design assignments change, without invalidating unrelated work.
+- [ ] Listen to representative speech/music/SFX mixes on the target PC; automated duration checks do not establish audio quality.
+
+## 4.4 Regression, packaging and acceptance
+
+- [ ] Add focused Stage 4 regression tests and run them during development.
+- [ ] Run the complete unittest suite on the latest Stage 4 head.
+- [ ] Run the Windows frozen-app, bundled-asset, installer, SHA-256, and Microsoft Defender workflow; inspect all failed steps.
+- [ ] Target-PC acceptance: edit/save/reopen pronunciation rules and sound-design assignments, generate previews, and compare actual output with requested settings.
+- [ ] Preserve and track all earlier open acceptance gates: Stage 1 hardware freeze/crash validation; Stage 2 supported-format import/edit/reopen validation; Stage 3 Voice Studio/Character Studio UI and actual voice-preview acceptance.
+- [ ] Do not mark Stage 4 complete from green CI alone.
+
+## Stage 3 carry-forward — do not lose these items
+
+Stage 3 Run #894 succeeded on `ec20d76106e01971e16c045a475eb72f78115c83`; the Stage 3 plan was updated after that run. Stage 3 PR #18 is open. Automated/package gates passed, but these items remain open and must not be silently treated as complete:
+
+- [ ] Packaged Windows acceptance for actual selected-profile preview/provider identity and voice quality.
+- [ ] Verify Voice Studio and Character Studio UI state, persistence/reload, and preview/generation error reporting.
+- [ ] Behavioral tests for case-insensitive character updates, alias edits, duplicate names, delete semantics, and assignment references.
+- [ ] Persistence-level verification of character-analysis results, confidence/examples, dialogue totals, and unassigned counts across save/reopen.
+- [ ] Assignment integrity through chapter reorder/merge/split, including explicit offset migration or safe invalidation.
+- [ ] Broader character detection fixtures for first-person narration, aliases, attributed dialogue, and unassigned dialogue.
+- [ ] Stage 1 target-PC freeze/crash validation.
+- [ ] Stage 2 target-PC TXT/EPUB/PDF/DOCX import, duplicate guidance, cancel/retry, chapter editing and reopen comparison.
+
+## Stage 4 baseline audit
+
+The existing application includes a pronunciation dictionary, a cast-aware voice preview path, a sound-design preview path, BGM/transition cue settings, and an audio assembly pipeline. This stage begins by testing the real implementation and fixing gaps; do not assume every listed behavior is already correct.
+
+## Completion rule
+
+Close Stage 4 only when targeted and full automated tests pass, the Windows package gates pass on the latest code, the Stage 3 carry-forward checklist is preserved, and target-PC acceptance is either completed with evidence or explicitly left open. Never claim the actual sound is correct without listening to rendered output.
