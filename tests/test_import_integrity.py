@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 from app.chapters.detector import Chapter, detect_chapters
-from app.core.project import Project, create_project
+from app.core.project import Project, create_project, list_projects
 from app.documents.parser import extract_text, clean_import_noise
 
 
@@ -96,6 +96,16 @@ class ImportIntegrityTests(unittest.TestCase):
             self.assertEqual(loaded.chapters[0].review_status, "reviewed")
             self.assertTrue(loaded.chapters[0].skip_for_generation)
             self.assertEqual(loaded.chapters[0].text, "A complete chapter.")
+
+    def test_library_listing_hides_in_progress_import_staging_directories(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "library"
+            staging = root / ".import-staging-test"
+            staging.mkdir(parents=True)
+            (staging / "project.json").write_text('{"title":"Not published"}', encoding="utf-8")
+
+            with mock.patch("app.core.project.library_root", return_value=root):
+                self.assertEqual(list_projects(), [])
 
     def test_failed_source_copy_leaves_no_partial_project_in_library(self):
         with tempfile.TemporaryDirectory() as temp:
