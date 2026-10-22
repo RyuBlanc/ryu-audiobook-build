@@ -28,7 +28,7 @@ from app.core.paths import app_root, audiobooks_root, ensure_roots, library_root
 from app.core.project import create_project, list_projects
 from app.documents.parser import SUPPORTED_EXTENSIONS, clean_import_noise, clean_text, detect_repeated_book_noise, extract_text
 from app.chapters.detector import detect_chapters
-from app.chapters.characters import analyze_book
+from app.chapters.characters import analyze_book, merge_character_analysis_record
 from app.tts.manager import GenerationManager
 from app.tts.preview import build_voice_preview
 from app.tts.profile_provider import provider_from_profile
@@ -1238,10 +1238,7 @@ class PremiumV2Bridge(QObject):
             items = []
             for c in analysis.characters:
                 prior = old.get(c.name.casefold(), {})
-                items.append({"name": c.name, "role": c.role, "dialogue_count": c.dialogue_count,
-                              "examples": list(c.examples or []), "confidence": float(c.confidence),
-                              "aliases": list(c.aliases or []), "voice_profile": prior.get("voice_profile"),
-                              "chapter_appearances": list(prior.get("chapter_appearances") or [])})
+                items.append(merge_character_analysis_record(c, prior))
             state["characters"] = items
             state["character_analysis"] = {"dialogue_total": analysis.dialogue_total,
                                            "unassigned_dialogue": analysis.unassigned_dialogue,
