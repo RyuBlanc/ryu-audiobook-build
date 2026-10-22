@@ -167,10 +167,9 @@ def clean_import_noise(text: str, repeated_noise: set[str] | None = None) -> tup
 
     obvious_noise = (
         re.compile(r"^https?://", re.I),
-        re.compile(r"^(?:www\.)?[^\s]+\.(?:com|net|org|cc|me)(?:/.*)?$", re.I),
-        re.compile(r"^.*(?:asianovel\.com|mp4directs\.com).*$", re.I),
-        re.compile(r"^\d{1,5}\s+report$", re.I),
-        re.compile(r"^report$", re.I),
+        re.compile(r"^(?:www\\.)?[^\\s]+\\.(?:com|net|org|cc|me)(?:/.*)?$", re.I),
+        re.compile(r"^.*(?:asianovel\\.com|mp4directs\\.com).*$", re.I),
+        re.compile(r"^\\d{1,5}\\s+report$", re.I),
     )
     for idx, raw_line in enumerate(lines):
         line = raw_line.strip()
@@ -178,9 +177,23 @@ def clean_import_noise(text: str, repeated_noise: set[str] | None = None) -> tup
             if line:
                 removed.append(line)
             continue
-        normalized = re.sub(r"\s+", " ", line).casefold()
+        normalized = re.sub(r"\\s+", " ", line).casefold()
+        report_watermark = False
+        if normalized == "report":
+            neighbors = []
+            if idx > 0:
+                neighbors.append(lines[idx - 1].strip().casefold())
+            if idx + 1 < len(lines):
+                neighbors.append(lines[idx + 1].strip().casefold())
+            report_watermark = any(
+                re.fullmatch(r"\\d{1,5}", neighbor)
+                or "asianovel.com" in neighbor
+                or "mp4directs.com" in neighbor
+                for neighbor in neighbors
+            )
         is_noise = (
             normalized in repeated_noise
+            or report_watermark
             or any(pattern.fullmatch(line) for pattern in obvious_noise)
         )
         if is_noise and line:
