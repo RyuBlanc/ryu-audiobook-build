@@ -107,3 +107,11 @@ Close Stage 4 only when targeted and full automated tests pass, the Windows pack
 - Run #930: 451 tests, three failures (two expectation/fixture issues and the sound import integration contract). The code/test contract was corrected in commit `0c54d7c7762f68ad9647ec7468628f48cc395a03`.
 - Run #931: 451 tests, one remaining assertion mismatch because the missing explicit cue error used the established wording “no longer exists” rather than the test's expected word “missing”. The regression expectation is broadened to accept either actionable wording. Packaging was not reached in either failed run.
 - Do not treat Prompt 3 or Stage 4 as verified until a subsequent latest-head run passes the suite and Windows package gates.
+
+
+## Prompt 3 additional control wiring
+
+- Background-music fade-in/fade-out selections are now sent to the backend, bounded to 0–30 seconds, saved in the book sound manifest, restored into the existing selectors, and passed into production assembly.
+- A selected zero volume remains zero instead of being replaced by a default. Disabling BGM persists an off mode while retaining the selected fade configuration.
+- Legacy prototype listeners on the existing Sound Design buttons are removed by cloning those controls without changing their visible markup, preventing duplicate fake import/preview/save actions alongside backend calls.
+- The approved HTML has no dedicated ambience selector or ducking control. Existing backend ambience/sidechain ducking remains supported, but adding new user-facing controls is intentionally out of scope for this no-redesign stage.

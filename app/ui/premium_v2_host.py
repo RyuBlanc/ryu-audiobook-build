@@ -1799,15 +1799,17 @@ class PremiumV2Bridge(QObject):
             pacing_profile=str(state.get("pacing_profile") or "natural"),
             metadata=metadata, bitrate=bitrate,
             background_audio_path=Path(state["background_audio_path"]) if state.get("background_audio_path") else None,
-            background_audio_volume=float(state.get("background_audio_volume") or 0.18),
+            background_audio_volume=float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18),
             ambience_audio_path=Path(state["ambience_audio_path"]) if state.get("ambience_audio_path") else None,
-            ambience_audio_volume=float(state.get("ambience_audio_volume") or 0.10),
+            ambience_audio_volume=float(state.get("ambience_audio_volume") if state.get("ambience_audio_volume") is not None else 0.10),
+            background_audio_fade_in=float(state.get("background_audio_fade_in") if state.get("background_audio_fade_in") is not None else 2.0),
+            background_audio_fade_out=float(state.get("background_audio_fade_out") if state.get("background_audio_fade_out") is not None else 3.0),
             background_audio_mode=str(state.get("background_audio_mode") or "off"),
             auto_music_style=str(state.get("auto_music_style") or "auto"),
             auto_music_variation=state.get("auto_music_track_path") or None,
             chapter_transition_sound=bool(state.get("chapter_transition_sound", False)),
             story_effects_enabled=bool(state.get("story_effects_enabled", False)),
-            story_effect_volume=float(state.get("story_effect_volume") or 0.22),
+            story_effect_volume=float(state.get("story_effect_volume") if state.get("story_effect_volume") is not None else 0.22),
             sound_cue_style=str(state.get("sound_cue_style") or "classic-book"),
             opening_cue_path=Path(state["opening_cue_path"]) if state.get("opening_cue_path") else None,
             page_turn_cue_path=Path(state["page_turn_cue_path"]) if state.get("page_turn_cue_path") else None,
@@ -2342,26 +2344,47 @@ class PremiumV2Bridge(QObject):
         project = self._active_project()
         raw = str(payload.get("path") or "").strip()
         state = load_state(project.folder)
+        try:
+            fade_in = max(0.0, min(30.0, float(payload.get("fade_in_seconds", state.get("background_audio_fade_in", 2.0)))))
+            fade_out = max(0.0, min(30.0, float(payload.get("fade_out_seconds", state.get("background_audio_fade_out", 3.0)))))
+        except (TypeError, ValueError):
+            raise ValueError("Background music fade values must be between 0 and 30 seconds.")
         if not raw:
-            state.update({"background_audio_path": "", "background_audio_mode": "off"})
+            state.update({"background_audio_path": "", "background_audio_mode": "off",
+                          "background_audio_enabled": False,
+                          "background_audio_fade_in": fade_in, "background_audio_fade_out": fade_out})
             save_state(project.folder, state)
-            return {"saved": True, "path": None, "mode": "off"}
+            return {"saved": True, "path": None, "mode": "off",
+                    "fade_in_seconds": fade_in, "fade_out_seconds": fade_out}
         selected = Path(raw).expanduser().resolve()
         valid = any(str(row["path"]) == str(selected) for row in self._sound_catalog({}))
         if not selected.is_file() or not valid:
             raise ValueError("Choose an audio file from the local Sound Design catalogue.")
-        volume = max(0.0, min(1.0, float(payload.get("volume", 0.18))))
+        try:
+            volume = max(0.0, min(1.0, float(payload.get("volume", 0.18))))
+            fade_in = max(0.0, min(30.0, float(payload.get("fade_in_seconds", state.get("background_audio_fade_in", 2.0)))))
+            fade_out = max(0.0, min(30.0, float(payload.get("fade_out_seconds", state.get("background_audio_fade_out", 3.0)))))
+        except (TypeError, ValueError):
+            raise ValueError("Background volume must be 0–100 percent and fades 0–30 seconds.")
         state.update({"background_audio_path": str(selected), "background_audio_volume": volume,
-                      "background_audio_mode": "manual", "modified_at": self._now()})
+                      "background_audio_fade_in": fade_in, "background_audio_fade_out": fade_out,
+                      "background_audio_mode": "manual", "background_audio_enabled": True,
+                      "modified_at": self._now()})
         save_state(project.folder, state)
-        return {"saved": True, "path": str(selected), "title": selected.stem, "volume": volume, "mode": "manual"}
+        return {"saved": True, "path": str(selected), "title": selected.stem, "volume": volume,
+                "fade_in_seconds": fade_in, "fade_out_seconds": fade_out, "mode": "manual"}
 
     def _sound_save_manifest(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
         state = load_state(project.folder)
         path = str(payload.get("path") or state.get("background_audio_path") or "").strip()
         enabled = bool(payload.get("enabled", bool(path)))
-        volume = max(0.0, min(1.0, float(payload.get("volume", state.get("background_audio_volume") or 0.18))))
+        try:
+            volume = max(0.0, min(1.0, float(payload.get("volume", state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18))))
+            fade_in = max(0.0, min(30.0, float(payload.get("fade_in_seconds", state.get("background_audio_fade_in", 2.0)))))
+            fade_out = max(0.0, min(30.0, float(payload.get("fade_out_seconds", state.get("background_audio_fade_out", 3.0)))))
+        except (TypeError, ValueError):
+            raise ValueError("Background volume must be 0–100 percent and fades 0–30 seconds.")
         if enabled and path:
             selected = Path(path).expanduser().resolve()
             if not selected.is_file() or not any(row["path"] == str(selected) for row in self._sound_catalog({})):
@@ -2370,8 +2393,11 @@ class PremiumV2Bridge(QObject):
                           "background_audio_enabled": True, "background_audio_volume": volume})
         else:
             state.update({"background_audio_path": "", "background_audio_mode": "off", "background_audio_enabled": False})
+        state["background_audio_fade_in"] = fade_in
+        state["background_audio_fade_out"] = fade_out
         state["sound_manifest"] = {"bgm_path": state.get("background_audio_path") or None,
-                                   "bgm_volume": volume, "enabled": bool(enabled and path),
+                                   "bgm_volume": volume, "fade_in_seconds": fade_in,
+                                   "fade_out_seconds": fade_out, "enabled": bool(enabled and path),
                                    "updated_at": self._now()}
         save_state(project.folder, state)
         return dict(state["sound_manifest"])
@@ -2399,6 +2425,8 @@ class PremiumV2Bridge(QObject):
             "strategy": str(state.get("chapter_bgm_strategy") or "same"),
             "default_path": state.get("background_audio_path") or None,
             "default_volume": float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18),
+            "fade_in_seconds": float(state.get("background_audio_fade_in") if state.get("background_audio_fade_in") is not None else 2.0),
+            "fade_out_seconds": float(state.get("background_audio_fade_out") if state.get("background_audio_fade_out") is not None else 3.0),
             "overrides": overrides,
             "chapters": [{"number": chapter.number, "title": chapter.title} for chapter in project.chapters],
         }

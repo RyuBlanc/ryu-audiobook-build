@@ -20,6 +20,22 @@
   const chapterUndoStacks = new Map(), chapterRedoStacks = new Map();
   let chapterLastText = '', chapterHistoryGroupOpen = false, chapterHistoryGroupTimer = null, chapterHistoryApplying = false;
   let libraryCharacters = [], libraryEditorId = null, libraryEditorActive = false;
+  // The approved HTML ships legacy prototype listeners. Replace only sound controls
+  // whose actions are handled by the real backend adapter; visual markup is unchanged.
+  ['importMusicTracks','importCueClips','previewSelectedTrack','setBookDefaultTrack',
+   'saveChapterBgm','previewCueSequence','clearAllCues','soundPreviewBook',
+   'saveSoundPresetAdvanced','applySoundToProduction'].forEach(id => {
+    const node = $(id);
+    if (node?.parentNode) node.replaceWith(node.cloneNode(true));
+  });
+  if ($('musicImportInput')) $('musicImportInput').onchange = null;
+  if ($('cueImportInput')) $('cueImportInput').onchange = null;
+  const fadeSeconds = id => {
+    const label = String($(id)?.selectedOptions?.[0]?.textContent || '').trim();
+    if (!label || /^none$/i.test(label)) return 0;
+    const match = label.match(/\d+/);
+    return match ? Math.max(0, Math.min(30, Number(match[0]))) : 0;
+  };
   const selectedChapter = () => chapters.find(c => c.number === window.ryuPremiumSelectedChapter) || chapters[0];
   function ensureDialogueUnassignButton() {
     const confirmButton = $('confirmAiCharacter');
@@ -337,6 +353,10 @@
   }
   async function refreshChapterBgm() {
     chapterBgmState = await call('sound.chapter_bgm.get');
+    const fadeIn = Number(chapterBgmState.fade_in_seconds ?? 2);
+    const fadeOut = Number(chapterBgmState.fade_out_seconds ?? 3);
+    if ($('bgmFadeIn')) $('bgmFadeIn').selectedIndex = ({0:0,2:1,3:2,5:3})[fadeIn] ?? 0;
+    if ($('bgmFadeOut')) $('bgmFadeOut').selectedIndex = ({0:0,3:1,5:2,8:3})[fadeOut] ?? 0;
     renderChapterBgm();
     return chapterBgmState;
   }
@@ -1139,8 +1159,8 @@
     if ($('soundTrackSearch')) $('soundTrackSearch').oninput = () => refreshSounds().catch(e=>message(e.message,true));
     document.querySelectorAll('#cueSourceFilter [data-cue-source]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('#cueSourceFilter [data-cue-source]').forEach(x => x.classList.toggle('active', x === button)); refreshSoundCues().catch(e => message(e.message, true)); }));
     if ($('soundTrackGrid')) $('soundTrackGrid').addEventListener('click', e=>{const b=e.target.closest('[data-select-sound]');if(!b)return;selectedSoundPath=b.dataset.selectSound;if($('selectedSoundTitle'))$('selectedSoundTitle').textContent=sounds.find(t=>t.path===selectedSoundPath)?.title||'Selected track';if($('selectedSoundMeta'))$('selectedSoundMeta').textContent='Selected from the local catalogue';message('Selected sound track. Save it to the active book to apply it.');});
-    if ($('setBookDefaultTrack')) $('setBookDefaultTrack').onclick = act(async()=>{if(!selectedSoundPath)throw new Error('Select a track from the local sound catalogue first.');await call('sound.assign',{path:selectedSoundPath,volume:Number($('advancedMusicVolume')?.value||18)/100});await refreshChapterBgm();message('Background track assigned to the active book.');});
-    if ($('saveSoundPresetAdvanced')) $('saveSoundPresetAdvanced').onclick = act(async()=>{await call('sound.save_manifest',{path:selectedSoundPath||'',enabled:Boolean(selectedSoundPath),volume:Number($('advancedMusicVolume')?.value||18)/100});await refreshChapterBgm();message('Sound manifest saved to the active book.');});
+    if ($('setBookDefaultTrack')) $('setBookDefaultTrack').onclick = act(async()=>{if(!selectedSoundPath)throw new Error('Select a track from the local sound catalogue first.');await call('sound.assign',{path:selectedSoundPath,volume:Number($('advancedMusicVolume')?.value ?? 18)/100,fade_in_seconds:fadeSeconds('bgmFadeIn'),fade_out_seconds:fadeSeconds('bgmFadeOut')});await refreshChapterBgm();message('Background track assigned to the active book.');});
+    if ($('saveSoundPresetAdvanced')) $('saveSoundPresetAdvanced').onclick = act(async()=>{await call('sound.save_manifest',{path:selectedSoundPath||'',enabled:Boolean(selectedSoundPath),volume:Number($('advancedMusicVolume')?.value ?? 18)/100,fade_in_seconds:fadeSeconds('bgmFadeIn'),fade_out_seconds:fadeSeconds('bgmFadeOut')});await refreshChapterBgm();message('Sound manifest saved to the active book.');});
     ['mainPlay','miniPlay'].forEach(id=>{if($(id))$(id).onclick=act(openPlayer);});
     if ($('playerTimeline')) $('playerTimeline').oninput=()=>{if(playerAudio&&playerAudio.duration)playerAudio.currentTime=Number($('playerTimeline').value)/100*playerAudio.duration;};
     if ($('hideMini')) $('hideMini').onclick=()=> $('miniPlayer')?.classList.add('hidden');
@@ -1318,13 +1338,13 @@
             $('soundWave')?.classList.add('playing');
           } else if (soundButton.id === 'setBookDefaultTrack') {
             if (!selectedSoundPath) throw new Error('Select a track from the local sound catalogue first.');
-            await call('sound.assign', {path:selectedSoundPath,volume:Number($('advancedMusicVolume')?.value || 18)/100});
+            await call('sound.assign', {path:selectedSoundPath,volume:Number($('advancedMusicVolume')?.value ?? 18)/100,fade_in_seconds:fadeSeconds('bgmFadeIn'),fade_out_seconds:fadeSeconds('bgmFadeOut')});
             message('Book default background track saved.');
           } else if (soundButton.id === 'saveSoundPresetAdvanced') {
-            const result = await call('sound.save_manifest', {path:selectedSoundPath || '',enabled:Boolean(selectedSoundPath),volume:Number($('advancedMusicVolume')?.value || 18)/100});
+            const result = await call('sound.save_manifest', {path:selectedSoundPath || '',enabled:Boolean(selectedSoundPath),volume:Number($('advancedMusicVolume')?.value ?? 18)/100,fade_in_seconds:fadeSeconds('bgmFadeIn'),fade_out_seconds:fadeSeconds('bgmFadeOut')});
             message(result.enabled ? 'Book sound manifest saved.' : 'Book sound manifest saved with background music disabled.');
           } else if (soundButton.id === 'applySoundToProduction') {
-            await call('sound.save_manifest', {path:selectedSoundPath || '',enabled:Boolean(selectedSoundPath),volume:Number($('advancedMusicVolume')?.value || 18)/100});
+            await call('sound.save_manifest', {path:selectedSoundPath || '',enabled:Boolean(selectedSoundPath),volume:Number($('advancedMusicVolume')?.value ?? 18)/100,fade_in_seconds:fadeSeconds('bgmFadeIn'),fade_out_seconds:fadeSeconds('bgmFadeOut')});
             await refreshChapterBgm();
             document.querySelector('[data-page="generate"]')?.click();
           } else if (soundButton.id === 'saveChapterBgm') {

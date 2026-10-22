@@ -98,6 +98,37 @@ class SoundDesignCatalogueTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "overwrite"):
                 assembler.assemble_m4b([chapter_dir], asset, "Test", "", None, [], background_audio_path=asset)
 
+    def test_sound_manifest_persists_bounded_fades_and_zero_volume(self):
+        track = Path(self.app_root) / "Audio Library" / "manifest.wav"
+        _valid_wav(track)
+        self.bridge_a.catalog = [{"path": str(track.resolve()), "title": "manifest"}]
+        saved = host.PremiumV2Bridge._sound_save_manifest(self.bridge_a, {
+            "path": str(track), "enabled": True, "volume": 0.0,
+            "fade_in_seconds": 0, "fade_out_seconds": 8})
+        from app.core.state import load_state
+        state = load_state(self.project_a)
+        self.assertEqual(state["background_audio_volume"], 0.0)
+        self.assertEqual(state["background_audio_fade_in"], 0.0)
+        self.assertEqual(state["background_audio_fade_out"], 8.0)
+        self.assertEqual(saved["fade_out_seconds"], 8.0)
+        disabled = host.PremiumV2Bridge._sound_save_manifest(self.bridge_a, {
+            "path": "", "enabled": False, "volume": 0.0,
+            "fade_in_seconds": 0, "fade_out_seconds": 5})
+        state = load_state(self.project_a)
+        self.assertEqual(state["background_audio_mode"], "off")
+        self.assertEqual(state["background_audio_path"], "")
+        self.assertEqual(state["background_audio_fade_out"], 5.0)
+        self.assertFalse(disabled["enabled"])
+
+    def test_production_generation_passes_saved_fades_and_preserves_zero_volumes(self):
+        source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        start = source.index("def _production_generate_book")
+        end = source.index("def _generation_progress", start)
+        generation = source[start:end]
+        self.assertIn("background_audio_fade_in=float(state.get", generation)
+        self.assertIn("background_audio_fade_out=float(state.get", generation)
+        self.assertIn("background_audio_volume=float(state.get(\"background_audio_volume\") if state.get(\"background_audio_volume\") is not None else 0.18)", generation)
+
     def test_preview_and_production_do_not_mask_missing_saved_paths(self):
         host_source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         preview_source = Path("app/ui/full_book_preview.py").read_text(encoding="utf-8")
