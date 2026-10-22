@@ -75,5 +75,32 @@ class PronunciationSynthesisSafetyTests(unittest.TestCase):
             self.assertTrue((second_u.chapter_dir / "chunks" / "00001.wav").exists())
 
 
+    def test_deleted_rule_invalidates_only_chapters_whose_synthesis_text_reverts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            provider = _OffsetAwareProvider()
+            affected = _chapter(1, "One", "NYC is busy.")
+            unrelated = _chapter(2, "Two", "Boston is quiet.")
+            rules = [{"written_form": "NYC", "spoken_form": "New York City"}]
+            first_a = prepare_chapter_plan(affected, provider, "Narrator", root, rules)
+            first_u = prepare_chapter_plan(unrelated, provider, "Narrator", root, rules)
+            for plan in (first_a, first_u):
+                _write_valid_wav(plan.chapter_dir / "chunks" / "00001.wav")
+                save_state(plan.chapter_dir, {
+                    "completed": [0],
+                    "chunks_total": len(plan.chunks_with_voices),
+                    "generation_signature": plan.signature,
+                })
+
+            second_a = prepare_chapter_plan(affected, provider, "Narrator", root, [])
+            second_u = prepare_chapter_plan(unrelated, provider, "Narrator", root, [])
+            self.assertNotEqual(first_a.signature, second_a.signature)
+            self.assertEqual(second_a.completed, frozenset())
+            self.assertFalse((second_a.chapter_dir / "chunks" / "00001.wav").exists())
+            self.assertEqual(first_u.signature, second_u.signature)
+            self.assertEqual(second_u.completed, frozenset({0}))
+            self.assertTrue((second_u.chapter_dir / "chunks" / "00001.wav").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
