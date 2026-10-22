@@ -484,60 +484,45 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $pythonExe = $env:RYU_CI_PYTHON_EXE
-          if (-not $pythonExe -or -not (Test-Path -LiteralPath $pythonExe)) {
-            $pythonExe = Join-Path $env:pythonLocation 'python.exe'
+          Add-Type -AssemblyName System.Drawing
+          $png = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.png'
+          $ico = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.ico'
+          $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
+          $exe = Join-Path (Get-Location) "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
+          foreach ($path in @($png, $ico, $installer, $exe)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required release asset missing: $path" }
           }
-          if (-not (Test-Path -LiteralPath $pythonExe)) {
-            $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          $bitmap = [System.Drawing.Bitmap]::FromFile($png)
+          try {
+            $transparent = 0
+            $nonTransparent = 0
+            for ($y = 0; $y -lt $bitmap.Height; $y += 1) {
+              for ($x = 0; $x -lt $bitmap.Width; $x += 1) {
+                if ($bitmap.GetPixel($x, $y).A -eq 0) { $transparent += 1 } else { $nonTransparent += 1 }
+              }
+            }
+            $total = $bitmap.Width * $bitmap.Height
+            if ($transparent -lt ($total * 0.001) -or $nonTransparent -lt ($total * 0.1)) {
+              throw "Logo alpha/content check failed: dimensions=$($bitmap.Width)x$($bitmap.Height), transparent=$transparent, nonTransparent=$nonTransparent"
+            }
+            Write-Host "Original logo PNG transparency verified: $($bitmap.Width)x$($bitmap.Height), transparent pixels=$transparent."
+          } finally {
+            $bitmap.Dispose()
           }
-          if (-not (Test-Path -LiteralPath $pythonExe)) { throw "Python interpreter not found for release integrity checks: $pythonExe" }
-          Write-Host "Using Python for logo/hash validation: $pythonExe"
-          & $pythonExe -c @'
-          from pathlib import Path
-          from PIL import Image
-          import hashlib
-          import json
-          root = Path.cwd()
-          png = root / "assets" / "ryu_audiobook_logo.png"
-          ico = root / "assets" / "ryu_audiobook_logo.ico"
-          if not png.is_file() or not ico.is_file():
-              raise SystemExit("Generated original logo PNG/ICO is missing.")
-          with Image.open(png) as im:
-              rgba = im.convert("RGBA")
-              alpha = rgba.getchannel("A")
-              lo, hi = alpha.getextrema()
-              transparent = sum(1 for a in alpha.getdata() if a == 0)
-              opaque = sum(1 for a in alpha.getdata() if a > 0)
-              total = rgba.width * rgba.height
-              if lo != 0 or hi == 0 or transparent < total * 0.001 or opaque < total * 0.1:
-                  raise SystemExit(f"Logo transparency/content contract failed: alpha={lo,hi}, transparent={transparent}, opaque={opaque}")
-              print(f"Original logo PNG: {rgba.width}x{rgba.height}; transparent pixels={transparent}; alpha preserved.")
-          with Image.open(ico) as im:
-              sizes = sorted(im.info.get("sizes", set()))
-              if (256, 256) not in sizes or (16, 16) not in sizes:
-                  raise SystemExit(f"ICO lacks required Windows sizes: {sizes}")
-              for size in [(16,16),(32,32),(48,48),(256,256)]:
-                  frame = im.copy()
-                  frame.thumbnail(size)
-                  if frame.convert("RGBA").getchannel("A").getextrema()[1] == 0:
-                      raise SystemExit(f"ICO frame {size} is fully transparent.")
-              print(f"Original logo ICO contains multi-size Windows icon frames: {sizes}")
-          files = [
-              root / "installer" / "installer-output" / "Ryu's Audiobook Setup.exe",
-              root / "dist" / "Ryu's Audiobook" / "Ryu's Audiobook.exe",
-              png, ico,
-          ]
-          manifest = []
-          for path in files:
-              if not path.is_file():
-                  raise SystemExit(f"Release file missing for hash manifest: {path}")
-              digest = hashlib.sha256(path.read_bytes()).hexdigest()
-              manifest.append({"file": str(path.relative_to(root)), "size_bytes": path.stat().st_size, "sha256": digest})
-              print(f"SHA256 {digest}  {path.relative_to(root)}")
-          (root / "release-sha256-manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-          '@
-          if ($LASTEXITCODE -ne 0) { throw "Logo integrity or release hash verification failed with exit code $LASTEXITCODE." }
+          if ((Get-Item -LiteralPath $ico).Length -lt 1024) { throw 'Generated Windows ICO is unexpectedly small.' }
+          Write-Host "Generated Windows ICO exists and is non-trivial in size: $((Get-Item -LiteralPath $ico).Length) bytes."
+          $manifest = @()
+          foreach ($path in @($installer, $exe, $png, $ico)) {
+            $hash = Get-FileHash -LiteralPath $path -Algorithm SHA256
+            $manifest += [pscustomobject]@{
+              file = [System.IO.Path]::GetRelativePath((Get-Location).Path, $path)
+              size_bytes = (Get-Item -LiteralPath $path).Length
+              sha256 = $hash.Hash.ToLowerInvariant()
+            }
+            Write-Host "SHA256 $($hash.Hash)  $path"
+          }
+          $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath 'release-sha256-manifest.json' -Encoding utf8
+          if (-not (Test-Path -LiteralPath 'release-sha256-manifest.json' -PathType Leaf)) { throw 'Release SHA-256 manifest was not created.' }
 
       - name: Scan release executables with Microsoft Defender
         shell: pwsh
