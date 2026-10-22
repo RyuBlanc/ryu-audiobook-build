@@ -1483,6 +1483,8 @@ class PremiumV2Bridge(QObject):
         if not chapters:
             raise ValueError("No chapters are eligible for generation. Restore chapter text or re-include a skipped chapter.")
         state = load_state(project.folder)
+        from app.audio.library import validate_saved_audio_paths
+        validate_saved_audio_paths(state)
         profile_name = str(payload.get("profile_name") or state.get("voice_profile") or "").strip()
         profile = self._find_profile(profile_name)
         if profile is None:
