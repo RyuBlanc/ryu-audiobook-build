@@ -2158,6 +2158,12 @@ class PremiumV2Bridge(QObject):
             state["chapter_bgm_strategy"] = strategy
             if strategy == "same":
                 state["chapter_bgm_overrides"] = {}
+            else:
+                # Chapter-specific tracks must be mixed even when the book has
+                # no separate default BGM assigned. The assembler gates custom
+                # overrides on manual mode, so choosing chapter-based BGM
+                # explicitly activates that mode.
+                state["background_audio_mode"] = "manual"
             state["modified_at"] = self._now()
             save_state(project.folder, state)
             return self._sound_chapter_bgm_get({})
@@ -2200,6 +2206,7 @@ class PremiumV2Bridge(QObject):
         }
         state["chapter_bgm_overrides"] = overrides
         state["chapter_bgm_strategy"] = "custom"
+        state["background_audio_mode"] = "manual"
         state["modified_at"] = self._now()
         save_state(project.folder, state)
         return {"saved": True, "number": number, "title": chapter.title,
