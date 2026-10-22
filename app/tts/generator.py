@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from pathlib import Path
 import hashlib
 import json
+import os
 import re
+import tempfile
 import wave
 from typing import Callable
 
@@ -53,8 +55,36 @@ def load_state(chapter_dir: Path) -> dict:
         return {"completed": []}
 
 
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    """Persist JSON without truncating the last good file if a write is interrupted."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(path.parent),
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_name = handle.name
+            handle.write(json.dumps(payload, ensure_ascii=False, indent=2))
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        Path(temp_name).replace(path)
+        temp_name = None
+    finally:
+        if temp_name:
+            try:
+                Path(temp_name).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def save_state(chapter_dir: Path, state: dict) -> None:
-    state_path(chapter_dir).write_text(json.dumps(state, indent=2), encoding="utf-8")
+    _atomic_write_json(state_path(chapter_dir), state)
 
 
 def _provider_signature(provider: TTSProvider, voice: str | None, chunks: list[tuple[str, str | list[str] | None]]) -> str:
