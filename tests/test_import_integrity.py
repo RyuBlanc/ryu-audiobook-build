@@ -116,7 +116,7 @@ class ImportIntegrityTests(unittest.TestCase):
         self.assertIn("Report", removed)
 
     def test_standalone_report_word_is_preserved_without_watermark_context(self):
-        source = "She handed him the report.\\n\\nReport\\n\\nThe meeting continued."
+        source = "She handed him the report.\n\nReport\n\nThe meeting continued."
         cleaned, removed = clean_import_noise(source)
 
         self.assertIn("Report", cleaned)
@@ -133,10 +133,10 @@ class ImportIntegrityTests(unittest.TestCase):
         from app.documents.parser import clean_import_noise
 
         source = (
-            "The character opened https://example.com/path to read the letter.\\n"
-            "“I said, report it!” she shouted.\\n"
-            "世界はまだ終わっていない。\\n"
-            "The hero kept walking—slowly, carefully.\\n"
+            "The character opened https://example.com/path to read the letter.\n"
+            "“I said, report it!” she shouted.\n"
+            "世界はまだ終わっていない。\n"
+            "The hero kept walking—slowly, carefully.\n"
             "The next paragraph stays separate."
         )
         cleaned, removed = clean_import_noise(source)
@@ -152,27 +152,27 @@ class ImportIntegrityTests(unittest.TestCase):
         from app.documents.parser import reflow_source_text
 
         source = (
-            "Chapter 1: Arrival\\n"
-            "The inter-\\n"
-            "national train slowed near the station.\\n\\n"
-            "“Stay here,” she said.\\n"
-            "“I will.”\\n\\n"
-            "Chapter 2: Departure\\n"
+            "Chapter 1: Arrival\n"
+            "The inter-\n"
+            "national train slowed near the station.\n\n"
+            "“Stay here,” she said.\n"
+            "“I will.”\n\n"
+            "Chapter 2: Departure\n"
             "The next part begins."
         )
         result = reflow_source_text(source)
 
-        self.assertIn("Chapter 1: Arrival\\nThe international train slowed near the station.", result)
-        self.assertIn("“Stay here,” she said.\\n“ I will.”".replace("“ ", "“"), result)
-        self.assertIn("Chapter 2: Departure\\nThe next part begins.", result)
+        self.assertIn("Chapter 1: Arrival\nThe international train slowed near the station.", result)
+        self.assertIn("“Stay here,” she said.\n“ I will.”".replace("“ ", "“"), result)
+        self.assertIn("Chapter 2: Departure\nThe next part begins.", result)
         self.assertNotIn("Arrival The", result)
         self.assertNotIn("Chapter 1: Arrival Chapter 2: Departure", result)
 
     def test_chapter_detection_supports_roman_numerals_prologue_and_epilogue(self):
         source = (
-            "Prologue\\nA beginning before the main story.\\n"
-            "Chapter IV: The Trial\\nThe trial starts.\\n"
-            "Epilogue\\nThe story closes."
+            "Prologue\nA beginning before the main story.\n"
+            "Chapter IV: The Trial\nThe trial starts.\n"
+            "Epilogue\nThe story closes."
         )
         chapters = detect_chapters(source)
 
@@ -184,15 +184,15 @@ class ImportIntegrityTests(unittest.TestCase):
 
     def test_chapter_detection_preserves_preamble_and_books_without_headings(self):
         preamble_source = (
-            "Translator note: names follow the original spelling.\\n"
-            "Chapter 1: First\\nThe first chapter begins."
+            "Translator note: names follow the original spelling.\n"
+            "Chapter 1: First\nThe first chapter begins."
         )
         chapters = detect_chapters(preamble_source)
         self.assertEqual(len(chapters), 1)
         self.assertIn("Translator note: names follow the original spelling.", chapters[0].text)
         self.assertIn("The first chapter begins.", chapters[0].text)
 
-        unheaded = detect_chapters("A complete opening.\\n\\nA complete ending.")
+        unheaded = detect_chapters("A complete opening.\n\nA complete ending.")
         self.assertEqual(len(unheaded), 1)
         self.assertEqual(unheaded[0].title, "Full Book")
         self.assertIn("A complete opening.", unheaded[0].text)
@@ -200,8 +200,8 @@ class ImportIntegrityTests(unittest.TestCase):
 
     def test_chapter_detection_does_not_treat_dialogue_like_chapter_text_as_heading(self):
         source = (
-            "Chapter 1: Arrival\\n"
-            "Chapter 2: You cannot go in there, she said, turning away.\\n"
+            "Chapter 1: Arrival\n"
+            "Chapter 2: You cannot go in there, she said, turning away.\n"
             "She reached for the door."
         )
         chapters = detect_chapters(source)
