@@ -1791,7 +1791,7 @@ class PremiumV2Bridge(QObject):
             provider, voice, chapters, project.folder / "working_audio",
             on_progress=lambda *args: self._generation_progress(job_id, *args),
             on_finished=lambda summary: self._generation_finished(job_id, project, summary, output, profile.name),
-            pronunciation_dictionary=list(state.get("pronunciation_dictionary") or []),
+            pronunciation_dictionary=_effective_pronunciation_dictionary(state),
             narration_speed=float(state.get("narration_speed") or 0.90),
             pacing_profile=str(state.get("pacing_profile") or "natural"),
             metadata=metadata, bitrate=bitrate,

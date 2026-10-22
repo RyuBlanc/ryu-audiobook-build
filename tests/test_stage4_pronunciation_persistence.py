@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.ui import premium_v2_host as host
+from app.tts.narration import apply_pronunciation_dictionary
 
 
 class _BridgeHarness:
@@ -119,6 +120,35 @@ class PronunciationPersistenceTests(unittest.TestCase):
             self.save(self.bridge_a, "Ryu", "Ree-yoo", scope="Global library")
         self.assertEqual("{broken", path.read_text(encoding="utf-8"))
 
+
+    def test_effective_synthesis_rules_merge_scopes_with_book_series_global_precedence(self):
+        settings = self.root / "settings"
+        settings.mkdir()
+        with patch.object(host, "settings_root", return_value=settings):
+            host._write_pronunciation_store(host._pronunciation_scope_path("global_library"), [
+                {"written_form": "NYC", "spoken_form": "Global City"},
+                {"written_form": "Mira", "spoken_form": "Global Mira"},
+                {"written_form": "GlobalOnly", "spoken_form": "Global Reading"},
+                {"written_form": "Disabled", "spoken_form": "Global Reading"},
+            ])
+            host._write_pronunciation_store(host._pronunciation_scope_path("series", "Slime"), [
+                {"written_form": "NYC", "spoken_form": "Series City"},
+                {"written_form": "Mira", "spoken_form": "Series Mira"},
+                {"written_form": "SeriesOnly", "spoken_form": "Series Reading"},
+                {"written_form": "Disabled", "spoken_form": "Series Reading"},
+            ])
+            effective = host._effective_pronunciation_dictionary({
+                "series": "Slime",
+                "pronunciation_dictionary": [
+                    {"written_form": "NYC", "spoken_form": "Book City", "enabled": True},
+                    {"written_form": "Disabled", "spoken_form": "Ignored", "enabled": False},
+                    {"written_form": "BookOnly", "spoken_form": "Book Reading", "enabled": True},
+                ],
+            })
+        self.assertEqual(
+            apply_pronunciation_dictionary("NYC Mira SeriesOnly GlobalOnly BookOnly Disabled", effective),
+            "Book City Series Mira Series Reading Global Reading Book Reading Disabled",
+        )
 
 if __name__ == "__main__":
     unittest.main()
