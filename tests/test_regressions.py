@@ -2468,6 +2468,33 @@ Hyoudou Issei spoke to Rias Gremory.
         source = "I am a second year high school student."
         result = prepare_for_narration(source)
         self.assertEqual(result.narration_text, source)
+    def test_cast_provider_cleanup_continues_after_a_child_close_error(self):
+        from app.tts.cast_provider import CastAwareProvider
+
+        class DummyNarrator:
+            def synthesize(self, text, output_path, voice=None):
+                return output_path
+
+        class BrokenCloser:
+            def close(self):
+                raise RuntimeError("simulated shutdown failure")
+
+        class GoodCloser:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        cast = CastAwareProvider(DummyNarrator(), "Narrator", {}, {})
+        good = GoodCloser()
+        cast._providers = {
+            "broken": (BrokenCloser(), "voice"),
+            "good": (good, "voice"),
+        }
+        cast.close()
+        self.assertTrue(good.closed, "one failed child close must not leak the other worker")
+
     def test_cast_provider_reuses_qwen_custom_worker_across_profiles(self):
         from unittest.mock import patch
         from app.tts.cast_provider import CastAwareProvider
