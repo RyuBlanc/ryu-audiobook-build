@@ -549,7 +549,7 @@ jobs:
           if (-not $mp -or -not (Test-Path $mp)) { throw 'Microsoft Defender command-line scanner was not found.' }
           foreach ($path in @($exe, $installer)) {
             Write-Host "Microsoft Defender custom scan: $path"
-            $scanOutput = @(& $mp -Scan -ScanType 3 -File $path 2>&1)
+            $scanOutput = @(& $mp -Scan -ScanType 3 -File $path -DisableRemediation 2>&1)
             $scanExit = $LASTEXITCODE
             $scanOutput | ForEach-Object { Write-Host $_ }
             $scanText = $scanOutput -join "`n"

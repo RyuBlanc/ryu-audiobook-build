@@ -286,3 +286,25 @@ Premium V2 adds controls for AI dialogue review and assignment, reusable Charact
 ### Stage 1 closure boundary
 
 The **source-level control audit is now closed** for the currently inventoried legacy control groups: all 89 old IDs are classified (69 retained, 20 mapped to named successors), and the no-ID groups below are mapped to stable selectors plus their event/backend paths. Regression tests guard both inventories. This closes the source audit, not manual acceptance: successor IDs and source handlers do not prove equivalent runtime behavior. Stage 6 must still verify interactions, persistence, responsiveness and real audio in the packaged Windows build.
+
+
+## Stage 4 Prompt 5 — cross-stage audit evidence and release blockers (23 October 2026)
+
+### Reproducible issue found and corrected in source
+- `app/chapters/editor.py` previously did not carry following-chapter dialogue assignments through merge and did not partition/remap assignment spans when splitting a chapter. Its remapper also rebuilt a small fixed set of fields and dropped multi-speaker metadata.
+- The correction remaps exact text spans to new chapter text, adjusts offsets across split/merge boundaries, preserves assignment metadata, and intentionally discards stale/removed-heading spans instead of guessing.
+- Regression file: `tests/test_cross_stage_chapter_assignment_integrity.py`. Coverage includes merge, paragraph split, split-at-selection, edits preserving multi-speaker metadata, and project save/reload compatibility. CI result is pending for the consolidated commit; do not treat test presence as a passing test.
+- Latest historical complete suite: Run #940, 459 tests passed on `9a1b9edacb133634e0f2b443f6616bd1b04b0c3b`. That SHA predates the new editor regression fix, so it is not evidence for the latest code.
+
+### Windows packaging/security observations
+- Run #940 passed frozen application, bundled assets/critical modules, Inno Setup installer, logo check, SHA-256 manifest generation, and upload of installer/manifest/portable app.
+- The Defender step's command exit code was zero, but its output said scans of both `Ryu's Audiobook.exe` and `Ryu's Audiobook Setup.exe` were “skipped.” The previous workflow incorrectly treated that as a clean scan.
+- Workflow guard now fails if scan output indicates a skipped scan and uses the custom-scan `-DisableRemediation` option to ignore configured file exclusions. The new workflow must demonstrate real completed scans before release artifacts can be uploaded.
+- The run also warned that optional starter track `springly_sprigs.mp3` failed to download (curl exit code 35); the packaging step intentionally omits unavailable supplemental tracks from the packaged manifest, while required track/cue count gates passed.
+
+### Stage carry-forward checklist (not closed)
+- **Stage 1:** target Windows PC freeze/crash/hardware validation and packaged UI responsiveness/flicker profiling.
+- **Stage 2:** packaged TXT/EPUB/PDF/DOCX import; duplicate guidance; cancel/retry; chapter detection edge fixtures; add/delete/merge/split/find-replace/undo-redo/re-detection safety; edit/save/reopen comparison.
+- **Stage 3:** actual saved provider/profile/voice preview and voice quality; Voice Studio/Character Studio persistence and errors; character rename/alias/duplicate/delete behavior; analysis confidence/examples/dialogue totals/unassigned counts across reload; assignment offsets and routing after chapter structural operations.
+- **Stage 4:** actual audio listening; pronunciation on/off and selected voice/provider identity; sound-design preview vs final mix; cue boundaries; BGM-off; measured duration; provider/FFmpeg failure, cancellation, retry, cleanup and resumability; unchanged checkpoint/source text.
+- **Branch/PR sequence:** Stage 4 head is a descendant of Stage 3 PR #18 head `d5d17f41393910596ad793dfe8df8753c6a1a836`. Keep the Stage 3 PR open until its review/merge is resolved; merge Stage 3 first, then re-check Stage 4 against the resulting merge base. Never force-reset Stage 4 to an older baseline.

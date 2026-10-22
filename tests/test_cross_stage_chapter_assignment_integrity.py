@@ -1,6 +1,9 @@
 """Cross-stage regressions for cast assignment integrity during chapter editing."""
 import unittest
+import tempfile
+from pathlib import Path
 
+from app.core.project import Project
 from app.chapters.detector import Chapter
 from app.chapters.editor import ChapterEditor
 
@@ -88,6 +91,38 @@ class CrossStageChapterAssignmentIntegrityTests(unittest.TestCase):
         self.assertEqual([item["text"] for item in second.dialogue_assignments], [dialogue])
         item = second.dialogue_assignments[0]
         self.assertEqual(second.text[item["start"]:item["end"]], dialogue)
+
+    def test_split_and_merge_assignment_offsets_survive_project_save_reload(self):
+        text = "Opening paragraph.\n\nMira said, Wait here.\n\nClosing paragraph."
+        opening = "Opening paragraph."
+        dialogue = "Wait here."
+        chapter = Chapter(1, "Full Book", text, dialogue_assignments=[
+            {"start": text.index(opening), "end": text.index(opening) + len(opening),
+             "text": opening, "speaker": "Narrator"},
+            {"start": text.index(dialogue), "end": text.index(dialogue) + len(dialogue),
+             "text": dialogue, "speaker": "Mira", "speakers": ["Mira", "Ren"],
+             "multi_speaker_mode": "chorus", "confidence": 0.9},
+        ])
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp) / "project"
+            editor = ChapterEditor([chapter])
+            editor.split(0, 1, "Dialogue")
+            Project("Compatibility Book", folder, None, editor.chapters).save()
+            reopened = Project.load(folder)
+            self.assertEqual([item["text"] for item in reopened.chapters[0].dialogue_assignments], [opening])
+            self.assertEqual([item["text"] for item in reopened.chapters[1].dialogue_assignments], [dialogue])
+            right_item = reopened.chapters[1].dialogue_assignments[0]
+            self.assertEqual(reopened.chapters[1].text[right_item["start"]:right_item["end"]], dialogue)
+            self.assertEqual(right_item["speakers"], ["Mira", "Ren"])
+            ChapterEditor(reopened.chapters).merge_with_next(0)
+            Project("Compatibility Book", folder, None, reopened.chapters).save()
+            merged = Project.load(folder).chapters[0]
+            self.assertEqual({item["text"] for item in merged.dialogue_assignments}, {opening, dialogue})
+            for item in merged.dialogue_assignments:
+                self.assertEqual(merged.text[item["start"]:item["end"]], item["text"])
+            merged_dialogue = next(item for item in merged.dialogue_assignments if item["text"] == dialogue)
+            self.assertEqual(merged_dialogue["multi_speaker_mode"], "chorus")
+            self.assertEqual(merged_dialogue["confidence"], 0.9)
 
     def test_text_edit_keeps_multi_speaker_fields_but_drops_stale_spans(self):
         old = "Mira said, Wait here."
