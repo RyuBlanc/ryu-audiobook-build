@@ -19,6 +19,7 @@ class _BridgeHarness:
         self.project = SimpleNamespace(folder=Path(folder), chapters=list(chapters))
     def _active_project(self): return self.project
     def _now(self): return "2026-10-22T00:00:00+00:00"
+    def _sound_catalog(self, _payload): return getattr(self, "catalog", [])
 
 class SoundDesignCatalogueTests(unittest.TestCase):
     def setUp(self):
@@ -60,28 +61,26 @@ class SoundDesignCatalogueTests(unittest.TestCase):
 
     def test_chapter_bgm_assignment_edit_clear_and_reload_are_project_isolated(self):
         track = _valid_wav(self.app_root / "Audio Library" / "track.wav")
-        with patch.object(host.PremiumV2Bridge, "_sound_catalog", autospec=True,
-                          side_effect=lambda _self, _payload: [{"path": str(track.resolve()), "title": "track"}]):
-            saved = host.PremiumV2Bridge._sound_chapter_bgm_save(self.bridge_a, {
+        self.bridge_a.catalog = [{"path": str(track.resolve()), "title": "track"}]
+        saved = host.PremiumV2Bridge._sound_chapter_bgm_save(self.bridge_a, {
                 "number": 1, "rule": "custom", "path": str(track), "volume": 0.2,
                 "start_offset": "after_10_seconds", "end_behavior": "continue_to_transition"})
-            self.assertTrue(saved["saved"])
-            reloaded = host.PremiumV2Bridge._sound_chapter_bgm_get(self.bridge_a, {})
-            self.assertEqual(reloaded["overrides"]["1"]["path"], str(track.resolve()))
-            self.assertEqual(reloaded["overrides"]["1"]["end_behavior"], "continue_to_transition")
-            host.PremiumV2Bridge._sound_chapter_bgm_save(self.bridge_a, {"number": 1, "rule": "none"})
-            self.assertEqual(host.PremiumV2Bridge._sound_chapter_bgm_get(self.bridge_a, {})["overrides"]["1"]["rule"], "none")
-            self.assertEqual(host.PremiumV2Bridge._sound_chapter_bgm_get(self.bridge_b, {})["overrides"], {})
+        self.assertTrue(saved["saved"])
+        reloaded = host.PremiumV2Bridge._sound_chapter_bgm_get(self.bridge_a, {})
+        self.assertEqual(reloaded["overrides"]["1"]["path"], str(track.resolve()))
+        self.assertEqual(reloaded["overrides"]["1"]["end_behavior"], "continue_to_transition")
+        host.PremiumV2Bridge._sound_chapter_bgm_save(self.bridge_a, {"number": 1, "rule": "none"})
+        self.assertEqual(host.PremiumV2Bridge._sound_chapter_bgm_get(self.bridge_a, {})["overrides"]["1"]["rule"], "none")
+        self.assertEqual(host.PremiumV2Bridge._sound_chapter_bgm_get(self.bridge_b, {})["overrides"], {})
 
     def test_cue_assignments_save_clear_and_reload_are_book_local(self):
         track = _valid_wav(self.app_root / "Audio Library" / "opening.wav")
-        with patch.object(host.PremiumV2Bridge, "_sound_catalog", autospec=True,
-                          side_effect=lambda _self, _payload: [{"path": str(track.resolve()), "title": "opening"}]):
-            self.assertTrue(host.PremiumV2Bridge._sound_cues_save(self.bridge_a, {"slot": "opening", "path": str(track)})["saved"])
-            self.assertEqual(host.PremiumV2Bridge._sound_cues_get(self.bridge_a, {})["opening"]["path"], str(track.resolve()))
-            self.assertIsNone(host.PremiumV2Bridge._sound_cues_get(self.bridge_b, {})["opening"]["path"])
-            host.PremiumV2Bridge._sound_cues_clear(self.bridge_a, {})
-            self.assertIsNone(host.PremiumV2Bridge._sound_cues_get(self.bridge_a, {})["opening"]["path"])
+        self.bridge_a.catalog = [{"path": str(track.resolve()), "title": "opening"}]
+        self.assertTrue(host.PremiumV2Bridge._sound_cues_save(self.bridge_a, {"slot": "opening", "path": str(track)})["saved"])
+        self.assertEqual(host.PremiumV2Bridge._sound_cues_get(self.bridge_a, {})["opening"]["path"], str(track.resolve()))
+        self.assertIsNone(host.PremiumV2Bridge._sound_cues_get(self.bridge_b, {})["opening"]["path"])
+        host.PremiumV2Bridge._sound_cues_clear(self.bridge_a, {})
+        self.assertIsNone(host.PremiumV2Bridge._sound_cues_get(self.bridge_a, {})["opening"]["path"])
 
     def test_catalogue_uses_sidecar_title_license_and_duration(self):
         track = _valid_wav(self.app_root / "Audio Library" / "custom.wav")
@@ -104,7 +103,8 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         preview_source = Path("app/ui/full_book_preview.py").read_text(encoding="utf-8")
         self.assertIn("validate_saved_audio_paths(state)", host_source)
         self.assertIn("validate_saved_audio_paths(state)", preview_source)
-        self.assertNotIn('Path(state["opening_cue_path"]).is_file() else None', host_source)
-        self.assertNotIn('Path(str(state["opening_cue_path"])).is_file() else None', preview_source)
+        generation = host_source[host_source.index("def _production_generate_book"):host_source.index("def _sound_catalog")]
+        self.assertIn('opening_cue_path=Path(state["opening_cue_path"]) if state.get("opening_cue_path") else None', generation)
+        self.assertIn('opening_cue_path=Path(str(state["opening_cue_path"])) if state.get("opening_cue_path") else None', preview_source)
 
 if __name__ == "__main__": unittest.main()

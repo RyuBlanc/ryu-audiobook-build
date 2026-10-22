@@ -199,9 +199,7 @@ def import_audio_files(files,*,target_kind,category="universal",license_note="")
  added=[]
  for raw in files:
   source=Path(raw).expanduser()
-  if not source.is_file() or source.suffix.casefold() not in AUDIO_EXTENSIONS:
-   raise ValueError(f"Unsupported or missing audio asset: {source}")
-  probe_audio_duration_seconds(source)
+  if not source.is_file() or source.suffix.casefold() not in AUDIO_EXTENSIONS: continue
   if source.resolve().parent==destination.resolve(): dest=source.resolve()
   else:
    dest=destination/source.name
@@ -242,7 +240,10 @@ def _seed_index(seed,count):
 def resolve_music_track(mood,selected_track=None,*,seed_text=""):
  if selected_track is not None:
   p=Path(str(selected_track)).expanduser()
-  probe_audio_duration_seconds(p)
+  if not p.is_file():
+   raise FileNotFoundError(f"Selected music track no longer exists: {p}. Reassign it in Sound Design.")
+  if p.suffix.casefold() not in AUDIO_EXTENSIONS:
+   raise ValueError(f"Selected music track has an unsupported audio format: {p.name}")
   return p.resolve()
  key=str(mood or "universal").strip().casefold()
  key={"dark":"horror","anime-rock":"action","fantasy / adventure":"fantasy",
@@ -282,9 +283,12 @@ def validate_saved_audio_paths(state):
  for key,label in fields:
   raw=state.get(key)
   if not raw: continue
-  try: probe_audio_duration_seconds(Path(str(raw)).expanduser())
-  except (FileNotFoundError,ValueError,RuntimeError) as exc:
-   raise type(exc)(f"Saved {label} is invalid: {exc}. Reassign it in Sound Design.") from exc
+  path=Path(str(raw)).expanduser()
+  if not path.is_file():
+   raise FileNotFoundError(f"Saved {label} is missing: {path}. Reassign it in Sound Design.")
+  try: probe_audio_duration_seconds(path)
+  except (ValueError,RuntimeError) as exc:
+   raise ValueError(f"Saved {label} is unreadable: {exc}. Reassign it in Sound Design.") from exc
  auto_path=state.get("auto_music_track_path")
  if auto_path and str(state.get("background_audio_mode") or "off").casefold()=="auto":
   try: probe_audio_duration_seconds(Path(str(auto_path)).expanduser())
@@ -297,17 +301,20 @@ def validate_saved_audio_paths(state):
    raw=override.get("path")
    if not raw:
     raise ValueError(f"Chapter {chapter} uses custom BGM but no track is saved. Reassign it in Sound Design.")
-   try: probe_audio_duration_seconds(Path(str(raw)).expanduser())
-   except (FileNotFoundError,ValueError,RuntimeError) as exc:
-    raise type(exc)(f"Saved custom BGM for chapter {chapter} is invalid: {exc}. Reassign it in Sound Design.") from exc
+   path=Path(str(raw)).expanduser()
+   if not path.is_file():
+    raise FileNotFoundError(f"Saved custom BGM for chapter {chapter} is missing: {path}. Reassign it in Sound Design.")
+   try: probe_audio_duration_seconds(path)
+   except (ValueError,RuntimeError) as exc:
+    raise ValueError(f"Saved custom BGM for chapter {chapter} is unreadable: {exc}. Reassign it in Sound Design.") from exc
 
 def resolve_cue_track(kind,selected_path=None,*,seed_text=""):
  if selected_path:
   p=Path(selected_path).expanduser()
-  probe_audio_duration_seconds(p)
+  if not p.is_file():
+   raise FileNotFoundError(f"Selected audiobook cue no longer exists: {p}")
+  if p.suffix.casefold() not in AUDIO_EXTENSIONS:
+   raise ValueError(f"Selected audiobook cue has an unsupported audio format: {p.name}")
   return p.resolve()
  tracks=list_cue_tracks(kind)
- if not tracks:return None
- selected=tracks[_seed_index(seed_text,len(tracks))]
- probe_audio_duration_seconds(selected)
- return selected
+ return tracks[_seed_index(seed_text,len(tracks))] if tracks else None
