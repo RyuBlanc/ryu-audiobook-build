@@ -53,6 +53,30 @@ class PronunciationDictionaryTests(unittest.TestCase):
             "Mira met Wren.",
         )
 
+    def test_voice_studio_saved_field_names_are_applied(self):
+        text = "Mira Vale met Ren."
+        dictionary = [
+            {"written_form": "Mira Vale", "spoken_form": "My-rah Vail", "enabled": True},
+            {"written_form": "Ren", "spoken_form": "Wren", "enabled": True},
+        ]
+
+        self.assertEqual(
+            apply_pronunciation_dictionary(text, dictionary),
+            "My-rah Vail met Wren.",
+        )
+
+    def test_duplicate_written_forms_are_deterministic_and_first_entry_wins(self):
+        text = "Mira met Mira."
+        dictionary = [
+            {"written_form": "Mira", "spoken_form": "Mee-rah"},
+            {"written_form": "mira", "spoken_form": "My-rah"},
+        ]
+
+        self.assertEqual(
+            apply_pronunciation_dictionary(text, dictionary),
+            "Mee-rah met Mee-rah.",
+        )
+
     def test_unicode_names_are_supported(self):
         text = "Éowyn met éOWYN."
         dictionary = [{"written": "Éowyn", "spoken": "Ay-oh-win"}]
