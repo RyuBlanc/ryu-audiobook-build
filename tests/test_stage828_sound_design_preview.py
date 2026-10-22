@@ -22,7 +22,10 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         self.assertIn('audio_root = project.folder / "working_audio"', source)
         self.assertIn('A full-book mix preview needs saved narration audio for every chapter.', source)
         self.assertIn('reuses_saved_narration', source)
-        self.assertIn('chapter_dirs, output, title, author, cover, chapter_titles', source)
+        # The assembler mutates chapter directories, so preview must use disposable staged copies.
+        self.assertIn("staged_dirs, output, title, author, cover, chapter_titles", source)
+        self.assertIn("shutil.copytree(source_dir, target_dir)", source)
+        self.assertIn('with tempfile.TemporaryDirectory(prefix="ryu-preview-chapters-") as staging:', source)
 
     def test_full_book_preview_uses_the_production_sound_design_assignments(self):
         source = Path("app/ui/full_book_preview.py").read_text(encoding="utf-8")

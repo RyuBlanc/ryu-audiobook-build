@@ -124,3 +124,12 @@ Close Stage 4 only when targeted and full automated tests pass, the Windows pack
 - Voice and full-book previews register cancellable job events, stop at safe synthesis/assembly boundaries, mark cancellation distinctly, discard partial preview output, and clean their event registrations. A provider or single FFmpeg operation already in progress may finish before the next safe-boundary check.
 - Full-book preview still uses saved narration and reports measured final duration; it does not re-synthesize chapters or claim duration from requested settings.
 - Automated evidence will be added by the Prompt 4 regression suite and the latest Windows workflow. Target-PC listening, cue audibility/boundaries, and perceived mix quality remain manual acceptance items.
+
+
+## Run #937 investigation and Prompt 4 continuation
+
+- Run #937 failed on commit `b7b3b382f5320158b3c178340d3b4d65d31964dd`: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39854793296.
+- The Windows workflow ran 459 unittest cases and stopped at `test_full_book_mix_preview_reuses_saved_narration_and_validates_all_chapters`. The test asserted the old direct `chapter_dirs` argument, while the worker correctly passes disposable `staged_dirs` so the production assembler cannot mutate saved chapter checkpoints. Other reported Stage 4 preview tests passed. Packaging steps were not reached in Run #937.
+- Prompt 4 correction: update the source-contract regression to assert that chapter directories are copied into a temporary staging area and the assembler receives those staged directories. This aligns the test with the checkpoint-preservation behavior rather than weakening the implementation.
+- Latest-head Windows rerun is required after this correction. Do not claim packaging, installer, SHA-256, Defender, or complete Stage 4 acceptance until the new workflow actually confirms those gates.
+- Remaining manual acceptance: target-PC listening and cue boundary/audibility/mix quality, plus Stage 1–3 carry-forward checks listed above.
