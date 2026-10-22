@@ -130,7 +130,7 @@ def apply_pronunciation_dictionary(text: str, dictionary: list[dict] | None = No
     entries.sort(key=lambda pair: len(pair[0]), reverse=True)
     by_written = {written.casefold(): spoken for written, spoken in entries}
     alternatives = "|".join(re.escape(written) for written, _spoken in entries)
-    pattern = re.compile(r"(?<!\\w)(?P<written>" + alternatives + r")(?!\\w)", re.IGNORECASE)
+    pattern = re.compile(r"(?<!\w)(?P<written>" + alternatives + r")(?!\w)", re.IGNORECASE)
     return pattern.sub(
         lambda match: by_written[match.group("written").casefold()],
         text,
