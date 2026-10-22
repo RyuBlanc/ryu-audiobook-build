@@ -115,3 +115,12 @@ Close Stage 4 only when targeted and full automated tests pass, the Windows pack
 - A selected zero volume remains zero instead of being replaced by a default. Disabling BGM persists an off mode while retaining the selected fade configuration.
 - Legacy prototype listeners on the existing Sound Design buttons are removed by cloning those controls without changing their visible markup, preventing duplicate fake import/preview/save actions alongside backend calls.
 - The approved HTML has no dedicated ambience selector or ducking control. Existing backend ambience/sidechain ducking remains supported, but adding new user-facing controls is intentionally out of scope for this no-redesign stage.
+
+
+## Prompt 4 — Preview, mixing, and final assembly
+
+- Full-book Sound Design preview now copies saved chapter working directories into a disposable staging area before invoking the production assembler. The assembler writes chapter M4A and concat metadata inside those directories; staging prevents preview from changing project chapter files or reusable generation checkpoints.
+- Full-book preview now passes the saved BGM fade-in/fade-out values to the same assembler as production and uses production's 0.90 narration-speed fallback when the setting is absent.
+- Voice and full-book previews register cancellable job events, stop at safe synthesis/assembly boundaries, mark cancellation distinctly, discard partial preview output, and clean their event registrations. A provider or single FFmpeg operation already in progress may finish before the next safe-boundary check.
+- Full-book preview still uses saved narration and reports measured final duration; it does not re-synthesize chapters or claim duration from requested settings.
+- Automated evidence will be added by the Prompt 4 regression suite and the latest Windows workflow. Target-PC listening, cue audibility/boundaries, and perceived mix quality remain manual acceptance items.

@@ -237,6 +237,7 @@ class PremiumV2Bridge(QObject):
         self._jobs: dict[str, dict[str, Any]] = {}
         self._generators: dict[str, GenerationManager] = {}
         self._import_cancel_events: dict[str, threading.Event] = {}
+        self._preview_cancel_events: dict[str, threading.Event] = {}
         self._load_durable_jobs()
 
     @Slot(str, str, result=str)
@@ -1209,8 +1210,11 @@ class PremiumV2Bridge(QObject):
         job_id = self._new_job("sound-design-preview" if include_sound_design else "voice-preview",
                                ("Sound Design mix preview · " if include_sound_design else "Preview · ") + profile.name,
                                f"Generate up to {seconds} seconds using the selected provider", project)
+        cancel_event = threading.Event()
+        with self._jobs_lock:
+            self._preview_cancel_events[job_id] = cancel_event
         self._job_update(job_id, state="running", started_at=self._now(), stage="Preparing preview", progress=2)
-        threading.Thread(target=self._preview_worker, args=(job_id, profile, text_value, seconds, state),
+        threading.Thread(target=self._preview_worker, args=(job_id, profile, text_value, seconds, state, cancel_event),
                          daemon=True, name="RyuPremiumPreview").start()
         return {"job_id": job_id, "state": "running", "duration_seconds": seconds, "profile_name": profile.name}
 
@@ -1285,8 +1289,13 @@ class PremiumV2Bridge(QObject):
             raise RuntimeError("The Sound Design mix preview changed duration unexpectedly.")
         return output
 
-    def _preview_worker(self, job_id: str, profile, text_value: str, seconds: int, state: dict[str, Any]) -> None:
+    def _preview_worker(self, job_id: str, profile, text_value: str, seconds: int, state: dict[str, Any], cancel_event=None) -> None:
+        from app.tts.preview import PreviewCancelledError
+        output = app_root() / "Previews" / f"preview_{job_id}.wav"
+        preview_path = output
         try:
+            if cancel_event is not None and cancel_event.is_set():
+                raise PreviewCancelledError("Preview cancelled by user.")
             provider, voice = provider_from_profile(profile)
             # Keep Voice Studio previews consistent with production: saved
             # character assignments must route quoted dialogue through their
@@ -1333,10 +1342,15 @@ class PremiumV2Bridge(QObject):
                 pacing_profile=str(state.get("pacing_profile") or "natural"),
                 max_chars=max(1400, seconds * 240), progress_callback=progress,
                 target_seconds=seconds,
+                cancel_check=cancel_event.is_set if cancel_event is not None else None,
             )
+            if cancel_event is not None and cancel_event.is_set():
+                raise PreviewCancelledError("Preview cancelled by user.")
             preview_path = Path(result.output_path)
             if state.get("_include_sound_design_preview"):
                 preview_path = self._render_sound_design_preview(preview_path, job_id, state)
+            if cancel_event is not None and cancel_event.is_set():
+                raise PreviewCancelledError("Preview cancelled by user.")
             duration = None
             try:
                 from app.audio.assembler import _duration_ms
@@ -1368,9 +1382,27 @@ class PremiumV2Bridge(QObject):
                                  "pronunciation_rule_counts": dict(rule_counts),
                              })
         except Exception as exc:
-            log.exception("Premium V2 voice preview failed")
-            self._job_update(job_id, state="failed", stage="Preview failed", progress=0, message=str(exc),
-                             error={"code": "preview_failed", "message": str(exc)}, recoverable=True)
+            if cancel_event is not None and cancel_event.is_set() or isinstance(exc, PreviewCancelledError):
+                for candidate in {output, preview_path}:
+                    try:
+                        Path(candidate).unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                self._job_update(job_id, state="cancelled", stage="Preview cancelled", progress=0,
+                                 message="Preview cancelled at a safe synthesis boundary; temporary audio was discarded.")
+            else:
+                log.exception("Premium V2 voice preview failed")
+                for candidate in {output, preview_path}:
+                    try:
+                        Path(candidate).unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                self._job_update(job_id, state="failed", stage="Preview failed", progress=0, message=str(exc),
+                                 error={"code": "preview_failed", "message": str(exc)}, recoverable=True)
+        finally:
+            if cancel_event is not None:
+                with self._jobs_lock:
+                    self._preview_cancel_events.pop(job_id, None)
 
     def _character_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         state = load_state(self._active_project().folder)
@@ -1951,6 +1983,13 @@ class PremiumV2Bridge(QObject):
             manager = self._generators.get(job_id)
             row = self._jobs.get(job_id)
         if manager is None:
+            with self._jobs_lock:
+                preview_cancel = self._preview_cancel_events.get(job_id)
+                import_cancel = self._import_cancel_events.get(job_id)
+            if row and preview_cancel is not None and row.get("state") in {"queued", "running", "cancel_requested"}:
+                preview_cancel.set()
+                return self._job_update(job_id, state="cancel_requested", stage="Cancellation requested",
+                                        message="Preview will stop at the next safe synthesis or FFmpeg boundary; partial preview audio will be discarded.")
             with self._jobs_lock:
                 import_cancel = self._import_cancel_events.get(job_id)
             if row and row.get("type") == "import" and import_cancel is not None and row.get("state") in {"queued", "running", "cancel_requested"}:

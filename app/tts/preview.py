@@ -21,6 +21,11 @@ class _PreviewUnits(list):
 
 
 @dataclass(frozen=True)
+class PreviewCancelledError(RuntimeError):
+    """Raised when a user cancels a preview at a safe synthesis boundary."""
+
+
+@dataclass(frozen=True)
 class PreviewResult:
     output_path: Path
     segments: int
@@ -151,6 +156,7 @@ def build_voice_preview(
     dialogue_assignments=None,
     progress_callback=None,
     target_seconds: float | None = None,
+    cancel_check=None,
 ) -> PreviewResult:
     if target_seconds is not None and float(target_seconds) > 0:
         # A character estimate is only a safety budget, not the preview's
@@ -189,6 +195,11 @@ def build_voice_preview(
             except Exception:
                 pass
 
+    def check_cancelled() -> None:
+        if callable(cancel_check) and cancel_check():
+            raise PreviewCancelledError("Preview cancelled by user.")
+
+    check_cancelled()
     report("preparing", 0, total_units)
     target = max(0.0, float(target_seconds or 0.0))
     accumulated_seconds = 0.0
@@ -206,6 +217,7 @@ def build_voice_preview(
         generated_segments = 0
         generated_text: list[str] = []
         for index, (unit, unit_voice) in enumerate(units):
+            check_cancelled()
             report("synthesizing", index, total_units)
             raw_path = root / f"{index:03d}.wav"
             normalized_path = root / f"{index:03d}-normalized.wav"
@@ -213,13 +225,16 @@ def build_voice_preview(
                 synthesize_voice_set(provider, unit, unit_voice, raw_path)
             else:
                 provider.synthesize(unit, raw_path, unit_voice)
+            check_cancelled()
             if not provider_handles_controls:
                 _apply_speed(raw_path, narration_speed)
                 next_text = units[index + 1][0] if index + 1 < len(units) else None
                 pause_ms = pause_after_ms(unit, pacing_profile, next_text=next_text)
                 if pause_ms:
                     append_silence(raw_path, pause_ms)
+            check_cancelled()
             _normalize(raw_path, normalized_path)
+            check_cancelled()
             normalized.append(normalized_path)
             generated_text.append(unit)
             for written, count in (unit_rule_counts[index] if index < len(unit_rule_counts) else {}).items():
@@ -238,8 +253,10 @@ def build_voice_preview(
             if target > 0 and accumulated_seconds >= target:
                 break
 
+        check_cancelled()
         report("finalizing", 0, 1)
         _concat(normalized, output_path)
+        check_cancelled()
         report("finalizing", 1, 1)
 
     if not output_path.exists() or output_path.stat().st_size < 1024:
