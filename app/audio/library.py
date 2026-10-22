@@ -232,6 +232,10 @@ def resolve_music_track(mood,selected_track=None,*,seed_text=""):
 def resolve_cue_track(kind,selected_path=None,*,seed_text=""):
  if selected_path:
   p=Path(selected_path).expanduser()
-  if p.is_file() and p.suffix.casefold() in AUDIO_EXTENSIONS:return p.resolve()
+  if not p.is_file():
+   raise FileNotFoundError(f"Selected audiobook cue no longer exists: {p}")
+  if p.suffix.casefold() not in AUDIO_EXTENSIONS:
+   raise ValueError(f"Selected audiobook cue has an unsupported audio format: {p.name}")
+  return p.resolve()
  tracks=list_cue_tracks(kind)
  return tracks[_seed_index(seed_text,len(tracks))] if tracks else None
