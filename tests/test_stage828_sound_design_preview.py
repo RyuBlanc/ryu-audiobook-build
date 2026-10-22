@@ -22,7 +22,10 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         self.assertIn('audio_root = project.folder / "working_audio"', source)
         self.assertIn('A full-book mix preview needs saved narration audio for every chapter.', source)
         self.assertIn('reuses_saved_narration', source)
-        self.assertIn('chapter_dirs, output, title, author, cover, chapter_titles', source)
+        # The assembler mutates chapter directories, so preview must use disposable staged copies.
+        self.assertIn("staged_dirs, output, title, author, cover, chapter_titles", source)
+        self.assertIn("shutil.copytree(source_dir, target_dir)", source)
+        self.assertIn('with tempfile.TemporaryDirectory(prefix="ryu-preview-chapters-") as staging:', source)
 
     def test_full_book_preview_uses_the_production_sound_design_assignments(self):
         source = Path("app/ui/full_book_preview.py").read_text(encoding="utf-8")
@@ -109,6 +112,135 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
             self.assertEqual(result, narration)
             run.assert_not_called()
             self.assertFalse(output.exists())
+
+
+    def test_chapter_bgm_override_uses_original_chapter_number_after_skips(self):
+        import json
+        from tempfile import TemporaryDirectory
+        from app.audio.assembler import _chapter_number_for_bgm
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            chapter = root / "004_Chapter_Four"
+            chapter.mkdir()
+            (chapter / "narration.json").write_text(
+                json.dumps({"chapter": 4}), encoding="utf-8"
+            )
+            self.assertEqual(_chapter_number_for_bgm(chapter, 2), 4)
+
+            fallback_chapter = root / "007_Chapter_Seven"
+            fallback_chapter.mkdir()
+            self.assertEqual(_chapter_number_for_bgm(fallback_chapter, 3), 7)
+
+    def test_full_book_preview_reports_measured_duration(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.ui import full_book_preview
+
+        class Host:
+            def __init__(self):
+                self.updates = []
+
+            def _job_update(self, job_id, **changes):
+                self.updates.append((job_id, changes))
+
+        with TemporaryDirectory() as temporary:
+            output = Path(temporary) / "preview.m4b"
+            host = Host()
+
+            def render(*args, **kwargs):
+                target = Path(args[1])
+                target.write_bytes(b"validated preview")
+                return target
+
+            with patch("app.audio.assembler.assemble_m4b", side_effect=render), \
+                 patch("app.audio.assembler._duration_ms", return_value=12_345):
+                full_book_preview._render_full_book_preview(
+                    host, "job-1", object(), [], [], output, "Title", "", {}, 256, {}
+                )
+
+            final_update = host.updates[-1][1]
+            self.assertEqual(final_update["state"], "completed")
+            self.assertEqual(final_update["result"]["duration_seconds"], 12.345)
+            self.assertTrue(output.is_file())
+
+    def test_failed_full_book_preview_removes_partial_output(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.ui import full_book_preview
+
+        class Host:
+            def __init__(self):
+                self.updates = []
+
+            def _job_update(self, job_id, **changes):
+                self.updates.append((job_id, changes))
+
+        with TemporaryDirectory() as temporary:
+            output = Path(temporary) / "preview.m4b"
+            host = Host()
+
+            def failed_render(*args, **kwargs):
+                Path(args[1]).write_bytes(b"partial")
+                raise RuntimeError("FFmpeg failed during finalization")
+
+            with patch("app.audio.assembler.assemble_m4b", side_effect=failed_render):
+                full_book_preview._render_full_book_preview(
+                    host, "job-2", object(), [], [], output, "Title", "", {}, 256, {}
+                )
+
+            self.assertFalse(output.exists())
+            self.assertEqual(host.updates[-1][1]["state"], "failed")
+            self.assertIn("FFmpeg failed", host.updates[-1][1]["message"])
+
+
+
+    def test_missing_saved_sound_assets_fail_before_preview_or_generation(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from app.audio.library import validate_saved_audio_paths
+
+        with TemporaryDirectory() as temporary:
+            missing = Path(temporary) / "deleted-music.wav"
+            with self.assertRaisesRegex(FileNotFoundError, "Saved book background music is missing"):
+                validate_saved_audio_paths({"background_audio_path": str(missing)})
+            with self.assertRaisesRegex(FileNotFoundError, "Saved custom BGM for chapter 4 is missing"):
+                validate_saved_audio_paths({"chapter_bgm_overrides": {"4": {"rule": "custom", "path": str(missing)}}})
+            with self.assertRaisesRegex(ValueError, "uses custom BGM but no track is saved"):
+                validate_saved_audio_paths({"chapter_bgm_overrides": {"4": {"rule": "custom"}}})
+
+    def test_explicit_missing_cue_does_not_silently_fall_back_to_another_track(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from app.audio.library import resolve_cue_track
+
+        with TemporaryDirectory() as temporary:
+            missing = Path(temporary) / "deleted-opening-cue.wav"
+            with self.assertRaisesRegex(FileNotFoundError, "Selected audiobook cue no longer exists"):
+                resolve_cue_track("opening", selected_path=missing)
+
+    def test_chapter_bgm_end_behaviors_have_distinct_fade_policies(self):
+        from app.audio.assembler import _chapter_bgm_fade_out
+
+        self.assertEqual(_chapter_bgm_fade_out("fade_before_end", 4.0), 4.0)
+        self.assertEqual(_chapter_bgm_fade_out("continue_to_transition", 4.0), 0.75)
+        self.assertEqual(_chapter_bgm_fade_out("stop_immediately", 4.0), 0.0)
+        self.assertEqual(_chapter_bgm_fade_out("fade_before_end", 99.0), 30.0)
+        with self.assertRaisesRegex(ValueError, "Unsupported chapter BGM end behavior"):
+            _chapter_bgm_fade_out("unknown", 3.0)
+
+    def test_chapter_bgm_selection_activates_mixer_without_book_default(self):
+        source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        start = source.index("    def _sound_chapter_bgm_save(")
+        end = source.index("    def _sound_cues_get(", start)
+        handler = source[start:end]
+        self.assertIn('state["background_audio_mode"] = "manual"', handler)
+        assembler = Path("app/audio/assembler.py").read_text(encoding="utf-8")
+        self.assertIn(
+            'chapter_scoped_bgm = bool(effective_overrides) and effective_audio_mode == "manual"',
+            assembler,
+        )
+
 
 
 if __name__ == "__main__":

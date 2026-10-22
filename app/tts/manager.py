@@ -13,7 +13,7 @@ from app.chapters.detector import Chapter
 from app.tts.base import TTSProvider
 from app.tts.generator import generate_chapter
 from app.tts.chunker import split_text
-from app.tts.narration import prepare_for_narration
+from app.tts.narration import apply_pronunciation_dictionary_with_counts, prepare_for_narration
 
 
 @dataclass
@@ -109,6 +109,7 @@ class GenerationManager:
         self._chapter_work_units: list[list[int]] = []
         self._total_chunks = 0
         self._total_work_units = 0
+        self.pronunciation_rule_counts: dict[str, int] = {}
 
     def start(
         self,
@@ -257,10 +258,7 @@ class GenerationManager:
         for chapter in self.chapters:
             self._chunk_offsets.append(offset)
             self._chunk_work_offsets.append(work_offset)
-            narration_text = prepare_for_narration(
-                chapter.text,
-                self.pronunciation_dictionary,
-            ).narration_text
+            narration_text = prepare_for_narration(chapter.text).narration_text
             if hasattr(self.provider, "split_for_cast"):
                 try:
                     raw_parts = self.provider.split_for_cast(
@@ -283,6 +281,9 @@ class GenerationManager:
                     max_sentences=int(getattr(self.provider, "recommended_chunk_sentences", 2)),
                     split_on_expression_change=bool(getattr(self.provider, "split_on_expression_change", False)),
                 ):
+                    paced, rule_counts = apply_pronunciation_dictionary_with_counts(paced, self.pronunciation_dictionary)
+                    for written, count in rule_counts.items():
+                        self.pronunciation_rule_counts[written] = self.pronunciation_rule_counts.get(written, 0) + count
                     unit = max(1, len(paced))
                     chapter_units.append(unit)
                     offset += 1
@@ -293,6 +294,9 @@ class GenerationManager:
         generated_chapter_dirs: list[Path] = []
         completed_numbers: list[int] = []
         self._emit(0, len(self.chapters), 0, f"plan:{self._total_work_units}:0:{self._total_chunks}")
+        if self.pronunciation_rule_counts:
+            total_replacements = sum(self.pronunciation_rule_counts.values())
+            self._emit(0, len(self.chapters), 0, f"pronunciation:{total_replacements}:{len(self.pronunciation_rule_counts)}")
         cancelled = False
         packaging_failed = False
         packaging_error = None

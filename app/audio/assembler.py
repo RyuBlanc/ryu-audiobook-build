@@ -336,6 +336,42 @@ def _mix_chapter_bgm(
     return output_path
 
 
+
+def _chapter_bgm_fade_out(end_behavior: str, configured_fade_out: float) -> float:
+    """Resolve chapter BGM tail policy to a distinct, bounded fade duration.
+
+    'fade_before_end' uses the configured book fade. 'continue_to_transition'
+    keeps the bed almost to the boundary, using a short 0.75-second tail so it
+    meets the transition cleanly. 'stop_immediately' cuts at the chapter edge.
+    """
+    behavior = str(end_behavior or "fade_before_end").strip().lower()
+    if behavior == "fade_before_end":
+        return max(0.0, min(30.0, float(configured_fade_out)))
+    if behavior == "continue_to_transition":
+        return 0.75
+    if behavior == "stop_immediately":
+        return 0.0
+    raise ValueError(f"Unsupported chapter BGM end behavior: {behavior}")
+
+def _chapter_number_for_bgm(chapter_dir: Path, fallback: int) -> int:
+    """Resolve the source chapter number so skipped/reordered chapters keep their overrides."""
+    try:
+        payload = json.loads((chapter_dir / "narration.json").read_text(encoding="utf-8"))
+        number = int(payload.get("chapter") or 0)
+        if number > 0:
+            return number
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    match = re.match(r"^(\d+)_", chapter_dir.name)
+    if match:
+        try:
+            number = int(match.group(1))
+            if number > 0:
+                return number
+        except ValueError:
+            pass
+    return int(fallback)
+
 def assemble_m4b(
     chapter_dirs: list[Path],
     output_path: Path,
@@ -400,6 +436,15 @@ def assemble_m4b(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path = output_path.with_suffix(".m4b")
+    protected_inputs = [Path(p).expanduser().resolve() for p in (
+        background_audio_path, ambience_audio_path, opening_cue_path, page_turn_cue_path,
+        ending_cue_path, scene_transition_cue_path,
+    ) if p]
+    protected_inputs.extend(Path(str(item.get("path"))).expanduser().resolve()
+                            for item in (chapter_bgm_overrides or {}).values()
+                            if isinstance(item, dict) and item.get("rule") == "custom" and item.get("path"))
+    if output_path.resolve() in protected_inputs:
+        raise ValueError("Audiobook output cannot overwrite a selected sound-design source asset. Choose a different output path.")
 
     effective_audio_mode = str(background_audio_mode or "manual").strip().casefold()
     if effective_audio_mode not in {"off", "auto", "manual"}:
@@ -717,7 +762,8 @@ def assemble_m4b(
         if chapter_scoped_bgm:
             chapter_music_files: list[Path] = []
             for chapter_index, (chapter_file, chapter_dir) in enumerate(zip(chapters, chapter_dirs), start=1):
-                override = effective_overrides.get(str(chapter_index), {})
+                source_chapter_number = _chapter_number_for_bgm(chapter_dir, chapter_index)
+                override = effective_overrides.get(str(source_chapter_number), {})
                 if not isinstance(override, dict):
                     override = {}
                 rule = str(override.get("rule") or "default").strip().lower()
@@ -744,7 +790,7 @@ def assemble_m4b(
                     except (OSError, ValueError, TypeError, IndexError):
                         offset_ms = 0
                 behavior = str(override.get("end_behavior") or "fade_before_end").strip().lower()
-                fade_out = float(background_audio_fade_out) if behavior == "fade_before_end" else 0.0
+                fade_out = _chapter_bgm_fade_out(behavior, background_audio_fade_out)
                 mixed = temp_dir / f"chapter-bgm-{chapter_index:05d}.m4a"
                 chapter_music_files.append(_mix_chapter_bgm(
                     chapter_file, selected_track, mixed, float(volume),
