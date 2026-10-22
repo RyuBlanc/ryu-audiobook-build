@@ -409,7 +409,14 @@
           if (completionResult === false) {
             message('The preview job ended, but its output did not pass playback validation. Check the preview status and retry.', true);
           } else {
-            message(job.message || ((job.title || 'Job') + ' ' + job.state), job.state !== 'completed');
+            // Import results carry review warnings separately from the concise job status.
+            // Surface those warnings to the user instead of silently dropping them.
+            const importWarnings = job.type === 'import' && job.state === 'completed' &&
+              Array.isArray(job.result?.warnings) ? job.result.warnings.filter(Boolean) : [];
+            const completionMessage = importWarnings.length
+              ? importWarnings.join(' ')
+              : (job.message || ((job.title || 'Job') + ' ' + job.state));
+            message(completionMessage, job.state !== 'completed');
           }
           if (job.state === 'completed') { await refreshChapters().catch(()=>{}); await refreshCharacters().catch(()=>{}); }
         }
