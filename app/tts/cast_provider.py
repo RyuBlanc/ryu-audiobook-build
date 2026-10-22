@@ -331,7 +331,12 @@ class CastAwareProvider(TTSProvider):
             seen.add(id(provider))
             close = getattr(provider, "close", None)
             if callable(close):
-                close()
+                try:
+                    close()
+                except Exception:
+                    # One failed child shutdown must not prevent the remaining
+                    # heavyweight workers from being released.
+                    continue
 
     def _provider_cache_key(self, profile_name: str, profile: VoiceProfile) -> str:
         backend = self.backend_override if self.backend_override != "automatic" else (profile.backend or "automatic")
