@@ -94,8 +94,10 @@ class SoundDesignCatalogueTests(unittest.TestCase):
 
     def test_final_output_cannot_overwrite_selected_sound_asset(self):
         asset = _valid_wav(self.root / "source.m4b")
-        with self.assertRaisesRegex(ValueError, "overwrite"):
-            assembler.assemble_m4b([], asset, "Test", "", None, [], background_audio_path=asset)
+        chapter_dir = self.root / "chapter"; chapter_dir.mkdir()
+        with patch.object(assembler, "assemble_chapter", return_value=chapter_dir / "chapter.m4a"):
+            with self.assertRaisesRegex(ValueError, "overwrite"):
+                assembler.assemble_m4b([chapter_dir], asset, "Test", "", None, [], background_audio_path=asset)
 
     def test_preview_and_production_do_not_mask_missing_saved_paths(self):
         host_source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")

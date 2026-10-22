@@ -182,7 +182,7 @@ def probe_audio_duration_seconds(path):
  except (OSError,subprocess.SubprocessError) as exc:
   raise RuntimeError(f"Could not inspect audio asset {path.name}: {exc}") from exc
  output=str(result.stderr or "")+"\\n"+str(result.stdout or "")
- match=re.search(r"Duration:\\s*(\\d+):(\\d+):(\\d+(?:\\.\\d+)?)",output)
+ match=re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)",output)
  if not match:
   raise ValueError(f"Audio asset {path.name} is unreadable or has no measurable duration. Re-import a valid audio file.")
  seconds=int(match.group(1))*3600+int(match.group(2))*60+float(match.group(3))
@@ -192,12 +192,16 @@ def probe_audio_duration_seconds(path):
 
 def import_audio_files(files,*,target_kind,category="universal",license_note=""):
  target=str(target_kind or "").strip().casefold()
+ if target not in {"music", *(key for key,_label in CUE_KINDS)}:
+  raise ValueError(f"Unknown audio import type: {target_kind}")
  destination=music_category_root(category) if target=="music" else cue_category_root(target)
  note=str(license_note or "").strip()
  added=[]
  for raw in files:
   source=Path(raw).expanduser()
-  if not source.is_file() or source.suffix.casefold() not in AUDIO_EXTENSIONS: continue
+  if not source.is_file() or source.suffix.casefold() not in AUDIO_EXTENSIONS:
+   raise ValueError(f"Unsupported or missing audio asset: {source}")
+  probe_audio_duration_seconds(source)
   if source.resolve().parent==destination.resolve(): dest=source.resolve()
   else:
    dest=destination/source.name
@@ -209,7 +213,11 @@ def import_audio_files(files,*,target_kind,category="universal",license_note="")
            "original_filename":source.name,"license_note":note,
            "imported_at":datetime.now(timezone.utc).isoformat()}
   try: _metadata_path(dest).write_text(json.dumps(payload,ensure_ascii=False,indent=2),encoding="utf-8")
-  except OSError: pass
+  except OSError as exc:
+   if dest != source.resolve():
+    try: dest.unlink()
+    except OSError: pass
+   raise RuntimeError(f"Could not save audio metadata for {dest.name}: {exc}") from exc
   added.append(dest)
  return added
 
