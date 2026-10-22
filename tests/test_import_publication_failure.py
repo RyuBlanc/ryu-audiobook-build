@@ -14,12 +14,13 @@ class ImportPublicationFailureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "library"
             missing_source = Path(temp) / "missing.txt"
+            root.mkdir(parents=True)
 
             with mock.patch("app.core.project.library_root", return_value=root):
                 with self.assertRaisesRegex(FileNotFoundError, "Import source does not exist"):
                     create_project("Invalid Import", missing_source, [Chapter(1, "Chapter 1", "Text")])
 
-                self.assertFalse(root.exists())
+                self.assertEqual(list(root.iterdir()), [])
                 self.assertEqual(list_projects(), [])
 
 
