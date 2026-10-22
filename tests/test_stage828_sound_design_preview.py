@@ -192,5 +192,19 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
 
 
 
+    def test_chapter_bgm_selection_activates_mixer_without_book_default(self):
+        source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        start = source.index("    def _sound_chapter_bgm_save(")
+        end = source.index("    def _sound_cues_get(", start)
+        handler = source[start:end]
+        self.assertIn('state["background_audio_mode"] = "manual"', handler)
+        assembler = Path("app/audio/assembler.py").read_text(encoding="utf-8")
+        self.assertIn(
+            'chapter_scoped_bgm = bool(effective_overrides) and effective_audio_mode == "manual"',
+            assembler,
+        )
+
+
+
 if __name__ == "__main__":
     unittest.main()
