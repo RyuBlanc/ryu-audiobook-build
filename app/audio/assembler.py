@@ -346,7 +346,7 @@ def _chapter_number_for_bgm(chapter_dir: Path, fallback: int) -> int:
             return number
     except (OSError, ValueError, TypeError, AttributeError):
         pass
-    match = re.match(r"^(\\d+)_", chapter_dir.name)
+    match = re.match(r"^(\d+)_", chapter_dir.name)
     if match:
         try:
             number = int(match.group(1))
