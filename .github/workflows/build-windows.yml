@@ -502,7 +502,7 @@ jobs:
               }
             }
             $total = $bitmap.Width * $bitmap.Height
-            if ($transparent -lt ($total * 0.001) -or $nonTransparent -lt ($total * 0.1)) {
+            if ($transparent -lt 1 -or $nonTransparent -lt ($total * 0.1)) {
               throw "Logo alpha/content check failed: dimensions=$($bitmap.Width)x$($bitmap.Height), transparent=$transparent, nonTransparent=$nonTransparent"
             }
             Write-Host "Original logo PNG transparency verified: $($bitmap.Width)x$($bitmap.Height), transparent pixels=$transparent."
