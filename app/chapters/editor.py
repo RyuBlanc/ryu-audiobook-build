@@ -32,21 +32,76 @@ class ChapterEditor:
             raise IndexError("There is no next chapter to merge.")
         current = self.chapters[index]
         following = self.chapters[index + 1]
-        title = current.title
-        text = (current.text.rstrip() + "\n\n" + following.text.lstrip()).strip()
-        self.chapters[index] = replace(current, title=title, text=text)
+        left = current.text.rstrip()
+        right = following.text.lstrip()
+        raw_text = left + "\n\n" + right
+        leading_trim = len(raw_text) - len(raw_text.lstrip())
+        text = raw_text.strip()
+        right_offset = len(left) + 2 - leading_trim
+
+        assignments = []
+        for item in getattr(current, "dialogue_assignments", []) or []:
+            adjusted = dict(item)
+            adjusted["start"] = int(item.get("start", 0) or 0) - leading_trim
+            adjusted["end"] = int(item.get("end", 0) or 0) - leading_trim
+            assignments.append(adjusted)
+        for item in getattr(following, "dialogue_assignments", []) or []:
+            adjusted = dict(item)
+            adjusted["start"] = int(item.get("start", 0) or 0) + right_offset
+            adjusted["end"] = int(item.get("end", 0) or 0) + right_offset
+            assignments.append(adjusted)
+
+        remapped = _remap_assignments(text, assignments)
+        self.chapters[index] = replace(
+            current, title=current.title, text=text, dialogue_assignments=remapped
+        )
         del self.chapters[index + 1]
         self._renumber()
 
     def split(self, index: int, paragraph_index: int, new_title: str) -> None:
         chapter = self.chapters[index]
-        paragraphs = [p.strip() for p in chapter.text.split("\n\n") if p.strip()]
-        if paragraph_index <= 0 or paragraph_index >= len(paragraphs):
+        text = chapter.text
+        paragraph_spans = []
+        cursor = 0
+        for paragraph in text.split("\n\n"):
+            start = cursor + len(paragraph) - len(paragraph.lstrip())
+            end = cursor + len(paragraph.rstrip())
+            if paragraph.strip():
+                paragraph_spans.append((start, end))
+            cursor += len(paragraph) + 2
+        if paragraph_index <= 0 or paragraph_index >= len(paragraph_spans):
             raise ValueError("Split point must be between paragraphs.")
-        first = "\n\n".join(paragraphs[:paragraph_index])
-        second = "\n\n".join(paragraphs[paragraph_index:])
-        self.chapters[index] = replace(chapter, text=first)
-        self.chapters.insert(index + 1, Chapter(0, new_title.strip() or "New Chapter", second))
+
+        split_at = paragraph_spans[paragraph_index][0]
+        left_raw, right_raw = text[:split_at], text[split_at:]
+        first, second = left_raw.strip(), right_raw.strip()
+        first_trim = len(left_raw) - len(left_raw.lstrip())
+        second_trim = len(right_raw) - len(right_raw.lstrip())
+        first_assignments, second_assignments = [], []
+        for item in getattr(chapter, "dialogue_assignments", []) or []:
+            start = int(item.get("start", 0) or 0)
+            end = int(item.get("end", start) or start)
+            if end <= split_at:
+                adjusted = dict(item)
+                adjusted["start"] = start - first_trim
+                adjusted["end"] = end - first_trim
+                first_assignments.append(adjusted)
+            elif start >= split_at:
+                adjusted = dict(item)
+                adjusted["start"] = start - split_at - second_trim
+                adjusted["end"] = end - split_at - second_trim
+                second_assignments.append(adjusted)
+            # An assignment spanning the split boundary is deliberately dropped.
+        first_assignments = _remap_assignments(first, first_assignments)
+        second_assignments = _remap_assignments(second, second_assignments)
+        self.chapters[index] = replace(
+            chapter, text=first, dialogue_assignments=first_assignments
+        )
+        self.chapters.insert(
+            index + 1,
+            Chapter(0, new_title.strip() or "New Chapter", second,
+                    dialogue_assignments=second_assignments),
+        )
         self._renumber()
 
     def split_at_selection(
@@ -72,16 +127,45 @@ class ChapterEditor:
         if not title:
             raise ValueError("Select a chapter title first.")
 
-        before = text[:line_start].strip()
-        after = text[line_end + 1 :].strip() if line_end < len(text) else ""
+        cut_at = line_end + 1 if line_end < len(text) else line_end
+        before_raw = text[:line_start]
+        after_raw = text[cut_at:]
+        before = before_raw.strip()
+        after = after_raw.strip()
+        before_trim = len(before_raw) - len(before_raw.lstrip())
+        after_trim = len(after_raw) - len(after_raw.lstrip())
+        before_assignments, after_assignments = [], []
+        for item in getattr(chapter, "dialogue_assignments", []) or []:
+            start_pos = int(item.get("start", 0) or 0)
+            end_pos = int(item.get("end", start_pos) or start_pos)
+            if end_pos <= line_start:
+                adjusted = dict(item)
+                adjusted["start"] = start_pos - before_trim
+                adjusted["end"] = end_pos - before_trim
+                before_assignments.append(adjusted)
+            elif start_pos >= cut_at:
+                adjusted = dict(item)
+                adjusted["start"] = start_pos - cut_at - after_trim
+                adjusted["end"] = end_pos - cut_at - after_trim
+                after_assignments.append(adjusted)
+            # Assignments on the removed heading line are intentionally discarded.
+        before_assignments = _remap_assignments(before, before_assignments)
+        after_assignments = _remap_assignments(after, after_assignments)
 
         if not before:
             # The selected heading is at the beginning: simply make it the
             # current chapter title and keep all following story text.
-            self.chapters[index] = replace(chapter, title=title, text=after)
+            self.chapters[index] = replace(
+                chapter, title=title, text=after, dialogue_assignments=after_assignments
+            )
         else:
-            self.chapters[index] = replace(chapter, text=before)
-            self.chapters.insert(index + 1, Chapter(0, title, after))
+            self.chapters[index] = replace(
+                chapter, text=before, dialogue_assignments=before_assignments
+            )
+            self.chapters.insert(
+                index + 1,
+                Chapter(0, title, after, dialogue_assignments=after_assignments),
+            )
 
         self._renumber()
 
@@ -101,20 +185,28 @@ class ChapterEditor:
 
 
 def _remap_assignments(text: str, assignments: list[dict]) -> list[dict]:
-    """Keep assignments attached to their dialogue text after local edits.
+    """Keep valid cast metadata attached to its exact dialogue after edits.
 
-    Exact dialogue text is preferred. If a text was edited, its old
-    assignment is dropped instead of being silently attached to a different
-    passage.
+    Stale or ambiguous source spans are not guessed. All assignment metadata
+    (including multi-speaker mode, confidence, and evidence) is retained when
+    the exact text can be located in the new chapter.
     """
     remapped: list[dict] = []
     used: set[int] = set()
     for item in assignments or []:
         snippet = str(item.get("text", "")).strip()
         speaker = str(item.get("speaker", "")).strip()
-        if not snippet or not speaker:
+        speakers = [
+            str(value).strip()
+            for value in (item.get("speakers") or [])
+            if str(value).strip()
+        ]
+        if not snippet or not (speaker or speakers):
             continue
-        old_start = int(item.get("start", 0) or 0)
+        try:
+            old_start = int(item.get("start", 0) or 0)
+        except (TypeError, ValueError):
+            old_start = 0
         candidates: list[int] = []
         cursor = 0
         while True:
@@ -130,11 +222,12 @@ def _remap_assignments(text: str, assignments: list[dict]) -> list[dict]:
         start = min(candidates, key=lambda pos: abs(pos - old_start))
         end = start + len(snippet)
         used.add(start)
-        remapped.append({
-            "start": start,
-            "end": end,
-            "text": snippet,
-            "speaker": speaker,
-            "source": str(item.get("source", "manual")),
-        })
+        updated = dict(item)
+        updated.update({"start": start, "end": end, "text": snippet})
+        if speaker:
+            updated["speaker"] = speaker
+        if speakers:
+            updated["speakers"] = speakers
+        updated.setdefault("source", "manual")
+        remapped.append(updated)
     return remapped
