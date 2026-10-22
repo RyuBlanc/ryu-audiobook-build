@@ -131,7 +131,7 @@ Close Stage 4 only when targeted and full automated tests pass, the Windows pack
 - Run #937 failed on commit `b7b3b382f5320158b3c178340d3b4d65d31964dd`: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39854793296.
 - The Windows workflow ran 459 unittest cases and stopped at `test_full_book_mix_preview_reuses_saved_narration_and_validates_all_chapters`. The test asserted the old direct `chapter_dirs` argument, while the worker correctly passes disposable `staged_dirs` so the production assembler cannot mutate saved chapter checkpoints. Other reported Stage 4 preview tests passed. Packaging steps were not reached in Run #937.
 - Prompt 4 correction: update the source-contract regression to assert that chapter directories are copied into a temporary staging area and the assembler receives those staged directories. This aligns the test with the checkpoint-preservation behavior rather than weakening the implementation.
-- Latest-head Windows rerun is required after this correction. Do not claim packaging, installer, SHA-256, Defender, or complete Stage 4 acceptance until the new workflow actually confirms those gates.
+- Run #938 subsequently verified this correction and the packaging gates on commit `6cb04fca5a941778979f347d5f8ee7a07e15b643`; see the detailed Run #938 record below. Defender's tool reported the two scans as skipped, so actual malware-scan verification remains unresolved.
 - Remaining manual acceptance: target-PC listening and cue boundary/audibility/mix quality, plus Stage 1–3 carry-forward checks listed above.
 
 
