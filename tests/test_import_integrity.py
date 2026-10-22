@@ -233,6 +233,21 @@ class ImportIntegrityTests(unittest.TestCase):
             self.assertTrue(loaded.chapters[0].skip_for_generation)
             self.assertEqual(loaded.chapters[0].text, "A complete chapter.")
 
+    def test_failed_project_metadata_or_chapter_write_removes_staging_folder(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "library"
+            source = Path(temp) / "source.txt"
+            source.write_text("A complete source book.", encoding="utf-8")
+
+            with mock.patch("app.core.project.library_root", return_value=root):
+                with mock.patch.object(Project, "save", side_effect=OSError("simulated metadata write failure")):
+                    with self.assertRaisesRegex(OSError, "simulated metadata write failure"):
+                        create_project("Write Failure", source, [Chapter(1, "Chapter 1", "Text")])
+
+            self.assertTrue(root.exists())
+            self.assertEqual(list(root.iterdir()), [])
+            self.assertEqual(list_projects(), [])
+
     def test_library_listing_hides_in_progress_import_staging_directories(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "library"
