@@ -151,6 +151,18 @@ class Stage3CharacterAnalysisTests(unittest.TestCase):
         self.assertEqual(merged["scope"], "Series-wide")
         self.assertEqual(merged["chapter_appearances"], [1, 3, 8])
 
+
+    def test_character_rename_preserves_previous_name_as_alias_for_voice_routing(self):
+        host_source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        update_method = host_source[
+            host_source.index("def _character_update("):
+            host_source.index("def _character_delete(")
+        ]
+
+        self.assertIn("if original_name.casefold() != name.casefold():", update_method)
+        self.assertIn("aliases = [original_name, *aliases]", update_method)
+        self.assertIn('str(alias).strip().casefold() != name.casefold()', update_method)
+
     def test_manual_assignments_remain_character_candidates_during_reanalysis(self):
         chapter = Chapter(
             1,
