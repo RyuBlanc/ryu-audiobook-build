@@ -7,6 +7,7 @@ on:
       - fix/voice-preview-responsive-emotion
       - feature/background-audio-mvp
       - fix/import-qa-speaker-hover-hardware
+      - fix/stage-1-generation-stability
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.
