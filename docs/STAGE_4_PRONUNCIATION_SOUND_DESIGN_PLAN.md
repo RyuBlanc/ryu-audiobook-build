@@ -37,9 +37,9 @@ Make pronunciation handling and story-aware sound design predictable, persistent
 
 ## 4.4 Regression, packaging and acceptance
 
-- [ ] Add focused Stage 4 regression tests and run them during development.
-- [ ] Run the complete unittest suite on the latest Stage 4 head.
-- [ ] Run the Windows frozen-app, bundled-asset, installer, SHA-256, and Microsoft Defender workflow; inspect all failed steps.
+- [x] Add focused Stage 4 regression tests and run them during development (Run #919 passed on `422fcb1bde50761f31a67653996e397953ef118a`).
+- [x] Run the complete unittest suite on the latest Stage 4 head (Run #919 passed).
+- [x] Run the Windows frozen-app, bundled-asset, installer, SHA-256, and Microsoft Defender workflow; inspect all failed steps (Run #919: all required steps passed; release publication skipped by workflow policy).
 - [ ] Target-PC acceptance: edit/save/reopen pronunciation rules and sound-design assignments, generate previews, and compare actual output with requested settings.
 - [ ] Preserve and track all earlier open acceptance gates: Stage 1 hardware freeze/crash validation; Stage 2 supported-format import/edit/reopen validation; Stage 3 Voice Studio/Character Studio UI and actual voice-preview acceptance.
 - [ ] Do not mark Stage 4 complete from green CI alone.
@@ -60,6 +60,13 @@ Stage 3 Run #894 succeeded on `ec20d76106e01971e16c045a475eb72f78115c83`; the St
 ## Stage 4 baseline audit
 
 The existing application includes a pronunciation dictionary, a cast-aware voice preview path, a sound-design preview path, BGM/transition cue settings, and an audio assembly pipeline. This stage begins by testing the real implementation and fixing gaps; do not assume every listed behavior is already correct.
+
+
+
+## Latest verification evidence
+
+- **Run #919** completed successfully on `422fcb1bde50761f31a67653996e397953ef118a` on 2026-10-22: complete unittest/application build, frozen app, bundled assets, installer, SHA-256 manifest, Microsoft Defender scan, and artifact uploads passed. Verified run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39793982369.
+- Automated gates above are checked off only for that exact commit. Target-PC listening and save/reopen acceptance remain open; green CI is not Stage 4 sign-off.
 
 ## Completion rule
 
