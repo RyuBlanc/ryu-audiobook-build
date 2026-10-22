@@ -275,15 +275,15 @@ class GenerationManager:
             from app.tts.pacing import split_for_pacing
             chapter_units: list[int] = []
             for part, _part_voice in raw_parts:
-                part, rule_counts = apply_pronunciation_dictionary_with_counts(part, self.pronunciation_dictionary)
-                for written, count in rule_counts.items():
-                    self.pronunciation_rule_counts[written] = self.pronunciation_rule_counts.get(written, 0) + count
                 for paced in split_for_pacing(
                     part,
                     max_chars=int(getattr(self.provider, "recommended_chunk_chars", 1400)),
                     max_sentences=int(getattr(self.provider, "recommended_chunk_sentences", 2)),
                     split_on_expression_change=bool(getattr(self.provider, "split_on_expression_change", False)),
                 ):
+                    paced, rule_counts = apply_pronunciation_dictionary_with_counts(paced, self.pronunciation_dictionary)
+                    for written, count in rule_counts.items():
+                        self.pronunciation_rule_counts[written] = self.pronunciation_rule_counts.get(written, 0) + count
                     unit = max(1, len(paced))
                     chapter_units.append(unit)
                     offset += 1
