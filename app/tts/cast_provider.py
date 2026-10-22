@@ -366,7 +366,8 @@ class CastAwareProvider(TTSProvider):
         profile = self.profiles.get(profile_name)
         if profile is None:
             return self.narrator_provider.synthesize(text, output_path, self.narrator_voice)
-        cached = self._providers.get(profile_name)
+        cache_key = self._provider_cache_key(profile_name, profile)
+        cached = self._providers.get(cache_key)
         if cached is None:
             cached = provider_from_profile(profile)
             provider, provider_voice = cached
@@ -376,6 +377,9 @@ class CastAwareProvider(TTSProvider):
             if callable(child_callback):
                 child_callback(self._status_callback)
             cached = (provider, provider_voice)
-            self._providers[profile_name] = cached
+            self._providers[cache_key] = cached
         provider, provider_voice = cached
+        if cache_key.startswith(("shared:qwen:", "shared:chatterbox:")):
+            self._configure_profile_request(provider, profile)
+            provider_voice = profile.voice_id
         return provider.synthesize(text, output_path, provider_voice)
