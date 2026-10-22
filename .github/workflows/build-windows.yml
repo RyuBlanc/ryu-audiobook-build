@@ -10,6 +10,7 @@ on:
       - fix/stage-1-generation-stability
       - stage-2/import-integrity
       - stage-3/voice-studio-character-assignment
+      - stage-4-pronunciation-sound-design
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.
