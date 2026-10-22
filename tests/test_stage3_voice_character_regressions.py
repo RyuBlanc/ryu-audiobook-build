@@ -1,6 +1,9 @@
 """Stage 3 regression tests for voice cast analysis and dialogue assignment."""
 
 import unittest
+import tempfile
+from pathlib import Path
+from unittest import mock
 
 from app.chapters.assignment_utils import (
     assignment_speakers,
@@ -10,6 +13,36 @@ from app.chapters.assignment_utils import (
 )
 from app.chapters.characters import analyze_book, merge_character_analysis_record
 from app.chapters.detector import Chapter
+from app.tts.voice_profile import VoiceProfile, load_saved_profiles, save_profiles
+
+
+
+class Stage3VoiceProfilePersistenceTests(unittest.TestCase):
+    def test_custom_voice_profile_round_trips_unicode_metadata(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "voice catalogue"
+            catalogue = root / "voices.json"
+            profile = VoiceProfile(
+                name="Mira • 夜",
+                provider="chatterbox",
+                voice_id="mira-reference",
+                sample_path=str(root / "Mira • 夜" / "reference.wav"),
+                notes="Character voice — warm, measured, and clear.",
+                authorized=True,
+            )
+
+            with mock.patch("app.tts.voice_profile.voices_root", return_value=root), \\
+                 mock.patch("app.tts.voice_profile.profiles_file", return_value=catalogue), \\
+                 mock.patch("app.tts.voice_profile.builtin_voice_profiles", return_value=[]):
+                save_profiles([profile])
+                loaded = load_saved_profiles()
+
+            self.assertTrue(catalogue.is_file())
+            self.assertEqual(len(loaded), 1)
+            self.assertEqual(loaded[0].name, "Mira • 夜")
+            self.assertEqual(loaded[0].sample_path, str(root / "Mira • 夜" / "reference.wav"))
+            self.assertEqual(loaded[0].notes, "Character voice — warm, measured, and clear.")
+            self.assertTrue(loaded[0].authorized)
 
 
 class Stage3DialogueAssignmentTests(unittest.TestCase):
