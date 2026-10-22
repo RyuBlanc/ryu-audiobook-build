@@ -107,13 +107,18 @@ def apply_pronunciation_dictionary(text: str, dictionary: list[dict] | None = No
 
     result = text
     entries = []
+    seen_written: set[str] = set()
     for item in dictionary:
         if not isinstance(item, dict) or item.get("enabled", True) is False:
             continue
-        written = str(item.get("written", "")).strip()
-        spoken = str(item.get("spoken", "")).strip()
-        if written and spoken:
+        # Voice Studio stores written_form/spoken_form; accept the shorter
+        # written/spoken shape as a backwards-compatible API form too.
+        written = str(item.get("written_form") or item.get("written") or item.get("word") or "").strip()
+        spoken = str(item.get("spoken_form") or item.get("spoken") or item.get("pronunciation") or "").strip()
+        key = written.casefold()
+        if written and spoken and key not in seen_written:
             entries.append((written, spoken))
+            seen_written.add(key)
 
     if not entries:
         return text
@@ -125,7 +130,7 @@ def apply_pronunciation_dictionary(text: str, dictionary: list[dict] | None = No
     entries.sort(key=lambda pair: len(pair[0]), reverse=True)
     by_written = {written.casefold(): spoken for written, spoken in entries}
     alternatives = "|".join(re.escape(written) for written, _spoken in entries)
-    pattern = re.compile(r"(?<!\w)(?P<written>" + alternatives + r")(?!\w)", re.IGNORECASE)
+    pattern = re.compile(r"(?<!\\w)(?P<written>" + alternatives + r")(?!\\w)", re.IGNORECASE)
     return pattern.sub(
         lambda match: by_written[match.group("written").casefold()],
         text,
