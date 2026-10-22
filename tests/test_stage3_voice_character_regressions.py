@@ -31,9 +31,11 @@ class Stage3VoiceProfilePersistenceTests(unittest.TestCase):
                 authorized=True,
             )
 
-            with mock.patch("app.tts.voice_profile.voices_root", return_value=root), \\
-                 mock.patch("app.tts.voice_profile.profiles_file", return_value=catalogue), \\
-                 mock.patch("app.tts.voice_profile.builtin_voice_profiles", return_value=[]):
+            with (
+                mock.patch("app.tts.voice_profile.voices_root", return_value=root),
+                mock.patch("app.tts.voice_profile.profiles_file", return_value=catalogue),
+                mock.patch("app.tts.voice_profile.builtin_voice_profiles", return_value=[]),
+            ):
                 save_profiles([profile])
                 loaded = load_saved_profiles()
 
