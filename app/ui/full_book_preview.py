@@ -79,7 +79,7 @@ def start_full_book_preview(host) -> dict[str, Any]:
 def _render_full_book_preview(host, job_id, project, chapter_dirs, chapter_titles,
                               output, title, author, metadata, bitrate, state) -> None:
     try:
-        from app.audio.assembler import assemble_m4b
+        from app.audio.assembler import assemble_m4b, _duration_ms
 
         def report(done: int, total: int, stage: str) -> None:
             progress = min(96, max(4, int((done / max(1, total)) * 90) + 4))
@@ -118,14 +118,25 @@ def _render_full_book_preview(host, job_id, project, chapter_dirs, chapter_title
             chapter_bgm_overrides=state.get("chapter_bgm_overrides")
                 if isinstance(state.get("chapter_bgm_overrides"), dict) else {},
         )
+        duration_ms = _duration_ms(output_path)
+        if duration_ms <= 0:
+            raise RuntimeError("Sound-design preview was rendered but has no measurable audio duration.")
         host._job_update(
             job_id, state="completed", stage="Full-book mix preview ready", progress=100,
-            message="Full-book mix preview rendered from saved narration.", output_path=str(output_path),
+            message="Full-book mix preview rendered from saved narration.",
+            output_path=str(output_path),
             result={"output_path": str(output_path), "file_url": output_path.resolve().as_uri(),
+                    "duration_seconds": round(duration_ms / 1000.0, 3),
                     "chapter_count": len(chapter_dirs), "reuses_saved_narration": True},
             recoverable=False,
         )
     except Exception as exc:
+        # This worker owns a unique preview-only path. Remove partial output on
+        # FFmpeg/probe failure so it cannot be mistaken for a usable preview.
+        try:
+            output.unlink(missing_ok=True)
+        except OSError:
+            pass
         host._job_update(
             job_id, state="failed", stage="Full-book mix preview failed", progress=0,
             message=str(exc), error={"code": "sound_design_preview_failed", "message": str(exc)},
