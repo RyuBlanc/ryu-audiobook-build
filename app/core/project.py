@@ -150,6 +150,11 @@ def list_projects() -> list[Project]:
     projects = []
     root = library_root()
     for folder in sorted(root.iterdir()):
+        # Import staging folders may briefly contain verified JSON while the
+        # import worker is preparing its atomic publish. Never expose them as
+        # user projects before the final directory rename.
+        if folder.name.startswith(".import-staging-"):
+            continue
         if folder.is_dir() and (folder / "project.json").exists():
             try:
                 projects.append(Project.load(folder))
