@@ -102,6 +102,8 @@ class GenerationManager:
         self._thread: Thread | None = None
         self.failed: list[int] = []
         self.failure_details: dict[int, str] = {}
+        self._completed_numbers: list[int] = []
+        self._finished_callback_called = False
         self._chunk_offsets: list[int] = []
         self._chunk_work_offsets: list[int] = []
         self._chapter_work_units: list[list[int]] = []
@@ -142,6 +144,10 @@ class GenerationManager:
             )
         self.cancel_event.clear()
         self.pause_event.clear()
+        self.failed = []
+        self.failure_details = {}
+        self._completed_numbers = []
+        self._finished_callback_called = False
         effective_metadata = dict(self.metadata)
         if metadata:
             effective_metadata.update(metadata)
@@ -332,6 +338,7 @@ class GenerationManager:
                     raise RuntimeError("Chapter generation is incomplete.")
                 completed += 1
                 completed_numbers.append(chapter.number)
+                self._completed_numbers = list(completed_numbers)
                 generated_chapter_dirs.append(result.output_path)
                 chapter_units = self._chapter_work_units[index] if index < len(self._chapter_work_units) else []
                 completed_units = sum(chapter_units[: result.chunks_completed])
@@ -441,6 +448,7 @@ class GenerationManager:
                 close()
             except Exception:
                 pass
+        self._finished_callback_called = True
         if self.on_finished:
             self.on_finished(summary)
 
