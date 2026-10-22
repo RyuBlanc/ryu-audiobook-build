@@ -1,81 +1,124 @@
-# Stage 4 Plan — Pronunciation and Sound Design
+"""Stage 4 pronunciation dictionary persistence, scope, and validation regressions."""
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
-**Working branch:** `stage-4-pronunciation-sound-design`  
-**Baseline:** Stage 3 implementation head `d5d17f41393910596ad793dfe8df8753c6a1a836` (Stage 3 PR #18 remains open)  
-**UI rule:** preserve the approved Premium V2 HTML and all existing control layout. Fix backend behavior and tests; no redesign, simulated results, or replacement of real audio with demo data.
-
-## Stage 4 objective
-
-Make pronunciation handling and story-aware sound design predictable, persistent, safely applied to real synthesis, and verifiable in the packaged Windows application. Keep audio generation resumable and preserve chapter timing, source text, and existing projects.
-
-## 4.1 Pronunciation dictionary and text preparation
-
-- [x] Audit pronunciation dictionary data shape, normalization, duplicate/conflicting entries, case sensitivity, Unicode, invalid/empty entries, and current-book versus library scopes (implementation + regression coverage added in Prompt 1).
-- [x] Add regression tests for save/reload persistence, edit/delete, deterministic duplicate resolution, scope isolation, and project isolation.
-- [ ] Verify replacements apply to synthesis text only; never mutate saved chapter source text or chapter offsets.
-- [ ] Test overlapping terms, word boundaries, punctuation, repeated matches, Unicode names, and replacement loops.
-- [ ] Ensure dictionary edits invalidate only affected generation signatures/checkpoints; no stale chunks after a pronunciation change.
-- [ ] Verify errors and applied-rule counts are exposed through actual backend/UI status.
-
-## 4.2 Sound-design catalogue and story assignments
-
-- [ ] Audit cue/BGM catalogue records, asset paths, missing files, metadata, and safe defaults.
-- [ ] Test chapter-level BGM overrides, opening/closing cues, transition cues, SFX cues, and the behavior when BGM is disabled.
-- [ ] Test malformed, missing, unsupported, or unreadable audio assets: provide clear errors and never corrupt source audio or silently produce a misleading mix.
-- [ ] Verify story-aware recommendations/assignments persist and can be edited, cleared, and reloaded.
-- [ ] Verify mix controls (gain/volume, fades, ducking, chapter boundaries, transitions) remain within safe bounds and preserve intended duration.
-- [ ] Check that user-specified assets and existing project paths are not overwritten by preview or mix rendering.
-
-## 4.3 Preview, synthesis and audio assembly
-
-- [ ] Test voice preview with pronunciation rules enabled and disabled, and verify the selected profile/provider is the one requested.
-- [ ] Test sound-design preview uses real assigned cues/music, reports the actual rendered duration, and cleans up temporary files.
-- [ ] Verify chapter transitions and opening/closing cues are applied once at the correct boundaries, including when BGM is off.
-- [ ] Test cancellation, provider/FFmpeg failures, retry, cleanup, and resumability for preview and final assembly.
-- [ ] Test generation signatures/checkpoints change when pronunciation rules or sound-design assignments change, without invalidating unrelated work.
-- [ ] Listen to representative speech/music/SFX mixes on the target PC; automated duration checks do not establish audio quality.
-
-## 4.4 Regression, packaging and acceptance
-
-- [x] Add focused Stage 4 regression tests and run them during development (Run #919 passed on `422fcb1bde50761f31a67653996e397953ef118a`).
-- [x] Run the complete unittest suite on the latest Stage 4 head (Run #919 passed).
-- [x] Run the Windows frozen-app, bundled-asset, installer, SHA-256, and Microsoft Defender workflow; inspect all failed steps (Run #919: all required steps passed; release publication skipped by workflow policy).
-- [ ] Target-PC acceptance: edit/save/reopen pronunciation rules and sound-design assignments, generate previews, and compare actual output with requested settings.
-- [ ] Preserve and track all earlier open acceptance gates: Stage 1 hardware freeze/crash validation; Stage 2 supported-format import/edit/reopen validation; Stage 3 Voice Studio/Character Studio UI and actual voice-preview acceptance.
-- [ ] Do not mark Stage 4 complete from green CI alone.
-
-## Prompt 1 implementation notes
-
-- Dictionary fields are NFC-normalized and validated before writes; legacy written/spoken aliases remain readable.
-- Current-book entries remain in the active project's `state.json`; global-library and named-series entries use app-owned JSON stores with atomic replacement. Existing legacy rows stored in project state remain book-local to avoid unexpectedly sharing them across projects.
-- Saves canonicalize duplicate case-insensitive written forms within a scope, return conflict-resolution metadata, and reject unsupported scopes rather than persisting misleading metadata.
-- The approved HTML file was not edited. The existing dictionary table now renders real persisted rows with scope/status and a delete action, and list/table selection is scope-aware.
-- Automated tests added in `tests/test_stage4_pronunciation_persistence.py`. Actual TTS application of global/series scopes, generation-signature invalidation, UI runtime behavior, and target-PC save/reopen still require follow-up in Prompt 2 / acceptance.
-
-## Stage 3 carry-forward — do not lose these items
-
-Stage 3 Run #894 succeeded on `ec20d76106e01971e16c045a475eb72f78115c83`; the Stage 3 plan was updated after that run. Stage 3 PR #18 is open. Automated/package gates passed, but these items remain open and must not be silently treated as complete:
-
-- [ ] Packaged Windows acceptance for actual selected-profile preview/provider identity and voice quality.
-- [ ] Verify Voice Studio and Character Studio UI state, persistence/reload, and preview/generation error reporting.
-- [ ] Behavioral tests for case-insensitive character updates, alias edits, duplicate names, delete semantics, and assignment references.
-- [ ] Persistence-level verification of character-analysis results, confidence/examples, dialogue totals, and unassigned counts across save/reopen.
-- [ ] Assignment integrity through chapter reorder/merge/split, including explicit offset migration or safe invalidation.
-- [ ] Broader character detection fixtures for first-person narration, aliases, attributed dialogue, and unassigned dialogue.
-- [ ] Stage 1 target-PC freeze/crash validation.
-- [ ] Stage 2 target-PC TXT/EPUB/PDF/DOCX import, duplicate guidance, cancel/retry, chapter editing and reopen comparison.
-
-## Stage 4 baseline audit
-
-The existing application includes a pronunciation dictionary, a cast-aware voice preview path, a sound-design preview path, BGM/transition cue settings, and an audio assembly pipeline. This stage begins by testing the real implementation and fixing gaps; do not assume every listed behavior is already correct.
+from app.ui import premium_v2_host as host
 
 
+class _BridgeHarness:
+    def __init__(self, folder):
+        self.project = SimpleNamespace(folder=Path(folder))
+    def _active_project(self):
+        return self.project
+    def _now(self):
+        return "2026-10-22T00:00:00+00:00"
 
-## Latest verification evidence
 
-- **Run #919** completed successfully on `422fcb1bde50761f31a67653996e397953ef118a` on 2026-10-22: complete unittest/application build, frozen app, bundled assets, installer, SHA-256 manifest, Microsoft Defender scan, and artifact uploads passed. Verified run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39793982369.
-- Automated gates above are checked off only for that exact commit. Target-PC listening and save/reopen acceptance remain open; green CI is not Stage 4 sign-off.
+class PronunciationPersistenceTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.project_a = self.root / "project-a"
+        self.project_b = self.root / "project-b"
+        self.project_a.mkdir()
+        self.project_b.mkdir()
+        self.bridge_a = _BridgeHarness(self.project_a)
+        self.bridge_b = _BridgeHarness(self.project_b)
+        self.settings = self.root / "settings"
+        self.settings.mkdir()
+        self.settings_patch = patch.object(host, "settings_root", return_value=self.settings)
+        self.settings_patch.start()
+        self.addCleanup(self.settings_patch.stop)
+        self.addCleanup(self.temp.cleanup)
 
-## Completion rule
+    def save(self, bridge, written, spoken, **extra):
+        return host.PremiumV2Bridge._pronunciation_save(
+            bridge, {"written_form": written, "spoken_form": spoken, **extra}
+        )
 
-Close Stage 4 only when targeted and full automated tests pass, the Windows package gates pass on the latest code, the Stage 3 carry-forward checklist is preserved, and target-PC acceptance is either completed with evidence or explicitly left open. Never claim the actual sound is correct without listening to rendered output.
+    def list(self, bridge):
+        return host.PremiumV2Bridge._pronunciation_list(bridge, {})
+
+    def delete(self, bridge, written, **extra):
+        return host.PremiumV2Bridge._pronunciation_delete(
+            bridge, {"written_form": written, **extra}
+        )
+
+    def test_save_reload_and_nfc_casefold_duplicate_update(self):
+        self.save(self.bridge_a, "e\u0301owyn", "Ay-oh-win")
+        result = self.save(self.bridge_a, "ÉOWYN", "Ee-oh-win")
+        rows = self.list(self.bridge_a)
+        self.assertEqual(1, len(rows))
+        self.assertEqual("ÉOWYN", rows[0]["written_form"])
+        self.assertEqual("Ee-oh-win", rows[0]["spoken_form"])
+        self.assertTrue(result["updated_existing"])
+        self.assertTrue(result["conflict_resolved"])
+        persisted = json.loads((self.project_a / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(1, len(persisted["pronunciation_dictionary"]))
+
+    def test_legacy_duplicate_rows_are_collapsed_on_edit(self):
+        (self.project_a / "state.json").write_text(json.dumps({
+            "pronunciation_dictionary": [
+                {"written": "Mira", "spoken": "Mee-rah"},
+                {"written_form": "mira", "spoken_form": "My-rah"},
+                {"written_form": "", "spoken_form": "invalid"},
+            ]
+        }), encoding="utf-8")
+        result = self.save(self.bridge_a, "MIRA", "Mih-rah")
+        self.assertEqual(1, result["duplicate_rows_collapsed"])
+        rows = self.list(self.bridge_a)
+        self.assertEqual(1, len(rows))
+        self.assertEqual("Mih-rah", rows[0]["spoken_form"])
+
+    def test_project_scope_is_isolated_between_projects(self):
+        self.save(self.bridge_a, "Mira", "Mee-rah")
+        self.assertEqual(["Mira"], [row["written_form"] for row in self.list(self.bridge_a)])
+        self.assertEqual([], self.list(self.bridge_b))
+
+    def test_global_library_entry_persists_and_is_visible_across_projects(self):
+        self.save(self.bridge_a, "Ryu", "Ree-yoo", scope="Global library")
+        rows_a = self.list(self.bridge_a)
+        rows_b = self.list(self.bridge_b)
+        self.assertEqual(1, len(rows_a))
+        self.assertEqual(1, len(rows_b))
+        self.assertEqual("global_library", rows_b[0]["scope_type"])
+        self.assertTrue(host._pronunciation_scope_path("global_library").is_file())
+
+    def test_series_entries_are_separate_by_normalized_series_name(self):
+        self.save(self.bridge_a, "Rimuru", "Ree-moo-roo", scope="Series · Slime")
+        self.save(self.bridge_a, "Rimuru", "Rim-oo-roo", scope="Series · Other")
+        rows = [row for row in self.list(self.bridge_b) if row["scope_type"] == "series"]
+        self.assertEqual({"Slime", "Other"}, {row["scope_id"] for row in rows})
+        self.delete(self.bridge_b, "Rimuru", scope="Series · Slime")
+        rows = [row for row in self.list(self.bridge_b) if row["scope_type"] == "series"]
+        self.assertEqual({"Other"}, {row["scope_id"] for row in rows})
+
+    def test_empty_delete_and_invalid_save_do_not_mutate_dictionary(self):
+        self.save(self.bridge_a, "Mira", "Mee-rah")
+        with self.assertRaisesRegex(ValueError, "Written term"):
+            host.PremiumV2Bridge._pronunciation_delete(self.bridge_a, {"written_form": ""})
+        for written, spoken in (("", "reading"), ("term", ""), ("x" * 501, "reading"), ("term", "y" * 1001)):
+            with self.subTest(written=written[:8], spoken_length=len(spoken)):
+                with self.assertRaises(ValueError):
+                    self.save(self.bridge_a, written, spoken)
+        self.assertEqual(["Mira"], [row["written_form"] for row in self.list(self.bridge_a)])
+
+    def test_invalid_scope_is_rejected_instead_of_saved_as_unimplemented_metadata(self):
+        with self.assertRaisesRegex(ValueError, "Choose Current book"):
+            self.save(self.bridge_a, "Mira", "Mee-rah", scope="Everywhere")
+        self.assertEqual([], self.list(self.bridge_a))
+
+    def test_corrupt_global_dictionary_is_reported_and_not_overwritten(self):
+        path = host._pronunciation_scope_path("global_library")
+        path.write_text("{broken", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "could not be read"):
+            self.save(self.bridge_a, "Ryu", "Ree-yoo", scope="Global library")
+        self.assertEqual("{broken", path.read_text(encoding="utf-8"))
+
+
+if __name__ == "__main__":
+    unittest.main()

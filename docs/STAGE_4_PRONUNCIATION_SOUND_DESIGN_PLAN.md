@@ -10,8 +10,8 @@ Make pronunciation handling and story-aware sound design predictable, persistent
 
 ## 4.1 Pronunciation dictionary and text preparation
 
-- [ ] Audit pronunciation dictionary data shape, normalization, duplicate/conflicting entries, case sensitivity, Unicode, and invalid/empty entries.
-- [ ] Add regression tests for save/reload persistence, edit/delete, deterministic matching, and project isolation.
+- [x] Audit pronunciation dictionary data shape, normalization, duplicate/conflicting entries, case sensitivity, Unicode, invalid/empty entries, and current-book versus library scopes (implementation + regression coverage added in Prompt 1).
+- [x] Add regression tests for save/reload persistence, edit/delete, deterministic duplicate resolution, scope isolation, and project isolation.
 - [ ] Verify replacements apply to synthesis text only; never mutate saved chapter source text or chapter offsets.
 - [ ] Test overlapping terms, word boundaries, punctuation, repeated matches, Unicode names, and replacement loops.
 - [ ] Ensure dictionary edits invalidate only affected generation signatures/checkpoints; no stale chunks after a pronunciation change.
@@ -43,6 +43,14 @@ Make pronunciation handling and story-aware sound design predictable, persistent
 - [ ] Target-PC acceptance: edit/save/reopen pronunciation rules and sound-design assignments, generate previews, and compare actual output with requested settings.
 - [ ] Preserve and track all earlier open acceptance gates: Stage 1 hardware freeze/crash validation; Stage 2 supported-format import/edit/reopen validation; Stage 3 Voice Studio/Character Studio UI and actual voice-preview acceptance.
 - [ ] Do not mark Stage 4 complete from green CI alone.
+
+## Prompt 1 implementation notes
+
+- Dictionary fields are NFC-normalized and validated before writes; legacy written/spoken aliases remain readable.
+- Current-book entries remain in the active project's `state.json`; global-library and named-series entries use app-owned JSON stores with atomic replacement. Existing legacy rows stored in project state remain book-local to avoid unexpectedly sharing them across projects.
+- Saves canonicalize duplicate case-insensitive written forms within a scope, return conflict-resolution metadata, and reject unsupported scopes rather than persisting misleading metadata.
+- The approved HTML file was not edited. The existing dictionary table now renders real persisted rows with scope/status and a delete action, and list/table selection is scope-aware.
+- Automated tests added in `tests/test_stage4_pronunciation_persistence.py`. Actual TTS application of global/series scopes, generation-signature invalidation, UI runtime behavior, and target-PC save/reopen still require follow-up in Prompt 2 / acceptance.
 
 ## Stage 3 carry-forward — do not lose these items
 
