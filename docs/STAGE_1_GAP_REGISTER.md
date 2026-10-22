@@ -290,21 +290,24 @@ The **source-level control audit is now closed** for the currently inventoried l
 
 ## Stage 4 Prompt 5 — cross-stage audit evidence and release blockers (23 October 2026)
 
-### Reproducible issue found and corrected in source
-- `app/chapters/editor.py` previously did not carry following-chapter dialogue assignments through merge and did not partition/remap assignment spans when splitting a chapter. Its remapper also rebuilt a small fixed set of fields and dropped multi-speaker metadata.
-- The correction remaps exact text spans to new chapter text, adjusts offsets across split/merge boundaries, preserves assignment metadata, and intentionally discards stale/removed-heading spans instead of guessing.
-- Regression file: `tests/test_cross_stage_chapter_assignment_integrity.py`. Coverage includes merge, paragraph split, split-at-selection, edits preserving multi-speaker metadata, and project save/reload compatibility. CI result is pending for the consolidated commit; do not treat test presence as a passing test.
-- Latest historical complete suite: Run #940, 459 tests passed on `9a1b9edacb133634e0f2b443f6616bd1b04b0c3b`. That SHA predates the new editor regression fix, so it is not evidence for the latest code.
+- Audit commit: `aa9b4587c39c65f4d8a66c9bede8ec191dac7704`; branch `stage-4-pronunciation-sound-design`.
+- Stage 3 PR #18 remains open at `d5d17f41393910596ad793dfe8df8753c6a1a836`. Stage 4 is 50 commits ahead and 0 behind; its merge base is the Stage 3 head. Merge Stage 3 first, then reconcile Stage 4. Never force-reset to an older baseline.
 
-### Windows packaging/security observations
-- Run #940 passed frozen application, bundled assets/critical modules, Inno Setup installer, logo check, SHA-256 manifest generation, and upload of installer/manifest/portable app.
-- The Defender step's command exit code was zero, but its output said scans of both `Ryu's Audiobook.exe` and `Ryu's Audiobook Setup.exe` were “skipped.” The previous workflow incorrectly treated that as a clean scan.
-- Workflow guard now fails if scan output indicates a skipped scan and uses the custom-scan `-DisableRemediation` option to ignore configured file exclusions. The new workflow must demonstrate real completed scans before release artifacts can be uploaded.
-- The run also warned that optional starter track `springly_sprigs.mp3` failed to download (curl exit code 35); the packaging step intentionally omits unavailable supplemental tracks from the packaged manifest, while required track/cue count gates passed.
+### Cross-stage editor defect — fixed and verified
+- `app/chapters/editor.py` had failed to preserve assignment records from the next chapter during merge, partition/remap spans during split, and retain multi-speaker/cast metadata through remapping. The fix remaps exact assignment text into resulting chapter content and discards stale/removed-heading spans instead of guessing.
+- `tests/test_cross_stage_chapter_assignment_integrity.py`: all five tests passed in Run #945 (merge, paragraph split, split-at-selection, metadata retention on edits, and project save/reload compatibility).
+- **Full suite:** Run #945, `Ran 464 tests in 30.608s` / `OK`, Windows Server 2025, Python 3.12.10, exact head `aa9b4587c39c65f4d8a66c9bede8ec191dac7704`. https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39862896213.
 
-### Stage carry-forward checklist (not closed)
-- **Stage 1:** target Windows PC freeze/crash/hardware validation and packaged UI responsiveness/flicker profiling.
-- **Stage 2:** packaged TXT/EPUB/PDF/DOCX import; duplicate guidance; cancel/retry; chapter detection edge fixtures; add/delete/merge/split/find-replace/undo-redo/re-detection safety; edit/save/reopen comparison.
-- **Stage 3:** actual saved provider/profile/voice preview and voice quality; Voice Studio/Character Studio persistence and errors; character rename/alias/duplicate/delete behavior; analysis confidence/examples/dialogue totals/unassigned counts across reload; assignment offsets and routing after chapter structural operations.
-- **Stage 4:** actual audio listening; pronunciation on/off and selected voice/provider identity; sound-design preview vs final mix; cue boundaries; BGM-off; measured duration; provider/FFmpeg failure, cancellation, retry, cleanup and resumability; unchanged checkpoint/source text.
-- **Branch/PR sequence:** Stage 4 head is a descendant of Stage 3 PR #18 head `d5d17f41393910596ad793dfe8df8753c6a1a836`. Keep the Stage 3 PR open until its review/merge is resolved; merge Stage 3 first, then re-check Stage 4 against the resulting merge base. Never force-reset Stage 4 to an older baseline.
+### Windows package and scan evidence — Run #945
+- Passed: frozen EXE self-test; bundled Piper/Kokoro voice assets and critical modules; Inno Setup installation and installer compilation; original logo transparency/content check; release SHA-256 manifest; installer, manifest, and portable-artifact uploads; cleanup of older Windows build runs/artifacts.
+- **Defender scanned both executables:** log explicitly says the portable `Ryu's Audiobook.exe` scan and `Ryu's Audiobook Setup.exe` scan each “found no threats.” The fail-closed guard rejects nonzero exit codes, skipped scans, or output without a recognized completed-scan result. Custom scan passed `-DisableRemediation`. This run resolves the previous Run #940 / #938 “scan skipped” ambiguity for this commit.
+- Artifacts (expire 2026-11-21 UTC): portable `Ryu-Audiobook-Portable-945`, ID `12463925128`, 1,348,226,514 bytes, ZIP SHA-256 `abd8bbfbd426d698d5cd8cdcc55207e12a28762aedd4667caa0ff41654c3b3a3`; installer `Ryu-Audiobook-Installer-945`, ID `12463695558`, 648,309,461 bytes, ZIP SHA-256 `652788ed1e55bca8bbc41f9d4eff7f8f40b18f0479c48fa1b12750afb92fb9d0`; manifest `Ryu-Audiobook-Release-SHA256-945`, ID `12463311632`, 513 bytes, ZIP SHA-256 `1b8527b90fbb861d3c727915f97ba0289ec206f10efbb742cba572b812b90e74`. Executable hashes recorded inside manifest: portable EXE `337C69B6E7F15F7222099E8792C26B6DA1DF38D5E01F7CF699B6FAC940F8BF7F`; installer EXE `DCC024150176CFBF240FE1AAC09A0C380F4820987A2C29F3A25A777CD5F09A3C`.
+- `springly_sprigs.mp3` successfully downloaded in Run #945, so the earlier transient curl exit 35 from Run #940 does not describe this run. `Publish verified installer release` was skipped by workflow conditions; no GitHub release publication is claimed. No test/build/scan/upload step failed, and no steps/jobs were cancelled in Run #945.
+
+### Remaining acceptance gates — keep Stage 4 open
+- Stage 1: target-PC hardware freeze/crash and packaged UI responsiveness/flicker.
+- Stage 2: TXT/EPUB/PDF/DOCX import; duplicate/cancel/retry; full chapter edit/merge/split/find-replace/undo-redo/save/reopen.
+- Stage 3: actual selected saved profile/provider preview and voice quality; Voice Studio/Character Studio persistence/error UI; analysis result persistence; rename/alias/duplicate/delete behavior.
+- Stage 4: real listening for pronunciation on/off and voice identity; sound preview versus final mix; cue boundaries, BGM-off and duration; provider/FFmpeg failure, cancellation, retry, cleanup and checkpoint/source-text preservation.
+- Keep the approved Premium V2 HTML visually unchanged. Automated CI does not establish target-PC operation or perceived audio quality.
+
