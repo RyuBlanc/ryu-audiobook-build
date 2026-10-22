@@ -337,6 +337,22 @@ def _mix_chapter_bgm(
 
 
 
+def _chapter_bgm_fade_out(end_behavior: str, configured_fade_out: float) -> float:
+    """Resolve chapter BGM tail policy to a distinct, bounded fade duration.
+
+    'fade_before_end' uses the configured book fade. 'continue_to_transition'
+    keeps the bed almost to the boundary, using a short 0.75-second tail so it
+    meets the transition cleanly. 'stop_immediately' cuts at the chapter edge.
+    """
+    behavior = str(end_behavior or "fade_before_end").strip().lower()
+    if behavior == "fade_before_end":
+        return max(0.0, min(30.0, float(configured_fade_out)))
+    if behavior == "continue_to_transition":
+        return 0.75
+    if behavior == "stop_immediately":
+        return 0.0
+    raise ValueError(f"Unsupported chapter BGM end behavior: {behavior}")
+
 def _chapter_number_for_bgm(chapter_dir: Path, fallback: int) -> int:
     """Resolve the source chapter number so skipped/reordered chapters keep their overrides."""
     try:
@@ -765,7 +781,7 @@ def assemble_m4b(
                     except (OSError, ValueError, TypeError, IndexError):
                         offset_ms = 0
                 behavior = str(override.get("end_behavior") or "fade_before_end").strip().lower()
-                fade_out = float(background_audio_fade_out) if behavior == "fade_before_end" else 0.0
+                fade_out = _chapter_bgm_fade_out(behavior, background_audio_fade_out)
                 mixed = temp_dir / f"chapter-bgm-{chapter_index:05d}.m4a"
                 chapter_music_files.append(_mix_chapter_bgm(
                     chapter_file, selected_track, mixed, float(volume),
