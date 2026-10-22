@@ -241,5 +241,44 @@ class Stage3CastRoutingTests(unittest.TestCase):
         self.assertEqual(narrator.calls, [("Narration text.", "Narrator")])
 
 
+
+class Stage3HostSafetyContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.host_source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+
+    def test_partial_character_update_preserves_omitted_metadata(self):
+        start = self.host_source.index("def _character_update(")
+        end = self.host_source.index("def _character_delete(", start)
+        method = self.host_source[start:end]
+
+        self.assertIn('payload.get("role") if "role" in payload else item.get("role", "Character")', method)
+        self.assertIn('payload.get("short_description") if "short_description" in payload else item.get("short_description", "")', method)
+        self.assertIn('payload.get("notes") if "notes" in payload else item.get("notes", "")', method)
+        self.assertIn('payload.get("scope") if "scope" in payload else item.get("scope", "Current book only")', method)
+        self.assertIn('payload.get("voice_profile") if "voice_profile" in payload else item.get("voice_profile")', method)
+
+    def test_voice_profile_deletion_is_blocked_while_referenced(self):
+        start = self.host_source.index("def _voice_delete(")
+        end = self.host_source.index("def _voice_select(", start)
+        method = self.host_source[start:end]
+
+        self.assertIn("Built-in voices cannot be deleted", method)
+        self.assertIn('state.get("voice_profile")', method)
+        self.assertIn('item.get("voice_profile")', method)
+        self.assertIn("Select another narrator before deleting it", method)
+        self.assertIn("Reassign that character before deleting it", method)
+
+    def test_custom_voice_clone_requires_reference_audio_and_permission(self):
+        start = self.host_source.index("def _voice_save(")
+        end = self.host_source.index("def _voice_list(", start)
+        method = self.host_source[start:end]
+
+        self.assertIn('if provider_name == "chatterbox" and not authorized:', method)
+        self.assertIn('if provider_name == "chatterbox" and not sample_path:', method)
+        self.assertIn('if not authorized:', method)
+        self.assertIn('if not sample_path:', method)
+
+
 if __name__ == "__main__":
     unittest.main()
