@@ -40,6 +40,14 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         metadata = json.loads(imported[0].with_name(imported[0].name + ".license.json").read_text(encoding="utf-8"))
         self.assertEqual(metadata["license_note"], "CC0"); self.assertTrue(imported[0].is_file())
 
+    def test_library_import_rejects_missing_or_unsupported_assets(self):
+        with patch.object(library, "audio_library_root", return_value=self.app_root / "Audio Library"):
+            with self.assertRaisesRegex(ValueError, "Unsupported or missing audio asset"):
+                library.import_audio_files([self.root / "absent.wav"], target_kind="music")
+            unsupported = self.root / "bad.exe"; unsupported.write_bytes(b"not audio")
+            with self.assertRaisesRegex(ValueError, "Unsupported or missing audio asset"):
+                library.import_audio_files([unsupported], target_kind="music")
+
     def test_deleted_explicit_music_or_cue_never_falls_back_to_another_track(self):
         valid = _valid_wav(self.root / "fallback.wav")
         with patch.object(library, "list_music_tracks", return_value=[library.AudioTrack(valid, "universal", "Universal")]):
@@ -128,6 +136,11 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         self.assertIn("background_audio_fade_in=float(state.get", generation)
         self.assertIn("background_audio_fade_out=float(state.get", generation)
         self.assertIn("background_audio_volume=float(state.get(\"background_audio_volume\") if state.get(\"background_audio_volume\") is not None else 0.18)", generation)
+        adapter = Path("assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertNotIn("if ($('setBookDefaultTrack')) $('setBookDefaultTrack').onclick", adapter)
+        self.assertNotIn("if ($('saveSoundPresetAdvanced')) $('saveSoundPresetAdvanced').onclick", adapter)
+        self.assertIn("fade_in_seconds:fadeSeconds('bgmFadeIn')", adapter)
+        self.assertIn("fade_out_seconds:fadeSeconds('bgmFadeOut')", adapter)
 
     def test_preview_and_production_do_not_mask_missing_saved_paths(self):
         host_source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")

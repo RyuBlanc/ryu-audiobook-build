@@ -199,7 +199,8 @@ def import_audio_files(files,*,target_kind,category="universal",license_note="")
  added=[]
  for raw in files:
   source=Path(raw).expanduser()
-  if not source.is_file() or source.suffix.casefold() not in AUDIO_EXTENSIONS: continue
+  if not source.is_file() or source.suffix.casefold() not in AUDIO_EXTENSIONS:
+   raise ValueError(f"Unsupported or missing audio asset: {source}")
   if source.resolve().parent==destination.resolve(): dest=source.resolve()
   else:
    dest=destination/source.name
