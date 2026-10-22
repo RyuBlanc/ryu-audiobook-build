@@ -130,5 +130,32 @@ class PreviewAssemblyTests(unittest.TestCase):
             self.assertEqual(list(root.glob("ryu-preview-*")), [])
 
 
+    def test_voice_preview_worker_removes_partial_sound_mix_on_ffmpeg_failure(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); preview_root = root / "Previews"; preview_root.mkdir()
+            host = _Host()
+            host._jobs_lock = threading.RLock()
+            host._render_sound_design_preview = lambda source, job_id, state: (
+                (preview_root / f"sound_mix_preview_{job_id}.m4a").write_bytes(b"partial"),
+                (_ for _ in ()).throw(RuntimeError("FFmpeg mix failed")),
+            )[1]
+            profile = SimpleNamespace(name="Narrator", provider="local", voice_id="voice")
+            def fake_build(_text, _provider, _voice, output, **kwargs):
+                _write_wav(output, 0.3)
+                return SimpleNamespace(output_path=output, voices_used=("voice",), segments=1,
+                                       applied_rule_counts={})
+            with patch("app.ui.premium_v2_host.app_root", return_value=root), \
+                 patch("app.ui.premium_v2_host.provider_from_profile", return_value=(object(), "voice")), \
+                 patch("app.ui.premium_v2_host.load_profiles", return_value=[]), \
+                 patch("app.ui.premium_v2_host.build_voice_preview", side_effect=fake_build):
+                from app.ui.premium_v2_host import PremiumV2Bridge
+                PremiumV2Bridge._preview_worker(
+                    host, "job", profile, "A preview sentence.", 10,
+                    {"_include_sound_design_preview": True}, threading.Event())
+            self.assertFalse((preview_root / "preview_job.wav").exists())
+            self.assertFalse((preview_root / "sound_mix_preview_job.m4a").exists())
+            failed = next(row for _job, row in host.updates if row.get("state") == "failed")
+            self.assertIn("FFmpeg mix failed", failed["message"])
+
 if __name__ == "__main__":
     unittest.main()

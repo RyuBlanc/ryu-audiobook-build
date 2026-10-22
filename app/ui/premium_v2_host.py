@@ -1383,7 +1383,9 @@ class PremiumV2Bridge(QObject):
                              })
         except Exception as exc:
             if cancel_event is not None and cancel_event.is_set() or isinstance(exc, PreviewCancelledError):
-                for candidate in {output, preview_path}:
+                for candidate in {output, preview_path,
+                                   app_root() / "Previews" / f"sound_mix_preview_{job_id}.m4a",
+                                   app_root() / "Previews" / f"sound-preview-opening-{job_id}.m4a"}:
                     try:
                         Path(candidate).unlink(missing_ok=True)
                     except OSError:
@@ -1392,7 +1394,9 @@ class PremiumV2Bridge(QObject):
                                  message="Preview cancelled at a safe synthesis boundary; temporary audio was discarded.")
             else:
                 log.exception("Premium V2 voice preview failed")
-                for candidate in {output, preview_path}:
+                for candidate in {output, preview_path,
+                                   app_root() / "Previews" / f"sound_mix_preview_{job_id}.m4a",
+                                   app_root() / "Previews" / f"sound-preview-opening-{job_id}.m4a"}:
                     try:
                         Path(candidate).unlink(missing_ok=True)
                     except OSError:
