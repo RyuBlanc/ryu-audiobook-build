@@ -102,6 +102,8 @@ class GenerationManager:
         self._thread: Thread | None = None
         self.failed: list[int] = []
         self.failure_details: dict[int, str] = {}
+        self._completed_numbers: list[int] = []
+        self._finished_callback_called = False
         self._chunk_offsets: list[int] = []
         self._chunk_work_offsets: list[int] = []
         self._chapter_work_units: list[list[int]] = []
@@ -142,6 +144,10 @@ class GenerationManager:
             )
         self.cancel_event.clear()
         self.pause_event.clear()
+        self.failed = []
+        self.failure_details = {}
+        self._completed_numbers = []
+        self._finished_callback_called = False
         effective_metadata = dict(self.metadata)
         if metadata:
             effective_metadata.update(metadata)
@@ -194,6 +200,49 @@ class GenerationManager:
             Thread(target=close, name="RyuTTSCancelCleanup", daemon=True).start()
 
     def _run(self, output_path: Path | None, title: str, author: str, cover: Path | None, metadata: dict[str, str]) -> None:
+        """Ensure unexpected worker failures become a terminal job result."""
+        try:
+            self._run_body(output_path, title, author, cover, metadata)
+        except Exception as exc:
+            message = f"Generation aborted unexpectedly: {exc}"
+            try:
+                self._emit(0, len(self.chapters), 0, f"fatal:{message}")
+            except Exception:
+                pass
+            close = getattr(self.provider, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+            if not self._finished_callback_called and self.on_finished:
+                completed_numbers = list(self._completed_numbers)
+                completed_set = set(completed_numbers)
+                failed = list(self.failed)
+                failed_set = set(failed)
+                for chapter in self.chapters:
+                    number = int(getattr(chapter, "number", 0) or 0)
+                    if number not in completed_set and number not in failed_set:
+                        failed.append(number)
+                        self.failure_details.setdefault(number, message)
+                summary = GenerationSummary(
+                    chapters_total=len(self.chapters),
+                    chapters_completed=len(completed_numbers),
+                    chapters_failed=failed,
+                    chapters_completed_numbers=completed_numbers,
+                    failure_details=dict(self.failure_details),
+                    output_path=None,
+                    cancelled=self.cancel_event.is_set(),
+                    packaging_failed=bool(output_path and len(completed_numbers) == len(self.chapters)),
+                    packaging_error=message if output_path and len(completed_numbers) == len(self.chapters) else None,
+                )
+                self._finished_callback_called = True
+                try:
+                    self.on_finished(summary)
+                except Exception:
+                    pass
+
+    def _run_body(self, output_path: Path | None, title: str, author: str, cover: Path | None, metadata: dict[str, str]) -> None:
         # This directory is deliberately called working: it is not the user's
         # audiobook library and can be removed after a successful package build.
         self.audio_root.mkdir(parents=True, exist_ok=True)
@@ -289,6 +338,7 @@ class GenerationManager:
                     raise RuntimeError("Chapter generation is incomplete.")
                 completed += 1
                 completed_numbers.append(chapter.number)
+                self._completed_numbers = list(completed_numbers)
                 generated_chapter_dirs.append(result.output_path)
                 chapter_units = self._chapter_work_units[index] if index < len(self._chapter_work_units) else []
                 completed_units = sum(chapter_units[: result.chunks_completed])
@@ -398,6 +448,7 @@ class GenerationManager:
                 close()
             except Exception:
                 pass
+        self._finished_callback_called = True
         if self.on_finished:
             self.on_finished(summary)
 

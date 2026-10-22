@@ -331,14 +331,48 @@ class CastAwareProvider(TTSProvider):
             seen.add(id(provider))
             close = getattr(provider, "close", None)
             if callable(close):
-                close()
+                try:
+                    close()
+                except Exception:
+                    # One failed child shutdown must not prevent the remaining
+                    # heavyweight workers from being released.
+                    continue
+
+    def _provider_cache_key(self, profile_name: str, profile: VoiceProfile) -> str:
+        backend = self.backend_override if self.backend_override != "automatic" else (profile.backend or "automatic")
+        if profile.provider == "qwen-character" and str(profile.qwen_mode or "custom").casefold() in {"custom", "clone"}:
+            return "shared:qwen:" + json.dumps([backend, profile.model_id or "auto", profile.qwen_mode or "custom"], separators=(",", ":"))
+        if profile.provider == "chatterbox":
+            return "shared:chatterbox:" + json.dumps([backend, profile.language or "en", profile.model_id == "chatterbox-multilingual"], separators=(",", ":"))
+        return profile_name
+
+    @staticmethod
+    def _configure_profile_request(provider: TTSProvider, profile: VoiceProfile) -> None:
+        if profile.provider == "qwen-character":
+            provider.voice_id = profile.voice_id
+            provider.language = profile.language or "English"
+            provider.instruct = profile.qwen_prompt or profile.notes
+            provider.qwen_seed = profile.qwen_seed
+            provider.reference_audio = Path(profile.sample_path).expanduser() if profile.sample_path else None
+            provider.reference_text = profile.reference_text or ""
+            provider.qwen_anchor_path = Path(profile.qwen_anchor_path).expanduser() if profile.qwen_anchor_path else None
+            provider.qwen_anchor_text = profile.qwen_anchor_text or ""
+            provider.qwen_profile_id = profile.qwen_profile_id or ""
+        elif profile.provider == "chatterbox":
+            reference = Path(profile.sample_path).expanduser() if profile.sample_path else None
+            if reference is None or not reference.is_file():
+                raise RuntimeError(f"Custom voice profile '{profile.name}' has no valid reference audio.")
+            provider.reference_audio = reference.resolve()
+            provider.exaggeration = profile.exaggeration
+            provider.cfg_weight = profile.cfg_weight
 
     def synthesize(self, text: str, output_path: Path, voice: str | None = None) -> Path:
         profile_name = voice.casefold() if voice else ""
         profile = self.profiles.get(profile_name)
         if profile is None:
             return self.narrator_provider.synthesize(text, output_path, self.narrator_voice)
-        cached = self._providers.get(profile_name)
+        cache_key = self._provider_cache_key(profile_name, profile)
+        cached = self._providers.get(cache_key)
         if cached is None:
             cached = provider_from_profile(profile)
             provider, provider_voice = cached
@@ -348,6 +382,9 @@ class CastAwareProvider(TTSProvider):
             if callable(child_callback):
                 child_callback(self._status_callback)
             cached = (provider, provider_voice)
-            self._providers[profile_name] = cached
+            self._providers[cache_key] = cached
         provider, provider_voice = cached
+        if cache_key.startswith(("shared:qwen:", "shared:chatterbox:")):
+            self._configure_profile_request(provider, profile)
+            provider_voice = profile.voice_id
         return provider.synthesize(text, output_path, provider_voice)
