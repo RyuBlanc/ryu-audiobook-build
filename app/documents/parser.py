@@ -144,11 +144,15 @@ def detect_repeated_book_noise(chapter_texts: list[str]) -> dict[str, int]:
 
 
 def clean_import_noise(text: str, repeated_noise: set[str] | None = None) -> tuple[str, list[str]]:
-    repeated_noise = {str(item).casefold() for item in (repeated_noise or set())}
+    repeated_noise = {re.sub(r"\s+", " ", str(item)).strip().casefold() for item in (repeated_noise or set())}
     removed: list[str] = []
     kept: list[str] = []
     lines = text.splitlines()
     page_noise_indices: set[int] = set()
+
+    # A bare page number is considered noise only when adjacent to a known
+    # watermark or the site's page label. A URL/domain line is independently
+    # removable; this also handles extracted PDF text where columns reflow.
     for idx, raw in enumerate(lines):
         value = raw.strip().casefold()
         if re.fullmatch(r"\d{1,5}", value):
@@ -167,9 +171,9 @@ def clean_import_noise(text: str, repeated_noise: set[str] | None = None) -> tup
 
     obvious_noise = (
         re.compile(r"^https?://", re.I),
-        re.compile(r"^(?:www\\.)?[^\\s]+\\.(?:com|net|org|cc|me)(?:/.*)?$", re.I),
-        re.compile(r"^.*(?:asianovel\\.com|mp4directs\\.com).*$", re.I),
-        re.compile(r"^\\d{1,5}\\s+report$", re.I),
+        re.compile(r"^(?:www\.)?[^\s]+\.(?:com|net|org|cc|me)(?:/.*)?$", re.I),
+        re.compile(r"^.*(?:asianovel\.com|mp4directs\.com).*$", re.I),
+        re.compile(r"^\d{1,5}\s+report$", re.I),
     )
     for idx, raw_line in enumerate(lines):
         line = raw_line.strip()
@@ -177,7 +181,7 @@ def clean_import_noise(text: str, repeated_noise: set[str] | None = None) -> tup
             if line:
                 removed.append(line)
             continue
-        normalized = re.sub(r"\\s+", " ", line).casefold()
+        normalized = re.sub(r"\s+", " ", line).casefold()
         report_watermark = False
         if normalized == "report":
             neighbors = []
@@ -186,7 +190,7 @@ def clean_import_noise(text: str, repeated_noise: set[str] | None = None) -> tup
             if idx + 1 < len(lines):
                 neighbors.append(lines[idx + 1].strip().casefold())
             report_watermark = any(
-                re.fullmatch(r"\\d{1,5}", neighbor)
+                re.fullmatch(r"\d{1,5}", neighbor)
                 or "asianovel.com" in neighbor
                 or "mp4directs.com" in neighbor
                 for neighbor in neighbors
