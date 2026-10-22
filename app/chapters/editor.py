@@ -34,10 +34,11 @@ class ChapterEditor:
         following = self.chapters[index + 1]
         left = current.text.rstrip()
         right = following.text.lstrip()
+        right_trim = len(following.text) - len(right)
         raw_text = left + "\n\n" + right
         leading_trim = len(raw_text) - len(raw_text.lstrip())
         text = raw_text.strip()
-        right_offset = len(left) + 2 - leading_trim
+        right_offset = len(left) + 2 - leading_trim - right_trim
 
         assignments = []
         for item in getattr(current, "dialogue_assignments", []) or []:
