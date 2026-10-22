@@ -241,7 +241,7 @@ def resolve_music_track(mood,selected_track=None,*,seed_text=""):
  if selected_track is not None:
   p=Path(str(selected_track)).expanduser()
   if not p.is_file():
-   raise FileNotFoundError(f"Selected music track no longer exists: {p}. Reassign it in Sound Design.")
+   raise FileNotFoundError(f"Selected music track is missing or no longer exists: {p}. Reassign it in Sound Design.")
   if p.suffix.casefold() not in AUDIO_EXTENSIONS:
    raise ValueError(f"Selected music track has an unsupported audio format: {p.name}")
   return p.resolve()
