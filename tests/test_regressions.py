@@ -2468,6 +2468,101 @@ Hyoudou Issei spoke to Rias Gremory.
         source = "I am a second year high school student."
         result = prepare_for_narration(source)
         self.assertEqual(result.narration_text, source)
+    def test_cast_provider_reuses_qwen_custom_worker_across_profiles(self):
+        from unittest.mock import patch
+        from app.tts.cast_provider import CastAwareProvider
+
+        class DummyNarrator:
+            def synthesize(self, text, output_path, voice=None):
+                return output_path
+
+        class DummyQwen:
+            def synthesize(self, text, output_path, voice=None):
+                self.calls.append((text, self.voice_id, self.instruct, self.qwen_seed))
+                return output_path
+
+            def __init__(self):
+                self.calls = []
+                self.voice_id = ""
+                self.instruct = ""
+                self.qwen_seed = None
+
+        first = VoiceProfile(
+            name="Character A", provider="qwen-character", voice_id="Ryan",
+            model_id="custom-0.6b", backend="automatic", language="English",
+            qwen_mode="custom", qwen_prompt="first prompt", qwen_seed=1,
+        )
+        second = VoiceProfile(
+            name="Character B", provider="qwen-character", voice_id="Aiden",
+            model_id="custom-0.6b", backend="automatic", language="English",
+            qwen_mode="custom", qwen_prompt="second prompt", qwen_seed=2,
+        )
+        engine = DummyQwen()
+        with patch("app.tts.cast_provider.provider_from_profile", return_value=(engine, "unused")) as factory:
+            cast = CastAwareProvider(
+                DummyNarrator(), "Narrator",
+                {first.name: first, second.name: second},
+                {"Speaker A": first.name, "Speaker B": second.name},
+            )
+            cast.synthesize("First line.", Path("first.wav"), first.name)
+            cast.synthesize("Second line.", Path("second.wav"), second.name)
+
+        self.assertEqual(factory.call_count, 1, "compatible Qwen profiles should share one model worker")
+        self.assertEqual(engine.calls, [
+            ("First line.", "Ryan", "first prompt", 1),
+            ("Second line.", "Aiden", "second prompt", 2),
+        ])
+
+    def test_cast_provider_reuses_chatterbox_worker_across_profiles(self):
+        from unittest.mock import patch
+        from app.tts.cast_provider import CastAwareProvider
+
+        class DummyNarrator:
+            def synthesize(self, text, output_path, voice=None):
+                return output_path
+
+        class DummyChatterbox:
+            def __init__(self):
+                self.calls = []
+                self.reference_audio = None
+                self.exaggeration = 0.0
+                self.cfg_weight = 0.0
+
+            def synthesize(self, text, output_path, voice=None):
+                self.calls.append((text, str(self.reference_audio), self.exaggeration, self.cfg_weight))
+                return output_path
+
+        with tempfile.TemporaryDirectory() as temp:
+            reference_a = Path(temp) / "a.wav"
+            reference_b = Path(temp) / "b.wav"
+            reference_a.write_bytes(b"reference-a")
+            reference_b.write_bytes(b"reference-b")
+            first = VoiceProfile(
+                name="Clone A", provider="chatterbox", voice_id="a",
+                sample_path=str(reference_a), model_id="chatterbox", backend="automatic",
+                language="en", exaggeration=0.2, cfg_weight=0.3,
+            )
+            second = VoiceProfile(
+                name="Clone B", provider="chatterbox", voice_id="b",
+                sample_path=str(reference_b), model_id="chatterbox", backend="automatic",
+                language="en", exaggeration=0.7, cfg_weight=0.8,
+            )
+            engine = DummyChatterbox()
+            with patch("app.tts.cast_provider.provider_from_profile", return_value=(engine, "unused")) as factory:
+                cast = CastAwareProvider(
+                    DummyNarrator(), "Narrator",
+                    {first.name: first, second.name: second},
+                    {"Speaker A": first.name, "Speaker B": second.name},
+                )
+                cast.synthesize("First line.", Path("first.wav"), first.name)
+                cast.synthesize("Second line.", Path("second.wav"), second.name)
+
+            self.assertEqual(factory.call_count, 1, "compatible Chatterbox profiles should share one model worker")
+            self.assertEqual(engine.calls, [
+                ("First line.", str(reference_a.resolve()), 0.2, 0.3),
+                ("Second line.", str(reference_b.resolve()), 0.7, 0.8),
+            ])
+
     def test_cast_provider_routes_em_dash_dialogue_to_assigned_character(self):
         from app.tts.cast_provider import CastAwareProvider
 
