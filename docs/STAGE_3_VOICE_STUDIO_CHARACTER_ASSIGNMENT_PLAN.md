@@ -16,7 +16,7 @@
 ### 3.2 Character analysis and cast persistence
 - [ ] Test deterministic character detection with attributed dialogue, aliases, first-person narration, and unassigned dialogue.
 - [x] Re-analysis now preserves voice-profile assignment, edited role, aliases, description, notes, scope, and chapter appearances for case-insensitive exact-name matches; regression test added and awaiting CI verification.
-- [ ] Test case-insensitive matching, alias edits, duplicate names, rename and delete semantics.
+- [ ] Test case-insensitive matching, alias edits, duplicate names, rename and delete semantics. Character rename now retains the previous canonical name as an alias so existing dialogue references can continue to resolve; regression contract added, awaiting CI.
 - [ ] Verify analysis output, confidence/examples, dialogue totals, and unassigned counts are saved and reloaded accurately.
 
 ### 3.3 Dialogue assignment and generation routing
