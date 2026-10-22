@@ -192,6 +192,16 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
 
 
 
+    def test_explicit_missing_cue_does_not_silently_fall_back_to_another_track(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from app.audio.library import resolve_cue_track
+
+        with TemporaryDirectory() as temporary:
+            missing = Path(temporary) / "deleted-opening-cue.wav"
+            with self.assertRaisesRegex(FileNotFoundError, "Selected audiobook cue no longer exists"):
+                resolve_cue_track("opening", selected_path=missing)
+
     def test_chapter_bgm_end_behaviors_have_distinct_fade_policies(self):
         from app.audio.assembler import _chapter_bgm_fade_out
 
