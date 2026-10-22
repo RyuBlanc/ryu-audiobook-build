@@ -2628,6 +2628,60 @@ Rias Gremory
             finally:
                 vp.voices_root = original_root
 
+    def test_generation_resume_state_write_is_atomic_and_preserves_last_good_copy(self):
+        from unittest.mock import patch
+        import app.tts.generator as generator
+
+        with tempfile.TemporaryDirectory() as temp:
+            chapter_dir = Path(temp) / "001_Chapter_One"
+            chapter_dir.mkdir(parents=True)
+            state_file = chapter_dir / "generation.json"
+            previous = '{"completed": [0]}'
+            state_file.write_text(previous, encoding="utf-8")
+
+            with patch.object(Path, "replace", side_effect=OSError("simulated replace failure")):
+                with self.assertRaises(OSError):
+                    generator.save_state(chapter_dir, {"completed": [0, 1]})
+
+            self.assertEqual(state_file.read_text(encoding="utf-8"), previous)
+            self.assertEqual(list(chapter_dir.glob(".generation.json.*.tmp")), [])
+
+            generator.save_state(chapter_dir, {"completed": [0, 1]})
+            self.assertEqual(generator.load_state(chapter_dir), {"completed": [0, 1]})
+            self.assertEqual(list(chapter_dir.glob(".generation.json.*.tmp")), [])
+
+    def test_generation_manager_reports_unexpected_planning_failure_and_closes_provider(self):
+        from app.tts.manager import GenerationManager
+
+        class BrokenProvider:
+            def __init__(self):
+                self.closed = False
+
+            def split_for_cast(self, text, voice, **kwargs):
+                raise RuntimeError("simulated planning failure")
+
+            def close(self):
+                self.closed = True
+
+        with tempfile.TemporaryDirectory() as temp:
+            provider = BrokenProvider()
+            summaries = []
+            manager = GenerationManager(
+                provider,
+                "Narrator",
+                [Chapter(1, "Chapter One", "A non-empty chapter.")],
+                Path(temp) / "working-audio",
+                on_finished=summaries.append,
+            )
+            manager.start()
+            manager._thread.join(timeout=10)
+
+            self.assertFalse(manager._thread.is_alive(), "generation worker remained stuck")
+            self.assertTrue(provider.closed, "provider cleanup was skipped after a fatal error")
+            self.assertEqual(len(summaries), 1, "fatal worker failure must produce one terminal result")
+            self.assertEqual(summaries[0].chapters_failed, [1])
+            self.assertIn("simulated planning failure", summaries[0].failure_details[1])
+
     def test_generation_resume_reuses_completed_chunks_without_reopening_them(self):
         from app.tts.generator import generate_chapter
 
