@@ -123,7 +123,7 @@ class PronunciationPersistenceTests(unittest.TestCase):
 
     def test_effective_synthesis_rules_merge_scopes_with_book_series_global_precedence(self):
         settings = self.root / "settings"
-        settings.mkdir()
+        settings.mkdir(exist_ok=True)
         with patch.object(host, "settings_root", return_value=settings):
             host._write_pronunciation_store(host._pronunciation_scope_path("global_library"), [
                 {"written_form": "NYC", "spoken_form": "Global City"},

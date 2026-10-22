@@ -1350,8 +1350,9 @@ class PremiumV2Bridge(QObject):
                     "The preview audio was generated, but its duration could not be measured. "
                     "The preview is not marked ready; check the audio runtime and retry."
                 )
-            replacements = sum((result.applied_rule_counts or {}).values())
-            count_message = f" Pronunciation applied {replacements} replacement(s) across {len(result.applied_rule_counts or {})} rule(s)."
+            rule_counts = getattr(result, "applied_rule_counts", {}) or {}
+            replacements = sum(rule_counts.values())
+            count_message = f" Pronunciation applied {replacements} replacement(s) across {len(rule_counts)} rule(s)."
             self._job_update(job_id, state="completed", stage="Preview ready", progress=100,
                              message=("Sound Design mix preview ready." if state.get("_include_sound_design_preview") else "Audio preview generated.") + count_message,
                              output_path=str(preview_path), result={
@@ -1362,7 +1363,7 @@ class PremiumV2Bridge(QObject):
                                  "selected_provider": str(profile.provider),
                                  "selected_voice_id": str(profile.voice_id or ""),
                                  "pronunciation_replacements": replacements,
-                                 "pronunciation_rule_counts": dict(result.applied_rule_counts or {}),
+                                 "pronunciation_rule_counts": dict(rule_counts),
                              })
         except Exception as exc:
             log.exception("Premium V2 voice preview failed")

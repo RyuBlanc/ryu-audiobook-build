@@ -14,6 +14,12 @@ from app.tts.base import TTSProvider
 from app.tts.multivoice import synthesize_voice_set
 
 
+class _PreviewUnits(list):
+    def __init__(self):
+        super().__init__()
+        self.rule_counts: list[dict[str, int]] = []
+
+
 @dataclass(frozen=True)
 class PreviewResult:
     output_path: Path
@@ -89,7 +95,6 @@ def _preview_units(
     pronunciation_dictionary: list[dict] | None,
     max_chars: int,
     dialogue_assignments=None,
-    unit_rule_counts: list[dict[str, int]] | None = None,
 ) -> list[tuple[str, str | list[str] | None]]:
     narration = prepare_for_narration(text).narration_text
 
@@ -107,7 +112,7 @@ def _preview_units(
     else:
         raw = [(narration, voice)]
 
-    units: list[tuple[str, str | list[str] | None]] = []
+    units = _PreviewUnits()
     used_chars = 0
     preview_unit_chars = 360
     preview_unit_sentences = 1
@@ -120,8 +125,6 @@ def _preview_units(
             max_sentences=preview_unit_sentences,
         ):
             unit, rule_counts = apply_pronunciation_dictionary_with_counts(unit, pronunciation_dictionary)
-            if unit_rule_counts is not None:
-                unit_rule_counts.append(rule_counts)
             if used_chars >= max_chars:
                 return units
             remaining = max_chars - used_chars
@@ -129,6 +132,7 @@ def _preview_units(
                 # Never cut through a sentence merely to fill the preview.
                 return units
             units.append((unit, segment_voice))
+            units.rule_counts.append(rule_counts)
             used_chars += len(unit)
             if used_chars >= max_chars:
                 return units
@@ -163,7 +167,6 @@ def build_voice_preview(
         )
     else:
         effective_max_chars = int(max_chars)
-    unit_rule_counts: list[dict[str, int]] = []
     applied_rule_counts: dict[str, int] = {}
     units = _preview_units(
         text,
@@ -172,8 +175,8 @@ def build_voice_preview(
         pronunciation_dictionary,
         max_chars=effective_max_chars,
         dialogue_assignments=dialogue_assignments,
-        unit_rule_counts=unit_rule_counts,
     )
+    unit_rule_counts = getattr(units, "rule_counts", [])
     if not units:
         raise ValueError("The selected chapter does not contain enough readable text for a preview.")
 
