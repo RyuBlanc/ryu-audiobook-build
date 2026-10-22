@@ -115,11 +115,21 @@ def apply_pronunciation_dictionary(text: str, dictionary: list[dict] | None = No
         if written and spoken:
             entries.append((written, spoken))
 
+    if not entries:
+        return text
+
+    # Resolve matches against the original text in one pass. Sequential
+    # substitutions can cascade (a spoken form can accidentally match another
+    # written form), making output depend on dictionary ordering. Longest
+    # phrase wins when entries overlap; ties retain saved entry order.
     entries.sort(key=lambda pair: len(pair[0]), reverse=True)
-    for written, spoken in entries:
-        pattern = re.compile(r"(?<!\w)" + re.escape(written) + r"(?!\w)", re.IGNORECASE)
-        result = pattern.sub(lambda match: spoken, result)
-    return result
+    by_written = {written.casefold(): spoken for written, spoken in entries}
+    alternatives = "|".join(re.escape(written) for written, _spoken in entries)
+    pattern = re.compile(r"(?<!\\w)(?P<written>" + alternatives + r")(?!\\w)", re.IGNORECASE)
+    return pattern.sub(
+        lambda match: by_written[match.group("written").casefold()],
+        text,
+    )
 
 
 def prepare_for_narration(
