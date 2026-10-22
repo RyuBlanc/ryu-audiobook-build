@@ -96,11 +96,9 @@ def _render_full_book_preview(host, job_id, project, chapter_dirs, chapter_title
             chapter_dirs, output, title, author, cover, chapter_titles,
             metadata=metadata, progress=report, bitrate=bitrate,
             narration_speed=float(state.get("narration_speed") or 1.0),
-            background_audio_path=Path(str(state["background_audio_path"]))
-                if state.get("background_audio_path") and Path(str(state["background_audio_path"])).is_file() else None,
+            background_audio_path=Path(str(state["background_audio_path"])) if state.get("background_audio_path") else None,
             background_audio_volume=float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18),
-            ambience_audio_path=Path(str(state["ambience_audio_path"]))
-                if state.get("ambience_audio_path") and Path(str(state["ambience_audio_path"])).is_file() else None,
+            ambience_audio_path=Path(str(state["ambience_audio_path"])) if state.get("ambience_audio_path") else None,
             ambience_audio_volume=float(state.get("ambience_audio_volume") if state.get("ambience_audio_volume") is not None else 0.10),
             background_audio_mode=str(state.get("background_audio_mode") or "off"),
             auto_music_style=str(state.get("auto_music_style") or "auto"),
@@ -109,14 +107,10 @@ def _render_full_book_preview(host, job_id, project, chapter_dirs, chapter_title
             story_effects_enabled=bool(state.get("story_effects_enabled", False)),
             story_effect_volume=float(state.get("story_effect_volume") if state.get("story_effect_volume") is not None else 0.22),
             sound_cue_style=str(state.get("sound_cue_style") or "classic-book"),
-            opening_cue_path=Path(str(state["opening_cue_path"]))
-                if state.get("opening_cue_path") and Path(str(state["opening_cue_path"])).is_file() else None,
-            page_turn_cue_path=Path(str(state["page_turn_cue_path"]))
-                if state.get("page_turn_cue_path") and Path(str(state["page_turn_cue_path"])).is_file() else None,
-            ending_cue_path=Path(str(state["ending_cue_path"]))
-                if state.get("ending_cue_path") and Path(str(state["ending_cue_path"])).is_file() else None,
-            scene_transition_cue_path=Path(str(state["scene_transition_cue_path"]))
-                if state.get("scene_transition_cue_path") and Path(str(state["scene_transition_cue_path"])).is_file() else None,
+            opening_cue_path=Path(str(state["opening_cue_path"])) if state.get("opening_cue_path") else None,
+            page_turn_cue_path=Path(str(state["page_turn_cue_path"])) if state.get("page_turn_cue_path") else None,
+            ending_cue_path=Path(str(state["ending_cue_path"])) if state.get("ending_cue_path") else None,
+            scene_transition_cue_path=Path(str(state["scene_transition_cue_path"])) if state.get("scene_transition_cue_path") else None,
             chapter_bgm_overrides=state.get("chapter_bgm_overrides")
                 if isinstance(state.get("chapter_bgm_overrides"), dict) else {},
         )

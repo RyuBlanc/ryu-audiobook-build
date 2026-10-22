@@ -1222,6 +1222,8 @@ class PremiumV2Bridge(QObject):
     def _render_sound_design_preview(self, source: Path, job_id: str, state: dict[str, Any]) -> Path:
         """Render a short audition using the active book's real music/cue assignments."""
         from app.audio.assembler import _concat_audio_files, _duration_ms, _run
+        from app.audio.library import validate_saved_audio_paths
+        validate_saved_audio_paths(state)
 
         preview_root = app_root() / "Previews"
         preview_root.mkdir(parents=True, exist_ok=True)
@@ -2260,7 +2262,8 @@ class PremiumV2Bridge(QObject):
         return {"opened": True, "path": str(folder.resolve())}
 
     def _sound_catalog(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        extensions = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".aiff", ".opus"}
+        from app.audio.library import AUDIO_EXTENSIONS, metadata_for
+        extensions = AUDIO_EXTENSIONS
         roots = [(app_root() / "Audio Library", "Imported locally")]
         bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])) / "assets" / "starter_audio"
         if bundled.is_dir():
@@ -2282,10 +2285,12 @@ class PremiumV2Bridge(QObject):
                     if size <= 0:
                         continue
                     key = str(resolved)
-                    found[key] = {"id": key, "title": path.stem, "path": key,
+                    metadata = metadata_for(resolved)
+                    license_note = str(metadata.get("license_note") or metadata.get("source_note") or metadata.get("license") or "Unknown; verify rights before publishing")
+                    found[key] = {"id": key, "title": str(metadata.get("title") or path.stem), "path": key,
                                   "source": source, "format": path.suffix.lower(),
-                                  "size_bytes": size, "duration_seconds": None,
-                                  "licensing": "Unknown; verify rights before publishing"}
+                                  "size_bytes": size, "duration_seconds": metadata.get("duration_seconds"),
+                                  "licensing": license_note, "metadata": metadata}
             except OSError:
                 log.exception("Could not scan sound asset folder %s", root)
         return sorted(found.values(), key=lambda row: (row["source"], row["title"].casefold()))
@@ -2300,7 +2305,8 @@ class PremiumV2Bridge(QObject):
             paths = selected
         if not paths:
             return {"cancelled": True, "imported": []}
-        extensions = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".aiff", ".opus"}
+        from app.audio.library import AUDIO_EXTENSIONS, probe_audio_duration_seconds
+        extensions = AUDIO_EXTENSIONS
         target_root = app_root() / "Audio Library"
         target_root.mkdir(parents=True, exist_ok=True)
         imported = []
@@ -2308,11 +2314,25 @@ class PremiumV2Bridge(QObject):
             source = Path(str(raw)).expanduser().resolve()
             if not source.is_file() or source.suffix.lower() not in extensions:
                 raise ValueError(f"Unsupported or missing audio asset: {source.name}")
+            duration_seconds = probe_audio_duration_seconds(source)
             destination = target_root / source.name
             if destination.exists() and destination.resolve() != source:
                 destination = target_root / f"{source.stem}-{uuid.uuid4().hex[:8]}{source.suffix.lower()}"
             if source != destination.resolve():
                 shutil.copy2(source, destination)
+            metadata_path = destination.with_name(destination.name + ".license.json")
+            metadata = {"role": "music" if str(payload.get("target_kind") or "").casefold() == "music" else "cue",
+                        "category": str(payload.get("category") or "universal"),
+                        "title": destination.stem, "original_filename": source.name,
+                        "license_note": str(payload.get("license_note") or "User-imported; verify license before publishing"),
+                        "duration_seconds": duration_seconds, "imported_at": self._now()}
+            try:
+                metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+            except OSError as exc:
+                if destination.resolve() != source:
+                    try: destination.unlink()
+                    except OSError: pass
+                raise RuntimeError(f"Could not save metadata for imported audio {destination.name}: {exc}") from exc
             imported.append({"title": destination.stem, "path": str(destination.resolve()),
                              "source": "Imported locally", "format": destination.suffix.lower(),
                              "size_bytes": destination.stat().st_size})

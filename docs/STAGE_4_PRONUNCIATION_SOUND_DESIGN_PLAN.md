@@ -20,12 +20,13 @@ Make pronunciation handling and story-aware sound design predictable, persistent
 
 ## 4.2 Sound-design catalogue and story assignments
 
-- [ ] Audit cue/BGM catalogue records, asset paths, missing files, metadata, and safe defaults.
-- [ ] Test chapter-level BGM overrides, opening/closing cues, transition cues, SFX cues, and the behavior when BGM is disabled.
-- [ ] Test malformed, missing, unsupported, or unreadable audio assets: provide clear errors and never corrupt source audio or silently produce a misleading mix.
-- [ ] Verify story-aware recommendations/assignments persist and can be edited, cleared, and reloaded.
-- [ ] Verify mix controls (gain/volume, fades, ducking, chapter boundaries, transitions) remain within safe bounds and preserve intended duration.
-- [ ] Check that user-specified assets and existing project paths are not overwritten by preview or mix rendering.
+- [x] Audit cue/BGM catalogue records, asset paths, missing files, metadata, and safe defaults; catalogue rows surface persisted title/license/duration metadata.
+- [x] Validate audio readability during import and before use; corrupt, unsupported, missing, and zero-duration assets produce actionable errors.
+- [x] Explicitly selected music/cue paths no longer fall through to an unrelated library track when missing or unreadable.
+- [x] Add focused regression tests for catalogue metadata, import isolation, invalid/missing assets, cue/BGM assignments, BGM-off behavior, bounded fades/gain, and output/source separation.
+- [x] Keep saved paths visible to validators instead of converting missing selections to `None`; preserve zero-volume values rather than replacing them with defaults.
+- [x] Guard against final audiobook output overwriting any selected sound-design source asset.
+- [ ] Target-PC listening and UI save/edit/clear/reload acceptance remain open.
 
 ## 4.3 Preview, synthesis and audio assembly
 
@@ -89,3 +90,13 @@ Close Stage 4 only when targeted and full automated tests pass, the Windows pack
 - Generation signatures hash the actual prepared chunk text and provider/voice identity. A changed pronunciation that changes a chapter's synthesis text invalidates incompatible checkpoints; chapters whose prepared text is unchanged remain reusable.
 - Preview job results report selected saved profile/provider/voice ID, voices used by generated segments, and actual per-rule replacement counts. Production progress reports the actual substitutions prepared for synthesis.
 - The approved HTML was not changed. Target-PC save/reopen, audio listening, and selected-provider acceptance remain open.
+
+
+## Prompt 3 implementation notes
+
+- Run #927 passed on commit `bc1bf253ec7394fabd87b10d92811f9473bef379`: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39806080839.
+- Prompt 3 tightens the real asset path: catalogue metadata is surfaced; imports validate audio readability and persist sidecar metadata; metadata write failures are reported rather than swallowed.
+- Saved sound-design paths are validated for existence, supported extension, and measurable audio duration. Production and preview call sites no longer turn missing saved paths into `None` before the validation boundary.
+- Explicitly selected music/cue files no longer fall through to an unrelated library track when missing or unreadable. The user must reassign the file in Sound Design.
+- The final output path is rejected if it resolves to a selected sound-design source asset.
+- The approved Premium V2 HTML layout remains unchanged. Target-PC listening and interactive save/edit/clear/reload acceptance remain open.

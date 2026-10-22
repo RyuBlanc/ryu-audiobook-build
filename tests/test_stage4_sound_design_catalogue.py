@@ -1,0 +1,108 @@
+"""Stage 4 real sound-design catalogue, persistence, and asset safety regressions."""
+from __future__ import annotations
+import json, tempfile, unittest, wave
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+from app.audio import library, assembler
+from app.ui import premium_v2_host as host
+
+def _valid_wav(path: Path, seconds: int = 1) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1); handle.setsampwidth(2); handle.setframerate(8000)
+        handle.writeframes(b"\x00\x00" * 8000 * seconds)
+    return path
+
+class _BridgeHarness:
+    def __init__(self, folder, chapters=()):
+        self.project = SimpleNamespace(folder=Path(folder), chapters=list(chapters))
+    def _active_project(self): return self.project
+    def _now(self): return "2026-10-22T00:00:00+00:00"
+
+class SoundDesignCatalogueTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name); self.app_root = self.root / "Ryu's Audiobook"; self.app_root.mkdir()
+        self.project_a, self.project_b = self.root / "book-a", self.root / "book-b"
+        self.project_a.mkdir(); self.project_b.mkdir()
+        self.bridge_a = _BridgeHarness(self.project_a, [SimpleNamespace(number=1, title="One")])
+        self.bridge_b = _BridgeHarness(self.project_b, [SimpleNamespace(number=1, title="Other")])
+        self.app_patch = patch.object(host, "app_root", return_value=self.app_root)
+        self.app_patch.start(); self.addCleanup(self.app_patch.stop)
+
+    def test_library_import_copies_audio_and_persists_metadata_without_touching_source(self):
+        source = _valid_wav(self.root / "original.wav"); original = source.read_bytes()
+        with patch.object(library, "audio_library_root", return_value=self.app_root / "Audio Library"):
+            imported = library.import_audio_files([source], target_kind="music", license_note="CC0")
+        self.assertEqual(source.read_bytes(), original); self.assertEqual(len(imported), 1)
+        metadata = json.loads(imported[0].with_name(imported[0].name + ".license.json").read_text(encoding="utf-8"))
+        self.assertEqual(metadata["license_note"], "CC0"); self.assertTrue(imported[0].is_file())
+
+    def test_deleted_explicit_music_or_cue_never_falls_back_to_another_track(self):
+        valid = _valid_wav(self.root / "fallback.wav")
+        with patch.object(library, "list_music_tracks", return_value=[library.AudioTrack(valid, "universal", "Universal")]):
+            with self.assertRaisesRegex(FileNotFoundError, "missing"):
+                library.resolve_music_track("universal", selected_track=self.root / "deleted.wav")
+        with patch.object(library, "list_cue_tracks", return_value=[valid]):
+            with self.assertRaisesRegex(FileNotFoundError, "missing"):
+                library.resolve_cue_track("opening", selected_path=self.root / "deleted.wav")
+
+    def test_saved_path_validation_rejects_missing_unsupported_and_unreadable_files(self):
+        with self.assertRaisesRegex(FileNotFoundError, "Reassign it in Sound Design"):
+            library.validate_saved_audio_paths({"opening_cue_path": str(self.root / "deleted.wav")})
+        unsupported = self.root / "cue.exe"; unsupported.write_bytes(b"fake")
+        with self.assertRaisesRegex(ValueError, "Unsupported audio format"):
+            library.validate_saved_audio_paths({"ending_cue_path": str(unsupported)})
+        broken = self.root / "broken.mp3"; broken.write_bytes(b"not mp3")
+        with self.assertRaisesRegex(ValueError, "unreadable|duration"):
+            library.validate_saved_audio_paths({"ambience_audio_path": str(broken)})
+
+    def test_chapter_bgm_assignment_edit_clear_and_reload_are_project_isolated(self):
+        track = _valid_wav(self.app_root / "Audio Library" / "track.wav")
+        with patch.object(host.PremiumV2Bridge, "_sound_catalog", autospec=True,
+                          side_effect=lambda _self, _payload: [{"path": str(track.resolve()), "title": "track"}]):
+            saved = host.PremiumV2Bridge._sound_chapter_bgm_save(self.bridge_a, {
+                "number": 1, "rule": "custom", "path": str(track), "volume": 0.2,
+                "start_offset": "after_10_seconds", "end_behavior": "continue_to_transition"})
+            self.assertTrue(saved["saved"])
+            reloaded = host.PremiumV2Bridge._sound_chapter_bgm_get(self.bridge_a, {})
+            self.assertEqual(reloaded["overrides"]["1"]["path"], str(track.resolve()))
+            self.assertEqual(reloaded["overrides"]["1"]["end_behavior"], "continue_to_transition")
+            host.PremiumV2Bridge._sound_chapter_bgm_save(self.bridge_a, {"number": 1, "rule": "none"})
+            self.assertEqual(host.PremiumV2Bridge._sound_chapter_bgm_get(self.bridge_a, {})["overrides"]["1"]["rule"], "none")
+            self.assertEqual(host.PremiumV2Bridge._sound_chapter_bgm_get(self.bridge_b, {})["overrides"], {})
+
+    def test_cue_assignments_save_clear_and_reload_are_book_local(self):
+        track = _valid_wav(self.app_root / "Audio Library" / "opening.wav")
+        with patch.object(host.PremiumV2Bridge, "_sound_catalog", autospec=True,
+                          side_effect=lambda _self, _payload: [{"path": str(track.resolve()), "title": "opening"}]):
+            self.assertTrue(host.PremiumV2Bridge._sound_cues_save(self.bridge_a, {"slot": "opening", "path": str(track)})["saved"])
+            self.assertEqual(host.PremiumV2Bridge._sound_cues_get(self.bridge_a, {})["opening"]["path"], str(track.resolve()))
+            self.assertIsNone(host.PremiumV2Bridge._sound_cues_get(self.bridge_b, {})["opening"]["path"])
+            host.PremiumV2Bridge._sound_cues_clear(self.bridge_a, {})
+            self.assertIsNone(host.PremiumV2Bridge._sound_cues_get(self.bridge_a, {})["opening"]["path"])
+
+    def test_catalogue_uses_sidecar_title_license_and_duration(self):
+        track = _valid_wav(self.app_root / "Audio Library" / "custom.wav")
+        track.with_name(track.name + ".license.json").write_text(json.dumps({
+            "title": "A Custom Cue", "license_note": "CC0", "duration_seconds": 1.0}), encoding="utf-8")
+        rows = host.PremiumV2Bridge._sound_catalog(self.bridge_a, {})
+        row = next(item for item in rows if item["path"] == str(track.resolve()))
+        self.assertEqual(row["title"], "A Custom Cue"); self.assertEqual(row["licensing"], "CC0")
+        self.assertEqual(row["duration_seconds"], 1.0)
+
+    def test_final_output_cannot_overwrite_selected_sound_asset(self):
+        asset = _valid_wav(self.root / "source.m4b")
+        with self.assertRaisesRegex(ValueError, "overwrite"):
+            assembler.assemble_m4b([], asset, "Test", "", None, [], background_audio_path=asset)
+
+    def test_preview_and_production_do_not_mask_missing_saved_paths(self):
+        host_source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        preview_source = Path("app/ui/full_book_preview.py").read_text(encoding="utf-8")
+        self.assertIn("validate_saved_audio_paths(state)", host_source)
+        self.assertIn("validate_saved_audio_paths(state)", preview_source)
+        self.assertNotIn('Path(state["opening_cue_path"]).is_file() else None', host_source)
+        self.assertNotIn('Path(str(state["opening_cue_path"])).is_file() else None', preview_source)
+
+if __name__ == "__main__": unittest.main()

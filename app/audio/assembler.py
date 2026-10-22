@@ -436,6 +436,15 @@ def assemble_m4b(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path = output_path.with_suffix(".m4b")
+    protected_inputs = [Path(p).expanduser().resolve() for p in (
+        background_audio_path, ambience_audio_path, opening_cue_path, page_turn_cue_path,
+        ending_cue_path, scene_transition_cue_path,
+    ) if p]
+    protected_inputs.extend(Path(str(item.get("path"))).expanduser().resolve()
+                            for item in (chapter_bgm_overrides or {}).values()
+                            if isinstance(item, dict) and item.get("rule") == "custom" and item.get("path"))
+    if output_path.resolve() in protected_inputs:
+        raise ValueError("Audiobook output cannot overwrite a selected sound-design source asset. Choose a different output path.")
 
     effective_audio_mode = str(background_audio_mode or "manual").strip().casefold()
     if effective_audio_mode not in {"off", "auto", "manual"}:

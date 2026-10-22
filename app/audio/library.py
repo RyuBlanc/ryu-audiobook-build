@@ -11,11 +11,13 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
+import subprocess
 import sys
 from app.core.paths import audio_library_root
 
-AUDIO_EXTENSIONS={".wav",".mp3",".m4a",".aac",".flac",".ogg",".opus",".wma"}
+AUDIO_EXTENSIONS={".wav",".mp3",".m4a",".aac",".flac",".ogg",".opus",".wma",".aiff"}
 MUSIC_CATEGORIES=(
  ("fantasy","Epic fantasy / magic"),("action","Action / battle / anime-rock"),
  ("mystery","Mystery / suspense / investigation"),("horror","Dark / supernatural / horror"),
@@ -153,11 +155,40 @@ def cue_category_root(kind):
 
 def _metadata_path(path): return path.with_name(path.name+".license.json")
 
-def license_note_for(path):
+def metadata_for(path):
  try:
   data=json.loads(_metadata_path(path).read_text(encoding="utf-8"))
-  return str(data.get("license_note") or data.get("source_note") or "")
- except (OSError,ValueError,TypeError): return ""
+  return data if isinstance(data,dict) else {}
+ except FileNotFoundError:
+  return {}
+ except (OSError,ValueError,TypeError) as exc:
+  raise ValueError(f"Audio metadata for {Path(path).name} could not be read: {exc}") from exc
+
+def license_note_for(path):
+ data=metadata_for(path)
+ return str(data.get("license_note") or data.get("source_note") or data.get("license") or "")
+
+def probe_audio_duration_seconds(path):
+ """Ask bundled FFmpeg to read an asset; reject corrupt/empty audio."""
+ path=Path(path).expanduser()
+ if not path.is_file():
+  raise FileNotFoundError(f"Audio asset is missing: {path}. Reassign it in Sound Design.")
+ if path.suffix.casefold() not in AUDIO_EXTENSIONS:
+  raise ValueError(f"Unsupported audio format for {path.name}. Choose a supported audio file in Sound Design.")
+ try:
+  import imageio_ffmpeg
+  result=subprocess.run([imageio_ffmpeg.get_ffmpeg_exe(),"-hide_banner","-i",str(path)],
+                        capture_output=True,text=True,timeout=20,check=False)
+ except (OSError,subprocess.SubprocessError) as exc:
+  raise RuntimeError(f"Could not inspect audio asset {path.name}: {exc}") from exc
+ output=str(result.stderr or "")+"\\n"+str(result.stdout or "")
+ match=re.search(r"Duration:\\s*(\\d+):(\\d+):(\\d+(?:\\.\\d+)?)",output)
+ if not match:
+  raise ValueError(f"Audio asset {path.name} is unreadable or has no measurable duration. Re-import a valid audio file.")
+ seconds=int(match.group(1))*3600+int(match.group(2))*60+float(match.group(3))
+ if seconds<=0:
+  raise ValueError(f"Audio asset {path.name} has zero duration. Choose a valid audio file.")
+ return seconds
 
 def import_audio_files(files,*,target_kind,category="universal",license_note=""):
  target=str(target_kind or "").strip().casefold()
@@ -203,7 +234,8 @@ def _seed_index(seed,count):
 def resolve_music_track(mood,selected_track=None,*,seed_text=""):
  if selected_track is not None:
   p=Path(str(selected_track)).expanduser()
-  if p.is_file() and p.suffix.casefold() in AUDIO_EXTENSIONS:return p.resolve()
+  probe_audio_duration_seconds(p)
+  return p.resolve()
  key=str(mood or "universal").strip().casefold()
  key={"dark":"horror","anime-rock":"action","fantasy / adventure":"fantasy",
       "science-fiction":"sci-fi","sci fi":"sci-fi","drama":"emotional"}.get(key,key)
@@ -230,7 +262,7 @@ def resolve_music_track(mood,selected_track=None,*,seed_text=""):
  return candidates[_seed_index(seed_text,len(candidates))].path
 
 def validate_saved_audio_paths(state):
- """Fail clearly when a saved sound-design assignment points to a missing file."""
+ """Fail clearly when saved assignments are missing, unsupported, or unreadable."""
  fields=(
   ("background_audio_path","book background music"),
   ("ambience_audio_path","book ambience"),
@@ -242,11 +274,14 @@ def validate_saved_audio_paths(state):
  for key,label in fields:
   raw=state.get(key)
   if not raw: continue
-  path=Path(str(raw)).expanduser()
-  if not path.is_file():
-   raise FileNotFoundError(f"Saved {label} is missing: {path}. Reassign it in Sound Design.")
-  if path.suffix.casefold() not in AUDIO_EXTENSIONS:
-   raise ValueError(f"Saved {label} has an unsupported audio format: {path.name}")
+  try: probe_audio_duration_seconds(Path(str(raw)).expanduser())
+  except (FileNotFoundError,ValueError,RuntimeError) as exc:
+   raise type(exc)(f"Saved {label} is invalid: {exc}. Reassign it in Sound Design.") from exc
+ auto_path=state.get("auto_music_track_path")
+ if auto_path and str(state.get("background_audio_mode") or "off").casefold()=="auto":
+  try: probe_audio_duration_seconds(Path(str(auto_path)).expanduser())
+  except (FileNotFoundError,ValueError,RuntimeError) as exc:
+   raise type(exc)(f"Saved automatic BGM selection is invalid: {exc}. Reassign it in Sound Design.") from exc
  overrides=state.get("chapter_bgm_overrides")
  if isinstance(overrides,dict):
   for chapter,override in overrides.items():
@@ -254,19 +289,17 @@ def validate_saved_audio_paths(state):
    raw=override.get("path")
    if not raw:
     raise ValueError(f"Chapter {chapter} uses custom BGM but no track is saved. Reassign it in Sound Design.")
-   path=Path(str(raw)).expanduser()
-   if not path.is_file():
-    raise FileNotFoundError(f"Saved custom BGM for chapter {chapter} is missing: {path}. Reassign it in Sound Design.")
-   if path.suffix.casefold() not in AUDIO_EXTENSIONS:
-    raise ValueError(f"Saved custom BGM for chapter {chapter} has an unsupported audio format: {path.name}")
+   try: probe_audio_duration_seconds(Path(str(raw)).expanduser())
+   except (FileNotFoundError,ValueError,RuntimeError) as exc:
+    raise type(exc)(f"Saved custom BGM for chapter {chapter} is invalid: {exc}. Reassign it in Sound Design.") from exc
 
 def resolve_cue_track(kind,selected_path=None,*,seed_text=""):
  if selected_path:
   p=Path(selected_path).expanduser()
-  if not p.is_file():
-   raise FileNotFoundError(f"Selected audiobook cue no longer exists: {p}")
-  if p.suffix.casefold() not in AUDIO_EXTENSIONS:
-   raise ValueError(f"Selected audiobook cue has an unsupported audio format: {p.name}")
+  probe_audio_duration_seconds(p)
   return p.resolve()
  tracks=list_cue_tracks(kind)
- return tracks[_seed_index(seed_text,len(tracks))] if tracks else None
+ if not tracks:return None
+ selected=tracks[_seed_index(seed_text,len(tracks))]
+ probe_audio_duration_seconds(selected)
+ return selected
