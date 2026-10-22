@@ -60,6 +60,20 @@ class ImportIntegrityTests(unittest.TestCase):
         self.assertIn("The next paragraph remains intact.", cleaned)
         self.assertIn("Report", removed)
 
+    def test_standalone_report_word_is_preserved_without_watermark_context(self):
+        source = "She handed him the report.\\n\\nReport\\n\\nThe meeting continued."
+        cleaned, removed = clean_import_noise(source)
+
+        self.assertIn("Report", cleaned)
+        self.assertIn("The meeting continued.", cleaned)
+        self.assertNotIn("Report", removed)
+
+    def test_import_worker_applies_noise_cleanup_and_reports_removed_count(self):
+        source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("detect_repeated_book_noise([chapter.text for chapter in chapters])", source)
+        self.assertIn("chapter.text, removed = clean_import_noise(chapter.text, repeated_noise)", source)
+        self.assertIn('"removed_noise_count": len(removed_noise)', source)
+
     def test_project_creation_round_trip_preserves_review_and_skip_state(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "library"
