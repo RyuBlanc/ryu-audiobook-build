@@ -192,6 +192,20 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
 
 
 
+    def test_missing_saved_sound_assets_fail_before_preview_or_generation(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from app.audio.library import validate_saved_audio_paths
+
+        with TemporaryDirectory() as temporary:
+            missing = Path(temporary) / "deleted-music.wav"
+            with self.assertRaisesRegex(FileNotFoundError, "Saved book background music is missing"):
+                validate_saved_audio_paths({"background_audio_path": str(missing)})
+            with self.assertRaisesRegex(FileNotFoundError, "Saved custom BGM for chapter 4 is missing"):
+                validate_saved_audio_paths({"chapter_bgm_overrides": {"4": {"rule": "custom", "path": str(missing)}}})
+            with self.assertRaisesRegex(ValueError, "uses custom BGM but no track is saved"):
+                validate_saved_audio_paths({"chapter_bgm_overrides": {"4": {"rule": "custom"}}})
+
     def test_explicit_missing_cue_does_not_silently_fall_back_to_another_track(self):
         from tempfile import TemporaryDirectory
         from pathlib import Path
