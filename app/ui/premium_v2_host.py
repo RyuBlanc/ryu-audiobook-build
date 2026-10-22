@@ -1360,8 +1360,8 @@ class PremiumV2Bridge(QObject):
                                  "requested_duration_seconds": seconds, "actual_duration_seconds": duration,
                                  "voices_used": list(result.voices_used), "segments": result.segments,
                                  "selected_profile": profile.name,
-                                 "selected_provider": str(profile.provider),
-                                 "selected_voice_id": str(profile.voice_id or ""),
+                                 "selected_provider": str(getattr(profile, "provider", "") or ""),
+                                 "selected_voice_id": str(getattr(profile, "voice_id", "") or ""),
                                  "pronunciation_replacements": replacements,
                                  "pronunciation_rule_counts": dict(rule_counts),
                              })
