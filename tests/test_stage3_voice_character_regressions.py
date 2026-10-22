@@ -8,7 +8,7 @@ from app.chapters.assignment_utils import (
     normalize_assignment,
     unassign_dialogue_from_chapters,
 )
-from app.chapters.characters import analyze_book
+from app.chapters.characters import analyze_book, merge_character_analysis_record
 from app.chapters.detector import Chapter
 
 
@@ -80,6 +80,42 @@ class Stage3DialogueAssignmentTests(unittest.TestCase):
 
 
 class Stage3CharacterAnalysisTests(unittest.TestCase):
+
+    def test_reanalysis_refreshes_evidence_but_preserves_user_cast_metadata(self):
+        candidate = type("Candidate", (), {
+            "name": "Mira",
+            "role": "Supporting Character",
+            "dialogue_count": 7,
+            "examples": ["A newly detected line."],
+            "confidence": 0.91,
+            "aliases": ["Mira Vale"],
+        })()
+        prior = {
+            "name": "Mira",
+            "role": "Lead",
+            "aliases": ["Captain Mira"],
+            "voice_profile": "Warm Narrator",
+            "short_description": "User-authored character description.",
+            "notes": "Keep this note.",
+            "scope": "Series-wide",
+            "chapter_appearances": [1, 3, 8],
+            "dialogue_count": 2,
+            "examples": ["Stale example"],
+        }
+
+        merged = merge_character_analysis_record(candidate, prior)
+
+        self.assertEqual(merged["dialogue_count"], 7)
+        self.assertEqual(merged["examples"], ["A newly detected line."])
+        self.assertEqual(merged["confidence"], 0.91)
+        self.assertEqual(merged["role"], "Lead")
+        self.assertEqual(merged["aliases"], ["Captain Mira", "Mira Vale"])
+        self.assertEqual(merged["voice_profile"], "Warm Narrator")
+        self.assertEqual(merged["short_description"], "User-authored character description.")
+        self.assertEqual(merged["notes"], "Keep this note.")
+        self.assertEqual(merged["scope"], "Series-wide")
+        self.assertEqual(merged["chapter_appearances"], [1, 3, 8])
+
     def test_manual_assignments_remain_character_candidates_during_reanalysis(self):
         chapter = Chapter(
             1,
