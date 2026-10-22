@@ -28,7 +28,7 @@ from app.core.paths import app_root, audiobooks_root, ensure_roots, library_root
 from app.core.project import create_project, list_projects
 from app.documents.parser import SUPPORTED_EXTENSIONS, clean_import_noise, clean_text, detect_repeated_book_noise, extract_text
 from app.chapters.detector import detect_chapters
-from app.chapters.characters import analyze_book
+from app.chapters.characters import analyze_book, merge_character_analysis_record
 from app.tts.manager import GenerationManager
 from app.tts.preview import build_voice_preview
 from app.tts.profile_provider import provider_from_profile
@@ -1238,10 +1238,7 @@ class PremiumV2Bridge(QObject):
             items = []
             for c in analysis.characters:
                 prior = old.get(c.name.casefold(), {})
-                items.append({"name": c.name, "role": c.role, "dialogue_count": c.dialogue_count,
-                              "examples": list(c.examples or []), "confidence": float(c.confidence),
-                              "aliases": list(c.aliases or []), "voice_profile": prior.get("voice_profile"),
-                              "chapter_appearances": list(prior.get("chapter_appearances") or [])})
+                items.append(merge_character_analysis_record(c, prior))
             state["characters"] = items
             state["character_analysis"] = {"dialogue_total": analysis.dialogue_total,
                                            "unassigned_dialogue": analysis.unassigned_dialogue,
@@ -1294,21 +1291,41 @@ class PremiumV2Bridge(QObject):
                           and str(c.get("name", "")).casefold() == name.casefold()), None)
         if duplicate is not None:
             raise ValueError("Another character already uses that name.")
-        profile_name = str(payload.get("voice_profile") or "").strip()
+        # Partial updates must not erase saved cast metadata merely because a
+        # caller omitted a field. Explicit empty values still allow the UI to
+        # clear optional fields intentionally.
+        raw_profile_name = payload.get("voice_profile") if "voice_profile" in payload else item.get("voice_profile")
+        profile_name = str(raw_profile_name or "").strip()
         if profile_name and self._find_profile(profile_name) is None:
             raise ValueError("Choose a voice from the saved Voice Studio catalogue.")
-        aliases = payload.get("aliases") or []
-        if isinstance(aliases, str):
+        aliases = payload.get("aliases")
+        if aliases is None:
+            aliases = list(item.get("aliases") or [])
+        elif isinstance(aliases, str):
             aliases = [part.strip() for part in aliases.replace("\n", ",").split(",") if part.strip()]
         if not isinstance(aliases, list):
             raise ValueError("Character aliases must be a list or comma-separated text.")
+        # A renamed character may still appear under the previous name in saved
+        # dialogue assignments and older analysis evidence. Keep that name as an
+        # alias so cast-aware narration routing continues to resolve the identity.
+        if original_name.casefold() != name.casefold():
+            aliases = [original_name, *aliases]
+        aliases = list(dict.fromkeys(
+            str(alias).strip()[:160]
+            for alias in aliases
+            if str(alias).strip() and str(alias).strip().casefold() != name.casefold()
+        ))
+        role_value = payload.get("role") if "role" in payload else item.get("role", "Character")
+        description_value = payload.get("short_description") if "short_description" in payload else item.get("short_description", "")
+        notes_value = payload.get("notes") if "notes" in payload else item.get("notes", "")
+        scope_value = payload.get("scope") if "scope" in payload else item.get("scope", "Current book only")
         item.update({
             "name": name,
-            "role": str(payload.get("role") or item.get("role") or "Character").strip()[:160],
-            "short_description": str(payload.get("short_description") or "").strip()[:1000],
+            "role": str(role_value or "Character").strip()[:160],
+            "short_description": str(description_value or "").strip()[:1000],
             "aliases": list(dict.fromkeys(str(alias).strip()[:160] for alias in aliases if str(alias).strip())),
-            "notes": str(payload.get("notes") or "").strip()[:4000],
-            "scope": str(payload.get("scope") or "Current book only").strip()[:80],
+            "notes": str(notes_value or "").strip()[:4000],
+            "scope": str(scope_value or "Current book only").strip()[:80],
             "voice_profile": profile_name or None,
         })
         state["characters"] = characters
