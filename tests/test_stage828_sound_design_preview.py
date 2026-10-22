@@ -192,6 +192,16 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
 
 
 
+    def test_chapter_bgm_end_behaviors_have_distinct_fade_policies(self):
+        from app.audio.assembler import _chapter_bgm_fade_out
+
+        self.assertEqual(_chapter_bgm_fade_out("fade_before_end", 4.0), 4.0)
+        self.assertEqual(_chapter_bgm_fade_out("continue_to_transition", 4.0), 0.75)
+        self.assertEqual(_chapter_bgm_fade_out("stop_immediately", 4.0), 0.0)
+        self.assertEqual(_chapter_bgm_fade_out("fade_before_end", 99.0), 30.0)
+        with self.assertRaisesRegex(ValueError, "Unsupported chapter BGM end behavior"):
+            _chapter_bgm_fade_out("unknown", 3.0)
+
     def test_chapter_bgm_selection_activates_mixer_without_book_default(self):
         source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         start = source.index("    def _sound_chapter_bgm_save(")
