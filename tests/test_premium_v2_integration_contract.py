@@ -228,6 +228,13 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("shutil.copy2(source_path, staged_source)", (ROOT / "app" / "core" / "project.py").read_text(encoding="utf-8"))
         self.assertIn("staging_folder.rename(final_folder)", (ROOT / "app" / "core" / "project.py").read_text(encoding="utf-8"))
 
+    def test_import_review_warnings_are_shown_after_import_completes(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("Array.isArray(job.result?.warnings)", adapter)
+        self.assertIn("const completionMessage = importWarnings.length", adapter)
+        self.assertIn("message(completionMessage, job.state !== 'completed')", adapter)
+        self.assertIn('"warnings": [f"Detected {len(chapters)} chapter(s); review chapter boundaries before production."]', self.host)
+
     def test_chapter_clean_button_uses_backend_cleaner(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
