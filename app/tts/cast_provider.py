@@ -370,6 +370,20 @@ class CastAwareProvider(TTSProvider):
         profile_name = voice.casefold() if voice else ""
         profile = self.profiles.get(profile_name)
         if profile is None:
+            # A name that is explicitly assigned to a character is not a
+            # generic fallback voice. Falling back to the narrator here would
+            # silently render a character in the wrong voice if the cast
+            # catalogue was incomplete or changed after routing was built.
+            assigned_profile_names = {
+                str(name).strip().casefold()
+                for name in self.assignments.values()
+                if str(name).strip()
+            }
+            if profile_name and profile_name in assigned_profile_names:
+                raise RuntimeError(
+                    f"The assigned character voice profile '{voice}' is unavailable. "
+                    "Open Character Studio and assign an available saved voice profile, then retry."
+                )
             return self.narrator_provider.synthesize(text, output_path, self.narrator_voice)
         cache_key = self._provider_cache_key(profile_name, profile)
         cached = self._providers.get(cache_key)
