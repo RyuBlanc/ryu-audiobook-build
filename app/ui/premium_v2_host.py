@@ -26,7 +26,7 @@ from PySide6.QtGui import QDesktopServices
 
 from app.core.paths import app_root, audiobooks_root, ensure_roots, library_root, settings_root
 from app.core.project import create_project, list_projects
-from app.documents.parser import SUPPORTED_EXTENSIONS, clean_import_noise, clean_text, extract_text
+from app.documents.parser import SUPPORTED_EXTENSIONS, clean_import_noise, clean_text, detect_repeated_book_noise, extract_text
 from app.chapters.detector import detect_chapters
 from app.chapters.characters import analyze_book
 from app.tts.manager import GenerationManager
@@ -709,6 +709,17 @@ class PremiumV2Bridge(QObject):
             chapters = detect_chapters(text)
             if not chapters:
                 raise ValueError("The document contains no readable chapter text.")
+            # Clean likely ebook page noise after chapter boundaries are known so
+            # repeated boilerplate can be detected across chapters without
+            # accidentally treating a single word in normal narration as noise.
+            repeated_noise = set(detect_repeated_book_noise([chapter.text for chapter in chapters]))
+            removed_noise: list[str] = []
+            for chapter in chapters:
+                chapter.text, removed = clean_import_noise(chapter.text, repeated_noise)
+                removed_noise.extend(removed)
+            chapters = [chapter for chapter in chapters if (chapter.text or "").strip()]
+            if not chapters:
+                raise ValueError("Cleanup removed all chapter text; import was stopped to protect the source book.")
             if cancel_event and cancel_event.is_set():
                 self._job_update(job_id, state="cancelled", stage="Import cancelled", progress=0,
                                  message="Import cancelled before creating a project; the source file was preserved.")
@@ -723,13 +734,17 @@ class PremiumV2Bridge(QObject):
                           "imported_at": self._now(), "modified_at": self._now()})
             save_state(project.folder, state)
             self._job_update(job_id, state="completed", stage="Import complete", progress=100,
-                             message="Book imported and saved locally", project_title=project.title,
+                             message=("Book imported and saved locally" +
+                                      (f"; removed {len(removed_noise)} likely page-noise line(s)" if removed_noise else "")),
+                             project_title=project.title,
                              project_folder=str(project.folder.resolve()), result={
                                  "title": project.title, "folder": str(project.folder.resolve()),
                                  "chapter_count": len(chapters), "word_count": state["word_count"],
                                  "source_file": str(project.source_path or path),
                                  "preview_text": "\n\n".join(c.text for c in chapters[:2])[:4000],
-                                 "warnings": [f"Detected {len(chapters)} chapter(s); review chapter boundaries before production."],
+                                 "removed_noise_count": len(removed_noise),
+                                 "warnings": [f"Detected {len(chapters)} chapter(s); review chapter boundaries before production."] +
+                                            ([f"Removed {len(removed_noise)} likely page-noise line(s); inspect the preview before production."] if removed_noise else []),
                              })
         except Exception as exc:
             log.exception("Premium V2 import failed")

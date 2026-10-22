@@ -90,27 +90,71 @@ class Project:
         return cls(metadata["title"], folder, source, chapters)
 
 def create_project(title: str, source_path: Path, chapters: list[Chapter]) -> Project:
+    """Create a project transactionally so failed imports never appear as partial books.
+
+    All writes happen in a private staging directory under the library root. The
+    completed folder is renamed into place only after the source copy and both
+    project JSON files have been written and verified.
+    """
+    source_path = Path(source_path)
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Import source does not exist: {source_path}")
+
+    root = library_root()
+    root.mkdir(parents=True, exist_ok=True)
     safe_title = "".join(c for c in title if c not in '<>:"/\\|?*').strip() or "Untitled Book"
-    folder = library_root() / safe_title
-    if folder.exists():
-        suffix = 2
-        while (library_root() / f"{safe_title} ({suffix})").exists():
-            suffix += 1
-        folder = library_root() / f"{safe_title} ({suffix})"
-    folder.mkdir(parents=True, exist_ok=True)
-    source_dir = folder / "source"
-    source_dir.mkdir(exist_ok=True)
-    destination = source_dir / source_path.name
-    if source_path.resolve() != destination.resolve():
-        shutil.copy2(source_path, destination)
-    project = Project(safe_title, folder, destination, chapters)
-    project.save()
-    return project
+
+    # Reserve a unique final name. The final rename is atomic on the same
+    # filesystem; if another importer wins the name in the meantime, retry.
+    suffix = 1
+    while True:
+        candidate_title = safe_title if suffix == 1 else f"{safe_title} ({suffix})"
+        final_folder = root / candidate_title
+        if not final_folder.exists():
+            break
+        suffix += 1
+
+    staging_folder = Path(tempfile.mkdtemp(prefix=".import-staging-", dir=str(root)))
+    try:
+        source_dir = staging_folder / "source"
+        source_dir.mkdir()
+        staged_source = source_dir / source_path.name
+        if source_path.resolve() != staged_source.resolve():
+            shutil.copy2(source_path, staged_source)
+
+        staged_project = Project(candidate_title, staging_folder, staged_source, chapters)
+        staged_project.save()
+
+        # Verify the staged project can be loaded before it becomes visible in
+        # the user's library. This catches malformed or incomplete JSON writes.
+        verified = Project.load(staging_folder)
+        if len(verified.chapters) != len(chapters):
+            raise IOError("Imported chapter count changed while saving the project.")
+
+        while True:
+            try:
+                staging_folder.rename(final_folder)
+                break
+            except FileExistsError:
+                suffix += 1
+                candidate_title = f"{safe_title} ({suffix})"
+                final_folder = root / candidate_title
+
+        final_source = final_folder / "source" / source_path.name
+        return Project(candidate_title, final_folder, final_source, verified.chapters)
+    except Exception:
+        shutil.rmtree(staging_folder, ignore_errors=True)
+        raise
 
 def list_projects() -> list[Project]:
     projects = []
     root = library_root()
     for folder in sorted(root.iterdir()):
+        # Import staging folders may briefly contain verified JSON while the
+        # import worker is preparing its atomic publish. Never expose them as
+        # user projects before the final directory rename.
+        if folder.name.startswith(".import-staging-"):
+            continue
         if folder.is_dir() and (folder / "project.json").exists():
             try:
                 projects.append(Project.load(folder))
