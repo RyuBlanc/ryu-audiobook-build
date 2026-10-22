@@ -46,7 +46,7 @@ class SoundDesignCatalogueTests(unittest.TestCase):
             with self.assertRaisesRegex(FileNotFoundError, "missing"):
                 library.resolve_music_track("universal", selected_track=self.root / "deleted.wav")
         with patch.object(library, "list_cue_tracks", return_value=[valid]):
-            with self.assertRaisesRegex(FileNotFoundError, "missing"):
+            with self.assertRaisesRegex(FileNotFoundError, "missing|no longer exists"):
                 library.resolve_cue_track("opening", selected_path=self.root / "deleted.wav")
 
     def test_saved_path_validation_rejects_missing_unsupported_and_unreadable_files(self):

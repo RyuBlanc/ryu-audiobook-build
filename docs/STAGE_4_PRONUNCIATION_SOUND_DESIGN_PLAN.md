@@ -40,8 +40,8 @@ Make pronunciation handling and story-aware sound design predictable, persistent
 ## 4.4 Regression, packaging and acceptance
 
 - [x] Add focused Stage 4 regression tests and run them during development (Run #919 passed on `422fcb1bde50761f31a67653996e397953ef118a`).
-- [x] Run the complete unittest suite on the latest Stage 4 head (Run #919 passed).
-- [x] Run the Windows frozen-app, bundled-asset, installer, SHA-256, and Microsoft Defender workflow; inspect all failed steps (Run #919: all required steps passed; release publication skipped by workflow policy).
+- [ ] Run the complete unittest suite on the latest Stage 4 head. Run #931 exercised 451 tests and found one assertion mismatch in the new deleted-cue regression (implementation correctly raised an actionable missing-selection error); the expectation was corrected for the next run.
+- [ ] Run the Windows frozen-app, bundled-asset, installer, SHA-256, and Microsoft Defender workflow on the latest Stage 4 head. Run #931 stopped at regression tests before packaging; latest-head verification is pending.
 - [ ] Target-PC acceptance: edit/save/reopen pronunciation rules and sound-design assignments, generate previews, and compare actual output with requested settings.
 - [ ] Preserve and track all earlier open acceptance gates: Stage 1 hardware freeze/crash validation; Stage 2 supported-format import/edit/reopen validation; Stage 3 Voice Studio/Character Studio UI and actual voice-preview acceptance.
 - [ ] Do not mark Stage 4 complete from green CI alone.
@@ -100,3 +100,10 @@ Close Stage 4 only when targeted and full automated tests pass, the Windows pack
 - Explicitly selected music/cue files no longer fall through to an unrelated library track when missing or unreadable. The user must reassign the file in Sound Design.
 - The final output path is rejected if it resolves to a selected sound-design source asset.
 - The approved Premium V2 HTML layout remains unchanged. Target-PC listening and interactive save/edit/clear/reload acceptance remain open.
+
+
+## Prompt 3 verification correction
+
+- Run #930: 451 tests, three failures (two expectation/fixture issues and the sound import integration contract). The code/test contract was corrected in commit `0c54d7c7762f68ad9647ec7468628f48cc395a03`.
+- Run #931: 451 tests, one remaining assertion mismatch because the missing explicit cue error used the established wording “no longer exists” rather than the test's expected word “missing”. The regression expectation is broadened to accept either actionable wording. Packaging was not reached in either failed run.
+- Do not treat Prompt 3 or Stage 4 as verified until a subsequent latest-head run passes the suite and Windows package gates.
