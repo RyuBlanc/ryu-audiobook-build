@@ -1294,11 +1294,23 @@ class PremiumV2Bridge(QObject):
         profile_name = str(payload.get("voice_profile") or "").strip()
         if profile_name and self._find_profile(profile_name) is None:
             raise ValueError("Choose a voice from the saved Voice Studio catalogue.")
-        aliases = payload.get("aliases") or []
-        if isinstance(aliases, str):
+        aliases = payload.get("aliases")
+        if aliases is None:
+            aliases = list(item.get("aliases") or [])
+        elif isinstance(aliases, str):
             aliases = [part.strip() for part in aliases.replace("\n", ",").split(",") if part.strip()]
         if not isinstance(aliases, list):
             raise ValueError("Character aliases must be a list or comma-separated text.")
+        # A renamed character may still appear under the previous name in saved
+        # dialogue assignments and older analysis evidence. Keep that name as an
+        # alias so cast-aware narration routing continues to resolve the identity.
+        if original_name.casefold() != name.casefold():
+            aliases = [original_name, *aliases]
+        aliases = list(dict.fromkeys(
+            str(alias).strip()[:160]
+            for alias in aliases
+            if str(alias).strip() and str(alias).strip().casefold() != name.casefold()
+        ))
         item.update({
             "name": name,
             "role": str(payload.get("role") or item.get("role") or "Character").strip()[:160],
