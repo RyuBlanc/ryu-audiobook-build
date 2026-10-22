@@ -7,7 +7,7 @@ from unittest import mock
 
 from app.chapters.detector import Chapter, detect_chapters
 from app.core.project import Project, create_project, list_projects
-from app.documents.parser import extract_text, clean_import_noise
+from app.documents.parser import extract_text, clean_import_noise, pdf_extraction_quality_warning
 
 
 class ImportIntegrityTests(unittest.TestCase):
@@ -31,6 +31,61 @@ class ImportIntegrityTests(unittest.TestCase):
             ])
             self.assertIn("The hero walked toward the door.", chapters[0].text)
             self.assertIn("She followed him.", chapters[1].text)
+
+    def test_docx_import_preserves_paragraphs_and_table_story_text(self):
+        from docx import Document
+
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "story.docx"
+            document = Document()
+            document.add_paragraph("Chapter 1: Arrival")
+            document.add_paragraph("The first paragraph survives.")
+            table = document.add_table(rows=1, cols=1)
+            table.cell(0, 0).text = "Story text stored in a table survives."
+            document.add_paragraph("The final paragraph survives.")
+            document.save(source)
+
+            book = extract_text(source)
+
+            self.assertIn("The first paragraph survives.", book.text)
+            self.assertIn("Story text stored in a table survives.", book.text)
+            self.assertIn("The final paragraph survives.", book.text)
+            self.assertLess(book.text.index("The first paragraph survives."),
+                            book.text.index("Story text stored in a table survives."))
+            self.assertLess(book.text.index("Story text stored in a table survives."),
+                            book.text.index("The final paragraph survives."))
+
+    def test_epub_import_follows_spine_reading_order(self):
+        from ebooklib import epub
+
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "story.epub"
+            book = epub.EpubBook()
+            book.set_identifier("import-integrity-test")
+            book.set_title("Reading order test")
+            book.set_language("en")
+            chapter_two = epub.EpubHtml(title="Second", file_name="second.xhtml", lang="en")
+            chapter_two.content = "<html><body><p>Second chapter content.</p></body></html>"
+            chapter_one = epub.EpubHtml(title="First", file_name="first.xhtml", lang="en")
+            chapter_one.content = "<html><body><p>First chapter content.</p></body></html>"
+            book.add_item(chapter_one)
+            book.add_item(chapter_two)
+            book.spine = [chapter_two, chapter_one]
+            book.add_item(epub.EpubNcx())
+            book.add_item(epub.EpubNav())
+            epub.write_epub(str(source), book)
+
+            extracted = extract_text(source).text
+
+            self.assertLess(extracted.index("Second chapter content."),
+                            extracted.index("First chapter content."))
+
+    def test_sparse_long_pdf_extraction_is_blocked_with_actionable_diagnostic(self):
+        warning = pdf_extraction_quality_warning(page_count=80, word_count=120)
+        self.assertIsNotNone(warning)
+        self.assertIn("OCR", warning)
+        self.assertIn("partial audiobook", warning)
+        self.assertIsNone(pdf_extraction_quality_warning(page_count=2, word_count=120))
 
     def test_chapter_detection_does_not_leak_next_heading_into_previous_body(self):
         source = (
