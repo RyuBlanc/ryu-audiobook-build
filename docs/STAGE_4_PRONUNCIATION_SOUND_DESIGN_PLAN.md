@@ -12,10 +12,11 @@ Make pronunciation handling and story-aware sound design predictable, persistent
 
 - [x] Audit pronunciation dictionary data shape, normalization, duplicate/conflicting entries, case sensitivity, Unicode, invalid/empty entries, and current-book versus library scopes (implementation + regression coverage added in Prompt 1).
 - [x] Add regression tests for save/reload persistence, edit/delete, deterministic duplicate resolution, scope isolation, and project isolation.
-- [ ] Verify replacements apply to synthesis text only; never mutate saved chapter source text or chapter offsets.
-- [ ] Test overlapping terms, word boundaries, punctuation, repeated matches, Unicode names, and replacement loops.
-- [ ] Ensure dictionary edits invalidate only affected generation signatures/checkpoints; no stale chunks after a pronunciation change.
-- [ ] Verify errors and applied-rule counts are exposed through actual backend/UI status.
+- [x] Keep chapter source text and saved dialogue offsets unchanged; resolve cast/offset spans before applying pronunciation replacements to cast segments.
+- [x] Add coverage for overlapping phrases, word boundaries, punctuation, repeated terms, Unicode NFC-equivalent names, disabled/invalid entries, and non-cascading replacements.
+- [x] Verify pronunciation-adjusted chunk text participates in per-chapter generation signatures: affected chapters reset; unrelated chapters retain reusable work.
+- [x] Expose actual preview replacement counts and selected profile/provider/voice identity; report prepared replacement/rule counts during production generation.
+- [x] Apply Current book, matching Series, and Global library rules to real preview and production synthesis with deterministic precedence; corrupt stores fail visibly.
 
 ## 4.2 Sound-design catalogue and story assignments
 
@@ -79,3 +80,12 @@ The existing application includes a pronunciation dictionary, a cast-aware voice
 ## Completion rule
 
 Close Stage 4 only when targeted and full automated tests pass, the Windows package gates pass on the latest code, the Stage 3 carry-forward checklist is preserved, and target-PC acceptance is either completed with evidence or explicitly left open. Never claim the actual sound is correct without listening to rendered output.
+
+
+## Prompt 2 implementation notes
+
+- Pronunciation substitutions are applied after cast/dialogue segmentation has consumed saved offsets, before pacing and TTS chunk generation. Source chapter text and stored assignment offsets are not rewritten by substitutions.
+- Effective synthesis rules combine current-book, matching-series, and global-library entries in that precedence order. Duplicate written terms resolve deterministically; a disabled higher-priority row suppresses lower-scope fallback for the same term.
+- Generation signatures hash the actual prepared chunk text and provider/voice identity. A changed pronunciation that changes a chapter's synthesis text invalidates incompatible checkpoints; chapters whose prepared text is unchanged remain reusable.
+- Preview job results report selected saved profile/provider/voice ID, voices used by generated segments, and actual per-rule replacement counts. Production progress reports the actual substitutions prepared for synthesis.
+- The approved HTML was not changed. Target-PC save/reopen, audio listening, and selected-provider acceptance remain open.

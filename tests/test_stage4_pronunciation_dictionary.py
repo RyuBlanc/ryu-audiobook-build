@@ -1,7 +1,7 @@
 """Stage 4 pronunciation substitution regression tests."""
 import unittest
 
-from app.tts.narration import apply_pronunciation_dictionary, prepare_for_narration
+from app.tts.narration import apply_pronunciation_dictionary, apply_pronunciation_dictionary_with_counts, prepare_for_narration
 
 
 class PronunciationDictionaryTests(unittest.TestCase):
@@ -101,6 +101,28 @@ class PronunciationDictionaryTests(unittest.TestCase):
         self.assertIn("New York City", result.narration_text)
         self.assertNotEqual(result.source_text, result.narration_text)
 
+
+    def test_repeated_terms_keep_punctuation_and_report_actual_counts(self):
+        result, counts = apply_pronunciation_dictionary_with_counts(
+            "Mira, Mira! (MIRA?)", [{"written_form": "Mira", "spoken_form": "Mee-rah"}]
+        )
+        self.assertEqual(result, "Mee-rah, Mee-rah! (Mee-rah?)")
+        self.assertEqual(counts, {"Mira": 3})
+
+    def test_canonical_unicode_equivalence_and_case_insensitive_match(self):
+        result, counts = apply_pronunciation_dictionary_with_counts(
+            "Cafe\u0301 met CAFÉ.", [{"written_form": "Café", "spoken_form": "ka-FAY"}]
+        )
+        self.assertEqual(result, "ka-FAY met ka-FAY.")
+        self.assertEqual(counts, {"Café": 2})
+
+    def test_prepared_narration_reports_only_rules_that_matched(self):
+        result = prepare_for_narration("Mira met Ren and Mira.", [
+            {"written_form": "Mira", "spoken_form": "Mee-rah"},
+            {"written_form": "Aria", "spoken_form": "Ah-ree-ah"},
+        ])
+        self.assertEqual(result.applied_rule_counts, {"Mira": 2})
+        self.assertEqual(result.source_text, "Mira met Ren and Mira.")
 
 if __name__ == "__main__":
     unittest.main()

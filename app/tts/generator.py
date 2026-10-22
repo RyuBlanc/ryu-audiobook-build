@@ -13,7 +13,7 @@ from typing import Callable
 from app.chapters.detector import Chapter
 from app.tts.base import TTSProvider
 from app.tts.chunker import split_text
-from app.tts.narration import prepare_for_narration
+from app.tts.narration import apply_pronunciation_dictionary_with_counts, prepare_for_narration
 from app.tts.pacing import append_silence, pause_after_ms, split_for_pacing
 from app.tts.multivoice import synthesize_voice_set
 
@@ -123,10 +123,7 @@ def prepare_chapter_plan(
     chunks_dir = chapter_dir / "chunks"
     chunks_dir.mkdir(parents=True, exist_ok=True)
 
-    narration = prepare_for_narration(
-        chapter.text,
-        pronunciation_dictionary=pronunciation_dictionary,
-    )
+    narration = prepare_for_narration(chapter.text)
     (chapter_dir / "narration.json").write_text(
         json.dumps(
             {
@@ -160,6 +157,8 @@ def prepare_chapter_plan(
 
     chunks_with_voices: list[tuple[str, str | list[str] | None]] = []
     for chunk_text, chunk_voice in raw_chunks_with_voices:
+        # Resolve saved dialogue offsets before replacements can change character counts.
+        chunk_text, _rule_counts = apply_pronunciation_dictionary_with_counts(chunk_text, pronunciation_dictionary)
         paced_chunks = split_for_pacing(
             chunk_text,
             max_chars=int(getattr(provider, "recommended_chunk_chars", 1400)),

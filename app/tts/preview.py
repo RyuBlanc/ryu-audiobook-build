@@ -8,7 +8,7 @@ import wave
 
 import imageio_ffmpeg
 
-from app.tts.narration import prepare_for_narration
+from app.tts.narration import apply_pronunciation_dictionary_with_counts, prepare_for_narration
 from app.tts.pacing import append_silence, pause_after_ms, split_for_pacing
 from app.tts.base import TTSProvider
 from app.tts.multivoice import synthesize_voice_set
@@ -21,6 +21,7 @@ class PreviewResult:
     voices_used: tuple[str, ...]
     # Exact text represented by synthesized segments; used to align preview SFX.
     source_text: str = ""
+    applied_rule_counts: dict[str, int] | None = None
 
 
 def _run_ffmpeg(args: list[str]) -> None:
@@ -88,11 +89,9 @@ def _preview_units(
     pronunciation_dictionary: list[dict] | None,
     max_chars: int,
     dialogue_assignments=None,
+    applied_rule_counts: dict[str, int] | None = None,
 ) -> list[tuple[str, str | list[str] | None]]:
-    narration = prepare_for_narration(
-        text,
-        pronunciation_dictionary=pronunciation_dictionary,
-    ).narration_text
+    narration = prepare_for_narration(text).narration_text
 
     if hasattr(provider, "split_for_cast"):
         try:
@@ -115,6 +114,10 @@ def _preview_units(
     # Short previews stay sentence-sized so a 20-second request does not
     # accidentally trigger a multi-minute synthesis unit.
     for segment, segment_voice in raw:
+        segment, rule_counts = apply_pronunciation_dictionary_with_counts(segment, pronunciation_dictionary)
+        if applied_rule_counts is not None:
+            for written, count in rule_counts.items():
+                applied_rule_counts[written] = applied_rule_counts.get(written, 0) + count
         for unit in split_for_pacing(
             segment,
             max_chars=preview_unit_chars,
@@ -161,6 +164,7 @@ def build_voice_preview(
         )
     else:
         effective_max_chars = int(max_chars)
+    applied_rule_counts: dict[str, int] = {}
     units = _preview_units(
         text,
         provider,
@@ -168,6 +172,7 @@ def build_voice_preview(
         pronunciation_dictionary,
         max_chars=effective_max_chars,
         dialogue_assignments=dialogue_assignments,
+        applied_rule_counts=applied_rule_counts,
     )
     if not units:
         raise ValueError("The selected chapter does not contain enough readable text for a preview.")
@@ -240,4 +245,5 @@ def build_voice_preview(
         segments=generated_segments,
         voices_used=tuple(dict.fromkeys(voices_used)),
         source_text="\n".join(generated_text),
+        applied_rule_counts=applied_rule_counts,
     )
