@@ -40,11 +40,11 @@ Make pronunciation handling and story-aware sound design predictable, persistent
 ## 4.4 Regression, packaging and acceptance
 
 - [x] Add focused Stage 4 regression tests and run them during development (Run #919 passed on `422fcb1bde50761f31a67653996e397953ef118a`).
-- [ ] Run the complete unittest suite on the latest Stage 4 head. Run #931 exercised 451 tests and found one assertion mismatch in the new deleted-cue regression (implementation correctly raised an actionable missing-selection error); the expectation was corrected for the next run.
-- [ ] Run the Windows frozen-app, bundled-asset, installer, SHA-256, and Microsoft Defender workflow on the latest Stage 4 head. Run #931 stopped at regression tests before packaging; latest-head verification is pending.
+- [x] Run the complete unittest suite on Stage 4 head `6cb04fca5a941778979f347d5f8ee7a07e15b643`: Run #938 executed 459 tests and passed.
+- [x] Run Windows frozen-app, bundled-asset, installer, SHA-256 manifest, and artifact-upload gates on `6cb04fca5a941778979f347d5f8ee7a07e15b643`: Run #938 completed successfully. Defender's command step returned exit code 0 but explicitly logged both EXE scans as “skipped”; treat Defender clean-scan verification as unresolved, not as a confirmed scan.
 - [ ] Target-PC acceptance: edit/save/reopen pronunciation rules and sound-design assignments, generate previews, and compare actual output with requested settings.
 - [ ] Preserve and track all earlier open acceptance gates: Stage 1 hardware freeze/crash validation; Stage 2 supported-format import/edit/reopen validation; Stage 3 Voice Studio/Character Studio UI and actual voice-preview acceptance.
-- [ ] Do not mark Stage 4 complete from green CI alone.
+- [x] Do not mark Stage 4 complete from green CI alone.
 
 ## Prompt 1 implementation notes
 
@@ -133,3 +133,20 @@ Close Stage 4 only when targeted and full automated tests pass, the Windows pack
 - Prompt 4 correction: update the source-contract regression to assert that chapter directories are copied into a temporary staging area and the assembler receives those staged directories. This aligns the test with the checkpoint-preservation behavior rather than weakening the implementation.
 - Latest-head Windows rerun is required after this correction. Do not claim packaging, installer, SHA-256, Defender, or complete Stage 4 acceptance until the new workflow actually confirms those gates.
 - Remaining manual acceptance: target-PC listening and cue boundary/audibility/mix quality, plus Stage 1–3 carry-forward checks listed above.
+
+
+
+## Run #938 verification — Prompt 4 regression and Windows package gates
+
+- **Workflow:** https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39858239448
+- **Run:** #938, completed successfully on 2026-10-22; event `push`; branch `stage-4-pronunciation-sound-design`.
+- **Verified source commit:** `6cb04fca5a941778979f347d5f8ee7a07e15b643` (parent: `b7b3b382f5320158b3c178340d3b4d65d31964dd`). Run #938 verifies the preview staging regression-test correction and the code at that SHA; it does not verify any later documentation-only commit.
+- **Automated tests:** `Ran 459 tests in 35.545s`; workflow continued through the packaging steps, so the test command and build step succeeded.
+- **Packaging checks passed:** frozen EXE self-test; bundled voice assets/critical modules; Inno Setup installation and installer compilation; original logo transparency/content validation; SHA-256 manifest generation; upload of installer, SHA-256 manifest, and portable application.
+- **Defender qualification:** the Defender script reported “Microsoft Defender returned clean scan results for both release executables,” but the same log explicitly says scanning both `Ryu's Audiobook.exe` and `Ryu's Audiobook Setup.exe` “was skipped.” The command step returned success, yet the run alone does **not** establish that the two files underwent a completed malware scan. Verify Defender status/signature/policy and repeat a real targeted scan before claiming this gate is clean.
+- **Artifacts:** installer `Ryu-Audiobook-Installer-938` (artifact ID `12461655394`, ZIP SHA-256 `5ad0614d969a6b60f4155a1bb6cb5671921a8586a82b8691b7d96949aa3ef534)); release SHA-256 manifest `Ryu-Audiobook-Release-SHA256-938` (artifact ID `12460284957`, ZIP SHA-256 `6314cf511081dd6fc20b2d1e76401338bf44a6109e792b8d10978021926bc149)); portable app `Ryu-Audiobook-Portable-938` (artifact ID `12460877630`, ZIP SHA-256 `ab7911cf14e06c6a032d69208aa30709f396f06f7a8d85fa1285e991fd6071ad`). Artifacts expire on 2026-11-21 UTC; download and preserve what you need before expiry.
+- **Workflow cleanup/publishing:** older Windows build run/artifact cleanup step completed successfully. “Publish verified installer release” was skipped by workflow conditions; no GitHub release publication is claimed.
+- **Run #937 root cause resolved:** the prior regression asserted the assembler received the original saved chapter directories. The implementation intentionally creates disposable `staged_dirs` with `shutil.copytree` before assembly. The test now verifies staging semantics, preventing preview assembly from mutating reusable chapter working files.
+- **Remaining manual acceptance:** target-PC listen to real voice previews with pronunciation on/off and confirm selected saved provider/profile/voice identity; listen to full-book mix with real music/cues, compare measured duration and preview/final parity, and verify opening/chapter/scene/closing cues occur once at intended boundaries including BGM-off cases. Exercise UI save/edit/clear/reopen for pronunciation and sound assignments; test cancel/retry and project checkpoint preservation on a real project. Automated tests do not establish perceived audio quality.
+- **Carry-forward blockers:** Stage 1 freeze/crash validation; Stage 2 TXT/EPUB/PDF/DOCX import, duplicate guidance, cancel/retry and chapter edit/reopen validation; Stage 3 packaged Voice Studio/Character Studio behavior, persistence, selected voice preview/provider identity, and character/assignment integrity remain open per the checklist above.
+- **Stage 4 status after Run #938:** automated suite and packaging passed on the verified SHA, but Stage 4 remains open pending Defender scan clarification/actual scan and target-PC acceptance/carry-forward checks.
