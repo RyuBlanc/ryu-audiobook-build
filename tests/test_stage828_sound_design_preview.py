@@ -111,5 +111,86 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
             self.assertFalse(output.exists())
 
 
+    def test_chapter_bgm_override_uses_original_chapter_number_after_skips(self):
+        import json
+        from tempfile import TemporaryDirectory
+        from app.audio.assembler import _chapter_number_for_bgm
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            chapter = root / "004_Chapter_Four"
+            chapter.mkdir()
+            (chapter / "narration.json").write_text(
+                json.dumps({"chapter": 4}), encoding="utf-8"
+            )
+            self.assertEqual(_chapter_number_for_bgm(chapter, 2), 4)
+
+            fallback_chapter = root / "007_Chapter_Seven"
+            fallback_chapter.mkdir()
+            self.assertEqual(_chapter_number_for_bgm(fallback_chapter, 3), 7)
+
+    def test_full_book_preview_reports_measured_duration(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.ui import full_book_preview
+
+        class Host:
+            def __init__(self):
+                self.updates = []
+
+            def _job_update(self, job_id, **changes):
+                self.updates.append((job_id, changes))
+
+        with TemporaryDirectory() as temporary:
+            output = Path(temporary) / "preview.m4b"
+            host = Host()
+
+            def render(*args, **kwargs):
+                target = Path(args[1])
+                target.write_bytes(b"validated preview")
+                return target
+
+            with patch("app.audio.assembler.assemble_m4b", side_effect=render), \\
+                 patch("app.audio.assembler._duration_ms", return_value=12_345):
+                full_book_preview._render_full_book_preview(
+                    host, "job-1", object(), [], [], output, "Title", "", {}, 256, {}
+                )
+
+            final_update = host.updates[-1][1]
+            self.assertEqual(final_update["state"], "completed")
+            self.assertEqual(final_update["result"]["duration_seconds"], 12.345)
+            self.assertTrue(output.is_file())
+
+    def test_failed_full_book_preview_removes_partial_output(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.ui import full_book_preview
+
+        class Host:
+            def __init__(self):
+                self.updates = []
+
+            def _job_update(self, job_id, **changes):
+                self.updates.append((job_id, changes))
+
+        with TemporaryDirectory() as temporary:
+            output = Path(temporary) / "preview.m4b"
+            host = Host()
+
+            def failed_render(*args, **kwargs):
+                Path(args[1]).write_bytes(b"partial")
+                raise RuntimeError("FFmpeg failed during finalization")
+
+            with patch("app.audio.assembler.assemble_m4b", side_effect=failed_render):
+                full_book_preview._render_full_book_preview(
+                    host, "job-2", object(), [], [], output, "Title", "", {}, 256, {}
+                )
+
+            self.assertFalse(output.exists())
+            self.assertEqual(host.updates[-1][1]["state"], "failed")
+            self.assertIn("FFmpeg failed", host.updates[-1][1]["message"])
+
+
+
 if __name__ == "__main__":
     unittest.main()
