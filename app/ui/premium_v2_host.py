@@ -1291,7 +1291,11 @@ class PremiumV2Bridge(QObject):
                           and str(c.get("name", "")).casefold() == name.casefold()), None)
         if duplicate is not None:
             raise ValueError("Another character already uses that name.")
-        profile_name = str(payload.get("voice_profile") or "").strip()
+        # Partial updates must not erase saved cast metadata merely because a
+        # caller omitted a field. Explicit empty values still allow the UI to
+        # clear optional fields intentionally.
+        raw_profile_name = payload.get("voice_profile") if "voice_profile" in payload else item.get("voice_profile")
+        profile_name = str(raw_profile_name or "").strip()
         if profile_name and self._find_profile(profile_name) is None:
             raise ValueError("Choose a voice from the saved Voice Studio catalogue.")
         aliases = payload.get("aliases")
@@ -1311,13 +1315,17 @@ class PremiumV2Bridge(QObject):
             for alias in aliases
             if str(alias).strip() and str(alias).strip().casefold() != name.casefold()
         ))
+        role_value = payload.get("role") if "role" in payload else item.get("role", "Character")
+        description_value = payload.get("short_description") if "short_description" in payload else item.get("short_description", "")
+        notes_value = payload.get("notes") if "notes" in payload else item.get("notes", "")
+        scope_value = payload.get("scope") if "scope" in payload else item.get("scope", "Current book only")
         item.update({
             "name": name,
-            "role": str(payload.get("role") or item.get("role") or "Character").strip()[:160],
-            "short_description": str(payload.get("short_description") or "").strip()[:1000],
+            "role": str(role_value or "Character").strip()[:160],
+            "short_description": str(description_value or "").strip()[:1000],
             "aliases": list(dict.fromkeys(str(alias).strip()[:160] for alias in aliases if str(alias).strip())),
-            "notes": str(payload.get("notes") or "").strip()[:4000],
-            "scope": str(payload.get("scope") or "Current book only").strip()[:80],
+            "notes": str(notes_value or "").strip()[:4000],
+            "scope": str(scope_value or "Current book only").strip()[:80],
             "voice_profile": profile_name or None,
         })
         state["characters"] = characters
