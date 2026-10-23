@@ -867,13 +867,10 @@
     grid.classList.toggle('character-library-compact', compact);
     grid.style.display = compact ? 'flex' : '';
     grid.style.flexDirection = compact ? 'column' : '';
-    const section = grid.closest('section') || grid.parentElement;
-    if (section) {
-      for (const button of section.querySelectorAll('button[data-character-view-mode]')) {
-        const active = button.dataset.characterViewMode === (compact ? 'compact' : 'cards');
-        button.classList.toggle('active', active);
-        button.setAttribute('aria-pressed', active ? 'true' : 'false');
-      }
+    for (const button of document.querySelectorAll('button[data-character-view-mode]')) {
+      const active = button.dataset.characterViewMode === (compact ? 'compact' : 'cards');
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-pressed', active ? 'true' : 'false');
     }
   }
   async function refreshCharacterLibrary() {
