@@ -37,6 +37,8 @@ class InstallerBrandingContractTests(unittest.TestCase):
         self.assertIn("required_ico_sizes", build_script)
         self.assertIn("icon_file.ico.sizes()", build_script)
         self.assertIn("icon_file.ico.getimage(icon_size)", build_script)
+        self.assertIn("missing_sizes = required_ico_sizes - icon_sizes", build_script)
+        self.assertIn("alpha_min != 0 or alpha_max != 255", build_script)
         self.assertIn("icon_alpha.getextrema()", build_script)
         self.assertIn("Application logo canvas corners must remain fully transparent.", build_script)
         self.assertNotIn("QImage(1024, 1024", build_script)
