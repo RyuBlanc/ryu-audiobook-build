@@ -14,6 +14,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox, QMainWindow
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWebEngineCore import QWebEngineSettings
 
 
 PRODUCT_NAME = "Ryu's Audiobook"
@@ -294,10 +295,10 @@ class InstallerWindow(QMainWindow):
             self.setWindowIcon(QIcon(str(logo)))
         self.view = QWebEngineView(self)
         self.view.settings().setAttribute(
-            self.view.settings().WebAttribute.LocalContentCanAccessFileUrls, True
+            QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True
         )
         self.view.settings().setAttribute(
-            self.view.settings().WebAttribute.LocalContentCanAccessRemoteUrls, False
+            QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, False
         )
         channel = QWebChannel(self.view.page())
         channel.registerObject("installerBridge", bridge)
