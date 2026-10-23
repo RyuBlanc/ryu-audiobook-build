@@ -262,14 +262,15 @@ class CharacterLibraryPage(QWidget):
             return
         for row in visible:
             card = QGroupBox()
+            card.setMaximumHeight(94)
             line = QHBoxLayout(card)
-            names = QLabel(
+            title = QLabel(
                 f"<b>{row.get('primary_name', '')}</b><br>"
                 f"Voice: {row.get('voice_name') or 'Not assigned'}<br>"
                 f"Series: {row.get('series') or 'Unassigned series'}"
             )
-            names.setWordWrap(True)
-            line.addWidget(names, 1)
+            title.setWordWrap(True)
+            line.addWidget(title, 1)
             open_button = QPushButton("Open Series in Studio")
             open_button.clicked.connect(
                 lambda checked=False, series=row.get("series", ""): self._open_studio(series)
@@ -277,7 +278,6 @@ class CharacterLibraryPage(QWidget):
             line.addWidget(open_button)
             self.cards_grid.addWidget(card)
         self.cards_grid.addStretch(1)
-
     def _render_list(self, previous_id=None):
         self.list.blockSignals(True)
         self.list.clear()
