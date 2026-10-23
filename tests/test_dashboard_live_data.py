@@ -244,6 +244,8 @@ class DashboardLiveDataTests(unittest.TestCase):
                 str(second.folder): {"status": "completed", "output_path": str(output_b), "narrator": "Voice B"},
             }
             bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
+            bridge.settings = mock.Mock()
+            bridge.settings.value.side_effect = lambda _key, default=None: default
             with mock.patch("app.ui.premium_v2_host.list_projects", return_value=[first, second]):
                 with mock.patch("app.ui.premium_v2_host.load_state", side_effect=lambda folder: states[str(folder)]):
                     selected = bridge._player_get_active({"folder": str(second.folder)})
@@ -260,6 +262,7 @@ class DashboardLiveDataTests(unittest.TestCase):
 
     def test_frontend_binds_dashboard_cards_and_delays_mini_player(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn("async function refreshDashboardHero", adapter)
         self.assertIn("function refreshDashboardGeneration", adapter)
         self.assertIn("function renderAudiobookLibrary", adapter)
@@ -293,7 +296,6 @@ class DashboardLiveDataTests(unittest.TestCase):
         self.assertIn("function syncMiniPlayer", adapter)
         self.assertIn("window.__ryuDashboardProjectTimer", adapter)
         self.assertIn("if (dashboardPageActive()) refreshProjects().catch(() => {})", adapter)
-        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn('voice_cast = state.get("voice_cast")', host)
         self.assertIn("extract_embedded_cover(source_for_cover, project.folder)", host)
         cover_art = (ROOT / "app" / "documents" / "cover_art.py").read_text(encoding="utf-8")

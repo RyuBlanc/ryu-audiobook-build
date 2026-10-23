@@ -461,6 +461,7 @@ class PremiumV2Bridge(QObject):
             "job.clear_completed": True,
             "history.list": True,
             "player.get_active": True,
+            "player.position.save": True,
             "settings.get": True,
             "settings.save": True,
             "models.list": True,
