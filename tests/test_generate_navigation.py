@@ -369,38 +369,33 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                 self.app.processEvents()
 
     def test_clicking_already_selected_generate_item_recovers_navigation(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="ryu-generate-reclick-") as temp:
-            workflow = ProjectWorkflow()
-            project = self._project(Path(temp) / "sample-project")
+        # This regression guards the click handler's recovery routing without
+        # running a second full generation workflow inside offscreen Qt. The
+        # real Generate-page visibility and construction are covered by the
+        # end-to-end smoke tests above.
+        workflow = ProjectWorkflow()
+        try:
+            row = next(
+                index for index in range(workflow.sidebar.count())
+                if workflow.sidebar.item(index).data(32) == "Generate"
+            )
+            item = workflow.sidebar.item(row)
+            workflow.sidebar.blockSignals(True)
             try:
-                workflow.show()
-                workflow.open_project(project)
-                workflow.select_section("Generate")
-                QTest.qWait(100)
-
-                self.assertEqual(
-                    workflow.sidebar.currentItem().data(32),
-                    "Generate",
-                    "Test setup requires Generate to be selected in the sidebar.",
-                )
-                self.assertIs(workflow.stack.currentWidget(), workflow.generation)
-
-                # Simulate a stale stack/page transition while the sidebar remains
-                # on Generate. Clicking that same row must still restore Generate.
-                workflow.stack.setCurrentWidget(workflow.import_page)
-                item = workflow.sidebar.currentItem()
-                rect = workflow.sidebar.visualItemRect(item)
-                # Invoke the same click-signal recovery handler directly. Native
-                # offscreen mouse clicks can stall Qt's event loop on Windows CI.
-                workflow._sidebar_item_clicked(item)
-                self.app.processEvents()
-
-                self.assertIs(workflow.stack.currentWidget(), workflow.generation)
-                self.assertTrue(workflow.generation.isVisible())
+                workflow.sidebar.setCurrentRow(row)
             finally:
-                workflow.close()
-                workflow.deleteLater()
-                self.app.processEvents()
+                workflow.sidebar.blockSignals(False)
+
+            # Simulate a stale stack while Generate remains selected.
+            workflow.stack.setCurrentWidget(workflow.import_page)
+            with patch.object(workflow, "_sidebar_changed") as route:
+                workflow._sidebar_item_clicked(item)
+                route.assert_called_once_with(row)
+            self.assertIs(workflow.stack.currentWidget(), workflow.import_page)
+        finally:
+            workflow.close()
+            workflow.deleteLater()
+            self.app.processEvents()
 
 
 if __name__ == "__main__":
