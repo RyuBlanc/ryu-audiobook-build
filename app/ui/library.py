@@ -254,7 +254,7 @@ class LibraryPage(QWidget):
                 f"{project.title}\n{marker} {status}\n{len(project.chapters)} chapter(s)"
             )
             item.setData(Qt.ItemDataRole.UserRole, str(project.folder))
-            state = load_state(project.folder)
+            state = self._state_cache[str(project.folder)]
             cover_path = Path(str(state.get("cover_path") or "")).expanduser()
             if cover_path.is_file():
                 item.setIcon(QIcon(str(cover_path)))
