@@ -318,11 +318,13 @@ class ProjectWorkflow(QMainWindow):
         if chosen:
             self.open_project(chosen)
         else:
-            # Existing Character Studio is project-scoped; select the current
-            # project when the reusable series title is not an exact project title.
+            # Existing Character Studio is project-scoped; use the current book
+            # as the workspace when the series title is not an exact project title.
             self.select_section("Voice Cast")
         if self.project:
             self.voice_cast.refresh_profiles()
+            if series:
+                self.voice_cast.load_series_for_editing(series)
             self.select_section("Voice Cast")
 
     def select_section(self, name: str) -> None:
