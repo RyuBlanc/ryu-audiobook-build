@@ -147,13 +147,30 @@ def _docx_cover(source: Path) -> tuple[bytes, str] | None:
         with zipfile.ZipFile(source) as archive:
             members = archive.namelist()
             # Word's document thumbnail is the best package-level preview.
-            candidates = [
+            thumbnails = [
                 name for name in members
                 if name.casefold().startswith("docprops/thumbnail.")
-                or (name.casefold().startswith("word/media/") and "cover" in Path(name).name.casefold())
+                and _image_extension(name)
             ]
+            named_covers = [
+                name for name in members
+                if name.casefold().startswith("word/media/")
+                and "cover" in Path(name).name.casefold()
+                and _image_extension(name)
+            ]
+            # Many DOCX books embed the title/cover image as image1.png without
+            # a descriptive filename and omit docProps/thumbnail entirely.
+            # Use the first supported embedded picture as a fallback, keeping
+            # explicit thumbnails and cover-named images higher priority.
+            embedded_images = [
+                name for name in members
+                if name.casefold().startswith("word/media/")
+                and _image_extension(name)
+            ]
+            candidates = list(dict.fromkeys(thumbnails + named_covers + embedded_images))
             candidates.sort(key=lambda name: (
-                0 if name.casefold().startswith("docprops/thumbnail.") else 1,
+                0 if name.casefold().startswith("docprops/thumbnail.") else
+                1 if "cover" in Path(name).name.casefold() else 2,
                 name.casefold(),
             ))
             for name in candidates:

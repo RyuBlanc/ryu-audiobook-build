@@ -519,6 +519,13 @@ class PremiumV2Bridge(QObject):
                     assigned_character_names.add(character_name.casefold())
 
         character_voice_count = len(assigned_character_names)
+        character_analysis_done = bool(state.get("character_analysis")) or bool(character_names)
+        # Once analysis confirms that a book has no character speakers, there is
+        # no missing character assignment to penalize in the preparation score.
+        character_voice_ratio = (
+            len(assigned_character_names) / len(character_names)
+            if character_names else (1.0 if character_analysis_done else 0.0)
+        )
         # Narrator is book metadata; readiness requires a selected, saved TTS voice profile.
         narrator_ready = bool(str(state.get("voice_profile") or "").strip())
         output_configured = bool(output_value)
@@ -542,9 +549,6 @@ class PremiumV2Bridge(QObject):
         # "Prepared" is a real readiness score, not a prototype number:
         # chapter text (40%), narrator (20%), output (15%), assigned character
         # voices (15%), pronunciation rules (5%), and sound design (5%).
-        character_voice_ratio = (
-            len(assigned_character_names) / len(character_names) if character_names else 0.0
-        )
         prepared_percent = round(
             40 * chapter_text_ratio
             + (20 if narrator_ready else 0)
@@ -606,7 +610,7 @@ class PremiumV2Bridge(QObject):
             "narrator_voice_configured": narrator_ready,
             "character_count": len(character_names),
             "character_voice_count": character_voice_count,
-            "character_analysis_done": bool(state.get("character_analysis")) or bool(character_names),
+            "character_analysis_done": character_analysis_done,
             "prepared_chapter_count": prepared_chapters,
             "prepared_percent": prepared_percent,
             "completed_chapter_count": completed_chapter_count,

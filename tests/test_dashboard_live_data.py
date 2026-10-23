@@ -116,6 +116,33 @@ class DashboardLiveDataTests(unittest.TestCase):
             self.assertTrue(state["cover_detection_attempted"])
             self.assertEqual(state["cover_path"], str(saved_cover.resolve()))
 
+    def test_analyzed_book_without_characters_is_not_penalized_for_voice_cast(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            library = base / "library"
+            with mock.patch("app.core.project.library_root", return_value=library):
+                project = self._create_project(library, "Narrator Only Book")
+            project.chapters[1].text = "Second chapter has readable text."
+            project.save()
+            output = project.folder / "configured-output.m4b"
+            state = {
+                "status": "imported",
+                "narrator": "Amy",
+                "voice_profile": "Amy",
+                "output_path": str(output),
+                "character_analysis": {"dialogue_total": 0, "unassigned_dialogue": 0},
+                "characters": [],
+                "voice_cast": {},
+            }
+            bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
+            with mock.patch("app.ui.premium_v2_host.load_state", return_value=state):
+                summary = bridge._project_summary(project)
+
+            self.assertTrue(summary["character_analysis_done"])
+            self.assertEqual(summary["character_count"], 0)
+            self.assertEqual(summary["character_voice_count"], 0)
+            self.assertEqual(summary["prepared_percent"], 90)
+
     def test_narrator_metadata_alone_does_not_count_as_selected_tts_voice(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
@@ -134,6 +161,30 @@ class DashboardLiveDataTests(unittest.TestCase):
             self.assertEqual(summary["narrator"], "Amy")
             self.assertFalse(summary["narrator_voice_configured"])
             self.assertEqual(summary["prepared_percent"], 35)
+
+    def test_docx_embedded_image_is_used_when_thumbnail_and_named_cover_are_missing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            library = base / "library"
+            source = base / "Book with embedded cover.docx"
+            image_bytes = b"first-embedded-docx-image"
+            with zipfile.ZipFile(source, "w") as docx:
+                docx.writestr("word/media/image1.png", image_bytes)
+                docx.writestr("word/document.xml", "<w:document/>")
+
+            with mock.patch("app.core.project.library_root", return_value=library):
+                project = create_project(
+                    "Book with embedded cover", source,
+                    [Chapter(1, "Chapter 1", "Readable source text.")]
+                )
+            bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
+            summary = bridge._project_summary(project)
+            saved_cover = project.folder / "assets" / "cover.png"
+            state = load_state(project.folder)
+
+            self.assertEqual(summary["cover_path"], str(saved_cover.resolve()))
+            self.assertEqual(saved_cover.read_bytes(), image_bytes)
+            self.assertTrue(state["cover_detection_attempted"])
 
     def test_player_resolves_requested_audiobook_not_active_editor_project(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -197,6 +248,9 @@ class DashboardLiveDataTests(unittest.TestCase):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn('voice_cast = state.get("voice_cast")', host)
         self.assertIn("extract_embedded_cover(source_for_cover, project.folder)", host)
+        cover_art = (ROOT / "app" / "documents" / "cover_art.py").read_text(encoding="utf-8")
+        self.assertIn("embedded_images = [", cover_art)
+        self.assertIn("character_voice_ratio = (", host)
         generation = (ROOT / "app" / "ui" / "generation_page.py").read_text(encoding="utf-8")
         self.assertIn("persist_project_cover(selected, self.project_folder)", generation)
 
