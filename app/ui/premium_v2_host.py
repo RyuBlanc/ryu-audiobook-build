@@ -487,18 +487,23 @@ class PremiumV2Bridge(QObject):
             1 for chapter in project.chapters
             if str(getattr(chapter, "text", "") or "").strip()
         )
-        prepared_percent = round(100 * prepared_chapters / chapter_count) if chapter_count else 0
+        chapter_text_ratio = prepared_chapters / chapter_count if chapter_count else 0.0
+
         character_rows = state.get("characters")
         if not isinstance(character_rows, list):
             character_rows = []
         voice_keys = ("voice_profile", "voice_profile_name", "assigned_voice_profile",
                       "voice_name", "voice_id", "assigned_voice", "voice")
+        character_names: set[str] = set()
         assigned_character_names: set[str] = set()
         for index, row in enumerate(character_rows):
-            if not isinstance(row, dict) or not any(str(row.get(key) or "").strip() for key in voice_keys):
+            if not isinstance(row, dict):
                 continue
             name = str(row.get("name") or row.get("character_id") or f"character-{index}").strip()
-            if name and name.casefold() != "narrator":
+            if not name or name.casefold() == "narrator":
+                continue
+            character_names.add(name.casefold())
+            if any(str(row.get(key) or "").strip() for key in voice_keys):
                 assigned_character_names.add(name.casefold())
         # Voice Cast persists manual assignments separately from the Character
         # Studio metadata. Merge both sources so the dashboard count reflects the
@@ -507,9 +512,43 @@ class PremiumV2Bridge(QObject):
         if isinstance(voice_cast, dict):
             for name, profile in voice_cast.items():
                 character_name = str(name or "").strip()
-                if character_name and character_name.casefold() != "narrator" and str(profile or "").strip():
+                if not character_name or character_name.casefold() == "narrator":
+                    continue
+                character_names.add(character_name.casefold())
+                if str(profile or "").strip():
                     assigned_character_names.add(character_name.casefold())
+
         character_voice_count = len(assigned_character_names)
+        narrator_ready = bool(str(state.get("narrator") or state.get("voice_profile") or "").strip())
+        output_configured = bool(output_value)
+        pronunciation_rules = (
+            state.get("pronunciation_dictionary")
+            or state.get("pronunciation_rules")
+            or state.get("pronunciation_terms")
+        )
+        pronunciation_ready = bool(pronunciation_rules)
+        sound_design_ready = bool(
+            state.get("background_audio_enabled")
+            or state.get("background_audio_path")
+            or state.get("auto_music_track_path")
+            or state.get("chapter_bgm_overrides")
+            or state.get("sound_cues")
+        )
+        # "Prepared" is a real readiness score, not a prototype number:
+        # chapter text (40%), narrator (20%), output (15%), assigned character
+        # voices (15%), pronunciation rules (5%), and sound design (5%).
+        character_voice_ratio = (
+            len(assigned_character_names) / len(character_names) if character_names else 0.0
+        )
+        prepared_percent = round(
+            40 * chapter_text_ratio
+            + (20 if narrator_ready else 0)
+            + (15 if output_configured else 0)
+            + round(15 * character_voice_ratio)
+            + (5 if pronunciation_ready else 0)
+            + (5 if sound_design_ready else 0)
+        )
+        prepared_percent = max(0, min(100, prepared_percent))
 
         last_edited = state.get("last_edited_chapter_number")
         try:
