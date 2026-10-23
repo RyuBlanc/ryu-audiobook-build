@@ -44,6 +44,12 @@ class DashboardLiveDataTests(unittest.TestCase):
                     {"name": "Rimuru"},
                     {"name": "Shuna", "assigned_voice_profile": "Shuna Voice"},
                 ],
+                "voice_cast": {
+                    "Mira": "Mira Voice",
+                    "Shuna": "Shuna Voice",
+                    "Rimuru": "",
+                    "Narrator": "Amy",
+                },
                 "completed_chapters": [1],
                 "last_edited_chapter_number": 2,
                 "modified_at": "2026-10-23T00:00:00+00:00",
@@ -103,6 +109,10 @@ class DashboardLiveDataTests(unittest.TestCase):
         self.assertIn("call('player.get_active', {folder})", adapter)
         self.assertIn("miniDock.classList.add('hidden')", adapter)
         self.assertIn("function syncMiniPlayer", adapter)
+        self.assertIn("window.__ryuDashboardProjectTimer", adapter)
+        self.assertIn("if (dashboardPageActive()) refreshProjects().catch(() => {})", adapter)
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn('voice_cast = state.get("voice_cast")', host)
 
 
 if __name__ == "__main__":
