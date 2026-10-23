@@ -38,7 +38,28 @@ def trash_project(project) -> Path:
     destination = trash_root() / f"{now[:10]}-{entry_id}"
     destination.mkdir(parents=False, exist_ok=False)
     target = destination / folder.name
+    moved_artifacts: list[dict] = []
     try:
+        # The current generator normally stores the finished M4B inside the
+        # project folder. Handle legacy/output paths outside it only when they
+        # are under the app-managed Library root; never move arbitrary user files.
+        state_path = folder / "state.json"
+        state = {}
+        if state_path.is_file():
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                state = {}
+        output_value = state.get("output_path") if isinstance(state, dict) else None
+        output_path = Path(output_value).expanduser().resolve() if output_value else None
+        external_output = None
+        if output_path and output_path.exists() and folder not in output_path.parents:
+            # Keep recovery constrained to app-owned files. The current project
+            # output directory is within the project and therefore moves with it.
+            managed_roots = (root,)
+            if any(output_path != managed and managed in output_path.parents for managed in managed_roots):
+                external_output = output_path
+
         shutil.move(str(folder), str(target))
         manifest = {
             "id": entry_id,
@@ -46,8 +67,22 @@ def trash_project(project) -> Path:
             "deleted_at": now,
             "original_folder_name": folder.name,
             "project_folder": str(target),
+            "external_artifacts": [],
             "restorable": True,
         }
+        if external_output and external_output.is_file():
+            artifact_dir = destination / "artifacts"
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            stored = artifact_dir / external_output.name
+            suffix = 2
+            while stored.exists():
+                stored = artifact_dir / f"{external_output.stem} ({suffix}){external_output.suffix}"
+                suffix += 1
+            shutil.move(str(external_output), str(stored))
+            manifest["external_artifacts"].append({
+                "original_path": str(external_output),
+                "trash_path": str(stored),
+            })
         _manifest_path(destination).write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -60,8 +95,12 @@ def trash_project(project) -> Path:
         })
         return destination
     except Exception:
-        # Best effort rollback: do not silently strand a project if a manifest
-        # cannot be persisted.
+        for artifact in moved_artifacts:
+            original_path = Path(artifact["original_path"])
+            trashed_path = Path(artifact["trash_path"])
+            if trashed_path.exists() and not original_path.exists():
+                original_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(trashed_path), str(original_path))
         if target.exists() and not folder.exists():
             folder.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(target), str(folder))
@@ -111,6 +150,38 @@ def restore_project(trash_entry: str | Path) -> Path:
         destination = library / f"{name} (restored {suffix})"
         suffix += 1
     shutil.move(str(project_folder), str(destination))
+    restored_artifacts = []
+    for artifact in manifest.get("external_artifacts", []):
+        try:
+            original_path = Path(artifact["original_path"]).expanduser()
+            trashed_path = Path(artifact["trash_path"]).resolve()
+            if entry not in trashed_path.parents or not trashed_path.is_file():
+                continue
+            restore_to = original_path
+            if restore_to.exists():
+                restore_to = restore_to.with_name(
+                    f"{restore_to.stem} (restored {datetime.now().strftime('%H%M%S')}){restore_to.suffix}"
+                )
+            restore_to.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(trashed_path), str(restore_to))
+            restored_artifacts.append((original_path, restore_to))
+        except (KeyError, OSError, ValueError):
+            continue
+    # If an external generated audiobook was restored to a collision-safe path,
+    # update this project's state pointer without touching pronunciation data.
+    if restored_artifacts:
+        state_path = destination / "state.json"
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            if isinstance(state, dict):
+                current_output = str(state.get("output_path") or "")
+                for original_path, restored_path in restored_artifacts:
+                    if current_output == str(original_path):
+                        state["output_path"] = str(restored_path)
+                        state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+                        break
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            pass
     _append_history({
         "event": "project_restored",
         "project_title": str(manifest.get("title") or name),
