@@ -207,11 +207,25 @@
         .filter(node => dashboardText(node.textContent).includes('last edited') && node.querySelectorAll('*').length <= 2)
         .sort((a,b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length)[0];
       if (edited) edited.textContent = 'Chapter ' + (project?.last_edited_chapter_number || '—') + ' last edited';
-      const prep = [...hero.querySelectorAll('p,span,small,b,strong,div')]
-        .filter(node => dashboardText(node.textContent).includes('prepared'))
-        .sort((a,b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length)[0];
       const percent = project ? Math.max(0, Math.min(100, Number(project.prepared_percent || 0))) : 0;
-      if (prep) prep.textContent = percent + '% prepared';
+      const preparedLine = [...hero.querySelectorAll('p,span,small,b,strong,div')]
+        .filter(node => /^\\d+\\s*%\\s*prepared$/i.test(String(node.textContent || '').trim()))
+        .sort((a,b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length)[0];
+      if (preparedLine) {
+        preparedLine.textContent = percent + '% prepared';
+      } else {
+        // Preserve any existing bold percentage / separate "prepared" label.
+        const percentNode = [...hero.querySelectorAll('strong,b,span')]
+          .find(node => /^\\d+\\s*%$/.test(String(node.textContent || '').trim()));
+        const preparedLeaf = dashboardLeaves(hero).find(node => dashboardText(node.textContent) === 'prepared');
+        if (percentNode) percentNode.textContent = percent + '%';
+        else if (preparedLeaf?.parentElement) {
+          const siblingPercent = [...preparedLeaf.parentElement.children]
+            .find(node => /^\\d+\\s*%$/.test(String(node.textContent || '').trim()));
+          if (siblingPercent) siblingPercent.textContent = percent + '%';
+          else preparedLeaf.parentElement.textContent = percent + '% prepared';
+        }
+      }
       const progress = hero.querySelector('.progress i,.progress-fill,.progress-bar-fill,[role="progressbar"],progress,[style*="width:"]');
       if (progress) {
         progress.style.width = percent + '%';
