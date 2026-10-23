@@ -17,6 +17,7 @@
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
   let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve();
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
+  let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
   const chapterUndoStacks = new Map(), chapterRedoStacks = new Map();
   let chapterLastText = '', chapterHistoryGroupOpen = false, chapterHistoryGroupTimer = null, chapterHistoryApplying = false;
   let libraryCharacters = [], libraryEditorId = null, libraryEditorActive = false;
@@ -130,6 +131,233 @@
     select.innerHTML = rows.map(r => '<option value="' + esc(r[value]) + '">' + esc(label(r)) + '</option>').join('');
     if (rows.some(r => String(r[value]) === previous)) select.value = previous;
   };
+  const dashboardText = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  function dashboardLeaves(root) {
+    return root ? [...root.querySelectorAll('h1,h2,h3,h4,p,span,small,b,strong,label,button,div,a')].filter(node => !node.children.length) : [];
+  }
+  function dashboardFindText(root, text) {
+    const target = dashboardText(text);
+    return dashboardLeaves(root).find(node => dashboardText(node.textContent) === target) || null;
+  }
+  function dashboardHero(root) {
+    const eyebrow = dashboardFindText(root, 'continue project');
+    let node = eyebrow?.parentElement || null;
+    while (node && node !== root) {
+      const text = dashboardText(node.textContent);
+      const actions = [...node.querySelectorAll('button,[role="button"],a')];
+      if (actions.some(button => ['continue project','create new project'].includes(dashboardText(button.textContent))) &&
+          text.includes('prepared') && text.includes('chapters')) return node;
+      node = node.parentElement;
+    }
+    return root?.querySelector('.continue-project,.continue-card,.dashboard-continue,[data-dashboard-continue]') || null;
+  }
+  function projectFileUrl(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const normalized = raw.replace(/\\/g, '/');
+    return encodeURI(normalized.startsWith('/') ? 'file://' + normalized : 'file:///' + normalized).replace(/#/g, '%23').replace(/\?/g, '%3F');
+  }
+  function applyProjectCover(element, path) {
+    if (!element) return;
+    const url = projectFileUrl(path);
+    if (element.tagName === 'IMG') {
+      if (url) { element.src = url; element.hidden = false; } else element.removeAttribute('src');
+    } else if (url) {
+      element.style.backgroundImage = 'url("' + url.replace(/"/g, '%22') + '")';
+      element.style.backgroundSize = 'cover';
+      element.style.backgroundPosition = 'center';
+      element.style.backgroundRepeat = 'no-repeat';
+      element.classList.add('has-project-cover');
+    } else {
+      element.style.removeProperty('background-image');
+      element.classList.remove('has-project-cover');
+    }
+  }
+  function applyProjectCovers(root) {
+    if (!root) return;
+    root.querySelectorAll('[data-cover-path]').forEach(card => {
+      applyProjectCover(card.querySelector('.book-cover,.project-cover,[data-project-cover],img[alt*="cover" i]'), card.dataset.coverPath || '');
+    });
+  }
+  async function refreshDashboardHero(rows = projects) {
+    const dash = $('dashboard');
+    if (!dash) return null;
+    let active = null;
+    try { active = await call('project.get_active'); } catch (_) {}
+    const ordered = [...rows].sort((a,b) => (Date.parse(b.modified_at || '') || 0) - (Date.parse(a.modified_at || '') || 0));
+    dashboardProject = (active && ordered.find(project => project.folder === active.folder)) ||
+      ordered.find(project => !project.completed && Number(project.chapter_count || 0) > 0) ||
+      ordered.find(project => Number(project.chapter_count || 0) > 0) || null;
+    const hero = dashboardHero(dash);
+    if (hero) {
+      const project = dashboardProject;
+      const heading = [...hero.querySelectorAll('h1,h2,h3,h4')]
+        .find(node => !['continue project','production status'].includes(dashboardText(node.textContent)));
+      if (heading) heading.textContent = project?.title || 'Start a new audiobook project';
+      const subtitle = [...hero.querySelectorAll('p,span,small,div')]
+        .filter(node => {
+          const text = dashboardText(node.textContent);
+          return text.includes('chapters') && (text.includes('narrator') || text.includes('character voices')) && node.querySelectorAll('*').length <= 2;
+        }).sort((a,b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length)[0];
+      if (subtitle) subtitle.textContent = project
+        ? 'Narrator ' + (project.narrator || '—') + ' · ' + Number(project.chapter_count || 0) +
+          ' chapters · ' + Number(project.character_voice_count || 0) + ' character voices'
+        : '— chapters · — character voices';
+      const edited = [...hero.querySelectorAll('p,span,small,div')]
+        .filter(node => dashboardText(node.textContent).includes('last edited') && node.querySelectorAll('*').length <= 2)
+        .sort((a,b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length)[0];
+      if (edited) edited.textContent = 'Chapter ' + (project?.last_edited_chapter_number || '—') + ' last edited';
+      const prep = [...hero.querySelectorAll('p,span,small,b,strong,div')]
+        .filter(node => dashboardText(node.textContent).includes('prepared'))
+        .sort((a,b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length)[0];
+      const percent = project ? Math.max(0, Math.min(100, Number(project.prepared_percent || 0))) : 0;
+      if (prep) prep.textContent = percent + '% prepared';
+      const progress = hero.querySelector('.progress i,.progress-fill,.progress-bar-fill,[role="progressbar"],progress,[style*="width:"]');
+      if (progress) {
+        progress.style.width = percent + '%';
+        progress.setAttribute('aria-valuenow', String(percent));
+        if (progress.tagName === 'PROGRESS') progress.value = percent;
+      }
+      applyProjectCover(hero.querySelector('.book-cover,.project-cover,[data-project-cover],img[alt*="cover" i]'), project?.cover_path || '');
+      hero.dataset.dashboardProjectFolder = project?.folder || '';
+      const action = [...hero.querySelectorAll('button,[role="button"],a')]
+        .find(button => ['continue project','create new project'].includes(dashboardText(button.textContent)));
+      if (action) {
+        action.textContent = project ? 'Continue Project' : 'Create New Project';
+        action.dataset.continueProjectFolder = project?.folder || '';
+        action.disabled = false;
+      }
+    }
+    const context = dashboardLeaves(document).find(node =>
+      dashboardText(node.textContent).endsWith('· local project') && !node.closest('#dashboard'));
+    if (context) context.textContent = dashboardProject ? dashboardProject.title + ' · Local project' : 'No project selected · Local project';
+    return dashboardProject;
+  }
+  function renderAudiobookLibrary(rows = projects) {
+    const page = $('player');
+    if (!page) return;
+    let container = $('backendAudiobookLibrary');
+    if (!container) {
+      container = document.createElement('section');
+      container.id = 'backendAudiobookLibrary';
+      container.className = 'section';
+      page.insertBefore(container, page.firstElementChild);
+    }
+    const available = rows.filter(project => project.completed && project.output_path);
+    container.innerHTML = '<div class="section-head"><div><p class="eyebrow">YOUR LIBRARY</p><h2>Generated audiobooks</h2></div><p class="muted">' +
+      available.length + ' ready to play</p></div><div class="recent-grid">' +
+      (available.map(project => '<article class="card project-card" data-project-folder="' + esc(project.folder || '') +
+        '" data-cover-path="' + esc(project.cover_path || '') + '"><div class="book-cover"></div><div class="project-pad"><span class="badge">Ready</span><h3>' +
+        esc(project.title || 'Untitled audiobook') + '</h3><p class="muted">' + esc(project.narrator || 'Narrator not set') + ' · ' +
+        Number(project.chapter_count || 0) + ' chapters</p><button class="btn small" type="button" data-play-project-folder="' +
+        esc(project.folder || '') + '">Play audiobook</button></div></article>').join('') ||
+        '<p class="muted">No finished audiobooks yet. Generate one in Production Studio to see it here.</p>') + '</div>';
+    applyProjectCovers(container);
+  }
+  function dashboardGenerationCard(root) {
+    const title = dashboardFindText(root, 'production status') || dashboardFindText(root, 'active generation');
+    let node = title?.parentElement || null;
+    while (node && node !== root) {
+      const text = dashboardText(node.textContent);
+      const buttons = [...node.querySelectorAll('button,[role="button"],a')];
+      if (text.includes('current chapter') && text.includes('processing stage') &&
+          buttons.some(button => ['view job','pause','resume'].includes(dashboardText(button.textContent)))) return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+  function setDashboardRow(root, label, value) {
+    const leaf = dashboardFindText(root, label);
+    if (!leaf) return;
+    let node = leaf;
+    for (let depth = 0; depth < 4 && node.parentElement; depth++) {
+      const parent = node.parentElement;
+      const siblings = [...parent.children].filter(child => child !== node && dashboardText(child.textContent) !== dashboardText(label));
+      if (siblings.length) { siblings[siblings.length - 1].textContent = value; return; }
+      node = parent;
+    }
+  }
+  function refreshDashboardGeneration(jobs = []) {
+    const root = $('dashboard');
+    const card = root && dashboardGenerationCard(root);
+    if (!card) return;
+    const active = jobs.filter(job => job.type === 'audiobook-generation' &&
+      ['queued','running','pause_requested','paused','cancel_requested','retrying'].includes(String(job.state || '').toLowerCase()))
+      .sort((a,b) => (Date.parse(b.updated_at || b.queued_at || '') || 0) - (Date.parse(a.updated_at || a.queued_at || '') || 0));
+    const job = active[0] || null;
+    const percentLabel = [...card.querySelectorAll('p,span,small,b,strong,div')]
+      .filter(node => /^\d+\s*%\s*complete$/.test(dashboardText(node.textContent)) || dashboardText(node.textContent) === '— complete')
+      .sort((a,b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length)[0];
+    const etaLabel = [...card.querySelectorAll('p,span,small,b,strong,div')]
+      .filter(node => /remaining$/.test(dashboardText(node.textContent)) || dashboardText(node.textContent) === 'unavailable')
+      .sort((a,b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length)[0];
+    const track = card.querySelector('.progress,.progress-track,.progress-bar,progress,[role="progressbar"]');
+    const fill = card.querySelector('.progress i,.progress-fill,.progress-bar-fill,[role="progressbar"],progress,[style*="width:"]');
+    const buttons = [...card.querySelectorAll('button,[role="button"],a')];
+    const view = buttons.find(button => dashboardText(button.textContent) === 'view job');
+    const control = buttons.find(button => ['pause','resume'].includes(dashboardText(button.textContent)));
+    if (!job) {
+      setDashboardRow(card, 'current chapter', '');
+      setDashboardRow(card, 'processing stage', '');
+      if (percentLabel) percentLabel.textContent = '';
+      if (etaLabel) etaLabel.textContent = '';
+      if (fill) { fill.style.width = '0%'; fill.setAttribute('aria-valuenow','0'); if (fill.tagName === 'PROGRESS') fill.value = 0; }
+      if (track) track.style.visibility = 'hidden';
+      if (view) { view.disabled = true; delete view.dataset.dashboardJobId; }
+      if (control) { control.disabled = true; delete control.dataset.dashboardJobId; delete control.dataset.dashboardGenerationAction; }
+      return;
+    }
+    const project = projects.find(row => row.folder === job.project_folder);
+    const total = Number(job.chapters_total || project?.chapter_count || 0);
+    const current = Number(job.current_chapter || 0);
+    setDashboardRow(card, 'current chapter', current > 0 ? current + ' of ' + (total || '—') : (total ? '0 of ' + total : '—'));
+    setDashboardRow(card, 'processing stage', job.stage || job.message || 'Working');
+    const percent = Math.max(0, Math.min(100, Math.round(Number(job.progress || 0))));
+    if (percentLabel) percentLabel.textContent = percent + '% complete';
+    const eta = Number(job.eta_seconds);
+    if (etaLabel) etaLabel.textContent = Number.isFinite(eta) && eta > 0 ? Math.floor(eta/60) + 'm ' + String(Math.floor(eta%60)).padStart(2,'0') + 's remaining' : '';
+    if (track) track.style.visibility = '';
+    if (fill) { fill.style.width = percent + '%'; fill.setAttribute('aria-valuenow',String(percent)); if (fill.tagName === 'PROGRESS') fill.value = percent; }
+    if (view) { view.disabled = false; view.dataset.dashboardJobId = job.job_id || ''; }
+    if (control) {
+      const paused = ['paused','pause_requested'].includes(String(job.state || '').toLowerCase());
+      control.textContent = paused ? 'Resume' : 'Pause';
+      control.disabled = !['running','paused'].includes(String(job.state || '').toLowerCase());
+      control.dataset.dashboardGenerationAction = paused ? 'resume' : 'pause';
+      control.dataset.dashboardJobId = job.job_id || '';
+    }
+  }
+  function audiobookPageActive() {
+    const nav = [...document.querySelectorAll('nav .active,aside .active,.sidebar .active,[aria-current="page"]')]
+      .find(node => /audiobooks/i.test(node.textContent || ''));
+    if (nav) return true;
+    const page = $('player');
+    if (!page || page.hidden || page.classList.contains('hidden')) return false;
+    const style = window.getComputedStyle(page);
+    return style.display !== 'none' && style.visibility !== 'hidden' && page.getClientRects().length > 0;
+  }
+  function syncMiniPlayer() {
+    const dock = $('miniPlayer');
+    if (dock) dock.classList.toggle('hidden', !(playerAudio && playerAudio.src && !miniPlayerDismissed && !audiobookPageActive()));
+  }
+  function bindMiniPlayerNavigation() {
+    if (typeof window.go === 'function' && !window.go.__ryuMiniPlayerWrapped) {
+      const original = window.go;
+      const wrapped = function(...args) {
+        const result = original.apply(this,args);
+        setTimeout(syncMiniPlayer,0);
+        return result;
+      };
+      wrapped.__ryuMiniPlayerWrapped = true;
+      window.go = wrapped;
+    }
+    if (!window.__ryuMiniPlayerNavBound) {
+      window.__ryuMiniPlayerNavBound = true;
+      document.addEventListener('click', event => {
+        if (event.target.closest('nav,aside,.sidebar,[data-page],[data-view]')) setTimeout(syncMiniPlayer,0);
+      }, true);
+    }
+  }
   async function refreshProjects() {
     projects = await call('project.list');
     const grid = $('libraryGrid');
