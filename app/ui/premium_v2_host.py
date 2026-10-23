@@ -458,11 +458,24 @@ class PremiumV2Bridge(QObject):
         if not isinstance(character_rows, list):
             character_rows = []
         voice_keys = ("voice_profile", "voice_profile_name", "assigned_voice_profile",
-                      "voice_name", "voice_id", "assigned_voice")
-        character_voice_count = sum(
-            1 for row in character_rows
-            if isinstance(row, dict) and any(str(row.get(key) or "").strip() for key in voice_keys)
-        )
+                      "voice_name", "voice_id", "assigned_voice", "voice")
+        assigned_character_names: set[str] = set()
+        for index, row in enumerate(character_rows):
+            if not isinstance(row, dict) or not any(str(row.get(key) or "").strip() for key in voice_keys):
+                continue
+            name = str(row.get("name") or row.get("character_id") or f"character-{index}").strip()
+            if name and name.casefold() != "narrator":
+                assigned_character_names.add(name.casefold())
+        # Voice Cast persists manual assignments separately from the Character
+        # Studio metadata. Merge both sources so the dashboard count reflects the
+        # same actual assignments shown by Voice Cast, without double counting.
+        voice_cast = state.get("voice_cast")
+        if isinstance(voice_cast, dict):
+            for name, profile in voice_cast.items():
+                character_name = str(name or "").strip()
+                if character_name and character_name.casefold() != "narrator" and str(profile or "").strip():
+                    assigned_character_names.add(character_name.casefold())
+        character_voice_count = len(assigned_character_names)
 
         last_edited = state.get("last_edited_chapter_number")
         try:
