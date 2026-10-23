@@ -38,7 +38,7 @@ class InstallerBrandingContractTests(unittest.TestCase):
         self.assertIn("icon_file.ico.sizes()", build_script)
         self.assertIn("icon_file.ico.getimage(icon_size)", build_script)
         self.assertIn("missing_sizes = required_ico_sizes - icon_sizes", build_script)
-        self.assertIn("alpha_min != 0", build_script)
+        self.assertIn("alpha_min > 16", build_script)
         self.assertIn("alpha_max < 128", build_script)
         self.assertIn("visible_pixels < pixel_count * 0.20", build_script)
         self.assertIn("alpha_histogram = icon_alpha.histogram()", build_script)

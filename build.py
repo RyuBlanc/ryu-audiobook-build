@@ -195,7 +195,7 @@ def build_logo_assets() -> None:
                 # a strong visible alpha range and enough non-transparent
                 # artwork, instead of requiring a perfectly opaque pixel.
                 if (
-                    alpha_min != 0
+                    alpha_min > 16
                     or alpha_max < 128
                     or visible_pixels < pixel_count * 0.20
                 ):
