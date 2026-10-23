@@ -19,6 +19,8 @@ class PremiumV2LibraryRecoveryWiringTests(unittest.TestCase):
 
     def test_audiobook_library_card_delete_is_connected_to_recoverable_backend(self) -> None:
         self.assertIn("data-delete-project", self.adapter)
+        self.assertIn("data-select-project", self.adapter)
+        self.assertIn("Delete Selected (", self.adapter)
         self.assertIn("call('project.trash'", self.adapter)
         self.assertIn("Deleted Books / Recover", self.adapter)
         self.assertIn("call('project.trash.list')", self.adapter)
@@ -42,6 +44,8 @@ class PremiumV2LibraryRecoveryWiringTests(unittest.TestCase):
         self.assertIn("characterRecoveryModal", self.adapter)
         self.assertIn("data-restore-character", self.adapter)
         self.assertIn("editCharacterDialogueSample", self.adapter)
+        self.assertIn("character-library-compact", self.adapter)
+        self.assertIn('"short": row.get("short") or row.get("short_name") or ""', self.host)
 
     def test_character_library_does_not_synthesize_demo_cast(self) -> None:
         self.assertIn("Existing saved casts are indexed automatically", self.adapter)
