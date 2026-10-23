@@ -80,9 +80,9 @@ class ImportBookWorker(QThread):
     def run(self) -> None:
         try:
             if self.book is None or self.chapters is None:
-                self.status.emit("Extracting text from the source book…")
+                self.status.emit(f"Extracting text from {self.source_path.name}…")
                 book = extract_text(self.source_path)
-                self.status.emit("Finding chapter and section boundaries…")
+                self.status.emit(f"Finding chapter and section boundaries in {self.source_path.name}…")
                 chapters = detect_chapters(book.text)
             else:
                 # Import Studio already parsed this book in the background.
@@ -90,7 +90,7 @@ class ImportBookWorker(QThread):
                 # parsing large EPUB/PDF files a second time.
                 book = self.book
                 chapters = self.chapters
-                self.status.emit("Verifying the extracted text and chapter map…")
+                self.status.emit(f"Verifying extracted text and chapter map for {self.source_path.name}…")
             if not chapters:
                 raise RuntimeError("No readable chapters were found in this file.")
             source_words = len(book.text.split())
@@ -102,7 +102,7 @@ class ImportBookWorker(QThread):
                     "Import was stopped to protect the book from losing content. "
                     "Review the source text and chapter boundaries, then retry."
                 )
-            self.status.emit("Saving the local audiobook project…")
+            self.status.emit(f"Saving {self.source_path.name} as a local audiobook project…")
             project = create_project(book.title, self.source_path, chapters)
             self.completed.emit(project)
         except Exception as exc:
@@ -570,6 +570,7 @@ class ProjectWorkflow(QMainWindow):
         self.audiobooks_page.player.positionChanged.connect(self._mini_position_changed)
         self.audiobooks_page.player.durationChanged.connect(self._mini_duration_changed)
         self.audiobooks_page.player.playbackStateChanged.connect(self._mini_playback_state_changed)
+        self.audiobooks_page.player.errorOccurred.connect(self._mini_playback_error)
         self.history_page = HistoryPage(
             on_open_project=self.open_project,
             on_open_generation=lambda: self.select_section("Generate"),
@@ -596,20 +597,42 @@ class ProjectWorkflow(QMainWindow):
         minutes, secs = divmod(remainder, 60)
         return f"{hours:d}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:d}:{secs:02d}"
 
-    def _mini_source_changed(self, source) -> None:
-        player = self.audiobooks_page.player
-        if source.isEmpty():
+    def _set_mini_player_visible(self, visible: bool) -> None:
+        """Change bottom-bar layout only when the target visibility actually changes."""
+        currently_hidden = self.mini_player_bar.isHidden()
+        if visible and currently_hidden:
+            self.mini_player_bar.setVisible(True)
+        elif not visible and not currently_hidden:
             self.mini_player_bar.setVisible(False)
+
+    def _mini_source_changed(self, source) -> None:
+        # A non-empty source means Qt accepted a URL, not that it can decode
+        # or play it. Keep the shell layout stable until PlayingState confirms
+        # actual playback; unsupported old M4B files no longer pop the mini-player.
+        if source.isEmpty():
+            self._set_mini_player_visible(False)
             self.mini_title.setText("No audiobook playing")
+            self.mini_title.setToolTip("")
+            self.mini_timeline.setRange(0, 0)
+            self.mini_timeline.setValue(0)
+            self.mini_position.setText("0:00")
+            self.mini_duration.setText("0:00")
             return
         self._mini_player_dismissed = False
         self.mini_title.setText(self.audiobooks_page.now_playing.text())
         self.mini_title.setToolTip(source.toLocalFile())
-        self.mini_player_bar.setVisible(True)
+        # Preserve the existing layout while switching tracks. If the bar was
+        # hidden, a source change does not reveal it; only successful playback does.
+
+    def _mini_playback_error(self, _error, _error_text: str) -> None:
+        # Error details stay in the Audiobooks page. The shared shell only hides
+        # its compact controls: it does not retry, change pages, or show a toast.
+        self._set_mini_player_visible(False)
+        self.mini_play_button.setText("▶")
 
     def _hide_mini_player(self) -> None:
         self._mini_player_dismissed = True
-        self.mini_player_bar.setVisible(False)
+        self._set_mini_player_visible(False)
 
     def _mini_position_changed(self, position: int) -> None:
         self.mini_timeline.blockSignals(True)
@@ -624,11 +647,18 @@ class ProjectWorkflow(QMainWindow):
     def _mini_playback_state_changed(self, state) -> None:
         from PySide6.QtMultimedia import QMediaPlayer
         playing = state == QMediaPlayer.PlaybackState.PlayingState
+        paused = state == QMediaPlayer.PlaybackState.PausedState
         self.mini_play_button.setText("Ⅱ" if playing else "▶")
-        if not self.audiobooks_page.player.source().isEmpty():
+        if playing:
             self.mini_title.setText(self.audiobooks_page.now_playing.text())
             if not self._mini_player_dismissed:
-                self.mini_player_bar.setVisible(True)
+                self._set_mini_player_visible(True)
+        elif paused:
+            # Preserve a visible bar when pausing a track that already started,
+            # but never reveal it for a merely selected or failed source.
+            if not self._mini_player_dismissed and not self.mini_player_bar.isHidden():
+                self.mini_title.setText(self.audiobooks_page.now_playing.text())
+        # StoppedState intentionally does not reveal the mini-player.
 
     def _toggle_mini_playback(self) -> None:
         player = self.audiobooks_page.player
@@ -1420,9 +1450,10 @@ class ProjectWorkflow(QMainWindow):
     def handle_import(self, path: Path, book=None, chapters=None) -> None:
         if self._import_worker is not None and self._import_worker.isRunning():
             return
+        self.import_page.project_creation_started(path)
         self.loading_overlay.show_loading(
             "Importing your book",
-            "Reading the source file, finding chapters and preparing your local project…",
+            f"Adding {Path(path).name} to the local Library and saving its chapter structure…",
         )
         worker = ImportBookWorker(path, book=book, chapters=chapters)
         self._import_worker = worker
@@ -1434,6 +1465,7 @@ class ProjectWorkflow(QMainWindow):
 
     def _import_completed(self, project: Project) -> None:
         self.loading_overlay.dismiss()
+        self.import_page.project_created(project)
         self.project = project
         self._set_project_title(project.title)
         self.library.refresh()
@@ -1442,6 +1474,7 @@ class ProjectWorkflow(QMainWindow):
 
     def _import_failed(self, message: str) -> None:
         self.loading_overlay.dismiss()
+        self.import_page.project_creation_failed(message)
         QMessageBox.critical(self, "Import Failed", message)
 
     def _import_worker_finished(self) -> None:
@@ -1750,6 +1783,10 @@ class ProjectWorkflow(QMainWindow):
             except Exception as exc:
                 self._log_ui_failure("Reset Character Studio after project deletion", exc)
             self.select_section("Library")
+        try:
+            self.import_page.clear_if_source_deleted(project.source_path)
+        except Exception as exc:
+            self._log_ui_failure("Clear stale Import Studio state after deletion", exc)
         self.history_page.refresh()
         self.dashboard.refresh()
         self.audiobooks_page.refresh()

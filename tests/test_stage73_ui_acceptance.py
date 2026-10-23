@@ -131,7 +131,9 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
     def test_library_search_filters_and_destructive_actions_require_confirmation(self):
         library = (ROOT / "app" / "ui" / "library.py").read_text(encoding="utf-8")
         self.assertIn("self.search.textChanged.connect(self._schedule_refresh)", library)
-        self.assertIn("self._refresh_timer.setInterval(120)", library)
+        self.assertIn("self._refresh_timer.setInterval(180)", library)
+        self.assertIn("_project_data_cache", library)
+        self.assertIn("_file_signature", library)
         self.assertIn("project_matches(", library)
         self.assertIn("self._state_cache =", library)
         self.assertIn("self._status_cache =", library)

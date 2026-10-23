@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,7 +23,12 @@ class UiStabilityRegressions(unittest.TestCase):
 
     def test_library_search_is_debounced_and_status_is_cached_per_refresh(self):
         source = (ROOT / "app/ui/library.py").read_text(encoding="utf-8")
-        self.assertIn("self._refresh_timer.setInterval(120)", source)
+        self.assertIn("self._refresh_timer.setInterval(180)", source)
+        self.assertIn("_project_data_cache", source)
+        self.assertIn("_file_signature", source)
+        self.assertIn("self.refresh(force_catalog=False)", source)
+        self.assertIn("self.status_filter.blockSignals(True)", source)
+        self.assertIn("previous_folder = str(previous_item.data", source)
         self.assertIn("self._state_cache =", source)
         self.assertIn("self._status_cache =", source)
         self.assertNotIn("completed = sum(project_status(project)", source)
@@ -30,13 +37,70 @@ class UiStabilityRegressions(unittest.TestCase):
         source = (ROOT / "app/ui/import_page.py").read_text(encoding="utf-8")
         worker = source.split("class ImportPreviewWorker", 1)[1].split("class BookDropZone", 1)[0]
         page = source.split("class ImportPage", 1)[1]
-        self.assertIn("self.progress.emit(10)", worker)
-        self.assertIn("self.progress.emit(55)", worker)
-        self.assertIn("self.progress.emit(90)", worker)
-        self.assertIn('self.status.setText("Preparing import…")', page)
-        self.assertIn("self.summary.setText", page)
-        self.assertIn("self.progress.setValue(0)", page)
+        self.assertIn("self.progress.emit(-1)", worker)
+        self.assertIn("Reading {self.source_path.name}", worker)
+        self.assertIn("Detecting chapters in {self.source_path.name}", worker)
+        self.assertIn("self.progress.setVisible(False)", page)
+        self.assertIn("self.progress.setRange(0, 0)", page)
+        self.assertIn("def project_created(", page)
+        self.assertIn("def clear_if_source_deleted(", page)
+        self.assertNotIn("self.progress.emit(10)", worker)
+        self.assertNotIn("self.progress.emit(55)", worker)
+        self.assertNotIn("self.progress.emit(90)", worker)
         self.assertNotIn("Continuing … characters", page)
+
+    def test_failed_audio_playback_does_not_toggle_shell_or_hide_the_error(self):
+        workflow = (ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")
+        player_page = (ROOT / "app/ui/audiobooks_page.py").read_text(encoding="utf-8")
+        source_changed = workflow.split("def _mini_source_changed", 1)[1].split("def _mini_playback_error", 1)[0]
+        state_changed = workflow.split("def _mini_playback_state_changed", 1)[1].split("def _toggle_mini_playback", 1)[0]
+        error_handler = workflow.split("def _mini_playback_error", 1)[1].split("def _hide_mini_player", 1)[0]
+        self.assertNotIn("setVisible(True)", source_changed)
+        self.assertIn("if playing:", state_changed)
+        self.assertIn("self._set_mini_player_visible(True)", state_changed)
+        self.assertNotIn("if not self.audiobooks_page.player.source().isEmpty():", state_changed)
+        self.assertIn("self._set_mini_player_visible(False)", error_handler)
+        self.assertIn("player.errorOccurred.connect(self._mini_playback_error)", workflow)
+        self.assertIn("self.player.errorOccurred.connect(self._playback_error)", player_page)
+        self.assertIn("Try in Default Player", player_page)
+        self.assertIn("self.external_play_button.setVisible(True)", player_page)
+        player_error = player_page.split("def _playback_error", 1)[1].split("def _open_in_default_player", 1)[0]
+        self.assertNotIn("setVisible(", player_error)
+        self.assertIn("QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))", player_page)
+
+    def test_playback_state_machine_does_not_show_mini_player_until_playing(self):
+        from app.ui.workflow import ProjectWorkflow
+
+        source = Mock()
+        source.isEmpty.return_value = False
+        source.toLocalFile.return_value = r"C:\\Audiobooks\\old.m4b"
+        workflow = SimpleNamespace(
+            audiobooks_page=SimpleNamespace(now_playing=SimpleNamespace(text=lambda: "Old audiobook")),
+            mini_title=Mock(),
+            mini_player_bar=Mock(),
+            mini_play_button=Mock(),
+            _mini_player_dismissed=True,
+            _set_mini_player_visible=Mock(),
+        )
+        ProjectWorkflow._mini_source_changed(workflow, source)
+        workflow._set_mini_player_visible.assert_not_called()
+        self.assertFalse(workflow._mini_player_dismissed)
+
+        # Stopped is the common terminal state for an unsupported/corrupt file.
+        ProjectWorkflow._mini_playback_state_changed(workflow, object())
+        workflow._set_mini_player_visible.assert_not_called()
+
+        ProjectWorkflow._mini_playback_error(workflow, object(), "decoder failed")
+        workflow._set_mini_player_visible.assert_called_once_with(False)
+
+    def test_import_progress_uses_indeterminate_real_stages_and_clears_deleted_latest_source(self):
+        page = (ROOT / "app/ui/import_page.py").read_text(encoding="utf-8")
+        self.assertIn("self.progress.setRange(0, 0)", page)
+        self.assertIn("self.progress.setVisible(False)", page)
+        self.assertIn('self.info.setText(f"Latest import: {path.name}")', page)
+        self.assertIn("def project_created(", page)
+        self.assertIn("def project_creation_failed(", page)
+        self.assertIn("def clear_if_source_deleted(", page)
 
     def test_character_library_is_live_series_data_with_edit_and_recovery(self):
         workflow = (ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")

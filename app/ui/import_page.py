@@ -35,16 +35,18 @@ class ImportPreviewWorker(QThread):
 
     def run(self) -> None:
         try:
-            self.status.emit("Reading the source book…")
-            self.progress.emit(10)
+            # Extraction and chapter detection do not expose a reliable byte/page
+            # fraction. Show a true indeterminate animation and actual worker phases.
+            self.progress.emit(-1)
+            self.status.emit(f"Reading {self.source_path.name}…")
             book = extract_text(self.source_path)
             if not str(book.text or "").strip():
                 raise RuntimeError("No readable text was extracted from this file.")
-            self.status.emit("Detecting chapter and section boundaries…")
-            self.progress.emit(55)
+            self.status.emit(f"Detecting chapters in {self.source_path.name}…")
             chapters = detect_chapters(book.text)
             if not chapters:
                 raise RuntimeError("No readable chapters were found in this file.")
+            self.status.emit(f"Checking extracted text and chapter coverage for {self.source_path.name}…")
             source_words = len(book.text.split())
             chapter_words = sum(len(chapter.text.split()) for chapter in chapters)
             if source_words >= 1000 and chapter_words < int(source_words * 0.90):
@@ -52,8 +54,7 @@ class ImportPreviewWorker(QThread):
                     f"Chapter detection retained only {chapter_words:,} of {source_words:,} "
                     "extracted words. Import was stopped to protect your book from losing content."
                 )
-            self.status.emit("Preparing a text preview…")
-            self.progress.emit(90)
+            self.status.emit(f"Preparing the verified preview for {self.source_path.name}…")
             self.ready.emit(book, chapters)
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -185,6 +186,8 @@ class ImportPage(QWidget):
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
+        self.progress.setFormat("%p%")
+        self.progress.setVisible(False)
         result_layout.addWidget(self.progress)
         status_row = QHBoxLayout()
         self.status = QLabel("Ready")
@@ -227,7 +230,11 @@ class ImportPage(QWidget):
         self.book = None
         self.chapters = None
         self.create_button.setEnabled(False)
+        self.progress.setRange(0, 100)
         self.progress.setValue(0)
+        self.progress.setFormat("%p%")
+        self.progress.setVisible(False)
+        self.info.setText("Your source file remains in your chosen location; project data is stored locally.")
         self.summary.setText("Select a supported book to begin a fresh import.")
         self.preview.clear()
 
@@ -242,13 +249,15 @@ class ImportPage(QWidget):
         self.source_path = path
         self.create_button.setEnabled(False)
         self.button.setEnabled(False)
-        self.progress.setValue(0)
-        self.info.setText(f"Selected: {path.name}")
+        self.progress.setVisible(True)
+        self.progress.setRange(0, 0)
+        self.progress.setFormat(f"Analyzing {path.name}…")
+        self.info.setText(f"Latest import: {path.name}")
         self.summary.setText(f"Analyzing {path.name} in the background.")
-        self.status.setText("Preparing import…")
+        self.status.setText(f"Preparing to read {path.name}…")
         self.worker = ImportPreviewWorker(path)
         self.worker.status.connect(self.status.setText)
-        self.worker.progress.connect(self.progress.setValue)
+        self.worker.progress.connect(self._worker_progress_changed)
         self.worker.ready.connect(self._analysis_ready)
         self.worker.failed.connect(self._analysis_failed)
         self.worker.finished.connect(self._worker_finished)
@@ -268,15 +277,25 @@ class ImportPage(QWidget):
             text = str(chapter.text or "").strip()
             preview_parts.append(f"## {chapter.title}\n{text[:950]}")
         self.preview.setPlainText("\n\n".join(preview_parts))
+        self.progress.setRange(0, 100)
         self.progress.setValue(100)
-        self.status.setText("Extraction verified • preview the text, then create the local project.")
+        self.progress.setFormat("Analysis complete")
+        self.progress.setVisible(True)
+        self.status.setText(f"Extraction verified for {self.source_path.name} • preview the text, then create the local project.")
         self.create_button.setEnabled(True)
         self.button.setEnabled(True)
 
     def _analysis_failed(self, message: str) -> None:
+        self.progress.setRange(0, 100)
         self.progress.setValue(0)
+        self.progress.setFormat("%p%")
+        self.progress.setVisible(False)
+        self.source_path = None
+        self.book = None
+        self.chapters = None
+        self.info.setText("Your source file remains in your chosen location; project data is stored locally.")
         self.status.setText(f"Import analysis failed: {message}")
-        self.summary.setText("The project has not been created. Correct the source issue and try again.")
+        self.summary.setText("The project has not been created. Correct the source issue and choose the source again.")
         self.create_button.setEnabled(False)
         self.button.setEnabled(True)
 
@@ -290,7 +309,84 @@ class ImportPage(QWidget):
         if not self.on_import:
             self.status.setText("Project creation is unavailable in this window.")
             return
+        self.project_creation_started(self.source_path)
         self.create_button.setEnabled(False)
         self.button.setEnabled(False)
-        self.status.setText("Saving the verified text and chapters into the local project…")
         self.on_import(self.source_path, self.book, self.chapters)
+
+    def _worker_progress_changed(self, value: int) -> None:
+        """Show animation for unknown-duration work; never imply fake percentages."""
+        if int(value) < 0:
+            self.progress.setRange(0, 0)
+            self.progress.setFormat("Working…")
+            self.progress.setVisible(True)
+            return
+        self.progress.setRange(0, 100)
+        self.progress.setValue(max(0, min(100, int(value))))
+        self.progress.setVisible(True)
+
+    def project_creation_started(self, source_path: Path | str) -> None:
+        path = Path(source_path)
+        self.source_path = path
+        self.progress.setRange(0, 0)
+        self.progress.setFormat(f"Adding {path.name} to Library…")
+        self.progress.setVisible(True)
+        self.info.setText(f"Latest import: {path.name}")
+        self.summary.setText(f"Creating the local project for {path.name}…")
+        self.status.setText(f"Saving {path.name} and its verified chapter structure…")
+
+    def project_created(self, project) -> None:
+        project_source = getattr(project, "source_path", None)
+        if self.source_path is not None and project_source is not None:
+            if self._normal_path(self.source_path) != self._normal_path(project_source):
+                return
+        self.source_path = Path(project_source) if project_source else self.source_path
+        title = str(getattr(project, "title", "") or (self.source_path.name if self.source_path else "Imported book"))
+        source_name = self.source_path.name if self.source_path else title
+        self.progress.setRange(0, 100)
+        self.progress.setValue(100)
+        self.progress.setFormat("Import complete")
+        self.progress.setVisible(True)
+        self.info.setText(f"Latest import: {source_name}")
+        self.summary.setText(f"{title} was saved to your local Library.")
+        self.status.setText("Import complete • local project created successfully.")
+        self.create_button.setEnabled(False)
+        self.button.setEnabled(True)
+
+    def project_creation_failed(self, message: str) -> None:
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.progress.setFormat("%p%")
+        self.progress.setVisible(False)
+        self.info.setText("Your source file remains in your chosen location; project data is stored locally.")
+        self.status.setText(f"Project creation failed: {message}")
+        self.summary.setText("The verified preview is still available. Resolve the issue and try creating the project again.")
+        self.create_button.setEnabled(bool(self.source_path and self.book is not None and self.chapters is not None))
+        self.button.setEnabled(True)
+
+    @staticmethod
+    def _normal_path(path: Path | str) -> str:
+        try:
+            return str(Path(path).expanduser().resolve()).casefold()
+        except OSError:
+            return str(path).casefold()
+
+    def clear_if_source_deleted(self, source_path: Path | str | None) -> None:
+        """Hide latest-import data when its corresponding local project is deleted."""
+        if source_path is None or self.source_path is None:
+            return
+        if self._normal_path(source_path) != self._normal_path(self.source_path):
+            return
+        self.source_path = None
+        self.book = None
+        self.chapters = None
+        self.preview.clear()
+        self.info.setText("Your source file remains in your chosen location; project data is stored locally.")
+        self.summary.setText("Select a book to preview its extracted text and chapter boundaries.")
+        self.status.setText("Ready")
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.progress.setFormat("%p%")
+        self.progress.setVisible(False)
+        self.create_button.setEnabled(False)
+        self.button.setEnabled(True)

@@ -74,10 +74,15 @@ class LibraryPage(QWidget):
         self.on_before_delete = on_before_delete
         self.on_deleted = on_deleted
         self.projects = []
+        # Persistent metadata cache across searches. Cheap file signatures
+        # invalidate data when project state or its output actually changes.
+        self._project_data_cache: dict[str, dict] = {}
+        self._state_cache: dict[str, dict] = {}
+        self._status_cache: dict[str, tuple[str, str]] = {}
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setSingleShot(True)
-        self._refresh_timer.setInterval(120)
-        self._refresh_timer.timeout.connect(self.refresh)
+        self._refresh_timer.setInterval(180)
+        self._refresh_timer.timeout.connect(self._refresh_from_cached_catalog)
 
         content = QWidget()
         layout = QVBoxLayout(content)
@@ -213,13 +218,60 @@ class LibraryPage(QWidget):
 
     def _set_status_filter(self, value: str) -> None:
         index = self.status_filter.findText(value)
+        # The filter buttons and hidden combo are one logical control. Block
+        # the combo signal to avoid a second delayed refresh after this one.
+        self.status_filter.blockSignals(True)
         if index >= 0 and self.status_filter.currentIndex() != index:
             self.status_filter.setCurrentIndex(index)
+        self.status_filter.blockSignals(False)
         for label, button in self.filter_buttons.items():
             button.setChecked(label == value)
-        self.refresh()
+        self.refresh(force_catalog=False)
 
-    def refresh(self) -> None:
+    def _refresh_from_cached_catalog(self) -> None:
+        self.refresh(force_catalog=False)
+
+    @staticmethod
+    def _file_signature(path: Path | None) -> tuple[str, int | None, int | None]:
+        if path is None:
+            return ("", None, None)
+        try:
+            stat = path.stat()
+            return (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            return (str(path), None, None)
+
+    def _project_data(self, project) -> tuple[dict, tuple[str, str]]:
+        key = str(project.folder)
+        state_path = project.folder / "state.json"
+        project_file = getattr(project, "project_file", project.folder / "project.json")
+        state_signature = (
+            self._file_signature(state_path),
+            self._file_signature(project_file),
+        )
+        cached = self._project_data_cache.get(key)
+        if cached and cached.get("state_signature") == state_signature:
+            state = cached["state"]
+        else:
+            state = load_state(project.folder)
+
+        output_raw = str(state.get("output_path") or "").strip()
+        output_path = Path(output_raw).expanduser() if output_raw else None
+        output_signature = self._file_signature(output_path)
+        full_signature = (state_signature, output_signature)
+        if cached and cached.get("signature") == full_signature:
+            status_info = cached["status"]
+        else:
+            status_info = project_status(project, state)
+        self._project_data_cache[key] = {
+            "state_signature": state_signature,
+            "signature": full_signature,
+            "state": state,
+            "status": status_info,
+        }
+        return state, status_info
+
+    def refresh(self, force_catalog: bool = True) -> None:
         query = self.search.text() if hasattr(self, "search") else ""
         status_filter = self.status_filter.currentText() if hasattr(self, "status_filter") else "All"
         for label, button in getattr(self, "filter_buttons", {}).items():
@@ -227,14 +279,20 @@ class LibraryPage(QWidget):
             button.setChecked(label == status_filter)
             button.blockSignals(False)
 
-        self.projects = list_projects()
-        # Cache each project state and calculated status for this refresh; the
-        # previous implementation read JSON repeatedly during filtering and stats.
-        self._state_cache = {str(project.folder): load_state(project.folder) for project in self.projects}
-        self._status_cache = {
-            str(project.folder): project_status(project, self._state_cache[str(project.folder)])
-            for project in self.projects
-        }
+        # Search-only refreshes reuse the project catalogue; explicit refreshes
+        # (import/delete/page entry) rebuild it. Signatures detect changed state/output.
+        if force_catalog or not self.projects:
+            self.projects = list_projects()
+        active_keys = {str(project.folder) for project in self.projects}
+        for stale_key in set(self._project_data_cache) - active_keys:
+            self._project_data_cache.pop(stale_key, None)
+        self._state_cache = {}
+        self._status_cache = {}
+        for project in self.projects:
+            key = str(project.folder)
+            state, status_info = self._project_data(project)
+            self._state_cache[key] = state
+            self._status_cache[key] = status_info
         visible = [
             project for project in self.projects
             if project_matches(
@@ -244,6 +302,8 @@ class LibraryPage(QWidget):
             )
         ]
 
+        previous_item = self.list.currentItem()
+        previous_folder = str(previous_item.data(Qt.ItemDataRole.UserRole) or "") if previous_item else ""
         self.list.blockSignals(True)
         self.list.clear()
         self._visible_projects = visible
@@ -285,7 +345,14 @@ class LibraryPage(QWidget):
         )
 
         if visible:
-            self.list.setCurrentRow(0)
+            # Preserve selection across search/filter refreshes when the selected
+            # project remains visible instead of jumping to the first card.
+            target_row = next(
+                (index for index, project in enumerate(visible)
+                 if str(project.folder) == previous_folder),
+                0,
+            )
+            self.list.setCurrentRow(target_row)
         else:
             if self.projects:
                 self.details.setText(
