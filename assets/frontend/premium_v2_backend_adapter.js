@@ -1454,18 +1454,18 @@
         });
         return;
       }
-      if (button && dashboardButton.dataset.dashboardJobId && button.dataset.dashboardGenerationAction) {
+      if (button && button.dataset.dashboardJobId && button.dataset.dashboardGenerationAction) {
         e.preventDefault(); e.stopImmediatePropagation();
         void runAction(async () => {
           const action = button.dataset.dashboardGenerationAction;
-          await call(action === 'pause' ? 'job.pause' : 'job.resume', {job_id:dashboardButton.dataset.dashboardJobId});
+          await call(action === 'pause' ? 'job.pause' : 'job.resume', {job_id:button.dataset.dashboardJobId});
           await refreshJobs();
           await refreshHistory();
           message((action === 'pause' ? 'Pause' : 'Resume') + ' requested for the active audiobook generation.');
         });
         return;
       }
-      if (button && dashboardButton.dataset.dashboardJobId && buttonLabel === 'view job') {
+      if (button && button.dataset.dashboardJobId && buttonLabel === 'view job') {
         e.preventDefault(); e.stopImmediatePropagation();
         $('backgroundJobsButton')?.click();
         refreshJobs().catch(err => message(err?.message || String(err), true));
