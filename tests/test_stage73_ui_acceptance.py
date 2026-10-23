@@ -130,8 +130,11 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
 
     def test_library_search_filters_and_destructive_actions_require_confirmation(self):
         library = (ROOT / "app" / "ui" / "library.py").read_text(encoding="utf-8")
-        self.assertIn("self.search.textChanged.connect(self.refresh)", library)
-        self.assertIn("project_matches(project, query, status_filter)", library)
+        self.assertIn("self.search.textChanged.connect(self._schedule_refresh)", library)
+        self.assertIn("self._refresh_timer.setInterval(120)", library)
+        self.assertIn("project_matches(", library)
+        self.assertIn("self._state_cache =", library)
+        self.assertIn("self._status_cache =", library)
         self.assertIn("QListWidget.SelectionMode.ExtendedSelection", library)
         self.assertIn("QMessageBox.StandardButton.No,", library)
         self.assertIn("if answer != QMessageBox.StandardButton.Yes:", library)
@@ -223,11 +226,10 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
         end = self.workflow.index("    def _sidebar_item_clicked(", start)
         transition = self.workflow[start:end]
         self.assertIn("self.stack.setCurrentWidget(widget)", transition)
-        self.assertIn("if reduced_motion_enabled() or not widget.isVisible():", transition)
-        self.assertIn("animation.setDuration(135)", transition)
-        self.assertIn('self._log_ui_failure("Page transition animation", exc)', transition)
-        self.assertIn("widget.setGraphicsEffect(None)", transition)
-
+        self.assertNotIn("QGraphicsOpacityEffect", transition)
+        self.assertNotIn("animation.start()", transition)
+        self.assertIn("self._page_animation_widget.setGraphicsEffect(None)", transition)
+        self.assertIn("self._update_page_chrome(widget)", transition)
 
     def test_generation_history_uses_real_local_state_and_safe_output_paths(self):
         page = (ROOT / "app" / "ui" / "history_page.py").read_text(encoding="utf-8")

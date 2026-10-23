@@ -1560,7 +1560,12 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("self.loading_overlay.show_loading(", workflow_source)
         self.assertIn("self._redetect_worker = worker", workflow_source)
         self.assertIn("worker.start()", workflow_source)
-        self.assertIn("animation.setDuration(135)", workflow_source)
+        transition_start = workflow_source.index("def _show_page")
+        transition_end = workflow_source.index("def _sidebar_item_clicked", transition_start)
+        transition_source = workflow_source[transition_start:transition_end]
+        self.assertIn("self.stack.setCurrentWidget(widget)", transition_source)
+        self.assertNotIn("QGraphicsOpacityEffect", transition_source)
+        self.assertNotIn("animation.start()", transition_source)
         self.assertIn("QListWidget#sidebar::item:selected", main_source)
         self.assertIn("stop:0 #84142e", main_source)
 

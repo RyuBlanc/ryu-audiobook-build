@@ -15,6 +15,9 @@ class UiStabilityRegressions(unittest.TestCase):
         self.assertNotIn("animation.start()", transition)
         self.assertIn("def _sidebar_item_clicked", source)
         self.assertIn("def _open_generation_feature", source)
+        self.assertIn("def _refresh_generation_context(self) -> None:", source)
+        self.assertIn("def _install_generation_feature_pages(", source)
+        self.assertIn("def _save_sound_preset(", source)
 
     def test_library_search_is_debounced_and_status_is_cached_per_refresh(self):
         source = (ROOT / "app/ui/library.py").read_text(encoding="utf-8")

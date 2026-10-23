@@ -369,14 +369,40 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                 self.app.processEvents()
 
     def test_clicking_already_selected_generate_item_recovers_navigation(self) -> None:
-        # Keep this recovery-dispatch check independent of native/offscreen Qt
-        # initialization. End-to-end Generate construction and visibility are
-        # exercised by the dedicated GUI smoke tests above.
-        source = (Path(__file__).resolve().parents[1] / "app/ui/workflow.py").read_text(encoding="utf-8")
-        handler = source.split("def _sidebar_item_clicked", 1)[1].split("def _open_generation_feature", 1)[0]
-        self.assertIn("self.stack.currentWidget() is not expected", handler)
-        self.assertIn("self._sidebar_changed(row)", handler)
-        self.assertIn("name in {\"Pronunciation\", \"Sound Design\"}", handler)
+        with tempfile.TemporaryDirectory(prefix="ryu-generate-reclick-") as temp:
+            workflow = ProjectWorkflow()
+            project = self._project(Path(temp) / "sample-project")
+            try:
+                workflow.show()
+                workflow.open_project(project)
+                workflow.select_section("Generate")
+                QTest.qWait(100)
+
+                self.assertEqual(
+                    workflow.sidebar.currentItem().data(32),
+                    "Generate",
+                    "Test setup requires Generate to be selected in the sidebar.",
+                )
+                self.assertIs(workflow.stack.currentWidget(), workflow.generation)
+
+                # Simulate a stale stack/page transition while the sidebar remains
+                # on Generate. Clicking that same row must still restore Generate.
+                workflow.stack.setCurrentWidget(workflow.import_page)
+                item = workflow.sidebar.currentItem()
+                rect = workflow.sidebar.visualItemRect(item)
+                QTest.mouseClick(
+                    workflow.sidebar.viewport(),
+                    Qt.MouseButton.LeftButton,
+                    pos=rect.center(),
+                )
+                QTest.qWait(100)
+
+                self.assertIs(workflow.stack.currentWidget(), workflow.generation)
+                self.assertTrue(workflow.generation.isVisible())
+            finally:
+                workflow.close()
+                workflow.deleteLater()
+                self.app.processEvents()
 
 
 if __name__ == "__main__":
