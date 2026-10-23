@@ -954,6 +954,31 @@ class ProjectWorkflow(QMainWindow):
             self._sidebar_changed(row)
 
 
+    def _refresh_generation_context(self) -> None:
+        """Refresh book-dependent fields after the Generate page is already visible."""
+        if not self.project or not self.generation:
+            return
+        page = self.generation
+        page.chapters = self.project.chapters
+        problems: list[str] = []
+        for label, callback in (
+            ("voice profiles", page._refresh_voice_profiles),
+            ("voice cast", page._load_voice_cast_summary),
+            ("chapter sources", page.refresh_chapter_sources),
+        ):
+            try:
+                callback()
+            except Exception as exc:
+                # A stale optional widget/profile must not block navigation,
+                # but retain the complete traceback for the support log.
+                self._log_ui_failure(f"Generate context refresh ({label})", exc)
+                problems.append(f"{label}: {type(exc).__name__}: {exc}")
+        if problems and hasattr(page, "status"):
+            page.status.setText(
+                "Generate opened, but some details could not be refreshed. "
+                + " | ".join(problems)
+            )
+
     def _open_generation_feature(self, feature: str) -> None:
         """Open the dedicated, book-specific Pronunciation or Sound Design screen."""
         key = "Pronunciation" if feature == "pronunciation" else "Sound Design"
