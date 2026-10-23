@@ -39,8 +39,10 @@ jobs:
           echo "Fetching all completed workflow runs."
           gh api --paginate -H "Accept: application/vnd.github+json" "${api}/actions/runs?per_page=100"             --jq '.workflow_runs[] | select(.status == "completed") | [.id,.name,.head_sha,.head_branch,.created_at,.conclusion] | @tsv'             > "${RUNNER_TEMP}/runs.tsv"
 
-          # Protect explicit 1.1.1 release run, all open PR head commits, recent
-          # per-workflow history, and all 1.1.1 installer failures/cancellations.
+          # Rank the completed runs once, in newest-first order per workflow.
+          # Release and open-PR protection is checked before any retention deletion.
+          sort -t $'\t' -k5,5r "${RUNNER_TEMP}/runs.tsv" > "${RUNNER_TEMP}/runs-sorted.tsv"
+          declare -A retained_count=()
           while IFS=$'\t' read -r run_id workflow_name sha run_branch created_at conclusion; do
             [[ -z "${run_id:-}" ]] && continue
             if [[ "$run_id" == "$REFERENCE_RUN_ID" ]]; then
@@ -56,16 +58,15 @@ jobs:
               continue
             fi
 
-            rank=$(awk -F '\t' -v name="$workflow_name" -v id="$run_id" '
-              $2 == name { n++; if ($1 == id) target=n }
-              END { print target+0 }
-            ' <(sort -t $'\t' -k5,5r "${RUNNER_TEMP}/runs.tsv"))
-            if (( rank <= 2 )); then
-              echo "Preserving one of the two newest ${workflow_name} runs: $run_id (rank $rank)."
+            count=${retained_count["$workflow_name"]:-0}
+            if (( count < 2 )); then
+              retained_count["$workflow_name"]=$((count + 1))
+              echo "Preserving one of the two newest ${workflow_name} runs: $run_id."
               continue
             fi
+
             echo "Deleting old workflow run $run_id ($workflow_name, $run_branch, $conclusion, $created_at)."
             gh api --method DELETE -H "Accept: application/vnd.github+json" "${api}/actions/runs/${run_id}" >/dev/null
-          done < "${RUNNER_TEMP}/runs.tsv"
+          done < "${RUNNER_TEMP}/runs-sorted.tsv"
 
           echo "Storage cleanup completed with release and PR protections."
