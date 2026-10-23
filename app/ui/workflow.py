@@ -311,9 +311,9 @@ class ProjectWorkflow(QMainWindow):
             else:
                 self._show_page(self.import_page)
         elif name == "Models":
-            self._show_page(self.stack.widget(6))
+            self._show_page(self.stack.widget(5))
         elif name == "Hardware":
-            self._show_page(self.stack.widget(7))
+            self._show_page(self.stack.widget(6))
 
     def _open_character_studio_for_series(self, series: str = "") -> None:
         """Open the live cast editor and make the requested series the working context."""
