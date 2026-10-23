@@ -168,6 +168,7 @@ def sync_characters(
                 "id": uuid.uuid4().hex,
                 "series": series_name,
                 "primary_name": name,
+                "short": str(source.get("short") or name.split()[0])[:120],
                 "aliases": incoming_aliases,
                 "voice_name": voice,
                 "dialogue_sample": sample,
@@ -186,6 +187,11 @@ def sync_characters(
             continue
 
         match["series"] = series_name
+        source_short = str(source.get("short") or "").strip()
+        if source_short and (update_names or not str(match.get("short") or "").strip()):
+            match["short"] = source_short[:120]
+        elif not str(match.get("short") or "").strip():
+            match["short"] = str(match.get("primary_name") or name).split()[0][:120]
         old_primary = str(match.get("primary_name") or "").strip()
         aliases = _clean_names(match.get("aliases") or [], old_primary)
         if update_names and name.casefold() != old_primary.casefold():
@@ -236,6 +242,10 @@ def update_character(record_id: str, changes: dict, path: Path | None = None) ->
         aliases = _clean_names([*aliases, old_primary], primary)
     record["series"] = series
     record["primary_name"] = primary
+    if "short" in changes:
+        record["short"] = str(changes.get("short") or primary.split()[0])[:120]
+    elif not str(record.get("short") or "").strip():
+        record["short"] = primary.split()[0][:120]
     record["aliases"] = aliases
     if "dialogue_sample" in changes:
         record["dialogue_sample"] = str(changes.get("dialogue_sample") or "").strip()
