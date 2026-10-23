@@ -832,9 +832,17 @@
       return playable;
     });
   }
-  async function openPlayer() {
-    const data = await call('player.get_active');
-    if (playerAudio && playerAudio.src === data.file_url) { if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause(); return; }
+  async function openPlayer(projectFolder = selectedAudiobookFolder) {
+    const folder = String(projectFolder || '').trim();
+    if (!folder) throw new Error('Select a finished audiobook from the Audiobooks library before playing.');
+    selectedAudiobookFolder = folder;
+    const data = await call('player.get_active', {folder});
+    if (playerAudio && playerAudio.src === data.file_url) {
+      miniPlayerDismissed = false;
+      if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause();
+      syncMiniPlayer();
+      return;
+    }
     if (playerAudio) playerAudio.pause();
     playerAudio = new Audio(data.file_url);
     playerAudio.preload = 'metadata';
@@ -848,13 +856,26 @@
       if (mini) mini.textContent = playerAudio.paused ? '▶' : 'Ⅱ';
     };
     playerAudio.onloadedmetadata = () => {
-      const headings = $('player')?.querySelectorAll('h2') || [];
+      const headings = [...($('player')?.querySelectorAll('h2') || [])].filter(heading => !heading.closest('#backendAudiobookLibrary'));
       if (headings[0]) headings[0].textContent = data.title;
       if (headings[1]) headings[1].textContent = data.chapters?.[0]?.title || 'Audiobook ready';
-      const mini = $('miniPlayer'); if (mini) mini.querySelector('b').textContent = data.title;
+      const mini = $('miniPlayer');
+      if (mini) {
+        const title = mini.querySelector('b');
+        if (title) title.textContent = data.title;
+        applyProjectCover(mini.querySelector('.book-cover,.project-cover,[data-project-cover],img[alt*="cover" i]'), data.cover_path || '');
+      }
+      const main = $('mainPlay');
+      if (main) main.textContent = 'Ⅱ';
+      syncMiniPlayer();
     };
-    playerAudio.onerror = () => message('The local audiobook file could not be opened in the embedded player.', true);
+    playerAudio.onerror = () => {
+      syncMiniPlayer();
+      message('The local audiobook file could not be opened in the embedded player.', true);
+    };
     await playerAudio.play();
+    miniPlayerDismissed = false;
+    syncMiniPlayer();
   }
   const formatTime = seconds => {
     const n = Math.max(0, Math.floor(Number(seconds) || 0)), h = Math.floor(n / 3600), m = Math.floor((n % 3600) / 60), sec = n % 60;
@@ -983,6 +1004,35 @@
     document.addEventListener('click', e => {
       const button = e.target.closest('button');
       const buttonLabel = button?.textContent?.trim().toLowerCase() || '';
+      if (button && button.dataset.playProjectFolder) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        void run(async () => {
+          const folder = button.dataset.playProjectFolder;
+          selectedAudiobookFolder = folder;
+          miniPlayerDismissed = false;
+          await openPlayer(folder);
+          renderAudiobookLibrary(projects);
+          message('Playing ' + (projects.find(project => project.folder === folder)?.title || 'selected audiobook') + '.');
+        });
+        return;
+      }
+      if (button && button.dataset.dashboardJobId && button.dataset.dashboardGenerationAction) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        void run(async () => {
+          const action = button.dataset.dashboardGenerationAction;
+          await call(action === 'pause' ? 'job.pause' : 'job.resume', {job_id:button.dataset.dashboardJobId});
+          await refreshJobs();
+          await refreshHistory();
+          message((action === 'pause' ? 'Pause' : 'Resume') + ' requested for the active audiobook generation.');
+        });
+        return;
+      }
+      if (button && button.dataset.dashboardJobId && buttonLabel === 'view job') {
+        e.preventDefault(); e.stopImmediatePropagation();
+        $('backgroundJobsButton')?.click();
+        refreshJobs().catch(err => message(err?.message || String(err), true));
+        return;
+      }
       if (button && buttonLabel === 'open output folder') {
         e.preventDefault(); e.stopImmediatePropagation();
         call('system.open_output').then(result => message('Opened output folder: ' + (result.path || ''))).catch(err => message(err?.message || String(err), true));
@@ -1400,7 +1450,10 @@
     // saveSoundPresetAdvanced is handled by the single delegated backend listener.
     ['mainPlay','miniPlay'].forEach(id=>{if($(id))$(id).onclick=act(openPlayer);});
     if ($('playerTimeline')) $('playerTimeline').oninput=()=>{if(playerAudio&&playerAudio.duration)playerAudio.currentTime=Number($('playerTimeline').value)/100*playerAudio.duration;};
-    if ($('hideMini')) $('hideMini').onclick=()=> $('miniPlayer')?.classList.add('hidden');
+    if ($('hideMini')) $('hideMini').onclick=()=>{
+      miniPlayerDismissed = true;
+      $('miniPlayer')?.classList.add('hidden');
+    };
     if ($('saveSettingsAdvanced')) $('saveSettingsAdvanced').onclick=act(async()=>{await call('settings.save',{theme:$('themeSelectAdvanced')?.value||'dark',effects:$('effectsModeAdvanced')?.value||'high'});message('Settings saved to this PC.');});
     document.addEventListener('input', e => {
       if (e.target?.id === 'librarySearch') {
@@ -1488,14 +1541,24 @@
           } catch (err) { message(err?.message || String(err), true); }
           return;
         }
+        if (label === 'create new project') {
+          e.preventDefault(); e.stopImmediatePropagation();
+          if (typeof window.go === 'function') window.go('import');
+          else message('Open Import Studio to start a new audiobook project.');
+          return;
+        }
         if (label === 'continue project') {
           e.preventDefault(); e.stopImmediatePropagation();
           try {
-            const activeProject = await call('project.get_active');
-            const candidate = activeProject || projects.find(p => !p.completed && Number(p.chapter_count || 0) > 0) || projects[0];
-            if (!candidate) throw new Error('Import a book before continuing a project.');
+            const folder = button.dataset.continueProjectFolder ||
+              button.closest('[data-dashboard-project-folder]')?.dataset.dashboardProjectFolder ||
+              dashboardProject?.folder || '';
+            const candidate = projects.find(project => project.folder === folder) || null;
+            if (!candidate) throw new Error('Select a saved project or use Create New Project to import a book.');
             const opened = await call('project.open', {folder:candidate.folder});
-            await refreshProjects(); await refreshChapters();
+            await refreshProjects();
+            await refreshChapters();
+            await refreshCharacters();
             if (typeof window.go === 'function') window.go('chapters');
             message('Continuing ' + (opened.title || candidate.title) + '.');
           } catch (err) { message(err?.message || String(err), true); }
@@ -1505,7 +1568,9 @@
           e.preventDefault(); e.stopImmediatePropagation();
           try {
             const rows = await call('job.list', {include_hidden:false});
-            const job = rows.find(j => !['completed','failed','cancelled'].includes(j.state));
+            const requestedJobId = button.dataset.dashboardJobId || '';
+            const job = rows.find(j => requestedJobId && j.job_id === requestedJobId) ||
+              rows.find(j => !['completed','failed','cancelled'].includes(j.state));
             if (!job) throw new Error('There are no active background jobs to view.');
             $('backgroundJobsButton')?.click();
             message((job.title || job.type) + ' · ' + (job.stage || job.state));
@@ -2181,6 +2246,11 @@
     // Hydrate the visible workflow first, then load secondary panels with a paint
     // opportunity between requests. Keep failures local so one unavailable optional
     // subsystem cannot block the rest of the UI from becoming usable.
+    const miniDock = $('miniPlayer');
+    if (miniDock) miniDock.classList.add('hidden');
+    bindMiniPlayerNavigation();
+    syncMiniPlayer();
+
     const hydrateInitialState = async () => {
       const phases = [
         [refreshProjects, refreshVoices, refreshChapters, loadSettings],
