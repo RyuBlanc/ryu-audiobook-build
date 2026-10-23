@@ -966,6 +966,7 @@
     const timeline = $('playerTimeline');
     if (timeline) { timeline.value = 0; timeline.disabled = true; }
     if ($('currentTime')) $('currentTime').textContent = '0:00';
+    if ($('miniProgress')) $('miniProgress').style.width = '0%';
     const durationNode = $('currentTime')?.parentElement?.querySelectorAll('span')?.[1];
     if (durationNode) durationNode.textContent = '0:00';
     const chapterList = grid?.querySelector('aside.card .list');
@@ -1008,6 +1009,8 @@
     const duration = playerAudio?.duration || 0;
     if ($('playerTimeline')) { $('playerTimeline').value = duration ? (playerAudio.currentTime / duration) * 100 : 0; $('playerTimeline').disabled = false; }
     if ($('currentTime')) $('currentTime').textContent = formatTime(playerAudio?.currentTime || 0);
+    if ($('miniProgress')) $('miniProgress').style.width =
+      (playerAudio?.duration ? playerAudio.currentTime / playerAudio.duration * 100 : 0) + '%';
     const durationNode = $('currentTime')?.parentElement?.querySelectorAll('span')?.[1];
     if (durationNode) durationNode.textContent = formatTime(duration);
     const mini = $('miniPlayer');
