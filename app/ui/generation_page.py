@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import hashlib
+import logging
 import json
 import re
 import time
@@ -43,6 +44,9 @@ from app.audio.library import (
     AUDIO_SOURCE_LINKS, CUE_KIND_LABELS, MUSIC_CATEGORIES, ensure_audio_library,
     import_audio_files, list_cue_tracks, list_music_tracks, resolve_cue_track, resolve_music_track,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 class VoicePreviewWorker(QThread):
