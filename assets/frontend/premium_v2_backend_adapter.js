@@ -263,7 +263,10 @@
     try { active = await call('project.get_active'); } catch (_) {}
     const ordered = [...rows].sort((a,b) => (Date.parse(b.modified_at || '') || 0) - (Date.parse(a.modified_at || '') || 0));
     dashboardProject = (active && ordered.find(project => project.folder === active.folder)) ||
-      ordered.find(project => !project.completed && Number(project.chapter_count || 0) > 0) ||
+      ordered.find(project => !project.completed && (
+        Number(project.chapter_count || 0) > 0 ||
+        ['importing','imported','setup','new','paused','failed','cancelled'].includes(String(project.status || '').toLowerCase())
+      )) ||
       ordered.find(project => Number(project.chapter_count || 0) > 0) || null;
     const hero = dashboardHero(dash);
     if (hero) {
@@ -1933,17 +1936,29 @@
         if (label === 'continue project') {
           e.preventDefault(); e.stopImmediatePropagation();
           try {
-            const folder = button.dataset.continueProjectFolder ||
-              button.closest('[data-dashboard-project-folder]')?.dataset.dashboardProjectFolder ||
+            const folder = dashboardButton.dataset.continueProjectFolder ||
+              dashboardButton.closest('[data-dashboard-project-folder]')?.dataset.dashboardProjectFolder ||
               dashboardProject?.folder || '';
             const candidate = projects.find(project => project.folder === folder) || null;
             if (!candidate) throw new Error('Select a saved project or use Create New Project to import a book.');
+
+            // Set the project's resume checkpoint before refreshing panels so a
+            // restarted app re-opens the same project and its saved step.
             const opened = await call('project.open', {folder:candidate.folder});
             await refreshProjects();
             await refreshChapters();
             await refreshCharacters();
-            if (typeof window.go === 'function') window.go('chapters');
-            message('Continuing ' + (opened.title || candidate.title) + '.');
+            const stage = String(opened.resume_stage || candidate.resume_stage || '').trim().toLowerCase();
+            const routeByStage = {
+              import:'import', narrator:'narrator', voice:'narrator', character:'characters',
+              characters:'characters', sound:'sound', sounds:'sound',
+              generator:'production', generation:'production', production:'production',
+              chapters:'chapters', chapter:'chapters'
+            };
+            const destination = routeByStage[stage] || (candidate.completed ? 'player' : 'chapters');
+            if (typeof window.go === 'function') window.go(destination);
+            message('Continuing ' + (opened.title || candidate.title) +
+              (stage ? ' · ' + stage + ' setup' : '') + '.');
           } catch (err) { message(err?.message || String(err), true); }
           return;
         }
@@ -1951,9 +1966,9 @@
           e.preventDefault(); e.stopImmediatePropagation();
           try {
             const rows = await call('job.list', {include_hidden:false});
-            const requestedJobId = button.dataset.dashboardJobId || '';
-            const job = rows.find(j => requestedJobId && j.job_id === requestedJobId) ||
-              rows.find(j => !['completed','failed','cancelled'].includes(j.state));
+            const requestedJobId = dashboardButton.dataset.dashboardJobId || '';
+            const job = rows.find(j => requestedJobId && String(j.job_id) === String(requestedJobId)) ||
+              rows.find(j => !['completed','failed','cancelled'].includes(String(j.state || '').toLowerCase()));
             if (!job) throw new Error('There are no active background jobs to view.');
             $('backgroundJobsButton')?.click();
             message((job.title || job.type) + ' · ' + (job.stage || job.state));
