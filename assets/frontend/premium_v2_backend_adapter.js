@@ -1399,18 +1399,18 @@
         });
         return;
       }
-      if (button && button.dataset.dashboardJobId && button.dataset.dashboardGenerationAction) {
+      if (button && dashboardButton.dataset.dashboardJobId && button.dataset.dashboardGenerationAction) {
         e.preventDefault(); e.stopImmediatePropagation();
         void runAction(async () => {
           const action = button.dataset.dashboardGenerationAction;
-          await call(action === 'pause' ? 'job.pause' : 'job.resume', {job_id:button.dataset.dashboardJobId});
+          await call(action === 'pause' ? 'job.pause' : 'job.resume', {job_id:dashboardButton.dataset.dashboardJobId});
           await refreshJobs();
           await refreshHistory();
           message((action === 'pause' ? 'Pause' : 'Resume') + ' requested for the active audiobook generation.');
         });
         return;
       }
-      if (button && button.dataset.dashboardJobId && buttonLabel === 'view job') {
+      if (button && dashboardButton.dataset.dashboardJobId && buttonLabel === 'view job') {
         e.preventDefault(); e.stopImmediatePropagation();
         $('backgroundJobsButton')?.click();
         refreshJobs().catch(err => message(err?.message || String(err), true));
@@ -1933,7 +1933,7 @@
         if (label === 'continue project') {
           e.preventDefault(); e.stopImmediatePropagation();
           try {
-            const folder = button.dataset.continueProjectFolder ||
+            const folder = dashboardButton.dataset.continueProjectFolder ||
               button.closest('[data-dashboard-project-folder]')?.dataset.dashboardProjectFolder ||
               dashboardProject?.folder || '';
             const candidate = projects.find(project => project.folder === folder) || null;
@@ -1951,7 +1951,7 @@
           e.preventDefault(); e.stopImmediatePropagation();
           try {
             const rows = await call('job.list', {include_hidden:false});
-            const requestedJobId = button.dataset.dashboardJobId || '';
+            const requestedJobId = dashboardButton.dataset.dashboardJobId || '';
             const job = rows.find(j => requestedJobId && j.job_id === requestedJobId) ||
               rows.find(j => !['completed','failed','cancelled'].includes(j.state));
             if (!job) throw new Error('There are no active background jobs to view.');
