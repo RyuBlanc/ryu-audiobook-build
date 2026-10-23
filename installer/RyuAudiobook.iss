@@ -16,16 +16,16 @@ DefaultDirName={autopf}\Ryu's Audiobook
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=installer-output
-OutputBaseFilename=Ryu's Audiobook Setup
+OutputBaseFilename=Ryu's Audiobook Core Setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern dark hidebevels includetitlebar
 WizardResizable=yes
 WizardSizePercent=125,110
 WizardBackColor=#05060A
-WizardImageFile=..\assets\installer_brand_panel.png
+WizardImageFile=..\assets\installer_brand_panel.bmp
 WizardImageBackColor=#05060A
-WizardSmallImageFile=..\assets\ryu_audiobook_logo.png
+WizardSmallImageFile=..\assets\ryu_audiobook_logo.bmp
 WizardSmallImageBackColor=#05060A
 DefaultDialogFontName=Segoe UI
 SetupIconFile=..\assets\ryu_audiobook_logo.ico
@@ -45,11 +45,12 @@ VersionInfoProductName={#MyAppName}
 Source: "..\dist\Ryu's Audiobook\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startmenuicon
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
+Name: "startmenuicon"; Description: "Create a Start menu entry"; GroupDescription: "Shortcuts:"; Flags: unchecked
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent

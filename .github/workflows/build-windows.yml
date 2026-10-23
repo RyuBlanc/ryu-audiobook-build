@@ -13,6 +13,7 @@ on:
       - stage-4-pronunciation-sound-design
       - fix/installer-branding-accessibility
       - fix/dashboard-live-data-project-covers-player
+      - fix/html-installer-transparent-logo
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.
@@ -22,7 +23,7 @@ permissions:
   actions: write
 
 concurrency:
-  # Isolate builds by branch so installer work cannot cancel Dashboard regression runs.
+  # A push on a separate review branch must not cancel another branch's validation run.
   group: ryu-audiobook-windows-build-${{ github.ref }}
   cancel-in-progress: true
 
@@ -471,8 +472,16 @@ jobs:
           choco install innosetup -y --no-progress
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed with exit code $LASTEXITCODE." }
 
+      - name: Restore Python for HTML installer packaging
+        id: html_python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Build installer
         shell: pwsh
+        env:
+          HTML_PYTHON: ${{ steps.html_python.outputs.python-path }}
         run: |
           $ErrorActionPreference = 'Stop'
           $candidates = @(
@@ -483,24 +492,50 @@ jobs:
           if (-not $isccPath) { throw 'ISCC.exe was not found after Inno Setup installation.' }
           Write-Host "Using Inno Setup compiler: $isccPath"
           & $isccPath 'installer\RyuAudiobook.iss'
-          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed with exit code $LASTEXITCODE." }
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup core compilation failed with exit code $LASTEXITCODE." }
+          $coreInstaller = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Core Setup.exe"
+          if (-not (Test-Path $coreInstaller)) { throw "Core installer was not produced: $coreInstaller" }
+          # Use the exact interpreter path exported by setup-python. A Windows
+          # Store execution-alias shim can precede Python on PATH on hosted runners.
+          $pythonExe = $env:HTML_PYTHON
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "setup-python did not provide a usable interpreter for HTML packaging: $pythonExe"
+          }
+          Write-Host "Using HTML-installer Python from setup-python output: $pythonExe"
+          $env:PYTHONPATH = (Get-Location).Path
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -m pip install --disable-pip-version-check PyInstaller PySide6
+          if ($LASTEXITCODE -ne 0) { throw "HTML installer build dependencies failed to install (exit $LASTEXITCODE)." }
+          Write-Host '=== Package functional HTML setup interface ==='
+          & $pythonExe -B 'installer\build_html_installer.py'
+          if ($LASTEXITCODE -ne 0) { throw "HTML installer packaging failed with exit code $LASTEXITCODE." }
           $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
-          if (-not (Test-Path $installer)) { throw "Installer was not produced: $installer" }
-          Write-Host "Installer created: $installer"
+          if (-not (Test-Path $installer)) { throw "HTML installer frontend was not produced: $installer" }
+          Write-Host "Functional HTML installer created: $installer"
 
       - name: Verify original logo transparency and generate release hashes
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           Add-Type -AssemblyName System.Drawing
+          $masterLogo = Join-Path (Get-Location) 'assets\ryu_audiobook_logo_master.png'
           $png = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.png'
           $ico = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.ico'
+          $logoBmp = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.bmp'
           $panel = Join-Path (Get-Location) 'assets\installer_brand_panel.png'
+          $panelBmp = Join-Path (Get-Location) 'assets\installer_brand_panel.bmp'
+          $coreInstaller = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Core Setup.exe"
           $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
           $exe = Join-Path (Get-Location) "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
-          foreach ($path in @($png, $ico, $panel, $installer, $exe)) {
+          foreach ($path in @($masterLogo, $png, $ico, $logoBmp, $panel, $panelBmp, $coreInstaller, $installer, $exe)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required release asset missing: $path" }
           }
+          $masterBitmap = [System.Drawing.Bitmap]::FromFile($masterLogo)
+          try {
+            if ($masterBitmap.GetPixel(0,0).A -ne 0 -or $masterBitmap.GetPixel($masterBitmap.Width-1,0).A -ne 0 -or $masterBitmap.GetPixel(0,$masterBitmap.Height-1).A -ne 0 -or $masterBitmap.GetPixel($masterBitmap.Width-1,$masterBitmap.Height-1).A -ne 0) {
+              throw 'Approved master logo must remain transparent at all canvas corners.'
+            }
+          } finally { $masterBitmap.Dispose() }
           $bitmap = [System.Drawing.Bitmap]::FromFile($png)
           try {
             $transparent = 0
@@ -521,18 +556,20 @@ jobs:
           } finally {
             $bitmap.Dispose()
           }
-          $panelBitmap = [System.Drawing.Bitmap]::FromFile($panel)
+          $logoBitmap = [System.Drawing.Bitmap]::FromFile($logoBmp)
           try {
-            if ($panelBitmap.GetPixel(0,0).A -ne 0 -or $panelBitmap.GetPixel($panelBitmap.Width-1,0).A -ne 0 -or $panelBitmap.GetPixel(0,$panelBitmap.Height-1).A -ne 0 -or $panelBitmap.GetPixel($panelBitmap.Width-1,$panelBitmap.Height-1).A -ne 0) {
-              throw 'Installer brand panel must keep a transparent canvas.'
-            }
-          } finally {
-            $panelBitmap.Dispose()
-          }
+            $corner = $logoBitmap.GetPixel(0,0)
+            if ($corner.R -ne 5 -or $corner.G -ne 6 -or $corner.B -ne 10) { throw "Installer logo BMP has the wrong matte: $($corner.R),$($corner.G),$($corner.B)" }
+          } finally { $logoBitmap.Dispose() }
+          $panelBitmap = [System.Drawing.Bitmap]::FromFile($panelBmp)
+          try {
+            $corner = $panelBitmap.GetPixel(0,0)
+            if ($corner.R -ne 5 -or $corner.G -ne 6 -or $corner.B -ne 10) { throw "Installer panel BMP has the wrong matte: $($corner.R),$($corner.G),$($corner.B)" }
+          } finally { $panelBitmap.Dispose() }
           if ((Get-Item -LiteralPath $ico).Length -lt 1024) { throw 'Generated Windows ICO is unexpectedly small.' }
           Write-Host "Generated Windows ICO exists and is non-trivial in size: $((Get-Item -LiteralPath $ico).Length) bytes."
           $manifest = @()
-          foreach ($path in @($installer, $exe, $png, $ico, $panel)) {
+          foreach ($path in @($installer, $coreInstaller, $exe, $masterLogo, $png, $ico, $logoBmp, $panel, $panelBmp)) {
             $hash = Get-FileHash -LiteralPath $path -Algorithm SHA256
             $manifest += [pscustomobject]@{
               file = [System.IO.Path]::GetRelativePath((Get-Location).Path, $path)
@@ -550,7 +587,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $exe = Join-Path (Get-Location) "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
           $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
-          foreach ($path in @($exe, $installer)) {
+          $coreInstaller = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Core Setup.exe"
+          foreach ($path in @($exe, $installer, $coreInstaller)) {
             if (-not (Test-Path $path)) { throw "Release executable missing for security scan: $path" }
           }
           $status = Get-MpComputerStatus -ErrorAction Stop
@@ -563,7 +601,7 @@ jobs:
               Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
           }
           if (-not $mp -or -not (Test-Path $mp)) { throw 'Microsoft Defender command-line scanner was not found.' }
-          foreach ($path in @($exe, $installer)) {
+          foreach ($path in @($exe, $installer, $coreInstaller)) {
             Write-Host "Microsoft Defender custom scan: $path"
             $scanOutput = @(& $mp -Scan -ScanType 3 -File $path -DisableRemediation 2>&1)
             $scanExit = $LASTEXITCODE
@@ -605,7 +643,7 @@ jobs:
           retention-days: 30
 
       - name: Remove older Windows build runs and artifacts
-        if: success()
+        if: success() && github.ref == 'refs/heads/main'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -613,7 +651,7 @@ jobs:
           CURRENT_RUN_ID: ${{ github.run_id }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $runs = gh api --paginate "/repos/$env:REPOSITORY/actions/runs?per_page=100" --jq '.workflow_runs[] | select(.name == "Build Windows App") | [.id,.status,.created_at] | @tsv'
+          $runs = gh api --paginate "/repos/$env:REPOSITORY/actions/runs?per_page=100" --jq '.workflow_runs[] | select(.name == "Build Windows App" and .status == "completed" and .conclusion == "success") | [.id,.status,.created_at] | @tsv'
           foreach ($line in $runs) {
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
             $parts = $line -split "	"
@@ -625,7 +663,7 @@ jobs:
             gh api --method DELETE "/repos/$env:REPOSITORY/actions/runs/$runId" | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "Could not remove old workflow run $runId." }
           }
-          Write-Host "Only the newly uploaded Windows build is retained."
+          Write-Host "Cleaned up older successful main-branch builds; failure logs and review-branch runs are preserved."
 
       - name: Publish verified installer release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
