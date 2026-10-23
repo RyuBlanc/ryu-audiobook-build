@@ -34,6 +34,10 @@ class InstallerBrandingContractTests(unittest.TestCase):
         self.assertIn("ImageChops.multiply(alpha, clip_mask)", build_script)
         self.assertIn("mask_scale = 4", build_script)
         self.assertIn("Image.Resampling.LANCZOS", build_script)
+        self.assertIn("required_ico_sizes", build_script)
+        self.assertIn("icon_file.ico.sizes()", build_script)
+        self.assertIn("icon_file.ico.getimage(icon_size)", build_script)
+        self.assertIn("icon_alpha.getextrema()", build_script)
         self.assertIn("Application logo canvas corners must remain fully transparent.", build_script)
         self.assertNotIn("QImage(1024, 1024", build_script)
 

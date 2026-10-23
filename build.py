@@ -169,6 +169,30 @@ def build_logo_assets() -> None:
             ],
         )
 
+        # Confirm the ICO actually contains every Windows shell size we expect.
+        # A non-empty ICO alone can still contain only a single small frame.
+        required_ico_sizes = {
+            (16, 16), (24, 24), (32, 32), (48, 48),
+            (64, 64), (128, 128), (256, 256),
+        }
+        with Image.open(LOGO_ICO) as icon_file:
+            icon_sizes = icon_file.ico.sizes()
+            missing_sizes = required_ico_sizes - icon_sizes
+            if missing_sizes:
+                missing_text = ", ".join(
+                    f"{width}x{height}" for width, height in sorted(missing_sizes)
+                )
+                raise RuntimeError(f"Windows ICO is missing required icon sizes: {missing_text}")
+            for icon_size in sorted(required_ico_sizes):
+                icon_frame = icon_file.ico.getimage(icon_size).convert("RGBA")
+                icon_alpha = icon_frame.getchannel("A")
+                alpha_min, alpha_max = icon_alpha.getextrema()
+                if alpha_min != 0 or alpha_max != 255:
+                    width, height = icon_size
+                    raise RuntimeError(
+                        f"Windows ICO {width}x{height} lost transparency or visible artwork."
+                    )
+
         # Inno Setup uses a portrait image slot on the Welcome/Finished pages.
         # Build a transparent composition that places the logo artwork at the
         # top without stretching it or painting a tile behind it.
