@@ -191,7 +191,7 @@ class ProjectWorkflow(QMainWindow):
         self.loading_overlay = FrostedLoadingOverlay(shell)
         self.loading_overlay.setGeometry(shell.rect())
 
-        self.library = LibraryPage(self.open_project)
+        self.library = LibraryPage(self.open_project, self._projects_deleted_from_library)
         self.import_page = ImportPage(self.handle_import)
         self.voice = VoicePage()
 
@@ -220,6 +220,33 @@ class ProjectWorkflow(QMainWindow):
         self._refresh_project_label()
         if hasattr(self, "loading_overlay") and self.centralWidget():
             self.loading_overlay.setGeometry(self.centralWidget().rect())
+
+    def _projects_deleted_from_library(self, projects: list[Project]) -> None:
+        """Detach open editor/generation pages before their backing folders enter Trash."""
+        current = self.project
+        if current is None:
+            return
+        current_path = str(Path(current.folder).resolve())
+        if not any(str(Path(project.folder).resolve()) == current_path for project in projects):
+            return
+        if self._page_animation is not None:
+            self._page_animation.stop()
+            if self._page_animation_widget is not None:
+                self._page_animation_widget.setGraphicsEffect(None)
+            self._page_animation = None
+            self._page_animation_widget = None
+        for attribute in ("editor", "generation"):
+            widget = getattr(self, attribute, None)
+            if widget is not None:
+                self.stack.removeWidget(widget)
+                widget.deleteLater()
+                setattr(self, attribute, None)
+        self._editor_index = -1
+        self._generation_index = -1
+        self.project = None
+        self._set_project_title("No book open")
+        self.select_section("Library")
+        self.library.refresh()
 
     def _set_project_title(self, title: str) -> None:
         self._project_title_full = title or "No book open"
