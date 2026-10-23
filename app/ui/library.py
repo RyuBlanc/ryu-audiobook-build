@@ -98,7 +98,7 @@ class TrashDialog(QDialog):
             return
         try:
             restored = restore_project(Path(item["project_folder"]).parent)
-            QMessageBox.information(self, "Book Restored", f"Restored to:\\n{restored}")
+            QMessageBox.information(self, "Book Restored", f"Restored to:\n{restored}")
             self.refresh()
         except Exception as exc:
             QMessageBox.critical(self, "Restore Failed", str(exc))
@@ -302,14 +302,14 @@ class LibraryPage(QWidget):
         selected = self._selected_projects()
         if not selected:
             return
-        names = "\\n".join(f"• {project.title}" for project in selected[:8])
+        names = "\n".join(f"• {project.title}" for project in selected[:8])
         if len(selected) > 8:
-            names += f"\\n• … and {len(selected) - 8} more"
+            names += f"\n• … and {len(selected) - 8} more"
 
         answer = QMessageBox.question(
             self,
             "Move Books to Recovery",
-            f"Move {len(selected)} selected book(s) to Deleted Books?\\n\\n{names}\\n\\n"
+            f"Move {len(selected)} selected book(s) to Deleted Books?\n\n{names}\n\n"
             "Their source file copy, chapters, generated files and pronunciation settings "
             "will be retained in recovery Trash. Recent history records remain outside the project. "
             "Use Deleted Books / Recover to restore them or permanently delete them.",
