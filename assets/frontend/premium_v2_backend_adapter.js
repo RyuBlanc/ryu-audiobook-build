@@ -18,6 +18,47 @@
   let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
+  const resumeCheckpointKey = 'ryu.project.resume-checkpoints.v1';
+  const resumeStages = new Set(['import','chapters','narrator','characters','sound','production','player']);
+  function readResumeCheckpoints() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(resumeCheckpointKey) || '{}');
+      return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    } catch (_) { return {}; }
+  }
+  function writeResumeCheckpoint(folder, stage) {
+    if (!folder || !resumeStages.has(stage)) return;
+    const checkpoints = readResumeCheckpoints();
+    checkpoints[folder] = {stage, updated_at:new Date().toISOString()};
+    try { localStorage.setItem(resumeCheckpointKey, JSON.stringify(checkpoints)); } catch (_) {}
+  }
+  function savedResumeStage(project) {
+    if (!project?.folder) return '';
+    const row = readResumeCheckpoints()[project.folder];
+    const stage = String(row?.stage || '').trim().toLowerCase();
+    return resumeStages.has(stage) ? stage : '';
+  }
+  function routeForResume(project) {
+    const stage = savedResumeStage(project);
+    if (stage) return stage;
+    if (project?.completed && project?.output_path) return 'player';
+    if (!project?.chapter_count) return 'import';
+    if (!project?.voice_profile) return 'narrator';
+    if (!project?.character_analysis_done) return 'characters';
+    if (!project?.sound_design_configured) return 'sound';
+    if (!project?.output_configured || project?.prepared_percent < 100) return 'production';
+    return 'chapters';
+  }
+  function navigateToProjectStage(project, stage = routeForResume(project)) {
+    const routes = {
+      import:'import', chapters:'chapters', narrator:'voice', characters:'characters',
+      sound:'sound', production:'production', player:'player'
+    };
+    const target = routes[stage] || 'chapters';
+    if (project?.folder) writeResumeCheckpoint(project.folder, stage);
+    if (typeof window.go === 'function') window.go(target);
+    return target;
+  }
   const chapterUndoStacks = new Map(), chapterRedoStacks = new Map();
   let chapterLastText = '', chapterHistoryGroupOpen = false, chapterHistoryGroupTimer = null, chapterHistoryApplying = false;
   let libraryCharacters = [], libraryEditorId = null, libraryEditorActive = false;
@@ -436,6 +477,14 @@
       const original = window.go;
       const wrapped = function(...args) {
         const result = original.apply(this,args);
+        const destination = String(args[0] || '').trim().toLowerCase();
+        const stageAliases = {
+          import:'import', chapters:'chapters', voice:'narrator', narrator:'narrator',
+          characters:'characters', character:'characters', sound:'sound', sounds:'sound',
+          production:'production', generator:'production', generation:'production', player:'player'
+        };
+        const stage = stageAliases[destination];
+        if (stage && dashboardProject?.folder) writeResumeCheckpoint(dashboardProject.folder, stage);
         setTimeout(() => {
           syncMiniPlayer();
           refreshProjects().catch(() => {});
@@ -1907,9 +1956,9 @@
         e.preventDefault(); e.stopImmediatePropagation();
         try {
           const opened = await call('project.open', {folder:recentProject.dataset.projectFolder});
-          await refreshProjects(); await refreshChapters();
-          if (typeof window.go === 'function') window.go('chapters');
-          message('Opened local project: ' + (opened.title || 'project'));
+          await refreshProjects(); await refreshChapters(); await refreshCharacters();
+          const target = navigateToProjectStage(opened, routeForResume(opened));
+          message('Opened local project: ' + (opened.title || 'project') + ' · ' + target + '.');
         } catch (err) { message(err?.message || String(err), true); }
         return;
       }
@@ -1948,17 +1997,8 @@
             await refreshProjects();
             await refreshChapters();
             await refreshCharacters();
-            const stage = String(opened.resume_stage || candidate.resume_stage || '').trim().toLowerCase();
-            const routeByStage = {
-              import:'import', narrator:'narrator', voice:'narrator', character:'characters',
-              characters:'characters', sound:'sound', sounds:'sound',
-              generator:'production', generation:'production', production:'production',
-              chapters:'chapters', chapter:'chapters'
-            };
-            const destination = routeByStage[stage] || (candidate.completed ? 'player' : 'chapters');
-            if (typeof window.go === 'function') window.go(destination);
-            message('Continuing ' + (opened.title || candidate.title) +
-              (stage ? ' · ' + stage + ' setup' : '') + '.');
+            const destination = navigateToProjectStage(opened, routeForResume(opened));
+            message('Continuing ' + (opened.title || candidate.title) + ' · ' + destination + '.');
           } catch (err) { message(err?.message || String(err), true); }
           return;
         }
