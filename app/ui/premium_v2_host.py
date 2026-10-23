@@ -1964,7 +1964,7 @@ class PremiumV2Bridge(QObject):
                 return value[:300]
         title = str(getattr(project, "title", "") or "").strip()
         inferred = re.sub(
-            r"(?i)(?:[\s._-]*(?:vol(?:ume)?\.?\s*\d+|book\s*\d+|part\s*\d+))\s*$",
+            r"(?i)(?:[\s._-]*(?:vol(?:ume)?\.?\s*\d+|book\s*\d+|part\s*\d+))(?:\s*[-–—:|]\s*.*)?\s*$",
             "",
             title,
         ).strip(" \t-–—_.:|")
@@ -1978,6 +1978,7 @@ class PremiumV2Bridge(QObject):
         *,
         update_names: bool = False,
         update_voice: bool = False,
+        registry_path: Path | None = None,
     ) -> None:
         """Merge the real saved Character Studio cast into the shared registry."""
         if not isinstance(characters, list) or not characters:
@@ -2015,13 +2016,16 @@ class PremiumV2Bridge(QObject):
             source_project_title=str(getattr(project, "title", "") or ""),
             update_names=update_names,
             update_voice=update_voice,
+            path=registry_path,
         )
 
     def _character_library_bootstrap(self) -> None:
-        """Migrate the old flat JSON shape and index cast data already saved in books."""
+        """Migrate the old flat file transactionally and import already-saved project casts."""
         if getattr(self, "_character_library_bootstrapped", False):
             return
         path = reusable_character_library_path()
+        registry_path = path
+        migration_path: Path | None = None
         legacy_rows: list[dict[str, Any]] = []
         if path.is_file():
             try:
@@ -2038,13 +2042,11 @@ class PremiumV2Bridge(QObject):
                 candidates = data if isinstance(data, list) else data.get("characters", [])
                 if isinstance(candidates, list):
                     legacy_rows = [dict(row) for row in candidates if isinstance(row, dict)]
-                path.parent.mkdir(parents=True, exist_ok=True)
-                temporary = path.with_suffix(path.suffix + ".migration.tmp")
-                temporary.write_text(
-                    json.dumps({"version": 1, "active": [], "deleted": []}, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
-                temporary.replace(path)
+                # Build the migrated registry beside the original. If a disk write
+                # or merge fails, the user's original file remains intact.
+                migration_path = path.with_suffix(path.suffix + ".migration")
+                migration_path.unlink(missing_ok=True)
+                registry_path = migration_path
 
         for row in legacy_rows:
             name = str(row.get("name") or row.get("primary_name") or "").strip()
@@ -2082,7 +2084,7 @@ class PremiumV2Bridge(QObject):
                 series, [normalized],
                 source_project_folder=str(row.get("source_project_folder") or ""),
                 source_project_title=str(row.get("source_project_title") or ""),
-                update_names=True, update_voice=True,
+                update_names=True, update_voice=True, path=registry_path,
             )
 
         # Existing projects can already have saved analysis even if the global
@@ -2092,9 +2094,20 @@ class PremiumV2Bridge(QObject):
                 state = load_state(project.folder)
                 rows = state.get("characters") or []
                 if isinstance(rows, list) and rows:
-                    self._sync_saved_cast(project, rows, state)
+                    self._sync_saved_cast(project, rows, state, registry_path=registry_path)
             except (OSError, ValueError, TypeError):
                 log.warning("Could not import the saved cast for %s into Character Library", project.title, exc_info=True)
+
+        if migration_path is not None:
+            if not migration_path.is_file():
+                migration_path.parent.mkdir(parents=True, exist_ok=True)
+                migration_path.write_text(
+                    json.dumps({"version": 1, "active": [], "deleted": []}, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            # Atomic same-directory replace: a partially migrated file is never
+            # exposed as the live registry.
+            migration_path.replace(path)
         self._character_library_bootstrapped = True
 
     def _character_library_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
