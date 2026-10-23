@@ -652,6 +652,7 @@ jobs:
           Write-Host 'Microsoft Defender completed both release executable scans without reporting a detection.'
 
       - name: Upload Windows installer artifact
+        id: upload_installer
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Installer-${{ github.run_number }}
@@ -677,8 +678,8 @@ jobs:
           compression-level: 0
           retention-days: 30
 
-      - name: Remove older Windows build runs and artifacts
-        if: success() && github.ref == 'refs/heads/main'
+      - name: Remove superseded Windows artifacts after successful build
+        if: success()
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -686,20 +687,35 @@ jobs:
           CURRENT_RUN_ID: ${{ github.run_id }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $runs = gh api --paginate "/repos/$env:REPOSITORY/actions/runs?per_page=100" --jq '.workflow_runs[] | select(.name == "Build Windows App" and .status == "completed" and .conclusion == "success") | [.id,.status,.created_at] | @tsv'
-          foreach ($line in $runs) {
-            if ([string]::IsNullOrWhiteSpace($line)) { continue }
-            $parts = $line -split "	"
-            $runId = $parts[0]
-            $status = $parts[1]
-            if ($runId -eq $env:CURRENT_RUN_ID) { continue }
-            if ($status -in @('in_progress','queued','waiting','requested','pending')) { continue }
-            Write-Host "Removing old Windows build run $runId ($status) and its artifact."
-            gh api --method DELETE "/repos/$env:REPOSITORY/actions/runs/$runId" | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "Could not remove old workflow run $runId." }
+          # This job is tied to the canonical 1.1.1 installer track. Keep run 1021,
+          # runs attached to open PRs, active runs, and every unsuccessful run for diagnostics.
+          $openPrRuns = @{}
+          $pullRequests = gh api --paginate "/repos/$env:REPOSITORY/pulls?state=open&per_page=100"
+          if ($LASTEXITCODE -ne 0) { throw "Could not enumerate open pull requests; refusing cleanup." }
+          $pullRequests | ConvertFrom-Json | ForEach-Object {
+            if ($_.head.repo.full_name -eq $env:REPOSITORY -and $_.head.sha) { $openPrRuns[$_.head.sha] = $true }
           }
-          Write-Host "Cleaned up older successful main-branch builds; failure logs and review-branch runs are preserved."
-
+          $runs = gh api --paginate "/repos/$env:REPOSITORY/actions/runs?per_page=100" --jq '.workflow_runs[] | select(.name == "Build Windows App" and .status == "completed" and .conclusion == "success") | [.id,.head_sha,.head_branch] | @tsv'
+          if ($LASTEXITCODE -ne 0) { throw "Could not enumerate build runs; refusing cleanup." }
+          foreach ($line in @($runs)) {
+            if ([string]::IsNullOrWhiteSpace("$line")) { continue }
+            $parts = "$line" -split [char]9, 3
+            $runId = $parts[0]
+            $sha = $parts[1]
+            $runBranch = $parts[2]
+            if ($runId -eq $env:CURRENT_RUN_ID) { continue }
+            if ($runId -eq "39933305387" -or $runBranch -eq "fix/installer-branding-accessibility" -and $sha -eq "ec9ba04c5f14be5a0efa6b2467132b7b18d921f0") {
+              Write-Host "Preserving canonical 1.1.1 reference Build 1021 ($runId)."
+              continue
+            }
+            if ($openPrRuns.ContainsKey($sha)) { Write-Host "Preserving build required by open PR: $runId ($sha)"; continue }
+            # Never delete review-branch runs or different app/version tracks.
+            if ($runBranch -ne "main" -and $runBranch -ne "fix/installer-branding-accessibility") { continue }
+            Write-Host "Removing superseded successful 1.1.1-track build $runId ($runBranch, $sha)."
+            gh api --method DELETE "/repos/$env:REPOSITORY/actions/runs/$runId" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Could not remove superseded build run $runId." }
+          }
+          Write-Host "Cleanup complete: Build 1021 and open-PR runs were preserved."
       - name: Publish verified installer release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: pwsh

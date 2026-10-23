@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QUrl, QSize, Qt
+from PySide6.QtCore import QUrl, QSize, Qt, QTimer
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QLabel, QListWidget, QListWidgetItem, QPushButton, QHBoxLayout,
@@ -13,8 +13,8 @@ from app.core.project import list_projects, delete_project
 from app.core.state import load_state
 
 
-def project_status(project) -> tuple[str, str]:
-    state = load_state(project.folder)
+def project_status(project, state: dict | None = None) -> tuple[str, str]:
+    state = state if state is not None else load_state(project.folder)
     output_value = state.get("output_path")
     output = Path(output_value) if output_value else None
     status = str(state.get("status") or "new").lower()
@@ -35,11 +35,10 @@ def project_status(project) -> tuple[str, str]:
     return "Imported", ""
 
 
-def project_matches(project, query: str, status_filter: str) -> bool:
+def project_matches(project, query: str, status_filter: str, state: dict | None = None, status_info=None) -> bool:
     query = (query or "").strip().casefold()
-    status, _ = project_status(project)
-
-    state = load_state(project.folder)
+    state = state if state is not None else load_state(project.folder)
+    status, _ = status_info if status_info is not None else project_status(project, state)
     parts = [project.title, project.source_path.name if project.source_path else ""]
     for key in ("author", "series", "narrator", "narrator_name", "voice_name", "selected_voice"):
         value = state.get(key)
@@ -73,6 +72,10 @@ class LibraryPage(QWidget):
         self.on_open = on_open
         self.on_import = on_import
         self.projects = []
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setSingleShot(True)
+        self._refresh_timer.setInterval(120)
+        self._refresh_timer.timeout.connect(self.refresh)
 
         content = QWidget()
         layout = QVBoxLayout(content)
@@ -112,13 +115,13 @@ class LibraryPage(QWidget):
         filters = QHBoxLayout()
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search title, author or narrator…")
-        self.search.textChanged.connect(self.refresh)
+        self.search.textChanged.connect(self._schedule_refresh)
         filters.addWidget(self.search, 1)
 
         self.status_filter = QComboBox()
         self.status_filter.addItems(["All", "Active", "Completed", "Attention"])
         self.status_filter.setVisible(False)
-        self.status_filter.currentIndexChanged.connect(self.refresh)
+        self.status_filter.currentIndexChanged.connect(self._schedule_refresh)
         self.filter_buttons: dict[str, QPushButton] = {}
         filter_row = QHBoxLayout()
         filter_row.setSpacing(6)
@@ -199,6 +202,9 @@ class LibraryPage(QWidget):
 
         self.refresh()
 
+    def _schedule_refresh(self, *_args) -> None:
+        self._refresh_timer.start()
+
     def _set_status_filter(self, value: str) -> None:
         index = self.status_filter.findText(value)
         if index >= 0 and self.status_filter.currentIndex() != index:
@@ -216,16 +222,27 @@ class LibraryPage(QWidget):
             button.blockSignals(False)
 
         self.projects = list_projects()
+        # Cache each project state and calculated status for this refresh; the
+        # previous implementation read JSON repeatedly during filtering and stats.
+        self._state_cache = {str(project.folder): load_state(project.folder) for project in self.projects}
+        self._status_cache = {
+            str(project.folder): project_status(project, self._state_cache[str(project.folder)])
+            for project in self.projects
+        }
         visible = [
             project for project in self.projects
-            if project_matches(project, query, status_filter)
+            if project_matches(
+                project, query, status_filter,
+                self._state_cache[str(project.folder)],
+                self._status_cache[str(project.folder)],
+            )
         ]
 
         self.list.blockSignals(True)
         self.list.clear()
         self._visible_projects = visible
         for project in visible:
-            status, _output = project_status(project)
+            status, _output = self._status_cache[str(project.folder)]
             marker = {
                 "Completed": "✓",
                 "In Progress": "▶",
@@ -250,9 +267,9 @@ class LibraryPage(QWidget):
             self.list.addItem(item)
         self.list.blockSignals(False)
 
-        completed = sum(project_status(project)[0] == "Completed" for project in self.projects)
-        in_progress = sum(project_status(project)[0] == "In Progress" for project in self.projects)
-        attention = sum(project_status(project)[0] == "Needs Attention" for project in self.projects)
+        completed = sum(value[0] == "Completed" for value in self._status_cache.values())
+        in_progress = sum(value[0] == "In Progress" for value in self._status_cache.values())
+        attention = sum(value[0] == "Needs Attention" for value in self._status_cache.values())
         self.total_label.setText(f"Local projects  ·  {len(self.projects)}")
         self.completed_label.setText(f"Completed  ·  {completed}")
         self.in_progress_label.setText(f"In progress  ·  {in_progress}")
