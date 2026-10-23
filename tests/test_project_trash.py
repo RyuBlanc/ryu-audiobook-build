@@ -66,6 +66,30 @@ class ProjectTrashTests(unittest.TestCase):
         events = (self.app / "History" / "project-events.jsonl").read_text(encoding="utf-8").splitlines()
         self.assertEqual([json.loads(line)["event"] for line in events], ["project_trashed", "project_restored"])
 
+    def test_external_project_output_is_moved_to_trash_and_restored(self):
+        from app.core.project_trash import trash_project, list_trashed_projects, restore_project
+
+        project = self._make_project()
+        external_audio = self.app / "Audiobooks" / "Novel Vol 1.m4b"
+        external_audio.parent.mkdir(parents=True)
+        external_audio.write_bytes(b"external audio")
+        state_path = project.folder / "state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["output_path"] = str(external_audio)
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        entry = trash_project(project)
+        self.assertFalse(external_audio.exists())
+        manifest = list_trashed_projects()[0]
+        self.assertEqual(len(manifest.get("external_artifacts", [])), 1)
+        trashed_audio = Path(manifest["external_artifacts"][0]["trash_path"])
+        self.assertTrue(trashed_audio.exists())
+
+        restored = restore_project(entry)
+        self.assertTrue(external_audio.exists())
+        restored_state = json.loads((restored / "state.json").read_text(encoding="utf-8"))
+        self.assertEqual(restored_state["output_path"], str(external_audio))
+
     def test_restore_chooses_non_destructive_destination_when_title_is_reused(self):
         from app.core.project_trash import trash_project, restore_project
 
