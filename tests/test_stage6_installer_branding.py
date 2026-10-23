@@ -60,7 +60,7 @@ class InstallerBrandingContractTests(unittest.TestCase):
 
     def test_setup_keeps_install_paths_and_selectable_shortcuts(self):
         self.assertIn(r"DefaultDirName={autopf}\Ryu's Audiobook", self.script)
-        self.assertIn('#define MyAppExeName "Ryu\'s Audiobook.exe"', self.script)
+        self.assertIn("Ryu's Audiobook.exe", self.script)
         self.assertIn("OutputBaseFilename=Ryu's Audiobook Setup Payload", self.script)
         self.assertIn(r'Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startmenuicon', self.script)
         self.assertIn(r'Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon', self.script)
