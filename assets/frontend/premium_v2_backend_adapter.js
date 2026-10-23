@@ -359,7 +359,7 @@
     }
   }
   async function refreshProjects() {
-    projects = await call('project.list');
+    projects = (await call('project.list')).sort((a,b) => (Date.parse(b.modified_at || '') || 0) - (Date.parse(a.modified_at || '') || 0));
     const grid = $('libraryGrid');
     const search = ($('librarySearch')?.value || '').trim().toLowerCase();
     const filter = $('libraryFilters')?.querySelector('button.active')?.textContent?.trim().toLowerCase() || 'all';
@@ -370,11 +370,17 @@
         (filter === 'attention' && (['failed','error','attention'].includes(status) || !Number(p.chapter_count || 0)));
       return matchesFilter && (!search || (p.title + ' ' + (p.source_path || '') + ' ' + status).toLowerCase().includes(search));
     });
-    if (grid) grid.innerHTML = visible.map(p => {
-      const complete = Boolean(p.completed);
-      const status = complete ? 'Completed' : (p.status || 'New');
-      return '<article class="card project-card" data-name="' + esc(p.title) + '" data-project-folder="' + esc(p.folder) + '"><div class="book-cover"></div><div class="project-pad"><span class="badge ' + (complete ? '' : 'info') + '">' + esc(status) + '</span><h3>' + esc(p.title) + '</h3><p class="muted">' + Number(p.chapter_count || 0) + ' chapters · Local project</p><p class="muted">' + esc(p.source_path || 'Source path unavailable') + '</p><button class="btn small" type="button" data-open-project="' + esc(p.folder) + '">Open project</button></div></article>';
-    }).join('') || '<p class="muted">No local projects found. Import a book to start your library.</p>';
+    if (grid) {
+      grid.innerHTML = visible.map(p => {
+        const complete = Boolean(p.completed), status = complete ? 'Completed' : (p.status || 'New');
+        return '<article class="card project-card" data-name="' + esc(p.title) + '" data-project-folder="' + esc(p.folder) +
+          '" data-cover-path="' + esc(p.cover_path || '') + '"><div class="book-cover"></div><div class="project-pad"><span class="badge ' +
+          (complete ? '' : 'info') + '">' + esc(status) + '</span><h3>' + esc(p.title) + '</h3><p class="muted">' +
+          Number(p.chapter_count || 0) + ' chapters · Local project</p><p class="muted">' + esc(p.source_path || 'Source path unavailable') +
+          '</p><button class="btn small" type="button" data-open-project="' + esc(p.folder) + '">Open project</button></div></article>';
+      }).join('') || '<p class="muted">No local projects found. Import a book to start your library.</p>';
+      applyProjectCovers(grid);
+    }
     const dash = $('dashboard');
     if (dash) {
       const metrics = dash.querySelectorAll('.metrics .metric strong');
@@ -383,19 +389,21 @@
       const attention = projects.filter(p => ['failed','error','attention'].includes(String(p.status || '').toLowerCase()) || !Number(p.chapter_count || 0)).length;
       [projects.length, completed, active, attention].forEach((value, index) => { if (metrics[index]) metrics[index].textContent = value; });
       const recent = dash.querySelector('.recent-grid');
-      if (recent) recent.innerHTML = projects.slice(0, 3).map(p => {
-        const status = String(p.status || 'new').toLowerCase();
-        const badge = p.completed ? 'Completed' : (['failed','error','attention'].includes(status) || !Number(p.chapter_count || 0) ? 'Attention' : 'Active');
-        const badgeClass = badge === 'Completed' ? '' : (badge === 'Attention' ? 'warn' : 'info');
-        return '<article class="card project-card" data-project-folder="' + esc(p.folder) + '"><div class="book-cover"></div><div class="project-pad"><span class="badge ' + badgeClass + '">● ' + badge + '</span><h3>' + esc(p.title) + '</h3><p class="muted">' + Number(p.chapter_count || 0) + ' chapters · ' + esc(p.status || 'Local project') + '</p></div></article>';
-      }).join('') || '<p class="muted">No local projects yet. Import a book to see it here.</p>';
-    }
-    $('libraryFilters')?.querySelectorAll('button').forEach(button => {
-      if (!button.dataset.backendFilterBound) {
-        button.dataset.backendFilterBound = '1';
-        button.addEventListener('click', () => setTimeout(() => refreshProjects().catch(e=>message(e.message,true)), 0));
+      if (recent) {
+        recent.innerHTML = projects.slice(0, 3).map(p => {
+          const status = String(p.status || 'new').toLowerCase();
+          const badge = p.completed ? 'Completed' : (['failed','error','attention'].includes(status) || !Number(p.chapter_count || 0) ? 'Attention' : 'Active');
+          const badgeClass = badge === 'Completed' ? '' : (badge === 'Attention' ? 'warn' : 'info');
+          return '<article class="card project-card" data-project-folder="' + esc(p.folder) + '" data-cover-path="' +
+            esc(p.cover_path || '') + '"><div class="book-cover"></div><div class="project-pad"><span class="badge ' +
+            badgeClass + '">● ' + badge + '</span><h3>' + esc(p.title) + '</h3><p class="muted">' +
+            Number(p.chapter_count || 0) + ' chapters · ' + esc(p.status || 'Local project') + '</p></div></article>';
+        }).join('') || '<p class="muted">No local projects yet. Import a book to see it here.</p>';
+        applyProjectCovers(recent);
       }
-    });
+    }
+    await refreshDashboardHero(projects);
+    renderAudiobookLibrary(projects);
     return projects;
   }
   async function refreshVoices() {
@@ -591,6 +599,7 @@
   let backendJobFilter = 'active';
   async function refreshJobs() {
     const allJobs = await call('job.list', {include_hidden:false});
+    refreshDashboardGeneration(allJobs);
     const jobs = allJobs.filter(j => backendJobFilter === 'all' ||
       (backendJobFilter === 'completed' ? j.state === 'completed' :
       (backendJobFilter === 'failed' ? j.state === 'failed' :
