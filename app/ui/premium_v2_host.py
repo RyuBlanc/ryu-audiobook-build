@@ -425,24 +425,88 @@ class PremiumV2Bridge(QObject):
             "reason": "Local import, chapter editing, saved voice selection and preview, character analysis and editing, pronunciation rules, audiobook generation, background jobs, history, playback metadata, local model installation, and settings are connected. Live hardware telemetry remains unavailable.",
         }
 
+    def _project_summary(self, project) -> dict[str, Any]:
+        """Return display data from saved local project files, never HTML sample values."""
+        state = load_state(project.folder)
+        output_value = str(state.get("output_path") or "").strip()
+        output = Path(output_value).expanduser() if output_value else None
+        try:
+            output = output.resolve() if output else None
+            valid_output = bool(output and output.is_file() and output.stat().st_size > 0)
+        except OSError:
+            valid_output = False
+        completed = valid_output and str(state.get("status") or "").casefold() == "completed"
+
+        cover_value = str(state.get("cover_path") or "").strip()
+        cover = Path(cover_value).expanduser() if cover_value else None
+        supported_cover_exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+        try:
+            if not cover or not cover.is_file() or cover.suffix.casefold() not in supported_cover_exts:
+                cover = None
+            else:
+                cover = cover.resolve()
+        except (OSError, RuntimeError):
+            cover = None
+
+        chapter_count = len(project.chapters)
+        prepared_chapters = sum(
+            1 for chapter in project.chapters
+            if str(getattr(chapter, "text", "") or "").strip()
+        )
+        prepared_percent = round(100 * prepared_chapters / chapter_count) if chapter_count else 0
+        character_rows = state.get("characters")
+        if not isinstance(character_rows, list):
+            character_rows = []
+        voice_keys = ("voice_profile", "voice_profile_name", "assigned_voice_profile",
+                      "voice_name", "voice_id", "assigned_voice")
+        character_voice_count = sum(
+            1 for row in character_rows
+            if isinstance(row, dict) and any(str(row.get(key) or "").strip() for key in voice_keys)
+        )
+
+        last_edited = state.get("last_edited_chapter_number")
+        try:
+            last_edited = int(last_edited) if last_edited is not None else None
+        except (TypeError, ValueError):
+            last_edited = None
+        if last_edited is not None and not 1 <= last_edited <= max(1, chapter_count):
+            last_edited = None
+
+        try:
+            modified_stamp = max(
+                path.stat().st_mtime
+                for path in (project.project_file, project.text_file, project.folder / "state.json")
+                if path.is_file()
+            )
+            filesystem_modified = datetime.fromtimestamp(modified_stamp, timezone.utc).isoformat(timespec="seconds")
+        except (OSError, ValueError):
+            filesystem_modified = ""
+        modified_at = str(state.get("modified_at") or filesystem_modified)
+        completed_chapters = state.get("completed_chapters")
+        completed_chapter_count = len(completed_chapters) if isinstance(completed_chapters, list) else 0
+
+        return {
+            "title": project.title,
+            "folder": str(project.folder.resolve()),
+            "source_path": str(project.source_path) if project.source_path else None,
+            "chapter_count": chapter_count,
+            "status": str(state.get("status") or "new"),
+            "output_path": str(output) if valid_output and output else None,
+            "completed": bool(completed),
+            "cover_path": str(cover) if cover else None,
+            "author": str(state.get("author") or ""),
+            "narrator": str(state.get("narrator") or state.get("voice_profile") or ""),
+            "voice_profile": str(state.get("voice_profile") or ""),
+            "character_voice_count": character_voice_count,
+            "prepared_chapter_count": prepared_chapters,
+            "prepared_percent": prepared_percent,
+            "completed_chapter_count": completed_chapter_count,
+            "last_edited_chapter_number": last_edited,
+            "modified_at": modified_at,
+        }
+
     def _project_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        result = []
-        for project in list_projects():
-            state = load_state(project.folder)
-            output_value = state.get("output_path")
-            output = Path(output_value) if output_value else None
-            completed = bool(output and output.is_file() and output.stat().st_size > 0
-                             and str(state.get("status", "")).lower() == "completed")
-            result.append({
-                "title": project.title,
-                "folder": str(project.folder),
-                "source_path": str(project.source_path) if project.source_path else None,
-                "chapter_count": len(project.chapters),
-                "status": str(state.get("status") or "new"),
-                "output_path": str(output) if output else None,
-                "completed": completed,
-            })
-        return result
+        return [self._project_summary(project) for project in list_projects()]
 
 
     def _project_open(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -455,8 +519,7 @@ class PremiumV2Bridge(QObject):
             raise ValueError("That project is not present in the local library.")
         self.settings.setValue("project/active_folder", str(selected.folder.resolve()))
         self.settings.sync()
-        return {"title": selected.title, "folder": str(selected.folder),
-                "chapter_count": len(selected.chapters)}
+        return self._project_summary(selected)
 
     def _project_get_active(self, _payload: dict[str, Any]) -> dict[str, Any] | None:
         folder = str(self.settings.value("project/active_folder", "") or "")
@@ -468,8 +531,7 @@ class PremiumV2Bridge(QObject):
             self.settings.remove("project/active_folder")
             self.settings.sync()
             return None
-        return {"title": selected.title, "folder": str(selected.folder),
-                "chapter_count": len(selected.chapters)}
+        return self._project_summary(selected)
 
     def _active_project(self):
         folder = str(self.settings.value("project/active_folder", "") or "")
@@ -514,6 +576,7 @@ class PremiumV2Bridge(QObject):
         project.save()
         project_state = load_state(project.folder)
         project_state["modified_at"] = self._now()
+        project_state["last_edited_chapter_number"] = chapter.number
         save_state(project.folder, project_state)
         return {"number": chapter.number, "title": chapter.title,
                 "word_count": len((chapter.text or "").split()),
@@ -2020,17 +2083,37 @@ class PremiumV2Bridge(QObject):
             self._persist_jobs()
         return {"hidden": count, "history_preserved": True}
 
-    def _player_get_active(self, _payload: dict[str, Any]) -> dict[str, Any]:
-        project = self._active_project()
+    def _player_get_active(self, payload: dict[str, Any]) -> dict[str, Any]:
+        requested_folder = str(payload.get("folder") or "").strip()
+        if requested_folder:
+            requested_path = Path(requested_folder).expanduser()
+            project = next(
+                (item for item in list_projects()
+                 if str(item.folder.resolve()) == str(requested_path.resolve())),
+                None,
+            )
+            if project is None:
+                raise ValueError("The selected audiobook is no longer available in the local library.")
+        else:
+            project = self._active_project()
+
         state = load_state(project.folder)
-        output = Path(str(state.get("output_path") or "")).expanduser()
-        if not output.is_file() or output.stat().st_size <= 0:
+        output_value = str(state.get("output_path") or "").strip()
+        output = Path(output_value).expanduser() if output_value else None
+        if not output or not output.is_file() or output.stat().st_size <= 0:
             raise FileNotFoundError("This project does not have a validated generated audiobook yet.")
-        return {"title": project.title, "author": str(state.get("author") or ""),
-                "narrator": str(state.get("voice_profile") or ""), "output_path": str(output.resolve()),
-                "file_url": output.resolve().as_uri(),
-                "chapters": [{"number": c.number, "title": c.title} for c in project.chapters],
-                "format": output.suffix.lower(), "file_size": output.stat().st_size}
+        summary = self._project_summary(project)
+        return {
+            **summary,
+            "title": project.title,
+            "author": str(state.get("author") or ""),
+            "narrator": str(state.get("narrator") or state.get("voice_profile") or ""),
+            "output_path": str(output.resolve()),
+            "file_url": output.resolve().as_uri(),
+            "chapters": [{"number": c.number, "title": c.title} for c in project.chapters],
+            "format": output.suffix.lower(),
+            "file_size": output.stat().st_size,
+        }
 
     def _settings_save(self, payload: dict[str, Any]) -> dict[str, Any]:
         allowed = {"theme": "ui/theme", "accent": "ui/accent", "interface_scale": "ui/interface_scale",
