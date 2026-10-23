@@ -809,7 +809,9 @@
     if ($('editCharacterName')) $('editCharacterName').value = c?.name || ''; if ($('editCharacterShort')) $('editCharacterShort').value = c?.short || '';
     if ($('editCharacterAliases')) $('editCharacterAliases').value = (c?.aliases||[]).join(', ');
     if ($('editCharacterVoice')) { $('editCharacterVoice').value = c?.voice || 'Unassigned'; $('editCharacterVoice').disabled = true; $('editCharacterVoice').title = 'Voice assignment is managed in Character Studio.'; }
-    if ($('editCharacterScope')) $('editCharacterScope').value = c?.scope || 'Global character library';
+    const activeSeries = $('characterSeriesFilter')?.value || 'All series';
+    const defaultScope = activeSeries !== 'All series' ? 'Series · ' + activeSeries : 'Global character library';
+    if ($('editCharacterScope')) $('editCharacterScope').value = c?.scope || defaultScope;
     if ($('editCharacterNotes')) $('editCharacterNotes').value = c?.notes || '';
     ensureCharacterDialogueSampleField();
     if ($('editCharacterDialogueSample')) $('editCharacterDialogueSample').value = c?.dialogue_sample || '';
@@ -820,7 +822,8 @@
   async function saveLibraryEditor() {
     const name = $('editCharacterName')?.value.trim() || ''; if (!name) throw new Error('Enter a character name before saving it to the Character Library.');
     const scope = $('editCharacterScope')?.value || 'Global character library';
-    const series = /^Series\s*[·:-]\s*Slime$/i.test(scope) ? 'Slime series' : scope;
+    const match = scope.match(/^Series\s*[·:-]\s*(.+)$/i);
+    const series = match ? match[1].trim() : (/^(global character library|all series)$/i.test(scope) ? '' : scope);
     const result = await call('character_library.save', {id:libraryEditorId||'',name,short:$('editCharacterShort')?.value||'',aliases:$('editCharacterAliases')?.value||'',scope,series,notes:$('editCharacterNotes')?.value||'',dialogue_sample:$('editCharacterDialogueSample')?.value||''});
     libraryEditorId = result.character.id; libraryEditorActive = false; $('characterEditorModal')?.classList.remove('show'); await refreshCharacterLibrary(); message('Character saved to the reusable local Character Library.');
   }
