@@ -1584,6 +1584,7 @@ class PremiumV2Bridge(QObject):
             state["character_analysis"] = {"dialogue_total": analysis.dialogue_total,
                                            "unassigned_dialogue": analysis.unassigned_dialogue,
                                            "updated_at": self._now()}
+            state["modified_at"] = self._now()
             save_state(project.folder, state)
             self._job_update(job_id, state="completed", stage="Analysis complete", progress=100,
                              message=f"Detected {len(items)} character candidate(s) from saved chapter text",
@@ -1609,6 +1610,7 @@ class PremiumV2Bridge(QObject):
             raise ValueError("That character is not in saved analysis. Run analysis again.")
         item["voice_profile"] = profile_name or None
         state["characters"] = characters
+        state["modified_at"] = self._now()
         save_state(project.folder, state)
         return {"name": name, "voice_profile": item["voice_profile"], "saved": True}
 
@@ -1670,6 +1672,7 @@ class PremiumV2Bridge(QObject):
             "voice_profile": profile_name or None,
         })
         state["characters"] = characters
+        state["modified_at"] = self._now()
         save_state(project.folder, state)
         return {"character": item, "saved": True}
 
@@ -1688,6 +1691,7 @@ class PremiumV2Bridge(QObject):
         if not removed:
             raise ValueError("The selected character is no longer in the saved cast.")
         state["characters"] = kept
+        state["modified_at"] = self._now()
         save_state(project.folder, state)
         return {"name": name, "deleted": True, "remaining": len(kept)}
 
