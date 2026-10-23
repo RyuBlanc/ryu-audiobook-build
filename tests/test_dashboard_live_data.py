@@ -287,7 +287,7 @@ class DashboardLiveDataTests(unittest.TestCase):
         self.assertIn("data-play-project-folder", adapter)
         self.assertIn(".mini-cover,.book-cover,.project-cover", adapter)
         self.assertIn("if (!playerAudio || !playerAudio.src) clearAudiobookPlayerDisplay()", adapter)
-        self.assertIn("button.dataset.continueProjectFolder", adapter)
+        self.assertIn("dashboardButton.dataset.continueProjectFolder", adapter)
         self.assertIn("button.dataset.playProjectFolder", adapter)
         self.assertIn("const runAction = async fn =>", adapter)
         self.assertIn("void runAction(async () =>", adapter)
