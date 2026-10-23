@@ -741,6 +741,35 @@
     const raw = String(c?.series || c?.scope || '').trim();
     return raw.replace(/^Series\s*[·:-]\s*/i, '').replace(/^Global character library$/i, '').trim();
   };
+  function ensureCharacterSeriesField() {
+    const modal = $('characterEditorModal');
+    if (!modal) return;
+    const legacyScope = $('editCharacterScope');
+    const legacyGroup = legacyScope?.closest('.form-group, .form-row, .field') || legacyScope?.parentElement;
+    if (legacyGroup) legacyGroup.style.display = 'none';
+    let input = $('editCharacterSeries');
+    if (!input) {
+      const wrap = document.createElement('div');
+      wrap.className = 'form-group';
+      wrap.style.cssText = 'display:flex;flex-direction:column;gap:7px;margin-top:12px;';
+      const label = document.createElement('label');
+      label.htmlFor = 'editCharacterSeries';
+      label.textContent = 'Series';
+      label.style.cssText = 'font-size:13px;font-weight:700;color:#e6e9f0;';
+      input = document.createElement('input');
+      input.id = 'editCharacterSeries';
+      input.type = 'text';
+      input.maxLength = 300;
+      input.placeholder = 'e.g. That Time I Got Reincarnated as a Slime';
+      input.autocomplete = 'off';
+      input.style.cssText = 'width:100%;box-sizing:border-box;padding:10px 12px;border-radius:10px;border:1px solid #343b49;background:#0d1119;color:#f4f5f8;font:inherit;';
+      wrap.append(label, input);
+      const name = $('editCharacterName');
+      const anchor = name?.closest('.form-group, .form-row, .field') || name?.parentElement;
+      if (anchor?.parentElement) anchor.parentElement.insertBefore(wrap, anchor.nextSibling);
+      else (modal.querySelector('.modal-body') || modal).appendChild(wrap);
+    }
+  }
   function ensureCharacterDialogueSampleField() {
     const modal = $('characterEditorModal');
     if (!modal) return;
@@ -911,6 +940,9 @@
     const defaultScope = activeSeries !== 'All series' ? 'Series · ' + activeSeries : 'Global character library';
     if ($('editCharacterScope')) $('editCharacterScope').value = c?.scope || defaultScope;
     if ($('editCharacterNotes')) $('editCharacterNotes').value = c?.notes || '';
+    ensureCharacterSeriesField();
+    const selectedSeries = $('characterSeriesFilter')?.value || 'All series';
+    if ($('editCharacterSeries')) $('editCharacterSeries').value = c?.series || (selectedSeries !== 'All series' ? selectedSeries : '');
     ensureCharacterDialogueSampleField();
     if ($('editCharacterDialogueSample')) $('editCharacterDialogueSample').value = c?.dialogue_sample || '';
     if ($('deleteCharacter')) $('deleteCharacter').style.visibility = c ? 'visible' : 'hidden';
@@ -919,9 +951,9 @@
   }
   async function saveLibraryEditor() {
     const name = $('editCharacterName')?.value.trim() || ''; if (!name) throw new Error('Enter a character name before saving it to the Character Library.');
-    const scope = $('editCharacterScope')?.value || 'Global character library';
-    const match = scope.match(/^Series\s*[·:-]\s*(.+)$/i);
-    const series = match ? match[1].trim() : (/^(global character library|all series)$/i.test(scope) ? '' : scope);
+    const requestedSeries = $('editCharacterSeries')?.value.trim() || '';
+    const scope = requestedSeries ? 'Series · ' + requestedSeries : 'Global character library';
+    const series = requestedSeries;
     const result = await call('character_library.save', {id:libraryEditorId||'',name,short:$('editCharacterShort')?.value||'',aliases:$('editCharacterAliases')?.value||'',scope,series,notes:$('editCharacterNotes')?.value||'',dialogue_sample:$('editCharacterDialogueSample')?.value||''});
     libraryEditorId = result.character.id; libraryEditorActive = false; $('characterEditorModal')?.classList.remove('show'); await refreshCharacterLibrary(); message('Character saved to the reusable local Character Library.');
   }
