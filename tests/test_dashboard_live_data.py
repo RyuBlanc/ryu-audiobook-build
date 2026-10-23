@@ -2,10 +2,12 @@
 from pathlib import Path
 import tempfile
 import unittest
+import zipfile
 from unittest import mock
 
 from app.chapters.detector import Chapter
 from app.core.project import create_project
+from app.core.state import load_state
 from app.ui.premium_v2_host import PremiumV2Bridge
 
 
@@ -61,13 +63,54 @@ class DashboardLiveDataTests(unittest.TestCase):
 
             self.assertEqual(summary["title"], "Slime Vol 2")
             self.assertEqual(summary["narrator"], "Amy")
-            self.assertEqual(summary["cover_path"], str(cover.resolve()))
+            portable_cover = project.folder / "assets" / "cover.png"
+            self.assertEqual(summary["cover_path"], str(portable_cover.resolve()))
+            self.assertTrue(portable_cover.is_file())
+            self.assertEqual(portable_cover.read_bytes(), cover.read_bytes())
             self.assertEqual(summary["chapter_count"], 2)
             self.assertEqual(summary["prepared_percent"], 50)
             self.assertEqual(summary["character_voice_count"], 2)
             self.assertEqual(summary["last_edited_chapter_number"], 2)
             self.assertTrue(summary["completed"])
             self.assertEqual(summary["output_path"], str(output.resolve()))
+
+    def test_legacy_epub_cover_is_discovered_and_persisted_into_project_assets(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            library = base / "library"
+            source = base / "Legacy Book.epub"
+            image_bytes = b"embedded-cover-image"
+            with zipfile.ZipFile(source, "w") as epub:
+                epub.writestr(
+                    "META-INF/container.xml",
+                    '<?xml version="1.0" encoding="UTF-8"?>'
+                    '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">'
+                    '<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>'
+                    '</rootfiles></container>',
+                )
+                epub.writestr(
+                    "OEBPS/content.opf",
+                    '<?xml version="1.0" encoding="UTF-8"?>'
+                    '<package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
+                    '<manifest><item id="front-cover" href="images/front-cover.png" '
+                    'media-type="image/png" properties="cover-image"/></manifest></package>',
+                )
+                epub.writestr("OEBPS/images/front-cover.png", image_bytes)
+
+            with mock.patch("app.core.project.library_root", return_value=library):
+                project = create_project(
+                    "Legacy Book", source, [Chapter(1, "Chapter 1", "Readable source text.")]
+                )
+
+            bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
+            summary = bridge._project_summary(project)
+            saved_cover = project.folder / "assets" / "cover.png"
+            state = load_state(project.folder)
+
+            self.assertEqual(summary["cover_path"], str(saved_cover.resolve()))
+            self.assertEqual(saved_cover.read_bytes(), image_bytes)
+            self.assertTrue(state["cover_detection_attempted"])
+            self.assertEqual(state["cover_path"], str(saved_cover.resolve()))
 
     def test_player_resolves_requested_audiobook_not_active_editor_project(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -115,6 +158,9 @@ class DashboardLiveDataTests(unittest.TestCase):
         self.assertIn("if (dashboardPageActive()) refreshProjects().catch(() => {})", adapter)
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn('voice_cast = state.get("voice_cast")', host)
+        self.assertIn("extract_embedded_cover(source_for_cover, project.folder)", host)
+        generation = (ROOT / "app" / "ui" / "generation_page.py").read_text(encoding="utf-8")
+        self.assertIn("persist_project_cover(selected, self.project_folder)", generation)
 
 
 if __name__ == "__main__":
