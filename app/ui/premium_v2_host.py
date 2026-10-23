@@ -527,6 +527,10 @@ class PremiumV2Bridge(QObject):
             or state.get("pronunciation_terms")
         )
         pronunciation_ready = bool(pronunciation_rules)
+        if isinstance(pronunciation_rules, (dict, list, tuple, set)):
+            pronunciation_rule_count = len(pronunciation_rules)
+        else:
+            pronunciation_rule_count = 1 if pronunciation_ready else 0
         sound_design_ready = bool(
             state.get("background_audio_enabled")
             or state.get("background_audio_path")
@@ -598,11 +602,17 @@ class PremiumV2Bridge(QObject):
             "author": str(state.get("author") or ""),
             "narrator": str(state.get("narrator") or state.get("voice_profile") or ""),
             "voice_profile": str(state.get("voice_profile") or ""),
+            "character_count": len(character_names),
             "character_voice_count": character_voice_count,
+            "character_analysis_done": bool(state.get("character_analysis")) or bool(character_names),
             "prepared_chapter_count": prepared_chapters,
             "prepared_percent": prepared_percent,
             "completed_chapter_count": completed_chapter_count,
             "last_edited_chapter_number": last_edited,
+            "source_exists": bool(project.source_path and project.source_path.is_file()),
+            "output_configured": output_configured,
+            "pronunciation_rule_count": pronunciation_rule_count,
+            "sound_design_configured": sound_design_ready,
             "modified_at": modified_at,
         }
 
