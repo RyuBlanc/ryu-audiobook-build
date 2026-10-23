@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from io import BytesIO
 import os
 import re
+import struct
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -74,9 +76,12 @@ BUNDLED_KOKORO = ROOT / "bundled_models" / "kokoro"
 ASSETS = ROOT / "assets"
 STARTER_AUDIO = ASSETS / "starter_audio"
 LOGO_SVG = ASSETS / "ryu_audiobook_logo.svg"
+LOGO_MASTER_PNG = ASSETS / "ryu_audiobook_logo_master.png"
 LOGO_PNG = ASSETS / "ryu_audiobook_logo.png"
 LOGO_ICO = ASSETS / "ryu_audiobook_logo.ico"
+LOGO_BMP = ASSETS / "ryu_audiobook_logo.bmp"
 INSTALLER_BRAND_PANEL_PNG = ASSETS / "installer_brand_panel.png"
+INSTALLER_BRAND_PANEL_BMP = ASSETS / "installer_brand_panel.bmp"
 DRAGON_MASTER_PNG = ASSETS / "dragon_four_winged.png"
 DRAGON_CROSS_PNG = ASSETS / "dragon_cross.png"
 DRAGON_CURSOR_PNG = ASSETS / "dragon_cursor.png"
@@ -84,48 +89,65 @@ DRAGON_CURSOR_PNG = ASSETS / "dragon_cursor.png"
 
 def build_logo_assets() -> None:
     ASSETS.mkdir(parents=True, exist_ok=True)
-    if not LOGO_SVG.exists():
-        raise RuntimeError(f"Missing application logo source: {LOGO_SVG}")
+    if not LOGO_MASTER_PNG.is_file() and not LOGO_SVG.exists():
+        raise RuntimeError(f"Missing transparent application logo source: {LOGO_MASTER_PNG}")
 
     qt_app = QGuiApplication.instance() or QGuiApplication([])
     try:
-        renderer = QSvgRenderer(str(LOGO_SVG))
-        if not renderer.isValid():
-            raise RuntimeError(f"Invalid application logo SVG: {LOGO_SVG}")
+        master = None
+        if LOGO_MASTER_PNG.is_file():
+            with Image.open(LOGO_MASTER_PNG) as source:
+                candidate = source.convert("RGBA")
+            # The checked-in HTML mock contains a 760px logo preview. Do not
+            # upscale that preview and mistake it for the original high-quality
+            # artwork. Only prefer a PNG master when it is genuinely full size.
+            if candidate.width >= 1200 and candidate.height >= 1200:
+                master = candidate
 
-        # Render at the SVG's native canvas resolution instead of shrinking the
-        # master artwork to 1024px. The transparent canvas and logo pixels are
-        # preserved; ICO downsampling happens only inside the required icon sizes.
-        source_size = renderer.defaultSize()
-        if source_size.width() < 1200 or source_size.height() < 1200:
-            raise RuntimeError(
-                f"Application logo source is unexpectedly small: "
-                f"{source_size.width()}x{source_size.height()}"
+        if master is not None:
+            canvas_size = (1254, 1254)
+            scale = min(canvas_size[0] / master.width, canvas_size[1] / master.height)
+            resized = master.resize(
+                (max(1, round(master.width * scale)), max(1, round(master.height * scale))),
+                Image.Resampling.LANCZOS,
             )
-        image = QImage(source_size, QImage.Format_RGBA8888)
-        image.fill(Qt.transparent)
-        painter = QPainter(image)
-        try:
-            renderer.render(painter)
-        finally:
-            painter.end()
-
-        if not image.save(str(LOGO_PNG), "PNG"):
-            raise RuntimeError(f"Could not render application logo: {LOGO_PNG}")
-
-        with Image.open(LOGO_PNG) as source:
-            rgba = source.convert("RGBA")
-        if rgba.size != (source_size.width(), source_size.height()):
-            raise RuntimeError(f"Application logo dimensions changed during rendering: {rgba.size}")
+            rgba = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
+            rgba.alpha_composite(resized, (
+                (canvas_size[0] - resized.width) // 2,
+                (canvas_size[1] - resized.height) // 2,
+            ))
+        else:
+            # Render the repository's full 1254px logo artwork instead of
+            # stretching the embedded 760px design preview. The declared SVG
+            # clip path is rasterized below, preserving transparency.
+            renderer = QSvgRenderer(str(LOGO_SVG))
+            if not renderer.isValid():
+                raise RuntimeError(f"Invalid application logo SVG: {LOGO_SVG}")
+            source_size = renderer.defaultSize()
+            if source_size.width() < 1200 or source_size.height() < 1200:
+                raise RuntimeError(
+                    f"Application logo source is unexpectedly small: "
+                    f"{source_size.width()}x{source_size.height()}"
+                )
+            image = QImage(source_size, QImage.Format_RGBA8888)
+            image.fill(Qt.transparent)
+            painter = QPainter(image)
+            try:
+                renderer.render(painter)
+            finally:
+                painter.end()
+            if not image.save(str(LOGO_PNG), "PNG"):
+                raise RuntimeError(f"Could not render application logo: {LOGO_PNG}")
+            with Image.open(LOGO_PNG) as source:
+                rgba = source.convert("RGBA")
+            if rgba.size != (source_size.width(), source_size.height()):
+                raise RuntimeError(f"Application logo dimensions changed during rendering: {rgba.size}")
         alpha = rgba.getchannel("A")
-        if alpha.getextrema()[0] != 0:
-            raise RuntimeError("Application logo lost its transparent pixels; refusing to add a background.")
 
-        # The master SVG explicitly clips the embedded artwork to this rounded
-        # tile. Some Qt SVG filter renderings leave non-zero alpha at the canvas
-        # corners, so re-apply the source SVG's own clip path in raster form.
-        # This only clears pixels outside the original clip; it does not repaint,
-        # recolor, crop, or add a background behind the logo.
+        # The source SVG embeds JPEG artwork, so its alpha may be fully opaque
+        # when QtSvg renders the image. Reapply the declared rounded tile clip in
+        # raster form before verifying corners. This preserves all artwork color
+        # and highlights; transparency comes from the geometry, not color-keying.
         svg_text = LOGO_SVG.read_text(encoding="utf-8")
         clip_match = re.search(
             r'<clipPath id="roundedBrandTile">.*?<rect[^>]*rx="([0-9.]+)"[^>]*ry="([0-9.]+)"',
@@ -158,16 +180,51 @@ def build_logo_assets() -> None:
         if any(alpha.getpixel(point) != 0 for point in corner_points):
             raise RuntimeError("Application logo canvas corners must remain fully transparent.")
 
-        # Save losslessly at full source resolution for the application UI.
+        # Preserve alpha for the application artwork and shell icon.
         rgba.save(LOGO_PNG, format="PNG", optimize=True)
-        rgba.save(
-            LOGO_ICO,
-            format="ICO",
-            sizes=[
-                (16, 16), (24, 24), (32, 32), (48, 48),
-                (64, 64), (128, 128), (256, 256)
-            ],
-        )
+
+        # Inno Setup's legacy bitmap slots cannot reliably honor PNG alpha.
+        # Prepare separate opaque RGB assets composited onto the exact wizard
+        # background. Never flatten the logo PNG/ICO used by the app itself.
+        logo_backdrop = Image.new("RGB", rgba.size, (5, 6, 10))
+        logo_backdrop.paste(rgba, (0, 0), rgba.getchannel("A"))
+        logo_backdrop.save(LOGO_BMP, format="BMP")
+        with Image.open(LOGO_BMP) as logo_bitmap:
+            if logo_bitmap.mode != "RGB" or logo_bitmap.getpixel((0, 0)) != (5, 6, 10):
+                raise RuntimeError("Installer logo BMP must match WizardBackColor.")
+
+        # Build PNG-backed ICO frames directly and reapply a rounded alpha
+        # mask at every target size. Pillow's generic ICO resampler can soften
+        # every 16px corner into a visible gray pixel, which is especially clear
+        # against Windows Explorer's icon tile.
+        icon_dimensions = [16, 24, 32, 48, 64, 128, 256]
+        ico_frames = []
+        for size in icon_dimensions:
+            frame = rgba.resize((size, size), Image.Resampling.LANCZOS)
+            mask = Image.new("L", (size, size), 0)
+            ImageDraw.Draw(mask).rounded_rectangle(
+                (0, 0, size - 1, size - 1),
+                radius=max(1, round(radius_x * size / rgba.width)),
+                fill=255,
+            )
+            frame.putalpha(ImageChops.multiply(frame.getchannel("A"), mask))
+            with BytesIO() as buffer:
+                frame.save(buffer, format="PNG", optimize=True)
+                ico_frames.append((size, buffer.getvalue()))
+
+        directory = bytearray(struct.pack("<HHH", 0, 1, len(ico_frames)))
+        offset = 6 + 16 * len(ico_frames)
+        for size, payload in ico_frames:
+            dimension_byte = 0 if size == 256 else size
+            directory.extend(struct.pack(
+                "<BBBBHHII",
+                dimension_byte, dimension_byte, 0, 0, 1, 32, len(payload), offset,
+            ))
+            offset += len(payload)
+        with LOGO_ICO.open("wb") as icon_output:
+            icon_output.write(directory)
+            for _size, payload in ico_frames:
+                icon_output.write(payload)
 
         # Confirm the ICO actually contains every Windows shell size we expect.
         # A non-empty ICO alone can still contain only a single small frame.
@@ -233,6 +290,12 @@ def build_logo_assets() -> None:
             fill=(255, 240, 185, 235),
         )
         panel.save(INSTALLER_BRAND_PANEL_PNG, format="PNG", optimize=True)
+        panel_bitmap = Image.new("RGB", panel.size, (5, 6, 10))
+        panel_bitmap.paste(panel, (0, 0), panel.getchannel("A"))
+        panel_bitmap.save(INSTALLER_BRAND_PANEL_BMP, format="BMP")
+        with Image.open(INSTALLER_BRAND_PANEL_BMP) as bitmap_check:
+            if bitmap_check.mode != "RGB" or bitmap_check.getpixel((0, 0)) != (5, 6, 10):
+                raise RuntimeError("Installer brand BMP must match WizardBackColor.")
         with Image.open(INSTALLER_BRAND_PANEL_PNG) as panel_check:
             panel_alpha = panel_check.getchannel("A")
             if panel_check.size != panel.size or any(
@@ -245,6 +308,8 @@ def build_logo_assets() -> None:
             raise RuntimeError("Generated application PNG is unexpectedly small.")
         if LOGO_ICO.stat().st_size < 1024:
             raise RuntimeError("Generated application icon is unexpectedly small.")
+        if LOGO_BMP.stat().st_size < 4096 or INSTALLER_BRAND_PANEL_BMP.stat().st_size < 4096:
+            raise RuntimeError("Generated Inno Setup bitmaps are unexpectedly small.")
 
         # Use the supplied four-winged dragon artwork, not a replacement SVG.
         # It is already transparent and cursor-sized; copying it preserves the
