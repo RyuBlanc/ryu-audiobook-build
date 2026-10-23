@@ -9,6 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import PyInstaller.__main__
 from PIL import Image, ImageChops, ImageDraw
+import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication, QImage, QPainter
 from PySide6.QtSvg import QSvgRenderer
@@ -84,6 +85,37 @@ DRAGON_CROSS_PNG = ASSETS / "dragon_cross.png"
 DRAGON_CURSOR_PNG = ASSETS / "dragon_cursor.png"
 
 
+def remove_neutral_white_matte(image: Image.Image) -> Image.Image:
+    """Remove a near-white JPEG matte without flattening the logo onto a tile.
+
+    The SVG embeds a JPEG, so some Qt/SVG versions can leave the white matte
+    visible even when the SVG filter is present. This conservative RGB/alpha
+    pass only touches near-white, low-chroma pixels. Crimson, gold, black and
+    the warm pages are left intact. Alpha is kept as real transparency.
+    """
+    pixels = np.asarray(image.convert("RGBA"), dtype=np.float32).copy()
+    rgb = pixels[..., :3]
+    original_alpha = pixels[..., 3] / 255.0
+    darkest = rgb.min(axis=2)
+    brightest = rgb.max(axis=2)
+    chroma = brightest - darkest
+    neutral_near_white = (chroma <= 20.0) & (darkest >= 232.0)
+    # Make neutral white approach fully transparent rapidly near white while
+    # feathering antialiased/JPEG edge pixels to avoid a pale halo on dark UI.
+    opacity = np.clip((255.0 - darkest) / 23.0, 0.0, 1.0) ** 2.4
+    final_alpha = original_alpha * np.where(neutral_near_white, opacity, 1.0)
+    safe_alpha = np.maximum(final_alpha, 1.0 / 255.0)
+    unmatte = np.clip(
+        (rgb - (1.0 - safe_alpha[..., None]) * 255.0) / safe_alpha[..., None],
+        0.0,
+        255.0,
+    )
+    pixels[..., :3] = np.where(neutral_near_white[..., None], unmatte, rgb)
+    pixels[..., 3] = final_alpha * 255.0
+    pixels[final_alpha <= 0.0, :3] = 0.0
+    return Image.fromarray(np.rint(pixels).astype(np.uint8), mode="RGBA")
+
+
 def build_logo_assets() -> None:
     ASSETS.mkdir(parents=True, exist_ok=True)
     if not LOGO_SVG.exists():
@@ -117,6 +149,7 @@ def build_logo_assets() -> None:
 
         with Image.open(LOGO_PNG) as source:
             rgba = source.convert("RGBA")
+        rgba = remove_neutral_white_matte(rgba)
         if rgba.size != (source_size.width(), source_size.height()):
             raise RuntimeError(f"Application logo dimensions changed during rendering: {rgba.size}")
         alpha = rgba.getchannel("A")
