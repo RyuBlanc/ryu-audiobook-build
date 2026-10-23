@@ -1023,9 +1023,13 @@
     document.addEventListener('click', e => {
       const button = e.target.closest('button');
       const buttonLabel = button?.textContent?.trim().toLowerCase() || '';
+      const runAction = async fn => {
+        try { await fn(); }
+        catch (err) { message(err?.message || String(err), true); }
+      };
       if (button && button.dataset.playProjectFolder) {
         e.preventDefault(); e.stopImmediatePropagation();
-        void run(async () => {
+        void runAction(async () => {
           const folder = button.dataset.playProjectFolder;
           selectedAudiobookFolder = folder;
           miniPlayerDismissed = false;
@@ -1037,7 +1041,7 @@
       }
       if (button && button.dataset.dashboardJobId && button.dataset.dashboardGenerationAction) {
         e.preventDefault(); e.stopImmediatePropagation();
-        void run(async () => {
+        void runAction(async () => {
           const action = button.dataset.dashboardGenerationAction;
           await call(action === 'pause' ? 'job.pause' : 'job.resume', {job_id:button.dataset.dashboardJobId});
           await refreshJobs();
