@@ -57,6 +57,15 @@ def _write_store(store: dict, path: Path) -> None:
         raise
 
 
+def _safe_count(value: Any, *, maximum: int | None = None) -> int:
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        number = 0
+    number = max(0, number)
+    return min(number, maximum) if maximum is not None else number
+
+
 def _clean_names(values, primary: str = "") -> list[str]:
     result: list[str] = []
     seen = {str(primary or "").strip().casefold()} if str(primary or "").strip() else set()
@@ -163,6 +172,10 @@ def sync_characters(
                 "dialogue_sample": sample,
                 "dialogue_sample_source": "character-studio",
                 "pronunciation": str(source.get("pronunciation") or "").strip(),
+                "notes": str(source.get("notes") or "").strip()[:4000],
+                "line_count": _safe_count(source.get("line_count", source.get("lines", source.get("dialogue_count", 0)))),
+                "chapter_count": _safe_count(source.get("chapter_count", source.get("chapters", 0))),
+                "confidence": _safe_count(source.get("confidence", 100), maximum=100),
                 "source_project_folder": str(source_project_folder or ""),
                 "source_project_title": str(source_project_title or ""),
                 "created_at": _timestamp(),
@@ -190,6 +203,14 @@ def sync_characters(
             match["dialogue_sample_source"] = "character-studio"
         if source.get("pronunciation"):
             match["pronunciation"] = str(source["pronunciation"]).strip()
+        if str(source.get("notes") or "").strip():
+            match["notes"] = str(source.get("notes") or "").strip()[:4000]
+        if any(key in source for key in ("line_count", "lines", "dialogue_count")):
+            match["line_count"] = _safe_count(source.get("line_count", source.get("lines", source.get("dialogue_count", 0))))
+        if any(key in source for key in ("chapter_count", "chapters")):
+            match["chapter_count"] = _safe_count(source.get("chapter_count", source.get("chapters", 0)))
+        if "confidence" in source:
+            match["confidence"] = _safe_count(source.get("confidence", 100), maximum=100)
         match["source_project_folder"] = str(source_project_folder or match.get("source_project_folder") or "")
         match["source_project_title"] = str(source_project_title or match.get("source_project_title") or "")
         match["updated_at"] = _timestamp()
@@ -220,6 +241,8 @@ def update_character(record_id: str, changes: dict, path: Path | None = None) ->
         record["dialogue_sample_source"] = "manual"
     if "pronunciation" in changes:
         record["pronunciation"] = str(changes.get("pronunciation") or "").strip()
+    if "notes" in changes:
+        record["notes"] = str(changes.get("notes") or "").strip()[:4000]
     record["updated_at"] = _timestamp()
     _write_store(store, target)
     return dict(record)
