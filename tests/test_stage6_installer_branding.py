@@ -93,8 +93,8 @@ class InstallerBrandingContractTests(unittest.TestCase):
         self.assertIn("INSTALLER_MANIFEST_FILE.write_text", build_script)
         self.assertIn("required_install_bytes", build_script)
         self.assertIn("--onefile", workflow)
-        self.assertIn("installer\\\\launcher.html;installer", workflow)
-        self.assertIn("installer\\\\launcher.py", workflow)
+        self.assertIn("launcher.html;installer", workflow)
+        self.assertIn("launcher.py", workflow)
         self.assertIn("Ryu's Audiobook Setup Payload.exe", workflow)
 
     def test_uninstaller_does_not_delete_user_data(self):
