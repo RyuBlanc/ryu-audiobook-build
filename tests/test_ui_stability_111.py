@@ -25,6 +25,18 @@ class UiStabilityRegressions(unittest.TestCase):
         self.assertIn("self._status_cache =", source)
         self.assertNotIn("completed = sum(project_status(project)", source)
 
+    def test_import_studio_reports_real_worker_stages_and_resets_preview_on_new_source(self):
+        source = (ROOT / "app/ui/import_page.py").read_text(encoding="utf-8")
+        worker = source.split("class ImportPreviewWorker", 1)[1].split("class BookDropZone", 1)[0]
+        page = source.split("class ImportPage", 1)[1]
+        self.assertIn("self.progress.emit(10)", worker)
+        self.assertIn("self.progress.emit(55)", worker)
+        self.assertIn("self.progress.emit(90)", worker)
+        self.assertIn('self.status.setText("Preparing import…")', page)
+        self.assertIn("self.summary.setText", page)
+        self.assertIn("self.progress.setValue(0)", page)
+        self.assertNotIn("Continuing … characters", page)
+
     def test_application_version_remains_111(self):
         source = (ROOT / "app/version.py").read_text(encoding="utf-8")
         self.assertIn('APP_VERSION = "1.1.1"', source)
