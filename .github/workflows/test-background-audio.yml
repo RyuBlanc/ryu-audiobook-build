@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: background-audio-regression-${{ github.ref }}
+  group: background-audio-regression-${{ github.event.pull_request.head.ref || github.ref }}
   cancel-in-progress: true
 
 jobs:

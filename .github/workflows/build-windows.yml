@@ -301,6 +301,7 @@ jobs:
           Write-Host "Installer created: $installer"
 
       - name: Upload Windows installer artifact
+        id: upload_installer
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Windows-${{ github.run_number }}
@@ -310,6 +311,27 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
+      - name: Delete superseded Windows artifacts after successful upload
+        if: success()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $currentArtifactId = "${{ steps.upload_installer.outputs.artifact-id }}"
+          $artifactLines = gh api --paginate --jq '.artifacts[] | select(.name | startswith("Ryu-Audiobook-Windows-")) | [.id, .name] | @tsv' "repos/$env:GITHUB_REPOSITORY/actions/artifacts?per_page=100"
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to list previous Windows installer artifacts.' }
+          foreach ($line in @($artifactLines)) {
+            if ([string]::IsNullOrWhiteSpace("$line")) { continue }
+            $parts = "$line" -split [char]9, 2
+            $artifactId = $parts[0]
+            if ($artifactId -and $artifactId -ne $currentArtifactId) {
+              gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/actions/artifacts/$artifactId"
+              if ($LASTEXITCODE -ne 0) { throw "Failed to remove superseded artifact $artifactId." }
+              Write-Host "Removed superseded artifact: $($parts[1]) ($artifactId)"
+            }
+          }
+          Write-Host "Kept current artifact ID $currentArtifactId."
       - name: Publish verified installer release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: pwsh

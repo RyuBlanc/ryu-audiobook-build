@@ -36,3 +36,13 @@ class LiveUiRegressionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_import_page_uses_worker_progress_and_removes_stale_demo_copy(self):
+        source = (REPO_ROOT / "app/ui/import_page.py").read_text(encoding="utf-8")
+        workflow = (REPO_ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")
+        self.assertIn("show_import_status", source)
+        self.assertIn("worker.status.connect(self.import_page.show_import_status)", workflow)
+        self.assertIn("load_latest_import", source)
+        self.assertNotIn("Continuing That Time", source)
+        self.assertNotIn("extract_text(", source)
+        self.assertNotIn("detect_chapters(", source)

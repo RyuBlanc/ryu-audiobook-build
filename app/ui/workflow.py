@@ -222,7 +222,12 @@ class ProjectWorkflow(QMainWindow):
             self.loading_overlay.setGeometry(self.centralWidget().rect())
 
     def _projects_deleted_from_library(self, projects: list[Project]) -> None:
-        """Detach open editor/generation pages before their backing folders enter Trash."""
+        """Clear recent-import status and detach any deleted active project."""
+        from app.core.import_status import clear_latest_import_for_folder
+        for deleted_project in projects:
+            clear_latest_import_for_folder(deleted_project.folder)
+        if hasattr(self, "import_page"):
+            self.import_page.refresh_latest_import()
         current = self.project
         if current is None:
             return
@@ -370,29 +375,28 @@ class ProjectWorkflow(QMainWindow):
     def handle_import(self, path: Path) -> None:
         if self._import_worker is not None and self._import_worker.isRunning():
             return
-        self.loading_overlay.show_loading(
-            "Importing your book",
-            "Reading the source file, finding chapters and preparing your local project…",
-        )
+        self.import_page.begin_import(path)
         worker = ImportBookWorker(path)
         self._import_worker = worker
-        worker.status.connect(self.loading_overlay.set_detail)
+        # Import progress reflects real worker phases; parsing no longer runs on
+        # the UI thread before the worker starts. Avoid a full-window overlay here.
+        worker.status.connect(self.import_page.show_import_status)
         worker.completed.connect(self._import_completed)
-        worker.failed.connect(self._import_failed)
+        worker.failed.connect(lambda message: self._import_failed(path, message))
         worker.finished.connect(self._import_worker_finished)
         worker.start()
 
     def _import_completed(self, project: Project) -> None:
-        self.loading_overlay.dismiss()
+        self.import_page.show_import_completed(project)
         self._last_imported_project_folder = str(project.folder.resolve())
         self.project = project
         self.library.refresh()
         self._set_project_title(project.title)
         self.open_editor()
 
-    def _import_failed(self, message: str) -> None:
-        self.loading_overlay.dismiss()
-        QMessageBox.critical(self, "Import Failed", message)
+    def _import_failed(self, path: Path, message: str) -> None:
+        # Inline errors avoid a blocking modal flash and keep retry context visible.
+        self.import_page.show_import_failed(path, message)
 
     def _import_worker_finished(self) -> None:
         # Keep the QThread alive until Qt confirms its worker loop has ended.
