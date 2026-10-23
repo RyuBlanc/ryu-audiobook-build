@@ -940,6 +940,87 @@
       return playable;
     });
   }
+  function setPlaybackButtonState() {
+    const paused = !playerAudio || playerAudio.paused;
+    const main = $('mainPlay'), mini = $('miniPlay');
+    if (main) main.textContent = paused ? '▶' : 'Ⅱ';
+    if (mini) mini.textContent = paused ? '▶' : 'Ⅱ';
+    if (main) main.disabled = !(playerAudio && playerAudio.src);
+    if (mini) mini.disabled = !(playerAudio && playerAudio.src);
+  }
+  function clearAudiobookPlayerDisplay() {
+    if (playerAudio && playerAudio.src) return;
+    const page = $('player');
+    if (!page) return;
+    const grid = page.querySelector('.player-grid');
+    const bookCard = grid?.querySelector(':scope > .card:first-child');
+    const playbackCard = grid?.querySelector(':scope > .card:nth-child(2)');
+    const title = bookCard?.querySelector('h2');
+    const metadata = bookCard?.querySelector('p.muted');
+    const nowPlaying = playbackCard?.querySelector('h2');
+    if (title) title.textContent = 'No audiobook selected';
+    if (metadata) metadata.textContent = 'Choose a finished audiobook from your library to begin playback.';
+    if (nowPlaying) nowPlaying.textContent = 'Select a finished audiobook';
+    applyProjectCover(bookCard?.querySelector('.player-cover,.book-cover,[data-project-cover]'), '');
+    const timeline = $('playerTimeline');
+    if (timeline) { timeline.value = 0; timeline.disabled = true; }
+    if ($('currentTime')) $('currentTime').textContent = '0:00';
+    const durationNode = $('currentTime')?.parentElement?.querySelectorAll('span')?.[1];
+    if (durationNode) durationNode.textContent = '0:00';
+    const chapterList = grid?.querySelector('aside.card .list');
+    if (chapterList) chapterList.innerHTML = '<div class="list-item">No audiobook selected.</div>';
+    const mini = $('miniPlayer');
+    if (mini) {
+      const miniTitle = mini.querySelector('b');
+      const miniSubtitle = mini.querySelector('small.muted');
+      const time = mini.querySelector('span.muted');
+      if (miniTitle) miniTitle.textContent = 'No audiobook selected';
+      if (miniSubtitle) miniSubtitle.textContent = 'Choose Play audiobook from the Audiobooks page';
+      if (time) time.textContent = '0:00';
+      applyProjectCover(mini.querySelector('.mini-cover,.book-cover,.project-cover,[data-project-cover],img[alt*="cover" i]'), '');
+      mini.classList.add('hidden');
+    }
+    setPlaybackButtonState();
+  }
+  function renderSelectedAudiobook(data) {
+    const page = $('player');
+    const grid = page?.querySelector('.player-grid');
+    const bookCard = grid?.querySelector(':scope > .card:first-child');
+    const playbackCard = grid?.querySelector(':scope > .card:nth-child(2)');
+    const title = bookCard?.querySelector('h2');
+    const metadata = bookCard?.querySelector('p.muted');
+    const nowPlaying = playbackCard?.querySelector('h2');
+    if (title) title.textContent = data.title || 'Untitled audiobook';
+    const author = String(data.author || '').trim();
+    const narrator = String(data.narrator || data.voice_profile || '').trim();
+    if (metadata) metadata.textContent = (author ? author + ' · ' : '') + (narrator ? 'Narrated by ' + narrator : 'Narrator not set');
+    if (nowPlaying) nowPlaying.textContent = 'Full audiobook';
+    applyProjectCover(bookCard?.querySelector('.player-cover,.book-cover,[data-project-cover]'), data.cover_path || '');
+    const chapters = Array.isArray(data.chapters) ? data.chapters : [];
+    const chapterList = grid?.querySelector('aside.card .list');
+    if (chapterList) {
+      chapterList.innerHTML = chapters.map(chapter =>
+        '<div class="list-item" data-audiobook-chapter="' + Number(chapter.number || 0) + '">' +
+        esc('Chapter ' + Number(chapter.number || 0) + ' · ' + String(chapter.title || 'Untitled chapter')) + '</div>'
+      ).join('') || '<div class="list-item">No chapter metadata available.</div>';
+    }
+    const duration = playerAudio?.duration || 0;
+    if ($('playerTimeline')) { $('playerTimeline').value = duration ? (playerAudio.currentTime / duration) * 100 : 0; $('playerTimeline').disabled = false; }
+    if ($('currentTime')) $('currentTime').textContent = formatTime(playerAudio?.currentTime || 0);
+    const durationNode = $('currentTime')?.parentElement?.querySelectorAll('span')?.[1];
+    if (durationNode) durationNode.textContent = formatTime(duration);
+    const mini = $('miniPlayer');
+    if (mini) {
+      const miniTitle = mini.querySelector('b');
+      const miniSubtitle = mini.querySelector('small.muted');
+      const time = mini.querySelector('span.muted');
+      if (miniTitle) miniTitle.textContent = data.title || 'Untitled audiobook';
+      if (miniSubtitle) miniSubtitle.textContent = 'Full audiobook · ' + chapters.length + ' chapters';
+      if (time) time.textContent = formatTime(playerAudio?.currentTime || 0);
+      applyProjectCover(mini.querySelector('.mini-cover,.book-cover,.project-cover,[data-project-cover],img[alt*="cover" i]'), data.cover_path || '');
+    }
+    setPlaybackButtonState();
+  }
   async function openPlayer(projectFolder = selectedAudiobookFolder) {
     const folder = String(projectFolder || '').trim();
     if (!folder) throw new Error('Select a finished audiobook from the Audiobooks library before playing.');
@@ -947,8 +1028,10 @@
     const data = await call('player.get_active', {folder});
     if (playerAudio && playerAudio.src === data.file_url) {
       miniPlayerDismissed = false;
+      renderSelectedAudiobook(data);
       if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause();
       syncMiniPlayer();
+      setPlaybackButtonState();
       return;
     }
     if (playerAudio) playerAudio.pause();
@@ -956,34 +1039,27 @@
     playerAudio.preload = 'metadata';
     playerAudio.ontimeupdate = () => {
       const duration = playerAudio.duration || 0, current = playerAudio.currentTime || 0;
-      if ($('playerTimeline') && duration) $('playerTimeline').value = current / duration * 100;
-      if ($('miniProgress') && duration) $('miniProgress').style.width = current / duration * 100 + '%';
+      if ($('playerTimeline') && duration) $('playerTimeline').value = duration ? current / duration * 100 : 0;
+      if ($('miniProgress') && duration) $('miniProgress').style.width = duration ? current / duration * 100 + '%' : '0%';
       if ($('currentTime')) $('currentTime').textContent = formatTime(current);
-      const main = $('mainPlay'), mini = $('miniPlay');
-      if (main) main.textContent = playerAudio.paused ? '▶' : 'Ⅱ';
-      if (mini) mini.textContent = playerAudio.paused ? '▶' : 'Ⅱ';
+      const time = $('miniPlayer')?.querySelector('span.muted');
+      if (time) time.textContent = formatTime(current);
+      setPlaybackButtonState();
     };
-    playerAudio.onloadedmetadata = () => {
-      const headings = [...($('player')?.querySelectorAll('h2') || [])].filter(heading => !heading.closest('#backendAudiobookLibrary'));
-      if (headings[0]) headings[0].textContent = data.title;
-      if (headings[1]) headings[1].textContent = data.chapters?.[0]?.title || 'Audiobook ready';
-      const mini = $('miniPlayer');
-      if (mini) {
-        const title = mini.querySelector('b');
-        if (title) title.textContent = data.title;
-        applyProjectCover(mini.querySelector('.book-cover,.project-cover,[data-project-cover],img[alt*="cover" i]'), data.cover_path || '');
-      }
-      const main = $('mainPlay');
-      if (main) main.textContent = 'Ⅱ';
-      syncMiniPlayer();
-    };
+    playerAudio.onplay = () => { setPlaybackButtonState(); syncMiniPlayer(); };
+    playerAudio.onpause = () => { setPlaybackButtonState(); syncMiniPlayer(); };
+    playerAudio.onended = () => { setPlaybackButtonState(); syncMiniPlayer(); };
+    playerAudio.onloadedmetadata = () => renderSelectedAudiobook(data);
     playerAudio.onerror = () => {
+      miniPlayerDismissed = true;
       syncMiniPlayer();
       message('The local audiobook file could not be opened in the embedded player.', true);
     };
     await playerAudio.play();
     miniPlayerDismissed = false;
+    renderSelectedAudiobook(data);
     syncMiniPlayer();
+    setPlaybackButtonState();
   }
   const formatTime = seconds => {
     const n = Math.max(0, Math.floor(Number(seconds) || 0)), h = Math.floor(n / 3600), m = Math.floor((n % 3600) / 60), sec = n % 60;
