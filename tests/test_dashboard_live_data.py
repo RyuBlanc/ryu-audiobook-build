@@ -8,7 +8,7 @@ from unittest import mock
 from app.chapters.detector import Chapter
 from app.core.project import create_project
 from app.core.state import load_state
-from app.ui.premium_v2_host import PremiumV2Bridge
+from app.ui.premium_v2_host import PremiumV2Bridge, _parse_audio_chapter_metadata
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -143,6 +143,30 @@ class DashboardLiveDataTests(unittest.TestCase):
             self.assertEqual(summary["character_voice_count"], 0)
             self.assertEqual(summary["prepared_percent"], 90)
 
+    def test_player_position_saves_to_correct_project_without_changing_modified_time(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            library = base / "library"
+            with mock.patch("app.core.project.library_root", return_value=library):
+                project = self._create_project(library, "Resume Me")
+            original_state = {
+                "modified_at": "2026-01-01T00:00:00+00:00",
+                "playback_position_seconds": 10,
+            }
+            from app.core.state import save_state
+            save_state(project.folder, original_state)
+            bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
+            with mock.patch("app.ui.premium_v2_host.list_projects", return_value=[project]):
+                result = bridge._player_position_save({
+                    "folder": str(project.folder),
+                    "position_seconds": 123.45,
+                })
+            state = load_state(project.folder)
+            self.assertTrue(result["saved"])
+            self.assertEqual(result["position_seconds"], 123.45)
+            self.assertEqual(state["playback_position_seconds"], 123.45)
+            self.assertEqual(state["modified_at"], "2026-01-01T00:00:00+00:00")
+
     def test_narrator_metadata_alone_does_not_count_as_selected_tts_voice(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
@@ -185,6 +209,24 @@ class DashboardLiveDataTests(unittest.TestCase):
             self.assertEqual(summary["cover_path"], str(saved_cover.resolve()))
             self.assertEqual(saved_cover.read_bytes(), image_bytes)
             self.assertTrue(state["cover_detection_attempted"])
+
+    def test_embedded_audio_chapter_metadata_is_parsed_into_seek_boundaries(self):
+        probe_output = """
+  Chapter #0:0: start 0.000000, end 102.500000
+    Metadata:
+      title           : Chapter 1 · Beginning
+  Chapter #0:1: start 102.500000, end 245.250000
+    Metadata:
+      title           : Chapter 2 · Journey
+"""
+        chapters = _parse_audio_chapter_metadata(probe_output)
+        self.assertEqual(len(chapters), 2)
+        self.assertEqual(chapters[0]["number"], 1)
+        self.assertEqual(chapters[0]["title"], "Chapter 1 · Beginning")
+        self.assertEqual(chapters[0]["start_seconds"], 0)
+        self.assertEqual(chapters[0]["end_seconds"], 102.5)
+        self.assertEqual(chapters[1]["start_seconds"], 102.5)
+        self.assertEqual(chapters[1]["end_seconds"], 245.25)
 
     def test_player_resolves_requested_audiobook_not_active_editor_project(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -230,9 +272,15 @@ class DashboardLiveDataTests(unittest.TestCase):
         self.assertIn("function clearAudiobookPlayerDisplay", adapter)
         self.assertIn("function renderSelectedAudiobook(data)", adapter)
         self.assertIn("const playSelectedAudiobook = () =>", adapter)
-        self.assertIn("playerAudio.onplay", adapter)
-        self.assertIn("playerAudio.onpause", adapter)
+        self.assertIn("function bindAudiobookPlayerControls()", adapter)
+        self.assertIn("function jumpPlayerChapter(direction)", adapter)
         self.assertIn("playerAudio.currentTime = duration *", adapter)
+        self.assertIn("persistPlayerPosition(false, false, audioFolder, audio)", adapter)
+        self.assertIn("call('player.position.save'", adapter)
+        self.assertIn("call('settings.save', {player_rate:rate})", adapter)
+        self.assertIn("call('settings.save', {player_volume:playerVolume})", adapter)
+        self.assertIn('"player.position.save": self._player_position_save', host)
+        self.assertIn("def _parse_audio_chapter_metadata", host)
         self.assertIn("data-play-project-folder", adapter)
         self.assertIn(".mini-cover,.book-cover,.project-cover", adapter)
         self.assertIn("if (!playerAudio || !playerAudio.src) clearAudiobookPlayerDisplay()", adapter)

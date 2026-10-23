@@ -15,7 +15,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve();
+  let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
   const chapterUndoStacks = new Map(), chapterRedoStacks = new Map();
@@ -961,6 +961,7 @@
     if (durationNode) durationNode.textContent = '0:00';
     const chapterList = grid?.querySelector('aside.card .list');
     if (chapterList) chapterList.innerHTML = '<div class="list-item">No audiobook selected.</div>';
+    activePlayerChapters = [];
     const mini = $('miniPlayer');
     if (mini) {
       const miniTitle = mini.querySelector('b');
@@ -989,12 +990,35 @@
     if (nowPlaying) nowPlaying.textContent = 'Full audiobook';
     applyProjectCover(bookCard?.querySelector('.player-cover,.book-cover,[data-project-cover]'), data.cover_path || '');
     const chapters = Array.isArray(data.chapters) ? data.chapters : [];
+    activePlayerChapters = chapters;
     const chapterList = grid?.querySelector('aside.card .list');
     if (chapterList) {
-      chapterList.innerHTML = chapters.map(chapter =>
-        '<div class="list-item" data-audiobook-chapter="' + Number(chapter.number || 0) + '">' +
-        esc('Chapter ' + Number(chapter.number || 0) + ' · ' + String(chapter.title || 'Untitled chapter')) + '</div>'
-      ).join('') || '<div class="list-item">No chapter metadata available.</div>';
+      chapterList.innerHTML = chapters.map(chapter => {
+        const start = Number(chapter.start_seconds);
+        const hasTiming = Number.isFinite(start) && start >= 0;
+        return '<div class="list-item" role="button" tabindex="' + (hasTiming ? '0' : '-1') +
+          '" data-audiobook-chapter-start="' + (hasTiming ? String(start) : '') + '"' +
+          (hasTiming ? '' : ' aria-disabled="true"') + '>' +
+          esc('Chapter ' + Number(chapter.number || 0) + ' · ' + String(chapter.title || 'Untitled chapter')) +
+          '</div>';
+      }).join('') || '<div class="list-item">No chapter metadata available.</div>';
+    }
+    const speedButtons = [...(page?.querySelectorAll('.player-grid .toolbar .segmented button') || [])];
+    speedButtons.forEach(button => {
+      const rate = Number(String(button.textContent || '').replace('×','').trim());
+      button.classList.toggle('active', Number.isFinite(rate) && Math.abs(rate - playerRate) < 0.01);
+    });
+    const volumeControl = page?.querySelector('.player-grid .toolbar input.range');
+    if (volumeControl) volumeControl.value = String(Math.round(playerVolume * 100));
+    const playerButtons = [...(page?.querySelectorAll('.player-controls button') || [])];
+    const hasTimedChapters = chapters.some(chapter => Number.isFinite(Number(chapter.start_seconds)));
+    if (playerButtons[1]) {
+      playerButtons[1].disabled = !hasTimedChapters;
+      playerButtons[1].title = hasTimedChapters ? 'Previous chapter' : 'Chapter navigation is unavailable for this audiobook file';
+    }
+    if (playerButtons[3]) {
+      playerButtons[3].disabled = !hasTimedChapters;
+      playerButtons[3].title = hasTimedChapters ? 'Next chapter' : 'Chapter navigation is unavailable for this audiobook file';
     }
     const duration = playerAudio?.duration || 0;
     if ($('playerTimeline')) { $('playerTimeline').value = duration ? (playerAudio.currentTime / duration) * 100 : 0; $('playerTimeline').disabled = false; }
@@ -1015,41 +1039,189 @@
     }
     setPlaybackButtonState();
   }
+  function persistPlayerPosition(force = false, reset = false, folder = selectedAudiobookFolder, audio = playerAudio) {
+    if (!folder || !audio || !audio.src) return;
+    const now = Date.now();
+    if (!force && now - playerPositionSaveAt < 10000) return;
+    playerPositionSaveAt = now;
+    const seconds = reset ? 0 : Math.max(0, Number(audio.currentTime) || 0);
+    void call('player.position.save', {folder, position_seconds:seconds})
+      .catch(error => console.warn('[Ryu player position]', error?.message || error));
+  }
+  function applyPlayerRate(value, persist = true) {
+    const rate = Number(value);
+    if (!Number.isFinite(rate) || rate < 0.5 || rate > 2) {
+      message('Playback speed must be between 0.5× and 2.0×.', true);
+      return;
+    }
+    playerRate = rate;
+    if (playerAudio) playerAudio.playbackRate = rate;
+    const page = $('player');
+    [...(page?.querySelectorAll('.player-grid .toolbar .segmented button') || [])].forEach(button => {
+      const candidate = Number(String(button.textContent || '').replace('×','').trim());
+      button.classList.toggle('active', Number.isFinite(candidate) && Math.abs(candidate-rate) < 0.01);
+    });
+    if (persist) void call('settings.save', {player_rate:rate})
+      .catch(error => message(error?.message || String(error), true));
+  }
+  function applyPlayerVolume(value, persist = false) {
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) return;
+    playerVolume = Math.max(0, Math.min(1, amount / 100));
+    if (playerAudio) playerAudio.volume = playerVolume;
+    const control = $('player')?.querySelector('.player-grid .toolbar input.range');
+    if (control) control.value = String(Math.round(playerVolume * 100));
+    if (persist) void call('settings.save', {player_volume:playerVolume})
+      .catch(error => message(error?.message || String(error), true));
+  }
+  function seekPlayerBy(seconds) {
+    if (!playerAudio || !playerAudio.src || !Number.isFinite(playerAudio.duration)) {
+      message('Choose Play audiobook on a finished title before using playback controls.', true);
+      return;
+    }
+    playerAudio.currentTime = Math.max(0, Math.min(playerAudio.duration, playerAudio.currentTime + Number(seconds || 0)));
+  }
+  function jumpPlayerChapter(direction) {
+    if (!playerAudio || !playerAudio.src) return;
+    const chapters = activePlayerChapters
+      .filter(chapter => Number.isFinite(Number(chapter.start_seconds)))
+      .slice().sort((a,b) => Number(a.start_seconds) - Number(b.start_seconds));
+    if (!chapters.length) {
+      message('Chapter navigation is unavailable for this audiobook file.', true);
+      return;
+    }
+    const current = Math.max(0, Number(playerAudio.currentTime) || 0);
+    let index = 0;
+    for (let i = 0; i < chapters.length; i++) {
+      if (Number(chapters[i].start_seconds) <= current + 0.05) index = i;
+      else break;
+    }
+    let targetIndex;
+    if (direction === 'previous') {
+      targetIndex = current - Number(chapters[index].start_seconds) > 3 ? index : index - 1;
+      if (targetIndex < 0) targetIndex = 0;
+    } else {
+      targetIndex = index + 1;
+      if (targetIndex >= chapters.length) {
+        message('You are already at the final chapter of this audiobook.');
+        return;
+      }
+    }
+    playerAudio.currentTime = Math.max(0, Number(chapters[targetIndex].start_seconds) || 0);
+  }
+  function bindAudiobookPlayerControls() {
+    const page = $('player');
+    if (!page || page.dataset.backendPlayerControlsBound === 'true') return;
+    page.dataset.backendPlayerControlsBound = 'true';
+    const buttons = [...(page.querySelector('.player-controls')?.querySelectorAll('button') || [])];
+    if (buttons[0]) { buttons[0].title = 'Rewind 15 seconds'; buttons[0].onclick = () => seekPlayerBy(-15); }
+    if (buttons[1]) { buttons[1].title = 'Previous chapter'; buttons[1].onclick = () => jumpPlayerChapter('previous'); }
+    if (buttons[3]) { buttons[3].title = 'Next chapter'; buttons[3].onclick = () => jumpPlayerChapter('next'); }
+    if (buttons[4]) { buttons[4].title = 'Forward 15 seconds'; buttons[4].onclick = () => seekPlayerBy(15); }
+    const speedButtons = [...page.querySelectorAll('.player-grid .toolbar .segmented button')];
+    speedButtons.forEach(button => {
+      button.onclick = () => {
+        const rate = Number(String(button.textContent || '').replace('×','').trim());
+        applyPlayerRate(rate, true);
+      };
+    });
+    const volumeControl = page.querySelector('.player-grid .toolbar input.range');
+    if (volumeControl) {
+      volumeControl.oninput = () => applyPlayerVolume(volumeControl.value, false);
+      volumeControl.onchange = () => applyPlayerVolume(volumeControl.value, true);
+    }
+    page.addEventListener('click', event => {
+      const chapter = event.target.closest('[data-audiobook-chapter-start]');
+      if (!chapter || chapter.getAttribute('aria-disabled') === 'true') return;
+      if (!playerAudio || !playerAudio.src) {
+        message('Choose Play audiobook on a finished title before selecting a chapter.', true);
+        return;
+      }
+      const start = Number(chapter.dataset.audiobookChapterStart);
+      if (Number.isFinite(start) && start >= 0) playerAudio.currentTime = start;
+    });
+    page.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      const chapter = event.target.closest('[data-audiobook-chapter-start]');
+      if (!chapter || chapter.getAttribute('aria-disabled') === 'true') return;
+      event.preventDefault();
+      const start = Number(chapter.dataset.audiobookChapterStart);
+      if (playerAudio && playerAudio.src && Number.isFinite(start) && start >= 0) playerAudio.currentTime = start;
+    });
+    applyPlayerRate(playerRate, false);
+    applyPlayerVolume(playerVolume * 100, false);
+  }
   async function openPlayer(projectFolder = selectedAudiobookFolder) {
     const folder = String(projectFolder || '').trim();
     if (!folder) throw new Error('Select a finished audiobook from the Audiobooks library before playing.');
-    selectedAudiobookFolder = folder;
     const data = await call('player.get_active', {folder});
     if (playerAudio && playerAudio.src === data.file_url) {
+      selectedAudiobookFolder = folder;
       miniPlayerDismissed = false;
+      playerRate = Number.isFinite(Number(data.playback_rate)) ? Number(data.playback_rate) : playerRate;
+      playerVolume = Number.isFinite(Number(data.playback_volume)) ? Math.max(0,Math.min(1,Number(data.playback_volume))) : playerVolume;
+      playerAudio.playbackRate = playerRate;
+      playerAudio.volume = playerVolume;
       renderSelectedAudiobook(data);
       if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause();
       syncMiniPlayer();
       setPlaybackButtonState();
       return;
     }
-    if (playerAudio) playerAudio.pause();
+    if (playerAudio) {
+      persistPlayerPosition(true, false, selectedAudiobookFolder, playerAudio);
+      playerAudio.pause();
+    }
+    selectedAudiobookFolder = folder;
+    playerPositionSaveAt = 0;
+    playerRate = Number.isFinite(Number(data.playback_rate)) && Number(data.playback_rate) >= 0.5 && Number(data.playback_rate) <= 2
+      ? Number(data.playback_rate) : 1;
+    playerVolume = Number.isFinite(Number(data.playback_volume)) && Number(data.playback_volume) >= 0 && Number(data.playback_volume) <= 1
+      ? Number(data.playback_volume) : 0.8;
     playerAudio = new Audio(data.file_url);
-    playerAudio.preload = 'metadata';
-    playerAudio.ontimeupdate = () => {
-      const duration = playerAudio.duration || 0, current = playerAudio.currentTime || 0;
-      if ($('playerTimeline') && duration) $('playerTimeline').value = duration ? current / duration * 100 : 0;
-      if ($('miniProgress') && duration) $('miniProgress').style.width = duration ? current / duration * 100 + '%' : '0%';
+    const audio = playerAudio;
+    const audioFolder = folder;
+    audio.preload = 'metadata';
+    audio.playbackRate = playerRate;
+    audio.volume = playerVolume;
+    audio.ontimeupdate = () => {
+      const duration = audio.duration || 0, current = audio.currentTime || 0;
+      if ($('playerTimeline') && duration) $('playerTimeline').value = current / duration * 100;
+      if ($('miniProgress') && duration) $('miniProgress').style.width = current / duration * 100 + '%';
       if ($('currentTime')) $('currentTime').textContent = formatTime(current);
       const time = $('miniPlayer')?.querySelector('span.muted');
       if (time) time.textContent = formatTime(current);
       setPlaybackButtonState();
+      persistPlayerPosition(false, false, audioFolder, audio);
     };
-    playerAudio.onplay = () => { setPlaybackButtonState(); syncMiniPlayer(); };
-    playerAudio.onpause = () => { setPlaybackButtonState(); syncMiniPlayer(); };
-    playerAudio.onended = () => { setPlaybackButtonState(); syncMiniPlayer(); };
-    playerAudio.onloadedmetadata = () => renderSelectedAudiobook(data);
-    playerAudio.onerror = () => {
+    audio.onplay = () => { setPlaybackButtonState(); syncMiniPlayer(); };
+    audio.onpause = () => {
+      persistPlayerPosition(true, false, audioFolder, audio);
+      setPlaybackButtonState();
+      syncMiniPlayer();
+    };
+    audio.onended = () => {
+      persistPlayerPosition(true, true, audioFolder, audio);
+      setPlaybackButtonState();
+      syncMiniPlayer();
+    };
+    audio.onloadedmetadata = () => {
+      if (playerAudio !== audio) return;
+      const duration = Number(audio.duration) || 0;
+      const savedPosition = Math.max(0, Number(data.playback_position_seconds) || 0);
+      if (duration > 0 && savedPosition > 0 && savedPosition < duration - 1) {
+        audio.currentTime = savedPosition;
+      } else if (duration > 0 && savedPosition >= duration - 1) {
+        audio.currentTime = 0;
+      }
+      renderSelectedAudiobook(data);
+    };
+    audio.onerror = () => {
       miniPlayerDismissed = true;
       syncMiniPlayer();
       message('The local audiobook file could not be opened in the embedded player.', true);
     };
-    await playerAudio.play();
+    await audio.play();
     miniPlayerDismissed = false;
     renderSelectedAudiobook(data);
     syncMiniPlayer();
@@ -1196,10 +1368,14 @@
     };
     if ($('mainPlay')) $('mainPlay').onclick = playSelectedAudiobook;
     if ($('miniPlay')) $('miniPlay').onclick = playSelectedAudiobook;
-    if ($('playerTimeline')) $('playerTimeline').oninput = () => {
-      const duration = playerAudio?.duration || 0;
-      if (playerAudio && duration) playerAudio.currentTime = duration * Math.max(0,Math.min(100,Number($('playerTimeline').value || 0))) / 100;
-    };
+    bindAudiobookPlayerControls();
+    if ($('playerTimeline')) {
+      $('playerTimeline').oninput = () => {
+        const duration = playerAudio?.duration || 0;
+        if (playerAudio && duration) playerAudio.currentTime = duration * Math.max(0,Math.min(100,Number($('playerTimeline').value || 0))) / 100;
+      };
+      $('playerTimeline').onchange = () => persistPlayerPosition(true, false, selectedAudiobookFolder, playerAudio);
+    }
     clearAudiobookPlayerDisplay();
     applyUnavailableControlStates();
     // Register navigation and action handlers before hydration. A slow local model,

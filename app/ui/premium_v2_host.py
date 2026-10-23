@@ -5,6 +5,7 @@ import binascii
 import hashlib
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import re
@@ -49,6 +50,60 @@ def frontend_path() -> Path:
     """Resolve the same self-contained HTML in source and PyInstaller builds."""
     root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
     return root / FRONTEND_RELATIVE_PATH
+
+
+def _parse_audio_chapter_metadata(probe_output: str) -> list[dict[str, Any]]:
+    """Parse FFmpeg chapter metadata without inventing chapter boundaries."""
+    source = str(probe_output or "")
+    header = re.compile(
+        r"(?m)^\s*Chapter #\d+:(\d+):\s*start\s+(\d+(?:\.\d+)?),\s*end\s+(\d+(?:\.\d+)?)",
+        flags=re.IGNORECASE,
+    )
+    matches = list(header.finditer(source))
+    chapters: list[dict[str, Any]] = []
+    for index, match in enumerate(matches):
+        stop = matches[index + 1].start() if index + 1 < len(matches) else len(source)
+        block = source[match.start():stop]
+        title_match = re.search(r"(?mi)^\s*title\s*:\s*(.+?)\s*$", block)
+        try:
+            start_seconds = float(match.group(2))
+            end_seconds = float(match.group(3))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not math.isfinite(start_seconds) or not math.isfinite(end_seconds):
+            continue
+        if start_seconds < 0 or end_seconds <= start_seconds:
+            continue
+        number = int(match.group(1)) + 1
+        title = title_match.group(1).strip() if title_match else f"Chapter {number}"
+        chapters.append({
+            "number": number,
+            "title": title[:500] or f"Chapter {number}",
+            "start_seconds": start_seconds,
+            "end_seconds": end_seconds,
+        })
+    return chapters
+
+
+def _read_audio_chapter_metadata(path: Path) -> list[dict[str, Any]]:
+    """Read embedded M4B chapter boundaries quickly; treat missing metadata as optional."""
+    try:
+        candidate = Path(path)
+        if not candidate.is_file() or candidate.stat().st_size < 1024:
+            return []
+        from app.audio.assembler import ffmpeg_path
+
+        probe = subprocess.run(
+            [ffmpeg_path(), "-hide_banner", "-i", str(candidate)],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        return _parse_audio_chapter_metadata(str(probe.stderr or "") + "\n" + str(probe.stdout or ""))
+    except Exception:
+        log.debug("Could not read embedded audiobook chapter metadata from %s", path, exc_info=True)
+        return []
 
 
 def _json_result(*, success: bool, data: Any = None, error: str | None = None,
@@ -298,6 +353,7 @@ class PremiumV2Bridge(QObject):
                 "job.clear_completed": self._job_clear_completed,
                 "history.list": self._history_list,
                 "player.get_active": self._player_get_active,
+                "player.position.save": self._player_position_save,
                 "settings.get": self._settings_get,
                 "settings.save": self._settings_save,
                 "models.list": self._models_list,
@@ -2243,6 +2299,29 @@ class PremiumV2Bridge(QObject):
         if not output or not output.is_file() or output.stat().st_size <= 0:
             raise FileNotFoundError("This project does not have a validated generated audiobook yet.")
         summary = self._project_summary(project)
+        actual_chapters = _read_audio_chapter_metadata(output)
+        chapters = actual_chapters or [
+            {"number": c.number, "title": c.title}
+            for c in project.chapters
+        ]
+        try:
+            playback_position = float(state.get("playback_position_seconds") or 0)
+        except (TypeError, ValueError, OverflowError):
+            playback_position = 0.0
+        if not math.isfinite(playback_position) or playback_position < 0:
+            playback_position = 0.0
+        try:
+            playback_rate = float(self.settings.value("player/playback_rate", 1.0))
+        except (TypeError, ValueError, OverflowError):
+            playback_rate = 1.0
+        if not math.isfinite(playback_rate) or not 0.5 <= playback_rate <= 2.0:
+            playback_rate = 1.0
+        try:
+            playback_volume = float(self.settings.value("player/playback_volume", 0.8))
+        except (TypeError, ValueError, OverflowError):
+            playback_volume = 0.8
+        if not math.isfinite(playback_volume) or not 0.0 <= playback_volume <= 1.0:
+            playback_volume = 0.8
         return {
             **summary,
             "title": project.title,
@@ -2250,17 +2329,51 @@ class PremiumV2Bridge(QObject):
             "narrator": str(state.get("narrator") or state.get("voice_profile") or ""),
             "output_path": str(output.resolve()),
             "file_url": output.resolve().as_uri(),
-            "chapters": [{"number": c.number, "title": c.title} for c in project.chapters],
+            "chapters": chapters,
             "format": output.suffix.lower(),
             "file_size": output.stat().st_size,
+            "playback_position_seconds": playback_position,
+            "playback_rate": playback_rate,
+            "playback_volume": playback_volume,
         }
+
+    def _player_position_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Remember listening position inside the selected project's local state."""
+        folder_value = str(payload.get("folder") or "").strip()
+        if not folder_value:
+            raise ValueError("Select an audiobook before saving playback position.")
+        requested_folder = Path(folder_value).expanduser().resolve()
+        project = next(
+            (item for item in list_projects()
+             if str(item.folder.resolve()) == str(requested_folder)),
+            None,
+        )
+        if project is None:
+            raise ValueError("The selected audiobook is no longer available in the local library.")
+        raw_position = payload.get("position_seconds", 0)
+        if isinstance(raw_position, bool):
+            raise ValueError("Playback position must be a non-negative number.")
+        try:
+            position = float(raw_position)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("Playback position must be a non-negative number.") from exc
+        if not math.isfinite(position) or position < 0 or position > 7 * 24 * 60 * 60:
+            raise ValueError("Playback position is outside the supported range.")
+        state = load_state(project.folder)
+        state["playback_position_seconds"] = round(position, 2)
+        # Listening progress must not reorder Recent Projects or masquerade as a content edit.
+        save_state(project.folder, state)
+        return {"saved": True, "folder": str(project.folder.resolve()),
+                "position_seconds": state["playback_position_seconds"]}
 
     def _settings_save(self, payload: dict[str, Any]) -> dict[str, Any]:
         allowed = {"theme": "ui/theme", "accent": "ui/accent", "interface_scale": "ui/interface_scale",
                    "effects": "ui/effects", "reduce_motion": "ui/reduce_motion",
                    "preview_seconds": "audio/preview_seconds", "bitrate": "production/bitrate",
                    "concurrency": "production/concurrency", "local_first": "privacy/local_first",
-                   "output_folder": "paths/output_folder"}
+                   "output_folder": "paths/output_folder",
+                   "player_rate": "player/playback_rate",
+                   "player_volume": "player/playback_volume"}
         for key, setting in allowed.items():
             if key not in payload:
                 continue
@@ -2271,6 +2384,20 @@ class PremiumV2Bridge(QObject):
                 raise ValueError("Preview duration must be 10, 20, 30, 45, or 60 seconds.")
             if key == "bitrate" and not 128 <= int(value) <= 320:
                 raise ValueError("Bitrate must be from 128 to 320 kbps.")
+            if key == "player_rate":
+                try:
+                    value = float(value)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError("Playback speed must be between 0.5× and 2.0×.") from exc
+                if not math.isfinite(value) or not 0.5 <= value <= 2.0:
+                    raise ValueError("Playback speed must be between 0.5× and 2.0×.")
+            if key == "player_volume":
+                try:
+                    value = float(value)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError("Player volume must be between 0 and 100 percent.") from exc
+                if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+                    raise ValueError("Player volume must be between 0 and 100 percent.")
             if key == "output_folder":
                 folder = Path(str(value)).expanduser().resolve()
                 folder.mkdir(parents=True, exist_ok=True)
