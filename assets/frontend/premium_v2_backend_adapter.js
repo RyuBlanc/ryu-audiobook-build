@@ -409,9 +409,16 @@
     const root = $('dashboard');
     const card = root && dashboardGenerationCard(root);
     if (!card) return;
-    const active = jobs.filter(job => job.type === 'audiobook-generation' &&
-      ['queued','running','pause_requested','paused','cancel_requested','retrying'].includes(String(job.state || '').toLowerCase()))
-      .sort((a,b) => (Date.parse(b.updated_at || b.queued_at || '') || 0) - (Date.parse(a.updated_at || a.queued_at || '') || 0));
+    const resumableStates = ['queued','running','pause_requested','paused','cancel_requested','retrying'];
+    const active = jobs.filter(job => {
+      const state = String(job.state || '').toLowerCase();
+      if (!resumableStates.includes(state)) return false;
+      const type = String(job.type || '').toLowerCase();
+      // The Active Generation card is only about generation. Import/analysis and
+      // voice previews remain visible in Background Jobs, not mislabeled as audio generation.
+      return type === 'audiobook-generation';
+    }).sort((a,b) =>
+      (Date.parse(b.updated_at || b.queued_at || '') || 0) - (Date.parse(a.updated_at || a.queued_at || '') || 0));
     const job = active[0] || null;
     // Bind by position within the static job card. These spans are deliberately
     // cleared when there is no job, so searching for their display text breaks
@@ -425,8 +432,14 @@
     const view = buttons.find(button => dashboardText(button.textContent) === 'view job');
     const control = buttons.find(button => ['pause','resume'].includes(dashboardText(button.textContent)));
     if (!job) {
-      setDashboardRow(card, 'current chapter', '');
-      setDashboardRow(card, 'processing stage', '');
+      const selectedProject = dashboardProject || null;
+      setDashboardRow(card, 'current chapter', selectedProject
+        ? (Number(selectedProject.completed_chapter_count || 0) + ' chapters prepared')
+        : 'No project selected');
+      setDashboardRow(card, 'processing stage', selectedProject
+        ? (selectedProject.completed && selectedProject.output_path ? 'Audiobook ready' :
+          ('Setup checkpoint · ' + (savedResumeStage(selectedProject) || routeForResume(selectedProject))))
+        : 'No active generation job');
       if (percentLabel) percentLabel.textContent = '';
       if (etaLabel) etaLabel.textContent = '';
       if (fill) { fill.style.width = '0%'; fill.setAttribute('aria-valuenow','0'); if (fill.tagName === 'PROGRESS') fill.value = 0; }
@@ -2015,8 +2028,9 @@
           try {
             const rows = await call('job.list', {include_hidden:false});
             const requestedJobId = dashboardButton.dataset.dashboardJobId || '';
-            const job = rows.find(j => requestedJobId && String(j.job_id) === String(requestedJobId)) ||
-              rows.find(j => !['completed','failed','cancelled'].includes(String(j.state || '').toLowerCase()));
+            const job = requestedJobId
+              ? rows.find(j => String(j.job_id) === String(requestedJobId))
+              : rows.find(j => !['completed','failed','cancelled'].includes(String(j.state || '').toLowerCase()));
             if (!job) throw new Error('There are no active background jobs to view.');
             $('backgroundJobsButton')?.click();
             message((job.title || job.type) + ' · ' + (job.stage || job.state));
