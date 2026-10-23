@@ -307,7 +307,8 @@ class DashboardLiveDataTests(unittest.TestCase):
     def test_dashboard_resume_uses_dashboard_button_and_persisted_stage_checkpoints(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("const dashboardButton = e.target.closest('#dashboard button')", adapter)
-        continue_at = adapter.index("if (label === 'continue project')")
+        listener_at = adapter.index("document.addEventListener('click', e =>", adapter.index("async function wire()"))
+        continue_at = adapter.index("if (label === 'continue project')", listener_at)
         continue_end = adapter.index("if (label === 'view job')", continue_at)
         continue_handler = adapter[continue_at:continue_end]
         self.assertIn("dashboardButton.dataset.continueProjectFolder", continue_handler)
