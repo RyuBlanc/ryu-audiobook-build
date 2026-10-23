@@ -511,22 +511,75 @@
       }, 3000);
     }
   }
+  function updateProjectDeleteButton() {
+    const button = $('deleteSelectedProjects');
+    if (!button) return;
+    const count = selectedProjectFolders.size;
+    button.textContent = 'Delete Selected (' + count + ')';
+    button.disabled = count === 0;
+    button.title = count ? 'Move ' + count + ' selected book(s) to Deleted Books' : 'Select one or more books first';
+    button.style.opacity = count ? '1' : '.55';
+  }
+  async function deleteSelectedProjects() {
+    const selected = projects.filter(project => selectedProjectFolders.has(String(project.folder)));
+    if (!selected.length) {
+      selectedProjectFolders.clear();
+      updateProjectDeleteButton();
+      return;
+    }
+    const titles = selected.slice(0, 8).map(project => '• ' + (project.title || 'Untitled')).join('\n');
+    const remaining = selected.length > 8 ? '\n• … and ' + (selected.length - 8) + ' more' : '';
+    if (!window.confirm('Move ' + selected.length + ' selected book(s) to Deleted Books? You can restore them later.\n\n' + titles + remaining)) return;
+    const button = $('deleteSelectedProjects');
+    if (button) button.disabled = true;
+    let moved = 0;
+    const failures = [];
+    for (const project of selected) {
+      try {
+        await call('project.trash', {folder: project.folder});
+        selectedProjectFolders.delete(String(project.folder));
+        moved += 1;
+      } catch (error) {
+        failures.push((project.title || 'Untitled') + ': ' + (error?.message || String(error)));
+      }
+    }
+    await refreshProjects();
+    updateProjectDeleteButton();
+    if (failures.length) {
+      message('Moved ' + moved + ' book(s) to Deleted Books. Not moved: ' + failures.join(' | '), true);
+    } else {
+      message('Moved ' + moved + ' book(s) to Deleted Books. Their saved work is recoverable until permanently purged.');
+    }
+  }
   function ensureProjectTrashControl() {
-    if ($('openProjectTrashBin')) return;
     const root = $('library');
     if (!root) return;
     const search = $('librarySearch');
     const filters = $('libraryFilters');
     const parent = filters?.parentElement || search?.parentElement || root;
-    const button = document.createElement('button');
-    button.id = 'openProjectTrashBin';
-    button.type = 'button';
-    button.className = 'btn small secondary';
-    button.textContent = 'Deleted Books / Recover';
-    button.title = 'Restore a book or permanently purge it from managed Trash';
-    button.style.cssText = 'margin-left:8px;white-space:nowrap;';
-    button.addEventListener('click', () => openProjectTrashBin().catch(err => message(err?.message || String(err), true)));
-    parent.appendChild(button);
+    if (!$('deleteSelectedProjects')) {
+      const deleteButton = document.createElement('button');
+      deleteButton.id = 'deleteSelectedProjects';
+      deleteButton.type = 'button';
+      deleteButton.className = 'btn small ghost library-delete';
+      deleteButton.textContent = 'Delete Selected (0)';
+      deleteButton.title = 'Select one or more books first';
+      deleteButton.style.cssText = 'margin-left:8px;white-space:nowrap;';
+      deleteButton.addEventListener('click', () => deleteSelectedProjects().catch(err => message(err?.message || String(err), true)));
+      parent.appendChild(deleteButton);
+    }
+    if (!$('openProjectTrashBin')) {
+      const button = document.createElement('button');
+      button.id = 'openProjectTrashBin';
+      button.type = 'button';
+      button.className = 'btn small secondary';
+      button.textContent = 'Deleted Books / Recover';
+      button.title = 'Restore a book or permanently purge it from managed Trash';
+      button.style.cssText = 'margin-left:8px;white-space:nowrap;';
+      button.addEventListener('click', () => openProjectTrashBin().catch(err => message(err?.message || String(err), true)));
+      parent.appendChild(button);
+    }
+    updateProjectDeleteButton();
   }
   function ensureProjectTrashModal() {
     let modal = $('projectTrashModal');
@@ -568,6 +621,7 @@
     return modal;
   }
   let projectTrashEntries = [];
+  let selectedProjectFolders = new Set();
   async function loadProjectTrashEntries(modal) {
     projectTrashEntries = await call('project.trash.list');
     const list = $('projectTrashEntries');
@@ -583,6 +637,7 @@
   }
   async function refreshProjects() {
     projects = (await call('project.list')).sort((a,b) => (Date.parse(b.modified_at || '') || 0) - (Date.parse(a.modified_at || '') || 0));
+    selectedProjectFolders = new Set([...selectedProjectFolders].filter(folder => projects.some(project => String(project.folder) === folder)));
     const grid = $('libraryGrid');
     ensureProjectTrashControl();
     const search = ($('librarySearch')?.value || '').trim().toLowerCase();
@@ -601,7 +656,7 @@
           '" data-cover-path="' + esc(p.cover_path || '') + '"><div class="book-cover"></div><div class="project-pad"><span class="badge ' +
           (complete ? '' : 'info') + '">' + esc(status) + '</span><h3>' + esc(p.title) + '</h3><p class="muted">' +
           Number(p.chapter_count || 0) + ' chapters · Local project</p><p class="muted">' + esc(p.source_path || 'Source path unavailable') +
-          '</p><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn small" type="button" data-open-project="' + esc(p.folder) + '">Open project</button><button class="btn small ghost library-delete" type="button" data-delete-project="' + esc(p.folder) + '" aria-label="Move ' + esc(p.title) + ' to Deleted Books">Delete</button></div></div></article>';
+          '</p><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px"><label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#abb4c4;cursor:pointer"><input type="checkbox" data-select-project="' + esc(p.folder) + '" ' + (selectedProjectFolders.has(String(p.folder)) ? 'checked' : '') + ' aria-label="Select ' + esc(p.title) + ' for bulk deletion" style="accent-color:#c62951"> Select</label><button class="btn small" type="button" data-open-project="' + esc(p.folder) + '">Open project</button><button class="btn small ghost library-delete" type="button" data-delete-project="' + esc(p.folder) + '" aria-label="Move ' + esc(p.title) + ' to Deleted Books">Delete</button></div></div></article>';
       }).join('') || '<p class="muted">No local projects found. Import a book to start your library.</p>';
       applyProjectCovers(grid);
     }
@@ -777,10 +832,55 @@
     ).join('') || '<div class="card" style="padding:18px"><b>The Recovery Bin is empty</b><p class="muted">Characters you delete from the reusable library will appear here.</p></div>';
     modal.style.display = 'flex';
   }
+  function ensureCharacterLibraryViewControls() {
+    const grid = $('characterLibraryGrid');
+    if (!grid) return;
+    let container = grid.parentElement;
+    let cardsButton = null, compactButton = null;
+    for (let depth = 0; container && depth < 7; depth++, container = container.parentElement) {
+      const buttons = [...container.querySelectorAll('button')];
+      cardsButton = buttons.find(button => button.textContent.trim().toLowerCase() === 'cards') || null;
+      compactButton = buttons.find(button => button.textContent.trim().toLowerCase() === 'compact list') || null;
+      if (cardsButton && compactButton) break;
+    }
+    if (!cardsButton || !compactButton) return;
+    cardsButton.dataset.characterViewMode = 'cards';
+    compactButton.dataset.characterViewMode = 'compact';
+    for (const button of [cardsButton, compactButton]) {
+      if (button.dataset.ryuViewBound === 'true') continue;
+      button.dataset.ryuViewBound = 'true';
+      button.addEventListener('click', () => {
+        window.__ryuCharacterLibraryViewMode = button.dataset.characterViewMode || 'cards';
+        refreshCharacterLibrary().catch(err => message(err?.message || String(err), true));
+      });
+    }
+  }
+  function applyCharacterLibraryViewMode(grid) {
+    if (!grid) return;
+    if (!document.getElementById('ryuCharacterLibraryViewStyles')) {
+      const style = document.createElement('style');
+      style.id = 'ryuCharacterLibraryViewStyles';
+      style.textContent = '#characterLibraryGrid.character-library-compact{display:flex!important;flex-direction:column!important;gap:8px!important}#characterLibraryGrid.character-library-compact>.library-character-card{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;flex-wrap:wrap}#characterLibraryGrid.character-library-compact .library-character-top{min-width:190px}#characterLibraryGrid.character-library-compact .alias-row{max-width:320px}#characterLibraryGrid.character-library-compact .library-character-meta{display:flex;gap:10px;flex-wrap:wrap}';
+      document.head.appendChild(style);
+    }
+    const compact = window.__ryuCharacterLibraryViewMode === 'compact';
+    grid.classList.toggle('character-library-compact', compact);
+    grid.style.display = compact ? 'flex' : '';
+    grid.style.flexDirection = compact ? 'column' : '';
+    const section = grid.closest('section') || grid.parentElement;
+    if (section) {
+      for (const button of section.querySelectorAll('button[data-character-view-mode]')) {
+        const active = button.dataset.characterViewMode === (compact ? 'compact' : 'cards');
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+      }
+    }
+  }
   async function refreshCharacterLibrary() {
     libraryCharacters = await call('character_library.list');
     ensureCharacterDialogueSampleField();
     ensureCharacterRecoveryButton();
+    ensureCharacterLibraryViewControls();
     const seriesFilter = $('characterSeriesFilter');
     const previousSeries = seriesFilter?.value || 'All series';
     const seriesNames = [...new Set(libraryCharacters.map(librarySeriesName).filter(Boolean))].sort((a,b) => a.localeCompare(b));
@@ -801,6 +901,7 @@
       const sampleText = sample ? '<p class="muted" style="margin:10px 0 0;line-height:1.5">“' + esc(sample.slice(0,220)) + (sample.length > 220 ? '…' : '') + '”</p>' : '';
       return '<article class="library-character-card" data-library-id="' + esc(c.id) + '"><div class="library-character-top"><span class="avatar">' + esc((c.short||c.name||'?').slice(0,1)) + '</span><div><h3>' + esc(c.name) + '</h3><p>' + esc(librarySeriesName(c)||'Unassigned series') + ' · ' + esc(c.voice||'Unassigned') + '</p></div></div><div class="alias-row">' + ((c.aliases||[]).map(x=>'<span class="alias-tag">' + esc(x) + '</span>').join('') || '<span class="alias-tag">No aliases</span>') + '</div>' + sampleText + '<div class="library-character-meta"><span>' + Number(c.lines||0) + ' assigned lines</span><span>' + Number(c.chapters||0) + ' chapters</span><span>' + Number(c.confidence??100) + '% confidence</span><span>' + esc(librarySeriesName(c)||'Unassigned series') + '</span></div><div class="library-character-actions" style="display:flex;gap:7px;flex-wrap:wrap"><button type="button" class="btn small secondary" data-test-library="' + esc(c.id) + '">▶ Test</button><button type="button" class="btn small secondary" data-edit-library="' + esc(c.id) + '">Edit</button><button type="button" class="btn small secondary" data-character-studio="' + esc(c.id) + '">Character Studio</button><button type="button" class="btn small ghost library-delete" data-delete-library="' + esc(c.id) + '">Delete</button></div></article>';
     }).join('') || '<div class="card"><b>No saved characters found</b><p class="muted">Import a cast or run Character Studio analysis on an imported book. Existing saved casts are indexed automatically; no sample characters are inserted.</p></div>';
+    applyCharacterLibraryViewMode(grid);
     return libraryCharacters;
   }
   function openLibraryEditor(c) {
@@ -1785,7 +1886,9 @@
         remove.disabled = true;
         try {
           const result = await call('project.trash', {folder:remove.dataset.deleteProject});
+          selectedProjectFolders.delete(String(remove.dataset.deleteProject));
           await refreshProjects();
+          updateProjectDeleteButton();
           message('Moved "' + (result.title || title) + '" to Deleted Books. Its source and saved work are recoverable until permanently purged.');
         } catch (err) {
           message(err?.message || String(err), true);
@@ -1800,6 +1903,17 @@
       catch (err) { message(err?.message || String(err), true); }
       finally { button.disabled = false; }
     });
+    if ($('libraryGrid') && !$('libraryGrid').dataset.bulkDeleteBound) {
+      $('libraryGrid').dataset.bulkDeleteBound = 'true';
+      $('libraryGrid').addEventListener('change', e => {
+        const checkbox = e.target.closest('[data-select-project]');
+        if (!checkbox) return;
+        const folder = String(checkbox.dataset.selectProject || '');
+        if (checkbox.checked) selectedProjectFolders.add(folder);
+        else selectedProjectFolders.delete(folder);
+        updateProjectDeleteButton();
+      });
+    }
     if ($('browseBtn')) $('browseBtn').onclick = act(importBook);
     if ($('fileInput')) $('fileInput').onchange = e => {
       const file = e.target.files?.[0]; e.target.value = '';
