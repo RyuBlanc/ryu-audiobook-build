@@ -70,8 +70,9 @@ class ProjectTrashTests(unittest.TestCase):
         from app.core.project_trash import trash_project, list_trashed_projects, restore_project
 
         project = self._make_project()
-        external_audio = self.app / "Audiobooks" / "Novel Vol 1.m4b"
-        external_audio.parent.mkdir(parents=True)
+        # This models a legacy generated output stored elsewhere inside the
+        # app-owned library root, not outside the managed application folder.
+        external_audio = self.library / "shared-output.m4b"
         external_audio.write_bytes(b"external audio")
         state_path = project.folder / "state.json"
         state = json.loads(state_path.read_text(encoding="utf-8"))
