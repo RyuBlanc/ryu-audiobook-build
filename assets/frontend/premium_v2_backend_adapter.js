@@ -340,12 +340,21 @@
     const dock = $('miniPlayer');
     if (dock) dock.classList.toggle('hidden', !(playerAudio && playerAudio.src && !miniPlayerDismissed && !audiobookPageActive()));
   }
+  function dashboardPageActive() {
+    const page = $('dashboard');
+    if (!page || page.hidden || page.classList.contains('hidden')) return false;
+    const style = window.getComputedStyle(page);
+    return style.display !== 'none' && style.visibility !== 'hidden' && page.getClientRects().length > 0;
+  }
   function bindMiniPlayerNavigation() {
     if (typeof window.go === 'function' && !window.go.__ryuMiniPlayerWrapped) {
       const original = window.go;
       const wrapped = function(...args) {
         const result = original.apply(this,args);
-        setTimeout(syncMiniPlayer,0);
+        setTimeout(() => {
+          syncMiniPlayer();
+          if (dashboardPageActive()) refreshProjects().catch(() => {});
+        },0);
         return result;
       };
       wrapped.__ryuMiniPlayerWrapped = true;
@@ -354,8 +363,18 @@
     if (!window.__ryuMiniPlayerNavBound) {
       window.__ryuMiniPlayerNavBound = true;
       document.addEventListener('click', event => {
-        if (event.target.closest('nav,aside,.sidebar,[data-page],[data-view]')) setTimeout(syncMiniPlayer,0);
+        if (event.target.closest('nav,aside,.sidebar,[data-page],[data-view]')) {
+          setTimeout(() => {
+            syncMiniPlayer();
+            if (dashboardPageActive()) refreshProjects().catch(() => {});
+          },0);
+        }
       }, true);
+    }
+    if (!window.__ryuDashboardProjectTimer) {
+      window.__ryuDashboardProjectTimer = setInterval(() => {
+        if (dashboardPageActive()) refreshProjects().catch(() => {});
+      }, 3000);
     }
   }
   async function refreshProjects() {
