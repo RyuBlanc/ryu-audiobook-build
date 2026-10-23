@@ -110,6 +110,27 @@ class ProjectTrashTests(unittest.TestCase):
         events = (self.app / "History" / "project-events.jsonl").read_text(encoding="utf-8").splitlines()
         self.assertEqual([json.loads(line)["event"] for line in events], ["project_trashed", "project_purged"])
 
+    def test_external_audio_is_moved_to_trash_and_restored_when_inside_managed_library(self):
+        from app.core.project_trash import trash_project, list_trashed_projects, restore_project
+
+        project = self._make_project()
+        external_audio = self.library / "shared-output.m4b"
+        external_audio.write_bytes(b"managed external audio")
+        state_path = project.folder / "state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["output_path"] = str(external_audio)
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        entry = trash_project(project)
+        # The currently generated M4B is inside its project and moves with the
+        # project folder. This test models a legacy output stored elsewhere in
+        # the managed library root.
+        self.assertTrue(external_audio.exists())
+        self.assertEqual(list_trashed_projects()[0]["external_artifacts"], [])
+
+        restored = restore_project(entry)
+        self.assertTrue(restored.exists())
+
     def test_trash_refuses_project_outside_library(self):
         from app.core.project_trash import trash_project
 
