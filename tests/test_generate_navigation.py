@@ -42,8 +42,8 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
             self.assertEqual(
                 page_keys,
                 ["Dashboard", "Library", "Import", "Chapters", "Voice & Narration",
-                 "Voice Cast", "Pronunciation", "Sound Design", "Generate", "Audiobooks",
-                 "History", "Models", "Hardware", "Settings"],
+                 "Voice Cast", "Character Library", "Pronunciation", "Sound Design",
+                 "Generate", "Audiobooks", "History", "Models", "Hardware", "Settings"],
             )
             group_labels = [
                 workflow.sidebar.item(i).text()
