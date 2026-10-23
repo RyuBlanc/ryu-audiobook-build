@@ -68,7 +68,7 @@ class DashboardLiveDataTests(unittest.TestCase):
             self.assertTrue(portable_cover.is_file())
             self.assertEqual(portable_cover.read_bytes(), cover.read_bytes())
             self.assertEqual(summary["chapter_count"], 2)
-            self.assertEqual(summary["prepared_percent"], 50)
+            self.assertEqual(summary["prepared_percent"], 65)
             self.assertEqual(summary["character_voice_count"], 2)
             self.assertEqual(summary["last_edited_chapter_number"], 2)
             self.assertTrue(summary["completed"])
