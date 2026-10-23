@@ -28,6 +28,7 @@ from PySide6.QtGui import QDesktopServices
 
 from app.core.paths import app_root, audiobooks_root, ensure_roots, library_root, settings_root
 from app.core.project import create_project, list_projects
+from app.documents.cover_art import COVER_IMAGE_EXTENSIONS, COVER_SOURCE_EXTENSIONS, extract_embedded_cover, persist_project_cover
 from app.documents.parser import SUPPORTED_EXTENSIONS, clean_import_noise, clean_text, detect_repeated_book_noise, extract_text
 from app.chapters.detector import detect_chapters
 from app.chapters.characters import analyze_book, merge_character_analysis_record
@@ -438,15 +439,48 @@ class PremiumV2Bridge(QObject):
         completed = valid_output and str(state.get("status") or "").casefold() == "completed"
 
         cover_value = str(state.get("cover_path") or "").strip()
-        cover = Path(cover_value).expanduser() if cover_value else None
-        supported_cover_exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
-        try:
-            if not cover or not cover.is_file() or cover.suffix.casefold() not in supported_cover_exts:
+        candidate_cover = Path(cover_value).expanduser() if cover_value else None
+        cover = None
+        state_changed = False
+        if candidate_cover and candidate_cover.is_file() and candidate_cover.suffix.casefold() in COVER_IMAGE_EXTENSIONS:
+            try:
+                cover = persist_project_cover(candidate_cover, project.folder)
+            except (OSError, ValueError, RuntimeError):
+                # Keep showing a valid source image even if the portable copy could
+                # not be written (for example, a disk with no free space).
+                try:
+                    cover = candidate_cover.resolve()
+                except (OSError, RuntimeError):
+                    cover = None
+            if cover and str(state.get("cover_path") or "") != str(cover):
+                state["cover_path"] = str(cover)
+                state_changed = True
+            if cover:
+                state["cover_detection_attempted"] = True
+                state_changed = True
+        elif cover_value:
+            # A moved/deleted source image must not hide a cover embedded in the
+            # imported book; discard the stale pointer and search once instead.
+            state.pop("cover_path", None)
+            state_changed = True
+
+        source_for_cover = project.source_path
+        if (cover is None and source_for_cover and source_for_cover.is_file()
+                and source_for_cover.suffix.casefold() in COVER_SOURCE_EXTENSIONS
+                and not state.get("cover_detection_attempted")):
+            state["cover_detection_attempted"] = True
+            state_changed = True
+            try:
+                cover = extract_embedded_cover(source_for_cover, project.folder)
+            except Exception:
+                log.debug("Could not extract embedded cover from %s", source_for_cover, exc_info=True)
                 cover = None
-            else:
-                cover = cover.resolve()
-        except (OSError, RuntimeError):
-            cover = None
+            if cover:
+                state["cover_path"] = str(cover)
+                state_changed = True
+
+        if state_changed:
+            save_state(project.folder, state)
 
         chapter_count = len(project.chapters)
         prepared_chapters = sum(
@@ -953,6 +987,16 @@ class PremiumV2Bridge(QObject):
             self.settings.setValue("project/active_folder", str(project.folder.resolve()))
             self.settings.sync()
             state = load_state(project.folder)
+            source_for_cover = project.source_path or path
+            if source_for_cover.suffix.casefold() in COVER_SOURCE_EXTENSIONS:
+                state["cover_detection_attempted"] = True
+                try:
+                    embedded_cover = extract_embedded_cover(source_for_cover, project.folder)
+                except Exception:
+                    log.debug("Could not extract embedded cover from %s", source_for_cover, exc_info=True)
+                    embedded_cover = None
+                if embedded_cover:
+                    state["cover_path"] = str(embedded_cover)
             state.update({"status": "imported", "source_path": str(project.source_path or path),
                           "source_title": book.title, "word_count": sum(len((c.text or "").split()) for c in chapters),
                           "imported_at": self._now(), "modified_at": self._now()})
