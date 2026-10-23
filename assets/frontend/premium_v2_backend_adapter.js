@@ -512,6 +512,7 @@
     }
     await refreshDashboardHero(projects);
     renderAudiobookLibrary(projects);
+    if (!playerAudio || !playerAudio.src) clearAudiobookPlayerDisplay();
     return projects;
   }
   async function refreshVoices() {
@@ -1182,6 +1183,31 @@
 
   async function wire() {
     await call('app.get_info');
+
+    // The approved HTML prototype attaches a fake timer-based player directly
+    // to these buttons. Replace those DOM nodes before attaching real playback,
+    // so the demo timer can never masquerade as audiobook audio.
+    for (const id of ['mainPlay','miniPlay']) {
+      const original = $(id);
+      if (!original) continue;
+      const replacement = original.cloneNode(true);
+      replacement.removeAttribute('onclick');
+      original.replaceWith(replacement);
+    }
+    const playSelectedAudiobook = () => {
+      if (!selectedAudiobookFolder) {
+        message('Open Audiobooks and choose Play audiobook on a finished title first.', true);
+        return;
+      }
+      openPlayer(selectedAudiobookFolder).catch(err => message(err?.message || String(err), true));
+    };
+    if ($('mainPlay')) $('mainPlay').onclick = playSelectedAudiobook;
+    if ($('miniPlay')) $('miniPlay').onclick = playSelectedAudiobook;
+    if ($('playerTimeline')) $('playerTimeline').oninput = () => {
+      const duration = playerAudio?.duration || 0;
+      if (playerAudio && duration) playerAudio.currentTime = duration * Math.max(0,Math.min(100,Number($('playerTimeline').value || 0))) / 100;
+    };
+    clearAudiobookPlayerDisplay();
     applyUnavailableControlStates();
     // Register navigation and action handlers before hydration. A slow local model,
     // history, or sound-library query must not delay the first interactive frame.
