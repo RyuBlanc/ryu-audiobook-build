@@ -10,10 +10,10 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.character_library import (
-    load_character_library, save_character_library, update_character,
-    soft_delete_character, restore_character, upsert_characters_from_studio,
+    load_character_library, update_character, soft_delete_character, restore_character,
 )
 from app.tts.voice_profile import load_profiles
+from PySide6.QtCore import QObject, Signal, QThread
 
 
 class CharacterEditDialog(QDialog):
@@ -60,6 +60,46 @@ class CharacterEditDialog(QDialog):
         }
 
 
+class CharacterPreviewWorker(QThread):
+    ready = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, profile, sample: str, output: Path):
+        super().__init__()
+        self.profile = profile
+        self.sample = sample
+        self.output = output
+
+    def run(self):
+        provider = None
+        try:
+            from app.tts.profile_provider import provider_from_profile
+            from app.tts.preview import build_voice_preview
+            provider, voice = provider_from_profile(self.profile)
+            build_voice_preview(
+                self.sample,
+                provider,
+                voice,
+                self.output,
+                narration_speed=0.90,
+                pacing_profile="natural",
+                max_chars=max(1000, len(self.sample) + 1),
+                target_seconds=10,
+            )
+            if not self.output.exists() or self.output.stat().st_size == 0:
+                raise RuntimeError("The voice engine did not produce a preview file.")
+            self.ready.emit(str(self.output))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+        finally:
+            close = getattr(provider, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+
+
 class CharacterLibraryPage(QWidget):
     """Persistent cross-volume cast library. Only stored app data is displayed."""
 
@@ -68,6 +108,7 @@ class CharacterLibraryPage(QWidget):
         self.open_character_studio = open_character_studio
         self.rows: list[dict] = []
         self.profiles = load_profiles()
+        self.preview_worker: CharacterPreviewWorker | None = None
 
         self.player = QMediaPlayer(self)
         self.audio_output = QAudioOutput(self)
@@ -335,6 +376,8 @@ class CharacterLibraryPage(QWidget):
         row = self._selected()
         if not row or not row.get("voice_name") or not row.get("dialogue_sample"):
             return
+        if self.preview_worker is not None and self.preview_worker.isRunning():
+            return
         profiles = {p.name: p for p in load_profiles()}
         profile = profiles.get(row["voice_name"])
         if not profile:
@@ -343,47 +386,29 @@ class CharacterLibraryPage(QWidget):
                 "The assigned profile is not currently available. Open Character Studio for this series and assign an installed voice profile.",
             )
             return
-        try:
-            from tempfile import gettempdir
-            from uuid import uuid4
-            from app.tts.profile_provider import provider_from_profile
-            from app.tts.preview import build_voice_preview
-            from threading import Thread
+        from tempfile import gettempdir
+        from uuid import uuid4
+        output = Path(gettempdir()) / f"ryu-character-preview-{uuid4().hex}.wav"
+        worker = CharacterPreviewWorker(profile, row["dialogue_sample"], output)
+        self.preview_worker = worker
+        self.preview_button.setEnabled(False)
+        self.status.setText("Generating a real assigned-voice preview…")
+        worker.ready.connect(self._preview_ready)
+        worker.failed.connect(self._preview_failed)
+        worker.finished.connect(self._preview_finished)
+        worker.start()
 
-            output = Path(gettempdir()) / f"ryu-character-preview-{uuid4().hex}.wav"
-            self.preview_button.setEnabled(False)
+    def _preview_ready(self, output_path: str):
+        self.player.setSource(QUrl.fromLocalFile(output_path))
+        self.player.play()
+        self.status.setText("Assigned-voice preview ready.")
 
-            def worker():
-                provider = None
-                try:
-                    provider, voice = provider_from_profile(profile)
-                    build_voice_preview(
-                        row["dialogue_sample"],
-                        provider,
-                        voice,
-                        output,
-                        narration_speed=0.90,
-                        pacing_profile="natural",
-                        max_chars=max(1000, len(row["dialogue_sample"]) + 1),
-                        target_seconds=10,
-                    )
-                    if output.exists():
-                        self.player.setSource(QUrl.fromLocalFile(str(output)))
-                        self.player.play()
-                except Exception as exc:
-                    self.status.setText(f"Voice preview failed: {exc}")
-                finally:
-                    close = getattr(provider, "close", None)
-                    if callable(close):
-                        try:
-                            close()
-                        except Exception:
-                            pass
-                    self.preview_button.setEnabled(True)
+    def _preview_failed(self, message: str):
+        self.status.setText(f"Voice preview failed: {message}")
 
-            Thread(target=worker, daemon=True).start()
-        except Exception as exc:
-            QMessageBox.critical(self, "Voice Preview Failed", str(exc))
+    def _preview_finished(self):
+        self.preview_button.setEnabled(True)
+        self.preview_worker = None
 
     def _playback_error(self, *args):
         self.status.setText(f"Audio playback error: {self.player.errorString()}")
