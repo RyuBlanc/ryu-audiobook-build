@@ -15,8 +15,49 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve();
+  let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
+  let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
+  const resumeCheckpointKey = 'ryu.project.resume-checkpoints.v1';
+  const resumeStages = new Set(['import','chapters','narrator','characters','sound','production','player']);
+  const resumeStageRoutes = {
+    import:'import', chapters:'chapters', narrator:'voice', characters:'characters',
+    sound:'sound', production:'production', player:'player'
+  };
+  function readResumeCheckpoints() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(resumeCheckpointKey) || '{}');
+      return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    } catch (_) { return {}; }
+  }
+  function writeResumeCheckpoint(folder, stage) {
+    if (!folder || !resumeStages.has(stage)) return;
+    const checkpoints = readResumeCheckpoints();
+    checkpoints[folder] = {stage, updated_at:new Date().toISOString()};
+    try { localStorage.setItem(resumeCheckpointKey, JSON.stringify(checkpoints)); } catch (_) {}
+  }
+  function savedResumeStage(project) {
+    if (!project?.folder) return '';
+    const stage = String(readResumeCheckpoints()[project.folder]?.stage || '').trim().toLowerCase();
+    return resumeStages.has(stage) ? stage : '';
+  }
+  function routeForResume(project) {
+    const saved = savedResumeStage(project);
+    if (saved) return saved;
+    if (project?.completed && project?.output_path) return 'player';
+    if (!project?.source_exists || !project?.chapter_count) return 'import';
+    if (!project?.voice_profile) return 'narrator';
+    if (!project?.character_analysis_done) return 'characters';
+    if (!project?.sound_design_configured) return 'sound';
+    if (!project?.output_configured) return 'production';
+    return 'chapters';
+  }
+  function navigateToProjectStage(project, stage = routeForResume(project)) {
+    const target = resumeStageRoutes[stage] || 'chapters';
+    if (project?.folder) writeResumeCheckpoint(project.folder, stage);
+    if (typeof window.go === 'function') window.go(target);
+    return target;
+  }
   const chapterUndoStacks = new Map(), chapterRedoStacks = new Map();
   let chapterLastText = '', chapterHistoryGroupOpen = false, chapterHistoryGroupTimer = null, chapterHistoryApplying = false;
   let libraryCharacters = [], libraryEditorId = null, libraryEditorActive = false;
@@ -130,8 +171,348 @@
     select.innerHTML = rows.map(r => '<option value="' + esc(r[value]) + '">' + esc(label(r)) + '</option>').join('');
     if (rows.some(r => String(r[value]) === previous)) select.value = previous;
   };
+  const dashboardText = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  function dashboardLeaves(root) {
+    return root ? [...root.querySelectorAll('h1,h2,h3,h4,p,span,small,b,strong,label,button,div,a')].filter(node => !node.children.length) : [];
+  }
+  function dashboardFindText(root, text) {
+    const target = dashboardText(text);
+    return dashboardLeaves(root).find(node => dashboardText(node.textContent) === target) || null;
+  }
+  function dashboardHero(root) {
+    const eyebrow = dashboardFindText(root, 'continue project');
+    let node = eyebrow?.parentElement || null;
+    while (node && node !== root) {
+      const text = dashboardText(node.textContent);
+      const actions = [...node.querySelectorAll('button,[role="button"],a')];
+      if (actions.some(button => ['continue project','create new project'].includes(dashboardText(button.textContent))) &&
+          text.includes('prepared') && text.includes('chapters')) return node;
+      node = node.parentElement;
+    }
+    return root?.querySelector('.continue-project,.continue-card,.dashboard-continue,[data-dashboard-continue]') || null;
+  }
+  function projectFileUrl(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const normalized = raw.replace(/\\/g, '/');
+    return encodeURI(normalized.startsWith('/') ? 'file://' + normalized : 'file:///' + normalized).replace(/#/g, '%23').replace(/\?/g, '%3F');
+  }
+  function applyProjectCover(element, path) {
+    if (!element) return;
+    const url = projectFileUrl(path);
+    if (element.tagName === 'IMG') {
+      if (url) { element.src = url; element.hidden = false; } else element.removeAttribute('src');
+    } else if (url) {
+      element.style.backgroundImage = 'url("' + url.replace(/"/g, '%22') + '")';
+      element.style.backgroundSize = 'cover';
+      element.style.backgroundPosition = 'center';
+      element.style.backgroundRepeat = 'no-repeat';
+      element.classList.add('has-project-cover');
+    } else {
+      element.style.removeProperty('background-image');
+      element.classList.remove('has-project-cover');
+    }
+  }
+  function applyProjectCovers(root) {
+    if (!root) return;
+    root.querySelectorAll('[data-cover-path]').forEach(card => {
+      applyProjectCover(card.querySelector('.book-cover,.project-cover,[data-project-cover],img[alt*="cover" i]'), card.dataset.coverPath || '');
+    });
+  }
+  function refreshDashboardFlow(project) {
+    const flow = document.querySelector('.production-flow');
+    if (!flow) return;
+    const title = flow.querySelector('.flow-summary > div:first-child b');
+    const readinessParts = [...(flow.querySelectorAll('.flow-readiness span,.flow-readiness strong') || [])];
+    const readinessLabel = readinessParts.find(node => node.tagName.toLowerCase() === 'span');
+    const readinessPercent = readinessParts.find(node => node.tagName.toLowerCase() === 'strong');
+    const stages = [...flow.querySelectorAll('.flow-stage')];
+    const links = [...flow.querySelectorAll('.flow-link')];
+    const defaultDetails = [
+      'Book & metadata', 'Structure & text', 'Voice profile',
+      'Character voices', 'Names & terms', 'Music & effects', 'Build audiobook'
+    ];
+    if (title) title.textContent = project?.title || 'No project selected';
+
+    if (!project) {
+      if (readinessLabel) readinessLabel.textContent = '0 of 7 stages ready';
+      if (readinessPercent) readinessPercent.textContent = '0%';
+      stages.forEach((stage,index) => {
+        stage.classList.remove('is-done','has-warning');
+        const check = stage.querySelector('.flow-check');
+        const detail = stage.querySelector('.flow-copy small');
+        if (check) check.textContent = '';
+        if (detail) detail.textContent = defaultDetails[index] || '';
+      });
+      links.forEach(link => link.classList.remove('is-done','has-warning'));
+      return;
+    }
+
+    const chapterCount = Number(project.chapter_count || 0);
+    const preparedChapters = Number(project.prepared_chapter_count || 0);
+    const chaptersReady = chapterCount > 0 && preparedChapters === chapterCount;
+    const hasChapterText = preparedChapters > 0;
+    const narratorName = String(project.narrator || project.voice_profile || '').trim();
+    const narratorReady = Boolean(String(project.voice_profile || '').trim());
+    const characterCount = Number(project.character_count || 0);
+    const characterVoiceCount = Number(project.character_voice_count || 0);
+    const characterReviewed = Boolean(project.character_analysis_done);
+    const charactersReady = characterReviewed &&
+      (characterCount === 0 || characterVoiceCount >= characterCount);
+    const outputReady = Boolean(project.output_configured);
+    const canGenerate = chapterCount > 0 && hasChapterText && narratorReady && outputReady;
+    const pronunciationCount = Number(project.pronunciation_rule_count || 0);
+    const soundConfigured = Boolean(project.sound_design_configured);
+
+    const stageState = [
+      {key:'import', ready:Boolean(project.source_exists), detail:project.source_exists ? 'Book & metadata' : 'Source file missing'},
+      {key:'chapters', ready:chaptersReady, detail:chaptersReady ? 'Structure & text' :
+        (chapterCount ? preparedChapters + '/' + chapterCount + ' chapters ready' : 'No chapters imported')},
+      {key:'voices', ready:narratorReady, detail:narratorReady ? (narratorName || project.voice_profile) : 'Choose a voice profile'},
+      {key:'characters', ready:charactersReady, detail:!characterReviewed ? 'Not analyzed' :
+        (characterCount === 0 ? 'No characters found' :
+          (charactersReady ? 'Voices assigned' : (characterCount-characterVoiceCount) + ' need review'))},
+      {key:'pronunciation', ready:true, detail:pronunciationCount ? pronunciationCount + ' saved rules' : 'Names & terms'},
+      {key:'sound', ready:true, detail:soundConfigured ? 'Configured' : 'Music & effects'},
+      {key:'generate', ready:canGenerate, detail:project.completed ? 'Audiobook ready' : (canGenerate ? 'Build audiobook' : 'Setup required')}
+    ];
+    const readyCount = stageState.filter(stage => stage.ready).length;
+    if (readinessLabel) readinessLabel.textContent = readyCount + ' of ' + stageState.length + ' stages ready';
+    if (readinessPercent) readinessPercent.textContent = Math.round(readyCount / stageState.length * 100) + '%';
+
+    stages.forEach((stage,index) => {
+      const current = stageState[index];
+      if (!current) return;
+      stage.classList.toggle('is-done', current.ready);
+      stage.classList.toggle('has-warning', !current.ready);
+      const check = stage.querySelector('.flow-check');
+      const detail = stage.querySelector('.flow-copy small');
+      if (check) check.textContent = current.ready ? '✓' : '!';
+      if (detail) detail.textContent = current.detail;
+      stage.dataset.projectReady = current.ready ? 'true' : 'false';
+    });
+    links.forEach((link,index) => {
+      link.classList.toggle('is-done', Boolean(stageState[index]?.ready));
+      link.classList.toggle('has-warning', Boolean(!stageState[index]?.ready && stageState[index+1]?.ready));
+    });
+  }
+  async function refreshDashboardHero(rows = projects) {
+    const dash = $('dashboard');
+    if (!dash) return null;
+    let active = null;
+    try { active = await call('project.get_active'); } catch (_) {}
+    const ordered = [...rows].sort((a,b) => (Date.parse(b.modified_at || '') || 0) - (Date.parse(a.modified_at || '') || 0));
+    dashboardProject = (active && ordered.find(project => project.folder === active.folder)) ||
+      ordered.find(project => !project.completed && Number(project.chapter_count || 0) > 0) ||
+      ordered.find(project => Number(project.chapter_count || 0) > 0) || null;
+    const hero = dashboardHero(dash);
+    if (hero) {
+      const project = dashboardProject;
+      const heading = [...hero.querySelectorAll('h1,h2,h3,h4')]
+        .find(node => !['continue project','production status'].includes(dashboardText(node.textContent)));
+      if (heading) heading.textContent = project?.title || 'Start a new audiobook project';
+      const subtitle = [...hero.querySelectorAll('p,span,small,div')]
+        .filter(node => {
+          const text = dashboardText(node.textContent);
+          return text.includes('chapters') && (text.includes('narrator') || text.includes('character voices')) && node.querySelectorAll('*').length <= 2;
+        }).sort((a,b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length)[0];
+      if (subtitle) subtitle.textContent = project
+        ? 'Narrator ' + (project.narrator || '—') + ' · ' + Number(project.chapter_count || 0) +
+          ' chapters · ' + Number(project.character_voice_count || 0) + ' character voices'
+        : '— chapters · — character voices';
+      const percent = project ? Math.max(0, Math.min(100, Number(project.prepared_percent || 0))) : 0;
+      // Keep the source HTML's existing bold percentage and adjacent label.
+      const preparedLine = hero.querySelector('.meta-row > span:first-child');
+      const preparedValue = preparedLine?.querySelector('b,strong');
+      if (preparedValue) preparedValue.textContent = percent + '%';
+      else if (preparedLine) preparedLine.textContent = percent + '% prepared';
+
+      // Update only the bold chapter number so the "last edited" typography stays intact.
+      const editedLine = hero.querySelector('.meta-row > span:nth-child(2)');
+      const editedValue = editedLine?.querySelector('b,strong');
+      const editedChapter = project?.last_edited_chapter_number || '—';
+      if (editedValue) editedValue.textContent = 'Chapter ' + editedChapter;
+      else if (editedLine) editedLine.textContent = 'Chapter ' + editedChapter + ' last edited';
+      const progress = hero.querySelector('.progress i,.progress-fill,.progress-bar-fill,[role="progressbar"],progress,[style*="width:"]');
+      if (progress) {
+        progress.style.width = percent + '%';
+        progress.setAttribute('aria-valuenow', String(percent));
+        if (progress.tagName === 'PROGRESS') progress.value = percent;
+      }
+      applyProjectCover(hero.querySelector('.book-cover,.project-cover,[data-project-cover],img[alt*="cover" i]'), project?.cover_path || '');
+      hero.dataset.dashboardProjectFolder = project?.folder || '';
+      const action = [...hero.querySelectorAll('button,[role="button"],a')]
+        .find(button => ['continue project','create new project'].includes(dashboardText(button.textContent)));
+      if (action) {
+        action.textContent = project ? 'Continue Project' : 'Create New Project';
+        action.dataset.continueProjectFolder = project?.folder || '';
+        action.disabled = false;
+      }
+    }
+    const context = dashboardLeaves(document).find(node =>
+      dashboardText(node.textContent).endsWith('· local project') && !node.closest('#dashboard'));
+    if (context) context.textContent = dashboardProject ? dashboardProject.title + ' · Local project' : 'No project selected · Local project';
+    refreshDashboardFlow(dashboardProject);
+    return dashboardProject;
+  }
+  function renderAudiobookLibrary(rows = projects) {
+    const page = $('player');
+    if (!page) return;
+    let container = $('backendAudiobookLibrary');
+    if (!container) {
+      container = document.createElement('section');
+      container.id = 'backendAudiobookLibrary';
+      container.className = 'section';
+      page.insertBefore(container, page.firstElementChild);
+    }
+    const available = rows.filter(project => project.completed && project.output_path);
+    container.innerHTML = '<div class="section-head"><div><p class="eyebrow">YOUR LIBRARY</p><h2>Generated audiobooks</h2></div><p class="muted">' +
+      available.length + ' ready to play</p></div><div class="recent-grid">' +
+      (available.map(project => '<article class="card project-card" data-project-folder="' + esc(project.folder || '') +
+        '" data-cover-path="' + esc(project.cover_path || '') + '"><div class="book-cover"></div><div class="project-pad"><span class="badge">Ready</span><h3>' +
+        esc(project.title || 'Untitled audiobook') + '</h3><p class="muted">' + esc(project.narrator || 'Narrator not set') + ' · ' +
+        Number(project.chapter_count || 0) + ' chapters</p><button class="btn small" type="button" data-play-project-folder="' +
+        esc(project.folder || '') + '">Play audiobook</button></div></article>').join('') ||
+        '<p class="muted">No finished audiobooks yet. Generate one in Production Studio to see it here.</p>') + '</div>';
+    applyProjectCovers(container);
+  }
+  function dashboardGenerationCard(root) {
+    const title = dashboardFindText(root, 'production status') || dashboardFindText(root, 'active generation');
+    let node = title?.parentElement || null;
+    while (node && node !== root) {
+      const text = dashboardText(node.textContent);
+      const buttons = [...node.querySelectorAll('button,[role="button"],a')];
+      if (text.includes('current chapter') && text.includes('processing stage') &&
+          buttons.some(button => ['view job','pause','resume'].includes(dashboardText(button.textContent)))) return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+  function setDashboardRow(root, label, value) {
+    const leaf = dashboardFindText(root, label);
+    if (!leaf) return;
+    let node = leaf;
+    for (let depth = 0; depth < 4 && node.parentElement; depth++) {
+      const parent = node.parentElement;
+      const siblings = [...parent.children].filter(child => child !== node && dashboardText(child.textContent) !== dashboardText(label));
+      if (siblings.length) { siblings[siblings.length - 1].textContent = value; return; }
+      node = parent;
+    }
+  }
+  function refreshDashboardGeneration(jobs = []) {
+    const root = $('dashboard');
+    const card = root && dashboardGenerationCard(root);
+    if (!card) return;
+    const resumableStates = ['queued','running','pause_requested','paused','cancel_requested','retrying'];
+    const active = jobs.filter(job => String(job.type || '').toLowerCase() === 'audiobook-generation' &&
+      resumableStates.includes(String(job.state || '').toLowerCase()))
+      .sort((a,b) => (Date.parse(b.updated_at || b.queued_at || '') || 0) - (Date.parse(a.updated_at || a.queued_at || '') || 0));
+    const job = active[0] || null;
+    // Bind by position within the static job card. These spans are deliberately
+    // cleared when there is no job, so searching for their display text breaks
+    // the next time generation starts.
+    const progressLine = [...card.querySelectorAll('.job-line')][2] || null;
+    const percentLabel = progressLine?.children?.[0] || null;
+    const etaLabel = progressLine?.children?.[1] || null;
+    const track = card.querySelector('.progress,.progress-track,.progress-bar,progress,[role="progressbar"]');
+    const fill = card.querySelector('.progress i,.progress-fill,.progress-bar-fill,[role="progressbar"],progress,[style*="width:"]');
+    const buttons = [...card.querySelectorAll('button,[role="button"],a')];
+    const view = buttons.find(button => dashboardText(button.textContent) === 'view job');
+    const control = buttons.find(button => ['pause','resume'].includes(dashboardText(button.textContent)));
+    if (!job) {
+      const selectedProject = dashboardProject || null;
+      setDashboardRow(card, 'current chapter', selectedProject
+        ? (Number(selectedProject.completed_chapter_count || 0) + ' chapters prepared')
+        : 'No project selected');
+      setDashboardRow(card, 'processing stage', selectedProject
+        ? (selectedProject.completed && selectedProject.output_path ? 'Audiobook ready' :
+          ('Setup checkpoint · ' + (savedResumeStage(selectedProject) || routeForResume(selectedProject))))
+        : 'No active generation job');
+      if (percentLabel) percentLabel.textContent = '';
+      if (etaLabel) etaLabel.textContent = '';
+      if (fill) { fill.style.width = '0%'; fill.setAttribute('aria-valuenow','0'); if (fill.tagName === 'PROGRESS') fill.value = 0; }
+      if (track) track.style.visibility = 'hidden';
+      if (view) { view.disabled = true; delete view.dataset.dashboardJobId; }
+      if (control) { control.disabled = true; delete control.dataset.dashboardJobId; delete control.dataset.dashboardGenerationAction; }
+      return;
+    }
+    const project = projects.find(row => row.folder === job.project_folder);
+    const total = Number(job.chapters_total || project?.chapter_count || 0);
+    const current = Number(job.current_chapter || 0);
+    setDashboardRow(card, 'current chapter', current > 0 ? current + ' of ' + (total || '—') : (total ? '0 of ' + total : '—'));
+    setDashboardRow(card, 'processing stage', job.stage || job.message || 'Working');
+    const percent = Math.max(0, Math.min(100, Math.round(Number(job.progress || 0))));
+    if (percentLabel) percentLabel.textContent = percent + '% complete';
+    const eta = Number(job.eta_seconds);
+    if (etaLabel) etaLabel.textContent = Number.isFinite(eta) && eta > 0 ? Math.floor(eta/60) + 'm ' + String(Math.floor(eta%60)).padStart(2,'0') + 's remaining' : '';
+    if (track) track.style.visibility = '';
+    if (fill) { fill.style.width = percent + '%'; fill.setAttribute('aria-valuenow',String(percent)); if (fill.tagName === 'PROGRESS') fill.value = percent; }
+    if (view) { view.disabled = false; view.dataset.dashboardJobId = job.job_id || ''; }
+    if (control) {
+      const paused = ['paused','pause_requested'].includes(String(job.state || '').toLowerCase());
+      control.textContent = paused ? 'Resume' : 'Pause';
+      control.disabled = !['running','paused'].includes(String(job.state || '').toLowerCase());
+      control.dataset.dashboardGenerationAction = paused ? 'resume' : 'pause';
+      control.dataset.dashboardJobId = job.job_id || '';
+    }
+  }
+  function audiobookPageActive() {
+    const nav = [...document.querySelectorAll('nav .active,aside .active,.sidebar .active,[aria-current="page"]')]
+      .find(node => /audiobooks/i.test(node.textContent || ''));
+    if (nav) return true;
+    const page = $('player');
+    if (!page || page.hidden || page.classList.contains('hidden')) return false;
+    const style = window.getComputedStyle(page);
+    return style.display !== 'none' && style.visibility !== 'hidden' && page.getClientRects().length > 0;
+  }
+  function syncMiniPlayer() {
+    const dock = $('miniPlayer');
+    if (dock) dock.classList.toggle('hidden', !(playerAudio && playerAudio.src && !miniPlayerDismissed && !audiobookPageActive()));
+  }
+  function dashboardPageActive() {
+    const page = $('dashboard');
+    if (!page || page.hidden || page.classList.contains('hidden')) return false;
+    const style = window.getComputedStyle(page);
+    return style.display !== 'none' && style.visibility !== 'hidden' && page.getClientRects().length > 0;
+  }
+  function bindMiniPlayerNavigation() {
+    if (typeof window.go === 'function' && !window.go.__ryuMiniPlayerWrapped) {
+      const original = window.go;
+      const wrapped = function(...args) {
+        const result = original.apply(this,args);
+        const page = String(args[0] || '').trim().toLowerCase();
+        const aliases = {
+          import:'import', chapters:'chapters', voice:'narrator', narrator:'narrator',
+          characters:'characters', character:'characters', sound:'sound', sounds:'sound',
+          production:'production', generator:'production', generation:'production', player:'player'
+        };
+        const stage = aliases[page];
+        if (stage && dashboardProject?.folder) writeResumeCheckpoint(dashboardProject.folder, stage);
+        setTimeout(() => {
+          syncMiniPlayer();
+          refreshProjects().catch(() => {});
+        },0);
+        return result;
+      };
+      wrapped.__ryuMiniPlayerWrapped = true;
+      window.go = wrapped;
+    }
+    if (!window.__ryuMiniPlayerNavBound) {
+      window.__ryuMiniPlayerNavBound = true;
+      document.addEventListener('click', event => {
+        if (event.target.closest('nav,aside,.sidebar,[data-page],[data-view]')) {
+          setTimeout(syncMiniPlayer,0);
+        }
+      }, true);
+    }
+    if (!window.__ryuDashboardProjectTimer) {
+      window.__ryuDashboardProjectTimer = setInterval(() => {
+        if (dashboardPageActive()) refreshProjects().catch(() => {});
+      }, 3000);
+    }
+  }
   async function refreshProjects() {
-    projects = await call('project.list');
+    projects = (await call('project.list')).sort((a,b) => (Date.parse(b.modified_at || '') || 0) - (Date.parse(a.modified_at || '') || 0));
     const grid = $('libraryGrid');
     const search = ($('librarySearch')?.value || '').trim().toLowerCase();
     const filter = $('libraryFilters')?.querySelector('button.active')?.textContent?.trim().toLowerCase() || 'all';
@@ -142,11 +523,17 @@
         (filter === 'attention' && (['failed','error','attention'].includes(status) || !Number(p.chapter_count || 0)));
       return matchesFilter && (!search || (p.title + ' ' + (p.source_path || '') + ' ' + status).toLowerCase().includes(search));
     });
-    if (grid) grid.innerHTML = visible.map(p => {
-      const complete = Boolean(p.completed);
-      const status = complete ? 'Completed' : (p.status || 'New');
-      return '<article class="card project-card" data-name="' + esc(p.title) + '" data-project-folder="' + esc(p.folder) + '"><div class="book-cover"></div><div class="project-pad"><span class="badge ' + (complete ? '' : 'info') + '">' + esc(status) + '</span><h3>' + esc(p.title) + '</h3><p class="muted">' + Number(p.chapter_count || 0) + ' chapters · Local project</p><p class="muted">' + esc(p.source_path || 'Source path unavailable') + '</p><button class="btn small" type="button" data-open-project="' + esc(p.folder) + '">Open project</button></div></article>';
-    }).join('') || '<p class="muted">No local projects found. Import a book to start your library.</p>';
+    if (grid) {
+      grid.innerHTML = visible.map(p => {
+        const complete = Boolean(p.completed), status = complete ? 'Completed' : (p.status || 'New');
+        return '<article class="card project-card" data-name="' + esc(p.title) + '" data-project-folder="' + esc(p.folder) +
+          '" data-cover-path="' + esc(p.cover_path || '') + '"><div class="book-cover"></div><div class="project-pad"><span class="badge ' +
+          (complete ? '' : 'info') + '">' + esc(status) + '</span><h3>' + esc(p.title) + '</h3><p class="muted">' +
+          Number(p.chapter_count || 0) + ' chapters · Local project</p><p class="muted">' + esc(p.source_path || 'Source path unavailable') +
+          '</p><button class="btn small" type="button" data-open-project="' + esc(p.folder) + '">Open project</button></div></article>';
+      }).join('') || '<p class="muted">No local projects found. Import a book to start your library.</p>';
+      applyProjectCovers(grid);
+    }
     const dash = $('dashboard');
     if (dash) {
       const metrics = dash.querySelectorAll('.metrics .metric strong');
@@ -155,19 +542,22 @@
       const attention = projects.filter(p => ['failed','error','attention'].includes(String(p.status || '').toLowerCase()) || !Number(p.chapter_count || 0)).length;
       [projects.length, completed, active, attention].forEach((value, index) => { if (metrics[index]) metrics[index].textContent = value; });
       const recent = dash.querySelector('.recent-grid');
-      if (recent) recent.innerHTML = projects.slice(0, 3).map(p => {
-        const status = String(p.status || 'new').toLowerCase();
-        const badge = p.completed ? 'Completed' : (['failed','error','attention'].includes(status) || !Number(p.chapter_count || 0) ? 'Attention' : 'Active');
-        const badgeClass = badge === 'Completed' ? '' : (badge === 'Attention' ? 'warn' : 'info');
-        return '<article class="card project-card" data-project-folder="' + esc(p.folder) + '"><div class="book-cover"></div><div class="project-pad"><span class="badge ' + badgeClass + '">● ' + badge + '</span><h3>' + esc(p.title) + '</h3><p class="muted">' + Number(p.chapter_count || 0) + ' chapters · ' + esc(p.status || 'Local project') + '</p></div></article>';
-      }).join('') || '<p class="muted">No local projects yet. Import a book to see it here.</p>';
-    }
-    $('libraryFilters')?.querySelectorAll('button').forEach(button => {
-      if (!button.dataset.backendFilterBound) {
-        button.dataset.backendFilterBound = '1';
-        button.addEventListener('click', () => setTimeout(() => refreshProjects().catch(e=>message(e.message,true)), 0));
+      if (recent) {
+        recent.innerHTML = projects.slice(0, 3).map(p => {
+          const status = String(p.status || 'new').toLowerCase();
+          const badge = p.completed ? 'Completed' : (['failed','error','attention'].includes(status) || !Number(p.chapter_count || 0) ? 'Attention' : 'Active');
+          const badgeClass = badge === 'Completed' ? '' : (badge === 'Attention' ? 'warn' : 'info');
+          return '<article class="card project-card" data-project-folder="' + esc(p.folder) + '" data-cover-path="' +
+            esc(p.cover_path || '') + '"><div class="book-cover"></div><div class="project-pad"><span class="badge ' +
+            badgeClass + '">● ' + badge + '</span><h3>' + esc(p.title) + '</h3><p class="muted">' +
+            Number(p.chapter_count || 0) + ' chapters · ' + esc(p.status || 'Local project') + '</p></div></article>';
+        }).join('') || '<p class="muted">No local projects yet. Import a book to see it here.</p>';
+        applyProjectCovers(recent);
       }
-    });
+    }
+    await refreshDashboardHero(projects);
+    renderAudiobookLibrary(projects);
+    if (!playerAudio || !playerAudio.src) clearAudiobookPlayerDisplay();
     return projects;
   }
   async function refreshVoices() {
@@ -363,6 +753,7 @@
   let backendJobFilter = 'active';
   async function refreshJobs() {
     const allJobs = await call('job.list', {include_hidden:false});
+    refreshDashboardGeneration(allJobs);
     const jobs = allJobs.filter(j => backendJobFilter === 'all' ||
       (backendJobFilter === 'completed' ? j.state === 'completed' :
       (backendJobFilter === 'failed' ? j.state === 'failed' :
@@ -595,29 +986,301 @@
       return playable;
     });
   }
-  async function openPlayer() {
-    const data = await call('player.get_active');
-    if (playerAudio && playerAudio.src === data.file_url) { if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause(); return; }
-    if (playerAudio) playerAudio.pause();
+  function setPlaybackButtonState() {
+    const paused = !playerAudio || playerAudio.paused;
+    const main = $('mainPlay'), mini = $('miniPlay');
+    if (main) main.textContent = paused ? '▶' : 'Ⅱ';
+    if (mini) mini.textContent = paused ? '▶' : 'Ⅱ';
+    if (main) main.disabled = !(playerAudio && playerAudio.src);
+    if (mini) mini.disabled = !(playerAudio && playerAudio.src);
+  }
+  function clearAudiobookPlayerDisplay() {
+    if (playerAudio && playerAudio.src) return;
+    const page = $('player');
+    if (!page) return;
+    const grid = page.querySelector('.player-grid');
+    const bookCard = grid?.querySelector(':scope > .card:first-child');
+    const playbackCard = grid?.querySelector(':scope > .card:nth-child(2)');
+    const title = bookCard?.querySelector('h2');
+    const metadata = bookCard?.querySelector('p.muted');
+    const nowPlaying = playbackCard?.querySelector('h2');
+    if (title) title.textContent = 'No audiobook selected';
+    if (metadata) metadata.textContent = 'Choose a finished audiobook from your library to begin playback.';
+    if (nowPlaying) nowPlaying.textContent = 'Select a finished audiobook';
+    applyProjectCover(bookCard?.querySelector('.player-cover,.book-cover,[data-project-cover]'), '');
+    const timeline = $('playerTimeline');
+    if (timeline) { timeline.value = 0; timeline.disabled = true; }
+    if ($('currentTime')) $('currentTime').textContent = '0:00';
+    if ($('miniProgress')) $('miniProgress').style.width = '0%';
+    const durationNode = $('currentTime')?.parentElement?.querySelectorAll('span')?.[1];
+    if (durationNode) durationNode.textContent = '0:00';
+    const chapterList = grid?.querySelector('aside.card .list');
+    if (chapterList) chapterList.innerHTML = '<div class="list-item">No audiobook selected.</div>';
+    activePlayerChapters = [];
+    const mini = $('miniPlayer');
+    if (mini) {
+      const miniTitle = mini.querySelector('b');
+      const miniSubtitle = mini.querySelector('small.muted');
+      const time = mini.querySelector('span.muted');
+      if (miniTitle) miniTitle.textContent = 'No audiobook selected';
+      if (miniSubtitle) miniSubtitle.textContent = 'Choose Play audiobook from the Audiobooks page';
+      if (time) time.textContent = '0:00';
+      applyProjectCover(mini.querySelector('.mini-cover,.book-cover,.project-cover,[data-project-cover],img[alt*="cover" i]'), '');
+      mini.classList.add('hidden');
+    }
+    setPlaybackButtonState();
+  }
+  function renderSelectedAudiobook(data) {
+    const page = $('player');
+    const grid = page?.querySelector('.player-grid');
+    const bookCard = grid?.querySelector(':scope > .card:first-child');
+    const playbackCard = grid?.querySelector(':scope > .card:nth-child(2)');
+    const title = bookCard?.querySelector('h2');
+    const metadata = bookCard?.querySelector('p.muted');
+    const nowPlaying = playbackCard?.querySelector('h2');
+    if (title) title.textContent = data.title || 'Untitled audiobook';
+    const author = String(data.author || '').trim();
+    const narrator = String(data.narrator || data.voice_profile || '').trim();
+    if (metadata) metadata.textContent = (author ? author + ' · ' : '') + (narrator ? 'Narrated by ' + narrator : 'Narrator not set');
+    if (nowPlaying) nowPlaying.textContent = 'Full audiobook';
+    applyProjectCover(bookCard?.querySelector('.player-cover,.book-cover,[data-project-cover]'), data.cover_path || '');
+    const chapters = Array.isArray(data.chapters) ? data.chapters : [];
+    activePlayerChapters = chapters;
+    const chapterList = grid?.querySelector('aside.card .list');
+    if (chapterList) {
+      chapterList.innerHTML = chapters.map(chapter => {
+        const start = Number(chapter.start_seconds);
+        const hasTiming = Number.isFinite(start) && start >= 0;
+        return '<div class="list-item" role="button" tabindex="' + (hasTiming ? '0' : '-1') +
+          '" data-audiobook-chapter-start="' + (hasTiming ? String(start) : '') + '"' +
+          (hasTiming ? '' : ' aria-disabled="true"') + '>' +
+          esc('Chapter ' + Number(chapter.number || 0) + ' · ' + String(chapter.title || 'Untitled chapter')) +
+          '</div>';
+      }).join('') || '<div class="list-item">No chapter metadata available.</div>';
+    }
+    const speedButtons = [...(page?.querySelectorAll('.player-grid .toolbar .segmented button') || [])];
+    speedButtons.forEach(button => {
+      const rate = Number(String(button.textContent || '').replace('×','').trim());
+      button.classList.toggle('active', Number.isFinite(rate) && Math.abs(rate - playerRate) < 0.01);
+    });
+    const volumeControl = page?.querySelector('.player-grid .toolbar input.range');
+    if (volumeControl) volumeControl.value = String(Math.round(playerVolume * 100));
+    const playerButtons = [...(page?.querySelectorAll('.player-controls button') || [])];
+    const hasTimedChapters = chapters.some(chapter => Number.isFinite(Number(chapter.start_seconds)));
+    if (playerButtons[1]) {
+      playerButtons[1].disabled = !hasTimedChapters;
+      playerButtons[1].title = hasTimedChapters ? 'Previous chapter' : 'Chapter navigation is unavailable for this audiobook file';
+    }
+    if (playerButtons[3]) {
+      playerButtons[3].disabled = !hasTimedChapters;
+      playerButtons[3].title = hasTimedChapters ? 'Next chapter' : 'Chapter navigation is unavailable for this audiobook file';
+    }
+    const duration = playerAudio?.duration || 0;
+    if ($('playerTimeline')) { $('playerTimeline').value = duration ? (playerAudio.currentTime / duration) * 100 : 0; $('playerTimeline').disabled = false; }
+    if ($('currentTime')) $('currentTime').textContent = formatTime(playerAudio?.currentTime || 0);
+    if ($('miniProgress')) $('miniProgress').style.width =
+      (playerAudio?.duration ? playerAudio.currentTime / playerAudio.duration * 100 : 0) + '%';
+    const durationNode = $('currentTime')?.parentElement?.querySelectorAll('span')?.[1];
+    if (durationNode) durationNode.textContent = formatTime(duration);
+    const mini = $('miniPlayer');
+    if (mini) {
+      const miniTitle = mini.querySelector('b');
+      const miniSubtitle = mini.querySelector('small.muted');
+      const time = mini.querySelector('span.muted');
+      if (miniTitle) miniTitle.textContent = data.title || 'Untitled audiobook';
+      if (miniSubtitle) miniSubtitle.textContent = 'Full audiobook · ' + chapters.length + ' chapters';
+      if (time) time.textContent = formatTime(playerAudio?.currentTime || 0);
+      applyProjectCover(mini.querySelector('.mini-cover,.book-cover,.project-cover,[data-project-cover],img[alt*="cover" i]'), data.cover_path || '');
+    }
+    setPlaybackButtonState();
+  }
+  function persistPlayerPosition(force = false, reset = false, folder = selectedAudiobookFolder, audio = playerAudio) {
+    if (!folder || !audio || !audio.src) return;
+    const now = Date.now();
+    if (!force && now - playerPositionSaveAt < 10000) return;
+    playerPositionSaveAt = now;
+    const seconds = reset ? 0 : Math.max(0, Number(audio.currentTime) || 0);
+    void call('player.position.save', {folder, position_seconds:seconds})
+      .catch(error => console.warn('[Ryu player position]', error?.message || error));
+  }
+  function applyPlayerRate(value, persist = true) {
+    const rate = Number(value);
+    if (!Number.isFinite(rate) || rate < 0.5 || rate > 2) {
+      message('Playback speed must be between 0.5× and 2.0×.', true);
+      return;
+    }
+    playerRate = rate;
+    if (playerAudio) playerAudio.playbackRate = rate;
+    const page = $('player');
+    [...(page?.querySelectorAll('.player-grid .toolbar .segmented button') || [])].forEach(button => {
+      const candidate = Number(String(button.textContent || '').replace('×','').trim());
+      button.classList.toggle('active', Number.isFinite(candidate) && Math.abs(candidate-rate) < 0.01);
+    });
+    if (persist) void call('settings.save', {player_rate:rate})
+      .catch(error => message(error?.message || String(error), true));
+  }
+  function applyPlayerVolume(value, persist = false) {
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) return;
+    playerVolume = Math.max(0, Math.min(1, amount / 100));
+    if (playerAudio) playerAudio.volume = playerVolume;
+    const control = $('player')?.querySelector('.player-grid .toolbar input.range');
+    if (control) control.value = String(Math.round(playerVolume * 100));
+    if (persist) void call('settings.save', {player_volume:playerVolume})
+      .catch(error => message(error?.message || String(error), true));
+  }
+  function seekPlayerBy(seconds) {
+    if (!playerAudio || !playerAudio.src || !Number.isFinite(playerAudio.duration)) {
+      message('Choose Play audiobook on a finished title before using playback controls.', true);
+      return;
+    }
+    playerAudio.currentTime = Math.max(0, Math.min(playerAudio.duration, playerAudio.currentTime + Number(seconds || 0)));
+  }
+  function jumpPlayerChapter(direction) {
+    if (!playerAudio || !playerAudio.src) return;
+    const chapters = activePlayerChapters
+      .filter(chapter => Number.isFinite(Number(chapter.start_seconds)))
+      .slice().sort((a,b) => Number(a.start_seconds) - Number(b.start_seconds));
+    if (!chapters.length) {
+      message('Chapter navigation is unavailable for this audiobook file.', true);
+      return;
+    }
+    const current = Math.max(0, Number(playerAudio.currentTime) || 0);
+    let index = 0;
+    for (let i = 0; i < chapters.length; i++) {
+      if (Number(chapters[i].start_seconds) <= current + 0.05) index = i;
+      else break;
+    }
+    let targetIndex;
+    if (direction === 'previous') {
+      targetIndex = current - Number(chapters[index].start_seconds) > 3 ? index : index - 1;
+      if (targetIndex < 0) targetIndex = 0;
+    } else {
+      targetIndex = index + 1;
+      if (targetIndex >= chapters.length) {
+        message('You are already at the final chapter of this audiobook.');
+        return;
+      }
+    }
+    playerAudio.currentTime = Math.max(0, Number(chapters[targetIndex].start_seconds) || 0);
+  }
+  function bindAudiobookPlayerControls() {
+    const page = $('player');
+    if (!page || page.dataset.backendPlayerControlsBound === 'true') return;
+    page.dataset.backendPlayerControlsBound = 'true';
+    const buttons = [...(page.querySelector('.player-controls')?.querySelectorAll('button') || [])];
+    if (buttons[0]) { buttons[0].title = 'Rewind 15 seconds'; buttons[0].onclick = () => seekPlayerBy(-15); }
+    if (buttons[1]) { buttons[1].title = 'Previous chapter'; buttons[1].onclick = () => jumpPlayerChapter('previous'); }
+    if (buttons[3]) { buttons[3].title = 'Next chapter'; buttons[3].onclick = () => jumpPlayerChapter('next'); }
+    if (buttons[4]) { buttons[4].title = 'Forward 15 seconds'; buttons[4].onclick = () => seekPlayerBy(15); }
+    const speedButtons = [...page.querySelectorAll('.player-grid .toolbar .segmented button')];
+    speedButtons.forEach(button => {
+      button.onclick = () => {
+        const rate = Number(String(button.textContent || '').replace('×','').trim());
+        applyPlayerRate(rate, true);
+      };
+    });
+    const volumeControl = page.querySelector('.player-grid .toolbar input.range');
+    if (volumeControl) {
+      volumeControl.oninput = () => applyPlayerVolume(volumeControl.value, false);
+      volumeControl.onchange = () => applyPlayerVolume(volumeControl.value, true);
+    }
+    page.addEventListener('click', event => {
+      const chapter = event.target.closest('[data-audiobook-chapter-start]');
+      if (!chapter || chapter.getAttribute('aria-disabled') === 'true') return;
+      if (!playerAudio || !playerAudio.src) {
+        message('Choose Play audiobook on a finished title before selecting a chapter.', true);
+        return;
+      }
+      const start = Number(chapter.dataset.audiobookChapterStart);
+      if (Number.isFinite(start) && start >= 0) playerAudio.currentTime = start;
+    });
+    page.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      const chapter = event.target.closest('[data-audiobook-chapter-start]');
+      if (!chapter || chapter.getAttribute('aria-disabled') === 'true') return;
+      event.preventDefault();
+      const start = Number(chapter.dataset.audiobookChapterStart);
+      if (playerAudio && playerAudio.src && Number.isFinite(start) && start >= 0) playerAudio.currentTime = start;
+    });
+    applyPlayerRate(playerRate, false);
+    applyPlayerVolume(playerVolume * 100, false);
+  }
+  async function openPlayer(projectFolder = selectedAudiobookFolder) {
+    const folder = String(projectFolder || '').trim();
+    if (!folder) throw new Error('Select a finished audiobook from the Audiobooks library before playing.');
+    const data = await call('player.get_active', {folder});
+    if (playerAudio && playerAudio.src === data.file_url) {
+      selectedAudiobookFolder = folder;
+      miniPlayerDismissed = false;
+      playerRate = Number.isFinite(Number(data.playback_rate)) ? Number(data.playback_rate) : playerRate;
+      playerVolume = Number.isFinite(Number(data.playback_volume)) ? Math.max(0,Math.min(1,Number(data.playback_volume))) : playerVolume;
+      playerAudio.playbackRate = playerRate;
+      playerAudio.volume = playerVolume;
+      renderSelectedAudiobook(data);
+      if (playerAudio.paused) await playerAudio.play(); else playerAudio.pause();
+      syncMiniPlayer();
+      setPlaybackButtonState();
+      return;
+    }
+    if (playerAudio) {
+      persistPlayerPosition(true, false, selectedAudiobookFolder, playerAudio);
+      playerAudio.pause();
+    }
+    selectedAudiobookFolder = folder;
+    playerPositionSaveAt = 0;
+    playerRate = Number.isFinite(Number(data.playback_rate)) && Number(data.playback_rate) >= 0.5 && Number(data.playback_rate) <= 2
+      ? Number(data.playback_rate) : 1;
+    playerVolume = Number.isFinite(Number(data.playback_volume)) && Number(data.playback_volume) >= 0 && Number(data.playback_volume) <= 1
+      ? Number(data.playback_volume) : 0.8;
     playerAudio = new Audio(data.file_url);
-    playerAudio.preload = 'metadata';
-    playerAudio.ontimeupdate = () => {
-      const duration = playerAudio.duration || 0, current = playerAudio.currentTime || 0;
+    const audio = playerAudio;
+    const audioFolder = folder;
+    audio.preload = 'metadata';
+    audio.playbackRate = playerRate;
+    audio.volume = playerVolume;
+    audio.ontimeupdate = () => {
+      const duration = audio.duration || 0, current = audio.currentTime || 0;
       if ($('playerTimeline') && duration) $('playerTimeline').value = current / duration * 100;
       if ($('miniProgress') && duration) $('miniProgress').style.width = current / duration * 100 + '%';
       if ($('currentTime')) $('currentTime').textContent = formatTime(current);
-      const main = $('mainPlay'), mini = $('miniPlay');
-      if (main) main.textContent = playerAudio.paused ? '▶' : 'Ⅱ';
-      if (mini) mini.textContent = playerAudio.paused ? '▶' : 'Ⅱ';
+      const time = $('miniPlayer')?.querySelector('span.muted');
+      if (time) time.textContent = formatTime(current);
+      setPlaybackButtonState();
+      persistPlayerPosition(false, false, audioFolder, audio);
     };
-    playerAudio.onloadedmetadata = () => {
-      const headings = $('player')?.querySelectorAll('h2') || [];
-      if (headings[0]) headings[0].textContent = data.title;
-      if (headings[1]) headings[1].textContent = data.chapters?.[0]?.title || 'Audiobook ready';
-      const mini = $('miniPlayer'); if (mini) mini.querySelector('b').textContent = data.title;
+    audio.onplay = () => { setPlaybackButtonState(); syncMiniPlayer(); };
+    audio.onpause = () => {
+      persistPlayerPosition(true, false, audioFolder, audio);
+      setPlaybackButtonState();
+      syncMiniPlayer();
     };
-    playerAudio.onerror = () => message('The local audiobook file could not be opened in the embedded player.', true);
-    await playerAudio.play();
+    audio.onended = () => {
+      persistPlayerPosition(true, true, audioFolder, audio);
+      setPlaybackButtonState();
+      syncMiniPlayer();
+    };
+    audio.onloadedmetadata = () => {
+      if (playerAudio !== audio) return;
+      const duration = Number(audio.duration) || 0;
+      const savedPosition = Math.max(0, Number(data.playback_position_seconds) || 0);
+      if (duration > 0 && savedPosition > 0 && savedPosition < duration - 1) {
+        audio.currentTime = savedPosition;
+      } else if (duration > 0 && savedPosition >= duration - 1) {
+        audio.currentTime = 0;
+      }
+      renderSelectedAudiobook(data);
+    };
+    audio.onerror = () => {
+      miniPlayerDismissed = true;
+      syncMiniPlayer();
+      message('The local audiobook file could not be opened in the embedded player.', true);
+    };
+    await audio.play();
+    miniPlayerDismissed = false;
+    renderSelectedAudiobook(data);
+    syncMiniPlayer();
+    setPlaybackButtonState();
   }
   const formatTime = seconds => {
     const n = Math.max(0, Math.floor(Number(seconds) || 0)), h = Math.floor(n / 3600), m = Math.floor((n % 3600) / 60), sec = n % 60;
@@ -740,12 +1403,74 @@
 
   async function wire() {
     await call('app.get_info');
+
+    // The approved HTML prototype attaches a fake timer-based player directly
+    // to these buttons. Replace those DOM nodes before attaching real playback,
+    // so the demo timer can never masquerade as audiobook audio.
+    for (const id of ['mainPlay','miniPlay']) {
+      const original = $(id);
+      if (!original) continue;
+      const replacement = original.cloneNode(true);
+      replacement.removeAttribute('onclick');
+      original.replaceWith(replacement);
+    }
+    const playSelectedAudiobook = () => {
+      if (!selectedAudiobookFolder) {
+        message('Open Audiobooks and choose Play audiobook on a finished title first.', true);
+        return;
+      }
+      openPlayer(selectedAudiobookFolder).catch(err => message(err?.message || String(err), true));
+    };
+    if ($('mainPlay')) $('mainPlay').onclick = playSelectedAudiobook;
+    if ($('miniPlay')) $('miniPlay').onclick = playSelectedAudiobook;
+    bindAudiobookPlayerControls();
+    if ($('playerTimeline')) {
+      $('playerTimeline').oninput = () => {
+        const duration = playerAudio?.duration || 0;
+        if (playerAudio && duration) playerAudio.currentTime = duration * Math.max(0,Math.min(100,Number($('playerTimeline').value || 0))) / 100;
+      };
+      $('playerTimeline').onchange = () => persistPlayerPosition(true, false, selectedAudiobookFolder, playerAudio);
+    }
+    clearAudiobookPlayerDisplay();
     applyUnavailableControlStates();
     // Register navigation and action handlers before hydration. A slow local model,
     // history, or sound-library query must not delay the first interactive frame.
     document.addEventListener('click', e => {
       const button = e.target.closest('button');
       const buttonLabel = button?.textContent?.trim().toLowerCase() || '';
+      const runAction = async fn => {
+        try { await fn(); }
+        catch (err) { message(err?.message || String(err), true); }
+      };
+      if (button && button.dataset.playProjectFolder) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        void runAction(async () => {
+          const folder = button.dataset.playProjectFolder;
+          selectedAudiobookFolder = folder;
+          miniPlayerDismissed = false;
+          await openPlayer(folder);
+          renderAudiobookLibrary(projects);
+          message('Playing ' + (projects.find(project => project.folder === folder)?.title || 'selected audiobook') + '.');
+        });
+        return;
+      }
+      if (button && button.dataset.dashboardJobId && button.dataset.dashboardGenerationAction) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        void runAction(async () => {
+          const action = button.dataset.dashboardGenerationAction;
+          await call(action === 'pause' ? 'job.pause' : 'job.resume', {job_id:button.dataset.dashboardJobId});
+          await refreshJobs();
+          await refreshHistory();
+          message((action === 'pause' ? 'Pause' : 'Resume') + ' requested for the active audiobook generation.');
+        });
+        return;
+      }
+      if (button && button.dataset.dashboardJobId && buttonLabel === 'view job') {
+        e.preventDefault(); e.stopImmediatePropagation();
+        $('backgroundJobsButton')?.click();
+        refreshJobs().catch(err => message(err?.message || String(err), true));
+        return;
+      }
       if (button && buttonLabel === 'open output folder') {
         e.preventDefault(); e.stopImmediatePropagation();
         call('system.open_output').then(result => message('Opened output folder: ' + (result.path || ''))).catch(err => message(err?.message || String(err), true));
@@ -1163,7 +1888,10 @@
     // saveSoundPresetAdvanced is handled by the single delegated backend listener.
     ['mainPlay','miniPlay'].forEach(id=>{if($(id))$(id).onclick=act(openPlayer);});
     if ($('playerTimeline')) $('playerTimeline').oninput=()=>{if(playerAudio&&playerAudio.duration)playerAudio.currentTime=Number($('playerTimeline').value)/100*playerAudio.duration;};
-    if ($('hideMini')) $('hideMini').onclick=()=> $('miniPlayer')?.classList.add('hidden');
+    if ($('hideMini')) $('hideMini').onclick=()=>{
+      miniPlayerDismissed = true;
+      $('miniPlayer')?.classList.add('hidden');
+    };
     if ($('saveSettingsAdvanced')) $('saveSettingsAdvanced').onclick=act(async()=>{await call('settings.save',{theme:$('themeSelectAdvanced')?.value||'dark',effects:$('effectsModeAdvanced')?.value||'high'});message('Settings saved to this PC.');});
     document.addEventListener('input', e => {
       if (e.target?.id === 'librarySearch') {
@@ -1231,9 +1959,9 @@
         e.preventDefault(); e.stopImmediatePropagation();
         try {
           const opened = await call('project.open', {folder:recentProject.dataset.projectFolder});
-          await refreshProjects(); await refreshChapters();
-          if (typeof window.go === 'function') window.go('chapters');
-          message('Opened local project: ' + (opened.title || 'project'));
+          await refreshProjects(); await refreshChapters(); await refreshCharacters();
+          const destination = navigateToProjectStage(opened, routeForResume(opened));
+          message('Opened local project: ' + (opened.title || 'project') + ' · ' + destination + '.');
         } catch (err) { message(err?.message || String(err), true); }
         return;
       }
@@ -1251,16 +1979,26 @@
           } catch (err) { message(err?.message || String(err), true); }
           return;
         }
+        if (label === 'create new project') {
+          e.preventDefault(); e.stopImmediatePropagation();
+          if (typeof window.go === 'function') window.go('import');
+          else message('Open Import Studio to start a new audiobook project.');
+          return;
+        }
         if (label === 'continue project') {
           e.preventDefault(); e.stopImmediatePropagation();
           try {
-            const activeProject = await call('project.get_active');
-            const candidate = activeProject || projects.find(p => !p.completed && Number(p.chapter_count || 0) > 0) || projects[0];
-            if (!candidate) throw new Error('Import a book before continuing a project.');
+            const folder = dashboardButton.dataset.continueProjectFolder ||
+              dashboardButton.closest('[data-dashboard-project-folder]')?.dataset.dashboardProjectFolder ||
+              dashboardProject?.folder || '';
+            const candidate = projects.find(project => project.folder === folder) || null;
+            if (!candidate) throw new Error('Select a saved project or use Create New Project to import a book.');
             const opened = await call('project.open', {folder:candidate.folder});
-            await refreshProjects(); await refreshChapters();
-            if (typeof window.go === 'function') window.go('chapters');
-            message('Continuing ' + (opened.title || candidate.title) + '.');
+            await refreshProjects();
+            await refreshChapters();
+            await refreshCharacters();
+            const destination = navigateToProjectStage(opened, routeForResume(opened));
+            message('Continuing ' + (opened.title || candidate.title) + ' · ' + destination + '.');
           } catch (err) { message(err?.message || String(err), true); }
           return;
         }
@@ -1268,7 +2006,10 @@
           e.preventDefault(); e.stopImmediatePropagation();
           try {
             const rows = await call('job.list', {include_hidden:false});
-            const job = rows.find(j => !['completed','failed','cancelled'].includes(j.state));
+            const requestedJobId = dashboardButton.dataset.dashboardJobId || '';
+            const job = requestedJobId
+              ? rows.find(j => String(j.job_id) === String(requestedJobId))
+              : rows.find(j => !['completed','failed','cancelled'].includes(String(j.state || '').toLowerCase()));
             if (!job) throw new Error('There are no active background jobs to view.');
             $('backgroundJobsButton')?.click();
             message((job.title || job.type) + ' · ' + (job.stage || job.state));
@@ -1944,6 +2685,11 @@
     // Hydrate the visible workflow first, then load secondary panels with a paint
     // opportunity between requests. Keep failures local so one unavailable optional
     // subsystem cannot block the rest of the UI from becoming usable.
+    const miniDock = $('miniPlayer');
+    if (miniDock) miniDock.classList.add('hidden');
+    bindMiniPlayerNavigation();
+    syncMiniPlayer();
+
     const hydrateInitialState = async () => {
       const phases = [
         [refreshProjects, refreshVoices, refreshChapters, loadSettings],
