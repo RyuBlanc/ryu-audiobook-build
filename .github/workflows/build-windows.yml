@@ -29,9 +29,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  tests:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          if ($pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "setup-python did not provide a real Python interpreter: $pythonExe"
+          }
+          & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 --upgrade pip
+          if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed with exit code $LASTEXITCODE." }
+          & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 -r requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw "Test dependency installation failed with exit code $LASTEXITCODE." }
+      - name: Run regression tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          $env:PYTHONPATH = (Get-Location).Path
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw "Regression tests failed with exit code $LASTEXITCODE." }
+
+  build:
+    needs: tests
+    runs-on: windows-latest
+    timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -83,18 +116,12 @@ jobs:
           & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 --upgrade pip
           & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 -r requirements.txt
 
-          Write-Host '=== Run regression tests ==='
-          git reset --hard HEAD
-          git clean -ffdx
-
           # Freeze the CI build number into source so the installed EXE does not
           # fall back to "Build dev" when launched outside the build environment.
           ('BUILD_NUMBER = "' + $env:RYU_BUILD_NUMBER + '"') | Set-Content -Path 'app\build_info.py' -Encoding ascii
 
           $env:PYTHONPATH = (Get-Location).Path
           $env:PYTHONDONTWRITEBYTECODE = '1'
-          & $pythonExe -B -m unittest discover -s tests -v
-          if ($LASTEXITCODE -ne 0) { throw "Regression tests failed with exit code $LASTEXITCODE." }
 
           Write-Host '=== Verify pinned Chatterbox Nano source ==='
           $source = Get-Content 'app\tts\chatterbox_runtime.py' -Raw
