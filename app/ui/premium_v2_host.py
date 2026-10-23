@@ -1997,6 +1997,7 @@ class PremiumV2Bridge(QObject):
                 chapter_count = len(chapter_rows) if isinstance(chapter_rows, (list, tuple, set)) else 0
             normalized.append({
                 "name": str(row.get("name") or row.get("primary_name") or "").strip(),
+                "short": row.get("short") or row.get("short_name") or "",
                 "aliases": row.get("aliases") or [],
                 "voice": row.get("voice_profile") or row.get("voice_name") or row.get("voice") or "",
                 "examples": examples,
@@ -2066,6 +2067,7 @@ class PremiumV2Bridge(QObject):
                 examples = [sample, *examples]
             normalized = {
                 "name": name,
+                "short": row.get("short") or row.get("short_name") or "",
                 "aliases": aliases,
                 "voice": row.get("voice") or row.get("voice_name") or "",
                 "examples": examples,
@@ -2145,6 +2147,7 @@ class PremiumV2Bridge(QObject):
             record = update_reusable_character(existing["id"], {
                 "series": series,
                 "primary_name": name[:300],
+                "short": str(payload.get("short") or "").strip(),
                 "aliases": aliases,
                 "dialogue_sample": sample,
                 "notes": notes,
@@ -2160,6 +2163,7 @@ class PremiumV2Bridge(QObject):
                 series,
                 [{
                     "name": name[:300],
+                    "short": str(payload.get("short") or "").strip(),
                     "aliases": aliases,
                     "dialogue_sample": sample,
                     "examples": [sample] if sample else [],
@@ -2240,6 +2244,7 @@ class PremiumV2Bridge(QObject):
                 series,
                 [{
                     "name": name,
+                    "short": candidate.get("short") or candidate.get("short_name") or "",
                     "aliases": aliases if isinstance(aliases, list) else [],
                     "voice": candidate.get("voice") or candidate.get("voice_name") or "",
                     "dialogue_sample": sample,
