@@ -7,6 +7,7 @@ import json
 import re
 import time
 import tempfile
+from datetime import datetime, timezone
 
 from PySide6.QtCore import QObject, Signal, QUrl, QTimer, QThread, QSettings
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
@@ -2801,6 +2802,7 @@ class GenerationPage(QWidget):
             state.update({
                 "voice_profile": profile.name if profile else None,
                 "output_path": str(output),
+                "modified_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "cover_path": str(self.cover) if self.cover else None,
                 "narrator": self.narrator.text().strip(),
                 "publisher": self.publisher.text().strip(),
