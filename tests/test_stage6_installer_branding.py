@@ -13,11 +13,19 @@ class InstallerBrandingContractTests(unittest.TestCase):
         cls.script = INSTALLER.read_text(encoding="utf-8")
 
     def test_setup_wizard_uses_premium_v2_dark_gold_palette(self):
-        self.assertIn("WizardForm.Color := $000F0A09;", self.script)
-        self.assertIn("WizardForm.MainPanel.Color := $001A130F;", self.script)
-        self.assertIn("WizardForm.PageNameLabel.Font.Color := $006AB0D6;", self.script)
-        self.assertIn("WizardForm.Font.Name := 'Segoe UI';", self.script)
+        # Native Inno Setup dark styling keeps standard controls (checkboxes,
+        # summary memos, dialogs and buttons) readable; test the new UI contract
+        # rather than requiring the old label-only color overrides.
+        self.assertIn("WizardStyle=modern dark hidebevels includetitlebar", self.script)
+        self.assertIn("WizardBackColor=#05060A", self.script)
+        self.assertIn("WizardImageFile=..\\assets\\installer_brand_panel.png", self.script)
+        self.assertIn("WizardImageBackColor=none", self.script)
+        self.assertIn("WizardSmallImageFile=..\\assets\\ryu_audiobook_logo.png", self.script)
+        self.assertIn("WizardSmallImageBackColor=none", self.script)
+        self.assertIn("DefaultDialogFontName=Segoe UI", self.script)
         self.assertIn("SetupIconFile=..\\assets\\ryu_audiobook_logo.ico", self.script)
+        self.assertNotIn("WizardForm.Color :=", self.script)
+        self.assertNotIn("WizardForm.InnerPage.Color :=", self.script)
 
     def test_setup_keeps_standard_install_launch_and_shortcut_paths(self):
         self.assertIn('DefaultDirName={autopf}\\Ryu\'s Audiobook', self.script)
