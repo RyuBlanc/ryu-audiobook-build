@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import os
 import re
 
@@ -17,6 +18,7 @@ from app.version import APP_VERSION
 
 BUILD_NUMBER = os.environ.get("RYU_BUILD_NUMBER", "dev")
 INSTALLER_VERSION_FILE = ROOT / "installer" / "version.generated.iss"
+INSTALLER_MANIFEST_FILE = ROOT / "installer" / "installer_manifest.json"
 VERSION_INFO_FILE = ROOT / "installer" / "version_info.generated.txt"
 
 def _numeric_version() -> tuple[int, int, int]:
@@ -369,3 +371,34 @@ else:
     )
 
 PyInstaller.__main__.run(args)
+
+
+def write_installer_manifest() -> None:
+    """Record the real uncompressed on-disk footprint for the custom installer UI."""
+    app_dir = ROOT / "dist" / "Ryu's Audiobook"
+    app_exe = app_dir / "Ryu's Audiobook.exe"
+    if not app_exe.is_file():
+        raise RuntimeError(f"Built application executable is missing: {app_exe}")
+    files = [path for path in app_dir.rglob("*") if path.is_file()]
+    total_bytes = sum(path.stat().st_size for path in files)
+    if total_bytes <= 0 or not files:
+        raise RuntimeError("Cannot create the installer manifest from an empty application folder.")
+    payload = {
+        "application_name": "Ryu's Audiobook",
+        "application_executable": "Ryu's Audiobook.exe",
+        "required_install_bytes": total_bytes,
+        "file_count": len(files),
+        "build_number": str(BUILD_NUMBER),
+    }
+    INSTALLER_MANIFEST_FILE.parent.mkdir(parents=True, exist_ok=True)
+    INSTALLER_MANIFEST_FILE.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\\n",
+        encoding="utf-8",
+    )
+    print(
+        f"Installer manifest created: {len(files)} files, "
+        f"{total_bytes:,} bytes required on the install drive."
+    )
+
+
+write_installer_manifest()
