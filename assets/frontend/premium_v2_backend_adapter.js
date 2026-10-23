@@ -511,9 +511,80 @@
       }, 3000);
     }
   }
+  function ensureProjectTrashControl() {
+    if ($('openProjectTrashBin')) return;
+    const root = $('library');
+    if (!root) return;
+    const search = $('librarySearch');
+    const filters = $('libraryFilters');
+    const parent = filters?.parentElement || search?.parentElement || root;
+    const button = document.createElement('button');
+    button.id = 'openProjectTrashBin';
+    button.type = 'button';
+    button.className = 'btn small secondary';
+    button.textContent = 'Deleted Books / Recover';
+    button.title = 'Restore a book or permanently purge it from managed Trash';
+    button.style.cssText = 'margin-left:8px;white-space:nowrap;';
+    button.addEventListener('click', () => openProjectTrashBin().catch(err => message(err?.message || String(err), true)));
+    parent.appendChild(button);
+  }
+  function ensureProjectTrashModal() {
+    let modal = $('projectTrashModal');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'projectTrashModal';
+    modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:100001;background:rgba(4,7,12,.84);backdrop-filter:blur(7px);align-items:center;justify-content:center;padding:22px;box-sizing:border-box;';
+    modal.innerHTML = '<div role="dialog" aria-modal="true" aria-labelledby="projectTrashTitle" style="width:min(760px,96vw);max-height:84vh;overflow:auto;background:#10141d;border:1px solid #343b49;border-radius:16px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.5);color:#f4f5f8"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h2 id="projectTrashTitle" style="margin:0">Deleted Books</h2><p class="muted" style="margin:6px 0 0">Restore a book to the active Library or permanently purge it when you are sure.</p></div><button type="button" class="btn small secondary" data-close-project-trash>Close</button></div><div id="projectTrashEntries" style="display:grid;gap:10px;margin-top:18px"></div></div>';
+    modal.addEventListener('click', async event => {
+      if (event.target === modal || event.target.closest('[data-close-project-trash]')) {
+        modal.style.display = 'none';
+        return;
+      }
+      const restore = event.target.closest('[data-restore-project]');
+      const purge = event.target.closest('[data-purge-project]');
+      if (!restore && !purge) return;
+      const button = restore || purge;
+      const id = button.dataset.restoreProject || button.dataset.purgeProject;
+      const record = projectTrashEntries.find(item => String(item.id) === String(id));
+      button.disabled = true;
+      try {
+        if (restore) {
+          await call('project.trash.restore', {id});
+          message('Restored "' + (record?.title || 'book') + '" to the active Library.');
+        } else {
+          if (!window.confirm('Permanently delete "' + (record?.title || 'this book') + '" and its trashed generated files? This cannot be undone.')) return;
+          await call('project.trash.purge', {id});
+          message('Permanently purged "' + (record?.title || 'book') + '".');
+        }
+        await refreshProjects();
+        await loadProjectTrashEntries(modal);
+      } catch (error) {
+        message(error?.message || String(error), true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+    document.body.appendChild(modal);
+    return modal;
+  }
+  let projectTrashEntries = [];
+  async function loadProjectTrashEntries(modal) {
+    projectTrashEntries = await call('project.trash.list');
+    const list = $('projectTrashEntries');
+    if (list) list.innerHTML = projectTrashEntries.map(item => {
+      const when = item.deleted_at ? new Date(item.deleted_at).toLocaleString() : 'Deletion date unavailable';
+      return '<article class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px"><div><b>' + esc(item.title || 'Untitled book') + '</b><div class="muted" style="margin-top:4px">Moved to Trash · ' + esc(when) + '</div></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn small secondary" data-restore-project="' + esc(item.id) + '">Restore</button><button type="button" class="btn small ghost library-delete" data-purge-project="' + esc(item.id) + '">Delete permanently</button></div></article>';
+    }).join('') || '<div class="card" style="padding:18px"><b>Deleted Books is empty</b><p class="muted">Books moved from the active Library will appear here and can be restored.</p></div>';
+    if (modal) modal.style.display = 'flex';
+  }
+  async function openProjectTrashBin() {
+    const modal = ensureProjectTrashModal();
+    await loadProjectTrashEntries(modal);
+  }
   async function refreshProjects() {
     projects = (await call('project.list')).sort((a,b) => (Date.parse(b.modified_at || '') || 0) - (Date.parse(a.modified_at || '') || 0));
     const grid = $('libraryGrid');
+    ensureProjectTrashControl();
     const search = ($('librarySearch')?.value || '').trim().toLowerCase();
     const filter = $('libraryFilters')?.querySelector('button.active')?.textContent?.trim().toLowerCase() || 'all';
     const visible = projects.filter(p => {
@@ -530,7 +601,7 @@
           '" data-cover-path="' + esc(p.cover_path || '') + '"><div class="book-cover"></div><div class="project-pad"><span class="badge ' +
           (complete ? '' : 'info') + '">' + esc(status) + '</span><h3>' + esc(p.title) + '</h3><p class="muted">' +
           Number(p.chapter_count || 0) + ' chapters · Local project</p><p class="muted">' + esc(p.source_path || 'Source path unavailable') +
-          '</p><button class="btn small" type="button" data-open-project="' + esc(p.folder) + '">Open project</button></div></article>';
+          '</p><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn small" type="button" data-open-project="' + esc(p.folder) + '">Open project</button><button class="btn small ghost library-delete" type="button" data-delete-project="' + esc(p.folder) + '" aria-label="Move ' + esc(p.title) + ' to Deleted Books">Delete</button></div></div></article>';
       }).join('') || '<p class="muted">No local projects found. Import a book to start your library.</p>';
       applyProjectCovers(grid);
     }
@@ -564,6 +635,7 @@
     voices = await call('voice.list');
     const rows = voices.map(v => ({...v, label: v.name + ' · ' + v.provider}));
     renderSelect($('editCharacterVoice'), [{name:'',label:'Unassigned'}, ...rows], 'name', v => v.label || 'Unassigned');
+    if ($('characterEditorModal')?.classList.contains('show') && $('editCharacterVoice')) $('editCharacterVoice').disabled = true;
     renderSelect($('pronQuickVoice'), rows, 'name', v => v.label);
     if ($('profileName') && !$('profileName').value.trim() && voices[0]) $('profileName').value = voices[0].name;
     return voices;
@@ -610,27 +682,146 @@
       window.ryuPremiumSelectedCharacter = c.name;
     }));
   }
-  const librarySeriesName = c => { const raw = String(c?.series || c?.scope || '').trim(); return /^Series\s*[·:-]\s*Slime$/i.test(raw) ? 'Slime series' : raw; };
+  const librarySeriesName = c => {
+    const raw = String(c?.series || c?.scope || '').trim();
+    return raw.replace(/^Series\s*[·:-]\s*/i, '').replace(/^Global character library$/i, '').trim();
+  };
+  function ensureCharacterDialogueSampleField() {
+    const modal = $('characterEditorModal');
+    if (!modal) return;
+    let sample = $('editCharacterDialogueSample');
+    if (!sample) {
+      const wrap = document.createElement('div');
+      wrap.className = 'form-group';
+      wrap.style.cssText = 'display:flex;flex-direction:column;gap:7px;margin-top:12px;';
+      const label = document.createElement('label');
+      label.htmlFor = 'editCharacterDialogueSample';
+      label.textContent = 'Dialogue sample (editable)';
+      label.style.cssText = 'font-size:13px;font-weight:700;color:#e6e9f0;';
+      sample = document.createElement('textarea');
+      sample.id = 'editCharacterDialogueSample';
+      sample.rows = 4;
+      sample.maxLength = 4000;
+      sample.placeholder = 'Save a representative line so this character stays recognizable across volumes.';
+      sample.style.cssText = 'width:100%;box-sizing:border-box;resize:vertical;min-height:92px;padding:10px 12px;border-radius:10px;border:1px solid #343b49;background:#0d1119;color:#f4f5f8;font:inherit;';
+      wrap.append(label, sample);
+      const notes = $('editCharacterNotes');
+      const anchor = notes?.closest('.form-group, .form-row, .field') || notes?.parentElement;
+      if (anchor?.parentElement) anchor.parentElement.insertBefore(wrap, anchor.nextSibling);
+      else (modal.querySelector('.modal-body') || modal).appendChild(wrap);
+    }
+    const voice = $('editCharacterVoice');
+    if (voice) {
+      voice.title = 'Voice assignments are managed in Character Studio so all volumes stay consistent.';
+      if (!modal.__ryuVoiceLockObserver && typeof MutationObserver !== 'undefined') {
+        modal.__ryuVoiceLockObserver = new MutationObserver(() => {
+          if (!modal.classList.contains('show')) voice.disabled = false;
+        });
+        modal.__ryuVoiceLockObserver.observe(modal, {attributes:true, attributeFilter:['class']});
+      }
+      if (modal.classList.contains('show')) voice.disabled = true;
+    }
+  }
+  function ensureCharacterRecoveryButton() {
+    if ($('openCharacterRecoveryBin')) return;
+    const importButton = $('importCharacterLibrary');
+    const addButton = $('addLibraryCharacter');
+    const parent = importButton?.parentElement || addButton?.parentElement;
+    if (!parent) return;
+    const button = document.createElement('button');
+    button.id = 'openCharacterRecoveryBin';
+    button.type = 'button';
+    button.className = 'btn small secondary';
+    button.textContent = 'Recovery Bin';
+    button.title = 'Restore characters previously removed from the reusable library';
+    button.addEventListener('click', () => openCharacterRecoveryBin().catch(err => message(err?.message || String(err), true)));
+    parent.appendChild(button);
+  }
+  function ensureCharacterRecoveryModal() {
+    let modal = $('characterRecoveryModal');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'characterRecoveryModal';
+    modal.style.cssText = 'display:none;position:fixed;inset:0;z-index:100000;background:rgba(4,7,12,.82);backdrop-filter:blur(7px);align-items:center;justify-content:center;padding:22px;box-sizing:border-box;';
+    modal.innerHTML = '<div role="dialog" aria-modal="true" aria-labelledby="characterRecoveryTitle" style="width:min(720px,96vw);max-height:84vh;overflow:auto;background:#10141d;border:1px solid #343b49;border-radius:16px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.5);color:#f4f5f8"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h2 id="characterRecoveryTitle" style="margin:0">Character Recovery Bin</h2><p class="muted" style="margin:6px 0 0">Deleted reusable characters remain here until restored.</p></div><button type="button" class="btn small secondary" data-close-character-recovery>Close</button></div><div id="characterRecoveryItems" style="display:grid;gap:10px;margin-top:18px"></div></div>';
+    modal.addEventListener('click', async event => {
+      if (event.target === modal || event.target.closest('[data-close-character-recovery]')) {
+        modal.style.display = 'none';
+        return;
+      }
+      const restore = event.target.closest('[data-restore-character]');
+      if (!restore) return;
+      restore.disabled = true;
+      try {
+        const record = libraryDeletedCharacters.find(item => String(item.id) === restore.dataset.restoreCharacter);
+        await call('character_library.restore', {id:restore.dataset.restoreCharacter});
+        await refreshCharacterLibrary();
+        message('Restored ' + (record?.name || 'character') + ' to the reusable Character Library.');
+        await openCharacterRecoveryBin();
+      } catch (error) {
+        message(error?.message || String(error), true);
+      } finally {
+        restore.disabled = false;
+      }
+    });
+    document.body.appendChild(modal);
+    return modal;
+  }
+  let libraryDeletedCharacters = [];
+  async function openCharacterRecoveryBin() {
+    const modal = ensureCharacterRecoveryModal();
+    libraryDeletedCharacters = await call('character_library.deleted.list');
+    const list = $('characterRecoveryItems');
+    if (list) list.innerHTML = libraryDeletedCharacters.map(c =>
+      '<article class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px"><div><b>' + esc(c.name) + '</b><div class="muted" style="margin-top:4px">' + esc(librarySeriesName(c) || 'Unassigned series') + ' · ' + esc(c.voice || 'Unassigned') + '</div><div class="muted" style="margin-top:4px">' + esc((c.aliases || []).join(', ') || 'No aliases') + '</div></div><button type="button" class="btn small secondary" data-restore-character="' + esc(c.id) + '">Restore</button></article>'
+    ).join('') || '<div class="card" style="padding:18px"><b>The Recovery Bin is empty</b><p class="muted">Characters you delete from the reusable library will appear here.</p></div>';
+    modal.style.display = 'flex';
+  }
   async function refreshCharacterLibrary() {
     libraryCharacters = await call('character_library.list');
-    const grid = $('characterLibraryGrid'), query = ($('characterLibrarySearch')?.value || '').trim().toLowerCase(), series = $('characterSeriesFilter')?.value || 'All series';
+    ensureCharacterDialogueSampleField();
+    ensureCharacterRecoveryButton();
+    const seriesFilter = $('characterSeriesFilter');
+    const previousSeries = seriesFilter?.value || 'All series';
+    const seriesNames = [...new Set(libraryCharacters.map(librarySeriesName).filter(Boolean))].sort((a,b) => a.localeCompare(b));
+    if (seriesFilter) {
+      seriesFilter.innerHTML = '';
+      const all = document.createElement('option');
+      all.value = 'All series'; all.textContent = 'All series'; seriesFilter.appendChild(all);
+      for (const name of seriesNames) {
+        const option = document.createElement('option');
+        option.value = name; option.textContent = name; seriesFilter.appendChild(option);
+      }
+      seriesFilter.value = seriesNames.includes(previousSeries) ? previousSeries : 'All series';
+    }
+    const grid = $('characterLibraryGrid'), query = ($('characterLibrarySearch')?.value || '').trim().toLowerCase(), series = seriesFilter?.value || 'All series';
     const rows = libraryCharacters.filter(c => (!query || [c.name,c.short,c.voice,c.series,c.scope,...(c.aliases||[])].join(' ').toLowerCase().includes(query)) && (series === 'All series' || librarySeriesName(c) === series || c.scope === series));
-    if (grid) grid.innerHTML = rows.map(c => '<article class="library-character-card" data-library-id="'+esc(c.id)+'"><div class="library-character-top"><span class="avatar">'+esc((c.short||c.name||'?').slice(0,1))+'</span><div><h3>'+esc(c.name)+'</h3><p>'+esc(librarySeriesName(c)||'Global')+' · '+esc(c.voice||'Unassigned')+'</p></div></div><div class="alias-row">'+((c.aliases||[]).map(x=>'<span class="alias-tag">'+esc(x)+'</span>').join('')||'<span class="alias-tag">No aliases</span>')+'</div><div class="library-character-meta"><span>'+Number(c.lines||0)+' assigned lines</span><span>'+Number(c.chapters||0)+' chapters</span><span>'+Number(c.confidence??100)+'% confidence</span><span>'+esc(c.scope||'Global character library')+'</span></div><div class="library-character-actions"><button class="btn small secondary" data-test-library="'+esc(c.id)+'">▶ Test</button><button class="btn small secondary" data-edit-library="'+esc(c.id)+'">Edit</button><button class="btn small ghost library-delete" data-delete-library="'+esc(c.id)+'">Delete</button></div></article>').join('') || '<div class="card"><b>No characters found</b><p class="muted">Import a cast or add a character to begin your reusable library.</p></div>';
+    if (grid) grid.innerHTML = rows.map(c => {
+      const sample = String(c.dialogue_sample || '').trim();
+      const sampleText = sample ? '<p class="muted" style="margin:10px 0 0;line-height:1.5">“' + esc(sample.slice(0,220)) + (sample.length > 220 ? '…' : '') + '”</p>' : '';
+      return '<article class="library-character-card" data-library-id="' + esc(c.id) + '"><div class="library-character-top"><span class="avatar">' + esc((c.short||c.name||'?').slice(0,1)) + '</span><div><h3>' + esc(c.name) + '</h3><p>' + esc(librarySeriesName(c)||'Unassigned series') + ' · ' + esc(c.voice||'Unassigned') + '</p></div></div><div class="alias-row">' + ((c.aliases||[]).map(x=>'<span class="alias-tag">' + esc(x) + '</span>').join('') || '<span class="alias-tag">No aliases</span>') + '</div>' + sampleText + '<div class="library-character-meta"><span>' + Number(c.lines||0) + ' assigned lines</span><span>' + Number(c.chapters||0) + ' chapters</span><span>' + Number(c.confidence??100) + '% confidence</span><span>' + esc(librarySeriesName(c)||'Unassigned series') + '</span></div><div class="library-character-actions" style="display:flex;gap:7px;flex-wrap:wrap"><button type="button" class="btn small secondary" data-test-library="' + esc(c.id) + '">▶ Test</button><button type="button" class="btn small secondary" data-edit-library="' + esc(c.id) + '">Edit</button><button type="button" class="btn small secondary" data-character-studio="' + esc(c.id) + '">Character Studio</button><button type="button" class="btn small ghost library-delete" data-delete-library="' + esc(c.id) + '">Delete</button></div></article>';
+    }).join('') || '<div class="card"><b>No saved characters found</b><p class="muted">Import a cast or run Character Studio analysis on an imported book. Existing saved casts are indexed automatically; no sample characters are inserted.</p></div>';
     return libraryCharacters;
   }
   function openLibraryEditor(c) {
     libraryEditorActive = true; libraryEditorId = c?.id || null;
     if ($('characterEditorTitle')) $('characterEditorTitle').textContent = c ? 'Edit character' : 'Add new character';
     if ($('editCharacterName')) $('editCharacterName').value = c?.name || ''; if ($('editCharacterShort')) $('editCharacterShort').value = c?.short || '';
-    if ($('editCharacterAliases')) $('editCharacterAliases').value = (c?.aliases||[]).join(', '); if ($('editCharacterVoice')) $('editCharacterVoice').value = c?.voice || (voices[0]?.name || 'Unassigned');
-    if ($('editCharacterScope')) $('editCharacterScope').value = c?.scope || 'Series · Slime'; if ($('editCharacterNotes')) $('editCharacterNotes').value = c?.notes || '';
-    if ($('deleteCharacter')) $('deleteCharacter').style.visibility = c ? 'visible' : 'hidden'; $('characterEditorModal')?.classList.add('show');
+    if ($('editCharacterAliases')) $('editCharacterAliases').value = (c?.aliases||[]).join(', ');
+    if ($('editCharacterVoice')) { $('editCharacterVoice').value = c?.voice || 'Unassigned'; $('editCharacterVoice').disabled = true; $('editCharacterVoice').title = 'Voice assignment is managed in Character Studio.'; }
+    if ($('editCharacterScope')) $('editCharacterScope').value = c?.scope || 'Global character library';
+    if ($('editCharacterNotes')) $('editCharacterNotes').value = c?.notes || '';
+    ensureCharacterDialogueSampleField();
+    if ($('editCharacterDialogueSample')) $('editCharacterDialogueSample').value = c?.dialogue_sample || '';
+    if ($('deleteCharacter')) $('deleteCharacter').style.visibility = c ? 'visible' : 'hidden';
+    $('characterEditorModal')?.classList.add('show');
+    if ($('editCharacterVoice')) $('editCharacterVoice').disabled = true;
   }
   async function saveLibraryEditor() {
     const name = $('editCharacterName')?.value.trim() || ''; if (!name) throw new Error('Enter a character name before saving it to the Character Library.');
     const scope = $('editCharacterScope')?.value || 'Global character library';
     const series = /^Series\s*[·:-]\s*Slime$/i.test(scope) ? 'Slime series' : scope;
-    const result = await call('character_library.save', {id:libraryEditorId||'',name,short:$('editCharacterShort')?.value||'',aliases:$('editCharacterAliases')?.value||'',voice:$('editCharacterVoice')?.value||'Unassigned',scope,series,notes:$('editCharacterNotes')?.value||''});
+    const result = await call('character_library.save', {id:libraryEditorId||'',name,short:$('editCharacterShort')?.value||'',aliases:$('editCharacterAliases')?.value||'',scope,series,notes:$('editCharacterNotes')?.value||'',dialogue_sample:$('editCharacterDialogueSample')?.value||''});
     libraryEditorId = result.character.id; libraryEditorActive = false; $('characterEditorModal')?.classList.remove('show'); await refreshCharacterLibrary(); message('Character saved to the reusable local Character Library.');
   }
   function importCharacterLibraryFile() {
@@ -1509,14 +1700,15 @@
         })().catch(err => message(err?.message || String(err), true));
         return;
       }
-      const add=e.target.closest('#addLibraryCharacter'), imp=e.target.closest('#importCharacterLibrary'), edit=e.target.closest('[data-edit-library]'), remove=e.target.closest('[data-delete-library]'), test=e.target.closest('[data-test-library]'), save=e.target.closest('#saveCharacterProfile'), del=e.target.closest('#deleteCharacter');
+      const add=e.target.closest('#addLibraryCharacter'), imp=e.target.closest('#importCharacterLibrary'), edit=e.target.closest('[data-edit-library]'), remove=e.target.closest('[data-delete-library]'), test=e.target.closest('[data-test-library]'), studio=e.target.closest('[data-character-studio]'), save=e.target.closest('#saveCharacterProfile'), del=e.target.closest('#deleteCharacter');
       if(add){e.preventDefault();e.stopImmediatePropagation();openLibraryEditor(null);return;}
       if(imp){e.preventDefault();e.stopImmediatePropagation();importCharacterLibraryFile();return;}
       if(edit){e.preventDefault();e.stopImmediatePropagation();openLibraryEditor(libraryCharacters.find(c=>String(c.id)===edit.dataset.editLibrary));return;}
-      if(remove){e.preventDefault();e.stopImmediatePropagation();const c=libraryCharacters.find(x=>String(x.id)===remove.dataset.deleteLibrary);if(!c||!window.confirm('Delete '+c.name+' from the reusable Character Library?'))return;call('character_library.delete',{id:c.id}).then(refreshCharacterLibrary).then(()=>message('Character removed from the reusable library.')).catch(err=>message(err?.message||String(err),true));return;}
+      if(remove){e.preventDefault();e.stopImmediatePropagation();const c=libraryCharacters.find(x=>String(x.id)===remove.dataset.deleteLibrary);if(!c||!window.confirm('Move '+c.name+' to the Character Recovery Bin? You can restore it later.'))return;call('character_library.delete',{id:c.id}).then(refreshCharacterLibrary).then(()=>message('Character moved to the Recovery Bin.')).catch(err=>message(err?.message||String(err),true));return;}
       if(save&&libraryEditorActive){e.preventDefault();e.stopImmediatePropagation();saveLibraryEditor().catch(err=>message(err?.message||String(err),true));return;}
-      if(del&&libraryEditorActive){e.preventDefault();e.stopImmediatePropagation();if(!libraryEditorId){libraryEditorActive=false;$('characterEditorModal')?.classList.remove('show');return;}const c=libraryCharacters.find(x=>String(x.id)===String(libraryEditorId));if(!c||!window.confirm('Delete '+c.name+' from the reusable Character Library?'))return;call('character_library.delete',{id:libraryEditorId}).then(()=>{libraryEditorActive=false;$('characterEditorModal')?.classList.remove('show');return refreshCharacterLibrary();}).then(()=>message('Character removed from the reusable library.')).catch(err=>message(err?.message||String(err),true));return;}
+      if(del&&libraryEditorActive){e.preventDefault();e.stopImmediatePropagation();if(!libraryEditorId){libraryEditorActive=false;$('characterEditorModal')?.classList.remove('show');if($('editCharacterVoice'))$('editCharacterVoice').disabled=false;return;}const c=libraryCharacters.find(x=>String(x.id)===String(libraryEditorId));if(!c||!window.confirm('Move '+c.name+' to the Character Recovery Bin? You can restore it later.'))return;call('character_library.delete',{id:libraryEditorId}).then(()=>{libraryEditorActive=false;$('characterEditorModal')?.classList.remove('show');if($('editCharacterVoice'))$('editCharacterVoice').disabled=false;return refreshCharacterLibrary();}).then(()=>message('Character moved to the Recovery Bin.')).catch(err=>message(err?.message||String(err),true));return;}
       if(e.target.closest('#characterLibrarySearch, #characterSeriesFilter'))setTimeout(()=>refreshCharacterLibrary().catch(err=>message(err?.message||String(err),true)),0);
+      if(studio){e.preventDefault();e.stopImmediatePropagation();const c=libraryCharacters.find(x=>String(x.id)===studio.dataset.characterStudio);if(!c){message('Choose a saved character first.',true);return;}if(!c.source_project_folder){window.ryuPremiumSelectedCharacter=c.name;window.go?.('characters');message('Opened Character Studio. Open a project from this series to assign a voice.');return;}void (async()=>{try{await call('project.open',{folder:c.source_project_folder});await refreshProjects();await refreshChapters();await refreshCharacters();window.ryuPremiumSelectedCharacter=c.name;window.go?.('characters');message('Opened Character Studio for '+c.name+'. Manage its voice assignment here.');}catch(err){message(err?.message||String(err),true);}})();return;}
       if(test){e.preventDefault();e.stopImmediatePropagation();const c=libraryCharacters.find(x=>String(x.id)===test.dataset.testLibrary);const profile=voices.find(v=>String(v.name).toLowerCase()===String(c?.voice||'').toLowerCase());if(!c||!profile){message('No matching saved voice profile exists for this character. Choose a saved profile in Voice Studio first.',true);return;}call('voice.preview',{profile_name:profile.name,text:'Hello, my name is '+c.name+'.',duration_seconds:10}).then(data=>monitorJob(data.job_id,async job=>{const url=job?.result?.file_url;if(!url)throw new Error('The character preview finished without a playable audio file.');if(previewAudio)previewAudio.pause();previewAudio=new Audio(url);await previewAudio.play();message('Playing character voice preview.');})).catch(err=>message(err?.message||String(err),true));return;}
     }, true);
     document.addEventListener('click', e => { const b=e.target.closest('[data-voice]'); if(b){selectedVoiceId=b.dataset.voice;const label=b.dataset.voice;if($('profileVoice'))$('profileVoice').textContent=label;if($('premiumName')&&!$('premiumName').value.trim())$('premiumName').value=label+' Custom';if($('profileName')&&!$('profileName').value.trim())$('profileName').value=label+' Custom';return;}if(e.target.closest('.provider'))selectedVoiceId=null; });
@@ -1581,6 +1773,24 @@
       }
     });
     if ($('libraryGrid')) $('libraryGrid').addEventListener('click', async e => {
+      const remove = e.target.closest('[data-delete-project]');
+      if (remove) {
+        e.preventDefault(); e.stopPropagation();
+        const project = projects.find(p => String(p.folder) === String(remove.dataset.deleteProject));
+        const title = project?.title || 'this project';
+        if (!window.confirm('Move "' + title + '" to Deleted Books? You can restore it later from Deleted Books / Recover.')) return;
+        remove.disabled = true;
+        try {
+          const result = await call('project.trash', {folder:remove.dataset.deleteProject});
+          await refreshProjects();
+          message('Moved "' + (result.title || title) + '" to Deleted Books. Its source and saved work are recoverable until permanently purged.');
+        } catch (err) {
+          message(err?.message || String(err), true);
+        } finally {
+          remove.disabled = false;
+        }
+        return;
+      }
       const button = e.target.closest('[data-open-project]'); if (!button) return;
       button.disabled = true;
       try { const opened = await call('project.open', {folder:button.dataset.openProject}); await refreshProjects(); await refreshChapters(); await refreshCharacters(); if (typeof window.go === 'function') window.go('chapters'); message('Opened local project: ' + (opened.title || opened.folder || 'project')); }
