@@ -49,7 +49,7 @@ class PremiumV2LibraryRecoveryWiringTests(unittest.TestCase):
 
     def test_character_library_does_not_synthesize_demo_cast(self) -> None:
         self.assertIn("Existing saved casts are indexed automatically", self.adapter)
-        self.assertIn("No sample characters are inserted", self.adapter)
+        self.assertIn("no sample characters are inserted", self.adapter)
         self.assertIn("def _character_library_bootstrap", self.host)
 
 
