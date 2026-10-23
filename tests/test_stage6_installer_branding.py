@@ -162,6 +162,8 @@ class InstallerBrandingContractTests(unittest.TestCase):
         self.assertIn("ryu-qwen-python-bootstrap\\python312\\python.exe", workflow)
         self.assertIn("$pythonExe -m ensurepip --upgrade", workflow)
         self.assertIn("$env:PYTHONPATH = (Get-Location).Path", workflow)
+        self.assertIn("- name: Validate installer JavaScript syntax", workflow)
+        self.assertIn("--check 'installer\\ryu_installer.js'", workflow)
 
 if __name__ == "__main__":
     unittest.main()

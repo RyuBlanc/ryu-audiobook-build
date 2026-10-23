@@ -36,6 +36,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate installer JavaScript syntax
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+          if ([string]::IsNullOrWhiteSpace($nodeExe) -or -not (Test-Path -LiteralPath $nodeExe -PathType Leaf)) {
+            throw 'Node.js is required to validate the functional HTML installer script.'
+          }
+          & $nodeExe --check 'installer\ryu_installer.js'
+          if ($LASTEXITCODE -ne 0) { throw "Installer JavaScript syntax validation failed with exit code $LASTEXITCODE." }
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
