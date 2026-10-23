@@ -1917,6 +1917,15 @@ class PremiumV2Bridge(QObject):
         return reusable_character_library_path()
 
     @staticmethod
+    def _character_library_ui_count(value: Any, default: int = 0, maximum: int | None = None) -> int:
+        try:
+            result = int(value if value is not None else default)
+        except (TypeError, ValueError, OverflowError):
+            result = default
+        result = max(0, result)
+        return min(result, maximum) if maximum is not None else result
+
+    @staticmethod
     def _character_library_ui_record(record: dict[str, Any]) -> dict[str, Any]:
         """Translate the persistent registry record into the Premium V2 UI contract."""
         name = str(record.get("primary_name") or record.get("name") or "").strip()
@@ -1930,7 +1939,7 @@ class PremiumV2Bridge(QObject):
             "name": name,
             "primary_name": name,
             "short": str(record.get("short") or (name.split()[0] if name else "?")),
-            "aliases": aliases[:5],
+            "aliases": [str(alias).strip() for alias in aliases if str(alias).strip()][:5],
             "voice": voice,
             "voice_profile": voice if voice != "Unassigned" else "",
             "scope": ("Series · " + series) if series else "Unassigned series",
@@ -1938,9 +1947,9 @@ class PremiumV2Bridge(QObject):
             "notes": str(record.get("notes") or ""),
             "dialogue_sample": str(record.get("dialogue_sample") or ""),
             "pronunciation": str(record.get("pronunciation") or ""),
-            "lines": max(0, int(record.get("line_count") or record.get("lines") or 0)),
-            "chapters": max(0, int(record.get("chapter_count") or record.get("chapters") or 0)),
-            "confidence": max(0, min(100, int(record.get("confidence", 100) or 0))),
+            "lines": PremiumV2Bridge._character_library_ui_count(record.get("line_count", record.get("lines", 0))),
+            "chapters": PremiumV2Bridge._character_library_ui_count(record.get("chapter_count", record.get("chapters", 0))),
+            "confidence": PremiumV2Bridge._character_library_ui_count(record.get("confidence", 100), default=100, maximum=100),
             "source_project_folder": str(record.get("source_project_folder") or ""),
             "source_project_title": str(record.get("source_project_title") or ""),
             "updated_at": str(record.get("updated_at") or ""),
