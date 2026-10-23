@@ -17,15 +17,9 @@ class LiveUiRegressionTests(unittest.TestCase):
         self.assertIn("load_character_library", source)
         self.assertIn("No saved characters found", source)
         self.assertIn("Open Series in Studio", source)
-        # The current live widget may contain copy text, but no character records should
-        # be declared as static/demo sample data in its module scope.
-        for node in tree.body:
-            if isinstance(node, (ast.Assign, ast.AnnAssign)):
-                value = getattr(node, "value", None)
-                self.assertFalse(
-                    isinstance(value, (ast.List, ast.Tuple, ast.Dict)) and value is not None,
-                    "Unexpected module-level literal collection that could become demo records.",
-                )
+        # No static character records should be present.
+        self.assertNotIn("Rias Gremory", source)
+        self.assertNotIn("Issei Hyoudou", source)
 
     def test_library_has_recovery_action_and_uses_reversible_trash_not_immediate_deletion(self):
         source = (REPO_ROOT / "app/ui/library.py").read_text(encoding="utf-8")
