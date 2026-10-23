@@ -87,6 +87,43 @@ DRAGON_CROSS_PNG = ASSETS / "dragon_cross.png"
 DRAGON_CURSOR_PNG = ASSETS / "dragon_cursor.png"
 
 
+def _remove_outer_neutral_logo_halo(image: Image.Image) -> Image.Image:
+    """Clear a narrow neutral-white fringe at the outer canvas edge only.
+
+    The interior of the logo contains legitimate ivory pages and gold highlights;
+    those pixels are intentionally untouched. This targets only near-neutral
+    light pixels within the outer 6% edge band that produced the unwanted pale
+    tile around the transparent artwork in Windows icons and the HTML installer.
+    """
+    rgba = image.convert("RGBA")
+    red, green, blue = rgba.convert("RGB").split()
+    bright = ImageChops.multiply(
+        ImageChops.multiply(
+            red.point(lambda value: 255 if value >= 205 else 0),
+            green.point(lambda value: 255 if value >= 205 else 0),
+        ),
+        blue.point(lambda value: 255 if value >= 205 else 0),
+    )
+    neutral = ImageChops.multiply(
+        ImageChops.multiply(
+            ImageChops.difference(red, green).point(lambda value: 255 if value <= 36 else 0),
+            ImageChops.difference(green, blue).point(lambda value: 255 if value <= 36 else 0),
+        ),
+        ImageChops.difference(red, blue).point(lambda value: 255 if value <= 36 else 0),
+    )
+    width, height = rgba.size
+    band = max(12, round(min(width, height) * 0.06))
+    edge = Image.new("L", rgba.size, 0)
+    draw = ImageDraw.Draw(edge)
+    draw.rectangle((0, 0, width - 1, band - 1), fill=255)
+    draw.rectangle((0, height - band, width - 1, height - 1), fill=255)
+    draw.rectangle((0, 0, band - 1, height - 1), fill=255)
+    draw.rectangle((width - band, 0, width - 1, height - 1), fill=255)
+    halo = ImageChops.multiply(ImageChops.multiply(bright, neutral), edge)
+    rgba.putalpha(ImageChops.subtract(rgba.getchannel("A"), halo))
+    return rgba
+
+
 def build_logo_assets() -> None:
     ASSETS.mkdir(parents=True, exist_ok=True)
     if not LOGO_MASTER_PNG.is_file() and not LOGO_SVG.exists():
@@ -142,6 +179,7 @@ def build_logo_assets() -> None:
                 rgba = source.convert("RGBA")
             if rgba.size != (source_size.width(), source_size.height()):
                 raise RuntimeError(f"Application logo dimensions changed during rendering: {rgba.size}")
+        rgba = _remove_outer_neutral_logo_halo(rgba)
         alpha = rgba.getchannel("A")
 
         # The source SVG embeds JPEG artwork, so its alpha may be fully opaque
