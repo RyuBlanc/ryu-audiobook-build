@@ -34,6 +34,9 @@ class InstallerBrandingContractTests(unittest.TestCase):
         self.assertIn("ImageChops.multiply(alpha, clip_mask)", build_script)
         self.assertIn("mask_scale = 4", build_script)
         self.assertIn("Image.Resampling.LANCZOS", build_script)
+        self.assertIn("remove_neutral_white_matte", build_script)
+        self.assertIn("neutral_near_white", build_script)
+        self.assertIn("final_alpha = original_alpha", build_script)
         self.assertIn("required_ico_sizes", build_script)
         self.assertIn("icon_file.ico.sizes()", build_script)
         self.assertIn("icon_file.ico.getimage(icon_size)", build_script)
@@ -55,12 +58,44 @@ class InstallerBrandingContractTests(unittest.TestCase):
                 source.index("ryu_audiobook_logo.svg"),
             )
 
-    def test_setup_keeps_standard_install_launch_and_shortcut_paths(self):
-        self.assertIn('DefaultDirName={autopf}\\Ryu\'s Audiobook', self.script)
-        self.assertIn('#define MyAppExeName "Ryu\'s Audiobook.exe"', self.script)
-        self.assertIn('Filename: "{app}\\{#MyAppExeName}"', self.script)
-        self.assertIn('Flags: nowait postinstall skipifsilent', self.script)
-        self.assertIn('Name: "{autodesktop}\\{#MyAppName}"', self.script)
+    def test_setup_keeps_install_paths_and_selectable_shortcuts(self):
+        self.assertIn(r"DefaultDirName={autopf}\\Ryu's Audiobook", self.script)
+        self.assertIn('#define MyAppExeName "Ryu\\'s Audiobook.exe"', self.script)
+        self.assertIn("OutputBaseFilename=Ryu's Audiobook Setup Payload", self.script)
+        self.assertIn(r'Name: "{autoprograms}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; Tasks: startmenuicon', self.script)
+        self.assertIn(r'Name: "{autodesktop}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; Tasks: desktopicon', self.script)
+        self.assertIn('Name: "startmenuicon"; Description: "Create a Start menu shortcut"', self.script)
+        self.assertNotIn("[Run]", self.script)
+
+    def test_delivered_installer_uses_reference_style_html_and_real_inno_engine(self):
+        html = (ROOT / "installer" / "launcher.html").read_text(encoding="utf-8")
+        launcher = (ROOT / "installer" / "launcher.py").read_text(encoding="utf-8")
+        build_script = (ROOT / "build.py").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
+
+        self.assertIn("--red:#ed174f", html)
+        self.assertIn("--gold:#f1bf64", html)
+        self.assertIn("grid-template-columns:285px 1fr", html)
+        self.assertIn('src="../assets/ryu_audiobook_logo.png"', html)
+        self.assertIn("new QWebChannel", html)
+        self.assertIn("bridge.startInstall(JSON.stringify(options))", html)
+        self.assertNotIn("setInterval(", html)
+
+        self.assertIn("QWebEngineView", launcher)
+        self.assertIn("payload/Ryu's Audiobook Setup Payload.exe", launcher)
+        self.assertIn('"/VERYSILENT"', launcher)
+        self.assertIn("subprocess.Popen(", launcher)
+        self.assertIn("required_install_bytes", launcher)
+        self.assertIn("app_exe.is_file()", launcher)
+        self.assertIn("logo_png.is_file()", launcher)
+
+        self.assertIn("def write_installer_manifest()", build_script)
+        self.assertIn("INSTALLER_MANIFEST_FILE.write_text", build_script)
+        self.assertIn("required_install_bytes", build_script)
+        self.assertIn("--onefile", workflow)
+        self.assertIn("installer\\\\launcher.html;installer", workflow)
+        self.assertIn("installer\\\\launcher.py", workflow)
+        self.assertIn("Ryu's Audiobook Setup Payload.exe", workflow)
 
     def test_uninstaller_does_not_delete_user_data(self):
         self.assertIn("User books, voices, models, and settings live under %USERPROFILE%", self.script)
