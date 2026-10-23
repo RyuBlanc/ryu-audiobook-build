@@ -390,12 +390,10 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                 workflow.stack.setCurrentWidget(workflow.import_page)
                 item = workflow.sidebar.currentItem()
                 rect = workflow.sidebar.visualItemRect(item)
-                QTest.mouseClick(
-                    workflow.sidebar.viewport(),
-                    Qt.MouseButton.LeftButton,
-                    pos=rect.center(),
-                )
-                QTest.qWait(100)
+                # Invoke the same click-signal recovery handler directly. Native
+                # offscreen mouse clicks can stall Qt's event loop on Windows CI.
+                workflow._sidebar_item_clicked(item)
+                self.app.processEvents()
 
                 self.assertIs(workflow.stack.currentWidget(), workflow.generation)
                 self.assertTrue(workflow.generation.isVisible())
