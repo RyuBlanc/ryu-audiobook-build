@@ -398,6 +398,56 @@ class VoiceCastPage(QWidget):
             )
             self.list.setCurrentRow(new_index)
 
+    def load_series_for_editing(self, series: str) -> None:
+        """Load already-saved reusable names for the selected series into this working cast.
+
+        Per-character assignments stay subject to Character Studio review. Existing
+        detections and aliases are merged by primary name, without inventing a voice.
+        """
+        from app.core.character_library import load_character_library
+        desired = str(series or "").strip()
+        reusable = [
+            row for row in load_character_library()
+            if not row.get("deleted")
+            and str(row.get("series") or "").casefold() == desired.casefold()
+        ]
+        if not reusable:
+            self.review_hint.setText(
+                f"No reusable characters are saved for '{desired}'. Analyze the open book to add them."
+            )
+            return
+        by_name = {str(row.get("name") or "").casefold(): row for row in self.rows}
+        for stored in reusable:
+            key = str(stored.get("primary_name") or "").casefold()
+            current = by_name.get(key)
+            if current is None:
+                current = {
+                    "name": stored.get("primary_name"),
+                    "role": "Reusable character",
+                    "dialogue_count": 0,
+                    "examples": [stored.get("dialogue_sample")] if stored.get("dialogue_sample") else [],
+                    "voice": stored.get("voice_name") or None,
+                    "confidence": 0.0,
+                    "aliases": list(stored.get("aliases") or [])[:5],
+                }
+                self.rows.append(current)
+                by_name[key] = current
+            else:
+                current["aliases"] = list(dict.fromkeys([
+                    *(current.get("aliases") or []),
+                    *(stored.get("aliases") or []),
+                ]))[:5]
+                if stored.get("dialogue_sample") and not current.get("examples"):
+                    current["examples"] = [stored["dialogue_sample"]]
+                if stored.get("voice_name") and not current.get("voice"):
+                    current["voice"] = stored["voice_name"]
+        self._save_cast()
+        self._refresh_labels()
+        self.review_hint.setText(
+            f"Loaded {len(reusable)} reusable character(s) from '{desired}'. "
+            "Review the voice assignments before generating another volume."
+        )
+
     def _load_saved_cast(self):
         saved = {
             str(k).casefold(): str(v)
