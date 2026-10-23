@@ -26,6 +26,7 @@ class CharacterLibraryRegistryTests(unittest.TestCase):
                 "Star Volume Series",
                 [{
                     "name": "Aria",
+                    "short": "Ari",
                     "aliases": ["Ari", "Little Star", "Captain", "A", "Songbird", "Sixth Alias"],
                     "voice": "Voice A",
                     "examples": ["I will protect the city."],
@@ -37,6 +38,7 @@ class CharacterLibraryRegistryTests(unittest.TestCase):
             self.assertEqual(len(records), 1)
             record = records[0]
             self.assertEqual(record["series"], "Star Volume Series")
+            self.assertEqual(record["short"], "Ari")
             self.assertEqual(len(record["aliases"]), 5)
             self.assertEqual(record["voice_name"], "Voice A")
             self.assertEqual(record["dialogue_sample"], "I will protect the city.")
@@ -44,6 +46,7 @@ class CharacterLibraryRegistryTests(unittest.TestCase):
             update_character(record["id"], {
                 "series": "Star Volume Series",
                 "primary_name": "Aria the Star",
+                "short": "Aria*",
                 "aliases": ["Ari", "Little Star"],
                 "dialogue_sample": "A manually edited dialogue line.",
                 "pronunciation": "AH-ree-ah",
@@ -58,6 +61,7 @@ class CharacterLibraryRegistryTests(unittest.TestCase):
             records = list_characters(path=store)
             self.assertEqual(len(records), 1)
             self.assertEqual(records[0]["primary_name"], "Aria the Star")
+            self.assertEqual(records[0]["short"], "Aria*")
             self.assertEqual(records[0]["voice_name"], "Voice B")
             self.assertEqual(records[0]["dialogue_sample"], "A manually edited dialogue line.")
             self.assertEqual(records[0]["pronunciation"], "AH-ree-ah")
