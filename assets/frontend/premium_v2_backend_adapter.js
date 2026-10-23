@@ -18,6 +18,46 @@
   let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
+  const resumeCheckpointKey = 'ryu.project.resume-checkpoints.v1';
+  const resumeStages = new Set(['import','chapters','narrator','characters','sound','production','player']);
+  const resumeStageRoutes = {
+    import:'import', chapters:'chapters', narrator:'voice', characters:'characters',
+    sound:'sound', production:'production', player:'player'
+  };
+  function readResumeCheckpoints() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(resumeCheckpointKey) || '{}');
+      return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    } catch (_) { return {}; }
+  }
+  function writeResumeCheckpoint(folder, stage) {
+    if (!folder || !resumeStages.has(stage)) return;
+    const checkpoints = readResumeCheckpoints();
+    checkpoints[folder] = {stage, updated_at:new Date().toISOString()};
+    try { localStorage.setItem(resumeCheckpointKey, JSON.stringify(checkpoints)); } catch (_) {}
+  }
+  function savedResumeStage(project) {
+    if (!project?.folder) return '';
+    const stage = String(readResumeCheckpoints()[project.folder]?.stage || '').trim().toLowerCase();
+    return resumeStages.has(stage) ? stage : '';
+  }
+  function routeForResume(project) {
+    const saved = savedResumeStage(project);
+    if (saved) return saved;
+    if (project?.completed && project?.output_path) return 'player';
+    if (!project?.source_exists || !project?.chapter_count) return 'import';
+    if (!project?.voice_profile) return 'narrator';
+    if (!project?.character_analysis_done) return 'characters';
+    if (!project?.sound_design_configured) return 'sound';
+    if (!project?.output_configured) return 'production';
+    return 'chapters';
+  }
+  function navigateToProjectStage(project, stage = routeForResume(project)) {
+    const target = resumeStageRoutes[stage] || 'chapters';
+    if (project?.folder) writeResumeCheckpoint(project.folder, stage);
+    if (typeof window.go === 'function') window.go(target);
+    return target;
+  }
   const chapterUndoStacks = new Map(), chapterRedoStacks = new Map();
   let chapterLastText = '', chapterHistoryGroupOpen = false, chapterHistoryGroupTimer = null, chapterHistoryApplying = false;
   let libraryCharacters = [], libraryEditorId = null, libraryEditorActive = false;
@@ -363,8 +403,9 @@
     const root = $('dashboard');
     const card = root && dashboardGenerationCard(root);
     if (!card) return;
-    const active = jobs.filter(job => job.type === 'audiobook-generation' &&
-      ['queued','running','pause_requested','paused','cancel_requested','retrying'].includes(String(job.state || '').toLowerCase()))
+    const resumableStates = ['queued','running','pause_requested','paused','cancel_requested','retrying'];
+    const active = jobs.filter(job => String(job.type || '').toLowerCase() === 'audiobook-generation' &&
+      resumableStates.includes(String(job.state || '').toLowerCase()))
       .sort((a,b) => (Date.parse(b.updated_at || b.queued_at || '') || 0) - (Date.parse(a.updated_at || a.queued_at || '') || 0));
     const job = active[0] || null;
     // Bind by position within the static job card. These spans are deliberately
@@ -379,8 +420,14 @@
     const view = buttons.find(button => dashboardText(button.textContent) === 'view job');
     const control = buttons.find(button => ['pause','resume'].includes(dashboardText(button.textContent)));
     if (!job) {
-      setDashboardRow(card, 'current chapter', '');
-      setDashboardRow(card, 'processing stage', '');
+      const selectedProject = dashboardProject || null;
+      setDashboardRow(card, 'current chapter', selectedProject
+        ? (Number(selectedProject.completed_chapter_count || 0) + ' chapters prepared')
+        : 'No project selected');
+      setDashboardRow(card, 'processing stage', selectedProject
+        ? (selectedProject.completed && selectedProject.output_path ? 'Audiobook ready' :
+          ('Setup checkpoint · ' + (savedResumeStage(selectedProject) || routeForResume(selectedProject))))
+        : 'No active generation job');
       if (percentLabel) percentLabel.textContent = '';
       if (etaLabel) etaLabel.textContent = '';
       if (fill) { fill.style.width = '0%'; fill.setAttribute('aria-valuenow','0'); if (fill.tagName === 'PROGRESS') fill.value = 0; }
@@ -433,6 +480,14 @@
       const original = window.go;
       const wrapped = function(...args) {
         const result = original.apply(this,args);
+        const page = String(args[0] || '').trim().toLowerCase();
+        const aliases = {
+          import:'import', chapters:'chapters', voice:'narrator', narrator:'narrator',
+          characters:'characters', character:'characters', sound:'sound', sounds:'sound',
+          production:'production', generator:'production', generation:'production', player:'player'
+        };
+        const stage = aliases[page];
+        if (stage && dashboardProject?.folder) writeResumeCheckpoint(dashboardProject.folder, stage);
         setTimeout(() => {
           syncMiniPlayer();
           refreshProjects().catch(() => {});
@@ -1904,9 +1959,9 @@
         e.preventDefault(); e.stopImmediatePropagation();
         try {
           const opened = await call('project.open', {folder:recentProject.dataset.projectFolder});
-          await refreshProjects(); await refreshChapters();
-          if (typeof window.go === 'function') window.go('chapters');
-          message('Opened local project: ' + (opened.title || 'project'));
+          await refreshProjects(); await refreshChapters(); await refreshCharacters();
+          const destination = navigateToProjectStage(opened, routeForResume(opened));
+          message('Opened local project: ' + (opened.title || 'project') + ' · ' + destination + '.');
         } catch (err) { message(err?.message || String(err), true); }
         return;
       }
@@ -1933,8 +1988,8 @@
         if (label === 'continue project') {
           e.preventDefault(); e.stopImmediatePropagation();
           try {
-            const folder = button.dataset.continueProjectFolder ||
-              button.closest('[data-dashboard-project-folder]')?.dataset.dashboardProjectFolder ||
+            const folder = dashboardButton.dataset.continueProjectFolder ||
+              dashboardButton.closest('[data-dashboard-project-folder]')?.dataset.dashboardProjectFolder ||
               dashboardProject?.folder || '';
             const candidate = projects.find(project => project.folder === folder) || null;
             if (!candidate) throw new Error('Select a saved project or use Create New Project to import a book.');
@@ -1942,8 +1997,8 @@
             await refreshProjects();
             await refreshChapters();
             await refreshCharacters();
-            if (typeof window.go === 'function') window.go('chapters');
-            message('Continuing ' + (opened.title || candidate.title) + '.');
+            const destination = navigateToProjectStage(opened, routeForResume(opened));
+            message('Continuing ' + (opened.title || candidate.title) + ' · ' + destination + '.');
           } catch (err) { message(err?.message || String(err), true); }
           return;
         }
@@ -1951,9 +2006,10 @@
           e.preventDefault(); e.stopImmediatePropagation();
           try {
             const rows = await call('job.list', {include_hidden:false});
-            const requestedJobId = button.dataset.dashboardJobId || '';
-            const job = rows.find(j => requestedJobId && j.job_id === requestedJobId) ||
-              rows.find(j => !['completed','failed','cancelled'].includes(j.state));
+            const requestedJobId = dashboardButton.dataset.dashboardJobId || '';
+            const job = requestedJobId
+              ? rows.find(j => String(j.job_id) === String(requestedJobId))
+              : rows.find(j => !['completed','failed','cancelled'].includes(String(j.state || '').toLowerCase()));
             if (!job) throw new Error('There are no active background jobs to view.');
             $('backgroundJobsButton')?.click();
             message((job.title || job.type) + ' · ' + (job.stage || job.state));
