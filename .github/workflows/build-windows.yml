@@ -13,6 +13,7 @@ on:
       - stage-4-pronunciation-sound-design
       - fix/installer-branding-accessibility
       - fix/dashboard-live-data-project-covers-player
+      - fix/installer-html-transparent-branding
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.
@@ -470,10 +471,14 @@ jobs:
           choco install innosetup -y --no-progress
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed with exit code $LASTEXITCODE." }
 
-      - name: Build installer
+      - name: Build branded HTML installer
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $pythonExe = $env:RYU_CI_PYTHON_EXE
+          if (-not $pythonExe -or -not (Test-Path $pythonExe)) {
+            $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          }
           $candidates = @(
             'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
             'C:\Program Files\Inno Setup 6\ISCC.exe'
@@ -482,10 +487,42 @@ jobs:
           if (-not $isccPath) { throw 'ISCC.exe was not found after Inno Setup installation.' }
           Write-Host "Using Inno Setup compiler: $isccPath"
           & $isccPath 'installer\RyuAudiobook.iss'
-          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed with exit code $LASTEXITCODE." }
-          $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
-          if (-not (Test-Path $installer)) { throw "Installer was not produced: $installer" }
-          Write-Host "Installer created: $installer"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup payload compilation failed with exit code $LASTEXITCODE." }
+
+          $outputDir = Join-Path (Get-Location) 'installer\installer-output'
+          $payload = Join-Path $outputDir "Ryu's Audiobook Setup Payload.exe"
+          if (-not (Test-Path -LiteralPath $payload -PathType Leaf)) { throw "Installer payload was not produced: $payload" }
+          if (-not (Test-Path -LiteralPath 'installer\launcher.html' -PathType Leaf)) { throw 'Branded HTML installer frontend is missing.' }
+          if (-not (Test-Path -LiteralPath 'installer\installer_manifest.json' -PathType Leaf)) { throw 'Real install-size manifest is missing; build.py must write it after PyInstaller.' }
+          if (-not (Test-Path -LiteralPath 'assets\ryu_audiobook_logo.png' -PathType Leaf)) { throw 'Transparent application PNG is missing.' }
+
+          Write-Host 'Packaging the branded HTML wizard and Inno Setup engine into the single Setup.exe.'
+          $launcherArgs = @(
+            '-m', 'PyInstaller',
+            '--noconfirm', '--clean', '--onefile', '--windowed',
+            '--name', "Ryu's Audiobook Setup",
+            '--icon', 'assets\ryu_audiobook_logo.ico',
+            '--distpath', 'installer\installer-output',
+            '--workpath', 'build\installer-launcher',
+            '--specpath', 'build\installer-launcher',
+            '--add-data', 'installer\launcher.html;installer',
+            '--add-data', 'assets\ryu_audiobook_logo.png;assets',
+            '--add-data', 'installer\installer_manifest.json;installer',
+            '--add-data', "$payload;payload",
+            '--collect-all', 'PySide6.QtWebEngineCore',
+            '--collect-all', 'PySide6.QtWebEngineWidgets',
+            '--collect-all', 'PySide6.QtWebChannel',
+            '--hidden-import', 'PySide6.QtWebEngineCore',
+            '--hidden-import', 'PySide6.QtWebEngineWidgets',
+            '--hidden-import', 'PySide6.QtWebChannel',
+            'installer\launcher.py'
+          )
+          & $pythonExe @launcherArgs
+          if ($LASTEXITCODE -ne 0) { throw "HTML Setup launcher packaging failed with exit code $LASTEXITCODE." }
+          $installer = Join-Path $outputDir "Ryu's Audiobook Setup.exe"
+          if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw "Final HTML installer was not produced: $installer" }
+          Write-Host "Branded HTML installer created: $installer"
+          Write-Host "Embedded Inno payload: $payload"
 
       - name: Verify original logo transparency and generate release hashes
         shell: pwsh
