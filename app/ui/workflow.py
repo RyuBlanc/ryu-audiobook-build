@@ -880,7 +880,7 @@ class ProjectWorkflow(QMainWindow):
                 return
 
     def _show_page(self, widget: QWidget) -> None:
-        """Switch heavy pages directly; animate light destinations without a black frame."""
+        """Switch pages without opacity effects that can flash black on Windows."""
         self._refresh_notification_count()
         if widget is None:
             return
@@ -889,57 +889,26 @@ class ProjectWorkflow(QMainWindow):
                 f"Cannot navigate to {type(widget).__name__}: page is not in the workflow stack."
             )
 
+        # QWidget graphics effects are expensive for the stacked pages and can
+        # briefly composite a black frame during rapid navigation on Windows.
+        # Stop and detach any effect left by an earlier transition before
+        # changing the visible page.
         if self._page_animation is not None:
             try:
                 self._page_animation.stop()
             except RuntimeError:
                 pass
-            if self._page_animation_widget is not None:
-                try:
-                    self._page_animation_widget.setGraphicsEffect(None)
-                except RuntimeError:
-                    pass
-            self._page_animation = None
-            self._page_animation_widget = None
+        if self._page_animation_widget is not None:
+            try:
+                self._page_animation_widget.setGraphicsEffect(None)
+            except RuntimeError:
+                pass
+        self._page_animation = None
+        self._page_animation_widget = None
 
-        heavy_pages = (
-            getattr(self, "library", None), getattr(self, "import_page", None),
-            getattr(self, "editor", None), getattr(self, "generation", None),
-            getattr(self, "voice", None), getattr(self, "voice_cast", None),
-            getattr(self, "pronunciation_page", None), getattr(self, "sound_design_page", None),
-            getattr(self, "audiobooks_page", None),
-        )
-        if reduced_motion_enabled() or not self.isVisible() or widget in heavy_pages:
-            self.stack.setCurrentWidget(widget)
-            self._sync_workflow_steps()
-            self._update_page_chrome(widget)
-            return
-
-        # Prepare effect before making the page visible; attaching it after the
-        # switch caused one frame to flash before opacity animation began.
-        effect = QGraphicsOpacityEffect(widget)
-        effect.setOpacity(0.0)
-        widget.setGraphicsEffect(effect)
-        self.stack.setCurrentWidget(widget)
         self._sync_workflow_steps()
         self._update_page_chrome(widget)
-
-        animation = QPropertyAnimation(effect, b"opacity", self)
-        animation.setDuration(135)
-        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        animation.setStartValue(0.0)
-        animation.setEndValue(1.0)
-        self._page_animation = animation
-        self._page_animation_widget = widget
-
-        def finish() -> None:
-            if self._page_animation is animation:
-                widget.setGraphicsEffect(None)
-                self._page_animation = None
-                self._page_animation_widget = None
-
-        animation.finished.connect(finish)
-        animation.start()
+        self.stack.setCurrentWidget(widget)
 
     def _sidebar_item_clicked(self, item: QListWidgetItem) -> None:
         """Recover navigation when the clicked row is already selected."""
