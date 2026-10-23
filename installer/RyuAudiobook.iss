@@ -16,7 +16,7 @@ DefaultDirName={autopf}\Ryu's Audiobook
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=installer-output
-OutputBaseFilename=Ryu's Audiobook Setup
+OutputBaseFilename=Ryu's Audiobook Setup Payload
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern dark hidebevels includetitlebar
@@ -49,7 +49,8 @@ Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "startmenuicon"; Description: "Create a Start menu shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
