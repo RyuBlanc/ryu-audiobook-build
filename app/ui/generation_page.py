@@ -22,6 +22,7 @@ from app.chapters.characters import analyze_book
 from app.ai.brain import _numeric_score
 from app.tts.pronunciation_suggester import suggest_pronunciation, suggest_names_from_text, COMMON_ENGLISH_WORDS, is_common_english_phrase, nativeish_pronunciation
 from app.documents.parser import extract_text
+from app.documents.cover_art import persist_project_cover
 from app.core.state import load_state, save_state
 from app.core.project import list_projects
 from app.ui.metadata_widgets import HistoryComboBox, GenrePicker
@@ -1877,6 +1878,14 @@ class GenerationPage(QWidget):
         cover = state.get("cover_path")
         if cover and Path(cover).exists():
             self.cover = Path(cover)
+            try:
+                portable_cover = persist_project_cover(self.cover, self.project_folder)
+                if portable_cover != self.cover.resolve():
+                    self.cover = portable_cover
+                    state["cover_path"] = str(portable_cover)
+                    save_state(self.project_folder, state)
+            except (OSError, ValueError, RuntimeError) as exc:
+                log.warning("Could not migrate an existing cover into the project folder: %s", exc)
             self.cover_label.setText(self.cover.name)
 
     def _current_profiles(self) -> list[VoiceProfile]:
@@ -2283,9 +2292,22 @@ class GenerationPage(QWidget):
             self._refresh_readiness()
 
     def choose_cover(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Select Cover", "", "Images (*.jpg *.jpeg *.png)")
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Cover", "", "Images (*.jpg *.jpeg *.png *.webp *.gif *.bmp *.tif *.tiff)"
+        )
         if path:
-            self.cover = Path(path)
+            selected = Path(path)
+            try:
+                self.cover = persist_project_cover(selected, self.project_folder) if self.project_folder else selected
+            except (OSError, ValueError) as exc:
+                # Keep the chosen image usable for this session, but make the
+                # portability problem visible instead of silently reverting to
+                # the generic Dashboard artwork.
+                self.cover = selected
+                self.cover_label.setText(f"{selected.name} (external file; could not copy)")
+                self._refresh_readiness()
+                log.warning("Could not persist cover image into the project folder: %s", exc, exc_info=True)
+                return
             self.cover_label.setText(self.cover.name)
             self._refresh_readiness()
 
