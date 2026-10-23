@@ -67,10 +67,12 @@ def project_matches(project, query: str, status_filter: str, state: dict | None 
 
 
 class LibraryPage(QWidget):
-    def __init__(self, on_open=None, on_import=None) -> None:
+    def __init__(self, on_open=None, on_import=None, on_before_delete=None, on_deleted=None) -> None:
         super().__init__()
         self.on_open = on_open
         self.on_import = on_import
+        self.on_before_delete = on_before_delete
+        self.on_deleted = on_deleted
         self.projects = []
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setSingleShot(True)
@@ -135,6 +137,10 @@ class LibraryPage(QWidget):
             filter_row.addWidget(button)
         filters.addLayout(filter_row)
         layout.addLayout(filters)
+        self.selection_hint = QLabel("Select one book, or Ctrl/Shift-select multiple books to delete them together.")
+        self.selection_hint.setObjectName("muted")
+        self.selection_hint.setWordWrap(True)
+        layout.addWidget(self.selection_hint)
 
         stats_box = QGroupBox("Collection Summary")
         stats = QHBoxLayout(stats_box)
@@ -325,8 +331,12 @@ class LibraryPage(QWidget):
             return
 
         project = visible[row]
-        status, output = project_status(project)
-        state = load_state(project.folder)
+        folder_key = str(project.folder)
+        state = self._state_cache.get(folder_key)
+        if state is None:
+            state = load_state(project.folder)
+        status_info = self._status_cache.get(folder_key)
+        status, output = status_info if status_info is not None else project_status(project, state)
         failed = state.get("failed_chapters") or []
         completed_chapters = state.get("completed_chapters") or []
 
@@ -388,9 +398,24 @@ class LibraryPage(QWidget):
         if answer != QMessageBox.StandardButton.Yes:
             return
 
+        deleted = []
         try:
             for project in selected:
+                if callable(self.on_before_delete):
+                    self.on_before_delete(project)
                 delete_project(project)
+                deleted.append(project)
+                if callable(self.on_deleted):
+                    self.on_deleted(project)
             self.refresh()
+            self.selection_hint.setText(
+                f"Deleted {len(deleted)} book(s). Their source/project files and saved generated output were removed; History records and shared Character Library data were retained."
+            )
         except Exception as exc:
-            QMessageBox.critical(self, "Delete Books Failed", str(exc))
+            self.refresh()
+            names = ", ".join(project.title for project in selected if project not in deleted)
+            QMessageBox.critical(
+                self,
+                "Delete Books Failed",
+                f"{exc}\n\nThe following selected book(s) were not fully deleted: {names or 'see History for the deletion status'}.",
+            )

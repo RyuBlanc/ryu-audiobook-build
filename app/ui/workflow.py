@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 import sys
 import traceback
+import time
 
 from PySide6.QtCore import Qt, QThread, Signal, QEasingCurve, QPropertyAnimation, QTimer, QSize, QSettings
 from PySide6.QtGui import QFontMetrics, QIcon, QColor
@@ -43,6 +44,7 @@ from app.ui.voice_page import VoicePage
 from app.ui.hardware_page import HardwarePage
 from app.ui.models_page import ModelsPage
 from app.ui.voice_cast_page import VoiceCastPage
+from app.ui.character_library import CharacterLibraryPage
 from app.ui.audiobooks_page import AudiobooksPage
 from app.ui.history_page import HistoryPage
 from app.ui.settings_page import SettingsPage
@@ -290,6 +292,7 @@ class ProjectWorkflow(QMainWindow):
             "Chapters": "Chapter Studio",
             "Voice & Narration": "Voice Studio",
             "Voice Cast": "Character Studio",
+            "Character Library": "Character Library",
             "Pronunciation": "Pronunciation Studio",
             "Sound Design": "Sound Design Studio",
             "Generate": "Production Studio",
@@ -331,6 +334,7 @@ class ProjectWorkflow(QMainWindow):
             ("Chapters", "Chapter Studio", "☷"),
             ("Voice & Narration", "Voice Studio", "◉"),
             ("Voice Cast", "Character Studio", "♙"),
+            ("Character Library", "Character Library", "♙"),
             ("Pronunciation", "Pronunciation Studio", "Aa"),
         ])
         add_nav_group("Production", [
@@ -530,7 +534,11 @@ class ProjectWorkflow(QMainWindow):
         self.loading_overlay = FrostedLoadingOverlay(shell)
         self.loading_overlay.setGeometry(shell.rect())
 
-        self.library = LibraryPage(self.open_project)
+        self.library = LibraryPage(
+            self.open_project,
+            on_before_delete=self._before_project_delete,
+            on_deleted=self._on_project_deleted,
+        )
         self.import_page = ImportPage(self.handle_import)
         self.voice = VoicePage()
 
@@ -548,6 +556,10 @@ class ProjectWorkflow(QMainWindow):
             lambda: self.project.source_path if self.project else None,
         )
         self.stack.addWidget(self.voice_cast)
+        self.character_library_page = CharacterLibraryPage(
+            on_open_in_studio=self._open_character_in_studio,
+        )
+        self.stack.addWidget(self.character_library_page)
         self.models_page = ModelsPage()
         self.stack.addWidget(self.models_page)
         self.hardware_page = HardwarePage()
@@ -680,14 +692,26 @@ class ProjectWorkflow(QMainWindow):
         self.theme_toggle.setText("☀" if target == "light" else "◐")
         self.theme_toggle.setToolTip("Switch to dark theme" if target == "light" else "Switch to cream light theme")
 
-    def _refresh_notification_count(self) -> None:
-        """Update the header count from persisted local project state."""
-        count = 0
-        for project in self._safe_list_projects():
-            state = load_state(project.folder)
-            status = str(state.get("status") or "new").strip().lower()
-            if status in {"generating", "running", "queued", "failed", "cancelled"} or state.get("failed_chapters"):
-                count += 1
+    def _refresh_notification_count(self, force: bool = False) -> None:
+        """Refresh the header count with a short cache to avoid disk scans on every page click."""
+        now = time.monotonic()
+        last = float(getattr(self, "_notification_count_last_refresh", 0.0) or 0.0)
+        cached = getattr(self, "_notification_count_cache", None)
+        if (
+            not force
+            and cached is not None
+            and now - last < 3.0
+        ):
+            count = int(cached)
+        else:
+            count = 0
+            for project in self._safe_list_projects():
+                state = load_state(project.folder)
+                status = str(state.get("status") or "new").strip().lower()
+                if status in {"generating", "running", "queued", "failed", "cancelled"} or state.get("failed_chapters"):
+                    count += 1
+            self._notification_count_cache = count
+            self._notification_count_last_refresh = now
         self.notifications_button.setText(f"♧ {count}")
         self.notifications_button.setToolTip(
             f"{count} local project(s) active or needing attention"
@@ -863,6 +887,7 @@ class ProjectWorkflow(QMainWindow):
             (self.import_page, "Import", "Bring a source book into your local workflow."),
             (self.voice, "Voice & Narration", "Choose, configure, and preview the narrator."),
             (self.voice_cast, "Voice Cast", "Review dialogue and assign character voices."),
+            (getattr(self, "character_library_page", None), "Character Library", "Browse reusable series-level character names, aliases, voice profiles, and dialogue samples."),
             (self.audiobooks_page, "Audiobooks", "Listen to finished local audiobook files in the app."),
             (self.history_page, "History", "Review real project and generation status from local files."),
             (self.settings_page, "Settings", "Manage appearance, local folders, and diagnostics."),
@@ -930,6 +955,8 @@ class ProjectWorkflow(QMainWindow):
             expected = self.voice
         elif name == "Voice Cast":
             expected = self.voice_cast
+        elif name == "Character Library":
+            expected = self.character_library_page
         elif name in {"Pronunciation", "Sound Design"}:
             expected = self.generation if self.project else self.import_page
         elif name == "Audiobooks":
@@ -1277,9 +1304,13 @@ class ProjectWorkflow(QMainWindow):
         elif name == "Voice Cast":
             try:
                 self.voice_cast.refresh_profiles()
+                self.voice_cast.load_current_project()
             except Exception as exc:
                 self._log_ui_failure("Refresh Voice Cast profiles", exc)
             self._show_page(self.voice_cast)
+        elif name == "Character Library":
+            self.character_library_page.refresh()
+            self._show_page(self.character_library_page)
         elif name == "Pronunciation":
             self._open_generation_feature("pronunciation")
         elif name == "Sound Design":
@@ -1674,6 +1705,97 @@ class ProjectWorkflow(QMainWindow):
                 self.stack.removeWidget(old_generation)
             old_generation.hide()
             old_generation.deleteLater()
+
+    def _before_project_delete(self, project: Project) -> None:
+        """Release local media handles before deleting their source files on Windows."""
+        for page in (
+            getattr(self, "audiobooks_page", None),
+            getattr(self, "generation", None),
+            getattr(self, "voice", None),
+        ):
+            if page is None:
+                continue
+            for name in ("player", "music_player", "preview_player", "pronunciation_player"):
+                player = getattr(page, name, None)
+                stop = getattr(player, "stop", None)
+                if callable(stop):
+                    try:
+                        stop()
+                    except RuntimeError:
+                        pass
+
+    def _on_project_deleted(self, project: Project) -> None:
+        """Refresh dependent views and drop stale widget references after deletion."""
+        active_folder = str(self.project.folder.resolve()) if self.project else ""
+        deleted_folder = str(project.folder.resolve())
+        if active_folder and active_folder == deleted_folder:
+            self.project = None
+            self._set_project_title("No book open")
+            for attribute in ("pronunciation_page", "sound_design_page", "editor", "generation"):
+                page = getattr(self, attribute, None)
+                if page is None:
+                    continue
+                try:
+                    if self.stack.indexOf(page) >= 0:
+                        self.stack.removeWidget(page)
+                    page.hide()
+                    page.deleteLater()
+                except RuntimeError:
+                    pass
+                setattr(self, attribute, None)
+            self._editor_index = -1
+            self._generation_index = -1
+            try:
+                self.voice_cast.load_current_project()
+            except Exception as exc:
+                self._log_ui_failure("Reset Character Studio after project deletion", exc)
+            self.select_section("Library")
+        self.history_page.refresh()
+        self.dashboard.refresh()
+        self.audiobooks_page.refresh()
+        self.character_library_page.refresh()
+        self._refresh_notification_count(force=True)
+
+    def _open_character_in_studio(self, record: dict) -> None:
+        """Open a volume belonging to a character's series, then focus that cast member."""
+        from app.core.project import list_projects
+        from app.core.state import load_state
+
+        series = str(record.get("series") or "").strip()
+        wanted = series.casefold()
+        candidates = []
+        for project in list_projects():
+            state = load_state(project.folder)
+            metadata = state.get("metadata") if isinstance(state.get("metadata"), dict) else {}
+            project_series = str(state.get("series_name") or state.get("series") or metadata.get("series") or project.title).strip()
+            if project_series.casefold() == wanted:
+                candidates.append(project)
+        if self.project and str(self.project.folder.resolve()) in {str(item.folder.resolve()) for item in candidates}:
+            target = self.project
+        elif candidates:
+            target = max(candidates, key=lambda item: item.folder.stat().st_mtime if item.folder.exists() else 0)
+        else:
+            QMessageBox.information(
+                self,
+                "Series not found in Library",
+                f"No local book is currently assigned to the series '{series}'. Open a volume in Character Studio and save this same series name to link it.",
+            )
+            return
+        self.open_project(target)
+        self.select_section("Voice Cast")
+        QTimer.singleShot(
+            0,
+            lambda name=str(record.get("primary_name") or ""): self.voice_cast.select_character_name(name),
+        )
+
+    def closeEvent(self, event) -> None:
+        """Stop optional character-preview workers before their Qt widgets are destroyed."""
+        try:
+            if hasattr(self, "character_library_page"):
+                self.character_library_page.shutdown()
+        except Exception as exc:
+            self._log_ui_failure("Character Library shutdown", exc)
+        super().closeEvent(event)
 
     def open_project(self, project: Project) -> None:
         self.project = project
