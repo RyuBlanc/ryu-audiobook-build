@@ -106,6 +106,8 @@ class DashboardLiveDataTests(unittest.TestCase):
         self.assertIn("function renderAudiobookLibrary", adapter)
         self.assertIn("button.dataset.continueProjectFolder", adapter)
         self.assertIn("button.dataset.playProjectFolder", adapter)
+        self.assertIn("const runAction = async fn =>", adapter)
+        self.assertIn("void runAction(async () =>", adapter)
         self.assertIn("call('player.get_active', {folder})", adapter)
         self.assertIn("miniDock.classList.add('hidden')", adapter)
         self.assertIn("function syncMiniPlayer", adapter)
