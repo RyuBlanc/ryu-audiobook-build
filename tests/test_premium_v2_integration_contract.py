@@ -507,10 +507,11 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
 
     def test_character_library_series_scope_matches_default_filter(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
-        self.assertIn("c?.scope || 'Series · Slime'", adapter)
-        self.assertIn("const series = /^Series\\s*[·:-]\\s*Slime$/i.test(scope) ? 'Slime series' : scope;", adapter)
+        self.assertIn("const selectedSeries = $('characterSeriesFilter')?.value || 'All series';", adapter)
+        self.assertIn("'Series · ' + selectedSeries : 'Global character library'", adapter)
+        self.assertIn("const series = requestedSeries;", adapter)
         self.assertIn("librarySeriesName(c) === series", adapter)
-        self.assertIn("return /^Series\\s*[·:-]\\s*Slime$/i.test(raw) ? 'Slime series' : raw;", adapter)
+        self.assertIn("return raw.replace(/^Series\\s*[·:-]\\s*/i, '').replace(/^Global character library$/i, '').trim();", adapter)
 
     def test_reusable_character_library_is_persisted_and_connected(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
@@ -523,7 +524,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         }.items():
             self.assertIn(f'"{command}": self.{handler}', host)
             self.assertIn(f'"{command}": True', host)
-        self.assertIn('settings_root() / "character_library.json"', host)
+        self.assertIn("character_library_path as reusable_character_library_path", host)
+        self.assertIn("return reusable_character_library_path()", host)
+        self.assertIn("migration_path.replace(path)", host)
         self.assertIn("temporary.replace(path)", host)
         self.assertIn("call('character_library.list')", adapter)
         self.assertIn("call('character_library.save'", adapter)
