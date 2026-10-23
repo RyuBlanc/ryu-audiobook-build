@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import Mock
 import unittest
@@ -26,6 +27,7 @@ class UiStabilityRegressions(unittest.TestCase):
         self.assertIn("self._refresh_timer.setInterval(180)", source)
         self.assertIn("_project_data_cache", source)
         self.assertIn("_file_signature", source)
+        self.assertIn("_resolve_output_path", source)
         self.assertIn("self.refresh(force_catalog=False)", source)
         self.assertIn("self.status_filter.blockSignals(True)", source)
         self.assertIn("previous_folder = str(previous_item.data", source)
@@ -67,6 +69,27 @@ class UiStabilityRegressions(unittest.TestCase):
         player_error = player_page.split("def _playback_error", 1)[1].split("def _open_in_default_player", 1)[0]
         self.assertNotIn("setVisible(", player_error)
         self.assertIn("QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))", player_page)
+
+    def test_library_status_resolves_project_relative_output_paths(self):
+        from app.ui.library import project_status
+
+        with TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            output = folder / "exports" / "legacy-book.m4b"
+            output.parent.mkdir(parents=True)
+            output.write_bytes(b"valid non-empty fixture")
+            project = SimpleNamespace(
+                title="Legacy Book",
+                folder=folder,
+                chapters=[object()],
+                source_path=None,
+            )
+            status, resolved = project_status(
+                project,
+                {"status": "completed", "output_path": "exports/legacy-book.m4b"},
+            )
+            self.assertEqual(status, "Completed")
+            self.assertEqual(Path(resolved), output.resolve())
 
     def test_playback_state_machine_does_not_show_mini_player_until_playing(self):
         from app.ui.workflow import ProjectWorkflow

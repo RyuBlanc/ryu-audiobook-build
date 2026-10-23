@@ -10,13 +10,34 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.project import list_projects, delete_project
+from app.core.paths import app_root
 from app.core.state import load_state
+
+
+def _resolve_output_path(project, output_value: str | Path | None) -> Path | None:
+    """Resolve legacy relative output paths using the same rules as Audiobooks shelf."""
+    raw = str(output_value or "").strip()
+    if not raw:
+        return None
+    candidate = Path(raw).expanduser()
+    candidates = [candidate] if candidate.is_absolute() else [
+        project.folder / candidate,
+        app_root() / candidate,
+    ]
+    for path in candidates:
+        try:
+            if path.is_file() and path.stat().st_size > 0:
+                return path.resolve()
+        except OSError:
+            continue
+    # Keep a predictable expected path for in-progress and attention rows whose
+    # final output does not exist yet; status classification checks existence.
+    return candidates[0]
 
 
 def project_status(project, state: dict | None = None) -> tuple[str, str]:
     state = state if state is not None else load_state(project.folder)
-    output_value = state.get("output_path")
-    output = Path(output_value) if output_value else None
+    output = _resolve_output_path(project, state.get("output_path"))
     status = str(state.get("status") or "new").lower()
 
     if status in {"failed", "cancelled"} or state.get("failed_chapters"):
@@ -26,7 +47,7 @@ def project_status(project, state: dict | None = None) -> tuple[str, str]:
     if (
         status == "completed"
         and output
-        and output.exists()
+        and output.is_file()
         and output.stat().st_size > 0
     ):
         return "Completed", str(output)
@@ -255,8 +276,7 @@ class LibraryPage(QWidget):
         else:
             state = load_state(project.folder)
 
-        output_raw = str(state.get("output_path") or "").strip()
-        output_path = Path(output_raw).expanduser() if output_raw else None
+        output_path = _resolve_output_path(project, state.get("output_path"))
         output_signature = self._file_signature(output_path)
         full_signature = (state_signature, output_signature)
         if cached and cached.get("signature") == full_signature:
