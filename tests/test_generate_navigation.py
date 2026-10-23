@@ -387,11 +387,11 @@ class GenerateNavigationSmokeTests(unittest.TestCase):
                 workflow.sidebar.blockSignals(False)
 
             # Simulate a stale stack while Generate remains selected.
-            workflow.stack.setCurrentWidget(workflow.import_page)
+            workflow.stack.setCurrentWidget(workflow.dashboard)
             with patch.object(workflow, "_sidebar_changed") as route:
                 workflow._sidebar_item_clicked(item)
                 route.assert_called_once_with(row)
-            self.assertIs(workflow.stack.currentWidget(), workflow.import_page)
+            self.assertIs(workflow.stack.currentWidget(), workflow.dashboard)
         finally:
             workflow.close()
             workflow.deleteLater()
