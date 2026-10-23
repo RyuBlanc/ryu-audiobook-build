@@ -32,8 +32,19 @@ class InstallerBrandingContractTests(unittest.TestCase):
         self.assertIn("source_size = renderer.defaultSize()", build_script)
         self.assertIn("roundedBrandTile", build_script)
         self.assertIn("ImageChops.multiply(alpha, clip_mask)", build_script)
+        self.assertIn("mask_scale = 4", build_script)
+        self.assertIn("Image.Resampling.LANCZOS", build_script)
         self.assertIn("Application logo canvas corners must remain fully transparent.", build_script)
         self.assertNotIn("QImage(1024, 1024", build_script)
+
+        # The main window and legacy Import control must prefer the PNG asset,
+        # retaining SVG only as a source-checkout fallback.
+        for relative_path in ("app/main.py", "app/ui/workflow.py"):
+            source = (ROOT / relative_path).read_text(encoding="utf-8")
+            self.assertLess(
+                source.index("ryu_audiobook_logo.png"),
+                source.index("ryu_audiobook_logo.svg"),
+            )
 
     def test_setup_keeps_standard_install_launch_and_shortcut_paths(self):
         self.assertIn('DefaultDirName={autopf}\\Ryu\'s Audiobook', self.script)
