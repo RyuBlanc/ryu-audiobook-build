@@ -2,7 +2,7 @@ name: Background Audio Regression Tests
 
 on:
   push:
-    branches: [feature/background-audio-mvp]
+    branches: [feature/background-audio-mvp, fix/library-delete-recovery-live-character-data]
   pull_request:
     branches: [main]
   workflow_dispatch:
