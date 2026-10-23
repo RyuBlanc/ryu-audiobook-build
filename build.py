@@ -425,7 +425,7 @@ def write_installer_manifest() -> None:
     }
     INSTALLER_MANIFEST_FILE.parent.mkdir(parents=True, exist_ok=True)
     INSTALLER_MANIFEST_FILE.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\\n",
+        json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     print(
