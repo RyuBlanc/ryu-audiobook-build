@@ -39,11 +39,8 @@ jobs:
           echo "Fetching all completed workflow runs."
           gh api --paginate -H "Accept: application/vnd.github+json" "${api}/actions/runs?per_page=100"             --jq '.workflow_runs[] | select(.status == "completed") | [.id,.name,.head_sha,.head_branch,.created_at,.conclusion] | @tsv'             > "${RUNNER_TEMP}/runs.tsv"
 
-          # Keep the newest two completed runs per workflow, but never delete:
-          # 1) the explicit 1.1.1 release reference run 1021;
-          # 2) any workflow run whose SHA is the head of an open PR;
-          # 3) the two newest completed runs for each workflow;
-          # 4) any failure/cancellation from the primary 1.1.1 installer line for diagnosis.
+          # Protect explicit 1.1.1 release run, all open PR head commits, recent
+          # per-workflow history, and all 1.1.1 installer failures/cancellations.
           while IFS=$'\t' read -r run_id workflow_name sha run_branch created_at conclusion; do
             [[ -z "${run_id:-}" ]] && continue
             if [[ "$run_id" == "$REFERENCE_RUN_ID" ]]; then
