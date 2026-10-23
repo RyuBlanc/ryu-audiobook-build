@@ -472,16 +472,8 @@ jobs:
           choco install innosetup -y --no-progress
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed with exit code $LASTEXITCODE." }
 
-      - name: Restore Python for HTML installer packaging
-        id: html_python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Build installer
+      - name: Build core installer payload
         shell: pwsh
-        env:
-          HTML_PYTHON: ${{ steps.html_python.outputs.python-path }}
         run: |
           $ErrorActionPreference = 'Stop'
           $candidates = @(
@@ -495,13 +487,44 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup core compilation failed with exit code $LASTEXITCODE." }
           $coreInstaller = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Core Setup.exe"
           if (-not (Test-Path $coreInstaller)) { throw "Core installer was not produced: $coreInstaller" }
-          # Use the exact interpreter path exported by setup-python. A Windows
-          # Store execution-alias shim can precede Python on PATH on hosted runners.
+
+      - name: Restore Python for HTML installer packaging
+        id: html_python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build functional HTML installer
+        shell: pwsh
+        env:
+          HTML_PYTHON: ${{ steps.html_python.outputs.python-path }}
+        run: |
+          # Re-select Python after the long core-setup compile. Prefer the
+          # freshly restored setup-python interpreter, then use the private
+          # Python runtime already installed and smoke-tested earlier in this job.
           $pythonExe = $env:HTML_PYTHON
           if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
-            throw "setup-python did not provide a usable interpreter for HTML packaging: $pythonExe"
+            $privatePython = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap\python312\python.exe'
+            if (Test-Path -LiteralPath $privatePython -PathType Leaf) {
+              $pythonExe = $privatePython
+              Write-Host "Using verified private Python fallback: $pythonExe"
+            }
           }
-          Write-Host "Using HTML-installer Python from setup-python output: $pythonExe"
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            $pathCandidate = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
+            if (-not [string]::IsNullOrWhiteSpace($pathCandidate) -and $pathCandidate -notlike '*WindowsApps*' -and (Test-Path -LiteralPath $pathCandidate -PathType Leaf)) {
+              $pythonExe = $pathCandidate
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "No usable Python interpreter for HTML packaging. setup-python=$($env:HTML_PYTHON); private fallback=$privatePython"
+          }
+          Write-Host "Using HTML-installer Python: $pythonExe"
+          & $pythonExe -m pip --version
+          if ($LASTEXITCODE -ne 0) {
+            & $pythonExe -m ensurepip --upgrade
+            if ($LASTEXITCODE -ne 0) { throw "Could not bootstrap pip for HTML installer Python (exit $LASTEXITCODE)." }
+          }
           $env:PYTHONPATH = (Get-Location).Path
           $env:PYTHONDONTWRITEBYTECODE = '1'
           & $pythonExe -m pip install --disable-pip-version-check PyInstaller PySide6
