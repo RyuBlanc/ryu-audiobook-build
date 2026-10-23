@@ -7,16 +7,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class UiStabilityRegressions(unittest.TestCase):
-    def test_heavy_pages_skip_full_widget_fade_and_light_fade_is_prepared_before_show(self):
+    def test_page_navigation_avoids_opacity_effects_and_keeps_handlers(self):
         source = (ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")
-        transition = source.split("def _show_page", 1)[1].split("def _sidebar_changed", 1)[0]
-        self.assertIn("heavy_pages", transition)
-        self.assertLess(
-            transition.index("widget.setGraphicsEffect(effect)"),
-            transition.index("self.stack.setCurrentWidget(widget)", transition.index("widget.setGraphicsEffect(effect)")),
-        )
-        self.assertIn('getattr(self, "import_page", None)', transition)
-        self.assertIn('getattr(self, "library", None)', transition)
+        transition = source.split("def _show_page", 1)[1].split("def _sidebar_item_clicked", 1)[0]
+        self.assertIn("self.stack.setCurrentWidget(widget)", transition)
+        self.assertNotIn("QGraphicsOpacityEffect", transition)
+        self.assertNotIn("animation.start()", transition)
+        self.assertIn("def _sidebar_item_clicked", source)
+        self.assertIn("def _open_generation_feature", source)
 
     def test_library_search_is_debounced_and_status_is_cached_per_refresh(self):
         source = (ROOT / "app/ui/library.py").read_text(encoding="utf-8")
