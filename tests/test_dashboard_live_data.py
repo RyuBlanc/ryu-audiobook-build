@@ -322,7 +322,7 @@ class DashboardLiveDataTests(unittest.TestCase):
         self.assertIn("function routeForResume(project)", adapter)
         self.assertIn("function navigateToProjectStage(project, stage = routeForResume(project))", adapter)
         self.assertIn("writeResumeCheckpoint(dashboardProject.folder, stage)", adapter)
-        self.assertIn("'Setup checkpoint · ' + (savedResumeStage(selectedProject) || routeForResume(selectedProject))", adapter)
+        self.assertIn("Setup checkpoint · ' + (savedResumeStage(selectedProject) || routeForResume(selectedProject))", adapter)
         self.assertIn("const resumableStates = ['queued','running','pause_requested','paused','cancel_requested','retrying']", adapter)
         self.assertIn("const job = requestedJobId", adapter)
         self.assertIn("routeForResume(project)", adapter)
