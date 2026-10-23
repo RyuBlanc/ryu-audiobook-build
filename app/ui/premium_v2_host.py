@@ -29,6 +29,15 @@ from PySide6.QtGui import QDesktopServices
 
 from app.core.paths import app_root, audiobooks_root, ensure_roots, library_root, settings_root
 from app.core.project import create_project, list_projects
+from app.core.character_library import (
+    character_library_path as reusable_character_library_path,
+    list_characters as list_reusable_characters,
+    list_deleted_characters as list_reusable_deleted_characters,
+    restore_character as restore_reusable_character,
+    soft_delete_character as soft_delete_reusable_character,
+    sync_characters as sync_reusable_characters,
+    update_character as update_reusable_character,
+)
 from app.documents.cover_art import COVER_IMAGE_EXTENSIONS, COVER_SOURCE_EXTENSIONS, extract_embedded_cover, persist_project_cover
 from app.documents.parser import SUPPORTED_EXTENSIONS, clean_import_noise, clean_text, detect_repeated_book_noise, extract_text
 from app.chapters.detector import detect_chapters
@@ -307,6 +316,10 @@ class PremiumV2Bridge(QObject):
                 "app.get_info": self._app_info,
                 "app.get_capabilities": self._capabilities,
                 "project.list": self._project_list,
+                "project.trash": self._project_trash,
+                "project.trash.list": self._project_trash_list,
+                "project.trash.restore": self._project_trash_restore,
+                "project.trash.purge": self._project_trash_purge,
                 "project.open": self._project_open,
                 "project.get_active": self._project_get_active,
                 "chapter.list": self._chapter_list,
@@ -332,6 +345,8 @@ class PremiumV2Bridge(QObject):
                 "voice.preview": self._voice_preview,
                 "character.list": self._character_list,
                 "character_library.list": self._character_library_list,
+                "character_library.deleted.list": self._character_library_deleted_list,
+                "character_library.restore": self._character_library_restore,
                 "character_library.save": self._character_library_save,
                 "character_library.delete": self._character_library_delete,
                 "character_library.import": self._character_library_import,
@@ -415,6 +430,10 @@ class PremiumV2Bridge(QObject):
             "app.get_capabilities": True,
             "project.create": False,
             "project.list": True,
+            "project.trash": True,
+            "project.trash.list": True,
+            "project.trash.restore": True,
+            "project.trash.purge": True,
             "project.open": True,
             "project.get_active": True,
             "chapter.list": True,
@@ -440,6 +459,8 @@ class PremiumV2Bridge(QObject):
             "voice.preview": True,
             "character.list": True,
             "character_library.list": True,
+            "character_library.deleted.list": True,
+            "character_library.restore": True,
             "character_library.save": True,
             "character_library.delete": True,
             "character_library.import": True,
@@ -695,6 +716,88 @@ class PremiumV2Bridge(QObject):
     def _project_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         return [self._project_summary(project) for project in list_projects()]
 
+    def _project_trash(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Move a local project to recoverable Trash without destroying its work."""
+        from app.core.project_trash import trash_project
+
+        requested = str(payload.get("folder") or "").strip()
+        if not requested:
+            raise ValueError("Choose a saved project before deleting it.")
+        try:
+            target = Path(requested).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ValueError("The selected project path is invalid.") from exc
+        project = next(
+            (item for item in list_projects() if Path(item.folder).resolve() == target),
+            None,
+        )
+        if project is None:
+            raise ValueError("That project is no longer present in the active Library.")
+        active_folder_value = str(self.settings.value("project/active_folder") or "").strip()
+        active_folder = Path(active_folder_value).expanduser().resolve() if active_folder_value else None
+        active_states = {"queued", "running", "paused", "cancelling"}
+        if active_folder == target:
+            with self._jobs_lock:
+                has_active_job = any(str(job.get("state") or "").casefold() in active_states
+                                     for job in self._jobs.values())
+            if has_active_job:
+                raise ValueError("This project has an active background job. Cancel or finish it before moving the book to Trash.")
+        entry = trash_project(project)
+        if active_folder == target:
+            self.settings.remove("project/active_folder")
+            self.settings.sync()
+        manifest_path = entry / "trash-manifest.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            manifest = {}
+        return {"id": str(manifest.get("id") or entry.name), "title": project.title,
+                "trashed": True, "deleted_at": manifest.get("deleted_at")}
+
+    def _project_trash_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
+        from app.core.project_trash import list_trashed_projects
+
+        entries = []
+        for item in list_trashed_projects():
+            entries.append({
+                "id": str(item.get("id") or ""),
+                "title": str(item.get("title") or item.get("original_folder_name") or "Untitled"),
+                "deleted_at": str(item.get("deleted_at") or ""),
+                "original_folder_name": str(item.get("original_folder_name") or ""),
+                "restorable": bool(item.get("restorable")),
+            })
+        return entries
+
+    def _project_trash_entry(self, payload: dict[str, Any]) -> Path:
+        from app.core.project_trash import list_trashed_projects, trash_root
+
+        requested_id = str(payload.get("id") or payload.get("trash_id") or "").strip()
+        if not requested_id:
+            raise ValueError("Choose a Trash entry first.")
+        record = next((item for item in list_trashed_projects()
+                       if str(item.get("id") or "") == requested_id), None)
+        if record is None:
+            raise ValueError("That Trash entry no longer exists. Refresh the recovery list.")
+        stored_project = Path(str(record.get("project_folder") or "")).expanduser().resolve()
+        root = trash_root().resolve()
+        entry = stored_project.parent
+        if root not in entry.parents or not (entry / "trash-manifest.json").is_file():
+            raise ValueError("The selected recovery record is outside the managed Trash.")
+        return entry
+
+    def _project_trash_restore(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from app.core.project_trash import restore_project
+
+        entry = self._project_trash_entry(payload)
+        restored_folder = restore_project(entry)
+        return {"restored": True, "folder": str(restored_folder), "title": restored_folder.name}
+
+    def _project_trash_purge(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from app.core.project_trash import purge_trashed_project
+
+        entry = self._project_trash_entry(payload)
+        purge_trashed_project(entry)
+        return {"purged": True}
 
     def _project_open(self, payload: dict[str, Any]) -> dict[str, Any]:
         requested = str(payload.get("folder") or "").strip()
@@ -1698,6 +1801,7 @@ class PremiumV2Bridge(QObject):
                                            "updated_at": self._now()}
             state["modified_at"] = self._now()
             save_state(project.folder, state)
+            self._sync_saved_cast(project, items, state, update_names=False, update_voice=False)
             self._job_update(job_id, state="completed", stage="Analysis complete", progress=100,
                              message=f"Detected {len(items)} character candidate(s) from saved chapter text",
                              result={"characters": items, "dialogue_total": analysis.dialogue_total,
@@ -1724,6 +1828,7 @@ class PremiumV2Bridge(QObject):
         state["characters"] = characters
         state["modified_at"] = self._now()
         save_state(project.folder, state)
+        self._sync_saved_cast(project, characters, state, update_names=True, update_voice=True)
         return {"name": name, "voice_profile": item["voice_profile"], "saved": True}
 
     def _character_update(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1786,6 +1891,7 @@ class PremiumV2Bridge(QObject):
         state["characters"] = characters
         state["modified_at"] = self._now()
         save_state(project.folder, state)
+        self._sync_saved_cast(project, characters, state, update_names=True, update_voice=True)
         return {"character": item, "saved": True}
 
     def _character_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1808,76 +1914,343 @@ class PremiumV2Bridge(QObject):
         return {"name": name, "deleted": True, "remaining": len(kept)}
 
     def _character_library_path(self) -> Path:
-        return settings_root() / "character_library.json"
+        return reusable_character_library_path()
 
-    def _character_library_read(self) -> list[dict[str, Any]]:
-        path = self._character_library_path()
-        try:
-            data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
-        except (OSError, ValueError, TypeError):
-            raise ValueError("The saved Character Library file is invalid. Import a valid JSON cast file to restore it.")
-        rows = data.get("characters", []) if isinstance(data, dict) else data
-        if not isinstance(rows, list): raise ValueError("Character Library data must be a list of characters.")
-        return [row for row in rows if isinstance(row, dict) and str(row.get("name") or "").strip()]
+    @staticmethod
+    def _character_library_ui_record(record: dict[str, Any]) -> dict[str, Any]:
+        """Translate the persistent registry record into the Premium V2 UI contract."""
+        name = str(record.get("primary_name") or record.get("name") or "").strip()
+        series = str(record.get("series") or "").strip()
+        aliases = record.get("aliases") or []
+        if not isinstance(aliases, list):
+            aliases = []
+        voice = str(record.get("voice_name") or record.get("voice") or "").strip() or "Unassigned"
+        return {
+            "id": str(record.get("id") or ""),
+            "name": name,
+            "primary_name": name,
+            "short": str(record.get("short") or (name.split()[0] if name else "?")),
+            "aliases": aliases[:5],
+            "voice": voice,
+            "voice_profile": voice if voice != "Unassigned" else "",
+            "scope": ("Series · " + series) if series else "Unassigned series",
+            "series": series,
+            "notes": str(record.get("notes") or ""),
+            "dialogue_sample": str(record.get("dialogue_sample") or ""),
+            "pronunciation": str(record.get("pronunciation") or ""),
+            "lines": max(0, int(record.get("line_count") or record.get("lines") or 0)),
+            "chapters": max(0, int(record.get("chapter_count") or record.get("chapters") or 0)),
+            "confidence": max(0, min(100, int(record.get("confidence", 100) or 0))),
+            "source_project_folder": str(record.get("source_project_folder") or ""),
+            "source_project_title": str(record.get("source_project_title") or ""),
+            "updated_at": str(record.get("updated_at") or ""),
+        }
 
-    def _character_library_write(self, rows: list[dict[str, Any]]) -> None:
-        path = self._character_library_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps({"version": 1, "characters": rows}, ensure_ascii=False, indent=2), encoding="utf-8")
-        temporary.replace(path)
+    def _project_series_name(self, project, state: dict[str, Any] | None = None) -> str:
+        state = state if isinstance(state, dict) else load_state(project.folder)
+        for key in ("series_name", "series_title", "novel_series", "series"):
+            value = str(state.get(key) or "").strip()
+            value = re.sub(r"(?i)^\s*series\s*[·:-]\s*", "", value).strip()
+            if value and value.casefold() not in {"global character library", "all series", "unassigned series"}:
+                return value[:300]
+        title = str(getattr(project, "title", "") or "").strip()
+        inferred = re.sub(
+            r"(?i)(?:[\s._-]*(?:vol(?:ume)?\.?\s*\d+|book\s*\d+|part\s*\d+))\s*$",
+            "",
+            title,
+        ).strip(" \t-–—_.:|")
+        return (inferred or title or "Unassigned series")[:300]
+
+    def _sync_saved_cast(
+        self,
+        project,
+        characters: list[dict[str, Any]],
+        state: dict[str, Any] | None = None,
+        *,
+        update_names: bool = False,
+        update_voice: bool = False,
+    ) -> None:
+        """Merge the real saved Character Studio cast into the shared registry."""
+        if not isinstance(characters, list) or not characters:
+            return
+        state = state if isinstance(state, dict) else load_state(project.folder)
+        series = self._project_series_name(project, state)
+        normalized = []
+        for row in characters:
+            if not isinstance(row, dict):
+                continue
+            examples = row.get("examples") or []
+            if not isinstance(examples, list):
+                examples = [str(examples)] if str(examples or "").strip() else []
+            chapter_rows = row.get("chapter_numbers") or row.get("chapters") or []
+            chapter_count = row.get("chapter_count")
+            if chapter_count is None:
+                chapter_count = len(chapter_rows) if isinstance(chapter_rows, (list, tuple, set)) else 0
+            normalized.append({
+                "name": str(row.get("name") or row.get("primary_name") or "").strip(),
+                "aliases": row.get("aliases") or [],
+                "voice": row.get("voice_profile") or row.get("voice_name") or row.get("voice") or "",
+                "examples": examples,
+                "dialogue_sample": row.get("dialogue_sample") or (examples[0] if examples else ""),
+                "pronunciation": row.get("pronunciation") or "",
+                "notes": row.get("notes") or "",
+                "line_count": row.get("dialogue_count", row.get("line_count", row.get("lines", 0))),
+                "chapter_count": chapter_count,
+                "confidence": row.get("confidence", 100),
+            })
+        sync_reusable_characters(
+            series,
+            normalized,
+            source_project_folder=str(project.folder),
+            source_project_title=str(getattr(project, "title", "") or ""),
+            update_names=update_names,
+            update_voice=update_voice,
+        )
+
+    def _character_library_bootstrap(self) -> None:
+        """Migrate the old flat JSON shape and index cast data already saved in books."""
+        if getattr(self, "_character_library_bootstrapped", False):
+            return
+        path = reusable_character_library_path()
+        legacy_rows: list[dict[str, Any]] = []
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+                raise ValueError(
+                    "The saved Character Library file could not be read. It was left untouched; export or back it up before repairing it."
+                ) from exc
+            is_legacy = isinstance(data, list) or (
+                isinstance(data, dict) and "characters" in data
+                and "active" not in data and "deleted" not in data
+            )
+            if is_legacy:
+                candidates = data if isinstance(data, list) else data.get("characters", [])
+                if isinstance(candidates, list):
+                    legacy_rows = [dict(row) for row in candidates if isinstance(row, dict)]
+                path.parent.mkdir(parents=True, exist_ok=True)
+                temporary = path.with_suffix(path.suffix + ".migration.tmp")
+                temporary.write_text(
+                    json.dumps({"version": 1, "active": [], "deleted": []}, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                temporary.replace(path)
+
+        for row in legacy_rows:
+            name = str(row.get("name") or row.get("primary_name") or "").strip()
+            if not name:
+                continue
+            scope = str(row.get("scope") or "").strip()
+            series = str(row.get("series") or "").strip()
+            if not series and re.match(r"(?i)^series\s*[·:-]", scope):
+                series = re.sub(r"(?i)^series\s*[·:-]\s*", "", scope).strip()
+            if not series or series.casefold() in {"global character library", "all series"}:
+                series = str(row.get("source_project_title") or "Unassigned series").strip()
+            aliases = row.get("aliases") or []
+            if isinstance(aliases, str):
+                aliases = [part.strip() for part in aliases.replace("\n", ",").split(",") if part.strip()]
+            examples = row.get("examples") or []
+            sample = str(row.get("dialogue_sample") or row.get("sample") or "").strip()
+            if not isinstance(examples, list):
+                examples = [str(examples)] if str(examples or "").strip() else []
+            if sample:
+                examples = [sample, *examples]
+            normalized = {
+                "name": name,
+                "aliases": aliases,
+                "voice": row.get("voice") or row.get("voice_name") or "",
+                "examples": examples,
+                "dialogue_sample": sample,
+                "notes": row.get("notes") or "",
+                "pronunciation": row.get("pronunciation") or "",
+                "line_count": row.get("lines", row.get("line_count", 0)),
+                "chapter_count": row.get("chapters", row.get("chapter_count", 0)),
+                "confidence": row.get("confidence", 100),
+            }
+            sync_reusable_characters(
+                series, [normalized],
+                source_project_folder=str(row.get("source_project_folder") or ""),
+                source_project_title=str(row.get("source_project_title") or ""),
+                update_names=True, update_voice=True,
+            )
+
+        # Existing projects can already have saved analysis even if the global
+        # registry was never hydrated. Reuse it once on first Character Library load.
+        for project in list_projects():
+            try:
+                state = load_state(project.folder)
+                rows = state.get("characters") or []
+                if isinstance(rows, list) and rows:
+                    self._sync_saved_cast(project, rows, state)
+            except (OSError, ValueError, TypeError):
+                log.warning("Could not import the saved cast for %s into Character Library", project.title, exc_info=True)
+        self._character_library_bootstrapped = True
 
     def _character_library_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        return self._character_library_read()
+        self._character_library_bootstrap()
+        return [self._character_library_ui_record(row) for row in list_reusable_characters()]
+
+    def _character_library_deleted_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
+        self._character_library_bootstrap()
+        return [self._character_library_ui_record(row) for row in list_reusable_deleted_characters()]
 
     def _character_library_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._character_library_bootstrap()
         name = str(payload.get("name") or "").strip()
-        if not name: raise ValueError("Enter a character name before saving it to the Character Library.")
+        if not name:
+            raise ValueError("Enter a character name before saving it to the Character Library.")
         aliases = payload.get("aliases") or []
-        if isinstance(aliases, str): aliases = aliases.split(",")
-        if not isinstance(aliases, list): raise ValueError("Character aliases must be a list or comma-separated text.")
-        row_id = str(payload.get("id") or "").strip() or uuid.uuid4().hex
-        scope = str(payload.get("scope") or "Global character library").strip()[:100]
-        item = {"id": row_id, "name": name[:300], "short": str(payload.get("short") or name.split()[0]).strip()[:120],
-                "aliases": list(dict.fromkeys(str(x).strip()[:160] for x in aliases if str(x).strip())),
-                "voice": str(payload.get("voice") or "Unassigned").strip()[:200], "scope": scope,
-                "series": str(payload.get("series") or scope).strip()[:100], "notes": str(payload.get("notes") or "").strip()[:4000],
-                "lines": max(0, int(payload.get("lines") or 0)), "chapters": max(0, int(payload.get("chapters") or 0)),
-                "confidence": max(0, min(100, int(payload.get("confidence", 100)))), "updated_at": self._now()}
-        rows = self._character_library_read()
-        old = next((i for i, row in enumerate(rows) if str(row.get("id") or "") == row_id or str(row.get("name") or "").casefold() == name.casefold()), None)
-        if old is None: rows.append(item)
-        else: rows[old] = item
-        self._character_library_write(rows)
-        return {"character": item, "count": len(rows), "saved": True}
+        if isinstance(aliases, str):
+            aliases = [part.strip() for part in aliases.replace("\n", ",").split(",") if part.strip()]
+        if not isinstance(aliases, list):
+            raise ValueError("Character aliases must be a list or comma-separated text.")
+        aliases = list(dict.fromkeys(str(item).strip()[:160] for item in aliases if str(item).strip()))[:5]
+
+        series = str(payload.get("series") or "").strip()
+        scope = str(payload.get("scope") or "").strip()
+        if not series and re.match(r"(?i)^series\s*[·:-]", scope):
+            series = re.sub(r"(?i)^series\s*[·:-]\s*", "", scope).strip()
+        if not series and scope.casefold() not in {"global character library", "all series"}:
+            series = scope
+        if not series or series.casefold() in {"global character library", "all series"}:
+            active_folder = str(self.settings.value("project/active_folder") or "").strip()
+            active_project = next(
+                (project for project in list_projects()
+                 if active_folder and str(Path(project.folder).resolve()) == str(Path(active_folder).resolve())),
+                None,
+            )
+            if active_project:
+                series = self._project_series_name(active_project, load_state(active_project.folder))
+            else:
+                series = "Unassigned series"
+        series = series[:300]
+
+        sample = str(payload.get("dialogue_sample") or "").strip()[:4000]
+        notes = str(payload.get("notes") or "").strip()[:4000]
+        existing = next(
+            (row for row in list_reusable_characters()
+             if str(row.get("id") or "") == str(payload.get("id") or "").strip()),
+            None,
+        )
+        if existing:
+            record = update_reusable_character(existing["id"], {
+                "series": series,
+                "primary_name": name[:300],
+                "aliases": aliases,
+                "dialogue_sample": sample,
+                "notes": notes,
+            })
+        else:
+            active_folder = str(self.settings.value("project/active_folder") or "").strip()
+            active_project = next(
+                (project for project in list_projects()
+                 if active_folder and str(Path(project.folder).resolve()) == str(Path(active_folder).resolve())),
+                None,
+            )
+            sync_reusable_characters(
+                series,
+                [{
+                    "name": name[:300],
+                    "aliases": aliases,
+                    "dialogue_sample": sample,
+                    "examples": [sample] if sample else [],
+                    "notes": notes,
+                    "confidence": 100,
+                    "voice": "",
+                }],
+                source_project_folder=str(active_project.folder) if active_project else "",
+                source_project_title=str(active_project.title) if active_project else "",
+                update_names=True,
+                update_voice=False,
+            )
+            record = next(
+                (row for row in list_reusable_characters()
+                 if str(row.get("series") or "").casefold() == series.casefold()
+                 and (
+                     str(row.get("primary_name") or "").casefold() == name.casefold()
+                     or name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])}
+                 )),
+                None,
+            )
+            if record is None:
+                raise RuntimeError("The character could not be saved to the reusable registry.")
+        self._character_library_bootstrapped = True
+        public = self._character_library_ui_record(record)
+        return {"character": public, "count": len(list_reusable_characters()), "saved": True}
 
     def _character_library_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._character_library_bootstrap()
         row_id = str(payload.get("id") or "").strip()
-        name = str(payload.get("name") or "").strip().casefold()
-        rows = self._character_library_read()
-        kept = [row for row in rows if not ((row_id and str(row.get("id") or "") == row_id) or (name and str(row.get("name") or "").casefold() == name))]
-        if len(kept) == len(rows): raise ValueError("The selected character is no longer in the Character Library.")
-        self._character_library_write(kept)
-        return {"deleted": len(rows)-len(kept), "count": len(kept)}
+        if not row_id:
+            name = str(payload.get("name") or "").strip().casefold()
+            record = next((row for row in list_reusable_characters()
+                           if str(row.get("primary_name") or "").casefold() == name), None)
+            row_id = str(record.get("id") or "") if record else ""
+        if not row_id:
+            raise ValueError("Choose a character from the reusable Character Library.")
+        record = soft_delete_reusable_character(row_id)
+        return {"deleted": 1, "count": len(list_reusable_characters()), "character": self._character_library_ui_record(record)}
+
+    def _character_library_restore(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._character_library_bootstrap()
+        row_id = str(payload.get("id") or "").strip()
+        if not row_id:
+            raise ValueError("Choose a deleted character to restore.")
+        record = restore_reusable_character(row_id)
+        return {"restored": True, "character": self._character_library_ui_record(record),
+                "count": len(list_reusable_characters())}
 
     def _character_library_import(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._character_library_bootstrap()
         incoming = payload.get("characters")
-        if isinstance(incoming, dict): incoming = incoming.get("characters")
-        if not isinstance(incoming, list) or not incoming: raise ValueError("Choose a JSON file containing a non-empty character list.")
-        rows = self._character_library_read()
-        by_name = {str(row.get("name") or "").casefold(): i for i, row in enumerate(rows)}
+        if isinstance(incoming, dict):
+            incoming = incoming.get("characters")
+        if not isinstance(incoming, list) or not incoming:
+            raise ValueError("Choose a JSON file containing a non-empty character list.")
         imported = 0
         for candidate in incoming:
-            if not isinstance(candidate, dict) or not str(candidate.get("name") or "").strip(): continue
-            item = dict(candidate); item["name"] = str(item["name"]).strip(); item["id"] = str(item.get("id") or uuid.uuid4().hex)
-            aliases = item.get("aliases") or []; item["aliases"] = aliases if isinstance(aliases, list) else str(aliases).split(",")
-            key = item["name"].casefold()
-            if key in by_name: rows[by_name[key]] = {**rows[by_name[key]], **item}
-            else: by_name[key] = len(rows); rows.append(item)
+            if not isinstance(candidate, dict):
+                continue
+            name = str(candidate.get("name") or candidate.get("primary_name") or "").strip()
+            if not name:
+                continue
+            scope = str(candidate.get("scope") or "").strip()
+            series = str(candidate.get("series") or "").strip()
+            if not series and re.match(r"(?i)^series\s*[·:-]", scope):
+                series = re.sub(r"(?i)^series\s*[·:-]\s*", "", scope).strip()
+            if not series or series.casefold() in {"global character library", "all series"}:
+                series = str(candidate.get("source_project_title") or "Imported cast").strip()
+            aliases = candidate.get("aliases") or []
+            if isinstance(aliases, str):
+                aliases = [part.strip() for part in aliases.replace("\n", ",").split(",") if part.strip()]
+            examples = candidate.get("examples") or []
+            sample = str(candidate.get("dialogue_sample") or candidate.get("sample") or "").strip()
+            if sample:
+                examples = [sample, *(examples if isinstance(examples, list) else [])]
+            sync_reusable_characters(
+                series,
+                [{
+                    "name": name,
+                    "aliases": aliases if isinstance(aliases, list) else [],
+                    "voice": candidate.get("voice") or candidate.get("voice_name") or "",
+                    "dialogue_sample": sample,
+                    "examples": examples if isinstance(examples, list) else [],
+                    "notes": candidate.get("notes") or "",
+                    "pronunciation": candidate.get("pronunciation") or "",
+                    "line_count": candidate.get("line_count", candidate.get("lines", 0)),
+                    "chapter_count": candidate.get("chapter_count", candidate.get("chapters", 0)),
+                    "confidence": candidate.get("confidence", 100),
+                }],
+                source_project_folder=str(candidate.get("source_project_folder") or ""),
+                source_project_title=str(candidate.get("source_project_title") or ""),
+                update_names=True,
+                update_voice=True,
+            )
             imported += 1
-        if not imported: raise ValueError("The selected JSON file contained no valid named characters.")
-        self._character_library_write(rows)
-        return {"imported": imported, "count": len(rows), "merged_by_name": True}
+        if not imported:
+            raise ValueError("The selected JSON file contained no valid named characters.")
+        return {"imported": imported, "count": len(list_reusable_characters()), "merged_by_name_and_series": True}
+
     def _pronunciation_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         project = self._active_project()
         state = load_state(project.folder)
