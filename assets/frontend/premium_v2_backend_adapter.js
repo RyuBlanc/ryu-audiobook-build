@@ -20,6 +20,10 @@
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
   const resumeCheckpointKey = 'ryu.project.resume-checkpoints.v1';
   const resumeStages = new Set(['import','chapters','narrator','characters','sound','production','player']);
+  const resumeStageRoutes = {
+    import:'import', chapters:'chapters', narrator:'voice', characters:'characters',
+    sound:'sound', production:'production', player:'player'
+  };
   function readResumeCheckpoints() {
     try {
       const raw = JSON.parse(localStorage.getItem(resumeCheckpointKey) || '{}');
@@ -41,20 +45,18 @@
   function routeForResume(project) {
     const stage = savedResumeStage(project);
     if (stage) return stage;
+    // Infer the earliest unfinished step from persisted project readiness. This
+    // covers projects created before resume checkpoints were introduced.
     if (project?.completed && project?.output_path) return 'player';
-    if (!project?.chapter_count) return 'import';
+    if (!project?.source_exists || !project?.chapter_count) return 'import';
     if (!project?.voice_profile) return 'narrator';
     if (!project?.character_analysis_done) return 'characters';
     if (!project?.sound_design_configured) return 'sound';
-    if (!project?.output_configured || project?.prepared_percent < 100) return 'production';
+    if (!project?.output_configured) return 'production';
     return 'chapters';
   }
   function navigateToProjectStage(project, stage = routeForResume(project)) {
-    const routes = {
-      import:'import', chapters:'chapters', narrator:'voice', characters:'characters',
-      sound:'sound', production:'production', player:'player'
-    };
-    const target = routes[stage] || 'chapters';
+    const target = resumeStageRoutes[stage] || 'chapters';
     if (project?.folder) writeResumeCheckpoint(project.folder, stage);
     if (typeof window.go === 'function') window.go(target);
     return target;
@@ -484,7 +486,13 @@
           production:'production', generator:'production', generation:'production', player:'player'
         };
         const stage = stageAliases[destination];
-        if (stage && dashboardProject?.folder) writeResumeCheckpoint(dashboardProject.folder, stage);
+        let checkpointProject = dashboardProject;
+        if (!checkpointProject?.folder) {
+          const heading = document.querySelector('#dashboard h1,#dashboard h2,#dashboard h3');
+          const activeTitle = String(heading?.textContent || '').trim().toLowerCase();
+          checkpointProject = projects.find(project => String(project.title || '').trim().toLowerCase() === activeTitle) || null;
+        }
+        if (stage && checkpointProject?.folder) writeResumeCheckpoint(checkpointProject.folder, stage);
         setTimeout(() => {
           syncMiniPlayer();
           refreshProjects().catch(() => {});
