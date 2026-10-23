@@ -10,44 +10,65 @@ on:
 permissions:
   actions: write
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ryu-audiobook-actions-cleanup
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Prune old completed workflow runs
+      - name: Prune old workflow runs while preserving release references and open-PR diagnostics
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
+          REFERENCE_RUN_ID: "39933305387"
+          REFERENCE_INSTALLER_ARTIFACT_ID: "12492473737"
+          REFERENCE_PORTABLE_ARTIFACT_ID: "12492483926"
+          REFERENCE_SHA256_ARTIFACT_ID: "12492473745"
         shell: bash
         run: |
           set -euo pipefail
+          api="/repos/${REPOSITORY}"
 
-          echo "Keeping the newest 2 completed/cancelled runs per workflow."
-          gh api --paginate             -H "Accept: application/vnd.github+json"             "/repos/${REPOSITORY}/actions/runs?per_page=100"             --jq '.workflow_runs[] | [.id,.name,.status,.created_at] | @tsv' |
-          while IFS=$'\t' read -r run_id workflow_name status created_at; do
-            if [[ "$status" == "in_progress" || "$status" == "queued" || "$status" == "waiting" || "$status" == "requested" || "$status" == "pending" ]]; then
+          echo "Fetching open pull requests so their head commits remain available."
+          gh api --paginate -H "Accept: application/vnd.github+json" "${api}/pulls?state=open&per_page=100"             --jq '.[] | select(.head.repo.full_name == env.REPOSITORY) | [.head.sha,.head.ref,.number] | @tsv'             > "${RUNNER_TEMP}/open-pr-heads.tsv"
+
+          echo "Fetching all completed workflow runs."
+          gh api --paginate -H "Accept: application/vnd.github+json" "${api}/actions/runs?per_page=100"             --jq '.workflow_runs[] | select(.status == "completed") | [.id,.name,.head_sha,.head_branch,.created_at,.conclusion] | @tsv'             > "${RUNNER_TEMP}/runs.tsv"
+
+          # Keep the newest two completed runs per workflow, but never delete:
+          # 1) the explicit 1.1.1 release reference run 1021;
+          # 2) any workflow run whose SHA is the head of an open PR;
+          # 3) the two newest completed runs for each workflow;
+          # 4) any failure/cancellation from the primary 1.1.1 installer line for diagnosis.
+          while IFS=$'\t' read -r run_id workflow_name sha run_branch created_at conclusion; do
+            [[ -z "${run_id:-}" ]] && continue
+            if [[ "$run_id" == "$REFERENCE_RUN_ID" ]]; then
+              echo "Preserving canonical release reference run $run_id."
               continue
             fi
-            printf '%s\t%s\t%s\n' "$run_id" "$workflow_name" "$created_at"
-          done > "${RUNNER_TEMP}/runs.tsv"
+            if awk -F '\t' -v sha="$sha" '$1 == sha { found=1 } END { exit !found }' "${RUNNER_TEMP}/open-pr-heads.tsv"; then
+              echo "Preserving run $run_id: its commit is referenced by an open PR."
+              continue
+            fi
+            if [[ "$workflow_name" == "Build Windows App" && "$run_branch" == "fix/installer-branding-accessibility" && "$conclusion" != "success" ]]; then
+              echo "Preserving 1.1.1 diagnostic run $run_id ($conclusion)."
+              continue
+            fi
 
-          while IFS= read -r workflow_name; do
-            count=0
-            while IFS=$'\t' read -r run_id name created_at; do
-              if [[ "$name" != "$workflow_name" ]]; then
-                continue
-              fi
-              count=$((count + 1))
-              if (( count > 2 )); then
-                echo "Deleting old run ${run_id} (${workflow_name}) from ${created_at}"
-                gh api --method DELETE                   -H "Accept: application/vnd.github+json"                   "/repos/${REPOSITORY}/actions/runs/${run_id}" >/dev/null
-              fi
-            done < <(sort -t $'\t' -k3,3r "${RUNNER_TEMP}/runs.tsv")
-          done < <(cut -f2 "${RUNNER_TEMP}/runs.tsv" | sort -u)
+            rank=$(awk -F '\t' -v name="$workflow_name" -v id="$run_id" '
+              $2 == name { n++; if ($1 == id) target=n }
+              END { print target+0 }
+            ' <(sort -t $'\t' -k5,5r "${RUNNER_TEMP}/runs.tsv"))
+            if (( rank <= 2 )); then
+              echo "Preserving one of the two newest ${workflow_name} runs: $run_id (rank $rank)."
+              continue
+            fi
+            echo "Deleting old workflow run $run_id ($workflow_name, $run_branch, $conclusion, $created_at)."
+            gh api --method DELETE -H "Accept: application/vnd.github+json" "${api}/actions/runs/${run_id}" >/dev/null
+          done < "${RUNNER_TEMP}/runs.tsv"
 
-          echo "Actions cleanup complete."
+          echo "Storage cleanup completed with release and PR protections."
