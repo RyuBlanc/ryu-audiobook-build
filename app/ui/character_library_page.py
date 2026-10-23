@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QUrl, QObject, Signal, QThread
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QFormLayout, QHBoxLayout, QLabel,
@@ -13,7 +12,6 @@ from app.core.character_library import (
     load_character_library, update_character, soft_delete_character, restore_character,
 )
 from app.tts.voice_profile import load_profiles
-from PySide6.QtCore import QObject, Signal, QThread
 
 
 class CharacterEditDialog(QDialog):
@@ -208,34 +206,38 @@ class CharacterLibraryPage(QWidget):
         self.rows = load_character_library()
         query = self.search.text().strip().casefold() if hasattr(self, "search") else ""
         selected_series = self.series_filter.currentData() if hasattr(self, "series_filter") else ""
-        series_values = sorted({str(row.get("series") or "") for row in self.rows if not row.get("deleted") and row.get("series")}, key=str.casefold)
-        current_series = selected_series
+
+        active_series = sorted({
+            str(row.get("series") or "") for row in self.rows
+            if not row.get("deleted") and row.get("series")
+        }, key=str.casefold)
         self.series_filter.blockSignals(True)
         self.series_filter.clear()
         self.series_filter.addItem("All series", "")
-        for series in series_values:
+        for series in active_series:
             self.series_filter.addItem(series, series)
-        idx = self.series_filter.findData(current_series)
-        self.series_filter.setCurrentIndex(idx if idx >= 0 else 0)
+        index = self.series_filter.findData(selected_series)
+        self.series_filter.setCurrentIndex(index if index >= 0 else 0)
         self.series_filter.blockSignals(False)
         selected_series = self.series_filter.currentData() or ""
 
         self.visible_rows = [
             row for row in self.rows
-            if (query in " ".join([
+            if query in " ".join([
                 str(row.get("primary_name", "")),
                 " ".join(row.get("aliases", [])),
                 str(row.get("series", "")),
                 str(row.get("voice_name", "")),
-            ]).casefold())
+            ]).casefold()
             and (not selected_series or row.get("series") == selected_series)
+            and (not row.get("deleted") or self.view_mode.currentText() == "List")
         ]
         self._render_cards()
         self._render_list(previous_id)
         live_count = sum(not row.get("deleted") for row in self.rows)
         deleted_count = sum(bool(row.get("deleted")) for row in self.rows)
         self.status.setText(
-            f"{live_count} saved character(s) • {deleted_count} deleted/recoverable • "
+            f"{live_count} saved character(s) • {deleted_count} deleted/recoverable. "
             "Voice assignment is managed in Character Studio."
         )
 
