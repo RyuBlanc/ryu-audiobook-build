@@ -116,6 +116,25 @@ class DashboardLiveDataTests(unittest.TestCase):
             self.assertTrue(state["cover_detection_attempted"])
             self.assertEqual(state["cover_path"], str(saved_cover.resolve()))
 
+    def test_narrator_metadata_alone_does_not_count_as_selected_tts_voice(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            library = base / "library"
+            with mock.patch("app.core.project.library_root", return_value=library):
+                project = self._create_project(library, "Metadata Only Narrator")
+            output = project.folder / "configured-output.m4b"
+            state = {
+                "status": "imported",
+                "narrator": "Amy",
+                "output_path": str(output),
+            }
+            bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
+            with mock.patch("app.ui.premium_v2_host.load_state", return_value=state):
+                summary = bridge._project_summary(project)
+            self.assertEqual(summary["narrator"], "Amy")
+            self.assertFalse(summary["narrator_voice_configured"])
+            self.assertEqual(summary["prepared_percent"], 35)
+
     def test_player_resolves_requested_audiobook_not_active_editor_project(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
@@ -153,6 +172,10 @@ class DashboardLiveDataTests(unittest.TestCase):
         self.assertIn("function renderAudiobookLibrary", adapter)
         self.assertIn("function refreshDashboardFlow", adapter)
         self.assertIn("refreshDashboardFlow(dashboardProject)", adapter)
+        self.assertIn("Boolean(String(project.voice_profile || '').trim())", adapter)
+        self.assertIn("const progressLine = [...card.querySelectorAll('.job-line')][2]", adapter)
+        self.assertIn("hero.querySelector('.meta-row > span:first-child')", adapter)
+        self.assertIn("hero.querySelector('.meta-row > span:nth-child(2)')", adapter)
         self.assertIn("function clearAudiobookPlayerDisplay", adapter)
         self.assertIn("function renderSelectedAudiobook(data)", adapter)
         self.assertIn("const playSelectedAudiobook = () =>", adapter)

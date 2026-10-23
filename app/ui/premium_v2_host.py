@@ -519,7 +519,8 @@ class PremiumV2Bridge(QObject):
                     assigned_character_names.add(character_name.casefold())
 
         character_voice_count = len(assigned_character_names)
-        narrator_ready = bool(str(state.get("narrator") or state.get("voice_profile") or "").strip())
+        # Narrator is book metadata; readiness requires a selected, saved TTS voice profile.
+        narrator_ready = bool(str(state.get("voice_profile") or "").strip())
         output_configured = bool(output_value)
         pronunciation_rules = (
             state.get("pronunciation_dictionary")
@@ -602,6 +603,7 @@ class PremiumV2Bridge(QObject):
             "author": str(state.get("author") or ""),
             "narrator": str(state.get("narrator") or state.get("voice_profile") or ""),
             "voice_profile": str(state.get("voice_profile") or ""),
+            "narrator_voice_configured": narrator_ready,
             "character_count": len(character_names),
             "character_voice_count": character_voice_count,
             "character_analysis_done": bool(state.get("character_analysis")) or bool(character_names),

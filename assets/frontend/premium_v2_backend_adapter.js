@@ -213,7 +213,7 @@
     const chaptersReady = chapterCount > 0 && preparedChapters === chapterCount;
     const hasChapterText = preparedChapters > 0;
     const narratorName = String(project.narrator || project.voice_profile || '').trim();
-    const narratorReady = Boolean(narratorName);
+    const narratorReady = Boolean(String(project.voice_profile || '').trim());
     const characterCount = Number(project.character_count || 0);
     const characterVoiceCount = Number(project.character_voice_count || 0);
     const characterReviewed = Boolean(project.character_analysis_done);
@@ -228,7 +228,7 @@
       {key:'import', ready:Boolean(project.source_exists), detail:project.source_exists ? 'Book & metadata' : 'Source file missing'},
       {key:'chapters', ready:chaptersReady, detail:chaptersReady ? 'Structure & text' :
         (chapterCount ? preparedChapters + '/' + chapterCount + ' chapters ready' : 'No chapters imported')},
-      {key:'voices', ready:narratorReady, detail:narratorReady ? narratorName : 'Choose a narrator'},
+      {key:'voices', ready:narratorReady, detail:narratorReady ? (narratorName || project.voice_profile) : 'Choose a voice profile'},
       {key:'characters', ready:charactersReady, detail:!characterReviewed ? 'Not analyzed' :
         (characterCount === 0 ? 'No characters found' :
           (charactersReady ? 'Voices assigned' : (characterCount-characterVoiceCount) + ' need review'))},
@@ -280,29 +280,19 @@
         ? 'Narrator ' + (project.narrator || '—') + ' · ' + Number(project.chapter_count || 0) +
           ' chapters · ' + Number(project.character_voice_count || 0) + ' character voices'
         : '— chapters · — character voices';
-      const edited = [...hero.querySelectorAll('p,span,small,div')]
-        .filter(node => dashboardText(node.textContent).includes('last edited') && node.querySelectorAll('*').length <= 2)
-        .sort((a,b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length)[0];
-      if (edited) edited.textContent = 'Chapter ' + (project?.last_edited_chapter_number || '—') + ' last edited';
       const percent = project ? Math.max(0, Math.min(100, Number(project.prepared_percent || 0))) : 0;
-      const preparedLine = [...hero.querySelectorAll('p,span,small,b,strong,div')]
-        .filter(node => /^\\d+\\s*%\\s*prepared$/i.test(String(node.textContent || '').trim()))
-        .sort((a,b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length)[0];
-      if (preparedLine) {
-        preparedLine.textContent = percent + '% prepared';
-      } else {
-        // Preserve any existing bold percentage / separate "prepared" label.
-        const percentNode = [...hero.querySelectorAll('strong,b,span')]
-          .find(node => /^\\d+\\s*%$/.test(String(node.textContent || '').trim()));
-        const preparedLeaf = dashboardLeaves(hero).find(node => dashboardText(node.textContent) === 'prepared');
-        if (percentNode) percentNode.textContent = percent + '%';
-        else if (preparedLeaf?.parentElement) {
-          const siblingPercent = [...preparedLeaf.parentElement.children]
-            .find(node => /^\\d+\\s*%$/.test(String(node.textContent || '').trim()));
-          if (siblingPercent) siblingPercent.textContent = percent + '%';
-          else preparedLeaf.parentElement.textContent = percent + '% prepared';
-        }
-      }
+      // Keep the source HTML's existing bold percentage and adjacent label.
+      const preparedLine = hero.querySelector('.meta-row > span:first-child');
+      const preparedValue = preparedLine?.querySelector('b,strong');
+      if (preparedValue) preparedValue.textContent = percent + '%';
+      else if (preparedLine) preparedLine.textContent = percent + '% prepared';
+
+      // Update only the bold chapter number so the "last edited" typography stays intact.
+      const editedLine = hero.querySelector('.meta-row > span:nth-child(2)');
+      const editedValue = editedLine?.querySelector('b,strong');
+      const editedChapter = project?.last_edited_chapter_number || '—';
+      if (editedValue) editedValue.textContent = 'Chapter ' + editedChapter;
+      else if (editedLine) editedLine.textContent = 'Chapter ' + editedChapter + ' last edited';
       const progress = hero.querySelector('.progress i,.progress-fill,.progress-bar-fill,[role="progressbar"],progress,[style*="width:"]');
       if (progress) {
         progress.style.width = percent + '%';
@@ -377,12 +367,12 @@
       ['queued','running','pause_requested','paused','cancel_requested','retrying'].includes(String(job.state || '').toLowerCase()))
       .sort((a,b) => (Date.parse(b.updated_at || b.queued_at || '') || 0) - (Date.parse(a.updated_at || a.queued_at || '') || 0));
     const job = active[0] || null;
-    const percentLabel = [...card.querySelectorAll('p,span,small,b,strong,div')]
-      .filter(node => /^\d+\s*%\s*complete$/.test(dashboardText(node.textContent)) || dashboardText(node.textContent) === '— complete')
-      .sort((a,b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length)[0];
-    const etaLabel = [...card.querySelectorAll('p,span,small,b,strong,div')]
-      .filter(node => /remaining$/.test(dashboardText(node.textContent)) || dashboardText(node.textContent) === 'unavailable')
-      .sort((a,b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length)[0];
+    // Bind by position within the static job card. These spans are deliberately
+    // cleared when there is no job, so searching for their display text breaks
+    // the next time generation starts.
+    const progressLine = [...card.querySelectorAll('.job-line')][2] || null;
+    const percentLabel = progressLine?.children?.[0] || null;
+    const etaLabel = progressLine?.children?.[1] || null;
     const track = card.querySelector('.progress,.progress-track,.progress-bar,progress,[role="progressbar"]');
     const fill = card.querySelector('.progress i,.progress-fill,.progress-bar-fill,[role="progressbar"],progress,[style*="width:"]');
     const buttons = [...card.querySelectorAll('button,[role="button"],a')];
