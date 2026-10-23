@@ -48,7 +48,7 @@ class DashboardLiveDataTests(unittest.TestCase):
                 "last_edited_chapter_number": 2,
                 "modified_at": "2026-10-23T00:00:00+00:00",
             }
-            bridge = object.__new__(PremiumV2Bridge)
+            bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
             with mock.patch("app.ui.premium_v2_host.list_projects", return_value=[project]):
                 with mock.patch("app.ui.premium_v2_host.load_state", return_value=state):
                     summary = bridge._project_list({})[0]
@@ -78,7 +78,7 @@ class DashboardLiveDataTests(unittest.TestCase):
                 str(first.folder): {"status": "completed", "output_path": str(output_a), "narrator": "Voice A"},
                 str(second.folder): {"status": "completed", "output_path": str(output_b), "narrator": "Voice B"},
             }
-            bridge = object.__new__(PremiumV2Bridge)
+            bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
             with mock.patch("app.ui.premium_v2_host.list_projects", return_value=[first, second]):
                 with mock.patch("app.ui.premium_v2_host.load_state", side_effect=lambda folder: states[str(folder)]):
                     selected = bridge._player_get_active({"folder": str(second.folder)})
