@@ -13,6 +13,7 @@ from app.chapters.detector import detect_chapters
 from app.documents.parser import extract_text
 from app.tts.voice_profile import load_profiles
 from app.core.state import load_state, save_state
+from app.core.character_library import upsert_characters_from_studio
 
 
 class VoiceCastAnalysisWorker(QThread):
@@ -285,6 +286,26 @@ class VoiceCastPage(QWidget):
 
         self.rows = rows
         self._save_cast()
+        # Persist the live analysis into the reusable series-level library.
+        # Primary-name/series identity means a later volume can reuse the cast.
+        folder = self._project_folder()
+        series = ""
+        if folder:
+            try:
+                from app.core.project import Project
+                series = Project.load(folder).title
+            except Exception:
+                series = Path(folder).name
+        upsert_characters_from_studio(series, [
+            {
+                "primary_name": row.get("name"),
+                "aliases": row.get("aliases") or [],
+                "voice_name": row.get("voice") or "",
+                "dialogue_sample": (row.get("examples") or [""])[0],
+            }
+            for row in rows
+            if row.get("name") and str(row.get("name")).casefold() != "narrator"
+        ])
 
         source_note = " from the original source" if source_used else " from the current chapters"
         self.summary.setText(
