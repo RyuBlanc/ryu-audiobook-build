@@ -220,23 +220,31 @@ class ImportPage(QWidget):
         if self.worker is not None and self.worker.isRunning():
             self.status.setText("Another book is still being analysed. Wait for it to finish before selecting another.")
             return
+
+        # Clear the previous preview before validating the new selection so a
+        # failed/unsupported file cannot leave old book details on screen.
+        self.source_path = None
+        self.book = None
+        self.chapters = None
+        self.create_button.setEnabled(False)
+        self.progress.setValue(0)
+        self.summary.setText("Select a supported book to begin a fresh import.")
+        self.preview.clear()
+
         if not path.is_file():
             self.status.setText("The selected file could not be found. Choose a file that still exists and try again.")
-            self.create_button.setEnabled(False)
+            self.button.setEnabled(True)
             return
         if path.suffix.lower() not in {".pdf", ".epub", ".txt", ".docx"}:
             self.status.setText("Unsupported file format. Choose a PDF, EPUB, TXT, or DOCX book.")
-            self.create_button.setEnabled(False)
+            self.button.setEnabled(True)
             return
         self.source_path = path
-        self.book = None
-        self.chapters = None
         self.create_button.setEnabled(False)
         self.button.setEnabled(False)
         self.progress.setValue(0)
         self.info.setText(f"Selected: {path.name}")
-        self.summary.setText("The source is being analysed in the background.")
-        self.preview.clear()
+        self.summary.setText(f"Analyzing {path.name} in the background.")
         self.status.setText("Preparing import…")
         self.worker = ImportPreviewWorker(path)
         self.worker.status.connect(self.status.setText)
