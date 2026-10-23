@@ -33,6 +33,7 @@ from app.ui.voice_page import VoicePage
 from app.ui.hardware_page import HardwarePage
 from app.ui.models_page import ModelsPage
 from app.ui.voice_cast_page import VoiceCastPage
+from app.ui.character_library_page import CharacterLibraryPage
 from app.ui.loading_overlay import FrostedLoadingOverlay
 from app.ui.motion import reduced_motion_enabled
 
@@ -163,6 +164,7 @@ class ProjectWorkflow(QMainWindow):
             ("Chapters", "☷"),
             ("Voice & Narration", "◉"),
             ("Voice Cast", "♙"),
+            ("Character Library", "♟"),
             ("Generate", "▶"),
             ("Models", "◆"),
             ("Hardware", "⚙"),
@@ -200,6 +202,8 @@ class ProjectWorkflow(QMainWindow):
             lambda: self.project.source_path if self.project else None,
         )
         self.stack.addWidget(self.voice_cast)
+        self.character_library = CharacterLibraryPage(self._open_character_studio_for_series)
+        self.stack.addWidget(self.character_library)
         self.stack.addWidget(ModelsPage())
         self.stack.addWidget(HardwarePage())
 
@@ -283,6 +287,9 @@ class ProjectWorkflow(QMainWindow):
         elif name == "Voice Cast":
             self.voice_cast.refresh_profiles()
             self._show_page(self.voice_cast)
+        elif name == "Character Library":
+            self.character_library.refresh()
+            self._show_page(self.character_library)
         elif name == "Generate":
             if self.project:
                 if self.generation:
@@ -297,9 +304,26 @@ class ProjectWorkflow(QMainWindow):
             else:
                 self._show_page(self.import_page)
         elif name == "Models":
-            self._show_page(self.stack.widget(4))
+            self._show_page(self.stack.widget(6))
         elif name == "Hardware":
             self._show_page(self.stack.widget(5))
+
+    def _open_character_studio_for_series(self, series: str = "") -> None:
+        """Open the live cast editor and make the requested series the working context."""
+        projects = [project for project in self.library.projects if project.folder.exists()]
+        chosen = next(
+            (project for project in projects if project.title.casefold() == str(series).casefold()),
+            None,
+        )
+        if chosen:
+            self.open_project(chosen)
+        else:
+            # Existing Character Studio is project-scoped; select the current
+            # project when the reusable series title is not an exact project title.
+            self.select_section("Voice Cast")
+        if self.project:
+            self.voice_cast.refresh_profiles()
+            self.select_section("Voice Cast")
 
     def select_section(self, name: str) -> None:
         for i in range(self.sidebar.count()):
