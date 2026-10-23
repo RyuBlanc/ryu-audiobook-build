@@ -520,15 +520,30 @@ class PremiumV2Bridge(QObject):
             last_edited = None
 
         try:
+            # project.json and chapters.json are the durable user-edit files.
+            # Exclude state.json here because reading/backfilling optional
+            # Dashboard metadata (such as an embedded cover) also writes it.
             modified_stamp = max(
                 path.stat().st_mtime
-                for path in (project.project_file, project.text_file, project.folder / "state.json")
+                for path in (project.project_file, project.text_file)
                 if path.is_file()
             )
             filesystem_modified = datetime.fromtimestamp(modified_stamp, timezone.utc).isoformat(timespec="seconds")
         except (OSError, ValueError):
             filesystem_modified = ""
-        modified_at = str(state.get("modified_at") or filesystem_modified)
+
+        modified_candidates = []
+        for value in (state.get("modified_at"), filesystem_modified):
+            if not value:
+                continue
+            try:
+                timestamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                if timestamp.tzinfo is None:
+                    timestamp = timestamp.replace(tzinfo=timezone.utc)
+                modified_candidates.append(timestamp.astimezone(timezone.utc))
+            except (TypeError, ValueError, OverflowError):
+                continue
+        modified_at = max(modified_candidates).isoformat(timespec="seconds") if modified_candidates else ""
         completed_chapters = state.get("completed_chapters")
         completed_chapter_count = len(completed_chapters) if isinstance(completed_chapters, list) else 0
 
@@ -551,6 +566,19 @@ class PremiumV2Bridge(QObject):
             "last_edited_chapter_number": last_edited,
             "modified_at": modified_at,
         }
+
+    def _mark_project_edited(self, project, chapter_number: int | None = None) -> None:
+        """Persist real edit timestamps used by Dashboard ordering and last-edited labels."""
+        state = load_state(project.folder)
+        state["modified_at"] = self._now()
+        if chapter_number is not None:
+            try:
+                number = int(chapter_number)
+            except (TypeError, ValueError):
+                number = 0
+            if 1 <= number <= len(project.chapters):
+                state["last_edited_chapter_number"] = number
+        save_state(project.folder, state)
 
     def _project_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         return [self._project_summary(project) for project in list_projects()]
@@ -621,10 +649,7 @@ class PremiumV2Bridge(QObject):
         chapter.title = title_value.strip()[:500]
         chapter.text = text_value
         project.save()
-        project_state = load_state(project.folder)
-        project_state["modified_at"] = self._now()
-        project_state["last_edited_chapter_number"] = chapter.number
-        save_state(project.folder, project_state)
+        self._mark_project_edited(project, chapter.number)
         return {"number": chapter.number, "title": chapter.title,
                 "word_count": len((chapter.text or "").split()),
                 "character_count": len(chapter.text or ""),
@@ -1045,6 +1070,7 @@ class PremiumV2Bridge(QObject):
         text_value = str(payload.get("text") or "")
         project.chapters.append(Chapter(len(project.chapters) + 1, title[:500], text_value))
         project.save()
+        self._mark_project_edited(project, project.chapters[-1].number)
         return {"number": project.chapters[-1].number, "title": project.chapters[-1].title}
 
     def _chapter_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1059,6 +1085,7 @@ class PremiumV2Bridge(QObject):
         for i, chapter in enumerate(project.chapters, 1):
             chapter.number = i
         project.save()
+        self._mark_project_edited(project, min(number, len(project.chapters)))
         return {"deleted": number, "chapter_count": len(project.chapters)}
 
     def _chapter_reorder(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1071,6 +1098,7 @@ class PremiumV2Bridge(QObject):
         for i, item in enumerate(project.chapters, 1):
             item.number = i
         project.save()
+        self._mark_project_edited(project, destination)
         return {"chapter_count": len(project.chapters), "moved_to": destination}
 
     def _chapter_merge(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1102,9 +1130,7 @@ class PremiumV2Bridge(QObject):
         for index, chapter in enumerate(project.chapters, 1):
             chapter.number = index
         project.save()
-        project_state = load_state(project.folder)
-        project_state["modified_at"] = self._now()
-        save_state(project.folder, project_state)
+        self._mark_project_edited(project, number - 1)
         return {"merged": number, "into": number - 1, "chapter_count": len(project.chapters)}
 
     def _chapter_split(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1142,9 +1168,7 @@ class PremiumV2Bridge(QObject):
         for i, item in enumerate(project.chapters, 1):
             item.number = i
         project.save()
-        project_state = load_state(project.folder)
-        project_state["modified_at"] = self._now()
-        save_state(project.folder, project_state)
+        self._mark_project_edited(project, new_chapter.number)
         return {
             "number": chapter.number,
             "new_number": new_chapter.number,
