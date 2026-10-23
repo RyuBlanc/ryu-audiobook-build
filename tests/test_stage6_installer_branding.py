@@ -107,7 +107,7 @@ class InstallerBrandingContractTests(unittest.TestCase):
         self.assertIn("$('browse').onclick=browseDirectory", js)
         self.assertIn("$('confirmExit').onclick=", js)
         self.assertIn("environmentChecked&&Number(environment.free_space_bytes)>0", js)
-        self.assertIn("Number(info.file_count).toLocaleString()", js)
+        self.assertIn("Number(info.file_count||0).toLocaleString()", js)
         self.assertIn("app.installEventFilter(window)", bridge)
         self.assertIn("handle.startSystemMove()", bridge)
         self.assertIn("QFileDialog.getExistingDirectory", bridge)
