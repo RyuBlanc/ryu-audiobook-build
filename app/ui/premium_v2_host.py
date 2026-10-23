@@ -455,7 +455,7 @@ class PremiumV2Bridge(QObject):
             if cover and str(state.get("cover_path") or "") != str(cover):
                 state["cover_path"] = str(cover)
                 state_changed = True
-            if cover:
+            if cover and not state.get("cover_detection_attempted"):
                 state["cover_detection_attempted"] = True
                 state_changed = True
         elif cover_value:
