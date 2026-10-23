@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import base64
+from io import BytesIO
 import json
 import os
 import re
@@ -86,35 +88,50 @@ DRAGON_CURSOR_PNG = ASSETS / "dragon_cursor.png"
 
 
 def remove_neutral_white_matte(image: Image.Image) -> Image.Image:
-    """Remove a near-white JPEG matte without flattening the logo onto a tile.
+    """Remove only neutral matte pixels connected to the JPEG canvas edge.
 
-    The SVG embeds a JPEG, so some Qt/SVG versions can leave the white matte
-    visible even when the SVG filter is present. This conservative RGB/alpha
-    pass only touches near-white, low-chroma pixels. Crimson, gold, black and
-    the warm pages are left intact. Alpha is kept as real transparency.
+    Do not globally fade white/light pixels: the official gold lettering,
+    illuminated book pages, and audio waveform contain near-white highlights.
+    A border-connected flood fill isolates the external JPEG matte and keeps
+    those interior highlights fully opaque.
     """
-    pixels = np.asarray(image.convert("RGBA"), dtype=np.float32).copy()
+    pixels = np.asarray(image.convert("RGBA"), dtype=np.uint8).copy()
     rgb = pixels[..., :3]
-    original_alpha = pixels[..., 3] / 255.0
+    original_alpha = pixels[..., 3].copy()
     darkest = rgb.min(axis=2)
     brightest = rgb.max(axis=2)
-    chroma = brightest - darkest
-    neutral_near_white = (chroma <= 20.0) & (darkest >= 232.0)
-    # Make neutral white approach fully transparent rapidly near white while
-    # feathering antialiased/JPEG edge pixels to avoid a pale halo on dark UI.
-    opacity = np.clip((255.0 - darkest) / 23.0, 0.0, 1.0) ** 2.4
-    final_alpha = original_alpha * np.where(neutral_near_white, opacity, 1.0)
-    safe_alpha = np.maximum(final_alpha, 1.0 / 255.0)
-    unmatte = np.clip(
-        (rgb - (1.0 - safe_alpha[..., None]) * 255.0) / safe_alpha[..., None],
-        0.0,
-        255.0,
+    chroma = brightest.astype(np.int16) - darkest.astype(np.int16)
+    white_candidate = (
+        (original_alpha > 0)
+        & (darkest >= 178)
+        & (chroma <= 42)
     )
-    pixels[..., :3] = np.where(neutral_near_white[..., None], unmatte, rgb)
-    pixels[..., 3] = final_alpha * 255.0
-    pixels[final_alpha <= 0.0, :3] = 0.0
-    return Image.fromarray(np.rint(pixels).astype(np.uint8), mode="RGBA")
+    mask_pixels = np.where(white_candidate, 255, 0).astype(np.uint8)
+    # Image.fromarray can produce a read-only image view; copy it before
+    # using ImageDraw.floodfill so the connected matte marks are actually kept.
+    matte_mask = Image.fromarray(mask_pixels, mode="L").copy()
+    width, height = matte_mask.size
 
+    # The mask contains only 0 and 255, so exact-threshold flood fill can mark
+    # only connected near-neutral background pixels. It cannot cross a logo
+    # outline or fill isolated gold/white artwork inside the tile.
+    for x in range(width):
+        if matte_mask.getpixel((x, 0)) == 255:
+            ImageDraw.floodfill(matte_mask, (x, 0), 128, thresh=0)
+        if matte_mask.getpixel((x, height - 1)) == 255:
+            ImageDraw.floodfill(matte_mask, (x, height - 1), 128, thresh=0)
+    for y in range(height):
+        if matte_mask.getpixel((0, y)) == 255:
+            ImageDraw.floodfill(matte_mask, (0, y), 128, thresh=0)
+        if matte_mask.getpixel((width - 1, y)) == 255:
+            ImageDraw.floodfill(matte_mask, (width - 1, y), 128, thresh=0)
+
+    connected_matte = np.asarray(matte_mask) == 128
+    final_alpha = original_alpha.copy()
+    final_alpha[connected_matte] = 0
+    pixels[..., 3] = final_alpha
+    pixels[connected_matte, :3] = 0
+    return Image.fromarray(pixels, mode="RGBA")
 
 def build_logo_assets() -> None:
     ASSETS.mkdir(parents=True, exist_ok=True)
@@ -136,22 +153,29 @@ def build_logo_assets() -> None:
                 f"Application logo source is unexpectedly small: "
                 f"{source_size.width()}x{source_size.height()}"
             )
-        image = QImage(source_size, QImage.Format_RGBA8888)
-        image.fill(Qt.transparent)
-        painter = QPainter(image)
+        svg_text = LOGO_SVG.read_text(encoding="utf-8")
+        # Use the SVG's own high-resolution embedded artwork as the source, but
+        # clear its JPEG matte before applying the matching rounded-tile clip.
+        # Rendering the SVG's white-removal filter can leave a gray/white fringe
+        # and can damage bright gold lettering on some Qt SVG versions.
+        embedded_match = re.search(
+            r'<image[^>]*href="data:image/(?:jpeg|jpg);base64,([^"]+)"',
+            svg_text,
+            re.DOTALL,
+        )
+        if not embedded_match:
+            raise RuntimeError("Application logo SVG has no embedded JPEG artwork.")
         try:
-            renderer.render(painter)
-        finally:
-            painter.end()
-
-        if not image.save(str(LOGO_PNG), "PNG"):
-            raise RuntimeError(f"Could not render application logo: {LOGO_PNG}")
-
-        with Image.open(LOGO_PNG) as source:
-            rgba = source.convert("RGBA")
-        rgba = remove_neutral_white_matte(rgba)
+            embedded_bytes = base64.b64decode(embedded_match.group(1), validate=True)
+            with Image.open(BytesIO(embedded_bytes)) as source:
+                rgba = remove_neutral_white_matte(source.convert("RGBA"))
+        except (ValueError, OSError) as exc:
+            raise RuntimeError(f"Could not decode the embedded application logo artwork: {exc}") from exc
         if rgba.size != (source_size.width(), source_size.height()):
-            raise RuntimeError(f"Application logo dimensions changed during rendering: {rgba.size}")
+            raise RuntimeError(
+                f"Application logo source dimensions {rgba.size} do not match SVG canvas "
+                f"{source_size.width()}x{source_size.height()}."
+            )
         alpha = rgba.getchannel("A")
         if alpha.getextrema()[0] != 0:
             raise RuntimeError("Application logo lost its transparent pixels; refusing to add a background.")
@@ -161,7 +185,6 @@ def build_logo_assets() -> None:
         # corners, so re-apply the source SVG's own clip path in raster form.
         # This only clears pixels outside the original clip; it does not repaint,
         # recolor, crop, or add a background behind the logo.
-        svg_text = LOGO_SVG.read_text(encoding="utf-8")
         clip_match = re.search(
             r'<clipPath id="roundedBrandTile">.*?<rect[^>]*rx="([0-9.]+)"[^>]*ry="([0-9.]+)"',
             svg_text,

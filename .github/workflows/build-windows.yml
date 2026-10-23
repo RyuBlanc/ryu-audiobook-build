@@ -499,7 +499,7 @@ jobs:
           Write-Host 'Packaging the branded HTML wizard and Inno Setup engine into the single Setup.exe.'
           $launcherArgs = @(
             '-m', 'PyInstaller',
-            '--noconfirm', '--clean', '--onefile', '--windowed',
+            '--noconfirm', '--clean', '--onefile', '--windowed', '--uac-admin',
             '--name', "Ryu's Audiobook Setup",
             '--icon', 'assets\ryu_audiobook_logo.ico',
             '--distpath', 'installer\installer-output',
