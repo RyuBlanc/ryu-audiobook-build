@@ -84,6 +84,15 @@ class InstallerBrandingContractTests(unittest.TestCase):
         self.assertIn("panel_bitmap = Image.new(\"RGB\", panel.size, (5, 6, 10))", build_script)
 
 
+    def test_html_installer_builder_validates_distribution_as_directory(self):
+        builder = (ROOT / "installer" / "build_html_installer.py").read_text(encoding="utf-8")
+        self.assertIn("if not APP_DIST.is_dir():", builder)
+        self.assertIn("for path in (APP_EXE, CORE_INSTALLER, HTML, HTML_JS, LOGO_PNG, LOGO_ICO):", builder)
+        self.assertNotIn("for path in (APP_DIST, APP_EXE, CORE_INSTALLER", builder)
+        self.assertIn("if not package_files:", builder)
+        self.assertIn("if APP_EXE not in package_files:", builder)
+
+
     def test_html_setup_bridge_runs_the_actual_windows_installer(self):
         html = (ROOT / "installer" / "ryu_installer.html").read_text(encoding="utf-8")
         html_js = (ROOT / "installer" / "ryu_installer.js").read_text(encoding="utf-8")

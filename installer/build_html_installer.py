@@ -21,10 +21,19 @@ APP_EXE = APP_DIST / "Ryu's Audiobook.exe"
 
 
 def main() -> None:
-    for path in (APP_DIST, APP_EXE, CORE_INSTALLER, HTML, HTML_JS, LOGO_PNG, LOGO_ICO):
+    # APP_DIST is a directory; checking it with is_file() incorrectly rejects
+    # every otherwise valid build. Validate the distribution folder separately
+    # from the executable and other individual file inputs.
+    if not APP_DIST.is_dir():
+        raise RuntimeError(f"Required application distribution directory is missing: {APP_DIST}")
+    for path in (APP_EXE, CORE_INSTALLER, HTML, HTML_JS, LOGO_PNG, LOGO_ICO):
         if not path.is_file():
             raise RuntimeError(f"Required installer input is missing: {path}")
     package_files = [path for path in APP_DIST.rglob("*") if path.is_file()]
+    if not package_files:
+        raise RuntimeError(f"Application distribution directory is empty: {APP_DIST}")
+    if APP_EXE not in package_files:
+        raise RuntimeError(f"Application executable is not included in the distribution: {APP_EXE}")
     installed_bytes = sum(path.stat().st_size for path in package_files)
     from app.version import APP_VERSION
     build_number = os.environ.get("RYU_BUILD_NUMBER", "dev")
