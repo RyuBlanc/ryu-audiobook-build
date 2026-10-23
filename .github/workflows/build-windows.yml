@@ -281,6 +281,7 @@ jobs:
 
           Write-Host '=== Build Windows application ==='
           & $pythonExe build.py
+          if ($LASTEXITCODE -ne 0) { throw "Windows application build failed with exit code $LASTEXITCODE." }
 
           Write-Host '=== Live Audiobook AI + application integration smoke ==='
           $aiRoot = Join-Path $env:RUNNER_TEMP 'ryu-ai-smoke'

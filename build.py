@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 import os
+import re
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import PyInstaller.__main__
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication, QImage, QPainter
 from PySide6.QtSvg import QSvgRenderer
@@ -119,6 +120,35 @@ def build_logo_assets() -> None:
         alpha = rgba.getchannel("A")
         if alpha.getextrema()[0] != 0:
             raise RuntimeError("Application logo lost its transparent pixels; refusing to add a background.")
+
+        # The master SVG explicitly clips the embedded artwork to this rounded
+        # tile. Some Qt SVG filter renderings leave non-zero alpha at the canvas
+        # corners, so re-apply the source SVG's own clip path in raster form.
+        # This only clears pixels outside the original clip; it does not repaint,
+        # recolor, crop, or add a background behind the logo.
+        svg_text = LOGO_SVG.read_text(encoding="utf-8")
+        clip_match = re.search(
+            r'<clipPath id="roundedBrandTile">.*?<rect[^>]*rx="([0-9.]+)"[^>]*ry="([0-9.]+)"',
+            svg_text,
+            re.DOTALL,
+        )
+        if not clip_match:
+            raise RuntimeError("Logo SVG is missing its original roundedBrandTile clip path.")
+        radius_x, radius_y = float(clip_match.group(1)), float(clip_match.group(2))
+        if abs(radius_x - radius_y) > 0.01:
+            raise RuntimeError("Logo SVG clip path must use equal horizontal and vertical radii.")
+
+        mask_scale = 4
+        mask_large = Image.new("L", (rgba.width * mask_scale, rgba.height * mask_scale), 0)
+        ImageDraw.Draw(mask_large).rounded_rectangle(
+            (0, 0, rgba.width * mask_scale - 1, rgba.height * mask_scale - 1),
+            radius=round(radius_x * mask_scale),
+            fill=255,
+        )
+        clip_mask = mask_large.resize(rgba.size, Image.Resampling.LANCZOS)
+        rgba.putalpha(ImageChops.multiply(alpha, clip_mask))
+
+        alpha = rgba.getchannel("A")
         corner_points = (
             (0, 0),
             (rgba.width - 1, 0),

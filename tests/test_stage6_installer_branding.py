@@ -19,13 +19,21 @@ class InstallerBrandingContractTests(unittest.TestCase):
         self.assertIn("WizardStyle=modern dark hidebevels includetitlebar", self.script)
         self.assertIn("WizardBackColor=#05060A", self.script)
         self.assertIn("WizardImageFile=..\\assets\\installer_brand_panel.png", self.script)
-        self.assertIn("WizardImageBackColor=none", self.script)
+        self.assertIn("WizardImageBackColor=#05060A", self.script)
         self.assertIn("WizardSmallImageFile=..\\assets\\ryu_audiobook_logo.png", self.script)
-        self.assertIn("WizardSmallImageBackColor=none", self.script)
+        self.assertIn("WizardSmallImageBackColor=#05060A", self.script)
         self.assertIn("DefaultDialogFontName=Segoe UI", self.script)
         self.assertIn("SetupIconFile=..\\assets\\ryu_audiobook_logo.ico", self.script)
         self.assertNotIn("WizardForm.Color :=", self.script)
         self.assertNotIn("WizardForm.InnerPage.Color :=", self.script)
+
+    def test_logo_render_keeps_native_resolution_and_original_transparency(self):
+        build_script = (ROOT / "build.py").read_text(encoding="utf-8")
+        self.assertIn("source_size = renderer.defaultSize()", build_script)
+        self.assertIn("roundedBrandTile", build_script)
+        self.assertIn("ImageChops.multiply(alpha, clip_mask)", build_script)
+        self.assertIn("Application logo canvas corners must remain fully transparent.", build_script)
+        self.assertNotIn("QImage(1024, 1024", build_script)
 
     def test_setup_keeps_standard_install_launch_and_shortcut_paths(self):
         self.assertIn('DefaultDirName={autopf}\\Ryu\'s Audiobook', self.script)
