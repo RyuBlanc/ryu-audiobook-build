@@ -53,6 +53,7 @@ jobs:
           python-version: '3.12'
 
       - name: Prepare, validate and build application
+        timeout-minutes: 60
         shell: pwsh
         env:
           RYU_BUILD_NUMBER: ${{ github.run_number }}
@@ -79,8 +80,8 @@ jobs:
           & $pythonExe -c "import sys; print(sys.executable); print(sys.version)"
 
           Write-Host '=== Install dependencies ==='
-          & $pythonExe -m pip install --upgrade pip
-          & $pythonExe -m pip install -r requirements.txt
+          & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 --upgrade pip
+          & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 -r requirements.txt
 
           Write-Host '=== Run regression tests ==='
           git reset --hard HEAD
@@ -104,7 +105,8 @@ jobs:
           $cbZip = Join-Path $cbRoot 'chatterbox.zip'
           $cbExtract = Join-Path $cbRoot 'src'
           New-Item -ItemType Directory -Force -Path $cbRoot | Out-Null
-          curl.exe -L --fail --retry 3 -o $cbZip "https://github.com/resemble-ai/chatterbox/archive/$revision.zip"
+          Write-Host "Downloading pinned Chatterbox source revision $revision (180-second transfer cap)." 
+          curl.exe --connect-timeout 15 --max-time 180 -L --fail --retry 2 -o $cbZip "https://github.com/resemble-ai/chatterbox/archive/$revision.zip"
           Expand-Archive -Force $cbZip $cbExtract
           $ttsTurbo = Get-ChildItem $cbExtract -Recurse -Filter 'tts_turbo.py' | Select-Object -First 1
           $nanoExample = Get-ChildItem $cbExtract -Recurse -Filter 'example_tts_nano.py' | Select-Object -First 1
@@ -122,8 +124,10 @@ jobs:
 
           Write-Host '=== Download bundled offline Kokoro voices ==='
           New-Item -ItemType Directory -Force -Path 'bundled_models\kokoro' | Out-Null
-          curl.exe -L --fail --retry 3 -o 'bundled_models\kokoro\kokoro-v1.0.fp16.onnx' 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.fp16.onnx'
-          curl.exe -L --fail --retry 3 -o 'bundled_models\kokoro\voices-v1.0.bin' 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin'
+          Write-Host 'Downloading Kokoro ONNX model (maximum 600 seconds).' 
+          curl.exe --connect-timeout 15 --max-time 600 -L --fail --retry 2 -o 'bundled_models\kokoro\kokoro-v1.0.fp16.onnx' 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.fp16.onnx'
+          Write-Host 'Downloading Kokoro voice pack (maximum 240 seconds).' 
+          curl.exe --connect-timeout 15 --max-time 240 -L --fail --retry 2 -o 'bundled_models\kokoro\voices-v1.0.bin' 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin'
           $model = Get-Item 'bundled_models\kokoro\kokoro-v1.0.fp16.onnx'
           $voices = Get-Item 'bundled_models\kokoro\voices-v1.0.bin'
           if ($model.Length -lt 100MB -or $voices.Length -lt 10MB) { throw 'Kokoro offline assets are incomplete.' }
@@ -167,7 +171,8 @@ jobs:
             $downloaded = $false
             foreach ($candidateUrl in $candidateUrls) {
               try {
-                curl.exe -L --fail --retry 1 --silent --show-error -A 'RyuAudiobookStarterAudio/1.0' -o $target $candidateUrl
+                Write-Host "Trying starter track '$($item.Rel)' from $candidateUrl (45-second cap)."
+                curl.exe --connect-timeout 10 --max-time 45 -L --fail --retry 0 --silent --show-error -A 'RyuAudiobookStarterAudio/1.0' -o $target $candidateUrl
                 if ($LASTEXITCODE -ne 0) { throw "Download exit code $LASTEXITCODE from $candidateUrl" }
                 if (-not (Test-Path $target) -or (Get-Item $target).Length -lt $item.Min) {
                   throw "File is missing or below minimum size from $candidateUrl"
@@ -204,7 +209,8 @@ jobs:
               if ($url.StartsWith('//')) { $url = 'https:' + $url }
               elseif ($url.StartsWith('/')) { $url = 'https://cdn.freesound.org' + $url }
               New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Destination) | Out-Null
-              curl.exe -L --fail --retry 2 --silent --show-error -A 'Mozilla/5.0 Ryu-Audiobook-asset-builder/1.0' -o $Destination $url
+              Write-Host "Downloading preview for $PageUrl (60-second cap)."
+              curl.exe --connect-timeout 10 --max-time 60 -L --fail --retry 1 --silent --show-error -A 'Mozilla/5.0 Ryu-Audiobook-asset-builder/1.0' -o $Destination $url
               if ($LASTEXITCODE -ne 0 -or -not (Test-Path $Destination) -or (Get-Item $Destination).Length -lt 5000) {
                 Remove-Item -Force -ErrorAction SilentlyContinue $Destination
                 Write-Warning "Could not download preview for $PageUrl."
@@ -306,13 +312,15 @@ jobs:
           $llamaZip = Join-Path $aiRoot 'llama.zip'
           if (-not (Test-Path $aiBin)) {
             New-Item -ItemType Directory -Force -Path $aiBin | Out-Null
-            curl.exe -L --fail --retry 3 -o $llamaZip 'https://github.com/ggml-org/llama.cpp/releases/download/b11193/llama-b11193-bin-win-cpu-x64.zip'
+            Write-Host 'Downloading llama.cpp CPU runtime (maximum 300 seconds).'
+            curl.exe --connect-timeout 15 --max-time 300 -L --fail --retry 2 -o $llamaZip 'https://github.com/ggml-org/llama.cpp/releases/download/b11193/llama-b11193-bin-win-cpu-x64.zip'
             Expand-Archive -Force $llamaZip $aiBin
           }
           $server = Get-ChildItem $aiBin -Recurse -Filter 'llama-server.exe' | Select-Object -First 1
           if (-not $server) { throw 'llama-server.exe was not found.' }
           if (-not (Test-Path $aiModel)) {
-            curl.exe -L --fail --retry 3 -o "$aiModel.part" 'https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/ef4088322893040952513f532f736ddeab518403/Qwen3-0.6B-Q5_K_M.gguf?download=true'
+            Write-Host 'Downloading Qwen3 GGUF model for the integration smoke test (maximum 900 seconds).'
+            curl.exe --connect-timeout 20 --max-time 900 -L --fail --retry 2 -o "$aiModel.part" 'https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/ef4088322893040952513f532f736ddeab518403/Qwen3-0.6B-Q5_K_M.gguf?download=true'
             Move-Item -Force "$aiModel.part" $aiModel
           }
           $stdoutLog = Join-Path $aiRoot 'llama.stdout.log'
@@ -381,7 +389,8 @@ jobs:
           $target = Join-Path $root 'python312'
           $venv = Join-Path $root 'runtime'
           New-Item -ItemType Directory -Force -Path $root | Out-Null
-          curl.exe -L --fail --retry 3 -o $installer 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe'
+          Write-Host 'Downloading Python 3.12.10 bootstrap installer (maximum 240 seconds).'
+          curl.exe --connect-timeout 15 --max-time 240 -L --fail --retry 2 -o $installer 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe'
           $arguments = @('/quiet','/passive','InstallAllUsers=0','Include_launcher=0','Include_test=0','PrependPath=0','Shortcuts=0',"TargetDir=$target")
           $process = Start-Process -FilePath $installer -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
           if ($process.ExitCode -notin @(0,3010)) { throw "Private Python installer failed with exit code $($process.ExitCode)." }
@@ -392,7 +401,7 @@ jobs:
           $venvPython = Join-Path $venv 'Scripts\python.exe'
           if (-not (Test-Path $venvPython)) { throw 'Private Qwen venv was not created.' }
           & $venvPython -m pip --version
-          & $venvPython -m pip install --no-deps qwen-tts==0.1.1
+          & $venvPython -m pip install --disable-pip-version-check --timeout 60 --retries 2 --no-deps qwen-tts==0.1.1
           & $venvPython -c "import importlib.metadata as md; assert md.version('qwen-tts') == '0.1.1'; print('qwen_tts wheel bootstrap OK')"
 
       - name: Verify frozen application
@@ -539,7 +548,7 @@ jobs:
           }
           $env:PYTHONPATH = (Get-Location).Path
           $env:PYTHONDONTWRITEBYTECODE = '1'
-          & $pythonExe -m pip install --disable-pip-version-check PyInstaller PySide6
+          & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 PyInstaller PySide6
           if ($LASTEXITCODE -ne 0) { throw "HTML installer build dependencies failed to install (exit $LASTEXITCODE)." }
           Write-Host '=== Package functional HTML setup interface ==='
           & $pythonExe -B 'installer\build_html_installer.py'
