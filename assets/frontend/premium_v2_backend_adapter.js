@@ -276,7 +276,7 @@
         (characterCount === 0 ? 'No characters found' :
           (charactersReady ? 'Voices assigned' : (characterCount-characterVoiceCount) + ' need review'))},
       {key:'pronunciation', ready:true, detail:pronunciationCount ? pronunciationCount + ' saved rules' : 'Names & terms'},
-      {key:'sound', ready:true, detail:soundConfigured, detailText:soundConfigured ? 'Configured' : 'Not configured'},
+      {key:'sound', ready:soundConfigured, detail:soundConfigured ? 'Configured' : 'Not configured'},
       {key:'generate', ready:canGenerate, detail:project.completed ? 'Audiobook ready' : (canGenerate ? 'Build audiobook' : 'Setup required')}
     ];
     const readyCount = stageState.filter(stage => stage.ready).length;
