@@ -125,9 +125,10 @@ class TrashDialog(QDialog):
 
 
 class LibraryPage(QWidget):
-    def __init__(self, on_open=None) -> None:
+    def __init__(self, on_open=None, on_deleted=None) -> None:
         super().__init__()
         self.on_open = on_open
+        self.on_deleted = on_deleted
         self.projects = []
 
         layout = QVBoxLayout(self)
@@ -319,8 +320,11 @@ class LibraryPage(QWidget):
         if answer != QMessageBox.StandardButton.Yes:
             return
         try:
-            for project in selected:
+            deleted = [project for project in selected]
+            for project in deleted:
                 trash_project(project)
             self.refresh()
+            if self.on_deleted:
+                self.on_deleted(deleted)
         except Exception as exc:
             QMessageBox.critical(self, "Delete Books Failed", str(exc))
