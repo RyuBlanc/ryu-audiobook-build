@@ -54,12 +54,14 @@ def trash_project(project) -> Path:
         output_value = state.get("output_path") if isinstance(state, dict) else None
         output_path = Path(output_value).expanduser().resolve() if output_value else None
         external_output = None
-        if output_path and output_path.exists() and folder not in output_path.parents:
-            # Keep recovery constrained to app-owned files. The current project
-            # output directory is within the project and therefore moves with it.
-            managed_roots = (root,)
-            if any(output_path != managed and managed in output_path.parents for managed in managed_roots):
-                external_output = output_path
+        if (
+            output_path
+            and output_path.exists()
+            and folder not in output_path.parents
+            and output_path != root
+            and root in output_path.parents
+        ):
+            external_output = output_path
 
         shutil.move(str(folder), str(target))
         manifest = {
