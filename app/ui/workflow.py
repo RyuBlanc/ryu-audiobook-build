@@ -113,6 +113,7 @@ class ProjectWorkflow(QMainWindow):
         self._redetect_worker: RedetectChaptersWorker | None = None
         self._page_animation: QPropertyAnimation | None = None
         self._page_animation_widget: QWidget | None = None
+        self._last_imported_project_folder: str | None = None
 
         shell = QWidget()
         shell_layout = QVBoxLayout(shell)
@@ -245,6 +246,11 @@ class ProjectWorkflow(QMainWindow):
             self._page_animation_widget = None
 
         self.stack.setCurrentWidget(widget)
+        # Heavy studio pages already have their own responsive transitions; a
+        # whole-widget graphics effect can trigger black flashes on some GPUs.
+        # Restrict cross-page fades to lightweight navigation destinations.
+        if widget in {getattr(self, "editor", None), getattr(self, "generation", None), getattr(self, "voice_cast", None), getattr(self, "character_library", None)}:
+            return
         if reduced_motion_enabled() or not widget.isVisible():
             return
 
@@ -274,6 +280,7 @@ class ProjectWorkflow(QMainWindow):
         name = self.sidebar.item(row).data(32)
 
         if name == "Library":
+            self.library.refresh()
             self._show_page(self.library)
         elif name == "Import":
             self._show_page(self.import_page)
@@ -350,7 +357,9 @@ class ProjectWorkflow(QMainWindow):
 
     def _import_completed(self, project: Project) -> None:
         self.loading_overlay.dismiss()
+        self._last_imported_project_folder = str(project.folder.resolve())
         self.project = project
+        self.library.refresh()
         self._set_project_title(project.title)
         self.open_editor()
 
