@@ -187,10 +187,23 @@ def build_logo_assets() -> None:
                 icon_frame = icon_file.ico.getimage(icon_size).convert("RGBA")
                 icon_alpha = icon_frame.getchannel("A")
                 alpha_min, alpha_max = icon_alpha.getextrema()
-                if alpha_min != 0 or alpha_max != 255:
+                alpha_histogram = icon_alpha.histogram()
+                visible_pixels = sum(alpha_histogram[32:])
+                pixel_count = icon_size[0] * icon_size[1]
+                # At 16px, anti-aliasing over an intricate logo can mean no
+                # pixel reaches exactly 255. Require transparent pixels plus
+                # a strong visible alpha range and enough non-transparent
+                # artwork, instead of requiring a perfectly opaque pixel.
+                if (
+                    alpha_min != 0
+                    or alpha_max < 128
+                    or visible_pixels < pixel_count * 0.20
+                ):
                     width, height = icon_size
                     raise RuntimeError(
-                        f"Windows ICO {width}x{height} lost transparency or visible artwork."
+                        f"Windows ICO {width}x{height} has invalid transparency/artwork: "
+                        f"alpha range={alpha_min}..{alpha_max}, "
+                        f"visible pixels={visible_pixels}/{pixel_count}."
                     )
 
         # Inno Setup uses a portrait image slot on the Welcome/Finished pages.
