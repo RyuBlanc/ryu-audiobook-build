@@ -12,6 +12,7 @@ on:
       - stage-3/voice-studio-character-assignment
       - stage-4-pronunciation-sound-design
       - fix/installer-branding-accessibility
+      - fix/dashboard-live-data-project-covers-player
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.
