@@ -179,6 +179,83 @@
       applyProjectCover(card.querySelector('.book-cover,.project-cover,[data-project-cover],img[alt*="cover" i]'), card.dataset.coverPath || '');
     });
   }
+  function refreshDashboardFlow(project) {
+    const flow = document.querySelector('.production-flow');
+    if (!flow) return;
+    const title = flow.querySelector('.flow-summary > div:first-child b');
+    const readinessParts = [...(flow.querySelectorAll('.flow-readiness span,.flow-readiness strong') || [])];
+    const readinessLabel = readinessParts.find(node => node.tagName.toLowerCase() === 'span');
+    const readinessPercent = readinessParts.find(node => node.tagName.toLowerCase() === 'strong');
+    const stages = [...flow.querySelectorAll('.flow-stage')];
+    const links = [...flow.querySelectorAll('.flow-link')];
+    const defaultDetails = [
+      'Book & metadata', 'Structure & text', 'Voice profile',
+      'Character voices', 'Names & terms', 'Music & effects', 'Build audiobook'
+    ];
+    if (title) title.textContent = project?.title || 'No project selected';
+
+    if (!project) {
+      if (readinessLabel) readinessLabel.textContent = '0 of 7 stages ready';
+      if (readinessPercent) readinessPercent.textContent = '0%';
+      stages.forEach((stage,index) => {
+        stage.classList.remove('is-done','has-warning');
+        const check = stage.querySelector('.flow-check');
+        const detail = stage.querySelector('.flow-copy small');
+        if (check) check.textContent = '';
+        if (detail) detail.textContent = defaultDetails[index] || '';
+      });
+      links.forEach(link => link.classList.remove('is-done','has-warning'));
+      return;
+    }
+
+    const chapterCount = Number(project.chapter_count || 0);
+    const preparedChapters = Number(project.prepared_chapter_count || 0);
+    const chaptersReady = chapterCount > 0 && preparedChapters === chapterCount;
+    const hasChapterText = preparedChapters > 0;
+    const narratorName = String(project.narrator || project.voice_profile || '').trim();
+    const narratorReady = Boolean(narratorName);
+    const characterCount = Number(project.character_count || 0);
+    const characterVoiceCount = Number(project.character_voice_count || 0);
+    const characterReviewed = Boolean(project.character_analysis_done);
+    const charactersReady = characterReviewed &&
+      (characterCount === 0 || characterVoiceCount >= characterCount);
+    const outputReady = Boolean(project.output_configured);
+    const canGenerate = chapterCount > 0 && hasChapterText && narratorReady && outputReady;
+    const pronunciationCount = Number(project.pronunciation_rule_count || 0);
+    const soundConfigured = Boolean(project.sound_design_configured);
+
+    const stageState = [
+      {key:'import', ready:Boolean(project.source_exists), detail:project.source_exists ? 'Book & metadata' : 'Source file missing'},
+      {key:'chapters', ready:chaptersReady, detail:chaptersReady ? 'Structure & text' :
+        (chapterCount ? preparedChapters + '/' + chapterCount + ' chapters ready' : 'No chapters imported')},
+      {key:'voices', ready:narratorReady, detail:narratorReady ? narratorName : 'Choose a narrator'},
+      {key:'characters', ready:charactersReady, detail:!characterReviewed ? 'Not analyzed' :
+        (characterCount === 0 ? 'No characters found' :
+          (charactersReady ? 'Voices assigned' : (characterCount-characterVoiceCount) + ' need review'))},
+      {key:'pronunciation', ready:true, detail:pronunciationCount ? pronunciationCount + ' saved rules' : 'Names & terms'},
+      {key:'sound', ready:true, detail:soundConfigured ? 'Configured' : 'Music & effects'},
+      {key:'generate', ready:canGenerate, detail:project.completed ? 'Audiobook ready' : (canGenerate ? 'Build audiobook' : 'Setup required')}
+    ];
+    const readyCount = stageState.filter(stage => stage.ready).length;
+    if (readinessLabel) readinessLabel.textContent = readyCount + ' of ' + stageState.length + ' stages ready';
+    if (readinessPercent) readinessPercent.textContent = Math.round(readyCount / stageState.length * 100) + '%';
+
+    stages.forEach((stage,index) => {
+      const current = stageState[index];
+      if (!current) return;
+      stage.classList.toggle('is-done', current.ready);
+      stage.classList.toggle('has-warning', !current.ready);
+      const check = stage.querySelector('.flow-check');
+      const detail = stage.querySelector('.flow-copy small');
+      if (check) check.textContent = current.ready ? '✓' : '!';
+      if (detail) detail.textContent = current.detail;
+      stage.dataset.projectReady = current.ready ? 'true' : 'false';
+    });
+    links.forEach((link,index) => {
+      link.classList.toggle('is-done', Boolean(stageState[index]?.ready));
+      link.classList.toggle('has-warning', Boolean(!stageState[index]?.ready && stageState[index+1]?.ready));
+    });
+  }
   async function refreshDashboardHero(rows = projects) {
     const dash = $('dashboard');
     if (!dash) return null;
@@ -245,6 +322,7 @@
     const context = dashboardLeaves(document).find(node =>
       dashboardText(node.textContent).endsWith('· local project') && !node.closest('#dashboard'));
     if (context) context.textContent = dashboardProject ? dashboardProject.title + ' · Local project' : 'No project selected · Local project';
+    refreshDashboardFlow(dashboardProject);
     return dashboardProject;
   }
   function renderAudiobookLibrary(rows = projects) {
@@ -367,7 +445,7 @@
         const result = original.apply(this,args);
         setTimeout(() => {
           syncMiniPlayer();
-          if (dashboardPageActive()) refreshProjects().catch(() => {});
+          refreshProjects().catch(() => {});
         },0);
         return result;
       };
@@ -378,10 +456,7 @@
       window.__ryuMiniPlayerNavBound = true;
       document.addEventListener('click', event => {
         if (event.target.closest('nav,aside,.sidebar,[data-page],[data-view]')) {
-          setTimeout(() => {
-            syncMiniPlayer();
-            if (dashboardPageActive()) refreshProjects().catch(() => {});
-          },0);
+          setTimeout(syncMiniPlayer,0);
         }
       }, true);
     }
