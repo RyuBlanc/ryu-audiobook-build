@@ -304,6 +304,24 @@ class DashboardLiveDataTests(unittest.TestCase):
         generation = (ROOT / "app" / "ui" / "generation_page.py").read_text(encoding="utf-8")
         self.assertIn("persist_project_cover(selected, self.project_folder)", generation)
 
+    def test_dashboard_resume_uses_dashboard_button_and_persisted_stage_checkpoints(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("const dashboardButton = e.target.closest('#dashboard button')", adapter)
+        continue_at = adapter.indexOf if False else adapter.index("if (label === 'continue project')")
+        continue_end = adapter.index("if (label === 'view job')", continue_at)
+        continue_handler = adapter[continue_at:continue_end]
+        self.assertIn("dashboardButton.dataset.continueProjectFolder", continue_handler)
+        self.assertNotIn("button.dataset.continueProjectFolder", continue_handler)
+        view_end = adapter.index("const libraryFilter =", continue_end)
+        view_handler = adapter[continue_end:view_end]
+        self.assertIn("dashboardButton.dataset.dashboardJobId", view_handler)
+        self.assertNotIn("button.dataset.dashboardJobId", view_handler)
+        self.assertIn("function writeResumeCheckpoint(folder, stage)", adapter)
+        self.assertIn("function savedResumeStage(project)", adapter)
+        self.assertIn("function routeForResume(project)", adapter)
+        self.assertIn("function navigateToProjectStage(project, stage = routeForResume(project))", adapter)
+        self.assertIn("writeResumeCheckpoint(dashboardProject.folder, stage)", adapter)
+
 
 if __name__ == "__main__":
     unittest.main()
