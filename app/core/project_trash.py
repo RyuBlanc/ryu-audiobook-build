@@ -39,6 +39,7 @@ def trash_project(project) -> Path:
     destination.mkdir(parents=False, exist_ok=False)
     target = destination / folder.name
     moved_artifacts: list[dict] = []
+    manifest: dict = {}
     try:
         # The current generator normally stores the finished M4B inside the
         # project folder. Handle legacy/output paths outside it only when they
@@ -79,6 +80,7 @@ def trash_project(project) -> Path:
                 stored = artifact_dir / f"{external_output.stem} ({suffix}){external_output.suffix}"
                 suffix += 1
             shutil.move(str(external_output), str(stored))
+            moved_artifacts.append({"original_path": str(external_output), "trash_path": str(stored)})
             manifest["external_artifacts"].append({
                 "original_path": str(external_output),
                 "trash_path": str(stored),
