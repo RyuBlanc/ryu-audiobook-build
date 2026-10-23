@@ -79,6 +79,8 @@ jobs:
           }
           & $nodeExe --check 'installer\ryu_installer.js'
           if ($LASTEXITCODE -ne 0) { throw "Installer JavaScript syntax validation failed with exit code $LASTEXITCODE." }
+          & $nodeExe --check 'assets\frontend\premium_v2_backend_adapter.js'
+          if ($LASTEXITCODE -ne 0) { throw "Premium V2 backend adapter syntax validation failed with exit code $LASTEXITCODE." }
 
       - name: Set up Python
         uses: actions/setup-python@v5
