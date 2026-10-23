@@ -7,9 +7,13 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QLabel, QListWidget, QListWidgetItem, QPushButton, QHBoxLayout,
     QVBoxLayout, QWidget, QMessageBox, QLineEdit, QComboBox, QGroupBox,
+    QDialog, QDialogButtonBox,
 )
 
-from app.core.project import list_projects, delete_project
+from app.core.project import list_projects
+from app.core.project_trash import (
+    trash_project, list_trashed_projects, restore_project, purge_trashed_project,
+)
 from app.core.state import load_state
 
 
@@ -38,18 +42,93 @@ def project_status(project) -> tuple[str, str]:
 def project_matches(project, query: str, status_filter: str) -> bool:
     query = (query or "").strip().casefold()
     status, _ = project_status(project)
-
     if status_filter and status_filter != "All" and status != status_filter:
         return False
-
     searchable = f"{project.title} {project.source_path.name if project.source_path else ''}".casefold()
     return not query or query in searchable
 
 
+class TrashDialog(QDialog):
+    """Recover or permanently purge projects previously deleted from the Library."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Deleted Books • Recovery")
+        self.resize(680, 420)
+        root = QVBoxLayout(self)
+        root.addWidget(QLabel(
+            "Books moved here are hidden from your active Library. Restore returns the "
+            "project, chapters, saved pronunciations and local generation work. "
+            "Permanent deletion cannot be undone."
+        ))
+        self.entries = QListWidget()
+        root.addWidget(self.entries, 1)
+        actions = QHBoxLayout()
+        self.restore_button = QPushButton("Restore Selected")
+        self.purge_button = QPushButton("Delete Permanently")
+        self.purge_button.setObjectName("danger")
+        actions.addWidget(self.restore_button)
+        actions.addWidget(self.purge_button)
+        actions.addStretch(1)
+        root.addLayout(actions)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        buttons.accepted.connect(self.accept)
+        root.addWidget(buttons)
+        self.restore_button.clicked.connect(self.restore_selected)
+        self.purge_button.clicked.connect(self.purge_selected)
+        self.refresh()
+
+    def refresh(self):
+        self.rows = list_trashed_projects()
+        self.entries.clear()
+        for item in self.rows:
+            label = f"{item.get('title', 'Untitled')}  ·  Deleted {item.get('deleted_at', 'unknown time')}"
+            self.entries.addItem(QListWidgetItem(label))
+        self.restore_button.setEnabled(bool(self.rows))
+        self.purge_button.setEnabled(bool(self.rows))
+
+    def _selected_entry(self):
+        row = self.entries.currentRow()
+        return self.rows[row] if 0 <= row < len(self.rows) else None
+
+    def restore_selected(self):
+        item = self._selected_entry()
+        if not item:
+            return
+        try:
+            restored = restore_project(Path(item["project_folder"]).parent)
+            QMessageBox.information(self, "Book Restored", f"Restored to:\n{restored}")
+            self.refresh()
+        except Exception as exc:
+            QMessageBox.critical(self, "Restore Failed", str(exc))
+
+    def purge_selected(self):
+        item = self._selected_entry()
+        if not item:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete Permanently",
+            f"Permanently delete '{item.get('title', 'Untitled')}' and its saved project data? "
+            "This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            purge_trashed_project(Path(item["project_folder"]).parent)
+            self.refresh()
+        except Exception as exc:
+            QMessageBox.critical(self, "Permanent Delete Failed", str(exc))
+
+
 class LibraryPage(QWidget):
-    def __init__(self, on_open=None) -> None:
+    def __init__(self, on_open=None, on_deleted=None) -> None:
         super().__init__()
         self.on_open = on_open
+        self.on_deleted = on_deleted
         self.projects = []
 
         layout = QVBoxLayout(self)
@@ -64,7 +143,10 @@ class LibraryPage(QWidget):
         self.subtitle.setWordWrap(True)
         title_col.addWidget(self.subtitle)
         header.addLayout(title_col, 1)
+        self.trash_button = QPushButton("Deleted Books / Recover")
+        header.addWidget(self.trash_button)
         layout.addLayout(header)
+        self.trash_button.clicked.connect(self.open_trash)
 
         filters = QHBoxLayout()
         self.search = QLineEdit()
@@ -91,7 +173,6 @@ class LibraryPage(QWidget):
         layout.addLayout(stats)
 
         body = QHBoxLayout()
-
         self.list = QListWidget()
         self.list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.list.currentRowChanged.connect(self.show_selected_details)
@@ -121,12 +202,16 @@ class LibraryPage(QWidget):
         self.open_button.clicked.connect(self.open_selected)
         self.delete_button.clicked.connect(self.delete_selected)
         self.folder_button.clicked.connect(self.open_selected_folder)
-
         self.refresh()
 
     def refresh(self) -> None:
         query = self.search.text() if hasattr(self, "search") else ""
         status_filter = self.status_filter.currentText() if hasattr(self, "status_filter") else "All"
+        previous_folder = None
+        if hasattr(self, "list") and self.list.currentRow() >= 0:
+            selected_before = getattr(self, "_visible_projects", [])
+            if self.list.currentRow() < len(selected_before):
+                previous_folder = str(selected_before[self.list.currentRow()].folder)
 
         self.projects = list_projects()
         visible = [
@@ -137,21 +222,16 @@ class LibraryPage(QWidget):
         self.list.blockSignals(True)
         self.list.clear()
         for project in visible:
-            status, output = project_status(project)
+            status, _ = project_status(project)
             marker = {
-                "Completed": "✓",
-                "In Progress": "▶",
-                "Needs Attention": "⚠",
-                "Ready": "●",
-                "Imported": "○",
+                "Completed": "✓", "In Progress": "▶", "Needs Attention": "⚠",
+                "Ready": "●", "Imported": "○",
             }.get(status, "•")
-            self.list.addItem(
-                QListWidgetItem(
-                    f"{marker}  {project.title}  ·  {status}  ·  "
-                    f"{len(project.chapters)} chapter(s)"
-                )
-            )
+            self.list.addItem(QListWidgetItem(
+                f"{marker}  {project.title}  ·  {status}  ·  {len(project.chapters)} chapter(s)"
+            ))
         self.list.blockSignals(False)
+        self._visible_projects = visible
 
         completed = sum(project_status(project)[0] == "Completed" for project in self.projects)
         in_progress = sum(project_status(project)[0] == "In Progress" for project in self.projects)
@@ -159,33 +239,33 @@ class LibraryPage(QWidget):
         self.completed_label.setText(f"Completed: {completed}")
         self.in_progress_label.setText(f"In progress: {in_progress}")
         self.subtitle.setText(
-            f"{len(visible)} book(s) shown • completed books remain available from the local library."
+            f"{len(visible)} book(s) shown • deletion moves books to recovery Trash; "
+            "saved project data remains recoverable until permanently deleted."
         )
 
-        if visible:
-            self.list.setCurrentRow(0)
+        selected_index = next(
+            (i for i, project in enumerate(visible) if str(project.folder) == previous_folder),
+            0 if visible else -1,
+        )
+        if selected_index >= 0:
+            self.list.setCurrentRow(selected_index)
         else:
             self.details.setText("No books match the current search/filter.")
-        self._visible_projects = visible
 
     def show_selected_details(self, row: int) -> None:
         visible = getattr(self, "_visible_projects", [])
         if not 0 <= row < len(visible):
             return
-
         project = visible[row]
         status, output = project_status(project)
         state = load_state(project.folder)
         failed = state.get("failed_chapters") or []
         completed_chapters = state.get("completed_chapters") or []
-
         details = [
-            f"<h3>{project.title}</h3>",
-            f"<b>Status:</b> {status}",
+            f"<h3>{project.title}</h3>", f"<b>Status:</b> {status}",
             f"<b>Chapters:</b> {len(project.chapters)}",
             f"<b>Completed chapters:</b> {len(completed_chapters)}",
         ]
-
         if project.source_path:
             details.append(f"<b>Source:</b> {project.source_path.name}")
         if output:
@@ -193,7 +273,6 @@ class LibraryPage(QWidget):
         if failed:
             details.append(f"<b>Failed chapters:</b> {', '.join(map(str, failed))}")
         details.append(f"<b>Project folder:</b> {project.folder}")
-
         self.details.setText("<br>".join(details))
 
     def _selected_projects(self):
@@ -212,34 +291,40 @@ class LibraryPage(QWidget):
 
     def open_selected_folder(self) -> None:
         selected = self._selected_projects()
-        if not selected:
-            return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(selected[0].folder)))
+        if selected:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(selected[0].folder)))
+
+    def open_trash(self) -> None:
+        dialog = TrashDialog(self)
+        dialog.exec()
+        self.refresh()
 
     def delete_selected(self) -> None:
         selected = self._selected_projects()
         if not selected:
             return
-
         names = "\n".join(f"• {project.title}" for project in selected[:8])
         if len(selected) > 8:
             names += f"\n• … and {len(selected) - 8} more"
 
         answer = QMessageBox.question(
             self,
-            "Delete Books",
-            f"Delete {len(selected)} selected book(s)?\n\n{names}\n\n"
-            "This removes each imported source, chapters, generated audio, cover, "
-            "settings and project data from the local Ryu's Audiobook library.",
+            "Move Books to Recovery",
+            f"Move {len(selected)} selected book(s) to Deleted Books?\n\n{names}\n\n"
+            "Their source file copy, chapters, generated files and pronunciation settings "
+            "will be retained in recovery Trash. Recent history records remain outside the project. "
+            "Use Deleted Books / Recover to restore them or permanently delete them.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-
         try:
-            for project in selected:
-                delete_project(project)
+            deleted = [project for project in selected]
+            for project in deleted:
+                trash_project(project)
             self.refresh()
+            if self.on_deleted:
+                self.on_deleted(deleted)
         except Exception as exc:
             QMessageBox.critical(self, "Delete Books Failed", str(exc))

@@ -2,7 +2,7 @@ name: Background Audio Regression Tests
 
 on:
   push:
-    branches: [feature/background-audio-mvp]
+    branches: [feature/background-audio-mvp, fix/library-delete-recovery-live-character-data]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: background-audio-regression-${{ github.ref }}
+  group: background-audio-regression-${{ github.event.pull_request.head.ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
