@@ -6,7 +6,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import PyInstaller.__main__
-from PIL import Image
+from PIL import Image, ImageDraw
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication, QImage, QPainter
 from PySide6.QtSvg import QSvgRenderer
@@ -75,6 +75,7 @@ STARTER_AUDIO = ASSETS / "starter_audio"
 LOGO_SVG = ASSETS / "ryu_audiobook_logo.svg"
 LOGO_PNG = ASSETS / "ryu_audiobook_logo.png"
 LOGO_ICO = ASSETS / "ryu_audiobook_logo.ico"
+INSTALLER_BRAND_PANEL_PNG = ASSETS / "installer_brand_panel.png"
 DRAGON_MASTER_PNG = ASSETS / "dragon_four_winged.png"
 DRAGON_CROSS_PNG = ASSETS / "dragon_cross.png"
 DRAGON_CURSOR_PNG = ASSETS / "dragon_cursor.png"
@@ -91,7 +92,16 @@ def build_logo_assets() -> None:
         if not renderer.isValid():
             raise RuntimeError(f"Invalid application logo SVG: {LOGO_SVG}")
 
-        image = QImage(1024, 1024, QImage.Format_RGBA8888)
+        # Render at the SVG's native canvas resolution instead of shrinking the
+        # master artwork to 1024px. The transparent canvas and logo pixels are
+        # preserved; ICO downsampling happens only inside the required icon sizes.
+        source_size = renderer.defaultSize()
+        if source_size.width() < 1200 or source_size.height() < 1200:
+            raise RuntimeError(
+                f"Application logo source is unexpectedly small: "
+                f"{source_size.width()}x{source_size.height()}"
+            )
+        image = QImage(source_size, QImage.Format_RGBA8888)
         image.fill(Qt.transparent)
         painter = QPainter(image)
         try:
@@ -103,14 +113,67 @@ def build_logo_assets() -> None:
             raise RuntimeError(f"Could not render application logo: {LOGO_PNG}")
 
         with Image.open(LOGO_PNG) as source:
-            source.convert("RGBA").save(
-                LOGO_ICO,
-                format="ICO",
-                sizes=[
-                    (16, 16), (24, 24), (32, 32), (48, 48),
-                    (64, 64), (128, 128), (256, 256)
-                ],
-            )
+            rgba = source.convert("RGBA")
+        if rgba.size != (source_size.width(), source_size.height()):
+            raise RuntimeError(f"Application logo dimensions changed during rendering: {rgba.size}")
+        alpha = rgba.getchannel("A")
+        if alpha.getextrema()[0] != 0:
+            raise RuntimeError("Application logo lost its transparent pixels; refusing to add a background.")
+        corner_points = (
+            (0, 0),
+            (rgba.width - 1, 0),
+            (0, rgba.height - 1),
+            (rgba.width - 1, rgba.height - 1),
+        )
+        if any(alpha.getpixel(point) != 0 for point in corner_points):
+            raise RuntimeError("Application logo canvas corners must remain fully transparent.")
+
+        # Save losslessly at full source resolution for the application UI.
+        rgba.save(LOGO_PNG, format="PNG", optimize=True)
+        rgba.save(
+            LOGO_ICO,
+            format="ICO",
+            sizes=[
+                (16, 16), (24, 24), (32, 32), (48, 48),
+                (64, 64), (128, 128), (256, 256)
+            ],
+        )
+
+        # Inno Setup uses a portrait image slot on the Welcome/Finished pages.
+        # Build a transparent composition that places the logo artwork at the
+        # top without stretching it or painting a tile behind it.
+        panel = Image.new("RGBA", (656, 1256), (0, 0, 0, 0))
+        panel_logo = rgba.copy()
+        panel_logo.thumbnail((560, 560), Image.Resampling.LANCZOS)
+        panel.alpha_composite(
+            panel_logo,
+            ((panel.width - panel_logo.width) // 2, 52),
+        )
+        draw = ImageDraw.Draw(panel)
+        divider_y = 705
+        draw.line(
+            (118, divider_y, 538, divider_y),
+            fill=(214, 176, 106, 190),
+            width=3,
+        )
+        draw.polygon(
+            (
+                (328, divider_y - 10),
+                (338, divider_y),
+                (328, divider_y + 10),
+                (318, divider_y),
+            ),
+            fill=(255, 240, 185, 235),
+        )
+        panel.save(INSTALLER_BRAND_PANEL_PNG, format="PNG", optimize=True)
+        with Image.open(INSTALLER_BRAND_PANEL_PNG) as panel_check:
+            panel_alpha = panel_check.getchannel("A")
+            if panel_check.size != panel.size or any(
+                panel_alpha.getpixel(point) != 0
+                for point in ((0, 0), (panel.width - 1, 0),
+                              (0, panel.height - 1), (panel.width - 1, panel.height - 1))
+            ):
+                raise RuntimeError("Installer brand panel must keep a transparent canvas.")
         if LOGO_PNG.stat().st_size < 4096:
             raise RuntimeError("Generated application PNG is unexpectedly small.")
         if LOGO_ICO.stat().st_size < 1024:

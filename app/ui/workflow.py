@@ -53,7 +53,7 @@ from app.ui.motion import reduced_motion_enabled
 def _import_book_icon() -> QIcon:
     """Use the Ryu audiobook brand mark instead of a generic plus symbol."""
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
-    for filename in ("ryu_audiobook_logo.svg", "ryu_audiobook_logo.png", "ryu_audiobook_logo.jpg"):
+    for filename in ("ryu_audiobook_logo.png", "ryu_audiobook_logo.svg", "ryu_audiobook_logo.jpg"):
         path = base / "assets" / filename
         if path.is_file():
             icon = QIcon(str(path))

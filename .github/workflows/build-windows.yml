@@ -11,6 +11,7 @@ on:
       - stage-2/import-integrity
       - stage-3/voice-studio-character-assignment
       - stage-4-pronunciation-sound-design
+      - fix/installer-branding-accessibility
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.
@@ -491,9 +492,10 @@ jobs:
           Add-Type -AssemblyName System.Drawing
           $png = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.png'
           $ico = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.ico'
+          $panel = Join-Path (Get-Location) 'assets\installer_brand_panel.png'
           $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
           $exe = Join-Path (Get-Location) "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
-          foreach ($path in @($png, $ico, $installer, $exe)) {
+          foreach ($path in @($png, $ico, $panel, $installer, $exe)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required release asset missing: $path" }
           }
           $bitmap = [System.Drawing.Bitmap]::FromFile($png)
@@ -506,17 +508,28 @@ jobs:
               }
             }
             $total = $bitmap.Width * $bitmap.Height
-            if ($transparent -lt 1 -or $nonTransparent -lt ($total * 0.1)) {
-              throw "Logo alpha/content check failed: dimensions=$($bitmap.Width)x$($bitmap.Height), transparent=$transparent, nonTransparent=$nonTransparent"
+            if ($bitmap.Width -lt 1200 -or $bitmap.Height -lt 1200 -or $transparent -lt 1 -or $nonTransparent -lt ($total * 0.1)) {
+              throw "Logo alpha/content/resolution check failed: dimensions=$($bitmap.Width)x$($bitmap.Height), transparent=$transparent, nonTransparent=$nonTransparent"
             }
-            Write-Host "Original logo PNG transparency verified: $($bitmap.Width)x$($bitmap.Height), transparent pixels=$transparent."
+            if ($bitmap.GetPixel(0,0).A -ne 0 -or $bitmap.GetPixel($bitmap.Width-1,0).A -ne 0 -or $bitmap.GetPixel(0,$bitmap.Height-1).A -ne 0 -or $bitmap.GetPixel($bitmap.Width-1,$bitmap.Height-1).A -ne 0) {
+              throw 'Original logo canvas corners must remain fully transparent; do not add a background.'
+            }
+            Write-Host "Logo resolution and transparency verified: $($bitmap.Width)x$($bitmap.Height), transparent pixels=$transparent."
           } finally {
             $bitmap.Dispose()
+          }
+          $panelBitmap = [System.Drawing.Bitmap]::FromFile($panel)
+          try {
+            if ($panelBitmap.GetPixel(0,0).A -ne 0 -or $panelBitmap.GetPixel($panelBitmap.Width-1,0).A -ne 0 -or $panelBitmap.GetPixel(0,$panelBitmap.Height-1).A -ne 0 -or $panelBitmap.GetPixel($panelBitmap.Width-1,$panelBitmap.Height-1).A -ne 0) {
+              throw 'Installer brand panel must keep a transparent canvas.'
+            }
+          } finally {
+            $panelBitmap.Dispose()
           }
           if ((Get-Item -LiteralPath $ico).Length -lt 1024) { throw 'Generated Windows ICO is unexpectedly small.' }
           Write-Host "Generated Windows ICO exists and is non-trivial in size: $((Get-Item -LiteralPath $ico).Length) bytes."
           $manifest = @()
-          foreach ($path in @($installer, $exe, $png, $ico)) {
+          foreach ($path in @($installer, $exe, $png, $ico, $panel)) {
             $hash = Get-FileHash -LiteralPath $path -Algorithm SHA256
             $manifest += [pscustomobject]@{
               file = [System.IO.Path]::GetRelativePath((Get-Location).Path, $path)
