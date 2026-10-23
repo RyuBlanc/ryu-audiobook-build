@@ -125,8 +125,8 @@ def upsert_characters_from_studio(series: str, rows: list[dict]) -> int:
             sample = str(source.get("dialogue_sample") or source.get("sample") or "").strip()
             if sample:
                 current["dialogue_sample"] = sample
-            if source.get("voice_name") or source.get("voice"):
-                current["voice_name"] = str(source.get("voice_name") or source.get("voice")).strip()
+            if "voice_name" in source or "voice" in source:
+                current["voice_name"] = str(source.get("voice_name") or source.get("voice") or "").strip()
             current["deleted"] = False
         changed += 1
     if changed:
