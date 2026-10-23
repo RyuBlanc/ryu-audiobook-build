@@ -941,6 +941,86 @@ class ProjectWorkflow(QMainWindow):
         animation.finished.connect(finish)
         animation.start()
 
+    def _sidebar_item_clicked(self, item: QListWidgetItem) -> None:
+        """Recover navigation when the clicked row is already selected."""
+        row = self.sidebar.row(item)
+        if row < 0:
+            return
+        name = str(item.data(32) or "")
+        if name == "Dashboard":
+            expected = self.dashboard
+        elif name == "Generate":
+            expected = self.generation if self.project else self.import_page
+        elif name == "Library":
+            expected = self.library
+        elif name == "Import":
+            expected = self.import_page
+        elif name == "Chapters":
+            expected = self.editor or self.import_page
+        elif name == "Voice & Narration":
+            expected = self.voice
+        elif name == "Voice Cast":
+            expected = self.voice_cast
+        elif name in {"Pronunciation", "Sound Design"}:
+            expected = self.generation if self.project else self.import_page
+        elif name == "Audiobooks":
+            expected = self.audiobooks_page
+        elif name == "History":
+            expected = self.history_page
+        elif name == "Settings":
+            expected = self.settings_page
+        elif name == "Models":
+            expected = self.models_page
+        elif name == "Hardware":
+            expected = self.hardware_page
+        else:
+            return
+        # Alias views must also re-run when already selected so their focus target
+        # is restored after navigation from another page or a stale stacked widget.
+        if (
+            expected is None
+            or self.stack.currentWidget() is not expected
+            or name in {"Pronunciation", "Sound Design"}
+        ):
+            self._sidebar_changed(row)
+
+
+    def _open_generation_feature(self, feature: str) -> None:
+        """Open the dedicated, book-specific Pronunciation or Sound Design screen."""
+        key = "Pronunciation" if feature == "pronunciation" else "Sound Design"
+        if not self.project:
+            selected_projects = self.library._selected_projects()
+            if selected_projects:
+                self.open_project(selected_projects[0])
+                for index in range(self.sidebar.count()):
+                    if self.sidebar.item(index).data(32) == key:
+                        self.sidebar.blockSignals(True)
+                        try:
+                            self.sidebar.setCurrentRow(index)
+                        finally:
+                            self.sidebar.blockSignals(False)
+                        break
+            else:
+                self._show_page(self.library)
+                self.page_subheading.setText(
+                    f"Select a book in Library or import one to open {key}."
+                )
+                return
+        if not self.project:
+            return
+        if (
+            self.generation is None
+            or self.stack.indexOf(self.generation) < 0
+            or self.generation.project_folder != self.project.folder
+        ):
+            self.ensure_generation_page()
+        target = self.pronunciation_page if feature == "pronunciation" else self.sound_design_page
+        if target is None or self.stack.indexOf(target) < 0:
+            QMessageBox.warning(self, key, f"{key} could not be initialized. Open Generate once and try again.")
+            return
+        self._show_page(target)
+
+
     def _sidebar_changed(self, row: int) -> None:
         if row < 0 or row >= self.sidebar.count():
             return
