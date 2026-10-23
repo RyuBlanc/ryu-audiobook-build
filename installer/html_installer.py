@@ -17,7 +17,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow
+from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow, QWidget
 
 APP_TITLE = "Ryu's Audiobook Setup"
 CORE_INSTALLER_NAME = "Ryu's Audiobook Core Setup.exe"
@@ -109,12 +109,20 @@ class InstallerBridge(QObject):
             return json.dumps({"error": "Choose an installation folder first."})
         required = int(self._payload.get("installed_size_bytes") or 0)
         free = _free_bytes(path_value)
+        reserve = 512 * 1024 * 1024
+        enough = bool(free > 0 and required > 0 and free >= required + reserve)
+        error = ""
+        if free <= 0:
+            error = "Windows could not determine free space for this location. Choose an existing folder or drive."
+        elif required <= 0:
+            error = "The installed package size could not be read. Re-download Setup."
+        elif not enough:
+            error = "There may not be enough free space here for the application plus a 512 MB safety reserve. Choose another drive."
         return json.dumps({
             "requested_path": path_value, "free_space_bytes": free,
             "required_size_bytes": required, "file_count": int(self._payload.get("file_count") or 0),
-            "has_enough_space": bool(free and (not required or free >= required + 512 * 1024 * 1024)),
-            "error": "There may not be enough free space here. Choose another drive."
-                if free and required and free < required + 512 * 1024 * 1024 else "",
+            "has_enough_space": enough, "safety_reserve_bytes": reserve,
+            "error": error,
         }, ensure_ascii=False)
 
     @Slot(str, result=str)
@@ -318,18 +326,34 @@ class InstallerWindow(QMainWindow):
         self.channel.registerObject("ryuInstaller", self.bridge)
         self.web.page().setWebChannel(self.channel)
         self.bridge.closeRequested.connect(self.close)
-        self.web.installEventFilter(self)
+        self._drag_offset = None
         self.web.load(QUrl.fromLocalFile(str(page.resolve())))
         screen = QApplication.primaryScreen().availableGeometry()
         self.move(screen.x() + (screen.width() - self.width()) // 2,
                   screen.y() + (screen.height() - self.height()) // 2)
 
     def eventFilter(self, obj, event):
-        if obj is self.web and event.type() == QEvent.Type.MouseButtonPress:
-            if event.button() == Qt.MouseButton.LeftButton and event.position().y() <= 46:
-                handle = self.windowHandle()
-                if handle is not None and handle.startSystemMove():
+        # WebEngine sends mouse events to Chromium child widgets, not reliably
+        # to QWebEngineView itself. Filter at QApplication level (installed in
+        # main()) and begin native movement only in the empty top strip.
+        if isinstance(obj, QWidget) and obj.window() is self:
+            event_type = event.type()
+            if event_type == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                point = self.mapFromGlobal(event.globalPosition().toPoint())
+                in_drag_strip = 0 <= point.y() <= 46 and 285 <= point.x() < self.width() - 112
+                if in_drag_strip:
+                    handle = self.windowHandle()
+                    if handle is not None and handle.startSystemMove():
+                        self._drag_offset = None
+                        return True
+                    self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
                     return True
+            elif event_type == QEvent.Type.MouseMove and self._drag_offset is not None:
+                if event.buttons() & Qt.MouseButton.LeftButton:
+                    self.move(event.globalPosition().toPoint() - self._drag_offset)
+                    return True
+            elif event_type == QEvent.Type.MouseButtonRelease:
+                self._drag_offset = None
         return super().eventFilter(obj, event)
 
     def closeEvent(self, event) -> None:
@@ -347,6 +371,9 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_TITLE)
     window = InstallerWindow()
+    # Filter mouse events for the WebEngine's internal child widgets too.
+    # This keeps the custom frameless installer draggable from its top strip.
+    app.installEventFilter(window)
     window.show()
     return app.exec()
 

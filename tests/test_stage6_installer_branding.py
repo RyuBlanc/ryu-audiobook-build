@@ -93,6 +93,33 @@ class InstallerBrandingContractTests(unittest.TestCase):
         self.assertIn("if APP_EXE not in package_files:", builder)
 
 
+    def test_html_installer_controls_are_wired_before_startup(self):
+        html = (ROOT / "installer" / "ryu_installer.html").read_text(encoding="utf-8")
+        js = (ROOT / "installer" / "ryu_installer.js").read_text(encoding="utf-8")
+        bridge = (ROOT / "installer" / "html_installer.py").read_text(encoding="utf-8")
+        self.assertIn('id="topMinimize"', html)
+        self.assertIn('id="topClose"', html)
+        self.assertIn('id="browse"', html)
+        self.assertIn('id="confirmExit"', html)
+        self.assertIn('id="packageFiles"', html)
+        self.assertIn("const minimizeButton=$('topMinimize');if(minimizeButton)", js)
+        self.assertNotIn("$('topMinimize').onclick=", js)
+        self.assertIn("$('browse').onclick=browseDirectory", js)
+        self.assertIn("$('confirmExit').onclick=", js)
+        self.assertIn("environmentChecked&&Number(environment.free_space_bytes)>0", js)
+        self.assertIn("Number(environment.file_count).toLocaleString()", js)
+        self.assertIn("app.installEventFilter(window)", bridge)
+        self.assertIn("handle.startSystemMove()", bridge)
+        self.assertIn("QFileDialog.getExistingDirectory", bridge)
+
+    def test_logo_pipeline_clears_only_the_outer_neutral_halo(self):
+        build_script = (ROOT / "build.py").read_text(encoding="utf-8")
+        self.assertIn("def _remove_outer_neutral_logo_halo(image: Image.Image)", build_script)
+        self.assertIn("band = max(12, round(min(width, height) * 0.06))", build_script)
+        self.assertIn("rgba = _remove_outer_neutral_logo_halo(rgba)", build_script)
+        self.assertIn("ImageChops.subtract(rgba.getchannel(\"A\"), halo)", build_script)
+
+
     def test_html_setup_bridge_runs_the_actual_windows_installer(self):
         html = (ROOT / "installer" / "ryu_installer.html").read_text(encoding="utf-8")
         html_js = (ROOT / "installer" / "ryu_installer.js").read_text(encoding="utf-8")

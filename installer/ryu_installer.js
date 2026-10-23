@@ -6,9 +6,9 @@ const componentData=[
 {id:'sound',icon:'♫',name:'Sound Design Tools',desc:'Background music, ambience, effects and chapter mixing'},
 {id:'qwen',icon:'◇',name:'Qwen Voice Studio Support',desc:'CustomVoice, VoiceDesign and authorized voice-reference workflows'}
 ];
-let step=0,installing=false,bridge=null,bridgeReady=false,environment={},lastStatus='idle',pollTimer=null;
+let step=0,installing=false,bridge=null,bridgeReady=false,environment={},environmentChecked=false,environmentRequest=0,lastStatus='idle',pollTimer=null;
 const $=id=>document.getElementById(id),screens=[...document.querySelectorAll('.screen')];
-function formatBytes(bytes){const n=Number(bytes||0);if(!Number.isFinite(n)||n<=0)return'Calculating…';const units=['B','KB','MB','GB','TB'];let v=n,i=0;while(v>=1024&&i<units.length-1){v/=1024;i++}return(i===0?String(Math.round(v)):v.toFixed(1))+' '+units[i]}
+function formatBytes(bytes){if(bytes===null||bytes===undefined||bytes==='')return'Checking…';const n=Number(bytes);if(!Number.isFinite(n)||n<0)return'Unavailable';if(n===0)return'0 B';const units=['B','KB','MB','GB','TB'];let v=n,i=0;while(v>=1024&&i<units.length-1){v/=1024;i++}return(i===0?String(Math.round(v)):v.toFixed(1))+' '+units[i]}
 function renderSteps(){$('steps').innerHTML=labels.map((x,i)=>'<div class="step '+(i===step?'active':i<step?'done':'')+'"><div class="step-no">'+(i<step?'✓':i+1)+'</div><div><strong>'+x[0]+'</strong><small>'+x[1]+'</small></div></div>').join('')}
 function renderComponents(){$('componentList').innerHTML=componentData.map(x=>'<div class="component selected" data-id="'+x.id+'" data-required="true"><div class="icon">'+x.icon+'</div><div><b>'+x.name+' · Included</b><p>'+x.desc+'</p></div><span>Included ✓</span></div>').join('')}
 function showError(text){const n=$('reviewError');if(!n)return;n.textContent=String(text||'Installation could not be started.');n.style.display='block'}
@@ -16,18 +16,34 @@ function clearError(){const n=$('reviewError');if(n){n.textContent='';n.style.di
 function update(){
  screens.forEach((x,i)=>x.classList.toggle('active',i===step));renderSteps();
  $('back').classList.toggle('hidden',step===0||step>=5);$('cancel').classList.toggle('hidden',step===6);$('next').classList.toggle('hidden',step===5);
- $('next').disabled=(step===1&&!$('accept').checked)||(!bridgeReady&&step===4);
+ const storageReady=environmentChecked&&Number(environment.free_space_bytes)>0&&Number(environment.required_size_bytes)>0&&environment.has_enough_space===true;
+ $('next').disabled=(step===1&&!$('accept').checked)||(step===4&&(!bridgeReady||!storageReady));
  $('next').textContent=step===4?'Install':step===6?'Finish':'Next →';
- if(step===4){$('reviewPath').textContent=$('installPath').value;$('reviewComponents').textContent='Complete package · '+formatBytes(environment.required_size_bytes)+' · '+componentData.length+' features'}
+ if(step===4){$('reviewPath').textContent=$('installPath').value;$('reviewComponents').textContent='Complete package · '+formatBytes(environment.required_size_bytes)+' · '+Number(environment.file_count||0).toLocaleString()+' files · '+componentData.length+' features'}
 }
 function updateEnvironment(path){
  if(!bridgeReady||!bridge)return;
+ const request=++environmentRequest;environmentChecked=false;if(step===4)update();
  bridge.getEnvironmentForPath(String(path||$('installPath').value||''),function(raw){
-  try{const info=JSON.parse(raw||'{}');environment=Object.assign({},environment,info);
-   $('freeSpace').textContent=formatBytes(info.free_space_bytes);$('installSize').textContent=formatBytes(info.required_size_bytes);
-   $('requiredSpace').textContent=formatBytes(info.required_size_bytes)+' required';$('versionLabel').textContent='Version '+String(info.version||'—');
-   if(info.error){showError(info.error)}else if(step===4)clearError();if(step===4)update();
-  }catch(e){showError('Could not read destination disk information. '+String(e))}
+  if(request!==environmentRequest)return;
+  try{
+   const info=JSON.parse(raw||'{}');environment=Object.assign({},environment,info);
+   const free=Number(info.free_space_bytes||0),required=Number(info.required_size_bytes||0);
+   $('freeSpace').textContent=free>0?formatBytes(free):'Unavailable';
+   $('installSize').textContent=required>0?formatBytes(required):'Unavailable';
+   $('packageFiles').textContent=Number(info.file_count||0)>0?Number(info.file_count).toLocaleString():'Unavailable';
+   $('requiredSpace').textContent=required>0?formatBytes(required)+' package + 512 MB reserve':'Package size unavailable';
+   $('versionLabel').textContent='Version '+String(info.version||'—');
+   environmentChecked=free>0&&required>0&&info.has_enough_space===true&&!info.error;
+   if(info.error){showError(info.error)}
+   else if(free<=0){showError('Could not determine free space for this location. Choose an existing folder or drive.')}
+   else if(required<=0){showError('The application package size is unavailable. Re-download Setup.')}
+   else if(info.has_enough_space===false){showError('Not enough free space for the application package plus the 512 MB safety reserve. Choose another drive.')}
+   else {clearError()}
+   if(step===4)update();
+  }catch(e){
+   environmentChecked=false;showError('Could not read destination disk/package information. '+String(e));if(step===4)update();
+  }
  })
 }
 function consumeStatus(status){
@@ -48,14 +64,14 @@ function consumeStatus(status){
 }
 function pollStatus(){if(!bridgeReady||!bridge)return;bridge.getStatus(function(raw){try{consumeStatus(JSON.parse(raw||'{}'))}catch(e){}})}
 function connectBridge(){
- if(!window.QWebChannel||!window.qt||!qt.webChannelTransport){$('phaseText').textContent='Native setup bridge is unavailable. Close this window and restart Setup.';return}
+ if(!window.QWebChannel||!window.qt||!qt.webChannelTransport){$('phaseText').textContent='Native setup bridge is unavailable. Close this window and restart Setup.';showError('The native setup service did not connect. Close and restart Setup.');update();return}
  new QWebChannel(qt.webChannelTransport,function(channel){
   bridge=channel.objects.ryuInstaller;bridgeReady=true;
   if(bridge.statusChanged)bridge.statusChanged.connect(function(raw){try{consumeStatus(JSON.parse(raw||'{}'))}catch(e){}});
   bridge.getEnvironment(function(raw){
    try{environment=JSON.parse(raw||'{}');$('installPath').value=environment.default_dir||$('installPath').value;
     $('versionLabel').textContent='Version '+String(environment.version||'—');renderComponents();updateEnvironment($('installPath').value);update();
-   }catch(e){showError('Package information could not be loaded. '+String(e))}
+   }catch(e){environmentChecked=false;showError('Package information could not be loaded. '+String(e));update()}
   });
   pollTimer=setInterval(pollStatus,600)
  })
@@ -81,7 +97,8 @@ $('next').onclick=nextStep;$('back').onclick=function(){if(!installing){step=Mat
 $('accept').onchange=update;$('browse').onclick=browseDirectory;
 $('installPath').addEventListener('change',function(){clearError();updateEnvironment(this.value)});
 $('installPath').addEventListener('blur',function(){updateEnvironment(this.value)});
-$('cancel').onclick=openExit;$('topClose').onclick=openExit;$('topMinimize').onclick=function(){if(bridgeReady&&bridge)bridge.minimize()};
-$('stay').onclick=closeExit;$('confirmExit').onclick=function(){closeExit();if(bridgeReady&&bridge)bridge.exitInstaller()};
+$('cancel').onclick=openExit;$('topClose').onclick=openExit;const minimizeButton=$('topMinimize');if(minimizeButton)minimizeButton.onclick=function(){if(bridgeReady&&bridge)bridge.minimize();else showError('Window controls are not ready yet.')};
+$('stay').onclick=closeExit;$('confirmExit').onclick=function(){closeExit();if(bridgeReady&&bridge)bridge.exitInstaller();else window.close()};
 $('wave').innerHTML=Array.from({length:92},(_,i)=>'<i style="animation-delay:'+(-(i%13)/10)+'s"></i>').join('');
+window.addEventListener('error',function(){const phase=$('phaseText');if(phase)phase.textContent='Setup encountered an interface error. Close and reopen Setup; no installation will begin until the controls are ready.';console.error('Ryu Setup interface error');});
 renderComponents();update();connectBridge();
