@@ -3450,6 +3450,21 @@ class PremiumV2Bridge(QObject):
         details = dict(payload or {})
         label = str(details.get("voice_name") or model_id)
         verb = {"install": "Install", "repair": "Repair", "uninstall": "Uninstall"}.get(action, action.title())
+        with self._jobs_lock:
+            active = [
+                job for job in self._jobs.values()
+                if str(job.get("state") or "").casefold() in {"queued", "running"}
+            ]
+        active_model_jobs = [job for job in active if str(job.get("type") or "").casefold().startswith("model-")]
+        if active_model_jobs:
+            raise RuntimeError("Another model installation, repair, or uninstall is already running. Let it finish before starting a second model operation.")
+        active_audio_jobs = [
+            job for job in active
+            if any(token in str(job.get("type") or "").casefold()
+                   for token in ("voice-preview", "production", "generation", "character-analyze", "import"))
+        ]
+        if active_audio_jobs:
+            raise RuntimeError("A preview, import, analysis, or audiobook generation job is active. Stop or finish it before changing installed model files.")
         job_id = self._new_job(
             "model-" + action, f"{verb} {label}",
             f"{verb} app-managed model/runtime component {model_id}",
@@ -3514,7 +3529,8 @@ class PremiumV2Bridge(QObject):
     def _models_uninstall(self, payload: dict[str, Any]) -> dict[str, Any]:
         model_id = str(payload.get("model_id") or "").strip().casefold()
         allowed = {"piper", "kokoro", "chatterbox", "chatterbox-multilingual", "chatterbox-runtime",
-                   "qwen-runtime", "qwen-model", "audiobook-ai"}
+                   "qwen-runtime", "qwen-model", "audiobook-ai",
+                   "custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b"}
         if model_id not in allowed:
             raise ValueError("Choose a supported app-managed model/runtime to uninstall.")
         return self._models_start_operation("uninstall", model_id, payload)
@@ -3755,16 +3771,17 @@ class PremiumV2Bridge(QObject):
             mark_installed("chatterbox-multilingual", False)
             return "Removed the shared Chatterbox runtime. Saved profiles and books were kept."
 
-        if requested == "qwen-model":
-            kind = str(payload.get("model_kind") or "").strip().casefold()
+        if requested == "qwen-model" or requested in {"custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b"}:
             from app.tts.qwen_character_runtime import MODEL_DIRS, RUNTIME_ROOT
+            kind = str(payload.get("model_kind") or requested).strip().casefold()
             if kind not in MODEL_DIRS:
                 raise ValueError("Choose the exact installed Qwen model to uninstall.")
             target = MODEL_DIRS[kind]
-            if target.exists():
-                report(f"Removing Qwen model {kind}…")
-                self._models_remove_path(target, RUNTIME_ROOT)
-            return f"Removed Qwen model {kind}. The Qwen runtime and other model folders were kept."
+            if not target.exists():
+                raise ValueError(f"Qwen model {kind} is not installed.")
+            report(f"Removing Qwen model {kind}…")
+            self._models_remove_path(target, RUNTIME_ROOT)
+            return f"Removed Qwen model {kind}. The Qwen runtime, other model folders and saved voice profiles were kept."
 
         if requested == "qwen-runtime":
             from app.tts.qwen_character_runtime import (
