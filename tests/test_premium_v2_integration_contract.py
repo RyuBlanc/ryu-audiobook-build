@@ -712,8 +712,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("await refreshProviderCatalog(providerKey, false)", adapter)
         self.assertIn("disk_free_bytes", host)
         self.assertIn("installed_voice_names", host)
-        self.assertIn("One or more model", host)
-        self.assertIn("Provider model and voice requirements", adapter)
+        self.assertIn("def _models_verify(self, payload: dict[str, Any])", host)
+        self.assertIn("model.requirements", adapter)
         self.assertNotIn("Per-model update, repair, and uninstall are not implemented", adapter)
 
 
