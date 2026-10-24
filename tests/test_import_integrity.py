@@ -131,11 +131,11 @@ class ImportIntegrityTests(unittest.TestCase):
 
     def test_single_occurrence_report_page_number_and_general_url_are_not_removed(self):
         source = (
-            "Chapter 1: Archive\\n"
-            "The report was placed beside the old ledger.\\n\\n"
-            "Report\\n\\n"
-            "The portal at https://example.com/archive remained open in the story.\\n\\n"
-            "17\\n\\n"
+            "Chapter 1: Archive\n"
+            "The report was placed beside the old ledger.\n\n"
+            "Report\n\n"
+            "The portal at https://example.com/archive remained open in the story.\n\n"
+            "17\n\n"
             "The keeper locked the library before sunrise."
         )
         cleaned, removed = clean_import_noise(source)
@@ -146,8 +146,8 @@ class ImportIntegrityTests(unittest.TestCase):
 
     def test_chapter_coverage_guard_handles_short_book_and_detected_content_loss(self):
         source = (
-            "Chapter 1: Begin\\nThe first body keeps enough words to verify the small book.\\n"
-            "Chapter 2: End\\nThe last body remains in the story and should be preserved."
+            "Chapter 1: Begin\nThe first body keeps enough words to verify the small book.\n"
+            "Chapter 2: End\nThe last body remains in the story and should be preserved."
         )
         chapters = detect_chapters(source)
         source_words, chapter_words, coverage = chapter_text_coverage(source, chapters)
@@ -158,6 +158,49 @@ class ImportIntegrityTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "Import was stopped"):
             validate_chapter_text_coverage(source, [Chapter(1, "Only", "one word")])
+
+    def test_many_short_chapters_pass_coverage_guard_without_false_loss(self):
+        parts = []
+        for number in range(1, 13):
+            parts.append(f"Chapter {number}: The Quiet Return")
+            parts.append("The dawn breaks now.")
+        source = "\\n".join(parts)
+        chapters = detect_chapters(source)
+
+        self.assertEqual(len(chapters), 12)
+        source_words, chapter_words, coverage = chapter_text_coverage(source, chapters)
+        self.assertEqual(chapter_words, source_words)
+        self.assertAlmostEqual(coverage, 1.0)
+        validate_chapter_text_coverage(source, chapters, minimum=0.90)
+
+    def test_txt_import_to_chapter_cleanup_pipeline_preserves_story_bodies(self):
+        source_text = "\\n\\n".join([
+            "Chapter 1: The Arrival\\nA heroine followed the old road to the city gate.\\n41\\nReport\\nwww.asianovel.com",
+            "Chapter 2: The Return\\nThe hero came home after the long battle ended.\\n42\\nReport\\nwww.asianovel.com",
+            "Chapter 3: The Promise\\nThey promised to meet again before the winter festival.\\n43\\nReport\\nwww.asianovel.com",
+        ])
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "realistic-light-novel.txt"
+            source.write_text(source_text, encoding="utf-8")
+            book = extract_text(source)
+
+        chapters = detect_chapters(book.text)
+        self.assertEqual(len(chapters), 3)
+        validate_chapter_text_coverage(book.text, chapters, minimum=0.90)
+        repeated = set(detect_repeated_book_noise([chapter.text for chapter in chapters]))
+        cleaned_chapters = []
+        for chapter in chapters:
+            chapter.text, _removed = clean_import_noise(chapter.text, repeated)
+            cleaned_chapters.append(chapter)
+
+        joined = "\\n".join(chapter.text for chapter in cleaned_chapters)
+        for body in ("heroine followed", "hero came home", "promised to meet"):
+            self.assertIn(body, joined)
+        self.assertNotIn("Report", joined)
+        self.assertNotIn("41", joined)
+        self.assertNotIn("42", joined)
+        self.assertNotIn("43", joined)
+        self.assertNotIn("www.asianovel.com", joined)
 
     def test_noise_cleanup_removes_known_watermark_without_dropping_story(self):
         source = (
@@ -207,8 +250,8 @@ class ImportIntegrityTests(unittest.TestCase):
 
     def test_repeated_generic_domain_is_preserved_as_story_content(self):
         source = [
-            "Chapter 1: Archive\\nThe character reads a note linking to www.example.com before leaving.",
-            "Chapter 2: Portal\\nA second character mentions www.example.com while describing the old city.",
+            "Chapter 1: Archive\nThe character reads a note linking to www.example.com before leaving.",
+            "Chapter 2: Portal\nA second character mentions www.example.com while describing the old city.",
         ]
         repeated = detect_repeated_book_noise(source)
         self.assertNotIn("www.example.com", repeated)
