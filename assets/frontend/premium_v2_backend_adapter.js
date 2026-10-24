@@ -2228,14 +2228,23 @@
         if ($('previewProgress')) $('previewProgress').style.width = pct + '%';
         if ($('previewState') && job.type === 'voice-preview') {
           const previewDetail = String(job.message || '').trim();
-          const previewDetailIsUseful = /elapsed \d+:\d{2}|loading qwen model|qwen model loaded|switching to cpu/i.test(previewDetail);
-          const previewProgressText = (job.stage || job.state) + ' · ' + Math.round(pct) + '%' +
-            (previewDetailIsUseful ? ' · ' + previewDetail : '');
-          $('previewState').textContent = previewProgressText;
+          const elapsedMatch = previewDetail.match(/elapsed \d+:\d{2}/i);
+          const previewDetailIsUseful = Boolean(elapsedMatch) ||
+            /loading qwen model|qwen model loaded|switching to cpu/i.test(previewDetail);
+          const shortDetail = elapsedMatch?.[0] ||
+            (/switching to cpu/i.test(previewDetail) ? 'Selecting compatible backend' :
+             /loading qwen model/i.test(previewDetail) ? 'Loading Qwen model' :
+             /qwen model loaded/i.test(previewDetail) ? 'Model loaded' : '');
+          // Keep the compact badge stable-width. Putting the full backend heartbeat
+          // here makes the toolbar wrap between refresh ticks and moves the preview.
+          $('previewState').textContent = (job.stage || job.state) + ' · ' + Math.round(pct) + '%';
           if($('sumPreview'))$('sumPreview').textContent=['completed','failed','cancelled'].includes(job.state)
             ? (job.state==='completed'?'Finalizing':job.state==='failed'?'Failed':'Cancelled')
             : 'Synthesizing · '+Math.round(pct)+'%';
-          if($('validation')&&!['completed','failed','cancelled'].includes(job.state))$('validation').textContent='Synthesizing preview · '+Math.round(pct)+'% · '+(job.stage||job.state)+(previewDetailIsUseful ? ' · '+previewDetail : '');
+          if($('validation')&&!['completed','failed','cancelled'].includes(job.state)) {
+            $('validation').textContent = 'Synthesizing preview · '+Math.round(pct)+'% · '+
+              (job.stage||job.state)+(previewDetailIsUseful ? ' · '+shortDetail : '');
+          }
         }
         await refreshJobs();
         if (finished || monitorToken !== monitorEpoch) return;
@@ -2727,7 +2736,8 @@
     style.textContent = [
       '#voices{overflow-anchor:none!important}',
       '#voices .content,#voices .layout,#voiceWorkspace,#voiceWorkspace .panel{overflow-anchor:none!important}',
-      '#voices #previewState,#voices #validation,#voices #previewProgress{min-height:1.25em}'
+      '#voices #previewState{min-height:1.25em;white-space:nowrap;max-width:170px;overflow:hidden;text-overflow:ellipsis;flex:0 0 auto}',
+      '#voices #validation{min-height:3em;box-sizing:border-box;overflow-wrap:anywhere}'
     ].join('');
     document.head.appendChild(style);
   }
