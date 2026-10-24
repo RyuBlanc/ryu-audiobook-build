@@ -3914,7 +3914,7 @@
         const providerKey = button.dataset.modelOpenProvider;
         const target = $('voices');
         if (!target) throw new Error('Voice Studio is unavailable in this build.');
-        window.go?.('voice');
+        window.go?.('voices');
         document.querySelectorAll('#voices .provider').forEach(panel => panel.classList.toggle('active', panel.dataset.provider === providerKey));
         const defaults = {offline:'Amy',sapi:'David',customvoice:'Serena',voicedesign:'Custom voice description',qwenclone:'Reference voice',customref:'Reference voice',edge:'Edge neural voice',eleven:'ElevenLabs voice'};
         selectedVoice = null; selectedVoiceId = null; selectedVoiceProvider = null;
