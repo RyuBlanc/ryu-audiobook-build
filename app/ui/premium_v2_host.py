@@ -471,6 +471,7 @@ class PremiumV2Bridge(QObject):
             "voice.import_reference": True,
             "voice.select": True,
             "voice.preview": True,
+            "voice.preview.save": True,
             "character.list": True,
             "character_library.list": True,
             "character_library.deleted.list": True,
