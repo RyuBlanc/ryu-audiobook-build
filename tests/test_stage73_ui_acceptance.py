@@ -325,14 +325,14 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
     def test_premium_v2_frontend_commands_are_registered_and_callable_in_backend(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
-        frontend_commands = set(re.findall(r"\\bcall\\(\\s*['\\\"]([^'\\\"]+)['\\\"]", adapter))
+        frontend_commands = set(re.findall(r"\bcall\(\s*['\"]([^'\"]+)['\"]", adapter))
 
         dispatch_start = host.index("            handlers = {", host.index("class PremiumV2Bridge"))
-        dispatch_end = host.index("\\n            }", dispatch_start)
+        dispatch_end = host.index("\n            }", dispatch_start)
         dispatch = host[dispatch_start:dispatch_end]
-        handler_rows = re.findall(r"""['\\\"]([^'\\\"]+)['\\\"]\\s*:\\s*self\\.([A-Za-z0-9_]+)""", dispatch)
+        handler_rows = re.findall(r"""["']([^"']+)["']\s*:\s*self\.([A-Za-z0-9_]+)""", dispatch)
         backend_commands = {command for command, _method in handler_rows}
-        defined_methods = set(re.findall(r"^    def (_[A-Za-z0-9_]+)\\(", host, re.MULTILINE))
+        defined_methods = set(re.findall(r"^    def (_[A-Za-z0-9_]+)\(", host, re.MULTILINE))
 
         self.assertGreaterEqual(len(frontend_commands), 70, "The audited frontend command set unexpectedly shrank.")
         self.assertEqual(sorted(frontend_commands - backend_commands), [],
