@@ -64,6 +64,11 @@ def detect_chapters(text: str) -> list[Chapter]:
             body = f"{preamble}\n\n{body}".strip()
         if not body:
             continue
+        # Preserve the source heading in the editable/narrated text as well as
+        # in Chapter.title. Users need to hear the actual section being played,
+        # especially titles split across page boundaries (for example
+        # "BLACK DOG/BIRTH" followed by "Part 1").
+        body = f"{title}\n{body}".strip()
         chapters.append(Chapter(len(chapters) + 1, title, body))
 
     if chapters:
