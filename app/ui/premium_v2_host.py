@@ -3555,8 +3555,8 @@ class PremiumV2Bridge(QObject):
             value = payload[key]
             if key == "theme" and value not in {"dark", "light"}:
                 raise ValueError("Theme must be dark or light.")
-            if key == "preview_seconds" and int(value) not in {10, 20, 30, 45, 60}:
-                raise ValueError("Preview duration must be 10, 20, 30, 45, or 60 seconds.")
+            if key == "preview_seconds" and int(value) not in {10, 20, 30, 45, 60, 90}:
+                raise ValueError("Preview duration must be 10, 20, 30, 45, 60, or 90 seconds.")
             if key == "bitrate" and not 128 <= int(value) <= 320:
                 raise ValueError("Bitrate must be from 128 to 320 kbps.")
             if key == "player_rate":
