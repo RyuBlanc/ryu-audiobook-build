@@ -17,6 +17,7 @@ class VoicePreviewContractTests(unittest.TestCase):
                 thread = Mock()
                 bridge = SimpleNamespace(
                     _active_project=lambda: project,
+                    _assert_no_active_model_lifecycle=lambda _activity: None,
                     _find_profile=lambda name: profile if name == profile.name else None,
                     _new_job=Mock(return_value="preview-job"),
                     _job_update=Mock(),
@@ -43,6 +44,7 @@ class VoicePreviewContractTests(unittest.TestCase):
         project = SimpleNamespace(folder=Path("unused"), chapters=[])
         bridge = SimpleNamespace(
             _active_project=lambda: project,
+            _assert_no_active_model_lifecycle=lambda _activity: None,
             _find_profile=lambda _name: profile,
             _new_job=Mock(),
             _job_update=Mock(),
