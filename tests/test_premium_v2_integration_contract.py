@@ -901,6 +901,36 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertNotIn("activeJob = jobId", dialog_body)
         self.assertNotIn("const tick = async () =>", dialog_body)
 
+    def test_refresh_epochs_protect_cast_pronunciation_and_project_state(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        expected = {
+            "async function refreshCharacters()": ("characterListEpoch", "return characters;"),
+            "async function refreshTerms()": ("termsListEpoch", "return terms;"),
+            "async function refreshProjects()": ("projectListEpoch", "return projects;"),
+        }
+        for function_name, (epoch, stale_return) in expected.items():
+            start = adapter.index(function_name)
+            end = adapter.find("\n  async function ", start + len(function_name))
+            if end < 0:
+                end = len(adapter)
+            block = adapter[start:end]
+            self.assertIn("++" + epoch, block, function_name)
+            self.assertIn(stale_return, block, function_name)
+
+    def test_history_rows_are_not_recreated_when_visible_job_state_is_identical(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        start = adapter.index("async function refreshHistory()")
+        end = adapter.index("async function refreshPerformance()", start)
+        block = adapter[start:end]
+        self.assertIn("const requestToken = ++historyListEpoch;", block)
+        self.assertIn("section.dataset.historyRenderSignature === signature", block)
+        self.assertIn("if (section) section.querySelectorAll('[data-backend-history]').forEach(el => el.remove());", block)
+        self.assertIn("row.dataset.backendHistory='1';", block)
+
     def test_project_and_audiobook_shelves_reuse_dom_when_records_are_unchanged(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
             encoding="utf-8"
