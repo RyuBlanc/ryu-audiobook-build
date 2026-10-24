@@ -704,6 +704,25 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertNotRegex(self.html, r'<span class="flow-link (?:is-current|is-done|has-warning)')
 
 
+    def test_chapter_insights_refresh_on_editor_changes_and_selection(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("function renderLiveChapterInsights()", adapter)
+        self.assertIn("const totalWords = chapters.reduce", adapter)
+        self.assertIn("const minutes = Math.max(0, Math.round(totalWords / 145))", adapter)
+        self.assertIn("Estimated narration", adapter)
+
+        selection_start = adapter.index("list.querySelectorAll('[data-chapter-number]').forEach")
+        selection_end = adapter.index("    }\n    if (title)", selection_start)
+        selection_handler = adapter[selection_start:selection_end]
+        self.assertIn("renderLiveChapterInsights();", selection_handler)
+
+        editor_start = adapter.index("if ($('chapterEditor')) $('chapterEditor').addEventListener('input'")
+        editor_end = adapter.index("if ($('chapterEditor')) $('chapterEditor').addEventListener('keydown'", editor_start)
+        editor_handler = adapter[editor_start:editor_end]
+        self.assertIn("c.text = editorText;", editor_handler)
+        self.assertIn(r"split(/\\s+/)", editor_handler)
+        self.assertIn("renderLiveChapterInsights();", editor_handler)
+
     def test_model_verification_and_lifecycle_actions_use_real_backend_operations(self):
         """Model Center lifecycle controls must target live backend handlers, not be disabled prototype buttons."""
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
