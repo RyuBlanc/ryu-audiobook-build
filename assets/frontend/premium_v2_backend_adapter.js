@@ -1412,7 +1412,7 @@
     if ($('jobsCompletedCount')) $('jobsCompletedCount').textContent = allJobs.filter(j => j.state === 'completed').length;
     if ($('backgroundJobCount')) $('backgroundJobCount').textContent = allJobs.filter(j => !['completed','failed','cancelled'].includes(j.state)).length + ' background jobs';
   }
-  async function monitorJob(jobId, done) {
+  async function monitorJob(jobId, done, terminal) {
     activeJob = jobId; if (poll) clearInterval(poll);
     const tick = async () => {
       try {
@@ -1432,6 +1432,9 @@
           clearInterval(poll); poll = null;
           if (typeof arguments[2] === 'function') {
             try { await arguments[2](job); } catch (terminalError) { console.warn('[Ryu job terminal callback]', terminalError); }
+          }
+          if (typeof terminal === 'function') {
+            try { await terminal(job); } catch (terminalError) { console.warn('[Ryu job terminal callback]', terminalError); }
           }
           const completionResult = job.state === 'completed' && done ? await done(job) : undefined;
           if (completionResult === false) {
@@ -2361,13 +2364,14 @@
         ' title="Remove only this app-managed component">Uninstall</button>');
     }
     actions.push('<button type="button" class="btn secondary small" data-model-verify="' + esc(model.model_id) + '" title="Check the actual installed files or provider prerequisites">Verify</button>');
-    const providerTarget = {
+    const providerTarget = ({
       piper:'offline', kokoro:'offline', 'custom-0.6b':'customvoice', 'custom-1.7b':'customvoice',
       'design-1.7b':'voicedesign', 'base-0.6b':'qwenclone', 'base-1.7b':'qwenclone',
-      'qwen-runtime':'customvoice', 'qwen-customvoice':'customvoice', 'qwen-voicedesign':'voicedesign',
-      'qwen-clone':'qwenclone', 'chatterbox-runtime':'customref', 'chatterbox':'customref',
-      'chatterbox-multilingual':'customref', 'windows-sapi':'sapi', 'edge-tts':'edge', 'elevenlabs':'eleven'
-    }[model.model_id];
+      'qwen-runtime':'customvoice', 'chatterbox-runtime':'customref',
+      'windows-sapi':'sapi', 'edge-tts':'edge', 'elevenlabs':'eleven'
+    }[model.model_id] || ({
+      'qwen-customvoice':'customvoice','qwen-voicedesign':'voicedesign','qwen-clone':'qwenclone'
+    }[model.feature]));
     if (providerTarget) {
       actions.push('<button type="button" class="btn secondary small" data-model-open-provider="' + esc(providerTarget) + '">Open Voice Studio</button>');
     } else if (model.model_id === 'audiobook-ai') {
@@ -2397,8 +2401,8 @@
       grid.innerHTML = filtered.map(model => {
         const local = model.component_type !== 'provider';
         const status = String(model.status || (model.installed ? 'Installed' : 'Needs setup'));
-        const problem = /incomplete|missing|not installed|needs installation|needs setup|api key required|no .* detected/i.test(status);
-        const badge = model.installed && !problem ? 'good' : problem ? 'warn' : 'info';
+        const problem = /incomplete|missing|not installed|needs installation|needs setup|api key required|unavailable|runtime required|no .* detected/i.test(status);
+        const badge = model.installed && !problem ? '' : problem ? 'warn' : 'info';
         const storage = Number(model.storage_bytes || 0) > 0 ? '<span class="model-meta-item">Local files · ' + esc(formatModelBytes(model.storage_bytes)) + '</span>' : '';
         const requirement = model.requirements ? '<p class="model-requirements">' + esc(model.requirements) + '</p>' : '';
         const piperVoices = model.model_id === 'piper' && Array.isArray(model.installed_voice_names) && model.installed_voice_names.length
@@ -3913,7 +3917,7 @@
         const providerKey = button.dataset.modelOpenProvider;
         const target = $('voices');
         if (!target) throw new Error('Voice Studio is unavailable in this build.');
-        window.go?.('voices');
+        window.go?.('voice');
         document.querySelectorAll('#voices .provider').forEach(panel => panel.classList.toggle('active', panel.dataset.provider === providerKey));
         const defaults = {offline:'Amy',sapi:'David',customvoice:'Serena',voicedesign:'Custom voice description',qwenclone:'Reference voice',customref:'Reference voice',edge:'Edge neural voice',eleven:'ElevenLabs voice'};
         selectedVoice = null; selectedVoiceId = null; selectedVoiceProvider = null;
