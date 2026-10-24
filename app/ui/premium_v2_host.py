@@ -2707,6 +2707,21 @@ class PremiumV2Bridge(QObject):
                         str(item.get("name") or "").casefold() == primary_key
                         or str(item.get("name") or "").casefold() in aliases_key
                     )), None)
+                    active_series = self._project_series_name(active_project, state)
+                    record_series = str(record.get("series") or "").strip()
+                    # A primary character newly created from Voice Studio should also
+                    # appear in Character Studio when its series is the active book's
+                    # series. Do not insert characters from unrelated series into this cast.
+                    if target is None and record_series and active_series.casefold() == record_series.casefold():
+                        target = {
+                            "name": str(record.get("primary_name") or name).strip(),
+                            "role": "Character",
+                            "short_description": str(record.get("short") or "").strip(),
+                            "aliases": list(record.get("aliases") or []),
+                            "voice_profile": voice_profile,
+                            "notes": str(record.get("notes") or "").strip(),
+                        }
+                        cast.append(target)
                     if target is not None:
                         target["voice_profile"] = voice_profile
                         state["characters"] = cast
