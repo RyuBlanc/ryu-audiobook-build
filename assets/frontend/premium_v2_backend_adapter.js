@@ -2354,6 +2354,25 @@
       if(studio){e.preventDefault();e.stopImmediatePropagation();const c=libraryCharacters.find(x=>String(x.id)===studio.dataset.characterStudio);if(!c){message('Choose a saved character first.',true);return;}if(!c.source_project_folder){window.ryuPremiumSelectedCharacter=c.name;window.go?.('characters');message('Opened Character Studio. Open a project from this series to assign a voice.');return;}void (async()=>{try{await call('project.open',{folder:c.source_project_folder});await refreshProjects();await refreshChapters();await refreshCharacters();window.ryuPremiumSelectedCharacter=c.name;window.go?.('characters');const castItem=[...document.querySelectorAll('[data-character-name]')].find(node=>node.dataset.characterName===c.name);castItem?.click();message('Opened Character Studio for '+c.name+'. Manage its voice assignment here.');}catch(err){message(err?.message||String(err),true);}})();return;}
       if(test){e.preventDefault();e.stopImmediatePropagation();const c=libraryCharacters.find(x=>String(x.id)===test.dataset.testLibrary);const profile=voices.find(v=>String(v.name).toLowerCase()===String(c?.voice||'').toLowerCase());if(!c||!profile){message('No matching saved voice profile exists for this character. Choose a saved profile in Voice Studio first.',true);return;}call('voice.preview',{profile_name:profile.name,text:'Hello, my name is '+c.name+'.',duration_seconds:10}).then(data=>monitorJob(data.job_id,async job=>{const url=job?.result?.file_url;if(!url)throw new Error('The character preview finished without a playable audio file.');if(previewAudio)previewAudio.pause();previewAudio=new Audio(url);await previewAudio.play();message('Playing character voice preview.');})).catch(err=>message(err?.message||String(err),true));return;}
     }, true);
+    // These selectors change real UI state; the previous HTML prototype left them inert.
+    document.addEventListener('click', event => {
+      const tab = event.target.closest('#voices [data-etab]');
+      if (tab) {
+        event.preventDefault(); event.stopImmediatePropagation();
+        const provider = tab.closest('.provider[data-provider="eleven"]');
+        if (provider) {
+          provider.querySelectorAll('[data-etab]').forEach(item => item.classList.toggle('active', item === tab));
+          provider.querySelectorAll('[data-epanel]').forEach(panel => panel.classList.toggle('active', panel.dataset.epanel === tab.dataset.etab));
+        }
+        return;
+      }
+      const preset = event.target.closest('.provider[data-provider="voicedesign"] .preset-grid .preset');
+      if (preset) {
+        event.preventDefault(); event.stopImmediatePropagation();
+        applyVoiceDesignPreset(preset);
+      }
+    }, true);
+
     // Refresh actions call the provider itself; they never report a static catalogue as live.
     document.addEventListener('click', event => {
       const button = event.target.closest('#voices .provider .health button');
