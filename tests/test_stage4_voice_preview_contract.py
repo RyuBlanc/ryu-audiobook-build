@@ -658,6 +658,11 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("window.__ryuDialogueReviewRenderSignature", adapter)
         self.assertIn("panel.dataset.ryuLiveInsightsSignature", adapter)
         self.assertIn("document.activeElement === box", adapter)
+        self.assertIn("call('project.get_active')", adapter)
+        self.assertIn("function refreshCurrentProjectCard", adapter)
+        self.assertIn("installProjectCardStatusObserver", adapter)
+        self.assertIn("titleNode.title = title", adapter)
+        self.assertIn("setProjectCardStatus(status)", adapter)
 
     def test_successful_qwen_preview_is_cached_but_full_generation_releases_it(self):
         host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
