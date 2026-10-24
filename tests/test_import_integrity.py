@@ -7,7 +7,10 @@ from unittest import mock
 
 from app.chapters.detector import Chapter, detect_chapters
 from app.core.project import Project, create_project, list_projects
-from app.documents.parser import (\n    extract_text, clean_import_noise, pdf_extraction_quality_warning,\n    detect_repeated_book_noise, chapter_text_coverage, validate_chapter_text_coverage,\n)
+from app.documents.parser import (
+    extract_text, clean_import_noise, pdf_extraction_quality_warning,
+    detect_repeated_book_noise, chapter_text_coverage, validate_chapter_text_coverage,
+)
 
 
 class ImportIntegrityTests(unittest.TestCase):
