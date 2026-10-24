@@ -15,7 +15,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, activeJob = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
+  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
   let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0, projectListEpoch = 0, characterListEpoch = 0, termsListEpoch = 0, soundListEpoch = 0, historyListEpoch = 0, librarySearchTimer = null, soundSearchTimer = null;
@@ -1521,6 +1521,7 @@
   async function monitorJob(jobId, done, terminal) {
     const monitorToken = ++monitorEpoch;
     activeJob = jobId;
+    activeJobType = null;
     if (poll) clearInterval(poll);
     poll = null;
     let finished = false;
@@ -1536,6 +1537,7 @@
         if (finished || monitorToken !== monitorEpoch) return;
         const job = jobs.find(j => j.job_id === jobId);
         if (!job) return;
+        if (activeJob === jobId) activeJobType = job.type || null;
         const pct = Math.max(0, Math.min(100, Number(job.progress || 0)));
         if ($('genPercent')) $('genPercent').textContent = Math.round(pct) + '%';
         if ($('genRing')) $('genRing').style.setProperty('--progress', pct + '%');
@@ -1551,7 +1553,7 @@
           finished = true;
           if (poll) clearInterval(poll);
           poll = null;
-          if (activeJob === jobId) activeJob = null;
+          if (activeJob === jobId) { activeJob = null; activeJobType = null; }
           if (typeof terminal === 'function') {
             try { await terminal(job); }
             catch (terminalError) {
@@ -3284,8 +3286,8 @@
     if ($('playPreview')) $('playPreview').onclick=act(async()=>{if(!previewAudio)throw new Error('Generate a preview first.');if(!previewAudio.paused){previewAudio.pause();$('playPreview').textContent='▶ Play';}else{await previewAudio.play();$('playPreview').textContent='Ⅱ Pause';}});
     if ($('stopPreview')) $('stopPreview').onclick=()=>{if(previewAudio){previewAudio.pause();previewAudio.currentTime=0;}if($('playPreview'))$('playPreview').textContent='▶ Play';};
     if ($('startGenerate')) $('startGenerate').onclick=act(async()=>{const data=await call('production.generate_book',{profile_name:selectedVoice||$('profileName')?.value,bitrate:256});await monitorJob(data.job_id);});
-    if ($('pauseGenerate')) $('pauseGenerate').onclick=act(async()=>{if(!activeJob)throw new Error('There is no active job to pause.');await call('job.pause',{job_id:activeJob});await refreshJobs();});
-    if ($('cancelJob')) $('cancelJob').onclick=act(async()=>{if(!activeJob)throw new Error('There is no active job to cancel.');await call('job.cancel',{job_id:activeJob});await refreshJobs();});
+    if ($('pauseGenerate')) $('pauseGenerate').onclick=act(async()=>{if(!activeJob||activeJobType!=='audiobook-generation')throw new Error('There is no active audiobook generation job to pause.');await call('job.pause',{job_id:activeJob});await refreshJobs();});
+    if ($('cancelJob')) $('cancelJob').onclick=act(async()=>{if(!activeJob||activeJobType!=='audiobook-generation')throw new Error('There is no active audiobook generation job to cancel.');await call('job.cancel',{job_id:activeJob});await refreshJobs();});
     ['analyzeCharacters','runAiAnalysis'].forEach(id=>{if($(id))$(id).onclick=act(async()=>{const data=await call('character.analyze');await monitorJob(data.job_id,refreshCharacters);});});
     if ($('previewPronTerm')) $('previewPronTerm').onclick=act(async()=>{
       const profile = $('pronQuickVoice')?.value || '';
