@@ -900,6 +900,10 @@
     })[profile?.provider]||'';
   }
   function currentVoiceName(){return String(selectedVoice||$('profileName')?.value||'').trim();}
+  function clearSavedProfileSelection(){
+    const select=document.querySelector('#voices .panel[data-panel="3"] .toolbar select');
+    if(select)select.value='';
+  }
   function updateVoiceBeingConfigured(value){
     const name=String(value||'').trim();
     for(const label of document.querySelectorAll('small,span,label,p,div')){
@@ -2060,6 +2064,7 @@
     };
     if(!(preset in prompts))return;
     invalidateVoicePreview();selectedVoice=null;selectedVoiceId=null;selectedVoiceProvider='qwen-character';profileEditOriginalName='';
+    clearSavedProfileSelection();
     panel.querySelectorAll('.preset').forEach(item=>item.classList.toggle('active',item===button));
     textarea.value=prompts[preset];
     const label=String(button.textContent||'Custom Description').trim(),name='Qwen VoiceDesign · '+label;
@@ -3226,6 +3231,7 @@
         selectedVoiceId = b.dataset.voice;
         selectedVoiceProvider = b.dataset.voiceProvider || null;
         selectedVoice=null;profileEditOriginalName='';
+        clearSavedProfileSelection();
         const label=b.dataset.voiceLabel || b.dataset.voice;
         if($('profileVoice'))$('profileVoice').textContent=label;
         if($('premiumName') && (!String($('premiumName').value || '').trim() || hadSavedSelection)) $('premiumName').value=label+' Custom';
@@ -3241,6 +3247,7 @@
       if(provider && !e.target.closest('button,input,textarea,select,label,[data-voice]')) {
         invalidateVoicePreview();
         selectedVoiceId=null;selectedVoice=null;selectedVoiceProvider=null;profileEditOriginalName='';
+        clearSavedProfileSelection();
         const key = provider.dataset.provider;
         const defaultLabels = {offline:'Amy',sapi:'David',customvoice:'Serena',voicedesign:'Custom voice description',qwenclone:'Reference voice',customref:'Reference voice',edge:'Edge neural voice',eleven:'ElevenLabs voice'};
         if($('profileVoice'))$('profileVoice').textContent=defaultLabels[key] || 'Custom voice';
