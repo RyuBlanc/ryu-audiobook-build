@@ -1687,6 +1687,28 @@
     });
   }
 
+  async function importSelectedReferenceFile(file, profileName) {
+    if (!file) throw new Error('Choose a reference audio file before saving this clone profile.');
+    const maxBytes = 25 * 1024 * 1024;
+    if (file.size > maxBytes) throw new Error('Reference audio must be smaller than 25 MB.');
+    const suffix = String(file.name || '').split('.').pop().toLowerCase();
+    const allowed = new Set(['wav','mp3','flac','ogg','m4a','aac','aiff','opus']);
+    if (!allowed.has(suffix)) throw new Error('Choose a WAV, MP3, FLAC, OGG, M4A, AAC, AIFF or OPUS reference audio file.');
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = '';
+    const chunk = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunk, bytes.length)));
+    }
+    const result = await call('voice.import_reference', {
+      profile_name:profileName,
+      filename:String(file.name || 'reference.' + suffix),
+      content_base64:btoa(binary)
+    });
+    if (result.cancelled || !result.sample_path) throw new Error('Reference audio was not imported.');
+    return result.sample_path;
+  }
+
   async function saveVoice(options = {}) {
     const name = String(options.nameOverride ?? ($('profileName')?.value || $('premiumName')?.value || '')).trim();
     const choice = document.querySelector('.provider.active')?.dataset.provider || 'offline';
@@ -1704,9 +1726,9 @@
     let sample_path = '';
     if (provider === 'chatterbox' || (provider === 'qwen-character' && /clone/i.test(choice))) {
       if (!authorized) throw new Error('Confirm you have permission to use this reference recording.');
-      const imported = await call('voice.import_reference', {profile_name:name});
-      if (imported.cancelled) return;
-      sample_path = imported.sample_path || imported.path || '';
+      const providerPanel = document.querySelector('#voices .provider[data-provider="' + choice + '"]');
+      const referenceFile = providerPanel?.querySelector('input[type="file"]')?.files?.[0];
+      sample_path = await importSelectedReferenceFile(referenceFile, name);
     }
     const matchedPiper = voices.find(v => v.provider === 'piper' && String(v.voice_id || '').toLowerCase().includes(voiceLabel.toLowerCase()));
     const designPanel = document.querySelector('.provider[data-provider="voicedesign"]');
