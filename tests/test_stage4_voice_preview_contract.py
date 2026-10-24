@@ -131,10 +131,39 @@ class VoicePreviewContractTests(unittest.TestCase):
         source = adapter.read_text(encoding="utf-8")
         self.assertIn("Number.isFinite(actual) || actual <= 0", source)
         self.assertIn("return false;", source)
-        self.assertIn("const playable = preparePreviewPlayback(job, Number(duration));", source)
-        self.assertIn("if ($('previewState') && playable) $('previewState').textContent = 'Ready';", source)
+        self.assertIn("const playable=preparePreviewPlayback(job,Number(duration));", source)
+        self.assertIn("if($('previewState')&&playable)$('previewState').textContent='Ready · 100%';", source)
         self.assertIn("Preview job completed without a valid measured audio duration", source)
 
+
+
+    def test_voice_profile_load_and_voice_design_preset_share_explicit_identity_state(self):
+        adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        source = adapter.read_text(encoding="utf-8")
+        self.assertIn("applySavedVoiceProfile(profile);", source)
+        self.assertIn("selectedVoice=profile.name;profileEditOriginalName=profile.name;", source)
+        self.assertIn("selectedVoiceProvider=profile.provider;", source)
+        self.assertIn("const label=String(button.textContent||'Custom Description').trim(),name='Qwen VoiceDesign · '+label;", source)
+        self.assertIn("selectedVoice=null;selectedVoiceId=null;selectedVoiceProvider='qwen-character';profileEditOriginalName='';", source)
+
+    def test_preview_controls_are_bound_to_validated_audio_and_native_save_dialog(self):
+        adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        source = adapter.read_text(encoding="utf-8")
+        self.assertIn("if(!previewAudio||!voicePreviewValid)", source)
+        self.assertIn("previewAudio.volume=previewVolume", source)
+        self.assertIn("previewAudio.ontimeupdate=syncPreviewPlaybackTime", source)
+        self.assertIn("voice.preview.save", source)
+        self.assertIn("Synthesizing preview · ", source)
+        self.assertIn("lastVoicePreviewPath=String(job?.result?.output_path||'')", source)
+
+    def test_provider_catalog_has_normalized_facets_and_optional_category_filter(self):
+        adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        source = adapter.read_text(encoding="utf-8")
+        self.assertIn("function voiceGenderFacet(row)", source)
+        self.assertIn("function voiceCategories(row)", source)
+        self.assertIn("optionsFor(categoryLabel?.querySelector('select'),'All categories',categoryValues,'All categories')", source)
+        self.assertIn("same(voiceLanguageFacet(row),languageFilter)", source)
+        self.assertIn("same(voiceRegionFacet(row),regionFilter)", source)
 
 if __name__ == "__main__":
     unittest.main()
