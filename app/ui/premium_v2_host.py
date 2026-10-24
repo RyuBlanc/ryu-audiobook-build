@@ -341,6 +341,8 @@ class PremiumV2Bridge(QObject):
                 "import.choose_file": self._import_choose_file,
                 "import.start": self._import_start,
                 "voice.list": self._voice_list,
+                "voice.catalog": self._voice_catalog,
+                "voice.credentials.set": self._voice_credentials_set,
                 "voice.save": self._voice_save,
                 "voice.delete": self._voice_delete,
                 "voice.import_reference": self._voice_import_reference,
@@ -455,6 +457,8 @@ class PremiumV2Bridge(QObject):
             "import.choose_file": True,
             "import.start": True,
             "voice.list": True,
+            "voice.catalog": True,
+            "voice.credentials.set": True,
             "voice.save": True,
             "voice.delete": True,
             "voice.import_reference": True,
@@ -1509,6 +1513,213 @@ class PremiumV2Bridge(QObject):
                 "authorized": profile.authorized, "qwen_mode": profile.qwen_mode, "saved": True,
                 "count": len(load_profiles())}
 
+    def _voice_catalog(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return the real provider catalogue for a Voice Studio library card."""
+        from app.tts.voice_profile import load_profiles, load_saved_profiles
+
+        key = str(payload.get("provider") or "").strip().casefold()
+        refresh = bool(payload.get("refresh"))
+        known = {"offline", "sapi", "customvoice", "voicedesign", "qwenclone", "customref", "edge", "eleven"}
+        if key not in known:
+            raise ValueError(f"Unknown voice library: {key or '(empty)'}")
+
+        saved_profiles = load_saved_profiles()
+        saved_names = {profile.name.strip().casefold() for profile in saved_profiles}
+        profiles = load_profiles()
+
+        def profile_row(profile):
+            return {
+                "name": profile.name,
+                "voice_id": profile.voice_id,
+                "provider": profile.provider,
+                "language": profile.language or "",
+                "locale": profile.language or "",
+                "gender": "Neutral",
+                "description": profile.qwen_prompt or profile.notes or "",
+                "saved": profile.name.strip().casefold() in saved_names,
+                "model_id": profile.model_id or "",
+                "qwen_mode": getattr(profile, "qwen_mode", "custom"),
+            }
+
+        rows: list[dict[str, Any]] = []
+        ready = False
+        message_text = ""
+        source = "local"
+
+        if key == "offline":
+            rows = [profile_row(profile) for profile in profiles if profile.provider in {"piper", "kokoro"}]
+            for row in rows:
+                label = (row.get("name") or "").casefold()
+                if "amy" in label:
+                    row["gender"] = "Female"
+                elif "lessac" in label or "ryan" in label:
+                    row["gender"] = "Male"
+                row["region"] = str(row.get("language") or "").replace("-", " ")
+            ready = bool(rows)
+            message_text = f"{len(rows)} installed offline voice(s) discovered." if ready else (
+                "No offline neural models are installed. Open Models to install an offline voice."
+            )
+
+        elif key == "sapi":
+            try:
+                import pyttsx3
+                engine = pyttsx3.init()
+                try:
+                    installed = engine.getProperty("voices") or []
+                    for voice in installed:
+                        voice_id = str(getattr(voice, "id", "") or "").strip()
+                        name = str(getattr(voice, "name", "") or voice_id).strip()
+                        languages = getattr(voice, "languages", []) or []
+                        locale = ""
+                        if languages:
+                            first = languages[0]
+                            locale = first.decode("utf-8", errors="ignore").strip("\x05 ") if isinstance(first, bytes) else str(first).strip()
+                        if voice_id:
+                            rows.append({
+                                "name": name or voice_id, "voice_id": voice_id, "provider": "windows-sapi",
+                                "language": locale, "locale": locale, "region": locale,
+                                "gender": str(getattr(voice, "gender", "") or "Unknown").title(),
+                                "description": "Installed Windows system voice",
+                                "saved": False,
+                            })
+                finally:
+                    try:
+                        engine.stop()
+                    except Exception:
+                        pass
+                ready = bool(rows)
+                message_text = f"{len(rows)} installed Windows SAPI voice(s) discovered." if ready else (
+                    "Windows did not report any installed SAPI voices on this PC."
+                )
+            except Exception as exc:
+                message_text = f"Windows SAPI catalogue could not be read: {exc}"
+
+        elif key in {"customvoice", "voicedesign", "qwenclone"}:
+            qwen_mode = {"customvoice": "custom", "voicedesign": "design", "qwenclone": "clone"}[key]
+            rows = [
+                profile_row(profile) for profile in profiles
+                if profile.provider == "qwen-character"
+                and str(getattr(profile, "qwen_mode", "custom") or "custom").casefold() == qwen_mode
+            ]
+            try:
+                from app.tts.qwen_character_runtime import runtime_ready
+                runtime_ok = bool(runtime_ready())
+            except Exception:
+                runtime_ok = False
+            if key == "customvoice":
+                ready = runtime_ok
+                message_text = (
+                    f"{len(rows)} CustomVoice option(s) available; model runtime ready."
+                    if runtime_ok else "Qwen CustomVoice runtime is not ready. Install/repair the matching Qwen model in Models."
+                )
+            elif key == "voicedesign":
+                ready = runtime_ok
+                message_text = (
+                    "Enter a voice description or choose a preset, then save it as a profile."
+                    if runtime_ok else "Qwen VoiceDesign runtime is not ready. Install/repair the matching Qwen model in Models."
+                )
+            else:
+                ready = runtime_ok
+                message_text = (
+                    "Choose a permitted reference recording and transcript, then save the clone profile."
+                    if runtime_ok else "Qwen Voice Clone runtime is not ready. Install/repair the matching Qwen model in Models."
+                )
+            source = "local"
+
+        elif key == "customref":
+            rows = [profile_row(profile) for profile in profiles if profile.provider == "chatterbox"]
+            ready = any(profile.sample_path for profile in saved_profiles if profile.provider == "chatterbox")
+            message_text = (
+                f"{len(rows)} saved reference-voice profile(s) found."
+                if ready else "Reference voice profiles are local. Import a recording and confirm permission before saving."
+            )
+
+        elif key == "edge":
+            from app.tts.providers.edge_tts import EdgeTTSProvider, VOICE_CACHE
+            had_cache = VOICE_CACHE.is_file()
+            try:
+                metadata = EdgeTTSProvider.fetch_voice_metadata(refresh=refresh)
+                rows = [{
+                    "name": str(item.get("friendly_name") or item.get("name") or ""),
+                    "voice_id": str(item.get("name") or ""),
+                    "provider": "edge-tts",
+                    "language": str(item.get("locale") or ""),
+                    "locale": str(item.get("locale") or ""),
+                    "region": str(item.get("locale") or "").split("-", 1)[-1],
+                    "gender": str(item.get("gender") or "Unknown").title(),
+                    "description": ", ".join(item.get("categories") or item.get("personalities") or []),
+                    "saved": False,
+                } for item in metadata if item.get("name")]
+                ready = bool(rows)
+                source = "live" if refresh or not had_cache else "cached"
+                message_text = (
+                    f"{len(rows)} Edge TTS voices loaded from the {source} catalogue."
+                    if ready else "Edge TTS catalogue unavailable. Check internet access, then refresh the catalogue."
+                )
+            except Exception as exc:
+                message_text = f"Edge TTS catalogue could not be loaded: {exc}"
+                source = "cached" if had_cache else "unavailable"
+
+        elif key == "eleven":
+            from app.tts.providers.elevenlabs import ElevenLabsProvider
+            api_key_set = bool(ElevenLabsProvider.load_api_key())
+            try:
+                metadata = ElevenLabsProvider.fetch_voice_metadata(refresh=refresh)
+                rows = [{
+                    "name": str(item.get("name") or item.get("voice_id") or ""),
+                    "voice_id": str(item.get("voice_id") or ""),
+                    "provider": "elevenlabs",
+                    "language": str(item.get("language") or ""),
+                    "locale": str(item.get("language") or ""),
+                    "region": str(item.get("accent") or ""),
+                    "gender": str(item.get("gender") or "Neutral").title(),
+                    "description": str(item.get("description") or item.get("use_case") or ""),
+                    "saved": False,
+                } for item in metadata if item.get("voice_id")]
+                ready = api_key_set and bool(rows)
+                source = "live" if api_key_set and (refresh or rows) else "cached"
+                message_text = (
+                    f"{len(rows)} ElevenLabs voice(s) loaded from your account."
+                    if ready else (
+                        "ElevenLabs API key is not configured. Choose Set API Key to connect your account."
+                        if not api_key_set else "ElevenLabs returned no voices. Check the account/API key and refresh."
+                    )
+                )
+            except Exception as exc:
+                message_text = f"ElevenLabs catalogue could not be loaded: {exc}"
+                source = "cached"
+
+        # Include profiles saved for this provider separately so the UI can show
+        # both installed/catalogue choices and saved profiles without conflating them.
+        profile_provider = {
+            "offline": {"piper", "kokoro"}, "sapi": {"windows-sapi"},
+            "customvoice": {"qwen-character"}, "voicedesign": {"qwen-character"},
+            "qwenclone": {"qwen-character"}, "customref": {"chatterbox"},
+            "edge": {"edge-tts"}, "eleven": {"elevenlabs"},
+        }[key]
+        for profile in saved_profiles:
+            if profile.provider not in profile_provider:
+                continue
+            if key.startswith("qwen") or key in {"customvoice", "voicedesign"}:
+                expected_mode = {"customvoice": "custom", "voicedesign": "design", "qwenclone": "clone"}.get(key)
+                if expected_mode and str(getattr(profile, "qwen_mode", "custom")).casefold() != expected_mode:
+                    continue
+            row = profile_row(profile)
+            row["saved"] = True
+            if not any(item.get("name", "").casefold() == row["name"].casefold() and item.get("voice_id") == row["voice_id"] for item in rows):
+                rows.append(row)
+
+        return {"provider": key, "ready": ready, "message": message_text, "source": source, "voices": rows, "count": len(rows)}
+
+    def _voice_credentials_set(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Save an ElevenLabs API key locally without echoing it into logs or UI responses."""
+        value = str(payload.get("api_key") or "").strip()
+        if not value:
+            raise ValueError("Enter a valid ElevenLabs API key.")
+        from app.tts.providers.elevenlabs import ElevenLabsProvider
+        ElevenLabsProvider.save_api_key(value)
+        return {"saved": True, "provider": "elevenlabs"}
+
     def _voice_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         # The UI needs to distinguish installed catalogue voices from saved,
         # reusable profiles. It must not infer "saved" from a provider or voice ID:
@@ -1523,6 +1734,13 @@ class PremiumV2Bridge(QObject):
                 "model_id": profile.model_id, "backend": profile.backend, "language": profile.language or "",
                 "sample_path": profile.sample_path, "authorized": bool(profile.authorized),
                 "qwen_mode": getattr(profile, "qwen_mode", "custom"),
+                "qwen_prompt": getattr(profile, "qwen_prompt", ""),
+                "qwen_seed": getattr(profile, "qwen_seed", None),
+                "reference_text": getattr(profile, "reference_text", ""),
+                "notes": getattr(profile, "notes", ""),
+                "exaggeration": getattr(profile, "exaggeration", 0.5),
+                "cfg_weight": getattr(profile, "cfg_weight", 0.35),
+                "style_preset": getattr(profile, "style_preset", "Natural"),
                 "saved": profile.name.strip().casefold() in saved_names,
             })
         return rows
