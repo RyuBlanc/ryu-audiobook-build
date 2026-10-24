@@ -2521,12 +2521,40 @@
     const ready = managed.filter(model => model.installed).length;
     const missing = managed.filter(model => !model.installed).length;
     if (heading) heading.textContent = ready + ' managed component(s) ready · ' + missing + ' need setup or attention';
-    // Retire prototype-only disk numbers and labels. Live free space is displayed
-    // in the status card above using the backend's actual models-root volume.
-    const storageLabel = [...root.querySelectorAll('*')].find(node => node.children.length === 0 && node.textContent.trim() === 'Models storage');
-    if (storageLabel) storageLabel.textContent = 'Drive free space';
-    const fakeFreeLabel = [...root.querySelectorAll('*')].find(node => node.children.length === 0 && /free in model folder/i.test(node.textContent));
-    if (fakeFreeLabel) fakeFreeLabel.textContent = rows.find(model => model.storage_root)?.storage_root || 'Storage path unavailable';
+    // Replace the HTML prototype's fixed storage number with a total derived
+    // from live per-component file sizes. Its old capacity bar had no measured
+    // denominator, so hide it instead of presenting a fake percentage.
+    const managedStorageBytes = rows.reduce((sum, model) =>
+      sum + Math.max(0, Number(model.storage_bytes || 0)), 0);
+    const liveFreeBytes = rows.find(model => model.disk_free_bytes != null)?.disk_free_bytes;
+    const storageLabel = [...root.querySelectorAll('*')].find(node =>
+      node.children.length === 0 && node.textContent.trim() === 'Models storage');
+    const oldFreeLabel = [...root.querySelectorAll('*')].find(node =>
+      node.children.length === 0 && /free in model folder/i.test(node.textContent));
+    if (storageLabel) storageLabel.textContent = 'Managed model files';
+    if (storageLabel && oldFreeLabel) {
+      // Find the smallest storage widget containing both the old metric and its
+      // footer so unrelated dashboard metrics are never changed.
+      let storageWidget = storageLabel;
+      while (storageWidget && storageWidget !== root && !storageWidget.contains(oldFreeLabel)) {
+        storageWidget = storageWidget.parentElement;
+      }
+      if (storageWidget && storageWidget !== root) {
+        const oldSize = [...storageWidget.querySelectorAll('*')].find(node =>
+          node.children.length === 0 && /^\\d+(?:\\.\\d+)?\\s*(?:B|KB|MB|GB|TB)$/i.test(node.textContent.trim()));
+        if (oldSize) oldSize.textContent = formatModelBytes(managedStorageBytes);
+        oldFreeLabel.textContent = liveFreeBytes == null
+          ? 'Drive free space unavailable'
+          : formatModelBytes(liveFreeBytes) + ' free on drive at model location';
+        const capacityBars = [...storageWidget.querySelectorAll('*')].filter(node =>
+          node.style && node.style.width && /%/.test(node.style.width));
+        for (const fill of capacityBars) {
+          const track = fill.closest('.progress,.progress-bar,.meter,.storage-progress') || fill.parentElement;
+          if (track && track !== storageWidget) track.hidden = true;
+          else fill.hidden = true;
+        }
+      }
+    }
     renderModelInventory();
     return rows;
   }
