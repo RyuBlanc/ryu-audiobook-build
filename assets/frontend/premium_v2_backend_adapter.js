@@ -2460,6 +2460,41 @@
     const root = $('models');
     const grid = $('modelGrid');
     if (!root || !grid) return rows;
+
+    // The old static screen said "Check updates" but had no update endpoint.
+    // Make its replacement truthful and useful: refresh the live inventory,
+    // provider-backed saved profile list, and the installed/readiness statuses.
+    let refreshButton = $('modelStatusRefresh');
+    if (!refreshButton) {
+      refreshButton = [...root.querySelectorAll('button')].find(button =>
+        /^check updates$/i.test(String(button.textContent || '').trim())
+      ) || null;
+    }
+    if (refreshButton) {
+      refreshButton.id = 'modelStatusRefresh';
+      refreshButton.textContent = 'Refresh status';
+      refreshButton.title = 'Re-read local model files, runtime markers, provider prerequisites and drive space.';
+      if (refreshButton.dataset.ryuRefreshBound !== 'true') {
+        refreshButton.dataset.ryuRefreshBound = 'true';
+        refreshButton.addEventListener('click', async event => {
+          event.preventDefault();
+          event.stopPropagation();
+          const previousText = refreshButton.textContent;
+          refreshButton.disabled = true;
+          refreshButton.textContent = 'Refreshing…';
+          try {
+            await refreshModels();
+            await refreshVoices();
+            message('Model status refreshed from the local installation and saved voice catalogue.');
+          } catch (error) {
+            message(error?.message || String(error), true);
+          } finally {
+            refreshButton.disabled = false;
+            refreshButton.textContent = 'Refresh status';
+          }
+        });
+      }
+    }
     let toolbar = $('modelInventoryToolbar');
     if (!toolbar) {
       toolbar = document.createElement('div');
