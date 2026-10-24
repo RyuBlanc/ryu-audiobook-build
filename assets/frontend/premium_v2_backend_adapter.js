@@ -1803,7 +1803,9 @@
     const modeGroup = [...document.querySelectorAll('#voices .seg')].find(el => [...el.querySelectorAll('button')].some(b => /Current Chapter|Selected Passage|Custom Text/.test(b.textContent)));
     const mode = modeGroup?.querySelector('button.active')?.textContent.trim() || 'Current Chapter';
     const previewBox = [...document.querySelectorAll('#voices textarea')].find(el => /Preview text/.test(el.closest('label')?.textContent || ''));
-    let previewText = c?.text || '';
+    // The editable preview box is the source of truth for what the user is auditioning.
+    // It is hydrated from the selected chapter, but deliberate edits must not be ignored.
+    let previewText = previewBox?.value || c?.text || '';
     if (/Custom Text/i.test(mode)) previewText = previewBox?.value || '';
     if (/Selected Passage/i.test(mode)) {
       const editor = $('chapterEditor');
