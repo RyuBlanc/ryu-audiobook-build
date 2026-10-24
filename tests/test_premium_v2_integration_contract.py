@@ -852,5 +852,39 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("applyUnavailableControlStates();", adapter[adapter.index("async function wire()"):])
 
 
+    def test_voice_library_uses_live_catalogues_saved_profiles_and_real_preview_selection(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        for command in (
+            "voice.catalog", "voice.credentials.set",
+            "voice.elevenlabs.design", "voice.elevenlabs.create",
+        ):
+            self.assertIn(f'"{command}": self._', host)
+            self.assertIn(f'"{command}": True', host)
+            self.assertIn("call('" + command + "'", adapter)
+        self.assertIn("def _preview_profile_from_payload", host)
+        self.assertIn("def _voice_catalog", host)
+        self.assertIn("EdgeTTSProvider.fetch_voice_metadata(refresh=refresh)", host)
+        self.assertIn("ElevenLabsProvider.fetch_voice_metadata(refresh=refresh)", host)
+        self.assertIn("pyttsx3.init()", host)
+        self.assertIn("saved: profile.name.strip().casefold() in saved_names", host)
+        self.assertIn("voices.filter(v => v.saved === true)", adapter)
+        self.assertIn("async function refreshProviderCatalog", adapter)
+        self.assertIn("function applySavedVoiceProfile", adapter)
+        self.assertIn("requestVoiceProfileSaveName", adapter)
+        self.assertIn("payload.voice_id = voiceId", adapter)
+        self.assertIn("let previewText = previewBox?.value || c?.text || ''", adapter)
+        self.assertIn("call('voice.preview', payload)", adapter)
+        self.assertIn("call('voice.elevenlabs.design'", adapter)
+        self.assertIn("call('voice.elevenlabs.create'", adapter)
+        self.assertNotIn(
+            "Credential management is not connected to a secure provider-specific credential store",
+            adapter,
+        )
+        self.assertNotIn(
+            "Premium cloud candidate generation is not connected to a provider endpoint",
+            adapter,
+        )
+
 if __name__ == "__main__":
     unittest.main()
