@@ -1867,13 +1867,17 @@ class PremiumV2Bridge(QObject):
         from app.tts.voice_profile import VoiceProfile
 
         profile_name = str(payload.get("profile_name") or "").strip()
-        existing = self._find_profile(profile_name or state.get("voice_profile"))
-        if existing is not None:
-            return existing
-
         provider = str(payload.get("provider") or "").strip().casefold()
         voice_id = str(payload.get("voice_id") or "").strip()
         allowed = {"piper", "kokoro", "windows-sapi", "qwen-character", "chatterbox", "edge-tts", "elevenlabs"}
+
+        # When the frontend explicitly sends the selected catalogue voice, use
+        # that provider/voice ID rather than an unrelated name in the profile box.
+        # This is what makes preview match the currently selected voice card.
+        if provider not in allowed or not voice_id:
+            existing = self._find_profile(profile_name or state.get("voice_profile"))
+            if existing is not None:
+                return existing
         if provider not in allowed or not voice_id:
             return None
 
