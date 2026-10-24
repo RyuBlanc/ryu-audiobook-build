@@ -18,7 +18,7 @@
   let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, activeJob = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
-  let providerCatalogs = Object.create(null);
+  let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0;
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
   const resumeCheckpointKey = 'ryu.project.resume-checkpoints.v1';
   const resumeStages = new Set(['import','chapters','narrator','characters','sound','production','player']);
@@ -822,7 +822,12 @@
     }
   }
   async function refreshProviderCatalog(providerKey, refresh = false) {
+    // Several lifecycle screens can refresh catalogues at the same time. Only
+    // the newest request for a provider may publish rows into that provider card.
+    const requestToken = (providerCatalogEpochs[providerKey] || 0) + 1;
+    providerCatalogEpochs[providerKey] = requestToken;
     const result = await call('voice.catalog', {provider:providerKey,refresh:Boolean(refresh)});
+    if (providerCatalogEpochs[providerKey] !== requestToken) return providerCatalogs[providerKey] || result;
     providerCatalogs[providerKey] = result;
     renderProviderCatalog(providerKey, result);
     return result;
@@ -870,7 +875,10 @@
   }
 
   async function refreshVoices() {
-    voices = await call('voice.list');
+    const requestToken = ++voiceListEpoch;
+    const loadedVoices = await call('voice.list');
+    if (requestToken !== voiceListEpoch) return voices;
+    voices = Array.isArray(loadedVoices) ? loadedVoices : [];
     const rows = voices.map(v => ({...v, label: v.name + ' · ' + v.provider}));
     renderSelect($('editCharacterVoice'), [{name:'',label:'Unassigned'}, ...rows], 'name', v => v.label || 'Unassigned');
     if ($('characterEditorModal')?.classList.contains('show') && $('editCharacterVoice')) $('editCharacterVoice').disabled = true;
@@ -1487,7 +1495,11 @@
                   : (job.message || ((job.title || 'Job') + ' ' + job.state)));
             message(completionMessage, job.state !== 'completed');
           }
-          if (job.state === 'completed' && monitorToken === monitorEpoch) {
+          // Model operations, voice previews and sound previews do not mutate
+          // book chapters/cast. Avoid rebuilding those panels after unrelated jobs:
+          // doing so reset scroll positions and competed with chapter autosave.
+          if (job.state === 'completed' && monitorToken === monitorEpoch &&
+              ['import','character-analysis','audiobook-generation'].includes(job.type)) {
             await refreshChapters().catch(()=>{});
             await refreshCharacters().catch(()=>{});
           }
@@ -2553,8 +2565,11 @@
     }
   }
   async function refreshModels() {
-    const rows = await call('models.list');
-    window.ryuModelInventoryRows = Array.isArray(rows) ? rows : [];
+    const requestToken = ++modelListEpoch;
+    const loadedRows = await call('models.list');
+    if (requestToken !== modelListEpoch) return window.ryuModelInventoryRows || [];
+    const rows = Array.isArray(loadedRows) ? loadedRows : [];
+    window.ryuModelInventoryRows = rows;
     const root = $('models');
     const grid = $('modelGrid');
     if (!root || !grid) return rows;
