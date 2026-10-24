@@ -1560,9 +1560,12 @@ class PremiumV2Bridge(QObject):
         if key not in known:
             raise ValueError(f"Unknown voice library: {key or '(empty)'}")
 
+        profiles = load_profiles()
+        # Loading the combined catalogue may safely disambiguate older custom
+        # names that collide with installed voices; read saved names after that
+        # migration so row badges match the profile names available to Load.
         saved_profiles = load_saved_profiles()
         saved_names = {profile.name.strip().casefold() for profile in saved_profiles}
-        profiles = load_profiles()
 
         def profile_row(profile):
             return {
@@ -1819,9 +1822,10 @@ class PremiumV2Bridge(QObject):
         # a saved alias may legitimately point at the same installed Amy/David voice.
         from app.tts.voice_profile import load_saved_profiles
 
+        profiles = load_profiles()
         saved_names = {p.name.strip().casefold() for p in load_saved_profiles()}
         rows = []
-        for profile in load_profiles():
+        for profile in profiles:
             rows.append({
                 "name": profile.name, "provider": profile.provider, "voice_id": profile.voice_id,
                 "model_id": profile.model_id, "backend": profile.backend, "language": profile.language or "",
@@ -1948,7 +1952,7 @@ class PremiumV2Bridge(QObject):
     def _voice_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
         state = load_state(project.folder)
-        profile = self._preview_profile_from_payload(payload, state)
+        profile = PremiumV2Bridge._preview_profile_from_payload(self, payload, state)
         if profile is None:
             raise ValueError("Choose an installed voice or load a saved voice profile before previewing.")
         text_value = str(payload.get("text") or "")
