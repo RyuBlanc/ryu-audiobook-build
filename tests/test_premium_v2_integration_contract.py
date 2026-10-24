@@ -901,6 +901,67 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertNotIn("activeJob = jobId", dialog_body)
         self.assertNotIn("const tick = async () =>", dialog_body)
 
+    def test_project_and_audiobook_shelves_reuse_dom_when_records_are_unchanged(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        start = adapter.index("async function refreshProjects()")
+        end = adapter.index("const voiceLibraryTitles =", start)
+        project_refresh = adapter[start:end]
+        self.assertIn("const requestToken = ++projectListEpoch;", project_refresh)
+        self.assertIn("if (requestToken !== projectListEpoch) return projects;", project_refresh)
+        self.assertIn("grid.dataset.projectRenderSignature !== librarySignature", project_refresh)
+        self.assertIn("recent.dataset.projectRenderSignature !== recentSignature", project_refresh)
+        shelf_start = adapter.index("function renderAudiobookLibrary(")
+        shelf_end = adapter.index("function dashboardGenerationCard(", shelf_start)
+        shelf = adapter[shelf_start:shelf_end]
+        self.assertIn("container.dataset.audiobookLibrarySignature === signature", shelf)
+
+    def test_library_and_sound_search_use_debounced_single_refresh_handlers(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("function scheduleLibrarySearchRefresh()", adapter)
+        self.assertIn("function scheduleSoundSearchRefresh()", adapter)
+        self.assertIn("}, 160);", adapter)
+        self.assertNotIn("if ($('librarySearch')) $('librarySearch').oninput", adapter)
+        self.assertNotIn("if ($('soundTrackSearch')) $('soundTrackSearch').oninput", adapter)
+        start = adapter.index("document.addEventListener('input', e => {")
+        end = adapter.index("}, true);", start)
+        input_router = adapter[start:end]
+        self.assertIn("scheduleLibrarySearchRefresh();", input_router)
+        self.assertIn("scheduleSoundSearchRefresh();", input_router)
+
+    def test_history_and_sound_refreshes_ignore_stale_results_and_reuse_unchanged_dom(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        history_start = adapter.index("async function refreshHistory()")
+        history_end = adapter.index("async function refreshPerformance()", history_start)
+        history = adapter[history_start:history_end]
+        self.assertIn("const requestToken = ++historyListEpoch;", history)
+        self.assertIn("if (requestToken !== historyListEpoch) return [];", history)
+        self.assertIn("section.dataset.historyRenderSignature === signature", history)
+        self.assertIn("querySelectorAll('[data-backend-history]')", history)
+        sound_start = adapter.index("async function refreshSounds()")
+        sound_end = adapter.index("async function refreshSoundCues()", sound_start)
+        sound = adapter[sound_start:sound_end]
+        self.assertIn("const requestToken = ++soundListEpoch;", sound)
+        self.assertIn("if (requestToken !== soundListEpoch) return sounds;", sound)
+        self.assertIn("grid.dataset.soundListSignature !== signature", sound)
+
+    def test_character_refresh_does_not_replace_cast_dom_for_identical_records(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        start = adapter.index("async function refreshCharacters()")
+        end = adapter.index("const librarySeriesName =", start)
+        block = adapter[start:end]
+        self.assertIn("const requestToken = ++characterListEpoch;", block)
+        self.assertIn("if (requestToken !== characterListEpoch) return characters;", block)
+        self.assertIn("list.dataset.characterListSignature !== signature", block)
+        self.assertIn("if ($('charFoundMetric'))", block)
+
     def test_monitor_job_serializes_ticks_ignores_stale_responses_and_clears_active_job(self):
         """A slow job-list response must not finish a job twice or mutate a newer task's UI."""
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
