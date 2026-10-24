@@ -3229,130 +3229,615 @@ class PremiumV2Bridge(QObject):
         self.settings.sync()
         return self._settings_get({})
 
-    def _models_install(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Install selected Qwen Voice Studio models as a durable background job."""
-        selection_map = {
-            "customvoice": "CustomVoice",
-            "voicedesign": "VoiceDesign",
-            "voiceclone": "Voice Clone",
-            "all": "Full Qwen Voice Studio",
+    def _models_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return the live, provider-aware local model and runtime inventory."""
+        from app.core.paths import models_root
+        from app.tts.model_registry import mark_installed
+        from app.tts.providers.piper import PiperProvider
+        from app.tts.providers.kokoro import KokoroProvider
+        from app.tts.chatterbox_runtime import RUNTIME_DIR as CHATTERBOX_ROOT, runtime_ready as chatterbox_ready
+        from app.tts.qwen_character_runtime import (
+            MODEL_IDS, MODEL_DIRS, model_installed as qwen_model_installed,
+            runtime_ready as qwen_runtime_ready, RUNTIME_ROOT as QWEN_ROOT,
+        )
+        from app.ai.model_runtime import installed as audiobook_ai_ready, recommended_model
+        root = models_root()
+        root.mkdir(parents=True, exist_ok=True)
+        try:
+            disk_free = int(shutil.disk_usage(root).free)
+        except OSError:
+            disk_free = None
+
+        def byte_size(path: Path, direct_only: bool = False) -> int:
+            try:
+                if path.is_file():
+                    return int(path.stat().st_size)
+                if not path.is_dir():
+                    return 0
+                total = 0
+                iterator = path.iterdir() if direct_only else path.rglob("*")
+                for candidate in iterator:
+                    try:
+                        if candidate.is_file():
+                            total += candidate.stat().st_size
+                    except OSError:
+                        continue
+                return total
+            except OSError:
+                return 0
+
+        def row(model_id: str, name: str, provider: str, installed: bool, notes: str, **extra):
+            return {
+                "model_id": model_id,
+                "name": name,
+                "provider": provider,
+                "installed": bool(installed),
+                "status": str(extra.pop("status", "Installed" if installed else "Not installed")),
+                "notes": notes,
+                "disk_free_bytes": disk_free,
+                "storage_root": str(root),
+                **extra,
+            }
+
+        result: list[dict[str, Any]] = []
+        try:
+            piper_paths = list(PiperProvider.model_paths())
+        except Exception:
+            piper_paths = []
+        piper_root = (root / "piper").resolve()
+        piper_local = []
+        for voice_path in piper_paths:
+            try:
+                if piper_root in voice_path.resolve().parents and voice_path.suffix.casefold() == ".onnx":
+                    piper_local.append(voice_path.resolve())
+            except OSError:
+                continue
+        piper_installed = bool(piper_paths)
+        result.append(row(
+            "piper", "Piper Offline Neural Voices", "piper", piper_installed,
+            "Install individual Piper voice models for offline narration. Installed voice files are listed here; bundled voices are managed by the application installer.",
+            status=(f"{len(piper_paths)} voice model(s) available" if piper_installed else "No voice models installed"),
+            installable=True, repairable=bool(piper_local), uninstallable=bool(piper_local),
+            removable_voice_count=len(piper_local), storage_bytes=sum(byte_size(v) + byte_size(v.with_suffix(v.suffix + ".json")) for v in piper_local),
+            requirements="Local model files; no internet required after download.",
+        ))
+
+        kokoro_root = root / "kokoro"
+        kokoro_local = kokoro_root.is_dir() and any(p.is_file() for p in kokoro_root.rglob("*"))
+        try:
+            kokoro_installed = bool(KokoroProvider.assets_available())
+            kokoro_voice_count = len(KokoroProvider().voices()) if kokoro_installed else 0
+        except Exception:
+            kokoro_installed, kokoro_voice_count = False, 0
+        result.append(row(
+            "kokoro", "Kokoro 82M Natural Narration", "kokoro", kokoro_installed,
+            "Offline natural narration. Requires both the ONNX model and voice pack. Bundled assets cannot be removed separately.",
+            status=("Installed locally" if kokoro_local and kokoro_installed else "Bundled with application" if kokoro_installed else "Model or voice pack missing"),
+            installable=not kokoro_installed, repairable=bool(kokoro_local or (kokoro_root.exists() and not kokoro_installed)),
+            uninstallable=bool(kokoro_local), storage_bytes=byte_size(kokoro_root),
+            voice_count=kokoro_voice_count, requirements="About 354 MB download; internet needed only for install/repair.",
+            managed_path=str(kokoro_root), bundled=bool(kokoro_installed and not kokoro_local),
+        ))
+
+        try:
+            chat_installed = bool(chatterbox_ready())
+        except Exception:
+            chat_installed = False
+        chat_present = CHATTERBOX_ROOT.exists()
+        result.append(row(
+            "chatterbox", "Chatterbox English Voice Cloning", "chatterbox", chat_installed,
+            "Installs the isolated cloning runtime. The English model weights are fetched by the provider on first use and are cached locally.",
+            status=("Runtime ready · weights download on first use" if chat_installed else "Runtime incomplete" if chat_present else "Not installed"),
+            installable=not chat_installed, repairable=chat_present or chat_installed,
+            uninstallable=chat_present, shared_runtime="chatterbox-runtime",
+            requirements="Python 3.11 isolated runtime; internet and several GB of disk space for setup/model cache.",
+            storage_bytes=byte_size(CHATTERBOX_ROOT),
+        ))
+        result.append(row(
+            "chatterbox-multilingual", "Chatterbox Multilingual Voice Cloning", "chatterbox", chat_installed,
+            "Shares the Chatterbox runtime. Multilingual synthesis uses the multilingual model weights, which the provider fetches and caches on first use.",
+            status=("Runtime ready · weights download on first use" if chat_installed else "Runtime incomplete" if chat_present else "Not installed"),
+            installable=not chat_installed, repairable=chat_present or chat_installed,
+            uninstallable=chat_present, shared_runtime="chatterbox-runtime",
+            requirements="Python 3.11 isolated runtime; internet and several GB of disk space for setup/model cache.",
+            storage_bytes=byte_size(CHATTERBOX_ROOT),
+        ))
+
+        try:
+            qwen_ready = bool(qwen_runtime_ready())
+        except Exception:
+            qwen_ready = False
+        result.append(row(
+            "qwen-runtime", "Qwen3-TTS Runtime", "qwen", qwen_ready,
+            "Isolated Python, PyTorch, torchaudio and Qwen TTS runtime shared by CustomVoice, VoiceDesign and Voice Clone models.",
+            status="Runtime ready" if qwen_ready else "Runtime needs installation or repair",
+            installable=not qwen_ready, repairable=QWEN_ROOT.exists() or qwen_ready,
+            uninstallable=QWEN_ROOT.exists(), requirements="Large offline runtime; model weights are managed separately.",
+            storage_bytes=0, managed_path=str(QWEN_ROOT),
+        ))
+        qwen_names = {
+            "custom-0.6b": ("Qwen CustomVoice 0.6B", "qwen-customvoice"),
+            "custom-1.7b": ("Qwen CustomVoice 1.7B", "qwen-customvoice"),
+            "design-1.7b": ("Qwen VoiceDesign 1.7B", "qwen-voicedesign"),
+            "base-0.6b": ("Qwen Voice Clone Base 0.6B", "qwen-clone"),
+            "base-1.7b": ("Qwen Voice Clone Base 1.7B", "qwen-clone"),
         }
-        requested = str(payload.get("selection") or "customvoice").strip().lower()
-        selection = selection_map.get(requested)
-        if selection is None:
-            raise ValueError("Choose CustomVoice, VoiceDesign, Voice Clone, or all Qwen capabilities.")
+        for kind, repo_id in MODEL_IDS.items():
+            try:
+                installed = bool(qwen_model_installed(kind))
+            except Exception:
+                installed = False
+            result.append(row(
+                kind, qwen_names.get(kind, (repo_id, ""))[0], "qwen", installed,
+                f"Local Qwen3-TTS weights from {repo_id}. The matching Qwen3-TTS runtime is also required.",
+                status="Installed and file-verified" if installed else "Not installed or incomplete",
+                installable=True, repairable=True, uninstallable=MODEL_DIRS[kind].exists(),
+                feature=qwen_names.get(kind, ("", "qwen"))[1], requirements="Model download can be several GB; requires internet for install/repair.",
+                storage_bytes=byte_size(MODEL_DIRS[kind]), managed_path=str(MODEL_DIRS[kind]),
+            ))
 
+        try:
+            ai_installed = bool(audiobook_ai_ready())
+            ai_model_id, ai_filename, ai_size = recommended_model()
+        except Exception:
+            ai_installed, ai_model_id, ai_filename, ai_size = False, "unknown", "AI model", 0
+        ai_root = root / "audiobook-ai"
+        ai_present = ai_root.exists()
+        result.append(row(
+            "audiobook-ai", "Audiobook AI · Local Book Analysis", "audiobook-ai", ai_installed,
+            "Local analysis engine used by book/character analysis. Installer selects a model for detected hardware and runs a real inference self-test.",
+            status=("Installed · model files present" if ai_installed else "Runtime/model needs setup" if ai_present else "Not installed"),
+            installable=not ai_installed, repairable=ai_present or ai_installed, uninstallable=ai_present,
+            model_name=ai_model_id, model_filename=ai_filename, download_bytes=int(ai_size),
+            requirements=f"Recommended local model download: about {ai_size / (1024 ** 3):.1f} GB.",
+            storage_bytes=byte_size(ai_root), managed_path=str(ai_root),
+        ))
+
+        try:
+            import pyttsx3
+            sapi_engine = pyttsx3.init()
+            try:
+                sapi_voices = sapi_engine.getProperty("voices") or []
+                sapi_count = len(sapi_voices)
+            finally:
+                try:
+                    sapi_engine.stop()
+                except Exception:
+                    pass
+        except Exception:
+            sapi_count = 0
+        result.append(row(
+            "windows-sapi", "Windows SAPI System Voices", "windows-sapi", sapi_count > 0,
+            "Uses voices installed in Windows. These are managed by Windows settings, not downloaded or removed by Ryu's Audiobook.",
+            status=f"{sapi_count} Windows voice(s) detected" if sapi_count else "No Windows SAPI voices detected",
+            installable=False, repairable=False, uninstallable=False, voice_count=sapi_count,
+            requirements="Windows system component; not a separately managed model.",
+        ))
+
+        try:
+            from app.tts.providers.edge_tts import EdgeTTSProvider
+            edge_ready = bool(EdgeTTSProvider.available())
+        except Exception:
+            edge_ready = False
+        result.append(row(
+            "edge-tts", "Microsoft Edge TTS · Online Voices", "edge-tts", edge_ready,
+            "Online neural voice service, not a local model download. Voice catalogue and synthesis require network access.",
+            status="Client package available · internet required" if edge_ready else "Edge TTS package unavailable",
+            installable=False, repairable=False, uninstallable=False, requirements="Internet connection; not an offline model.",
+        ))
+
+        try:
+            from app.tts.providers.elevenlabs import ElevenLabsProvider
+            eleven_key = bool(ElevenLabsProvider.load_api_key())
+        except Exception:
+            eleven_key = False
+        result.append(row(
+            "elevenlabs", "ElevenLabs · Premium Online Voices", "elevenlabs", eleven_key,
+            "Online provider access is configured when a local API key is present. Voice management and API credentials remain in Voice Studio.",
+            status="API key configured" if eleven_key else "API key required",
+            installable=False, repairable=False, uninstallable=False, credentials_configured=eleven_key,
+            requirements="Internet and your own ElevenLabs API key; no local model to install.",
+        ))
+        return result
+
+    def _models_start_operation(self, action: str, model_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Run potentially large model lifecycle work as a durable, cancellable-visible background job."""
+        details = dict(payload or {})
+        label = str(details.get("voice_name") or model_id)
+        verb = {"install": "Install", "repair": "Repair", "uninstall": "Uninstall"}.get(action, action.title())
         job_id = self._new_job(
-            "model-install", "Install " + selection,
-            "Install Qwen3-TTS runtime and selected local voice model(s)",
+            "model-" + action, f"{verb} {label}",
+            f"{verb} app-managed model/runtime component {model_id}",
         )
-        self._job_update(
-            job_id, state="running", started_at=self._now(), progress=1,
-            stage="Preparing installation",
-            message="Installing local Qwen3-TTS components. This may take a while.",
-        )
-
+        self._job_update(job_id, state="running", started_at=self._now(), progress=1,
+                         stage=f"Preparing to {action} {label}", message=f"{verb} started.")
         def report_progress(detail: str) -> None:
-            detail = str(detail)
-            match = re.search(r"(?<!\d)(\d{1,3})%", detail)
-            changes: dict[str, Any] = {"state": "running", "stage": detail, "message": detail}
+            value = str(detail or f"{verb} in progress")
+            match = re.search(r"(?<!\d)(\d{1,3})%", value)
+            changes: dict[str, Any] = {"state": "running", "stage": value, "message": value}
             if match:
                 changes["progress"] = min(98, max(1, int(match.group(1))))
             self._job_update(job_id, **changes)
-
-        def install() -> None:
+        def worker() -> None:
             try:
-                from app.tts.qwen_character_runtime import (
-                    install_runtime, install_model,
-                    best_custom_kind, best_clone_kind, best_voice_design_kind,
-                )
-                report_progress("Installing isolated Qwen3-TTS runtime…")
-                install_runtime(report_progress)
-                choices = {
-                    "CustomVoice": [best_custom_kind()],
-                    "VoiceDesign": [best_voice_design_kind(), best_clone_kind()],
-                    "Voice Clone": [best_clone_kind()],
-                }
-                if selection == "Full Qwen Voice Studio":
-                    targets = []
-                    for kind in (best_custom_kind(), best_voice_design_kind(), best_clone_kind()):
-                        if kind not in targets:
-                            targets.append(kind)
+                if action == "uninstall":
+                    outcome = self._models_uninstall_component(model_id, details, report_progress)
                 else:
-                    targets = choices[selection]
-                for kind in targets:
-                    report_progress(f"Preparing Qwen3-TTS {selection} model: {kind}…")
-                    install_model(kind, report_progress)
-                self._job_update(
-                    job_id, state="completed", progress=100,
-                    stage="Installation complete",
-                    message="Qwen Voice Studio installation completed.",
-                    result={"selection": selection, "models": targets},
-                    error=None, recoverable=False,
-                )
+                    outcome = self._models_install_component(model_id, details, report_progress, force_repair=action == "repair")
+                report_progress("Refreshing actual installed state…")
+                latest = self._models_list({})
+                self._job_update(job_id, state="completed", progress=100,
+                                 stage=f"{verb} complete", message=str(outcome or f"{verb} completed."),
+                                 result={"action": action, "model_id": model_id, "detail": str(outcome or ""),
+                                         "models": latest}, error=None, recoverable=False)
             except Exception as exc:
-                log.exception("Premium V2 Qwen model installation failed")
-                self._job_update(
-                    job_id, state="failed", stage="Installation failed",
-                    message="Qwen Voice Studio installation failed.",
-                    error={"code": "model_install_failed", "message": str(exc)},
-                    recoverable=True,
-                )
+                log.exception("Premium V2 model %s failed for %s", action, model_id)
+                self._job_update(job_id, state="failed", stage=f"{verb} failed",
+                                 message=f"{verb} failed for {label}.",
+                                 error={"code": "model_" + action + "_failed", "message": str(exc)},
+                                 recoverable=True)
+        threading.Thread(target=worker, daemon=True, name="RyuPremiumModelLifecycle").start()
+        return {"job_id": job_id, "model_id": model_id, "action": action, "state": "running"}
 
-        threading.Thread(
-            target=install, daemon=True, name="RyuPremiumModelInstall"
-        ).start()
-        return {"job_id": job_id, "selection": selection, "state": "running"}
+    def _models_install(self, payload: dict[str, Any]) -> dict[str, Any]:
+        selection = str(payload.get("selection") or "").strip().casefold()
+        model_id = str(payload.get("model_id") or "").strip().casefold()
+        if not model_id:
+            legacy = {
+                "customvoice": "qwen-customvoice",
+                "voicedesign": "qwen-voicedesign",
+                "voiceclone": "qwen-clone",
+                "all": "qwen-all",
+            }
+            model_id = legacy.get(selection, "")
+        allowed = {"piper", "kokoro", "chatterbox", "chatterbox-multilingual", "chatterbox-runtime",
+                   "qwen-runtime", "qwen-customvoice", "qwen-voicedesign", "qwen-clone", "qwen-all",
+                   "custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b", "audiobook-ai"}
+        if model_id not in allowed:
+            raise ValueError("Choose a supported local model/runtime. Windows SAPI, Edge TTS and ElevenLabs are system/online providers, not locally installed models.")
+        return self._models_start_operation("install", model_id, payload)
 
-    def _models_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        from app.tts.model_registry import BUILTIN_CATALOG, installed_models
-        installed = {m.model_id for m in installed_models()}
-        return [{"model_id": m.model_id, "name": m.display_name, "provider": m.provider,
-                 "voice_cloning": m.voice_cloning, "multilingual": m.multilingual,
-                 "installed": m.model_id in installed, "preferred_backends": list(m.preferred_backends),
-                 "notes": m.notes} for m in BUILTIN_CATALOG]
+    def _models_repair(self, payload: dict[str, Any]) -> dict[str, Any]:
+        model_id = str(payload.get("model_id") or "").strip().casefold()
+        allowed = {"piper", "kokoro", "chatterbox", "chatterbox-multilingual", "chatterbox-runtime",
+                   "qwen-runtime", "qwen-customvoice", "qwen-voicedesign", "qwen-clone",
+                   "custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b", "audiobook-ai"}
+        if model_id not in allowed:
+            raise ValueError("Choose a supported app-managed model/runtime to repair.")
+        return self._models_start_operation("repair", model_id, payload)
+
+    def _models_uninstall(self, payload: dict[str, Any]) -> dict[str, Any]:
+        model_id = str(payload.get("model_id") or "").strip().casefold()
+        allowed = {"piper", "kokoro", "chatterbox", "chatterbox-multilingual", "chatterbox-runtime",
+                   "qwen-runtime", "qwen-model", "audiobook-ai"}
+        if model_id not in allowed:
+            raise ValueError("Choose a supported app-managed model/runtime to uninstall.")
+        return self._models_start_operation("uninstall", model_id, payload)
+
+    @staticmethod
+    def _models_remove_path(target: Path, allowed_root: Path) -> None:
+        root = Path(allowed_root).resolve()
+        candidate = Path(target).resolve()
+        if candidate == root or root not in candidate.parents:
+            raise RuntimeError(f"Refusing to remove a path outside the selected component root: {target}")
+        if candidate.is_dir():
+            shutil.rmtree(candidate)
+        elif candidate.exists():
+            candidate.unlink()
+
+    def _models_install_component(self, model_id: str, payload: dict[str, Any], progress, force_repair: bool = False) -> str:
+        from app.core.paths import models_root
+        from app.tts.model_registry import mark_installed
+        root = models_root()
+        model_id = model_id.casefold()
+
+        def report(text: str) -> None:
+            if progress:
+                progress(text)
+
+        if model_id == "piper":
+            from app.tts.providers.piper import PiperProvider
+            voice_name = str(payload.get("voice_name") or "en_US-lessac-medium").strip()
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,119}", voice_name):
+                raise ValueError("Use a valid Piper voice ID such as en_US-lessac-medium.")
+            target_root = root / "piper"
+            target_root.mkdir(parents=True, exist_ok=True)
+            existing = next((item for item in PiperProvider.model_paths() if item.stem.casefold() == voice_name.casefold()), None)
+            if existing and not force_repair:
+                return f"Piper voice {voice_name} is already present."
+            backups: list[tuple[Path, Path]] = []
+            backup_root = target_root / (".repair-" + uuid.uuid4().hex)
+            if force_repair and existing:
+                backup_root.mkdir(parents=True, exist_ok=True)
+                for path in (existing, existing.with_suffix(existing.suffix + ".json")):
+                    if path.exists():
+                        backup = backup_root / path.name
+                        shutil.move(str(path), str(backup))
+                        backups.append((backup, path))
+            report(f"Downloading Piper voice {voice_name}.")
+            command = [sys.executable, "-m", "piper.download_voices", voice_name, "--data-dir", str(target_root)]
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=1800)
+            if completed.returncode != 0:
+                for backup, original in reversed(backups):
+                    if backup.exists():
+                        original.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(backup), str(original))
+                detail = (completed.stderr or completed.stdout or "").strip()
+                raise RuntimeError(detail or "Piper voice download failed.")
+            installed = next((item for item in PiperProvider.model_paths() if item.stem.casefold() == voice_name.casefold()), None)
+            if installed is None or not installed.is_file() or installed.stat().st_size < 1024:
+                for backup, original in reversed(backups):
+                    if backup.exists():
+                        original.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(backup), str(original))
+                raise RuntimeError("Piper download completed but the requested voice files were not found.")
+            shutil.rmtree(backup_root, ignore_errors=True)
+            mark_installed("piper", True)
+            return f"Piper voice {voice_name} is installed."
+
+        if model_id == "kokoro":
+            import ssl
+            import urllib.request
+            try:
+                import certifi
+                context = ssl.create_default_context(cafile=certifi.where())
+            except Exception:
+                context = ssl.create_default_context()
+            target_root = root / "kokoro"
+            target_root.mkdir(parents=True, exist_ok=True)
+            assets = (
+                ("https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.onnx",
+                 target_root / "kokoro-v1.0.onnx", "Kokoro ONNX model", 200 * 1024 * 1024),
+                ("https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin",
+                 target_root / "voices-v1.0.bin", "Kokoro voice pack", 10 * 1024 * 1024),
+            )
+            for url, target, label, minimum in assets:
+                if force_repair or not target.is_file() or target.stat().st_size < minimum:
+                    temporary = target.with_suffix(target.suffix + ".part")
+                    try:
+                        report(f"Downloading {label}…")
+                        request = urllib.request.Request(url, headers={"User-Agent": "Ryu-Audiobook/1.1", "Accept": "application/octet-stream"})
+                        with urllib.request.urlopen(request, timeout=90, context=context) as response, temporary.open("wb") as handle:
+                            total = int(response.headers.get("Content-Length", "0") or 0)
+                            received = 0
+                            while True:
+                                part = response.read(1024 * 1024)
+                                if not part:
+                                    break
+                                handle.write(part)
+                                received += len(part)
+                                if total:
+                                    report(f"Downloading {label}… {min(99, received * 100 // total)}%")
+                        if not temporary.is_file() or temporary.stat().st_size < minimum:
+                            raise RuntimeError(f"{label} download is incomplete.")
+                        temporary.replace(target)
+                    finally:
+                        temporary.unlink(missing_ok=True)
+            from app.tts.providers.kokoro import KokoroProvider
+            if not KokoroProvider.assets_available():
+                raise RuntimeError("Kokoro files were downloaded, but the runtime could not verify the model and voice pack.")
+            mark_installed("kokoro", True)
+            return "Kokoro model and voice pack installed and verified."
+
+        if model_id in {"chatterbox", "chatterbox-multilingual", "chatterbox-runtime"}:
+            from app.tts.chatterbox_runtime import RUNTIME_DIR, MARKER, install_runtime
+            if force_repair:
+                MARKER.unlink(missing_ok=True)
+            report("Installing or verifying the isolated Chatterbox runtime…")
+            install_runtime(progress)
+            if not RUNTIME_DIR.exists() or not MARKER.is_file():
+                raise RuntimeError("Chatterbox runtime did not pass its installation marker check.")
+            mark_installed("chatterbox", True)
+            mark_installed("chatterbox-multilingual", True)
+            return "Chatterbox runtime is ready. Provider model weights are downloaded on first use."
+
+        if model_id == "qwen-runtime":
+            from app.tts.qwen_character_runtime import install_runtime
+            install_runtime(progress, force_repair=force_repair)
+            return "Qwen3-TTS runtime repaired and verified." if force_repair else "Qwen3-TTS runtime installed and verified."
+
+        if model_id in {"qwen-customvoice", "qwen-voicedesign", "qwen-clone", "qwen-all"}:
+            from app.tts.qwen_character_runtime import (
+                install_runtime, install_model, best_custom_kind, best_clone_kind, best_voice_design_kind,
+            )
+            install_runtime(progress, force_repair=force_repair and model_id == "qwen-all")
+            choices = {
+                "qwen-customvoice": [best_custom_kind()],
+                "qwen-voicedesign": [best_voice_design_kind(), best_clone_kind()],
+                "qwen-clone": [best_clone_kind()],
+            }
+            targets = []
+            if model_id == "qwen-all":
+                for kind in (best_custom_kind(), best_voice_design_kind(), best_clone_kind()):
+                    if kind not in targets:
+                        targets.append(kind)
+            else:
+                targets = choices[model_id]
+            for kind in targets:
+                install_model(kind, progress, force_repair=force_repair)
+            return "Qwen3-TTS model(s) installed and file-verified: " + ", ".join(targets)
+
+        qwen_model_match = re.fullmatch(r"(?:qwen-model:)?(custom-0\.6b|custom-1\.7b|design-1\.7b|base-0\.6b|base-1\.7b)", model_id)
+        if qwen_model_match:
+            from app.tts.qwen_character_runtime import install_model
+            install_model(qwen_model_match.group(1), progress, force_repair=force_repair)
+            return f"Qwen model {qwen_model_match.group(1)} installed and file-verified."
+
+        if model_id == "audiobook-ai":
+            from app.ai.model_runtime import install_runtime, self_test
+            if not force_repair:
+                install_runtime(progress)
+                report("Running a real Audiobook AI inference self-test…")
+                detail = self_test()
+                return "Audiobook AI is installed and self-tested: " + detail
+
+            # A repair uses a sibling backup so an interrupted repair can restore
+            # the previous known-good runtime/model files.
+            target = root / "audiobook-ai"
+            backup = root / (".audiobook-ai-repair-" + uuid.uuid4().hex)
+            if target.exists():
+                target.rename(backup)
+            try:
+                install_runtime(progress)
+                report("Running a real Audiobook AI inference self-test…")
+                detail = self_test()
+            except Exception:
+                if target.exists():
+                    shutil.rmtree(target, ignore_errors=True)
+                if backup.exists():
+                    backup.rename(target)
+                raise
+            else:
+                shutil.rmtree(backup, ignore_errors=True)
+                return "Audiobook AI repaired and self-tested: " + detail
+
+        raise ValueError(f"No installer is registered for component: {model_id}")
+
+    def _models_uninstall_component(self, model_id: str, payload: dict[str, Any], progress) -> str:
+        from app.core.paths import models_root
+        from app.tts.model_registry import mark_installed
+        root = models_root().resolve()
+        requested = model_id.casefold()
+
+        with self._jobs_lock:
+            blocking = [
+                job for job in self._jobs.values()
+                if str(job.get("state") or "").casefold() in {"queued", "running"}
+                and any(token in str(job.get("type") or "").casefold()
+                        for token in ("voice-preview", "production", "generation", "character-analyze", "model-install", "model-repair"))
+            ]
+        if blocking:
+            raise RuntimeError("Uninstall is blocked while a voice preview, audiobook generation, analysis, or model installation/repair job is active. Stop or finish that job, then retry.")
+
+        def report(text: str) -> None:
+            if progress:
+                progress(text)
+
+        if requested == "piper":
+            from app.tts.providers.piper import PiperProvider
+            voice_name = str(payload.get("voice_name") or "").strip()
+            if not voice_name:
+                raise ValueError("Choose the exact user-installed Piper voice to uninstall.")
+            piper_root = (root / "piper").resolve()
+            voice = next((item.resolve() for item in PiperProvider.model_paths()
+                          if item.stem.casefold() == voice_name.casefold()
+                          and piper_root in item.resolve().parents), None)
+            if voice is None or voice.suffix.casefold() != ".onnx":
+                raise ValueError("That Piper voice is not a user-installed removable model.")
+            report(f"Removing Piper voice {voice.stem}…")
+            self._models_remove_path(voice, piper_root)
+            sidecar = voice.with_suffix(voice.suffix + ".json")
+            if sidecar.exists():
+                self._models_remove_path(sidecar, piper_root)
+            mark_installed("piper", bool(piper_root.exists() and any(piper_root.rglob("*.onnx"))))
+            return f"Removed Piper voice model {voice.stem}; other voice models and profiles were kept."
+
+        if requested == "kokoro":
+            target = root / "kokoro"
+            if not target.is_dir() or not any(p.is_file() for p in target.rglob("*")):
+                raise ValueError("There are no user-installed Kokoro files to remove.")
+            report("Removing user-installed Kokoro model and voice pack…")
+            self._models_remove_path(target, root)
+            mark_installed("kokoro", False)
+            return "Removed the user-installed Kokoro model and voice pack. Bundled files are untouched."
+
+        if requested in {"chatterbox", "chatterbox-multilingual", "chatterbox-runtime"}:
+            from app.tts.chatterbox_runtime import RUNTIME_DIR
+            if RUNTIME_DIR.exists():
+                report("Removing the shared Chatterbox runtime…")
+                self._models_remove_path(RUNTIME_DIR, root)
+            mark_installed("chatterbox", False)
+            mark_installed("chatterbox-multilingual", False)
+            return "Removed the shared Chatterbox runtime. Saved profiles and books were kept."
+
+        if requested == "qwen-model":
+            kind = str(payload.get("model_kind") or "").strip().casefold()
+            from app.tts.qwen_character_runtime import MODEL_DIRS, RUNTIME_ROOT
+            if kind not in MODEL_DIRS:
+                raise ValueError("Choose the exact installed Qwen model to uninstall.")
+            target = MODEL_DIRS[kind]
+            if target.exists():
+                report(f"Removing Qwen model {kind}…")
+                self._models_remove_path(target, RUNTIME_ROOT)
+            return f"Removed Qwen model {kind}. The Qwen runtime and other model folders were kept."
+
+        if requested == "qwen-runtime":
+            from app.tts.qwen_character_runtime import (
+                RUNTIME_ROOT, VENV_ROOT, PYTHON_ROOT, MARKER, INSTALLER_PATH, INSTALLER_LOG,
+            )
+            report("Removing the Qwen Python runtime only; downloaded model weights are preserved…")
+            for target in (VENV_ROOT, PYTHON_ROOT, MARKER, INSTALLER_PATH, INSTALLER_LOG):
+                if target.exists():
+                    self._models_remove_path(target, RUNTIME_ROOT)
+            return "Removed the Qwen runtime. Downloaded model weights and saved voice profiles were preserved."
+
+        if requested == "audiobook-ai":
+            target = root / "audiobook-ai"
+            if target.exists():
+                report("Removing the local Audiobook AI runtime and model…")
+                self._models_remove_path(target, root)
+            return "Removed local Audiobook AI runtime/model. Projects, source books and saved voices were kept."
+
+        raise ValueError(f"Uninstall is not supported for this managed component: {requested}")
 
     def _models_verify(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Verify installed Qwen model files from disk without downloading or loading ML runtimes."""
-        from app.tts.qwen_character_runtime import MODEL_IDS, MODEL_DIRS, model_installed
-
-        requested = str(payload.get("model_id") or "").strip().lower()
-        aliases = {
-            "customvoice": ("custom-0.6b", "custom-1.7b"),
-            "custom-voice": ("custom-0.6b", "custom-1.7b"),
-            "voicedesign": ("design-1.7b", "base-0.6b", "base-1.7b"),
-            "voice-design": ("design-1.7b", "base-0.6b", "base-1.7b"),
-            "voiceclone": ("base-0.6b", "base-1.7b"),
-            "voice-clone": ("base-0.6b", "base-1.7b"),
-        }
-        if requested in aliases:
-            kinds = aliases[requested]
-        elif requested in MODEL_IDS:
-            kinds = (requested,)
+        """Verify real local files and provider prerequisites without fake install claims."""
+        requested = str(payload.get("model_id") or "").strip().casefold()
+        if not requested:
+            raise ValueError("Choose a model or provider to verify.")
+        models = self._models_list({})
+        item = next((model for model in models if model["model_id"].casefold() == requested), None)
+        detail = ""
+        available = False
+        path = ""
+        if requested in {"custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b"}:
+            from app.tts.qwen_character_runtime import MODEL_IDS, MODEL_DIRS, model_installed
+            available = bool(model_installed(requested))
+            path = str(MODEL_DIRS[requested])
+            detail = "Required model files are present." if available else "Qwen model files are missing or incomplete; install or repair this model."
+        elif requested in {"qwen-runtime", "qwen-customvoice", "qwen-voicedesign", "qwen-clone", "qwen-all"}:
+            from app.tts.qwen_character_runtime import runtime_ready, model_installed, best_custom_kind, best_voice_design_kind, best_clone_kind, MODEL_DIRS
+            runtime_ok = bool(runtime_ready())
+            kinds = {
+                "qwen-customvoice": [best_custom_kind()],
+                "qwen-voicedesign": [best_voice_design_kind(), best_clone_kind()],
+                "qwen-clone": [best_clone_kind()],
+                "qwen-all": [best_custom_kind(), best_voice_design_kind(), best_clone_kind()],
+            }.get(requested, [])
+            available = runtime_ok if requested == "qwen-runtime" else runtime_ok and all(model_installed(kind) for kind in kinds)
+            path = str(MODEL_DIRS[kinds[0]]) if kinds else ""
+            detail = "Qwen runtime and selected model files are ready." if available else "Qwen runtime or required model files are missing; use Install or Repair."
+        elif requested == "piper":
+            from app.tts.providers.piper import PiperProvider
+            paths = list(PiperProvider.model_paths())
+            available = bool(paths) and all(p.is_file() and p.stat().st_size > 1024 for p in paths)
+            detail = f"{len(paths)} installed/bundled Piper voice model(s) discovered." if available else "No usable Piper voice model was found."
+        elif requested == "kokoro":
+            from app.tts.providers.kokoro import KokoroProvider
+            available = bool(KokoroProvider.assets_available())
+            detail = "Kokoro model and voice pack are available." if available else "Kokoro model or voice pack is missing/incomplete."
+        elif requested in {"chatterbox", "chatterbox-multilingual", "chatterbox-runtime"}:
+            from app.tts.chatterbox_runtime import runtime_ready
+            available = bool(runtime_ready())
+            detail = "Chatterbox runtime ready; model weights may still be fetched on first use." if available else "Chatterbox runtime is missing or incomplete."
+        elif requested == "audiobook-ai":
+            from app.ai.model_runtime import installed, model_path, server_path
+            available = bool(installed())
+            path = str(model_path())
+            detail = "Audiobook AI runtime and recommended model file are present." if available else "Audiobook AI runtime or recommended model file is missing."
+        elif requested == "windows-sapi":
+            available = bool(item and item.get("installed"))
+            detail = str(item.get("status") if item else "Windows SAPI provider was not found.")
+        elif requested == "edge-tts":
+            available = bool(item and item.get("installed"))
+            detail = "Edge TTS client package is available; synthesis still requires internet." if available else "Edge TTS client package is unavailable."
+        elif requested == "elevenlabs":
+            available = bool(item and item.get("credentials_configured"))
+            detail = "ElevenLabs API key is configured; account access is verified on first provider request." if available else "ElevenLabs API key is not configured. Open Voice Studio to connect the account."
         else:
-            raise ValueError("Choose a supported Qwen model ID or CustomVoice, VoiceDesign, or Voice Clone.")
-
-        models = [{
-            "model_id": kind,
-            "name": MODEL_IDS[kind],
-            "path": str(MODEL_DIRS[kind]),
-            "installed": bool(model_installed(kind)),
-        } for kind in kinds]
-        if requested in {"customvoice", "custom-voice"}:
-            ready = any(item["installed"] for item in models)
-        elif requested in {"voicedesign", "voice-design"}:
-            ready = models[0]["installed"] and any(item["installed"] for item in models[1:])
-        elif requested in {"voiceclone", "voice-clone"}:
-            ready = any(item["installed"] for item in models)
-        else:
-            ready = models[0]["installed"]
-        return {
-            "model_id": requested,
-            "available": ready,
-            "models": models,
-            "detail": ("Required model files are present." if ready else
-                       "One or more required model files are missing or incomplete. Use the supported Models installer, then verify again."),
-        }
+            raise ValueError(f"Unsupported model/provider to verify: {requested}")
+        return {"model_id": requested, "available": available, "detail": detail, "path": path,
+                "status": "Ready" if available else "Needs attention", "model": item}
 
     def _performance_info(self, _payload: dict[str, Any]) -> dict[str, Any]:
         return {"available": False, "reason": "Live CPU, GPU and VRAM telemetry is not connected to Premium V2 yet."}
