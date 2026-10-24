@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.chapters.detector import detect_chapters
-from app.documents.parser import extract_text
+from app.documents.parser import extract_text, validate_chapter_text_coverage
 
 
 class ImportPreviewWorker(QThread):
@@ -47,13 +47,10 @@ class ImportPreviewWorker(QThread):
             if not chapters:
                 raise RuntimeError("No readable chapters were found in this file.")
             self.status.emit(f"Checking extracted text and chapter coverage for {self.source_path.name}…")
-            source_words = len(book.text.split())
-            chapter_words = sum(len(chapter.text.split()) for chapter in chapters)
-            if source_words >= 1000 and chapter_words < int(source_words * 0.90):
-                raise RuntimeError(
-                    f"Chapter detection retained only {chapter_words:,} of {source_words:,} "
-                    "extracted words. Import was stopped to protect your book from losing content."
-                )
+            try:
+                validate_chapter_text_coverage(book.text, chapters, minimum=0.90)
+            except ValueError as exc:
+                raise RuntimeError(str(exc)) from exc
             self.status.emit(f"Preparing the verified preview for {self.source_path.name}…")
             self.ready.emit(book, chapters)
         except Exception as exc:
