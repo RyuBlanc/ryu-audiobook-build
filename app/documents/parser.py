@@ -5,7 +5,11 @@ from pathlib import Path
 import re
 
 from app.tts.pacing import is_heading_line
-from app.chapters.heading_rules import CHAPTER_HEADING_PATTERNS, is_chapter_heading_like as _is_chapter_heading_like
+from app.chapters.heading_rules import (
+    CHAPTER_HEADING_PATTERNS, TOC_HEADING_RE,
+    heading_title as _heading_title,
+    is_chapter_heading_like as _is_chapter_heading_like,
+)
 
 
 @dataclass
@@ -48,8 +52,59 @@ BOOK_NOISE_PATTERNS = (
 # A conservative, reusable word-coverage check for import previews. Chapter
 # bodies can repeat short headings/TOC labels, so compare normalized token
 # multisets rather than requiring raw text equality.
+def _coverage_heading_key(title: str) -> str:
+    value = str(title or "").strip()
+    value = re.sub(r"(?:\.{2,}|…+)\s*\d+\s*$", "", value)
+    value = re.sub(r"\s{2,}\d+\s*$", "", value)
+    return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
+
+def _toc_entry_title(line: str) -> str | None:
+    """Accept headings in a declared TOC when they use dotted leaders/page numbers."""
+    raw = str(line or "").strip()
+    if not raw:
+        return None
+    without_page = re.sub(r"(?:\.{2,}|…+)\s*\d+\s*$", "", raw).strip()
+    if without_page != raw:
+        title = _heading_title(without_page, allow_slash=True)
+        if title is not None:
+            return title
+    return _heading_title(raw, allow_slash=True)
+
+
+def _coverage_source_lines(source_text: str) -> list[str]:
+    """Exclude only a duplicate-aware TOC block that the analyzer also removes."""
+    lines = str(source_text or "").splitlines()
+    toc_indices = [i for i, line in enumerate(lines) if TOC_HEADING_RE.fullmatch(line.strip())]
+    for toc_index in toc_indices:
+        candidates: list[tuple[int, str]] = []
+        for index in range(toc_index + 1, len(lines)):
+            title = _toc_entry_title(lines[index])
+            if title is not None:
+                candidates.append((index, title))
+        for first_position, (first_index, first_title) in enumerate(candidates):
+            first_key = _coverage_heading_key(first_title)
+            if not first_key:
+                continue
+            for repeat_index, repeat_title in candidates[first_position + 1:]:
+                if _coverage_heading_key(repeat_title) != first_key:
+                    continue
+                next_marker = next(
+                    (index for index, _title in candidates if index > repeat_index),
+                    len(lines),
+                )
+                story_lines = [
+                    line.strip() for line in lines[repeat_index + 1:next_marker]
+                    if line.strip()
+                ]
+                if sum(len(line.split()) for line in story_lines) >= 12 and story_lines:
+                    return lines[:toc_index] + lines[repeat_index:]
+    return lines
+
+
 def chapter_text_coverage(source_text: str, chapters: list) -> tuple[int, int, float]:
-    source_words = len(re.findall(r"\b[\w’'-]+\b", str(source_text or ""), re.UNICODE))
+    coverage_source = "\n".join(_coverage_source_lines(source_text))
+    source_words = len(re.findall(r"\b[\w’'-]+\b", coverage_source, re.UNICODE))
     chapter_text = "\n".join(str(getattr(chapter, "text", "") or "") for chapter in chapters)
     body_words = len(re.findall(r"\b[\w’'-]+\b", chapter_text, re.UNICODE))
     # The detector deliberately removes heading lines from chapter bodies,
@@ -58,8 +113,11 @@ def chapter_text_coverage(source_text: str, chapters: list) -> tuple[int, int, f
     title_text = "\n".join(str(getattr(chapter, "title", "") or "") for chapter in chapters)
     title_words = len(re.findall(r"\b[\w’'-]+\b", title_text, re.UNICODE))
     chapter_words = body_words + title_words
-    coverage = chapter_words / source_words if source_words else (1.0 if not (chapter_text or title_text).strip() else 0.0)
+    coverage = chapter_words / source_words if source_words else (
+        1.0 if not (chapter_text or title_text).strip() else 0.0
+    )
     return source_words, chapter_words, coverage
+
 
 def validate_chapter_text_coverage(source_text: str, chapters: list, *, minimum: float = 0.90) -> None:
     """Raise an actionable error when chapter segmentation loses source content.
@@ -87,6 +145,7 @@ def validate_chapter_text_coverage(source_text: str, chapters: list, *, minimum:
             "your book from losing content. Review the heading rules or choose a "
             "different import format."
         )
+
 
 def _split_adjacent_dialogue(line: str) -> str:
     # Separate back-to-back quoted utterances such as:

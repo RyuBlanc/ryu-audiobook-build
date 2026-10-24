@@ -76,6 +76,19 @@ def _heading_key(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.casefold())
 
 
+def _toc_entry_title(line: str) -> str | None:
+    """Recognize TOC headings with dotted leaders/page numbers."""
+    raw = str(line or "").strip()
+    if not raw:
+        return None
+    without_page = re.sub(r"(?:\.{2,}|…+)\s*\d+\s*$", "", raw).strip()
+    if without_page != raw:
+        title = _heading_title(without_page)
+        if title is not None:
+            return title
+    return _heading_title(raw)
+
+
 def _remove_toc_when_story_heading_repeats(lines: list[str]) -> list[str]:
     """Drop a TOC block only when a listed heading reappears with story text.
 
@@ -86,7 +99,7 @@ def _remove_toc_when_story_heading_repeats(lines: list[str]) -> list[str]:
     for toc_index in toc_indices:
         candidates: list[tuple[int, str]] = []
         for index in range(toc_index + 1, len(lines)):
-            title = _heading_title(lines[index])
+            title = _toc_entry_title(lines[index])
             if title is not None:
                 candidates.append((index, title))
         for first_position, (first_index, first_title) in enumerate(candidates):

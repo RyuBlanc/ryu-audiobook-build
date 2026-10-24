@@ -202,6 +202,35 @@ class ImportIntegrityTests(unittest.TestCase):
         self.assertNotIn("43", joined)
         self.assertNotIn("www.asianovel.com", joined)
 
+    def test_duplicate_dotted_toc_is_removed_and_passes_coverage_guard(self):
+        source = """TABLE OF CONTENTS
+Prologue ........ 1
+Chapter 1: Arrival ........ 2
+Chapter 2: Return ........ 3
+Epilogue ........ 4
+
+Prologue
+The heroine walked through the old stone gate and greeted the guard before sunrise.
+Chapter 1: Arrival
+After the long journey, the traveler returned home and shared news with the waiting family.
+Chapter 2: Return
+They promised to meet again next winter, when the city would celebrate its annual winter festival.
+Epilogue
+In the final scene, the family gathered beside the river and remembered how their journey had changed everything.
+"""
+        chapters = detect_chapters(source)
+        self.assertEqual(
+            [chapter.title for chapter in chapters],
+            ["Prologue", "Chapter 1: Arrival", "Chapter 2: Return", "Epilogue"],
+        )
+        joined = "\n".join(chapter.text for chapter in chapters)
+        self.assertNotIn("TABLE OF CONTENTS", joined)
+        self.assertNotIn("........", joined)
+        source_words, chapter_words, coverage = chapter_text_coverage(source, chapters)
+        self.assertEqual(source_words, chapter_words)
+        self.assertAlmostEqual(coverage, 1.0)
+        validate_chapter_text_coverage(source, chapters, minimum=0.90)
+
     def test_noise_cleanup_removes_known_watermark_without_dropping_story(self):
         source = (
             "The story mentions a report in the ordinary narration.\n"
@@ -225,6 +254,7 @@ class ImportIntegrityTests(unittest.TestCase):
 
     def test_import_worker_applies_noise_cleanup_and_reports_removed_count(self):
         source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("validate_chapter_text_coverage(text, chapters, minimum=0.90)", source)
         self.assertIn("detect_repeated_book_noise([chapter.text for chapter in chapters])", source)
         self.assertIn("chapter.text, removed = clean_import_noise(chapter.text, repeated_noise)", source)
         self.assertIn('"removed_noise_count": len(removed_noise)', source)

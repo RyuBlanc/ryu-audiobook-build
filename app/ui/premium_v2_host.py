@@ -39,7 +39,10 @@ from app.core.character_library import (
     update_character as update_reusable_character,
 )
 from app.documents.cover_art import COVER_IMAGE_EXTENSIONS, COVER_SOURCE_EXTENSIONS, extract_embedded_cover, persist_project_cover
-from app.documents.parser import SUPPORTED_EXTENSIONS, clean_import_noise, clean_text, detect_repeated_book_noise, extract_text
+from app.documents.parser import (
+    SUPPORTED_EXTENSIONS, clean_import_noise, clean_text, detect_repeated_book_noise,
+    extract_text, validate_chapter_text_coverage,
+)
 from app.chapters.detector import detect_chapters
 from app.chapters.characters import analyze_book, merge_character_analysis_record
 from app.tts.manager import GenerationManager
@@ -1207,6 +1210,12 @@ class PremiumV2Bridge(QObject):
             chapters = detect_chapters(text)
             if not chapters:
                 raise ValueError("The document contains no readable chapter text.")
+            stage = "validating chapter coverage"
+            self._job_update(
+                job_id, stage="Validating chapter coverage", progress=56,
+                message="Checking that chapter detection retained the source text",
+            )
+            validate_chapter_text_coverage(text, chapters, minimum=0.90)
             # Clean likely ebook page noise after chapter boundaries are known so
             # repeated boilerplate can be detected across chapters without
             # accidentally treating a single word in normal narration as noise.
