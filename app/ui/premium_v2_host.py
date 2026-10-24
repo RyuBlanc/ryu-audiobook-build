@@ -350,6 +350,7 @@ class PremiumV2Bridge(QObject):
                 "voice.import_reference": self._voice_import_reference,
                 "voice.select": self._voice_select,
                 "voice.preview": self._voice_preview,
+                "voice.preview.save": self._voice_preview_save,
                 "character.list": self._character_list,
                 "character_library.list": self._character_library_list,
                 "character_library.deleted.list": self._character_library_deleted_list,
@@ -2026,6 +2027,36 @@ class PremiumV2Bridge(QObject):
                          daemon=True, name="RyuPremiumPreview").start()
         return {"job_id": job_id, "state": "running", "duration_seconds": seconds, "profile_name": profile.name}
 
+    def _voice_preview_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Copy the validated in-app voice preview through a native Save As dialog."""
+        source_value = str(payload.get("source_path") or "").strip()
+        if not source_value:
+            raise ValueError("Generate a validated voice preview before saving it.")
+        source = Path(source_value).expanduser().resolve()
+        preview_root = (app_root() / "Previews").resolve()
+        if source.parent != preview_root or not source.name.startswith("preview_") or source.suffix.casefold() != ".wav":
+            raise ValueError("Only a generated Ryu voice-preview WAV can be saved from this action.")
+        if not source.is_file() or source.stat().st_size < 1024:
+            raise FileNotFoundError("The generated preview file is no longer available. Generate it again.")
+
+        import re as _re
+        suggested = str(payload.get("suggested_name") or "Ryu Voice Preview").strip()
+        suggested = _re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "-", suggested).strip(" .-")[:100] or "Ryu Voice Preview"
+        default_path = Path.home() / "Downloads" / f"{suggested}.wav"
+        selected, _filter = QFileDialog.getSaveFileName(
+            None, "Save Voice Preview", str(default_path), "WAV audio (*.wav)"
+        )
+        if not selected:
+            return {"cancelled": True}
+        destination = Path(selected).expanduser()
+        if destination.suffix.casefold() != ".wav":
+            destination = destination.with_suffix(".wav")
+        destination = destination.resolve()
+        if destination == source:
+            raise ValueError("Choose a different destination from the temporary preview file.")
+        shutil.copy2(source, destination)
+        return {"cancelled": False, "path": str(destination), "bytes": destination.stat().st_size}
+
     def _sound_preview_book(self, _payload: dict[str, Any]) -> dict[str, Any]:
         """Queue a full-book mix preview from saved narration without re-synthesis."""
         from app.ui.full_book_preview import start_full_book_preview
@@ -2577,6 +2608,9 @@ class PremiumV2Bridge(QObject):
         if not isinstance(aliases, list):
             raise ValueError("Character aliases must be a list or comma-separated text.")
         aliases = list(dict.fromkeys(str(item).strip()[:160] for item in aliases if str(item).strip()))[:5]
+        voice_profile = str(payload.get("voice_profile") or "").strip()
+        if voice_profile and self._find_profile(voice_profile) is None:
+            raise ValueError("Choose a saved voice profile before assigning it to a character.")
 
         series = str(payload.get("series") or "").strip()
         scope = str(payload.get("scope") or "").strip()
@@ -2605,14 +2639,17 @@ class PremiumV2Bridge(QObject):
             None,
         )
         if existing:
-            record = update_reusable_character(existing["id"], {
+            changes = {
                 "series": series,
                 "primary_name": name[:300],
                 "short": str(payload.get("short") or "").strip(),
                 "aliases": aliases,
                 "dialogue_sample": sample,
                 "notes": notes,
-            })
+            }
+            if "voice_profile" in payload:
+                changes["voice_name"] = voice_profile
+            record = update_reusable_character(existing["id"], changes)
         else:
             active_folder = str(self.settings.value("project/active_folder") or "").strip()
             active_project = next(
@@ -2630,12 +2667,12 @@ class PremiumV2Bridge(QObject):
                     "examples": [sample] if sample else [],
                     "notes": notes,
                     "confidence": 100,
-                    "voice": "",
+                    "voice": voice_profile,
                 }],
                 source_project_folder=str(active_project.folder) if active_project else "",
                 source_project_title=str(active_project.title) if active_project else "",
                 update_names=True,
-                update_voice=False,
+                update_voice=bool(voice_profile),
             )
             record = next(
                 (row for row in list_reusable_characters()
@@ -2648,9 +2685,40 @@ class PremiumV2Bridge(QObject):
             )
             if record is None:
                 raise RuntimeError("The character could not be saved to the reusable registry.")
+        project_updated = False
+        if "voice_profile" in payload and voice_profile:
+            active_folder = str(self.settings.value("project/active_folder") or "").strip()
+            active_project = next(
+                (project for project in list_projects()
+                 if active_folder and str(Path(project.folder).resolve()) == str(Path(active_folder).resolve())),
+                None,
+            )
+            if active_project is not None:
+                state = load_state(active_project.folder)
+                cast = state.get("characters") or []
+                if isinstance(cast, list):
+                    primary_key = str(record.get("primary_name") or name).casefold()
+                    aliases_key = {str(value).casefold() for value in (record.get("aliases") or [])}
+                    target = next((item for item in cast if isinstance(item, dict) and (
+                        str(item.get("name") or "").casefold() == primary_key
+                        or str(item.get("name") or "").casefold() in aliases_key
+                    )), None)
+                    if target is not None:
+                        target["voice_profile"] = voice_profile
+                        state["characters"] = cast
+                        state["modified_at"] = self._now()
+                        save_state(active_project.folder, state)
+                        self._sync_saved_cast(active_project, cast, state, update_names=True, update_voice=True)
+                        project_updated = True
+                        record = next(
+                            (item for item in list_reusable_characters()
+                             if str(item.get("id") or "") == str(record.get("id") or "")),
+                            record,
+                        )
         self._character_library_bootstrapped = True
         public = self._character_library_ui_record(record)
-        return {"character": public, "count": len(list_reusable_characters()), "saved": True}
+        return {"character": public, "count": len(list_reusable_characters()), "saved": True,
+                "project_updated": project_updated}
 
     def _character_library_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._character_library_bootstrap()
