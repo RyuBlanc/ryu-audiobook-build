@@ -202,6 +202,17 @@ class ImportIntegrityTests(unittest.TestCase):
         self.assertIn("The next paragraph stays separate.", cleaned)
         self.assertEqual(removed, [])
 
+    def test_repeated_generic_domain_is_preserved_as_story_content(self):
+        source = [
+            "Chapter 1: Archive\\nThe character reads a note linking to www.example.com before leaving.",
+            "Chapter 2: Portal\\nA second character mentions www.example.com while describing the old city.",
+        ]
+        repeated = detect_repeated_book_noise(source)
+        self.assertNotIn("www.example.com", repeated)
+        cleaned, removed = clean_import_noise(source[0], set(repeated))
+        self.assertIn("www.example.com", cleaned)
+        self.assertEqual(removed, [])
+
     def test_reflow_joins_hyphenated_line_wrap_without_losing_paragraph_or_heading_boundaries(self):
         from app.documents.parser import reflow_source_text
 
