@@ -1,9 +1,11 @@
 from pathlib import Path
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
 
 from app.ui.premium_v2_host import PremiumV2Bridge
+from app.tts.voice_profile import VoiceProfile, load_profiles, save_profiles
 
 
 class PremiumV2VoiceSaveTests(unittest.TestCase):
@@ -61,6 +63,44 @@ class PremiumV2VoiceSaveTests(unittest.TestCase):
                         "authorized": False,
                     })
                 self.assertFalse((voices / "voices.json").exists())
+
+
+class VoiceProfileCatalogueRegressionTests(unittest.TestCase):
+    def test_saved_alias_of_builtin_voice_survives_catalogue_reload(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "voices"
+            builtin = VoiceProfile(
+                name="Offline Neural • Amy", provider="piper",
+                voice_id="en_US-amy-medium", model_id="piper", authorized=True,
+            )
+            alias = VoiceProfile(
+                name="My Story Narrator", provider="piper",
+                voice_id="en_US-amy-medium", model_id="piper", authorized=True,
+            )
+            with (
+                patch("app.tts.voice_profile.voices_root", return_value=root),
+                patch("app.tts.voice_profile.builtin_voice_profiles", return_value=[builtin]),
+            ):
+                save_profiles([alias])
+                loaded = load_profiles()
+            self.assertIn("My Story Narrator", [item.name for item in loaded])
+            self.assertTrue((root / "voices.json").is_file())
+
+    def test_one_invalid_legacy_row_does_not_hide_other_saved_profiles(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "voices"
+            root.mkdir()
+            (root / "voices.json").write_text(json.dumps([
+                {"name": "Valid Existing Profile", "provider": "piper",
+                 "voice_id": "en_US-amy-medium", "model_id": "piper"},
+                {"name": "Broken Legacy Record", "provider": "piper"},
+            ]), encoding="utf-8")
+            with (
+                patch("app.tts.voice_profile.voices_root", return_value=root),
+                patch("app.tts.voice_profile.builtin_voice_profiles", return_value=[]),
+            ):
+                loaded = load_profiles()
+            self.assertEqual([item.name for item in loaded], ["Valid Existing Profile"])
 
 
 if __name__ == "__main__":
