@@ -155,5 +155,36 @@ class VoiceProfileCatalogueRegressionTests(unittest.TestCase):
             self.assertEqual([item.name for item in loaded], ["Valid Existing Profile"])
 
 
+class VoiceProfileRenameTests(unittest.TestCase):
+    def test_renaming_a_saved_reference_profile_replaces_the_original_record(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sample = root / "reference.wav"
+            sample.write_bytes(b"reference-placeholder")
+            voices = root / "voices"
+            with (
+                patch("app.ui.premium_v2_host.ensure_roots"),
+                patch.object(PremiumV2Bridge, "_load_durable_jobs"),
+                patch("app.tts.voice_profile.voices_root", return_value=voices),
+                patch("app.tts.voice_profile.builtin_voice_profiles", return_value=[]),
+            ):
+                bridge = PremiumV2Bridge()
+                bridge._voice_save({
+                    "name": "Old Reference Name", "provider": "chatterbox",
+                    "voice_id": "reference-id", "sample_path": str(sample),
+                    "authorized": True, "qwen_mode": "clone",
+                })
+                result = bridge._voice_save({
+                    "name": "Renamed Reference Voice", "original_name": "Old Reference Name",
+                    "provider": "chatterbox", "voice_id": "reference-id",
+                    "authorized": True,
+                })
+                saved = load_profiles()
+            named = [profile.name for profile in saved if profile.provider == "chatterbox"]
+            self.assertEqual(named, ["Renamed Reference Voice"])
+            self.assertEqual(result["name"], "Renamed Reference Voice")
+            self.assertEqual(saved[0].sample_path, str(sample.resolve()))
+
+
 if __name__ == "__main__":
     unittest.main()

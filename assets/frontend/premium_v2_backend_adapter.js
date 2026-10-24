@@ -15,7 +15,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
+  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
   let providerCatalogs = Object.create(null);
@@ -805,6 +805,7 @@
       const choose = document.createElement('button');
       choose.className = 'btn choose'; choose.type = 'button'; choose.textContent = row.saved ? 'Load / Select' : 'Select';
       choose.dataset.voice = String(row.voice_id || row.name || '');
+      choose.dataset.voiceProvider = String(row.provider || ({offline:'piper',sapi:'windows-sapi',customvoice:'qwen-character',voicedesign:'qwen-character',qwenclone:'qwen-character',customref:'chatterbox',edge:'edge-tts',eleven:'elevenlabs'}[providerKey] || ''));
       choose.dataset.voiceLabel = String(row.name || row.voice_id || '');
       choose.dataset.voiceSaved = row.saved ? 'true' : 'false';
       if (row.saved) choose.dataset.voiceProfileName = String(row.name || '');
@@ -831,6 +832,7 @@
     if (!profile || profile.saved !== true) return false;
     selectedVoice = profile.name;
     selectedVoiceId = profile.voice_id;
+    selectedVoiceProvider = profile.provider;
     if ($('profileName')) $('profileName').value = profile.name;
     if ($('premiumName')) $('premiumName').value = profile.name;
     if ($('profileLibrary')) $('profileLibrary').textContent = profile.provider;
@@ -1711,51 +1713,78 @@
 
   async function saveVoice(options = {}) {
     const name = String(options.nameOverride ?? ($('profileName')?.value || $('premiumName')?.value || '')).trim();
+    const originalName = String(options.originalNameOverride ?? selectedVoice ?? '').trim();
+    const existingSavedProfile = voices.find(profile =>
+      profile.saved === true && profile.name.toLowerCase() === originalName.toLowerCase()
+    ) || null;
     const choice = document.querySelector('.provider.active')?.dataset.provider || 'offline';
     const providerMap = {offline:'piper',sapi:'windows-sapi',customvoice:'qwen-character',voicedesign:'qwen-character',qwenclone:'qwen-character',customref:'chatterbox',edge:'edge-tts',eleven:'elevenlabs'};
-    const provider = providerMap[choice] || (choice.includes('clone') ? 'qwen-character' : 'piper');
+    const provider = choice === 'offline'
+      ? (existingSavedProfile?.provider || selectedVoiceProvider || 'piper')
+      : (providerMap[choice] || (choice.includes('clone') ? 'qwen-character' : 'piper'));
     const voiceLabel = $('profileVoice')?.textContent?.trim() || selectedVoiceId || 'Amy';
     if (!options.confirmed) {
       const confirmedName = await requestVoiceProfileSaveName(name, choice, voiceLabel);
       if (!confirmedName) { message('Voice profile save cancelled.'); return null; }
-      return saveVoice({confirmed:true,nameOverride:confirmedName});
+      return saveVoice({
+        confirmed:true, nameOverride:confirmedName,
+        originalNameOverride:options.originalNameOverride ?? existingSavedProfile?.name ?? ''
+      });
     }
-    if (!name) throw new Error('Enter a name for this voice profile.');
+    if (!name) throw new Error('Enter a profile name before saving.');
     if (name.length > 160) throw new Error('Profile names must be 160 characters or fewer.');
-    const authorized = Boolean($('clonePermission')?.checked || $('customPermission')?.checked);
-    let sample_path = '';
+
+    const providerPanel = document.querySelector('#voices .provider[data-provider="' + choice + '"]');
+    const referenceFile = providerPanel?.querySelector('input[type="file"]')?.files?.[0];
+    const authorized = Boolean($('clonePermission')?.checked || $('customPermission')?.checked || existingSavedProfile?.authorized);
+    let sample_path = String(existingSavedProfile?.sample_path || '');
     if (provider === 'chatterbox' || (provider === 'qwen-character' && /clone/i.test(choice))) {
       if (!authorized) throw new Error('Confirm you have permission to use this reference recording.');
-      const providerPanel = document.querySelector('#voices .provider[data-provider="' + choice + '"]');
-      const referenceFile = providerPanel?.querySelector('input[type="file"]')?.files?.[0];
-      sample_path = await importSelectedReferenceFile(referenceFile, name);
+      if (referenceFile) sample_path = await importSelectedReferenceFile(referenceFile, name);
+      if (!sample_path) throw new Error('Choose a reference audio file before saving this clone profile.');
     }
+
     const matchedPiper = voices.find(v => v.provider === 'piper' && String(v.voice_id || '').toLowerCase().includes(voiceLabel.toLowerCase()));
     const designPanel = document.querySelector('.provider[data-provider="voicedesign"]');
     const designPrompt = designPanel?.querySelector('textarea')?.value?.trim() || '';
-    const designLanguage = designPanel?.querySelector('select')?.value || 'English';
+    const designLanguage = designPanel?.querySelector('select')?.value || existingSavedProfile?.language || 'English';
     const rawSeed = Number(designPanel?.querySelector('input[type="number"]')?.value || 0);
     const designSeed = Number.isFinite(rawSeed) && rawSeed > 0 ? Math.trunc(rawSeed) : null;
     if (choice === 'voicedesign' && !designPrompt) throw new Error('Enter a voice description before saving a VoiceDesign profile.');
-    const qwenMode = choice === 'voicedesign' ? 'design' : /clone/i.test(choice) ? 'clone' : 'custom';
+    const qwenMode = choice === 'voicedesign' ? 'design' : choice === 'qwenclone' ? 'clone' : (existingSavedProfile?.qwen_mode || 'custom');
     const qwenDefaultSpeaker = ({English:'Ryan',Chinese:'Serena',Japanese:'Ono_Anna',Korean:'Sohee'}[designLanguage] || 'Ryan');
     const qwenSelectedSpeaker = selectedVoiceId && !/custom description|reference voice|custom voice description/i.test(selectedVoiceId)
       ? selectedVoiceId : (/custom description|reference voice|custom voice description/i.test(voiceLabel) || choice === 'voicedesign' || choice === 'qwenclone' ? qwenDefaultSpeaker : (voiceLabel || qwenDefaultSpeaker));
     const voice_id = provider === 'piper'
-      ? (matchedPiper?.voice_id || voices.find(v => v.name === name)?.voice_id || 'en_US-amy-medium')
+      ? (selectedVoiceId || matchedPiper?.voice_id || voices.find(v => v.name === name)?.voice_id || 'en_US-amy-medium')
       : provider === 'qwen-character'
         ? qwenSelectedSpeaker
         : (selectedVoiceId || voiceLabel || name);
-    const result = await call('voice.save', {name,provider,voice_id,sample_path,authorized,
-      model_id:provider === 'chatterbox' ? 'chatterbox' : provider === 'qwen-character' ? 'auto' : provider,
-      backend:provider === 'piper' ? 'automatic' : provider,language:choice === 'voicedesign' ? designLanguage : 'English',
-      qwen_mode:provider === 'qwen-character' ? qwenMode : 'custom',
-      qwen_prompt:choice === 'voicedesign' ? designPrompt : '',
-      qwen_seed:choice === 'voicedesign' ? designSeed : null,
-      notes:choice === 'voicedesign' ? designPrompt : '',
-      reference_text:$('cloneTranscript')?.value || ''});
-    selectedVoice = result.name; selectedVoiceId = result.voice_id; await refreshVoices();
+    const currentCatalogEntry = providerCatalogs[choice]?.voices?.find(row => String(row.voice_id || '') === String(selectedVoiceId || ''));
+    const result = await call('voice.save', {
+      name, original_name:options.originalNameOverride ?? existingSavedProfile?.name ?? '',
+      provider, voice_id, sample_path, authorized,
+      model_id:existingSavedProfile?.model_id || (provider === 'chatterbox' ? 'chatterbox' : provider === 'qwen-character' ? 'auto' : provider),
+      backend:existingSavedProfile?.backend || (['piper','kokoro','qwen-character'].includes(provider) ? 'automatic' : provider),
+      language:choice === 'voicedesign' ? designLanguage : (existingSavedProfile?.language || currentCatalogEntry?.language || 'English'),
+      qwen_mode:provider === 'qwen-character' ? qwenMode : (existingSavedProfile?.qwen_mode || 'custom'),
+      qwen_prompt:choice === 'voicedesign' ? designPrompt : (existingSavedProfile?.qwen_prompt || ''),
+      qwen_seed:choice === 'voicedesign' ? designSeed : (existingSavedProfile?.qwen_seed ?? null),
+      qwen_profile_id:existingSavedProfile?.qwen_profile_id || '',
+      qwen_anchor_path:existingSavedProfile?.qwen_anchor_path || '',
+      qwen_anchor_text:existingSavedProfile?.qwen_anchor_text || '',
+      notes:choice === 'voicedesign' ? designPrompt : (existingSavedProfile?.notes || ''),
+      exaggeration:existingSavedProfile?.exaggeration ?? 0.5,
+      cfg_weight:existingSavedProfile?.cfg_weight ?? 0.35,
+      style_preset:existingSavedProfile?.style_preset || 'Natural',
+      reference_text:$('cloneTranscript')?.value || existingSavedProfile?.reference_text || ''
+    });
+    selectedVoice = result.name;
+    selectedVoiceId = result.voice_id;
+    selectedVoiceProvider = result.provider;
+    await refreshVoices();
     if ($('profileName')) $('profileName').value = result.name;
+    if ($('premiumName')) $('premiumName').value = result.name;
     const savedSelect = document.querySelector('#voices .panel[data-panel="3"] .toolbar select');
     if (savedSelect) savedSelect.value = result.name;
     document.querySelectorAll('#voices *').forEach(node => {
@@ -1766,8 +1795,10 @@
     if ($('previewProfile')) $('previewProfile').textContent = result.name;
     if ($('useNarrator')) $('useNarrator').disabled = false;
     if ($('saveOnly')) $('saveOnly').disabled = false;
-    message('Saved voice profile locally: ' + result.name); return result;
+    message('Saved voice profile locally: ' + result.name);
+    return result;
   }
+
   async function startImportPayload(payload, displayName) {
     if ($('importStatus')) $('importStatus').textContent = 'Importing ' + displayName + '…';
     if ($('importBar')) $('importBar').style.width = '5%';
@@ -1838,7 +1869,8 @@
     const providerKey = document.querySelector('#voices .provider.active')?.dataset.provider || '';
     const providerMap = {offline:'piper',sapi:'windows-sapi',customvoice:'qwen-character',voicedesign:'qwen-character',qwenclone:'qwen-character',customref:'chatterbox',edge:'edge-tts',eleven:'elevenlabs'};
     const savedProfile = voices.find(item => item.saved === true && item.name.toLowerCase() === name.toLowerCase());
-    if (!savedProfile && !providerMap[providerKey]) throw new Error('Select a provider and voice from Voice Library first.');
+    const resolvedProvider = providerKey === 'offline' ? (savedProfile?.provider || selectedVoiceProvider || 'piper') : providerMap[providerKey];
+    if (!savedProfile && !resolvedProvider) throw new Error('Select a provider and voice from Voice Library first.');
     const c = selectedChapter();
     const lengthGroup = [...document.querySelectorAll('#voices .toolbar')].find(el => /Length/.test(el.textContent));
     const duration = lengthGroup?.querySelector('.seg button.active')?.textContent.match(/\d+/)?.[0] || '30';
@@ -1870,10 +1902,10 @@
       const languageSelect = providerKey === 'voicedesign'
         ? design?.querySelector('.form2 select')
         : panel?.querySelector('.form3 select');
-      payload.provider = providerMap[providerKey];
+      payload.provider = resolvedProvider;
       payload.voice_id = voiceId;
-      payload.model_id = providerKey === 'qwen-character' || ['customvoice','voicedesign','qwenclone'].includes(providerKey) ? 'auto' : providerMap[providerKey];
-      payload.backend = ['piper','kokoro','qwen-character'].includes(providerMap[providerKey]) ? 'automatic' : providerMap[providerKey];
+      payload.model_id = resolvedProvider === 'qwen-character' ? 'auto' : resolvedProvider;
+      payload.backend = ['piper','kokoro','qwen-character'].includes(resolvedProvider) ? 'automatic' : resolvedProvider;
       payload.language = String(languageSelect?.value || 'English');
       payload.qwen_mode = qwenMode;
       payload.qwen_prompt = providerKey === 'voicedesign' ? (design?.querySelector('textarea')?.value || '') : '';
@@ -2478,6 +2510,7 @@
         const previousName = String($('profileName')?.value || '').trim();
         const hadSavedSelection = Boolean(selectedVoice);
         selectedVoiceId = b.dataset.voice;
+        selectedVoiceProvider = b.dataset.voiceProvider || null;
         selectedVoice=null;
         const label=b.dataset.voiceLabel || b.dataset.voice;
         if($('profileVoice'))$('profileVoice').textContent=label;
@@ -2490,7 +2523,7 @@
       }
       const provider = e.target.closest('.provider');
       if(provider && !e.target.closest('button,input,textarea,select,label,[data-voice]')) {
-        selectedVoiceId=null; selectedVoice=null;
+        selectedVoiceId=null; selectedVoice=null; selectedVoiceProvider=null;
         const key = provider.dataset.provider;
         const defaultLabels = {offline:'Amy',sapi:'David',customvoice:'Serena',voicedesign:'Custom voice description',qwenclone:'Reference voice',customref:'Reference voice',edge:'Edge neural voice',eleven:'ElevenLabs voice'};
         if($('profileVoice'))$('profileVoice').textContent=defaultLabels[key] || 'Custom voice';

@@ -1490,15 +1490,23 @@ class PremiumV2Bridge(QObject):
 
         saved = load_saved_profiles()
         existing = next((p for p in saved if p.name.casefold() == name.casefold()), None)
+        original_name = str(payload.get("original_name") or "").strip()
+        source_existing = next(
+            (p for p in saved if original_name and p.name.casefold() == original_name.casefold()),
+            None,
+        )
+        if source_existing is not None and existing is not None and source_existing is not existing:
+            raise ValueError(f"A saved profile named '{name}' already exists. Choose a different name to rename this profile.")
+        target_existing = existing or source_existing
         built_in_collision = next(
             (p for p in load_profiles() if p.name.casefold() == name.casefold()
              and existing is None),
             None,
         )
         if built_in_collision is not None:
-            raise ValueError("That name is already used by a built-in voice. Choose a distinct profile name.")
+            raise ValueError("That name is already used by an installed voice. Choose a distinct profile name.")
 
-        sample_path = str(payload.get("sample_path") or "").strip() or None
+        sample_path = str(payload.get("sample_path") or (target_existing.sample_path if target_existing else "")).strip() or None
         reference_path = str(payload.get("reference_path") or "").strip()
         if reference_path:
             sample_path = str(import_reference_audio(Path(reference_path).expanduser().resolve(), name).resolve())
@@ -1508,8 +1516,8 @@ class PremiumV2Bridge(QObject):
                 raise FileNotFoundError("The custom voice reference audio is missing.")
             sample_path = str(sample)
 
-        qwen_mode = str(payload.get("qwen_mode") or ("clone" if provider_name == "chatterbox" else "custom")).strip().lower()
-        authorized = bool(payload.get("authorized", False))
+        qwen_mode = str(payload.get("qwen_mode") or getattr(target_existing, "qwen_mode", "") or ("clone" if provider_name == "chatterbox" else "custom")).strip().lower()
+        authorized = bool(payload.get("authorized", False)) or bool(getattr(target_existing, "authorized", False))
         if provider_name == "chatterbox" and not authorized:
             raise ValueError("Confirm that you have permission to use this voice before saving a cloned voice.")
         if provider_name == "chatterbox" and not sample_path:
@@ -1523,24 +1531,24 @@ class PremiumV2Bridge(QObject):
         profile = VoiceProfile(
             name=name, provider=provider_name, voice_id=voice_id,
             sample_path=sample_path,
-            model_id=str(payload.get("model_id") or ("chatterbox" if provider_name == "chatterbox" else "auto")),
-            backend=str(payload.get("backend") or "automatic"),
-            language=str(payload.get("language") or "English"),
-            notes=str(payload.get("notes") or payload.get("description") or "")[:4000],
+            model_id=str(payload.get("model_id") or getattr(target_existing, "model_id", None) or ("chatterbox" if provider_name == "chatterbox" else "auto")),
+            backend=str(payload.get("backend") or getattr(target_existing, "backend", None) or "automatic"),
+            language=str(payload.get("language") or getattr(target_existing, "language", None) or "English"),
+            notes=str(payload.get("notes") or payload.get("description") or getattr(target_existing, "notes", "") or "")[:4000],
             authorized=authorized,
-            exaggeration=max(0.0, min(1.0, float(payload.get("exaggeration", 0.5)))),
-            cfg_weight=max(0.0, min(1.0, float(payload.get("cfg_weight", 0.35)))),
-            style_preset=str(payload.get("style_preset") or "Natural"),
+            exaggeration=max(0.0, min(1.0, float(payload.get("exaggeration", getattr(target_existing, "exaggeration", 0.5))))),
+            cfg_weight=max(0.0, min(1.0, float(payload.get("cfg_weight", getattr(target_existing, "cfg_weight", 0.35))))),
+            style_preset=str(payload.get("style_preset") or getattr(target_existing, "style_preset", None) or "Natural"),
             qwen_mode=qwen_mode,
-            qwen_prompt=str(payload.get("qwen_prompt") or payload.get("prompt") or "")[:4000],
-            qwen_seed=int(payload["qwen_seed"]) if payload.get("qwen_seed") not in (None, "") else None,
-            reference_text=str(payload.get("reference_text") or "")[:10000],
-            qwen_anchor_path=str(payload.get("qwen_anchor_path") or "") or None,
-            qwen_anchor_text=str(payload.get("qwen_anchor_text") or "")[:10000],
-            qwen_profile_id=str(payload.get("qwen_profile_id") or ""),
+            qwen_prompt=str(payload.get("qwen_prompt") or payload.get("prompt") or getattr(target_existing, "qwen_prompt", "") or "")[:4000],
+            qwen_seed=(int(payload["qwen_seed"]) if payload.get("qwen_seed") not in (None, "") else None) if qwen_mode == "design" else getattr(target_existing, "qwen_seed", None),
+            reference_text=str(payload.get("reference_text") or getattr(target_existing, "reference_text", "") or "")[:10000],
+            qwen_anchor_path=str(payload.get("qwen_anchor_path") or getattr(target_existing, "qwen_anchor_path", "") or "") or None,
+            qwen_anchor_text=str(payload.get("qwen_anchor_text") or getattr(target_existing, "qwen_anchor_text", "") or "")[:10000],
+            qwen_profile_id=str(payload.get("qwen_profile_id") or getattr(target_existing, "qwen_profile_id", "") or ""),
         )
-        if existing is not None:
-            saved[saved.index(existing)] = profile
+        if target_existing is not None:
+            saved[saved.index(target_existing)] = profile
         else:
             saved.append(profile)
         save_profiles(saved)
@@ -1578,6 +1586,15 @@ class PremiumV2Bridge(QObject):
                 "description": profile.qwen_prompt or profile.notes or "",
                 "saved": profile.name.strip().casefold() in saved_names,
                 "model_id": profile.model_id or "",
+                "sample_path": profile.sample_path,
+                "authorized": bool(profile.authorized),
+                "qwen_prompt": profile.qwen_prompt, "qwen_seed": profile.qwen_seed,
+                "qwen_profile_id": profile.qwen_profile_id,
+                "qwen_anchor_path": profile.qwen_anchor_path,
+                "qwen_anchor_text": profile.qwen_anchor_text,
+                "reference_text": profile.reference_text, "notes": profile.notes,
+                "style_preset": profile.style_preset,
+                "exaggeration": profile.exaggeration, "cfg_weight": profile.cfg_weight,
                 "qwen_mode": getattr(profile, "qwen_mode", "custom"),
             }
 
@@ -1833,6 +1850,9 @@ class PremiumV2Bridge(QObject):
                 "qwen_mode": getattr(profile, "qwen_mode", "custom"),
                 "qwen_prompt": getattr(profile, "qwen_prompt", ""),
                 "qwen_seed": getattr(profile, "qwen_seed", None),
+                "qwen_profile_id": getattr(profile, "qwen_profile_id", ""),
+                "qwen_anchor_path": getattr(profile, "qwen_anchor_path", None),
+                "qwen_anchor_text": getattr(profile, "qwen_anchor_text", ""),
                 "reference_text": getattr(profile, "reference_text", ""),
                 "notes": getattr(profile, "notes", ""),
                 "exaggeration": getattr(profile, "exaggeration", 0.5),
