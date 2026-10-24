@@ -7,7 +7,7 @@ from unittest import mock
 
 from app.chapters.detector import Chapter, detect_chapters
 from app.core.project import Project, create_project, list_projects
-from app.documents.parser import extract_text, clean_import_noise, pdf_extraction_quality_warning
+from app.documents.parser import (\n    extract_text, clean_import_noise, pdf_extraction_quality_warning,\n    detect_repeated_book_noise, chapter_text_coverage, validate_chapter_text_coverage,\n)
 
 
 class ImportIntegrityTests(unittest.TestCase):
@@ -101,6 +101,60 @@ class ImportIntegrityTests(unittest.TestCase):
         self.assertNotIn("Second chapter text", chapters[0].text)
         self.assertIn("First chapter text ends here.", chapters[0].text)
         self.assertIn("Second chapter text ends here.", chapters[1].text)
+
+    def test_realistic_multi_chapter_watermark_cleanup_keeps_story_and_removes_page_noise(self):
+        chapters_text = [
+            "Chapter 1: The Arrival\\nA heroine followed a long road toward the old city gate.\\n41\\nReport\\nwww.asianovel.com",
+            "Chapter 2: The Return\\nThe hero came back from the northern pass after the battle ended.\\n42\\nReport\\nwww.asianovel.com",
+            "Chapter 3: The Promise\\nThey promised to meet again before the next winter festival.\\n43\\nReport\\nwww.asianovel.com",
+        ]
+        repeated = set(detect_repeated_book_noise(chapters_text))
+        self.assertIn("report", repeated)
+        self.assertIn("www.asianovel.com", repeated)
+
+        cleaned_chapters = []
+        removed_all = []
+        for text in chapters_text:
+            cleaned, removed = clean_import_noise(text, repeated)
+            cleaned_chapters.append(cleaned)
+            removed_all.extend(removed)
+
+        story = "\\n".join(cleaned_chapters)
+        for expected in ("heroine followed", "hero came back", "promised to meet"):
+            self.assertIn(expected, story)
+        for noise in ("www.asianovel.com", "Report", "\\n41\\n", "\\n42\\n", "\\n43\\n"):
+            self.assertNotIn(noise, story)
+        self.assertGreaterEqual(len(removed_all), 9)
+
+    def test_single_occurrence_report_page_number_and_general_url_are_not_removed(self):
+        source = (
+            "Chapter 1: Archive\\n"
+            "The report was placed beside the old ledger.\\n"
+            "Report\\n"
+            "17\\n"
+            "The portal at https://example.com/archive remained open in the story.\\n"
+            "The keeper locked the library before sunrise."
+        )
+        cleaned, removed = clean_import_noise(source)
+        self.assertIn("Report", cleaned)
+        self.assertIn("17", cleaned)
+        self.assertIn("https://example.com/archive", cleaned)
+        self.assertEqual(removed, [])
+
+    def test_chapter_coverage_guard_handles_short_book_and_detected_content_loss(self):
+        source = (
+            "Chapter 1: Begin\\nThe first body keeps enough words to verify the small book.\\n"
+            "Chapter 2: End\\nThe last body remains in the story and should be preserved."
+        )
+        chapters = detect_chapters(source)
+        source_words, chapter_words, coverage = chapter_text_coverage(source, chapters)
+        self.assertGreater(source_words, 0)
+        self.assertGreater(chapter_words, 0)
+        self.assertGreater(coverage, 0.90)
+        validate_chapter_text_coverage(source, chapters)
+
+        with self.assertRaisesRegex(ValueError, "Import was stopped"):
+            validate_chapter_text_coverage(source, [Chapter(1, "Only", "one word")])
 
     def test_noise_cleanup_removes_known_watermark_without_dropping_story(self):
         source = (
