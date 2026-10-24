@@ -520,7 +520,7 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("stable_order = current_names == desired_names", refresh)
         self.assertIn("item.setText(label)", refresh)
         self.assertIn("item.setData(Qt.ItemDataRole.UserRole, name)", refresh)
-        self.assertIn("if not stable_order:", refresh)
+        self.assertIn("if not stable_order and updates_were_enabled:", refresh)
         self.assertIn("self.list.clear()", refresh)
         details_start = source.index("    def show_details(")
         details_end = source.index("    def assign_voice(", details_start)
