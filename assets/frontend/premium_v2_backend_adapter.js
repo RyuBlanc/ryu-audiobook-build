@@ -2712,6 +2712,22 @@
     updateVoiceActionButtons();return voicePreviewValid;
   }
 
+
+  function ensureStableStudioLayout() {
+    if (document.getElementById('ryuStableStudioLayoutStyle')) return;
+    const style = document.createElement('style');
+    style.id = 'ryuStableStudioLayoutStyle';
+    // Live status/progress updates should not make Chromium choose a different
+    // scroll anchor and jump the visible part of the Voice Studio workspace.
+    // Manual scrolling remains enabled; this only disables automatic anchoring.
+    style.textContent = [
+      '#voices{overflow-anchor:none!important}',
+      '#voices .content,#voices .layout,#voiceWorkspace,#voiceWorkspace .panel{overflow-anchor:none!important}',
+      '#voices #previewState,#voices #validation,#voices #previewProgress{min-height:1.25em}'
+    ].join('');
+    document.head.appendChild(style);
+  }
+
   function ensurePreviewDurationOptions() {
     if (!document.getElementById('ryuPreviewDurationStyle')) {
       const style = document.createElement('style');
@@ -3516,6 +3532,7 @@
     // The approved HTML prototype attaches a fake timer-based player directly
     // to these buttons. Replace those DOM nodes before attaching real playback,
     // so the demo timer can never masquerade as audiobook audio.
+    ensureStableStudioLayout();
     ensureVoiceStudioRuntimeControls();
     ensurePreviewDurationOptions();
     for (const id of ['mainPlay','miniPlay']) {
