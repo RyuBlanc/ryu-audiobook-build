@@ -711,6 +711,12 @@
     if (!chapters.some(c => c.number === window.ryuPremiumSelectedChapter)) window.ryuPremiumSelectedChapter = chapters[0].number;
     const current = selectedChapter(), list = $('chapterList'), editor = $('chapterEditor'), title = $('chapterTitle');
     if (list) {
+      list.style.maxHeight = 'calc(100vh - 270px)';
+      list.style.overflowY = 'auto';
+      list.style.overscrollBehavior = 'contain';
+      list.style.minHeight = '0';
+      list.style.paddingRight = '4px';
+      list.setAttribute('aria-label', 'Scrollable chapter list');
       list.innerHTML = chapters.map(c => '<div class="list-item ' + (c.number === current.number ? 'active' : '') + '" data-chapter-number="' + c.number + '">' + esc('Chapter ' + c.number + ' · ' + c.title) + '</div>').join('');
       list.querySelectorAll('[data-chapter-number]').forEach(el => el.addEventListener('click', () => {
         const c = chapters.find(x => x.number === Number(el.dataset.chapterNumber)); if (!c) return;
