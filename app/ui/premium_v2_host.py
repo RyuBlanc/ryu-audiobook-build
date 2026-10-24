@@ -3315,11 +3315,17 @@ class PremiumV2Bridge(QObject):
                     piper_local.append(voice_path.resolve())
             except OSError:
                 continue
-        piper_installed = bool(piper_paths)
+        piper_verified = [
+            voice_path for voice_path in piper_paths
+            if voice_path.is_file()
+            and voice_path.stat().st_size > 1024
+            and voice_path.with_suffix(voice_path.suffix + ".json").is_file()
+        ]
+        piper_installed = bool(piper_verified)
         result.append(row(
             "piper", "Piper Offline Neural Voices", "piper", piper_installed,
             "Install individual Piper voice models for offline narration. Installed voice files are listed here; bundled voices are managed by the application installer.",
-            status=(f"{len(piper_paths)} voice model(s) available" if piper_installed else "No voice models installed"),
+            status=(f"{len(piper_verified)} voice model(s) verified" if piper_installed else "No verified voice models (not installed or incomplete)"),
             installable=True, repairable=bool(piper_local), uninstallable=bool(piper_local),
             removable_voice_count=len(piper_local),
             installed_voice_names=sorted({item.stem for item in piper_local}, key=str.casefold),
@@ -3988,10 +3994,18 @@ class PremiumV2Bridge(QObject):
         available = False
         path = ""
         if requested in {"custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b"}:
-            from app.tts.qwen_character_runtime import MODEL_IDS, MODEL_DIRS, model_installed
-            available = bool(model_installed(requested))
+            from app.tts.qwen_character_runtime import MODEL_IDS, MODEL_DIRS, model_installed, runtime_ready
+            weights_ready = bool(model_installed(requested))
+            runtime_ok = bool(runtime_ready())
+            available = weights_ready and runtime_ok
             path = str(MODEL_DIRS[requested])
-            detail = "Required model files are present." if available else "Qwen model files are missing or incomplete; install or repair this model."
+            detail = (
+                "Required local model weights and the Qwen runtime are present."
+                if available else
+                "Model weights are present but the Qwen runtime needs installation/repair."
+                if weights_ready else
+                "Qwen model files are missing or incomplete; install or repair this model."
+            )
         elif requested in {"qwen-runtime", "qwen-customvoice", "qwen-voicedesign", "qwen-clone", "qwen-all"}:
             from app.tts.qwen_character_runtime import runtime_ready, model_installed, MODEL_DIRS
             runtime_ok = bool(runtime_ready())
@@ -4021,8 +4035,13 @@ class PremiumV2Bridge(QObject):
         elif requested == "piper":
             from app.tts.providers.piper import PiperProvider
             paths = list(PiperProvider.model_paths())
-            available = bool(paths) and all(p.is_file() and p.stat().st_size > 1024 for p in paths)
-            detail = f"{len(paths)} installed/bundled Piper voice model(s) discovered." if available else "No usable Piper voice model was found."
+            verified = [
+                model for model in paths
+                if model.is_file() and model.stat().st_size > 1024
+                and model.with_suffix(model.suffix + ".json").is_file()
+            ]
+            available = bool(verified)
+            detail = f"{len(verified)} Piper voice model(s) passed the local ONNX/config file check." if available else "No usable Piper ONNX/config pair was found; install or repair a voice model."
         elif requested == "kokoro":
             from app.tts.providers.kokoro import KokoroProvider
             available = bool(KokoroProvider.assets_available())
