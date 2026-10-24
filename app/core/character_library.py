@@ -254,6 +254,8 @@ def update_character(record_id: str, changes: dict, path: Path | None = None) ->
         record["pronunciation"] = str(changes.get("pronunciation") or "").strip()
     if "notes" in changes:
         record["notes"] = str(changes.get("notes") or "").strip()[:4000]
+    if "voice_name" in changes:
+        record["voice_name"] = str(changes.get("voice_name") or "").strip() or None
     record["updated_at"] = _timestamp()
     _write_store(store, target)
     return dict(record)
