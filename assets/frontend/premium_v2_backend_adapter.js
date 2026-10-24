@@ -1325,7 +1325,14 @@
     const designSeed = Number.isFinite(rawSeed) && rawSeed > 0 ? Math.trunc(rawSeed) : null;
     if (choice === 'voicedesign' && !designPrompt) throw new Error('Enter a voice description before saving a VoiceDesign profile.');
     const qwenMode = choice === 'voicedesign' ? 'design' : /clone/i.test(choice) ? 'clone' : 'custom';
-    const voice_id = provider === 'piper' ? (matchedPiper?.voice_id || voices.find(v => v.name === name)?.voice_id || 'en_US-amy-medium') : (selectedVoiceId || voiceLabel || name);
+    const qwenDefaultSpeaker = ({English:'Ryan',Chinese:'Serena',Japanese:'Ono_Anna',Korean:'Sohee'}[designLanguage] || 'Ryan');
+    const qwenSelectedSpeaker = selectedVoiceId && !/custom description|reference voice|custom voice description/i.test(selectedVoiceId)
+      ? selectedVoiceId : (/custom description|reference voice|custom voice description/i.test(voiceLabel) || choice === 'voicedesign' || choice === 'qwenclone' ? qwenDefaultSpeaker : (voiceLabel || qwenDefaultSpeaker));
+    const voice_id = provider === 'piper'
+      ? (matchedPiper?.voice_id || voices.find(v => v.name === name)?.voice_id || 'en_US-amy-medium')
+      : provider === 'qwen-character'
+        ? qwenSelectedSpeaker
+        : (selectedVoiceId || voiceLabel || name);
     const result = await call('voice.save', {name,provider,voice_id,sample_path,authorized,
       model_id:provider === 'chatterbox' ? 'chatterbox' : provider === 'qwen-character' ? 'auto' : provider,
       backend:provider === 'piper' ? 'automatic' : provider,language:choice === 'voicedesign' ? designLanguage : 'English',
