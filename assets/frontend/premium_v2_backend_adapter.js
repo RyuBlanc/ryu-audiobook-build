@@ -2346,6 +2346,10 @@
     while (amount >= 1024 && unit < units.length - 1) { amount /= 1024; unit++; }
     return amount.toFixed(unit >= 3 ? 1 : 0) + ' ' + units[unit];
   }
+  function modelNeedsAttention(model) {
+    return /incomplete|missing|not installed|needs installation|needs setup|setup required|api key required|unavailable|runtime required|dependency missing|not configured|not ready|no .* detected|no .* installed/i
+      .test(String(model?.status || ''));
+  }
   function modelLifecycleActionButtons(model) {
     const actions = [];
     const installId = model.install_id || model.model_id;
@@ -2394,8 +2398,8 @@
     const filtered = rows.filter(model => {
       const searchText = [model.name,model.provider,model.model_id,model.status,model.notes,model.requirements].join(' ').toLowerCase();
       if (query && !searchText.includes(query)) return false;
-      if (filter === 'attention' && model.installed && !/incomplete|missing|not installed|setup required|api key required|no .* detected/i.test(String(model.status || ''))) return false;
-      if (filter === 'ready' && !model.installed) return false;
+      if (filter === 'attention' && !modelNeedsAttention(model)) return false;
+      if (filter === 'ready' && (!model.installed || modelNeedsAttention(model))) return false;
       if (filter === 'local' && model.component_type === 'provider') return false;
       return true;
     });
@@ -2412,7 +2416,7 @@
       grid.innerHTML = filtered.map(model => {
         const local = model.component_type !== 'provider';
         const status = String(model.status || (model.installed ? 'Installed' : 'Needs setup'));
-        const problem = /incomplete|missing|not installed|needs installation|needs setup|api key required|unavailable|runtime required|no .* detected/i.test(status);
+        const problem = modelNeedsAttention({...model,status});
         const badge = model.installed && !problem ? '' : problem ? 'warn' : 'info';
         const storage = Number(model.storage_bytes || 0) > 0 ? '<span class="model-meta-item">Local files · ' + esc(formatModelBytes(model.storage_bytes)) + '</span>' : '';
         const requirement = model.requirements ? '<p class="model-requirements">' + esc(model.requirements) + '</p>' : '';
@@ -2439,8 +2443,7 @@
     const status = $('modelInventorySummary');
     if (status) {
       const managed = rows.filter(model => model.component_type !== 'provider');
-      const needsAttention = model => /incomplete|missing|not installed|needs installation|needs setup|api key required|unavailable|runtime required|no .* detected/i.test(String(model.status || ''));
-      const installed = managed.filter(model => model.installed && !needsAttention(model)).length;
+      const installed = managed.filter(model => model.installed && !modelNeedsAttention(model)).length;
       const needsSetup = managed.length - installed;
       const providers = rows.filter(model => model.component_type === 'provider');
       const providersReady = providers.filter(model => model.installed).length;
@@ -2519,8 +2522,8 @@
     }
     const heading = root.querySelector('.model-runtime h2');
     const managed = rows.filter(model => model.component_type !== 'provider');
-    const ready = managed.filter(model => model.installed).length;
-    const missing = managed.filter(model => !model.installed).length;
+    const ready = managed.filter(model => model.installed && !modelNeedsAttention(model)).length;
+    const missing = managed.length - ready;
     if (heading) heading.textContent = ready + ' managed component(s) ready · ' + missing + ' need setup or attention';
     // Replace the HTML prototype's fixed storage number with a total derived
     // from live per-component file sizes. Its old capacity bar had no measured
