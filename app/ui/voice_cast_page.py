@@ -453,15 +453,16 @@ class VoiceCastPage(QWidget):
     def show_details(self, index):
         row = self._row_for_visible_index(index)
         if not row:
-            self.details.setText("Select a cast member.")
-            self.examples.clear()
+            if self.details.text() != "Select a cast member.":
+                self.details.setText("Select a cast member.")
+            if self.examples.toPlainText():
+                self.examples.clear()
             return
 
         aliases = row.get("aliases") or []
         confidence = float(row.get("confidence", 0.0))
         assigned = row.get("voice") or "Not assigned"
-
-        self.details.setText(
+        details_text = (
             f"<h3>{row['name']}</h3>"
             f"Role: {row['role']}<br>"
             f"Dialogue cues: {row['dialogue_count']}<br>"
@@ -469,19 +470,22 @@ class VoiceCastPage(QWidget):
             f"Aliases: {', '.join(aliases) if aliases else 'None'}<br>"
             f"Assigned voice: {assigned}"
         )
+        if self.details.text() != details_text:
+            self.details.setText(details_text)
 
         examples = row.get("examples") or []
-        self.examples.setPlainText(
+        example_text = (
             "\n".join(f"• {value}" for value in examples)
             if examples
             else "No confidently linked dialogue examples."
         )
+        if self.examples.toPlainText() != example_text:
+            self.examples.setPlainText(example_text)
 
         if assigned:
             voice_index = self.profile.findData(assigned)
-            if voice_index >= 0:
+            if voice_index >= 0 and self.profile.currentIndex() != voice_index:
                 self.profile.setCurrentIndex(voice_index)
-
     def assign_voice(self):
         row = self._row_for_visible_index(self.list.currentRow())
         voice = self.profile.currentData()
@@ -614,46 +618,83 @@ class VoiceCastPage(QWidget):
 
 
     def _refresh_labels(self):
-        current_row = self.list.currentRow()
-        visible_before = self._visible_rows()
-        current_name = (
-            visible_before[current_row].get("name")
-            if 0 <= current_row < len(visible_before)
-            else None
-        )
+        # Retain the selected identity from the existing widget, not from the
+        # newly filtered data (the filter may already have changed).
+        current_item = self.list.currentItem()
+        current_name = ""
+        if current_item is not None:
+            current_name = str(
+                current_item.data(Qt.ItemDataRole.UserRole)
+                or current_item.text().split("  ·  ", 1)[0]
+            ).strip()
 
         visible = self._visible_rows()
-        self.list.blockSignals(True)
-        self.list.clear()
-
+        desired_names = [str(row.get("name") or "") for row in visible]
+        desired_labels = []
         for row in visible:
             assignment = "✓ assigned" if row.get("voice") else "· unassigned"
             confidence = float(row.get("confidence", 0.0))
             band = confidence_band(confidence)
-            self.list.addItem(
-                QListWidgetItem(
-                    f"{row['name']}  ·  {row['dialogue_count']} cues  ·  "
-                    f"{band}  ·  {assignment}"
-                )
+            desired_labels.append(
+                f"{row['name']}  ·  {row['dialogue_count']} cues  ·  "
+                f"{band}  ·  {assignment}"
             )
 
-        self.list.blockSignals(False)
+        current_names = [
+            str(
+                self.list.item(index).data(Qt.ItemDataRole.UserRole)
+                or self.list.item(index).text().split("  ·  ", 1)[0]
+            ).strip()
+            for index in range(self.list.count())
+        ]
+        stable_order = current_names == desired_names
+        was_blocked = self.list.blockSignals(True)
+        updates_were_enabled = self.list.updatesEnabled()
+        if not stable_order and updates_were_enabled:
+            self.list.setUpdatesEnabled(False)
+        try:
+            if stable_order:
+                # Typical assignment/analysis updates only change row metadata.
+                # Update the existing items without clearing the visible list.
+                for index, (name, label) in enumerate(zip(desired_names, desired_labels)):
+                    item = self.list.item(index)
+                    if item.text() != label:
+                        item.setText(label)
+                    if item.data(Qt.ItemDataRole.UserRole) != name:
+                        item.setData(Qt.ItemDataRole.UserRole, name)
+            else:
+                # Rebuild only when filtering, renaming, adding or reordering
+                # actually changes which characters appear in the list.
+                self.list.clear()
+                for name, label in zip(desired_names, desired_labels):
+                    item = QListWidgetItem(label)
+                    item.setData(Qt.ItemDataRole.UserRole, name)
+                    self.list.addItem(item)
+        finally:
+            self.list.blockSignals(was_blocked)
+            if not stable_order and updates_were_enabled:
+                self.list.setUpdatesEnabled(True)
+                self.list.viewport().update()
 
         if visible:
             target = 0
             if current_name:
                 target = next(
-                    (
-                        i for i, row in enumerate(visible)
-                        if row.get("name") == current_name
-                    ),
+                    (i for i, row in enumerate(visible) if row.get("name") == current_name),
                     0,
                 )
-            self.list.setCurrentRow(target)
+            if self.list.currentRow() != target:
+                self.list.setCurrentRow(target)
+            else:
+                # Refresh side details after an in-place label change even if
+                # the selected row itself did not move.
+                self.show_details(target)
         else:
-            self.details.setText("No cast members match the current filter.")
-            self.examples.clear()
-
+            empty_text = "No cast members match the current filter."
+            if self.details.text() != empty_text:
+                self.details.setText(empty_text)
+            if self.examples.toPlainText():
+                self.examples.clear()
     def _save_cast(self, *, update_names: bool = False, update_voice: bool = False):
         folder = self._project_folder()
         if not folder:

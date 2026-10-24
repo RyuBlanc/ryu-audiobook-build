@@ -511,5 +511,22 @@ class VoicePreviewContractTests(unittest.TestCase):
             self.assertIn("return '" + friendly + "';", source)
         self.assertIn("const voice=voiceDisplayName(profile);", source)
 
+    def test_voice_cast_refresh_updates_stable_rows_in_place_to_reduce_flicker(self):
+        voice_cast = Path(__file__).resolve().parents[1] / "app" / "ui" / "voice_cast_page.py"
+        source = voice_cast.read_text(encoding="utf-8")
+        start = source.index("    def _refresh_labels(")
+        end = source.index("    def _save_cast(", start)
+        refresh = source[start:end]
+        self.assertIn("stable_order = current_names == desired_names", refresh)
+        self.assertIn("item.setText(label)", refresh)
+        self.assertIn("item.setData(Qt.ItemDataRole.UserRole, name)", refresh)
+        self.assertIn("if not stable_order:", refresh)
+        self.assertIn("self.list.clear()", refresh)
+        details_start = source.index("    def show_details(")
+        details_end = source.index("    def assign_voice(", details_start)
+        details = source[details_start:details_end]
+        self.assertIn("if self.details.text() != details_text:", details)
+        self.assertIn("if self.examples.toPlainText() != example_text:", details)
+
 if __name__ == "__main__":
     unittest.main()
