@@ -129,10 +129,10 @@ class ImportIntegrityTests(unittest.TestCase):
     def test_single_occurrence_report_page_number_and_general_url_are_not_removed(self):
         source = (
             "Chapter 1: Archive\\n"
-            "The report was placed beside the old ledger.\\n"
-            "Report\\n"
-            "17\\n"
-            "The portal at https://example.com/archive remained open in the story.\\n"
+            "The report was placed beside the old ledger.\\n\\n"
+            "Report\\n\\n"
+            "The portal at https://example.com/archive remained open in the story.\\n\\n"
+            "17\\n\\n"
             "The keeper locked the library before sunrise."
         )
         cleaned, removed = clean_import_noise(source)
