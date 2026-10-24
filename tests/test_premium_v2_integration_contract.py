@@ -720,7 +720,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         editor_end = adapter.index("if ($('chapterEditor')) $('chapterEditor').addEventListener('keydown'", editor_start)
         editor_handler = adapter[editor_start:editor_end]
         self.assertIn("c.text = editorText;", editor_handler)
-        self.assertIn(r"split(/\\s+/)", editor_handler)
+        self.assertIn(r"split(/\s+/)", editor_handler)
         self.assertIn("renderLiveChapterInsights();", editor_handler)
 
     def test_model_verification_and_lifecycle_actions_use_real_backend_operations(self):
