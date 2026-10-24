@@ -112,14 +112,30 @@ def chapter_text_coverage(source_text: str, chapters: list) -> tuple[int, int, f
     source_words = len(re.findall(r"\b[\w’'-]+\b", coverage_source, re.UNICODE))
     chapter_text = "\n".join(str(getattr(chapter, "text", "") or "") for chapter in chapters)
     body_words = len(re.findall(r"\b[\w’'-]+\b", chapter_text, re.UNICODE))
-    # The detector deliberately removes heading lines from chapter bodies,
-    # but preserves their titles as Chapter.title. Count those titles as
-    # retained source text so books with many short chapters are not rejected.
-    title_text = "\n".join(str(getattr(chapter, "title", "") or "") for chapter in chapters)
-    title_words = len(re.findall(r"\b[\w’'-]+\b", title_text, re.UNICODE))
+
+    # Modern imports retain each detected heading as the first matching line
+    # in Chapter.text so the audiobook says the chapter title. Older projects
+    # have body-only text, so count their Chapter.title separately for coverage.
+    title_words = 0
+    for chapter in chapters:
+        title = str(getattr(chapter, "title", "") or "").strip()
+        if not title:
+            continue
+        title_key = re.sub(r"[^\w’'-]+", "", title).casefold()
+        body_lines = [
+            line.strip() for line in str(getattr(chapter, "text", "") or "").splitlines()
+            if line.strip()
+        ]
+        title_in_text = any(
+            re.sub(r"[^\w’'-]+", "", line).casefold() == title_key
+            for line in body_lines
+        )
+        if not title_in_text:
+            title_words += len(re.findall(r"\b[\w’'-]+\b", title, re.UNICODE))
+
     chapter_words = body_words + title_words
     coverage = chapter_words / source_words if source_words else (
-        1.0 if not (chapter_text or title_text).strip() else 0.0
+        1.0 if (chapter_text or title_words) else 0.0
     )
     return source_words, chapter_words, coverage
 
