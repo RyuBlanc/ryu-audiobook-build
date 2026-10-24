@@ -15,7 +15,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
+  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
   let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0, projectListEpoch = 0, characterListEpoch = 0, termsListEpoch = 0, soundListEpoch = 0, historyListEpoch = 0, librarySearchTimer = null, soundSearchTimer = null;
@@ -707,17 +707,38 @@
     edge:'Edge TTS', eleven:'ElevenLabs'
   };
   function voiceLanguageFacet(row) {
-    const raw = String(row.language || row.locale || '').trim();
+    const raw = String(row.language_name || row.language || row.locale || row.locale_code || '').trim();
     if (!raw) return 'Unknown';
-    if (/[A-Za-z]{3,}/.test(raw) && !/^[a-z]{2,3}[-_]/i.test(raw)) return raw;
-    const code = raw.split(/[-_]/)[0].toLowerCase();
-    return ({en:'English',af:'Afrikaans',ja:'Japanese',zh:'Chinese',cmn:'Chinese',es:'Spanish',fr:'French',de:'German',hi:'Hindi',ko:'Korean',it:'Italian',pt:'Portuguese',ru:'Russian',ar:'Arabic',nl:'Dutch'}[code] || raw);
+    const normalized = raw.replace(/_/g, '-');
+    if (/^[a-z]{2,3}(?:-[a-z0-9]+)*$/i.test(normalized)) {
+      const code = normalized.split('-')[0].toLowerCase();
+      return ({en:'English',af:'Afrikaans',ja:'Japanese',zh:'Chinese',cmn:'Chinese',es:'Spanish',fr:'French',de:'German',hi:'Hindi',ko:'Korean',it:'Italian',pt:'Portuguese',ru:'Russian',ar:'Arabic',nl:'Dutch',sv:'Swedish',da:'Danish',no:'Norwegian',fi:'Finnish',pl:'Polish',tr:'Turkish',uk:'Ukrainian',vi:'Vietnamese',th:'Thai',id:'Indonesian',ms:'Malay',he:'Hebrew',el:'Greek',cs:'Czech',ro:'Romanian',hu:'Hungarian',bn:'Bengali',ta:'Tamil',te:'Telugu'}[code] || code.toUpperCase());
+    }
+    return raw.replace(/\s*\([^)]*\)\s*$/, '').trim() || raw;
   }
   function voiceRegionFacet(row) {
-    const raw = String(row.region || row.locale || '').trim();
+    const explicit = String(row.region_name || row.region || row.accent || '').trim();
+    const locale = String(row.locale || row.locale_code || '').trim();
+    const raw = explicit || locale;
     if (!raw) return 'Unknown';
-    const code = raw.includes('-') ? raw.split('-').pop().toUpperCase() : raw.toUpperCase();
-    return ({US:'United States',GB:'United Kingdom',UK:'United Kingdom',ZA:'South Africa',IN:'India',AU:'Australia',CA:'Canada',NZ:'New Zealand',IE:'Ireland',SG:'Singapore',NG:'Nigeria',KE:'Kenya'}[code] || raw);
+    if (/^[a-z]{2,3}-[a-z]{2,4}$/i.test(raw)) {
+      const code = raw.split('-').pop().toUpperCase();
+      return ({US:'United States',GB:'United Kingdom',UK:'United Kingdom',ZA:'South Africa',IN:'India',AU:'Australia',CA:'Canada',NZ:'New Zealand',IE:'Ireland',SG:'Singapore',NG:'Nigeria',KE:'Kenya',AL:'Albania',BA:'Bosnia and Herzegovina',BR:'Brazil',MX:'Mexico',FR:'France',DE:'Germany',IT:'Italy',ES:'Spain',JP:'Japan',KR:'South Korea',CN:'China',TW:'Taiwan',HK:'Hong Kong',PH:'Philippines',MY:'Malaysia',ID:'Indonesia'}[code] || code);
+    }
+    const code = raw.toUpperCase();
+    return ({US:'United States',GB:'United Kingdom',UK:'United Kingdom',ZA:'South Africa',IN:'India',AU:'Australia',CA:'Canada',NZ:'New Zealand',IE:'Ireland',SG:'Singapore',NG:'Nigeria',KE:'Kenya',AL:'Albania',BA:'Bosnia and Herzegovina',BR:'Brazil',MX:'Mexico'}[code] || raw);
+  }
+  function voiceGenderFacet(row) {
+    const raw = String(row.gender || row.voice_metadata || row.metadata || 'Unknown').trim().toLowerCase();
+    if (/female|woman|girl/.test(raw)) return 'Female';
+    if (/male|man|boy/.test(raw)) return 'Male';
+    if (/neutral|androgyn/.test(raw)) return 'Neutral';
+    return raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : 'Unknown';
+  }
+  function voiceCategories(row) {
+    const raw = row.categories ?? row.category ?? row.use_case ?? row.personalities ?? [];
+    const values = Array.isArray(raw) ? raw : String(raw || '').split(/[,;|]/);
+    return [...new Set(values.map(value => String(value || '').trim()).filter(Boolean))];
   }
   function renderProviderCatalog(providerKey, result) {
     const panel = document.querySelector('#voices .provider[data-provider="' + providerKey + '"]');
@@ -737,30 +758,43 @@
     if (healthDetail) healthDetail.textContent = result.message || (result.count + ' live catalogue entries');
     if (providerKey === 'eleven' && $('apiState')) $('apiState').textContent = result.ready ? 'API key connected · Voice catalogue ready' : (result.message || 'API key not configured');
 
-    const facets = [...panel.querySelectorAll('.form3 select')];
-    const languageValues = [...new Set(rows.map(voiceLanguageFacet).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
-    const genderValues = [...new Set(rows.map(row=>String(row.gender || 'Unknown').trim() || 'Unknown'))].sort((a,b)=>a.localeCompare(b));
-    const regionValues = [...new Set(rows.map(voiceRegionFacet).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
-    const optionsFor = (select, defaultLabel, values, defaultValue) => {
-      if (!select) return;
-      const previous = select.value;
+    const form = panel.querySelector('.form3');
+    if (!form) return;
+    let categoryLabel = form.querySelector(':scope > .voice-category-filter');
+    const categoryValues = [...new Set(rows.flatMap(voiceCategories))].sort((a,b)=>a.localeCompare(b));
+    if (categoryValues.length && !categoryLabel) {
+      categoryLabel=document.createElement('label');categoryLabel.className='voice-category-filter';
+      const caption=document.createElement('span');caption.textContent='Category';
+      const select=document.createElement('select');select.className='select';
+      categoryLabel.append(caption,select);form.appendChild(categoryLabel);
+    } else if (!categoryValues.length && categoryLabel) { categoryLabel.remove();categoryLabel=null; }
+    const facets=[...form.querySelectorAll('select')];
+    const languageValues=[...new Set(rows.map(voiceLanguageFacet).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    const genderValues=[...new Set(rows.map(voiceGenderFacet).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    const regionValues=[...new Set(rows.map(voiceRegionFacet).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    const optionsFor=(select,defaultLabel,values,defaultValue)=>{
+      if(!select)return;
+      const previous=select.value;
       select.replaceChildren();
-      const first = document.createElement('option'); first.value = defaultValue; first.textContent = defaultLabel; select.appendChild(first);
-      for (const value of values) { const option = document.createElement('option'); option.value = value; option.textContent = value; select.appendChild(option); }
-      select.value = values.includes(previous) ? previous : defaultValue;
-      select.onchange = () => renderProviderCatalog(providerKey, providerCatalogs[providerKey]);
+      const first=document.createElement('option');first.value=defaultValue;first.textContent=defaultLabel;select.appendChild(first);
+      for(const value of values){const option=document.createElement('option');option.value=value;option.textContent=value;select.appendChild(option);}
+      select.value=values.find(value=>value.toLowerCase()===String(previous).toLowerCase())||defaultValue;
+      select.onchange=()=>renderProviderCatalog(providerKey,providerCatalogs[providerKey]);
     };
-    optionsFor(facets[0], 'All languages', languageValues, 'All languages');
-    optionsFor(facets[1], 'All', genderValues, 'All');
-    optionsFor(facets[2], 'All regions', regionValues, 'All regions');
-
-    const languageFilter = facets[0]?.value || 'All languages';
-    const genderFilter = facets[1]?.value || 'All';
-    const regionFilter = facets[2]?.value || 'All regions';
-    let filtered = rows.filter(row =>
-      (languageFilter === 'All languages' || voiceLanguageFacet(row) === languageFilter) &&
-      (genderFilter === 'All' || String(row.gender || 'Unknown').trim() === genderFilter) &&
-      (regionFilter === 'All regions' || voiceRegionFacet(row) === regionFilter)
+    optionsFor(facets[0],'All languages',languageValues,'All languages');
+    optionsFor(facets[1],'All',genderValues,'All');
+    optionsFor(facets[2],'All regions',regionValues,'All regions');
+    optionsFor(categoryLabel?.querySelector('select'),'All categories',categoryValues,'All categories');
+    const languageFilter=facets[0]?.value||'All languages';
+    const genderFilter=facets[1]?.value||'All';
+    const regionFilter=facets[2]?.value||'All regions';
+    const categoryFilter=categoryLabel?.querySelector('select')?.value||'All categories';
+    const same=(a,b)=>String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
+    let filtered=rows.filter(row=>
+      (languageFilter==='All languages'||same(voiceLanguageFacet(row),languageFilter))&&
+      (genderFilter==='All'||same(voiceGenderFacet(row),genderFilter))&&
+      (regionFilter==='All regions'||same(voiceRegionFacet(row),regionFilter))&&
+      (categoryFilter==='All categories'||voiceCategories(row).some(value=>same(value,categoryFilter)))
     );
     const recommended = panel.querySelector('input[type="checkbox"]');
     if (providerKey === 'offline' && recommended?.checked) {
@@ -788,6 +822,13 @@
       }
       panel.querySelectorAll(':scope > .voice-row').forEach(row=>row.remove());
     }
+    const renderKey=JSON.stringify(filtered.map(row=>[
+      row.voice_id||row.name,row.name,row.provider,row.language,row.locale,row.region,
+      row.gender,voiceCategories(row),Boolean(row.saved),row.description
+    ]));
+    if(listHost.dataset.catalogRenderKey===renderKey)return;
+    const previousScrollTop=listHost.scrollTop;
+    listHost.dataset.catalogRenderKey=renderKey;
     listHost.querySelectorAll(':scope > .voice-catalog-empty').forEach(node=>node.remove());
     if (!filtered.length) {
       const empty = document.createElement('p');
@@ -805,14 +846,16 @@
       const name = document.createElement('b'); name.textContent = String(row.name || row.voice_id || 'Unnamed voice');
       const detail = document.createElement('small'); detail.className = 'muted';
       const detailParts = [];
-      const language = String(row.language || row.locale || '').trim();
-      const gender = String(row.gender || '').trim();
-      const region = String(row.region || '').trim();
-      if (language) detailParts.push(language);
-      if (gender && gender.toLowerCase() !== 'unknown') detailParts.push(gender);
-      if (region && region !== language) detailParts.push(region);
-      if (row.saved) detailParts.push('Saved profile');
-      if (row.description) detailParts.push(String(row.description).slice(0,110));
+      const language=String(row.language_name||row.language||row.locale||'').trim();
+      const gender=voiceGenderFacet(row);
+      const region=String(row.region_name||row.region||row.accent||row.locale||'').trim();
+      const categories=voiceCategories(row);
+      if(language)detailParts.push(language);
+      if(gender&&gender.toLowerCase()!=='unknown')detailParts.push(gender);
+      if(region&&region!==language)detailParts.push(region);
+      if(categories.length)detailParts.push('Category: '+categories.join(', '));
+      if(row.saved)detailParts.push('Saved profile');
+      if(row.description)detailParts.push(String(row.description).slice(0,110));
       detail.textContent = detailParts.join(' · ') || 'Available in the selected provider';
       info.append(name, document.createElement('br'), detail);
       const choose = document.createElement('button');
@@ -825,6 +868,7 @@
       choose.title = row.saved ? 'Load this saved profile and its settings' : 'Select this installed or live catalogue voice';
       voiceRow.append(info, choose); listHost.appendChild(voiceRow);
     }
+    listHost.scrollTop=previousScrollTop;
     if (providerKey === 'eleven' && !filtered.length) {
       const createPanel = panel.querySelector('[data-epanel="create"]');
       if (createPanel && result.message) {
@@ -846,44 +890,211 @@
     return result;
   }
 
+  function providerPanelForProfile(profile) {
+    return ({
+      piper:'offline',kokoro:'offline','windows-sapi':'sapi',
+      'qwen-character':profile?.qwen_mode==='design'?'voicedesign':/clone/i.test(profile?.qwen_mode||'')?'qwenclone':'customvoice',
+      chatterbox:'customref','edge-tts':'edge',elevenlabs:'eleven'
+    })[profile?.provider]||'';
+  }
+  function currentVoiceName(){return String(selectedVoice||$('profileName')?.value||'').trim();}
+  function updateVoiceBeingConfigured(value){
+    const name=String(value||'').trim();
+    for(const label of document.querySelectorAll('small,span,label,p,div')){
+      if(label.children.length||String(label.textContent||'').trim().toLowerCase()!=='voice being configured')continue;
+      const valueNode=label.parentElement?.querySelector('b,strong,h2,h3');
+      if(valueNode&&valueNode!==label)valueNode.textContent=name;
+    }
+  }
+  function updateVoiceSummary(profile=null,options={}){
+    const name=String(profile?.name||'').trim(),key=providerPanelForProfile(profile);
+    const libraryLabel=name?(voiceLibraryTitles[key]||({
+      piper:'Offline Neural Voices',kokoro:'Offline Neural Voices','qwen-character':profile.qwen_mode==='design'?'Qwen VoiceDesign':/clone/i.test(profile.qwen_mode||'')?'Qwen Voice Clone':'Qwen CustomVoice',
+      'edge-tts':'Edge TTS','windows-sapi':'Windows SAPI',elevenlabs:'ElevenLabs',chatterbox:'Reference Voice'
+    }[profile.provider]||profile.provider||'')):'';
+    if($('workingSide'))$('workingSide').textContent=name;
+    if($('sumLibrary'))$('sumLibrary').textContent=libraryLabel;
+    if($('sumProfile'))$('sumProfile').textContent=name?(options.saved?'Saved':'Unsaved'):'';
+    if($('sumPreview'))$('sumPreview').textContent=options.previewReady?'Ready':(name?'Not generated':'');
+    if($('sumAssign'))$('sumAssign').textContent=options.assignment||(name?'Not assigned':'');
+    updateVoiceBeingConfigured(name);
+    const side=$('assignedSide'),p=side?.closest('p'),heading=p?.previousElementSibling;
+    if(heading&&/^currently assigned/i.test(String(heading.textContent||'').trim()))heading.textContent='Currently assigned character';
+    if(p)p.hidden=!String(side?.textContent||'').trim();
+  }
+  function updateVoiceActionButtons(){
+    const current=currentVoiceName();
+    const saved=Boolean(selectedVoice&&voices.some(item=>item.saved===true&&item.name.toLowerCase()===selectedVoice.toLowerCase()));
+    if($('saveOnly'))$('saveOnly').disabled=!current;
+    if($('useNarrator'))$('useNarrator').disabled=!voicePreviewValid;
+    if($('assignCharacter'))$('assignCharacter').disabled=!voicePreviewValid||!saved;
+    if($('downloadPreview'))$('downloadPreview').disabled=!voicePreviewValid||!lastVoicePreviewPath;
+  }
+  function invalidateVoicePreview(){
+    voicePreviewEpoch++;voicePreviewValid=false;lastVoicePreviewPath=null;lastVoicePreviewProfileName='';
+    if(previewAudio){try{previewAudio.pause();previewAudio.removeAttribute('src');previewAudio.load();}catch(_){}previewAudio=null;}
+    if($('playPreview')){$('playPreview').disabled=true;$('playPreview').textContent='▶ Play';}
+    if($('downloadPreview'))$('downloadPreview').disabled=true;
+    if($('previewProgress'))$('previewProgress').style.width='0%';
+    if($('previewState'))$('previewState').textContent=currentVoiceName()?'Not generated':'';
+    if($('previewPlaybackTime'))$('previewPlaybackTime').textContent='00:00 / 00:00';
+    if($('wave'))$('wave').classList.remove('playing');
+    if($('validation'))$('validation').textContent='No validated preview yet.';
+    if($('sumPreview'))$('sumPreview').textContent=currentVoiceName()?'Not generated':'';
+    updateVoiceActionButtons();
+  }
+  async function refreshAssignedCharacterForProfile(profile){
+    const token=++voiceAssignmentEpoch,side=$('assignedSide');
+    if(side)side.textContent='';
+    if($('sumAssign'))$('sumAssign').textContent=profile?.name?'Not assigned':'';
+    const p=side?.closest('p'),heading=p?.previousElementSibling;
+    if(heading&&/^currently assigned/i.test(String(heading.textContent||'').trim()))heading.textContent='Currently assigned character';
+    if(p)p.hidden=true;
+    if(!profile?.saved||!profile?.name)return;
+    try{
+      const rows=await call('character_library.list');
+      if(token!==voiceAssignmentEpoch)return;
+      libraryCharacters=Array.isArray(rows)?rows:[];
+      const wanted=profile.name.trim().toLowerCase();
+      const matches=libraryCharacters.filter(item=>String(item.voice_profile||item.voice||'').trim().toLowerCase()===wanted);
+      const chosen=matches[0],primary=String(chosen?.primary_name||chosen?.name||'').trim();
+      if(side)side.textContent=primary;
+      if($('sumAssign'))$('sumAssign').textContent=primary?'Assigned · '+primary:'Not assigned';
+      if(p)p.hidden=!primary;
+    }catch(error){if(token===voiceAssignmentEpoch)console.warn('[Ryu character assignment summary]',error);}
+  }
+  function ensureVoiceStudioRuntimeControls(){
+    const panel=document.querySelector('#voices .panel[data-panel="4"]'),toolbar=$('playPreview')?.parentElement;
+    if(toolbar){
+      let timer=$('previewPlaybackTime');
+      if(!timer){timer=document.createElement('span');timer.id='previewPlaybackTime';timer.className='muted';timer.textContent='00:00 / 00:00';timer.style.cssText='font-variant-numeric:tabular-nums;min-width:86px;text-align:center';$('playPreview')?.insertAdjacentElement('afterend',timer);}
+      let download=$('downloadPreview');
+      if(!download){download=document.createElement('button');download.id='downloadPreview';download.type='button';download.className='btn secondary';download.textContent='↓ Download Preview';download.disabled=true;timer.insertAdjacentElement('afterend',download);}
+      const volume=toolbar.querySelector('input[type="range"]');
+      if(volume){volume.id='previewVolume';volume.min='0';volume.max='100';volume.step='1';
+        if(!volume.dataset.previewVolumeBound){volume.dataset.previewVolumeBound='true';previewVolume=Math.max(0,Math.min(1,Number(volume.value||85)/100));volume.addEventListener('input',()=>{previewVolume=Math.max(0,Math.min(1,Number(volume.value||0)/100));if(previewAudio)previewAudio.volume=previewVolume;volume.setAttribute('aria-valuetext',Math.round(previewVolume*100)+' percent');});}
+      }
+    }
+    const previewTextarea=panel&&[...panel.querySelectorAll('textarea')].find(el=>/preview text/i.test(String(el.closest('label')?.textContent||'')));
+    if(previewTextarea&&!previewTextarea.dataset.previewIdentityBound){previewTextarea.dataset.previewIdentityBound='true';previewTextarea.addEventListener('input',()=>invalidateVoicePreview());}
+    const designPanel=document.querySelector('#voices .provider[data-provider="voicedesign"]');
+    if(designPanel){
+      const prompt=designPanel.querySelector('textarea'),language=designPanel.querySelector('select'),seed=designPanel.querySelector('input[type="number"]');
+      const detachForEdit=()=>{
+        if(selectedVoice){
+          const profile=voices.find(item=>item.saved===true&&item.name.toLowerCase()===selectedVoice.toLowerCase());
+          if(profile&&profile.provider==='qwen-character'&&profile.qwen_mode==='design'){
+            profileEditOriginalName=profile.name;selectedVoice=null;selectedVoiceId=null;selectedVoiceProvider='qwen-character';
+            updateVoiceSummary({name:$('profileName')?.value||profile.name,provider:'qwen-character',qwen_mode:'design'},{saved:false,previewReady:false,assignment:'Not assigned'});
+          }
+        }
+        invalidateVoicePreview();
+      };
+      for(const node of [prompt,language,seed])if(node&&!node.dataset.voiceDesignIdentityBound){node.dataset.voiceDesignIdentityBound='true';node.addEventListener('input',detachForEdit);node.addEventListener('change',detachForEdit);}
+    }
+    updateVoiceActionButtons();
+  }
+  async function openVoiceCharacterAssignment(){
+    if(!voicePreviewValid||!lastVoicePreviewPath)throw new Error('Generate a valid preview for the selected voice before assigning it.');
+    const name=currentVoiceName(),profile=voices.find(item=>item.saved===true&&item.name.toLowerCase()===name.toLowerCase());
+    if(!profile)throw new Error('Save this voice profile first, then generate a fresh preview before assigning it to a character.');
+    libraryCharacters=await call('character_library.list');
+    const overlay=document.createElement('div');overlay.id='ryuVoiceCharacterAssignDialog';
+    overlay.style.cssText='position:fixed;inset:0;z-index:100001;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(3,5,10,.82);backdrop-filter:blur(7px)';
+    const modal=document.createElement('section');modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-labelledby','ryuVoiceCharacterAssignTitle');
+    modal.style.cssText='box-sizing:border-box;width:min(580px,100%);max-height:min(86vh,760px);overflow:auto;background:#151a25;border:1px solid rgba(255,255,255,.13);border-radius:18px;box-shadow:0 24px 80px rgba(0,0,0,.5);padding:22px;color:#f4f5f8';
+    const title=document.createElement('h2');title.id='ryuVoiceCharacterAssignTitle';title.textContent='Assign Voice to Character';title.style.cssText='margin:0 0 5px;font-size:22px';
+    const hint=document.createElement('p');hint.className='muted';hint.textContent='Profile: '+profile.name+'. Choose a series and its primary character name. This assignment is saved to Character Library and shared with Character Studio.';hint.style.cssText='margin:0 0 18px;line-height:1.5';
+    const field=(textValue,control)=>{const label=document.createElement('label');label.style.cssText='display:block;margin:12px 0 5px;color:#aeb6c5;font-size:12px';label.textContent=textValue;label.appendChild(control);control.style.cssText='box-sizing:border-box;display:block;width:100%;margin-top:6px;padding:11px;border-radius:10px;border:1px solid #343b4a;background:#0c1018;color:#f6f7fa;font:inherit';return label;};
+    const seriesSelect=document.createElement('select'),characterSelect=document.createElement('select');
+    const seriesInput=document.createElement('input');seriesInput.type='text';seriesInput.maxLength=300;seriesInput.placeholder='Enter a series name';seriesInput.hidden=true;
+    const characterInput=document.createElement('input');characterInput.type='text';characterInput.maxLength=300;characterInput.placeholder='Primary character name';characterInput.hidden=true;
+    const seriesCaption=document.createElement('label');seriesCaption.style.cssText='display:block;margin-top:5px;font-size:12px;color:#aeb6c5';seriesCaption.textContent='New series name';seriesCaption.appendChild(seriesInput);
+    const charCaption=document.createElement('label');charCaption.style.cssText='display:block;margin-top:5px;font-size:12px;color:#aeb6c5';charCaption.textContent='New primary character';charCaption.appendChild(characterInput);
+    const seriesNames=[...new Set(libraryCharacters.map(item=>String(item.series||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    const addOption=(select,value,label)=>{const option=document.createElement('option');option.value=value;option.textContent=label;select.appendChild(option);};
+    addOption(seriesSelect,'','Choose a series');for(const series of seriesNames)addOption(seriesSelect,series,series);addOption(seriesSelect,'__new_series__','＋ Create a new series…');
+    const refreshCharactersForSeries=()=>{
+      const createSeries=seriesSelect.value==='__new_series__',series=(createSeries?seriesInput.value:seriesSelect.value).trim();
+      seriesInput.hidden=!createSeries;characterSelect.replaceChildren();addOption(characterSelect,'','Choose a character');
+      for(const item of libraryCharacters.filter(c=>String(c.series||'').trim().toLowerCase()===series.toLowerCase()))addOption(characterSelect,String(item.id||''),String(item.primary_name||item.name||'Unnamed character'));
+      addOption(characterSelect,'__new_character__','＋ Add a new primary character…');
+      if(createSeries)characterSelect.value='__new_character__';
+      characterInput.hidden=!(createSeries||characterSelect.value==='__new_character__');
+    };
+    seriesSelect.addEventListener('change',refreshCharactersForSeries);
+    seriesInput.addEventListener('input',refreshCharactersForSeries);
+    characterSelect.addEventListener('change',()=>{characterInput.hidden=!(seriesSelect.value==='__new_series__'||characterSelect.value==='__new_character__');});
+    const meta=document.createElement('p');meta.className='muted';meta.style.cssText='font-size:12px;line-height:1.45;margin:12px 0 0';meta.textContent='Only the primary name is required. Aliases, dialogue samples and pronunciation rules remain available in Character Library.';
+    const actions=document.createElement('div');actions.style.cssText='display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:20px';
+    const cancel=document.createElement('button');cancel.type='button';cancel.className='btn secondary';cancel.textContent='Cancel';
+    const assign=document.createElement('button');assign.type='button';assign.className='btn';assign.textContent='Assign Voice';
+    const close=()=>overlay.remove();cancel.addEventListener('click',close);overlay.addEventListener('click',event=>{if(event.target===overlay)close();});
+    assign.addEventListener('click',async()=>{
+      assign.disabled=true;assign.textContent='Saving…';
+      try{
+        const isNewSeries=seriesSelect.value==='__new_series__',series=(isNewSeries?seriesInput.value:seriesSelect.value).trim();
+        if(!series)throw new Error('Choose or enter a series name.');
+        let character=libraryCharacters.find(item=>String(item.id||'')===characterSelect.value);
+        if(characterSelect.value==='__new_character__'||isNewSeries){
+          const primary=characterInput.value.trim();if(!primary)throw new Error('Enter the primary character name.');
+          const saved=await call('character_library.save',{name:primary,series,scope:'Series · '+series,short:primary.split(/\s+/)[0],aliases:[],notes:'',dialogue_sample:''});
+          character=saved.character;libraryCharacters.push(character);
+        }
+        if(!character)throw new Error('Choose a character from the selected series.');
+        const assigned=await call('character_library.save',{
+          id:character.id,name:character.primary_name||character.name,series:String(character.series||series),
+          scope:'Series · '+String(character.series||series),short:character.short||'',aliases:character.aliases||[],
+          notes:character.notes||'',dialogue_sample:character.dialogue_sample||'',voice_profile:profile.name
+        });
+        const primaryName=assigned.character.primary_name||assigned.character.name;
+        if(characters.some(item=>String(item.name||'').toLowerCase()===String(primaryName).toLowerCase())){
+          await call('character.assign',{name:primaryName,profile_name:profile.name});
+          await refreshCharacters();
+        }
+        await refreshCharacterLibrary();await refreshVoices();await refreshAssignedCharacterForProfile({...profile,saved:true});
+        close();message('Assigned '+profile.name+' to '+primaryName+' · '+(assigned.character.series||series)+'.');
+      }catch(error){message(error?.message||String(error),true);assign.disabled=false;assign.textContent='Assign Voice';}
+    });
+    modal.append(title,hint,field('Series',seriesSelect),seriesCaption,field('Character',characterSelect),charCaption,meta,actions);
+    actions.append(cancel,assign);overlay.appendChild(modal);document.body.appendChild(overlay);refreshCharactersForSeries();
+    seriesInput.hidden=true;characterInput.hidden=true;seriesSelect.focus();
+  }
+
   function applySavedVoiceProfile(profile, announce = true) {
     if (!profile || profile.saved !== true) return false;
-    selectedVoice = profile.name;
-    selectedVoiceId = profile.voice_id;
-    selectedVoiceProvider = profile.provider;
-    if ($('profileName')) $('profileName').value = profile.name;
-    if ($('premiumName')) $('premiumName').value = profile.name;
-    if ($('profileLibrary')) $('profileLibrary').textContent = profile.provider;
-    if ($('profileVoice')) $('profileVoice').textContent = profile.voice_id;
-    if ($('previewProfile')) $('previewProfile').textContent = profile.name;
-    if ($('useNarrator')) $('useNarrator').disabled = false;
-    if ($('saveOnly')) $('saveOnly').disabled = false;
-    const providerPanel = {
-      piper:'offline', kokoro:'offline', 'windows-sapi':'sapi',
-      'qwen-character':profile.qwen_mode === 'design' ? 'voicedesign' : /clone/i.test(profile.qwen_mode || '') ? 'qwenclone' : 'customvoice',
-      chatterbox:'customref', 'edge-tts':'edge', elevenlabs:'eleven'
-    }[profile.provider];
-    document.querySelectorAll('#voices .provider').forEach(panel => panel.classList.toggle('active', panel.dataset.provider === providerPanel));
-    const designPanel = document.querySelector('.provider[data-provider="voicedesign"]');
-    if (designPanel) {
-      const prompt = designPanel.querySelector('textarea');
-      const language = designPanel.querySelector('select');
-      const seed = designPanel.querySelector('input[type="number"]');
-      if (prompt && profile.qwen_prompt != null) prompt.value = profile.qwen_prompt;
-      if (language && profile.language) language.value = profile.language;
-      if (seed) seed.value = profile.qwen_seed ?? '';
+    invalidateVoicePreview();
+    selectedVoice=profile.name;profileEditOriginalName=profile.name;
+    selectedVoiceId=profile.voice_id;selectedVoiceProvider=profile.provider;
+    if($('profileName'))$('profileName').value=profile.name;
+    if($('premiumName'))$('premiumName').value=profile.name;
+    if($('profileLibrary'))$('profileLibrary').textContent=({
+      piper:'Offline Neural Voices',kokoro:'Offline Neural Voices','qwen-character':profile.qwen_mode==='design'?'Qwen VoiceDesign':/clone/i.test(profile.qwen_mode||'')?'Qwen Voice Clone':'Qwen CustomVoice',
+      'windows-sapi':'Windows SAPI','edge-tts':'Edge TTS','elevenlabs':'ElevenLabs',chatterbox:'Reference Voice'
+    })[profile.provider]||profile.provider;
+    if($('profileVoice'))$('profileVoice').textContent=profile.voice_id||profile.name;
+    if($('previewProfile'))$('previewProfile').textContent=profile.name;
+    const providerPanel=providerPanelForProfile(profile);
+    document.querySelectorAll('#voices .provider').forEach(panel=>panel.classList.toggle('active',panel.dataset.provider===providerPanel));
+    const designPanel=document.querySelector('.provider[data-provider="voicedesign"]');
+    if(designPanel){
+      const prompt=designPanel.querySelector('textarea'),language=designPanel.querySelector('select'),seed=designPanel.querySelector('input[type="number"]');
+      if(prompt&&profile.qwen_prompt!=null)prompt.value=profile.qwen_prompt;
+      if(language&&profile.language)language.value=profile.language;
+      if(seed)seed.value=profile.qwen_seed??'';
+      designPanel.querySelectorAll('.preset').forEach(item=>item.classList.toggle('active',
+        String(item.textContent||'').trim().toLowerCase()===String(profile.name||'').replace(/^.*?[·•]\s*/,'').trim().toLowerCase()));
     }
-    const clonePanel = document.querySelector('.provider[data-provider="qwenclone"]');
-    if (clonePanel) {
-      const transcript = clonePanel.querySelector('textarea');
-      if (transcript && profile.reference_text != null) transcript.value = profile.reference_text;
-    }
-    const customPanel = document.querySelector('.provider[data-provider="customref"]');
-    const style = customPanel?.querySelector('select');
-    if (style && profile.style_preset) style.value = profile.style_preset;
-    const select = document.querySelector('#voices .panel[data-panel="3"] .toolbar select');
-    if (select) select.value = profile.name;
-    if (announce) message('Loaded saved voice profile: ' + profile.name + '. Its saved settings are restored; preview audio is a separate action.');
+    const transcript=document.querySelector('.provider[data-provider="qwenclone"] textarea');
+    if(transcript&&profile.reference_text!=null)transcript.value=profile.reference_text;
+    const style=document.querySelector('.provider[data-provider="customref"] select');
+    if(style&&profile.style_preset)style.value=profile.style_preset;
+    const select=document.querySelector('#voices .panel[data-panel="3"] .toolbar select');if(select)select.value=profile.name;
+    const detailValues={detailProvider:profile.provider,detailVoiceId:profile.voice_id||'',detailLanguage:profile.language||'',detailModel:profile.model_id||'',detailDescription:profile.qwen_prompt||profile.notes||''};
+    for(const [id,value] of Object.entries(detailValues))if($(id))$(id).textContent=String(value||'—');
+    updateVoiceSummary(profile,{saved:true,previewReady:false,assignment:'Not assigned'});
+    void refreshAssignedCharacterForProfile(profile);updateVoiceActionButtons();
+    if(announce)message('Loaded saved voice profile: '+profile.name+'. Provider, voice ID and saved settings are restored. Generate a fresh preview before playback or assignment.');
     return true;
   }
 
@@ -1603,7 +1814,10 @@
         if ($('aiProgressText')) $('aiProgressText').textContent = job.stage || job.message || job.state;
         if ($('aiProgressBar')) $('aiProgressBar').style.width = pct + '%';
         if ($('previewProgress')) $('previewProgress').style.width = pct + '%';
-        if ($('previewState') && job.type === 'voice-preview') $('previewState').textContent = job.stage || job.state;
+        if ($('previewState') && job.type === 'voice-preview') {
+          $('previewState').textContent=(job.stage||job.state)+' · '+Math.round(pct)+'%';
+          if($('validation')&&!['completed','failed','cancelled'].includes(job.state))$('validation').textContent='Synthesizing preview · '+Math.round(pct)+'% · '+(job.stage||job.state);
+        }
         await refreshJobs();
         if (finished || monitorToken !== monitorEpoch) return;
         if (['completed','failed','cancelled'].includes(job.state)) {
@@ -1818,8 +2032,7 @@
   }
 
   function applyVoiceDesignPreset(button) {
-    const panel=document.querySelector('.provider[data-provider="voicedesign"]');
-    const textarea=panel?.querySelector('textarea');
+    const panel=document.querySelector('.provider[data-provider="voicedesign"]'),textarea=panel?.querySelector('textarea');
     if(!panel||!textarea)return;
     const preset=String(button.textContent||'').trim().toLowerCase();
     const prompts={
@@ -1831,9 +2044,19 @@
       'custom description':''
     };
     if(!(preset in prompts))return;
+    invalidateVoicePreview();selectedVoice=null;selectedVoiceId=null;selectedVoiceProvider='qwen-character';profileEditOriginalName='';
     panel.querySelectorAll('.preset').forEach(item=>item.classList.toggle('active',item===button));
     textarea.value=prompts[preset];
-    textarea.dispatchEvent(new Event('input',{bubbles:true}));
+    const label=String(button.textContent||'Custom Description').trim(),name='Qwen VoiceDesign · '+label;
+    if($('profileName'))$('profileName').value=name;if($('premiumName'))$('premiumName').value=name;
+    if($('profileLibrary'))$('profileLibrary').textContent='Qwen VoiceDesign';
+    if($('profileVoice'))$('profileVoice').textContent=label;
+    if($('previewProfile'))$('previewProfile').textContent=name;
+    if($('sumProfile'))$('sumProfile').textContent='Unsaved';
+    const assigned=$('assignedSide');if(assigned)assigned.textContent='';const p=assigned?.closest('p');if(p)p.hidden=true;
+    updateVoiceSummary({name,provider:'qwen-character',qwen_mode:'design'},{saved:false,previewReady:false,assignment:'Not assigned'});
+    textarea.dispatchEvent(new Event('input',{bubbles:true}));updateVoiceActionButtons();
+    message('VoiceDesign preset selected: '+label+'. The previous saved profile is no longer selected; save and preview this voice separately.');
   }
 
   function requestVoiceProfileSaveName(initialName, providerKey, voiceLabel, purpose = 'profile') {
@@ -1924,7 +2147,7 @@
 
   async function saveVoice(options = {}) {
     const name = String(options.nameOverride ?? ($('profileName')?.value || $('premiumName')?.value || '')).trim();
-    const originalName = String(options.originalNameOverride ?? selectedVoice ?? '').trim();
+    const originalName = String(options.originalNameOverride ?? selectedVoice ?? profileEditOriginalName ?? '').trim();
     const existingSavedProfile = voices.find(profile =>
       profile.saved === true && profile.name.toLowerCase() === originalName.toLowerCase()
     ) || null;
@@ -1990,10 +2213,9 @@
       style_preset:existingSavedProfile?.style_preset || 'Natural',
       reference_text:$('cloneTranscript')?.value || existingSavedProfile?.reference_text || ''
     });
-    selectedVoice = result.name;
-    selectedVoiceId = result.voice_id;
-    selectedVoiceProvider = result.provider;
+    selectedVoice=result.name;profileEditOriginalName=result.name;selectedVoiceId=result.voice_id;selectedVoiceProvider=result.provider;
     await refreshVoices();
+    if(voicePreviewValid)lastVoicePreviewProfileName=result.name;
     if ($('profileName')) $('profileName').value = result.name;
     if ($('premiumName')) $('premiumName').value = result.name;
     const savedSelect = document.querySelector('#voices .panel[data-panel="3"] .toolbar select');
@@ -2001,12 +2223,12 @@
     document.querySelectorAll('#voices *').forEach(node => {
       if (node.children.length === 0 && node.textContent.trim() === 'Unsaved') node.textContent = 'Saved';
     });
-    if ($('profileLibrary')) $('profileLibrary').textContent = result.provider;
-    if ($('profileVoice')) $('profileVoice').textContent = result.voice_id;
-    if ($('previewProfile')) $('previewProfile').textContent = result.name;
-    if ($('useNarrator')) $('useNarrator').disabled = false;
-    if ($('saveOnly')) $('saveOnly').disabled = false;
-    message('Saved voice profile locally: ' + result.name);
+    if ($('profileLibrary')) $('profileLibrary').textContent=({'piper':'Offline Neural Voices','kokoro':'Offline Neural Voices','qwen-character':result.qwen_mode==='design'?'Qwen VoiceDesign':/clone/i.test(result.qwen_mode||'')?'Qwen Voice Clone':'Qwen CustomVoice','windows-sapi':'Windows SAPI','edge-tts':'Edge TTS','elevenlabs':'ElevenLabs','chatterbox':'Reference Voice'})[result.provider]||result.provider;
+    if ($('profileVoice')) $('profileVoice').textContent=result.voice_id||result.name;
+    if ($('previewProfile')) $('previewProfile').textContent=result.name;
+    updateVoiceSummary({...result,saved:true},{saved:true,previewReady:voicePreviewValid,assignment:$('sumAssign')?.textContent||'Not assigned'});
+    void refreshAssignedCharacterForProfile({...result,saved:true});updateVoiceActionButtons();
+    message('Saved voice profile locally: '+result.name);
     return result;
   }
 
@@ -2046,41 +2268,41 @@
     await startImportPayload({file_name:file.name,title:file.name.replace(/\.[^.]+$/,''),content_base64:btoa(binary)}, file.name);
   }
   function preparePreviewPlayback(job, requestedSeconds) {
-    const url = job?.result?.file_url;
-    const actual = Number(job?.result?.actual_duration_seconds);
-    const requested = Number(requestedSeconds || job?.result?.requested_duration_seconds || 0);
-    const play = $('playPreview');
-    if (!url || !Number.isFinite(actual) || actual <= 0) {
-      if (play) play.disabled = true;
-      if ($('previewState')) $('previewState').textContent = 'Failed';
-      if ($('validation')) $('validation').textContent = !url
-        ? 'Preview job completed without a playable local audio file. Check the job details and retry.'
-        : 'Preview job completed without a valid measured audio duration. The result cannot be marked ready.';
-      return false;
+  function formatPlaybackTime(value){const seconds=Math.max(0,Math.floor(Number(value)||0));return String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');}
+  function syncPreviewPlaybackTime(){const node=$('previewPlaybackTime');if(!node)return;node.textContent=formatPlaybackTime(previewAudio?.currentTime||0)+' / '+formatPlaybackTime(previewAudio?.duration||0);}
+  function preparePreviewPlayback(job, requestedSeconds) {
+    const url=job?.result?.file_url,actual=Number(job?.result?.actual_duration_seconds),requested=Number(requestedSeconds||job?.result?.requested_duration_seconds||0),play=$('playPreview');
+    if(!url||!Number.isFinite(actual)||actual<=0){
+      voicePreviewValid=false;lastVoicePreviewPath=null;if(play)play.disabled=true;if($('downloadPreview'))$('downloadPreview').disabled=true;
+      if($('previewState'))$('previewState').textContent='Failed';
+      if($('validation'))$('validation').textContent=!url?'Preview job completed without a playable local audio file. Check the job details and retry.':'Preview job completed without a valid measured audio duration. The result cannot be marked ready.';
+      updateVoiceActionButtons();return false;
     }
-    if (previewAudio) { previewAudio.pause(); previewAudio = null; }
-    previewAudio = new Audio(url);
-    previewAudio.preload = 'auto';
-    previewAudio.onended = () => { if (play) play.textContent = '▶ Play'; };
-    previewAudio.onerror = () => {
-      if (play) play.disabled = true;
-      if ($('previewState')) $('previewState').textContent = 'Playback error';
-      if ($('validation')) $('validation').textContent = 'The preview file exists but the embedded player could not open it. Use the preview output path from job details.';
-    };
-    if (play) play.disabled = false;
-    if ($('validation')) {
-      $('validation').textContent = requested > 0 && actual + 1.5 < requested
-        ? 'Preview shorter than requested · ' + actual.toFixed(1) + 's of ' + requested.toFixed(0) + 's. The source text or voice provider produced less audio than requested; try a longer passage and check the selected voice.'
-        : 'Preview ready · ' + actual.toFixed(1) + ' seconds' + (requested > 0 ? ' (requested ' + requested.toFixed(0) + 's)' : '');
-    }
-    return true;
+    if(previewAudio){previewAudio.pause();previewAudio=null;}
+    previewAudio=new Audio(url);previewAudio.preload='auto';previewAudio.volume=previewVolume;
+    lastVoicePreviewPath=String(job?.result?.output_path||'');lastVoicePreviewProfileName=currentVoiceName();voicePreviewValid=Boolean(lastVoicePreviewPath);
+    previewAudio.ontimeupdate=syncPreviewPlaybackTime;previewAudio.onloadedmetadata=syncPreviewPlaybackTime;
+    previewAudio.onplay=()=>{if(play)play.textContent='Ⅱ Pause';if($('wave'))$('wave').classList.add('playing');syncPreviewPlaybackTime();};
+    previewAudio.onpause=()=>{if(play)play.textContent='▶ Play';if($('wave'))$('wave').classList.remove('playing');syncPreviewPlaybackTime();};
+    previewAudio.onended=()=>{if(play)play.textContent='▶ Play';if($('wave'))$('wave').classList.remove('playing');syncPreviewPlaybackTime();};
+    previewAudio.onerror=()=>{voicePreviewValid=false;if(play)play.disabled=true;if($('downloadPreview'))$('downloadPreview').disabled=true;if($('previewState'))$('previewState').textContent='Playback error';if($('validation'))$('validation').textContent='The preview file exists but the embedded player could not open it. Generate another preview and check the local audio runtime.';updateVoiceActionButtons();};
+    if(play)play.disabled=false;if($('downloadPreview'))$('downloadPreview').disabled=false;
+    if($('previewState'))$('previewState').textContent='Ready · 100%';if($('previewProgress'))$('previewProgress').style.width='100%';
+    if($('validation'))$('validation').textContent=requested>0&&actual+1.5<requested
+      ?'Preview shorter than requested · '+actual.toFixed(1)+'s of '+requested.toFixed(0)+'s. The source text or voice provider produced less audio than requested; try a longer passage and check the selected voice.'
+      :'Preview ready · '+actual.toFixed(1)+' seconds'+(requested>0?' (requested '+requested.toFixed(0)+'s)':'');
+    syncPreviewPlaybackTime();
+    updateVoiceSummary({name:currentVoiceName(),provider:selectedVoiceProvider||({offline:'piper',sapi:'windows-sapi',customvoice:'qwen-character',voicedesign:'qwen-character',qwenclone:'qwen-character',customref:'chatterbox',edge:'edge-tts',eleven:'elevenlabs'}[document.querySelector('#voices .provider.active')?.dataset.provider]||'piper'),qwen_mode:document.querySelector('#voices .provider.active')?.dataset.provider==='voicedesign'?'design':'custom'},
+      {saved:Boolean(selectedVoice),previewReady:true,assignment:$('sumAssign')?.textContent||'Not assigned'});
+    updateVoiceActionButtons();return voicePreviewValid;
   }
   async function previewVoice() {
-    const name = String(selectedVoice || $('profileName')?.value || '').trim();
-    const providerKey = document.querySelector('#voices .provider.active')?.dataset.provider || '';
-    const providerMap = {offline:'piper',sapi:'windows-sapi',customvoice:'qwen-character',voicedesign:'qwen-character',qwenclone:'qwen-character',customref:'chatterbox',edge:'edge-tts',eleven:'elevenlabs'};
-    const savedProfile = voices.find(item => item.saved === true && item.name.toLowerCase() === name.toLowerCase());
-    const resolvedProvider = providerKey === 'offline' ? (savedProfile?.provider || selectedVoiceProvider || 'piper') : providerMap[providerKey];
+    const name=String(selectedVoice||$('profileName')?.value||'').trim();
+    const activeProviderKey=document.querySelector('#voices .provider.active')?.dataset.provider||'';
+    const providerMap={offline:'piper',sapi:'windows-sapi',customvoice:'qwen-character',voicedesign:'qwen-character',qwenclone:'qwen-character',customref:'chatterbox',edge:'edge-tts',eleven:'elevenlabs'};
+    const savedProfile=selectedVoice?voices.find(item=>item.saved===true&&item.name.toLowerCase()===selectedVoice.toLowerCase()):null;
+    const providerKey=savedProfile?providerPanelForProfile(savedProfile):activeProviderKey;
+    const resolvedProvider=savedProfile?savedProfile.provider:(providerKey==='offline'?(selectedVoiceProvider||'piper'):providerMap[providerKey]);
     if (!savedProfile && !resolvedProvider) throw new Error('Select a provider and voice from Voice Library first.');
     const c = selectedChapter();
     const lengthGroup = [...document.querySelectorAll('#voices .toolbar')].find(el => /Length/.test(el.textContent));
@@ -2127,15 +2349,20 @@
       payload.cfg_weight = 0.35;
       payload.style_preset = panel?.querySelector('select')?.value || 'Natural';
     }
-    const data = await call('voice.preview', payload);
-    if (previewAudio) { previewAudio.pause(); previewAudio = null; }
-    if ($('playPreview')) { $('playPreview').disabled = true; $('playPreview').textContent = '▶ Play'; }
-    if ($('previewProgress')) $('previewProgress').style.width = '0%';
-    if ($('previewState')) $('previewState').textContent = 'Queued';
-    if ($('validation')) $('validation').textContent = 'Preview job ' + data.job_id + ' is running locally.';
-    await monitorJob(data.job_id, async job => {
-      const playable = preparePreviewPlayback(job, Number(duration));
-      if ($('previewState') && playable) $('previewState').textContent = 'Ready';
+    const previewToken=++voicePreviewEpoch;voicePreviewValid=false;lastVoicePreviewPath=null;lastVoicePreviewProfileName='';
+    if(previewAudio){previewAudio.pause();previewAudio=null;}
+    if($('playPreview')){$('playPreview').disabled=true;$('playPreview').textContent='▶ Play';}
+    if($('downloadPreview'))$('downloadPreview').disabled=true;
+    if($('previewProgress'))$('previewProgress').style.width='0%';
+    if($('previewState'))$('previewState').textContent='Preparing · 2%';
+    if($('validation'))$('validation').textContent='Preparing synthesis · 2%';
+    updateVoiceActionButtons();
+    const data=await call('voice.preview',payload);
+    if(previewToken!==voicePreviewEpoch)return;
+    await monitorJob(data.job_id,async job=>{
+      if(previewToken!==voicePreviewEpoch)return true;
+      const playable=preparePreviewPlayback(job,Number(duration));
+      if($('previewState')&&playable)$('previewState').textContent='Ready · 100%';
       return playable;
     });
   }
@@ -2819,6 +3046,7 @@
     // The approved HTML prototype attaches a fake timer-based player directly
     // to these buttons. Replace those DOM nodes before attaching real playback,
     // so the demo timer can never masquerade as audiobook audio.
+    ensureVoiceStudioRuntimeControls();
     for (const id of ['mainPlay','miniPlay']) {
       const original = $(id);
       if (!original) continue;
@@ -2979,13 +3207,16 @@
         }
         const previousName = String($('profileName')?.value || '').trim();
         const hadSavedSelection = Boolean(selectedVoice);
+        invalidateVoicePreview();
         selectedVoiceId = b.dataset.voice;
         selectedVoiceProvider = b.dataset.voiceProvider || null;
-        selectedVoice=null;
+        selectedVoice=null;profileEditOriginalName='';
         const label=b.dataset.voiceLabel || b.dataset.voice;
         if($('profileVoice'))$('profileVoice').textContent=label;
         if($('premiumName') && (!String($('premiumName').value || '').trim() || hadSavedSelection)) $('premiumName').value=label+' Custom';
-        if($('profileName') && (!previousName || hadSavedSelection || /^Offline Neural\s*[·•-]/i.test(previousName) || /^Edge TTS\s*[·•-]/i.test(previousName))) $('profileName').value=label+' Custom';
+        if($('profileName') && (!previousName || hadSavedSelection || /^Offline Neural\s*[·•-]/i.test(previousName) || /^Edge TTS\s*[·•-]/i.test(previousName) || /^Qwen VoiceDesign\s*[·•-]/i.test(previousName))) $('profileName').value=label+' Custom';
+        updateVoiceSummary({name:$('profileName')?.value||'',provider:selectedVoiceProvider,qwen_mode:'custom'},{saved:false,previewReady:false,assignment:'Not assigned'});
+        const assigned=$('assignedSide');if(assigned)assigned.textContent='';const ap=assigned?.closest('p');if(ap)ap.hidden=true;updateVoiceActionButtons();
         document.querySelectorAll('#voices *').forEach(node => {
           if(node.children.length===0 && node.textContent.trim()==='Saved') node.textContent='Unsaved';
         });
@@ -2993,12 +3224,15 @@
       }
       const provider = e.target.closest('.provider');
       if(provider && !e.target.closest('button,input,textarea,select,label,[data-voice]')) {
-        selectedVoiceId=null; selectedVoice=null; selectedVoiceProvider=null;
+        invalidateVoicePreview();
+        selectedVoiceId=null;selectedVoice=null;selectedVoiceProvider=null;profileEditOriginalName='';
         const key = provider.dataset.provider;
         const defaultLabels = {offline:'Amy',sapi:'David',customvoice:'Serena',voicedesign:'Custom voice description',qwenclone:'Reference voice',customref:'Reference voice',edge:'Edge neural voice',eleven:'ElevenLabs voice'};
         if($('profileVoice'))$('profileVoice').textContent=defaultLabels[key] || 'Custom voice';
         if($('profileName'))$('profileName').value='';
         if($('premiumName'))$('premiumName').value='';
+        updateVoiceSummary(null,{saved:false,previewReady:false,assignment:''});
+        const assigned=$('assignedSide');if(assigned)assigned.textContent='';const ap=assigned?.closest('p');if(ap)ap.hidden=true;updateVoiceActionButtons();
         void refreshProviderCatalog(key, false).catch(error => console.warn('[Ryu voice catalogue]', error));
         document.querySelectorAll('#voices *').forEach(node => {
           if(node.children.length===0 && node.textContent.trim()==='Saved') node.textContent='Unsaved';
@@ -3330,6 +3564,7 @@
     // backend) and duplicated the Step 3 save action. Remove this unsupported control.
     $('saveDraft')?.remove();
     if ($('useNarrator')) $('useNarrator').onclick=act(async()=>{
+      if(!voicePreviewValid)throw new Error('Generate and validate a preview for this voice before assigning it as the narrator.');
       const v=await saveVoice();
       if(!v)return;
       await call('voice.select',{profile_name:v.name});
@@ -3341,8 +3576,15 @@
     });
     if ($('generatePreview')) $('generatePreview').onclick=act(previewVoice);
     if ($('previewGenerate')) $('previewGenerate').onclick=act(async()=>{const name=selectedVoice||$('profileName')?.value;const group=[...document.querySelectorAll('#generate .segmented')].find(el=>[...el.querySelectorAll('button')].some(b=>/10s|30s|60s/i.test(b.textContent)));const duration=group?.querySelector('button.active')?.textContent.match(/\d+/)?.[0]||'30';const data=await call('production.preview',{profile_name:name,duration_seconds:Number(duration)});await monitorJob(data.job_id,job=>preparePreviewPlayback(job,Number(duration)));});
-    if ($('playPreview')) $('playPreview').onclick=act(async()=>{if(!previewAudio)throw new Error('Generate a preview first.');if(!previewAudio.paused){previewAudio.pause();$('playPreview').textContent='▶ Play';}else{await previewAudio.play();$('playPreview').textContent='Ⅱ Pause';}});
-    if ($('stopPreview')) $('stopPreview').onclick=()=>{if(previewAudio){previewAudio.pause();previewAudio.currentTime=0;}if($('playPreview'))$('playPreview').textContent='▶ Play';};
+    if ($('playPreview')) $('playPreview').onclick=act(async()=>{if(!previewAudio||!voicePreviewValid)throw new Error('Generate a validated preview first.');if(!previewAudio.paused){previewAudio.pause();$('playPreview').textContent='▶ Play';}else{await previewAudio.play();$('playPreview').textContent='Ⅱ Pause';}});
+    if ($('stopPreview')) $('stopPreview').onclick=()=>{if(previewAudio){previewAudio.pause();previewAudio.currentTime=0;}if($('playPreview'))$('playPreview').textContent='▶ Play';syncPreviewPlaybackTime();};
+    if ($('downloadPreview')) $('downloadPreview').onclick=act(async()=>{
+      if(!voicePreviewValid||!lastVoicePreviewPath)throw new Error('Generate a validated preview before downloading it.');
+      const name=(lastVoicePreviewProfileName||currentVoiceName()||'Ryu Voice Preview').replace(/[<>:"/\\|?*\x00-\x1f]+/g,'-').trim()||'Ryu Voice Preview';
+      const result=await call('voice.preview.save',{source_path:lastVoicePreviewPath,suggested_name:name.replace(/\s+/g,'_')});
+      if(result.cancelled){message('Preview save cancelled.');return;}
+      message('Voice preview saved to '+result.path);
+    });
     if ($('startGenerate')) $('startGenerate').onclick=act(async()=>{const data=await call('production.generate_book',{profile_name:selectedVoice||$('profileName')?.value,bitrate:256});await monitorJob(data.job_id);});
     if ($('pauseGenerate')) $('pauseGenerate').onclick=act(async()=>{if(!activeJob||activeJobType!=='audiobook-generation')throw new Error('There is no active audiobook generation job to pause.');await call('job.pause',{job_id:activeJob});await refreshJobs();});
     if ($('cancelJob')) $('cancelJob').onclick=act(async()=>{if(!activeJob||activeJobType!=='audiobook-generation')throw new Error('There is no active audiobook generation job to cancel.');await call('job.cancel',{job_id:activeJob});await refreshJobs();});
@@ -3411,7 +3653,7 @@
       if($('assignedInspectorName'))$('assignedInspectorName').textContent='Select a character';
       message('Character removed from this book’s saved cast.');
     });
-    if ($('assignCharacter')) $('assignCharacter').onclick=act(async()=>{const name=window.ryuPremiumSelectedCharacter;if(!name)throw new Error('Select a character first.');await call('character.assign',{name,profile_name:selectedVoice||$('profileName')?.value});await refreshCharacters();});
+    if ($('assignCharacter')) $('assignCharacter').onclick=act(openVoiceCharacterAssignment);
     if ($('editCharacterVoice')) $('editCharacterVoice').onchange=act(async()=>{if(!window.ryuPremiumSelectedCharacter)return;await call('character.assign',{name:window.ryuPremiumSelectedCharacter,profile_name:$('editCharacterVoice').value});await refreshCharacters();});
     // Import buttons are handled once by the delegated Sound Design handler below.
     // Import buttons are handled once by the delegated Sound Design handler below.
@@ -3980,34 +4222,7 @@
         const name = String(select?.value || '').trim();
         const profile = voices.find(item => item.saved === true && item.name.toLowerCase() === name.toLowerCase());
         if (!profile) { message('Choose an existing saved profile from the list before loading.', true); return; }
-        selectedVoice = profile.name; selectedVoiceId = profile.voice_id;
-        if ($('profileName')) $('profileName').value = profile.name;
-        if ($('profileLibrary')) $('profileLibrary').textContent = profile.provider;
-        if ($('profileVoice')) $('profileVoice').textContent = profile.voice_id;
-        if ($('previewProfile')) $('previewProfile').textContent = profile.name;
-        if ($('useNarrator')) $('useNarrator').disabled = false;
-        if ($('saveOnly')) $('saveOnly').disabled = false;
-        const providerPanel = {
-          piper:'offline', kokoro:'offline', 'windows-sapi':'sapi',
-          'qwen-character':profile.qwen_mode === 'design' ? 'voicedesign' : /clone/i.test(profile.qwen_mode || '') ? 'qwenclone' : 'customvoice',
-          chatterbox:'customref', 'edge-tts':'edge', elevenlabs:'eleven'
-        }[profile.provider];
-        document.querySelectorAll('.provider').forEach(panel => panel.classList.toggle('active', panel.dataset.provider === providerPanel));
-        const designPanel = document.querySelector('.provider[data-provider="voicedesign"]');
-        if (designPanel) {
-          const prompt = designPanel.querySelector('textarea');
-          const language = designPanel.querySelector('select');
-          const seed = designPanel.querySelector('input[type="number"]');
-          if (prompt && profile.qwen_prompt != null) prompt.value = profile.qwen_prompt;
-          if (language && profile.language) language.value = profile.language;
-          if (seed) seed.value = profile.qwen_seed ?? '';
-        }
-        const clonePanel = document.querySelector('.provider[data-provider="qwenclone"]');
-        if (clonePanel) {
-          const transcript = clonePanel.querySelector('textarea');
-          if (transcript && profile.reference_text) transcript.value = profile.reference_text;
-        }
-        message('Loaded saved voice profile: ' + profile.name + '. Its saved settings are selected; preview audio is a separate action.');
+        applySavedVoiceProfile(profile);
         return;
       }
       if (button.closest('#voices .panel[data-panel="3"]') && label === 'delete') {
@@ -4019,6 +4234,8 @@
           await call('voice.delete', {profile_name:name});
           await refreshVoices();
           if ($('profileName')) $('profileName').value = '';
+          invalidateVoicePreview();selectedVoice=null;selectedVoiceId=null;selectedVoiceProvider=null;profileEditOriginalName='';
+          updateVoiceSummary(null,{saved:false,previewReady:false,assignment:''});
           message('Deleted saved custom voice profile: ' + name);
         });
         return;
