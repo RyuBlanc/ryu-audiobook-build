@@ -272,5 +272,43 @@ class VoicePreviewContractTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
 
+
+    def test_elevenlabs_web_opener_only_allows_official_destinations(self):
+        bridge = SimpleNamespace()
+        with patch.object(premium_v2_host.QDesktopServices, "openUrl", return_value=True) as open_url:
+            studio = premium_v2_host.PremiumV2Bridge._elevenlabs_open_web(bridge, {"target": "studio"})
+            self.assertTrue(studio["opened"])
+            self.assertEqual(studio["url"], "https://elevenlabs.io/text-to-speech")
+            self.assertEqual(open_url.call_args.args[0].toString(), studio["url"])
+
+            keys = premium_v2_host.PremiumV2Bridge._elevenlabs_open_web(bridge, {"target": "api_keys"})
+            self.assertTrue(keys["opened"])
+            self.assertEqual(keys["url"], "https://elevenlabs.io/app/settings/api-keys")
+            self.assertEqual(open_url.call_args.args[0].toString(), keys["url"])
+
+        with patch.object(premium_v2_host.QDesktopServices, "openUrl", return_value=True) as open_url:
+            with self.assertRaisesRegex(ValueError, "official ElevenLabs"):
+                premium_v2_host.PremiumV2Bridge._elevenlabs_open_web(
+                    bridge, {"target": "https://malicious.example"}
+                )
+            open_url.assert_not_called()
+
+    def test_voice_catalog_refreshes_do_not_rebuild_unchanged_dropdowns(self):
+        adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        source = adapter.read_text(encoding="utf-8")
+        self.assertIn("select.dataset.backendOptionsSignature === signature", source)
+        self.assertIn("profileSelect.dataset.savedOptionsSignature !== optionSignature", source)
+        self.assertIn("row.region_name,row.accent,row.gender,row.category,row.use_case", source)
+
+    def test_elevenlabs_without_api_key_exposes_manual_website_route_and_blocks_in_app_creation(self):
+        adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        source = adapter.read_text(encoding="utf-8")
+        self.assertIn('"elevenlabs.open_web": self._elevenlabs_open_web', 
+                      (Path(__file__).resolve().parents[1] / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8"))
+        self.assertIn("button.disabled = !result.ready", source)
+        self.assertIn("Ryu cannot fetch account audio without supported API access.", source)
+        self.assertIn("call('elevenlabs.open_web',{target:'api_keys'})", source)
+        self.assertIn("data-open-elevenlabs-web", source)
+
 if __name__ == "__main__":
     unittest.main()
