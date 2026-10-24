@@ -51,8 +51,14 @@ BOOK_NOISE_PATTERNS = (
 def chapter_text_coverage(source_text: str, chapters: list) -> tuple[int, int, float]:
     source_words = len(re.findall(r"\b[\w’'-]+\b", str(source_text or ""), re.UNICODE))
     chapter_text = "\n".join(str(getattr(chapter, "text", "") or "") for chapter in chapters)
-    chapter_words = len(re.findall(r"\b[\w’'-]+\b", chapter_text, re.UNICODE))
-    coverage = chapter_words / source_words if source_words else (1.0 if not chapter_text.strip() else 0.0)
+    body_words = len(re.findall(r"\b[\w’'-]+\b", chapter_text, re.UNICODE))
+    # The detector deliberately removes heading lines from chapter bodies,
+    # but preserves their titles as Chapter.title. Count those titles as
+    # retained source text so books with many short chapters are not rejected.
+    title_text = "\n".join(str(getattr(chapter, "title", "") or "") for chapter in chapters)
+    title_words = len(re.findall(r"\b[\w’'-]+\b", title_text, re.UNICODE))
+    chapter_words = body_words + title_words
+    coverage = chapter_words / source_words if source_words else (1.0 if not (chapter_text or title_text).strip() else 0.0)
     return source_words, chapter_words, coverage
 
 def validate_chapter_text_coverage(source_text: str, chapters: list, *, minimum: float = 0.90) -> None:
