@@ -805,7 +805,9 @@
       choose.className = 'btn choose'; choose.type = 'button'; choose.textContent = row.saved ? 'Load / Select' : 'Select';
       choose.dataset.voice = String(row.voice_id || row.name || '');
       choose.dataset.voiceLabel = String(row.name || row.voice_id || '');
-      choose.title = row.saved ? 'Select this saved profile voice' : 'Select this installed or live catalogue voice';
+      choose.dataset.voiceSaved = row.saved ? 'true' : 'false';
+      if (row.saved) choose.dataset.voiceProfileName = String(row.name || '');
+      choose.title = row.saved ? 'Load this saved profile and its settings' : 'Select this installed or live catalogue voice';
       voiceRow.append(info, choose); listHost.appendChild(voiceRow);
     }
     if (providerKey === 'eleven' && !filtered.length) {
@@ -822,6 +824,46 @@
     providerCatalogs[providerKey] = result;
     renderProviderCatalog(providerKey, result);
     return result;
+  }
+
+  function applySavedVoiceProfile(profile, announce = true) {
+    if (!profile || profile.saved !== true) return false;
+    selectedVoice = profile.name;
+    selectedVoiceId = profile.voice_id;
+    if ($('profileName')) $('profileName').value = profile.name;
+    if ($('premiumName')) $('premiumName').value = profile.name;
+    if ($('profileLibrary')) $('profileLibrary').textContent = profile.provider;
+    if ($('profileVoice')) $('profileVoice').textContent = profile.voice_id;
+    if ($('previewProfile')) $('previewProfile').textContent = profile.name;
+    if ($('useNarrator')) $('useNarrator').disabled = false;
+    if ($('saveOnly')) $('saveOnly').disabled = false;
+    const providerPanel = {
+      piper:'offline', kokoro:'offline', 'windows-sapi':'sapi',
+      'qwen-character':profile.qwen_mode === 'design' ? 'voicedesign' : /clone/i.test(profile.qwen_mode || '') ? 'qwenclone' : 'customvoice',
+      chatterbox:'customref', 'edge-tts':'edge', elevenlabs:'eleven'
+    }[profile.provider];
+    document.querySelectorAll('#voices .provider').forEach(panel => panel.classList.toggle('active', panel.dataset.provider === providerPanel));
+    const designPanel = document.querySelector('.provider[data-provider="voicedesign"]');
+    if (designPanel) {
+      const prompt = designPanel.querySelector('textarea');
+      const language = designPanel.querySelector('select');
+      const seed = designPanel.querySelector('input[type="number"]');
+      if (prompt && profile.qwen_prompt != null) prompt.value = profile.qwen_prompt;
+      if (language && profile.language) language.value = profile.language;
+      if (seed) seed.value = profile.qwen_seed ?? '';
+    }
+    const clonePanel = document.querySelector('.provider[data-provider="qwenclone"]');
+    if (clonePanel) {
+      const transcript = clonePanel.querySelector('textarea');
+      if (transcript && profile.reference_text != null) transcript.value = profile.reference_text;
+    }
+    const customPanel = document.querySelector('.provider[data-provider="customref"]');
+    const style = customPanel?.querySelector('select');
+    if (style && profile.style_preset) style.value = profile.style_preset;
+    const select = document.querySelector('#voices .panel[data-panel="3"] .toolbar select');
+    if (select) select.value = profile.name;
+    if (announce) message('Loaded saved voice profile: ' + profile.name + '. Its saved settings are restored; preview audio is a separate action.');
+    return true;
   }
 
   async function refreshVoices() {
