@@ -2726,6 +2726,24 @@
   }
 
 
+
+  function suppressLegacyVoicePreviewHandlers() {
+    // The shipped HTML prototype registers a delegated click listener that
+    // simulates preview progress and toggles fake playback state. The real
+    // backend handlers below are attached to these buttons, so let their target
+    // handlers run but prevent the prototype's ancestor listener from also
+    // mutating the same progress/status controls.
+    const ids = ['generatePreview','playPreview','stopPreview','useNarrator','assignCharacter'];
+    for (const id of ids) {
+      const button = $(id);
+      if (!button || button.dataset.ryuPrototypeActionShield === '1') continue;
+      button.dataset.ryuPrototypeActionShield = '1';
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+      });
+    }
+  }
+
   function ensureStableStudioLayout() {
     if (document.getElementById('ryuStableStudioLayoutStyle')) return;
     const style = document.createElement('style');
@@ -5094,6 +5112,9 @@
     };
     void hydrateInitialState();
     applyUnavailableControlStates();
+    // Bind after the real target handlers so legacy prototype click simulations
+    // cannot race the backend worker and force layout/status changes.
+    suppressLegacyVoicePreviewHandlers();
 
     if (!window.__ryuBackendJobTimer) window.__ryuBackendJobTimer=setInterval(()=>refreshJobs().catch(()=>{}),1500);
     const jobsBox = $('backgroundJobsList');
