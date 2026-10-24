@@ -107,9 +107,9 @@ class ImportIntegrityTests(unittest.TestCase):
 
     def test_realistic_multi_chapter_watermark_cleanup_keeps_story_and_removes_page_noise(self):
         chapters_text = [
-            "Chapter 1: The Arrival\\nA heroine followed a long road toward the old city gate.\\n41\\nReport\\nwww.asianovel.com",
-            "Chapter 2: The Return\\nThe hero came back from the northern pass after the battle ended.\\n42\\nReport\\nwww.asianovel.com",
-            "Chapter 3: The Promise\\nThey promised to meet again before the next winter festival.\\n43\\nReport\\nwww.asianovel.com",
+            "Chapter 1: The Arrival\nA heroine followed a long road toward the old city gate.\n41\nReport\nwww.asianovel.com",
+            "Chapter 2: The Return\nThe hero came back from the northern pass after the battle ended.\n42\nReport\nwww.asianovel.com",
+            "Chapter 3: The Promise\nThey promised to meet again before the next winter festival.\n43\nReport\nwww.asianovel.com",
         ]
         repeated = set(detect_repeated_book_noise(chapters_text))
         self.assertIn("report", repeated)
@@ -122,10 +122,10 @@ class ImportIntegrityTests(unittest.TestCase):
             cleaned_chapters.append(cleaned)
             removed_all.extend(removed)
 
-        story = "\\n".join(cleaned_chapters)
+        story = "\n".join(cleaned_chapters)
         for expected in ("heroine followed", "hero came back", "promised to meet"):
             self.assertIn(expected, story)
-        for noise in ("www.asianovel.com", "Report", "\\n41\\n", "\\n42\\n", "\\n43\\n"):
+        for noise in ("www.asianovel.com", "Report", "41", "42", "43"):
             self.assertNotIn(noise, story)
         self.assertGreaterEqual(len(removed_all), 9)
 
