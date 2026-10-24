@@ -1856,12 +1856,64 @@ class PremiumV2Bridge(QObject):
         return {"name": profile.name, "provider": profile.provider, "voice_id": profile.voice_id,
                 "backend": state["backend"], "saved": True}
 
+    def _preview_profile_from_payload(self, payload: dict[str, Any], state: dict[str, Any]):
+        """Resolve a saved profile or construct an in-memory profile for a live preview.
+
+        Previewing an installed/live catalogue voice must not require saving a profile
+        first. These temporary profiles are passed only to the preview worker and are
+        never written to the persistent voice catalogue.
+        """
+        from uuid import uuid4
+        from app.tts.voice_profile import VoiceProfile
+
+        profile_name = str(payload.get("profile_name") or "").strip()
+        existing = self._find_profile(profile_name or state.get("voice_profile"))
+        if existing is not None:
+            return existing
+
+        provider = str(payload.get("provider") or "").strip().casefold()
+        voice_id = str(payload.get("voice_id") or "").strip()
+        allowed = {"piper", "kokoro", "windows-sapi", "qwen-character", "chatterbox", "edge-tts", "elevenlabs"}
+        if provider not in allowed or not voice_id:
+            return None
+
+        sample_path = str(payload.get("sample_path") or "").strip() or None
+        qwen_mode = str(payload.get("qwen_mode") or ("clone" if provider == "chatterbox" else "custom")).strip().casefold()
+        if provider == "chatterbox" and not sample_path:
+            raise ValueError("Save the reference-voice profile first so its imported recording can be used for preview.")
+        if provider == "qwen-character" and qwen_mode in {"clone", "voiceclone", "voice-clone"} and not sample_path:
+            raise ValueError("Save the Qwen Voice Clone profile first so its permitted reference recording can be imported.")
+
+        qwen_profile_id = str(payload.get("qwen_profile_id") or "")
+        if provider == "qwen-character" and not qwen_profile_id:
+            qwen_profile_id = uuid4().hex
+        name = profile_name or ("Preview · " + voice_id)
+        return VoiceProfile(
+            name=name,
+            provider=provider,
+            voice_id=voice_id,
+            sample_path=sample_path,
+            model_id=str(payload.get("model_id") or ("auto" if provider == "qwen-character" else provider)),
+            backend=str(payload.get("backend") or ("automatic" if provider in {"piper", "kokoro", "qwen-character"} else provider)),
+            language=str(payload.get("language") or "English"),
+            notes=str(payload.get("notes") or payload.get("qwen_prompt") or "")[:4000],
+            authorized=bool(payload.get("authorized", False)),
+            exaggeration=max(0.0, min(1.0, float(payload.get("exaggeration", 0.5)))),
+            cfg_weight=max(0.0, min(1.0, float(payload.get("cfg_weight", 0.35)))),
+            style_preset=str(payload.get("style_preset") or "Natural"),
+            qwen_mode=qwen_mode,
+            qwen_prompt=str(payload.get("qwen_prompt") or "")[:4000],
+            qwen_seed=int(payload["qwen_seed"]) if payload.get("qwen_seed") not in (None, "") else None,
+            reference_text=str(payload.get("reference_text") or "")[:10000],
+            qwen_profile_id=qwen_profile_id,
+        )
+
     def _voice_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
         state = load_state(project.folder)
-        profile = self._find_profile(payload.get("profile_name") or state.get("voice_profile"))
+        profile = self._preview_profile_from_payload(payload, state)
         if profile is None:
-            raise ValueError("Select an installed or saved voice profile before previewing.")
+            raise ValueError("Choose an installed voice or load a saved voice profile before previewing.")
         text_value = str(payload.get("text") or "")
         number = payload.get("chapter_number")
         if not text_value.strip():
