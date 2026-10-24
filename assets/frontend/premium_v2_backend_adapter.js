@@ -1296,12 +1296,19 @@
     });
   }
 
-  async function saveVoice() {
-    const name = ($('profileName')?.value || $('premiumName')?.value || '').trim();
-    if (!name) throw new Error('Enter a name for this voice profile.');
+  async function saveVoice(options = {}) {
+    const name = String(options.nameOverride ?? ($('profileName')?.value || $('premiumName')?.value || '')).trim();
     const choice = document.querySelector('.provider.active')?.dataset.provider || 'offline';
     const providerMap = {offline:'piper',sapi:'windows-sapi',customvoice:'qwen-character',voicedesign:'qwen-character',qwenclone:'qwen-character',customref:'chatterbox',edge:'edge-tts',eleven:'elevenlabs'};
     const provider = providerMap[choice] || (choice.includes('clone') ? 'qwen-character' : 'piper');
+    const voiceLabel = $('profileVoice')?.textContent?.trim() || selectedVoiceId || 'Amy';
+    if (!options.confirmed) {
+      const confirmedName = await requestVoiceProfileSaveName(name, choice, voiceLabel);
+      if (!confirmedName) { message('Voice profile save cancelled.'); return null; }
+      return saveVoice({confirmed:true,nameOverride:confirmedName});
+    }
+    if (!name) throw new Error('Enter a name for this voice profile.');
+    if (name.length > 160) throw new Error('Profile names must be 160 characters or fewer.');
     const authorized = Boolean($('clonePermission')?.checked || $('customPermission')?.checked);
     let sample_path = '';
     if (provider === 'chatterbox' || (provider === 'qwen-character' && /clone/i.test(choice))) {
@@ -1310,7 +1317,6 @@
       if (imported.cancelled) return;
       sample_path = imported.sample_path || imported.path || '';
     }
-    const voiceLabel = $('profileVoice')?.textContent?.trim() || 'Amy';
     const matchedPiper = voices.find(v => v.provider === 'piper' && String(v.voice_id || '').toLowerCase().includes(voiceLabel.toLowerCase()));
     const designPanel = document.querySelector('.provider[data-provider="voicedesign"]');
     const designPrompt = designPanel?.querySelector('textarea')?.value?.trim() || '';
