@@ -3174,13 +3174,30 @@
         })().catch(err => message(err?.message || String(err), true));
         return;
       }
-      if (button.id === 'generateCandidates' || button.id === 'generateMore' || button.id === 'setKey' ||
-          label === 'get api key' || label === 'manage credentials') {
+      if (button.id === 'setKey') {
         stop();
-        const reason = button.id === 'setKey' || label === 'get api key' || label === 'manage credentials'
-          ? 'Credential management is not connected to a secure provider-specific credential store in this build. No API key was requested or saved.'
-          : 'Premium cloud candidate generation is not connected to a provider endpoint in this build. No mock candidates were generated; choose a supported saved voice profile and use Generate Preview instead.';
-        message(reason, true);
+        void requestElevenLabsApiKey();
+        return;
+      }
+      if (label === 'get api key') {
+        stop();
+        const opened = window.open('https://elevenlabs.io/app/settings/api-keys', '_blank', 'noopener,noreferrer');
+        if (!opened) message('Open https://elevenlabs.io/app/settings/api-keys in your browser to create an API key.', true);
+        return;
+      }
+      if (button.id === 'generateCandidates' || button.id === 'generateMore') {
+        stop();
+        void generateElevenLabsCandidates(button.id === 'generateMore').catch(error => message(error?.message || String(error), true));
+        return;
+      }
+      if (button.id === 'addPremium') {
+        stop();
+        void createSelectedElevenLabsVoice().catch(error => message(error?.message || String(error), true));
+        return;
+      }
+      if (label === 'manage credentials') {
+        stop();
+        void requestElevenLabsApiKey();
         return;
       }
       if (/^refresh$/.test(label) || label === 'refresh system voices' || label === 'refresh catalogue') {
