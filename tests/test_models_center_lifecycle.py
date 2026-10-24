@@ -130,6 +130,24 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             self.assertTrue((preserve / "config.json").is_file())
             self.assertIn("other model folders", message)
 
+    def test_active_model_lifecycle_blocks_preview_analysis_and_generation(self):
+        bridge = self.make_bridge()
+        bridge._jobs["active-model-job"] = {
+            "state": "running",
+            "type": "model-install",
+        }
+        for action, invoke in (
+            ("voice preview", lambda: bridge._voice_preview({})),
+            ("character analysis", lambda: bridge._character_analyze({})),
+            ("audiobook generation", lambda: bridge._production_generate_book({})),
+        ):
+            with self.subTest(action=action):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "while a model install, repair or uninstall is running",
+                ):
+                    invoke()
+
     def test_starting_second_model_operation_is_blocked_while_one_is_running(self):
         bridge = self.make_bridge()
         bridge._jobs["active-model-job"] = {"state": "running", "type": "model-install"}
