@@ -1430,9 +1430,6 @@
         await refreshJobs();
         if (['completed','failed','cancelled'].includes(job.state)) {
           clearInterval(poll); poll = null;
-          if (typeof arguments[2] === 'function') {
-            try { await arguments[2](job); } catch (terminalError) { console.warn('[Ryu job terminal callback]', terminalError); }
-          }
           if (typeof terminal === 'function') {
             try { await terminal(job); } catch (terminalError) { console.warn('[Ryu job terminal callback]', terminalError); }
           }
