@@ -30,6 +30,7 @@ def detect_chapters(text: str) -> list[Chapter]:
     """
     lines = remove_page_noise(text).splitlines()
     lines = _remove_toc_when_story_heading_repeats(lines)
+    lines = _combine_split_slash_titles(lines)
 
     slash_heading_indices = _slash_heading_marker_indices(lines)
     markers: list[tuple[int, str]] = []
@@ -48,13 +49,18 @@ def detect_chapters(text: str) -> list[Chapter]:
 
     chapters: list[Chapter] = []
     preamble = "\n".join(lines[:markers[0][0]]).strip()
+    opening_is_story = _looks_like_story_preamble(preamble)
+    if opening_is_story:
+        # An unheaded opening page is real narration, not disposable front matter.
+        # Keep it as a first-class chapter so users see/hear it separately.
+        chapters.append(Chapter(1, "Opening", preamble))
 
     # Boundaries are computed from every marker before empty bodies are omitted,
     # so empty headings can never leak into the preceding chapter's body.
     for position, (start, title) in enumerate(markers):
         end = markers[position + 1][0] if position + 1 < len(markers) else len(lines)
         body = "\n".join(lines[start + 1:end]).strip()
-        if position == 0 and preamble:
+        if position == 0 and preamble and not opening_is_story:
             body = f"{preamble}\n\n{body}".strip()
         if not body:
             continue
@@ -63,6 +69,56 @@ def detect_chapters(text: str) -> list[Chapter]:
     if chapters:
         return chapters
     return [Chapter(1, "Full Book", cleaned_text)] if cleaned_text else []
+
+
+def _combine_split_slash_titles(lines: list[str]) -> list[str]:
+    """Join slash-style book titles and a following Part/Volume label."""
+    output: list[str] = []
+    index = 0
+    section_re = re.compile(
+        r"^(?:part|volume|vol\.?|book|arc)\s+"
+        r"(?:\d{1,4}|[IVXLCDM]{1,12}|one|two|three|four|five|six|seven|eight|nine|ten|"
+        r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)$",
+        re.I,
+    )
+    while index < len(lines):
+        current = lines[index].strip()
+        if current and is_slash_title_candidate(current):
+            next_index = index + 1
+            while next_index < len(lines) and not lines[next_index].strip():
+                next_index += 1
+            if next_index < len(lines):
+                section = lines[next_index].strip()
+                if section_re.fullmatch(section) and parse_heading_title(section):
+                    output.append(f"{current}: {section}")
+                    index = next_index + 1
+                    continue
+        output.append(lines[index])
+        index += 1
+    return output
+
+
+def _looks_like_story_preamble(preamble: str) -> bool:
+    """Distinguish a substantial unheaded story opening from short front matter."""
+    value = str(preamble or "").strip()
+    if not value:
+        return False
+    words = re.findall(r"\b[\w’'-]+\b", value, re.UNICODE)
+    if len(words) < 18 or not re.search(r"[.!?…。！？]", value):
+        return False
+    first_line = next((line.strip().casefold() for line in value.splitlines() if line.strip()), "")
+    front_matter = (
+        "translator note", "translator's note", "translator’s note",
+        "translation note", "author's note", "author’s note", "disclaimer",
+        "copyright", "table of contents", "contents", "written by ", "translated by ",
+    )
+    if first_line.startswith(front_matter):
+        return False
+    # Metadata-only pages are often short, uppercase or label-like and should
+    # remain attached to the first chapter for manual review rather than split.
+    if len(value.splitlines()) <= 2 and len(words) < 28 and value.isupper():
+        return False
+    return True
 
 
 def _heading_title(line: str, *, allow_slash: bool = False) -> str | None:
