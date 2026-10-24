@@ -1413,10 +1413,36 @@ class PremiumV2Bridge(QObject):
         }
 
     def _voice_import_reference(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Import and normalize an explicitly selected voice-reference recording."""
+        """Import a selected reference recording from the file input or native picker."""
+        import base64
+        import binascii
+        from uuid import uuid4
+        from app.core.paths import voices_root
+        from app.tts.voice_profile import import_reference_audio
+
         profile_name = str(payload.get("profile_name") or payload.get("name") or "Custom Voice").strip()
         source_text = str(payload.get("source_path") or payload.get("path") or "").strip()
-        if source_text:
+        upload_path: Path | None = None
+        if payload.get("content_base64"):
+            encoded = str(payload.get("content_base64") or "")
+            maximum_upload = 25 * 1024 * 1024
+            if len(encoded) > (maximum_upload * 4 // 3) + 16:
+                raise ValueError("Reference audio is too large. Choose a file smaller than 25 MB.")
+            suffix = Path(str(payload.get("filename") or "reference.wav")).suffix.casefold()
+            if suffix not in {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".aiff", ".opus"}:
+                raise ValueError("Choose a supported audio file: WAV, MP3, FLAC, OGG, M4A, AAC, AIFF or OPUS.")
+            try:
+                raw = base64.b64decode(encoded, validate=True)
+            except (binascii.Error, ValueError) as exc:
+                raise ValueError("The selected reference audio could not be read. Choose the file again.") from exc
+            if not raw or len(raw) > maximum_upload:
+                raise ValueError("Reference audio must be non-empty and smaller than 25 MB.")
+            upload_root = voices_root() / "ReferenceUploads"
+            upload_root.mkdir(parents=True, exist_ok=True)
+            upload_path = upload_root / (uuid4().hex + suffix)
+            upload_path.write_bytes(raw)
+            source = upload_path.resolve()
+        elif source_text:
             source = Path(source_text).expanduser().resolve()
         else:
             selected, _filter = QFileDialog.getOpenFileName(
@@ -1426,8 +1452,15 @@ class PremiumV2Bridge(QObject):
             if not selected:
                 return {"cancelled": True, "sample_path": None}
             source = Path(selected).resolve()
-        from app.tts.voice_profile import import_reference_audio
-        normalized = import_reference_audio(source, profile_name)
+
+        try:
+            normalized = import_reference_audio(source, profile_name)
+        finally:
+            if upload_path is not None:
+                try:
+                    upload_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
         return {"cancelled": False, "sample_path": str(normalized.resolve()),
                 "source_path": str(source), "profile_name": profile_name}
 
