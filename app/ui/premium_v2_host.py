@@ -3404,8 +3404,8 @@ class PremiumV2Bridge(QObject):
         try:
             import winreg
             registry_paths = (
-                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\\Microsoft\\Speech\\Voices\\Tokens"),
-                (winreg.HKEY_CURRENT_USER, r"SOFTWARE\\Microsoft\\Speech\\Voices\\Tokens"),
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Speech\Voices\Tokens"),
+                (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Speech\Voices\Tokens"),
             )
             for hive, registry_path in registry_paths:
                 try:
