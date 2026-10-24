@@ -630,8 +630,6 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("still stopping", page.status.setText.call_args.args[0])
 
     def test_voice_cast_refresh_updates_stable_rows_in_place_to_reduce_flicker(self):
-
-    def test_voice_cast_refresh_updates_stable_rows_in_place_to_reduce_flicker(self):
         voice_cast = Path(__file__).resolve().parents[1] / "app" / "ui" / "voice_cast_page.py"
         source = voice_cast.read_text(encoding="utf-8")
         start = source.index("    def _refresh_labels(")
