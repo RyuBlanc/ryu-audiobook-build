@@ -4035,8 +4035,11 @@
           const disableLabel = button.textContent;
           button.disabled = true;
           button.textContent = action === 'uninstall' ? 'Removing…' : action === 'repair' ? 'Repairing…' : 'Starting…';
+          const modelLifecycleCommands = {install:'models.install',repair:'models.repair',uninstall:'models.uninstall'};
+          const modelCommand = modelLifecycleCommands[action];
+          if (!modelCommand) throw new Error('Unsupported model lifecycle action: ' + action);
           try {
-            const queued = await call('models.' + action, payload);
+            const queued = await call(modelCommand, payload);
             await refreshJobs();
             message((action === 'uninstall' ? 'Uninstall' : action === 'repair' ? 'Repair' : 'Install') +
               ' queued for ' + (model.name || operationId) + '. Track real progress in Background Jobs.');
