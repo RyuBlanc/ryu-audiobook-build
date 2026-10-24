@@ -18,7 +18,7 @@
   let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, activeJob = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
-  let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0;
+  let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0, projectListEpoch = 0;
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
   const resumeCheckpointKey = 'ryu.project.resume-checkpoints.v1';
   const resumeStages = new Set(['import','chapters','narrator','characters','sound','production','player']);
@@ -368,6 +368,9 @@
       page.insertBefore(container, page.firstElementChild);
     }
     const available = rows.filter(project => project.completed && project.output_path);
+    const signature = JSON.stringify(available.map(project => [project.folder,project.title,project.output_path,project.narrator,project.chapter_count,project.cover_path]));
+    if (container.dataset.audiobookLibrarySignature === signature) return;
+    container.dataset.audiobookLibrarySignature = signature;
     container.innerHTML = '<div class="section-head"><div><p class="eyebrow">YOUR LIBRARY</p><h2>Generated audiobooks</h2></div><p class="muted">' +
       available.length + ' ready to play</p></div><div class="recent-grid">' +
       (available.map(project => '<article class="card project-card" data-project-folder="' + esc(project.folder || '') +
@@ -638,7 +641,10 @@
     await loadProjectTrashEntries(modal);
   }
   async function refreshProjects() {
-    projects = (await call('project.list')).sort((a,b) => (Date.parse(b.modified_at || '') || 0) - (Date.parse(a.modified_at || '') || 0));
+    const requestToken = ++projectListEpoch;
+    const loadedProjects = await call('project.list');
+    if (requestToken !== projectListEpoch) return projects;
+    projects = (Array.isArray(loadedProjects) ? loadedProjects : []).sort((a,b) => (Date.parse(b.modified_at || '') || 0) - (Date.parse(a.modified_at || '') || 0));
     selectedProjectFolders = new Set([...selectedProjectFolders].filter(folder => projects.some(project => String(project.folder) === folder)));
     const grid = $('libraryGrid');
     ensureProjectTrashControl();
@@ -651,7 +657,12 @@
         (filter === 'attention' && (['failed','error','attention'].includes(status) || !Number(p.chapter_count || 0)));
       return matchesFilter && (!search || (p.title + ' ' + (p.source_path || '') + ' ' + status).toLowerCase().includes(search));
     });
-    if (grid) {
+    const librarySignature = JSON.stringify({
+      rows:visible.map(p => [p.folder,p.title,p.completed,p.status,p.source_path,p.chapter_count,p.cover_path,p.modified_at]),
+      search, filter, selected:[...selectedProjectFolders].sort()
+    });
+    if (grid && grid.dataset.projectRenderSignature !== librarySignature) {
+      grid.dataset.projectRenderSignature = librarySignature;
       grid.innerHTML = visible.map(p => {
         const complete = Boolean(p.completed), status = complete ? 'Completed' : (p.status || 'New');
         return '<article class="card project-card" data-name="' + esc(p.title) + '" data-project-folder="' + esc(p.folder) +
@@ -670,7 +681,9 @@
       const attention = projects.filter(p => ['failed','error','attention'].includes(String(p.status || '').toLowerCase()) || !Number(p.chapter_count || 0)).length;
       [projects.length, completed, active, attention].forEach((value, index) => { if (metrics[index]) metrics[index].textContent = value; });
       const recent = dash.querySelector('.recent-grid');
-      if (recent) {
+      const recentSignature = JSON.stringify(projects.slice(0, 3).map(p => [p.folder,p.title,p.status,p.chapter_count,p.completed,p.cover_path]));
+      if (recent && recent.dataset.projectRenderSignature !== recentSignature) {
+        recent.dataset.projectRenderSignature = recentSignature;
         recent.innerHTML = projects.slice(0, 3).map(p => {
           const status = String(p.status || 'new').toLowerCase();
           const badge = p.completed ? 'Completed' : (['failed','error','attention'].includes(status) || !Number(p.chapter_count || 0) ? 'Attention' : 'Active');
