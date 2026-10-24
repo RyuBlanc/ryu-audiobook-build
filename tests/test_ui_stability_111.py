@@ -22,6 +22,31 @@ class UiStabilityRegressions(unittest.TestCase):
         self.assertIn("def _install_generation_feature_pages(", source)
         self.assertIn("def _save_sound_preset(", source)
 
+    def test_voice_studio_prototype_actions_are_removed_before_backend_binding(self):
+        source = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        helper = source.split("function suppressLegacyVoicePreviewHandlers()", 1)[1].split(
+            "function ensureStableStudioLayout()", 1
+        )[0]
+        # Cloning preserves the approved HTML markup but drops listeners added by
+        # the prototype. Removing inline handlers prevents fake status/step changes.
+        self.assertIn("original.cloneNode(true)", helper)
+        self.assertIn("replacement.removeAttribute('onclick')", helper)
+        self.assertIn("original.replaceWith(replacement)", helper)
+        self.assertIn("replacement.addEventListener('click'", helper)
+        self.assertIn("event.stopPropagation()", helper)
+        for control in (
+            "generatePreview", "playPreview", "stopPreview", "saveProfile",
+            "saveOnly", "useNarrator", "assignCharacter",
+        ):
+            self.assertIn("'" + control + "'", helper)
+
+        # The shield must run synchronously before the first await in wire().
+        wire_start = source.split("async function wire()", 1)[1].split(
+            "await call('app.get_info')", 1
+        )[0]
+        self.assertIn("suppressLegacyVoicePreviewHandlers();", wire_start)
+        self.assertEqual(source.count("suppressLegacyVoicePreviewHandlers();"), 1)
+
     def test_library_search_is_debounced_and_status_is_cached_per_refresh(self):
         source = (ROOT / "app/ui/library.py").read_text(encoding="utf-8")
         self.assertIn("self._refresh_timer.setInterval(180)", source)
