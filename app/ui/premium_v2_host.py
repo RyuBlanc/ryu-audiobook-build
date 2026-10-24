@@ -3302,8 +3302,11 @@ class PremiumV2Bridge(QObject):
             "Install individual Piper voice models for offline narration. Installed voice files are listed here; bundled voices are managed by the application installer.",
             status=(f"{len(piper_paths)} voice model(s) available" if piper_installed else "No voice models installed"),
             installable=True, repairable=bool(piper_local), uninstallable=bool(piper_local),
-            removable_voice_count=len(piper_local), storage_bytes=sum(byte_size(v) + byte_size(v.with_suffix(v.suffix + ".json")) for v in piper_local),
+            removable_voice_count=len(piper_local),
+            installed_voice_names=sorted({item.stem for item in piper_local}, key=str.casefold),
+            storage_bytes=sum(byte_size(v) + byte_size(v.with_suffix(v.suffix + ".json")) for v in piper_local),
             requirements="Local model files; no internet required after download.",
+            component_type="model",
         ))
 
         kokoro_root = root / "kokoro"
@@ -3328,23 +3331,16 @@ class PremiumV2Bridge(QObject):
         except Exception:
             chat_installed = False
         chat_present = CHATTERBOX_ROOT.exists()
+        chat_installed = bool(chatterbox_ready())
+        chat_present = CHATTERBOX_ROOT.exists()
         result.append(row(
-            "chatterbox", "Chatterbox English Voice Cloning", "chatterbox", chat_installed,
-            "Installs the isolated cloning runtime. The English model weights are fetched by the provider on first use and are cached locally.",
-            status=("Runtime ready · weights download on first use" if chat_installed else "Runtime incomplete" if chat_present else "Not installed"),
+            "chatterbox-runtime", "Chatterbox Voice Cloning Runtime", "chatterbox", chat_installed,
+            "Shared runtime for English and multilingual reference-based voice cloning. The provider downloads and caches model weights on first use; runtime readiness does not claim those model weights are already present.",
+            status=("Runtime ready · English and multilingual modes available" if chat_installed else "Runtime incomplete" if chat_present else "Not installed"),
             installable=not chat_installed, repairable=chat_present or chat_installed,
-            uninstallable=chat_present, shared_runtime="chatterbox-runtime",
-            requirements="Python 3.11 isolated runtime; internet and several GB of disk space for setup/model cache.",
-            storage_bytes=byte_size(CHATTERBOX_ROOT),
-        ))
-        result.append(row(
-            "chatterbox-multilingual", "Chatterbox Multilingual Voice Cloning", "chatterbox", chat_installed,
-            "Shares the Chatterbox runtime. Multilingual synthesis uses the multilingual model weights, which the provider fetches and caches on first use.",
-            status=("Runtime ready · weights download on first use" if chat_installed else "Runtime incomplete" if chat_present else "Not installed"),
-            installable=not chat_installed, repairable=chat_present or chat_installed,
-            uninstallable=chat_present, shared_runtime="chatterbox-runtime",
-            requirements="Python 3.11 isolated runtime; internet and several GB of disk space for setup/model cache.",
-            storage_bytes=byte_size(CHATTERBOX_ROOT),
+            uninstallable=chat_present, requirements="Python 3.11 isolated runtime; internet for setup and first-use model weights.",
+            storage_bytes=byte_size(CHATTERBOX_ROOT, direct_only=True), component_type="runtime",
+            managed_path=str(CHATTERBOX_ROOT),
         ))
 
         try:
@@ -3357,7 +3353,7 @@ class PremiumV2Bridge(QObject):
             status="Runtime ready" if qwen_ready else "Runtime needs installation or repair",
             installable=not qwen_ready, repairable=QWEN_ROOT.exists() or qwen_ready,
             uninstallable=QWEN_ROOT.exists(), requirements="Large offline runtime; model weights are managed separately.",
-            storage_bytes=0, managed_path=str(QWEN_ROOT),
+            storage_bytes=0, managed_path=str(QWEN_ROOT), component_type="runtime",
         ))
         qwen_names = {
             "custom-0.6b": ("Qwen CustomVoice 0.6B", "qwen-customvoice"),
@@ -3378,6 +3374,7 @@ class PremiumV2Bridge(QObject):
                 installable=True, repairable=True, uninstallable=MODEL_DIRS[kind].exists(),
                 feature=qwen_names.get(kind, ("", "qwen"))[1], requirements="Model download can be several GB; requires internet for install/repair.",
                 storage_bytes=byte_size(MODEL_DIRS[kind]), managed_path=str(MODEL_DIRS[kind]),
+                component_type="model",
             ))
 
         try:
@@ -3394,7 +3391,8 @@ class PremiumV2Bridge(QObject):
             installable=not ai_installed, repairable=ai_present or ai_installed, uninstallable=ai_present,
             model_name=ai_model_id, model_filename=ai_filename, download_bytes=int(ai_size),
             requirements=f"Recommended local model download: about {ai_size / (1024 ** 3):.1f} GB.",
-            storage_bytes=byte_size(ai_root), managed_path=str(ai_root),
+            storage_bytes=byte_size(ai_root, direct_only=True), managed_path=str(ai_root),
+            component_type="model",
         ))
 
         try:
@@ -3416,6 +3414,7 @@ class PremiumV2Bridge(QObject):
             status=f"{sapi_count} Windows voice(s) detected" if sapi_count else "No Windows SAPI voices detected",
             installable=False, repairable=False, uninstallable=False, voice_count=sapi_count,
             requirements="Windows system component; not a separately managed model.",
+            component_type="provider",
         ))
 
         try:
@@ -3428,6 +3427,7 @@ class PremiumV2Bridge(QObject):
             "Online neural voice service, not a local model download. Voice catalogue and synthesis require network access.",
             status="Client package available · internet required" if edge_ready else "Edge TTS package unavailable",
             installable=False, repairable=False, uninstallable=False, requirements="Internet connection; not an offline model.",
+            component_type="provider",
         ))
 
         try:
@@ -3441,6 +3441,7 @@ class PremiumV2Bridge(QObject):
             status="API key configured" if eleven_key else "API key required",
             installable=False, repairable=False, uninstallable=False, credentials_configured=eleven_key,
             requirements="Internet and your own ElevenLabs API key; no local model to install.",
+            component_type="provider",
         ))
         return result
 
