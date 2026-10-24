@@ -805,43 +805,48 @@
     }
 
     const form = panel.querySelector('.form3');
-    if (!form) return;
-    let categoryLabel = form.querySelector(':scope > .voice-category-filter');
-    const categoryValues = [...new Set(rows.flatMap(voiceCategories))].sort((a,b)=>a.localeCompare(b));
-    if (categoryValues.length && !categoryLabel) {
-      categoryLabel=document.createElement('label');categoryLabel.className='voice-category-filter';
-      const caption=document.createElement('span');caption.textContent='Category';
-      const select=document.createElement('select');select.className='select';
-      categoryLabel.append(caption,select);form.appendChild(categoryLabel);
-    } else if (!categoryValues.length && categoryLabel) { categoryLabel.remove();categoryLabel=null; }
-    const facets=[...form.querySelectorAll('select')];
-    const languageValues=[...new Set(rows.map(voiceLanguageFacet).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
-    const genderValues=[...new Set(rows.map(voiceGenderFacet).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
-    const regionValues=[...new Set(rows.map(voiceRegionFacet).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
-    const optionsFor=(select,defaultLabel,values,defaultValue)=>{
-      if(!select)return;
-      const previous=select.value;
-      select.replaceChildren();
-      const first=document.createElement('option');first.value=defaultValue;first.textContent=defaultLabel;select.appendChild(first);
-      for(const value of values){const option=document.createElement('option');option.value=value;option.textContent=value;select.appendChild(option);}
-      select.value=values.find(value=>value.toLowerCase()===String(previous).toLowerCase())||defaultValue;
-      select.onchange=()=>renderProviderCatalog(providerKey,providerCatalogs[providerKey]);
-    };
-    optionsFor(facets[0],'All languages',languageValues,'All languages');
-    optionsFor(facets[1],'All',genderValues,'All');
-    optionsFor(facets[2],'All regions',regionValues,'All regions');
-    optionsFor(categoryLabel?.querySelector('select'),'All categories',categoryValues,'All categories');
-    const languageFilter=facets[0]?.value||'All languages';
-    const genderFilter=facets[1]?.value||'All';
-    const regionFilter=facets[2]?.value||'All regions';
-    const categoryFilter=categoryLabel?.querySelector('select')?.value||'All categories';
-    const same=(a,b)=>String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
-    let filtered=rows.filter(row=>
-      (languageFilter==='All languages'||same(voiceLanguageFacet(row),languageFilter))&&
-      (genderFilter==='All'||same(voiceGenderFacet(row),genderFilter))&&
-      (regionFilter==='All regions'||same(voiceRegionFacet(row),regionFilter))&&
-      (categoryFilter==='All categories'||voiceCategories(row).some(value=>same(value,categoryFilter)))
-    );
+    if (!form && providerKey !== 'eleven') return;
+    let filtered = rows;
+    // ElevenLabs uses its form5 as voice-design configuration, not catalogue
+    // filters. Render its My Voices catalogue directly without mutating those controls.
+    if (form) {
+      let categoryLabel = form.querySelector(':scope > .voice-category-filter');
+      const categoryValues = [...new Set(rows.flatMap(voiceCategories))].sort((a,b)=>a.localeCompare(b));
+      if (categoryValues.length && !categoryLabel) {
+        categoryLabel=document.createElement('label');categoryLabel.className='voice-category-filter';
+        const caption=document.createElement('span');caption.textContent='Category';
+        const select=document.createElement('select');select.className='select';
+        categoryLabel.append(caption,select);form.appendChild(categoryLabel);
+      } else if (!categoryValues.length && categoryLabel) { categoryLabel.remove();categoryLabel=null; }
+      const facets=[...form.querySelectorAll('select')];
+      const languageValues=[...new Set(rows.map(voiceLanguageFacet).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+      const genderValues=[...new Set(rows.map(voiceGenderFacet).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+      const regionValues=[...new Set(rows.map(voiceRegionFacet).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+      const optionsFor=(select,defaultLabel,values,defaultValue)=>{
+        if(!select)return;
+        const previous=select.value;
+        select.replaceChildren();
+        const first=document.createElement('option');first.value=defaultValue;first.textContent=defaultLabel;select.appendChild(first);
+        for(const value of values){const option=document.createElement('option');option.value=value;option.textContent=value;select.appendChild(option);}
+        select.value=values.find(value=>value.toLowerCase()===String(previous).toLowerCase())||defaultValue;
+        select.onchange=()=>renderProviderCatalog(providerKey,providerCatalogs[providerKey]);
+      };
+      optionsFor(facets[0],'All languages',languageValues,'All languages');
+      optionsFor(facets[1],'All',genderValues,'All');
+      optionsFor(facets[2],'All regions',regionValues,'All regions');
+      optionsFor(categoryLabel?.querySelector('select'),'All categories',categoryValues,'All categories');
+      const languageFilter=facets[0]?.value||'All languages';
+      const genderFilter=facets[1]?.value||'All';
+      const regionFilter=facets[2]?.value||'All regions';
+      const categoryFilter=categoryLabel?.querySelector('select')?.value||'All categories';
+      const same=(a,b)=>String(a||'').trim().toLowerCase()===String(b||'').trim().toLowerCase();
+      filtered=rows.filter(row=>
+        (languageFilter==='All languages'||same(voiceLanguageFacet(row),languageFilter))&&
+        (genderFilter==='All'||same(voiceGenderFacet(row),genderFilter))&&
+        (regionFilter==='All regions'||same(voiceRegionFacet(row),regionFilter))&&
+        (categoryFilter==='All categories'||voiceCategories(row).some(value=>same(value,categoryFilter)))
+      );
+    }
     const recommended = panel.querySelector('input[type="checkbox"]');
     if (providerKey === 'offline' && recommended?.checked) {
       filtered = filtered.slice().sort((a,b) => {
