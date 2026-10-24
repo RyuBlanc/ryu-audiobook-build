@@ -343,6 +343,8 @@ class PremiumV2Bridge(QObject):
                 "voice.list": self._voice_list,
                 "voice.catalog": self._voice_catalog,
                 "voice.credentials.set": self._voice_credentials_set,
+                "voice.elevenlabs.design": self._voice_elevenlabs_design,
+                "voice.elevenlabs.create": self._voice_elevenlabs_create,
                 "voice.save": self._voice_save,
                 "voice.delete": self._voice_delete,
                 "voice.import_reference": self._voice_import_reference,
@@ -459,6 +461,8 @@ class PremiumV2Bridge(QObject):
             "voice.list": True,
             "voice.catalog": True,
             "voice.credentials.set": True,
+            "voice.elevenlabs.design": True,
+            "voice.elevenlabs.create": True,
             "voice.save": True,
             "voice.delete": True,
             "voice.import_reference": True,
@@ -1710,6 +1714,62 @@ class PremiumV2Bridge(QObject):
                 rows.append(row)
 
         return {"provider": key, "ready": ready, "message": message_text, "source": source, "voices": rows, "count": len(rows)}
+
+    def _voice_elevenlabs_design(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Generate temporary ElevenLabs Voice Design candidates without saving them."""
+        from app.tts.providers.elevenlabs import ElevenLabsProvider
+
+        candidates = ElevenLabsProvider.design_character_voice(
+            style=str(payload.get("style") or "anime"),
+            gender=str(payload.get("gender") or "female"),
+            age=str(payload.get("age") or "young adult"),
+            temperament=str(payload.get("temperament") or "expressive"),
+            archetype=str(payload.get("archetype") or "heroine"),
+            model_id=str(payload.get("model_id") or "eleven_ttv_v3"),
+            seed=int(payload["seed"]) if payload.get("seed") not in (None, "") else None,
+        )
+        return {"candidates": candidates, "count": len(candidates)}
+
+    def _voice_elevenlabs_create(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create the selected Voice Design candidate in ElevenLabs and save it locally."""
+        from app.tts.providers.elevenlabs import ElevenLabsProvider
+        from app.tts.voice_profile import load_profiles
+
+        name = str(payload.get("name") or "").strip()
+        generated_id = str(payload.get("generated_voice_id") or "").strip()
+        description = str(payload.get("voice_description") or "").strip()
+        if not name:
+            raise ValueError("Enter a name for the selected premium voice.")
+        if len(name) > 160:
+            raise ValueError("Voice profile names must be 160 characters or fewer.")
+        if not generated_id:
+            raise ValueError("Select a generated Voice Design candidate first.")
+        # Refuse duplicate names before making a paid provider request.
+        if any(profile.name.strip().casefold() == name.casefold() for profile in load_profiles()):
+            raise ValueError(f"A voice or profile named '{name}' already exists. Choose another name.")
+
+        created = ElevenLabsProvider.create_designed_voice(
+            generated_voice_id=generated_id,
+            voice_name=name,
+            voice_description=description,
+            style=str(payload.get("style") or "anime"),
+            gender=str(payload.get("gender") or "female"),
+            age=str(payload.get("age") or "young adult"),
+        )
+        voice_id = str(created.get("voice_id") or "").strip()
+        if not voice_id:
+            raise RuntimeError("ElevenLabs did not return a voice ID for the new voice.")
+        saved = self._voice_save({
+            "name": name,
+            "provider": "elevenlabs",
+            "voice_id": voice_id,
+            "model_id": "eleven_v4",
+            "backend": "elevenlabs",
+            "language": "English",
+            "notes": description,
+            "authorized": True,
+        })
+        return {"name": saved["name"], "provider": "elevenlabs", "voice_id": voice_id, "profile": saved}
 
     def _voice_credentials_set(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Save an ElevenLabs API key locally without echoing it into logs or UI responses."""
