@@ -705,6 +705,49 @@
     // A catalogue selection is not a saved custom profile; never prefill this name.
     return voices;
   }
+  function renderLiveChapterInsights() {
+    const host = $('chapters');
+    if (!host) return;
+    const heading = [...host.querySelectorAll('h1,h2,h3,h4,h5,[role="heading"]')]
+      .find(node => String(node.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase() === 'chapter insights');
+    if (!heading) return;
+    const panel = heading.closest('.card') || heading.parentElement;
+    if (!panel) return;
+
+    const title = document.createElement('h3');
+    title.textContent = 'Chapter insights';
+    title.style.cssText = 'margin:0 0 12px;font-size:16px;font-weight:750;color:var(--text,#f3f4f6)';
+    const root = document.createElement('div');
+    root.id = 'liveChapterInsights';
+    root.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px';
+    const wordCount = chapter => Number(chapter.word_count || String(chapter.text || '').trim().split(/\s+/).filter(Boolean).length);
+    const totalWords = chapters.reduce((sum, chapter) => sum + wordCount(chapter), 0);
+    const emptyCount = chapters.filter(chapter => !String(chapter.text || '').trim()).length;
+    const reviewCount = chapters.filter(chapter => String(chapter.review_status || 'needs_review') !== 'reviewed').length;
+    const skippedCount = chapters.filter(chapter => chapter.skip_for_generation === true).length;
+    const selected = selectedChapter();
+    const selectedWords = selected ? wordCount(selected) : 0;
+    const minutes = Math.max(0, Math.round(totalWords / 145));
+    const formatTime = value => value >= 60 ? Math.floor(value / 60) + 'h ' + (value % 60) + 'm' : value + ' min';
+    const cards = [
+      ['Chapters', chapters.length.toLocaleString()],
+      ['Total words', totalWords.toLocaleString()],
+      ['Estimated narration', formatTime(minutes)],
+      ['Needs review', reviewCount.toLocaleString()],
+      ['Empty chapters', emptyCount.toLocaleString()],
+      ['Selected chapter', selected ? selectedWords.toLocaleString() + ' words' : '—']
+    ];
+    if (skippedCount) cards.push(['Excluded from generation', skippedCount.toLocaleString()]);
+    root.innerHTML = cards.map(([label,value]) =>
+      '<div style="background:rgba(9,12,18,.72);border:1px solid rgba(148,163,184,.15);border-radius:10px;padding:10px 12px;min-width:0">' +
+      '<div style="font-size:11px;letter-spacing:.04em;color:var(--muted,#9ca3af);margin-bottom:6px">' + esc(label) + '</div>' +
+      '<div style="font-size:17px;font-weight:750;overflow-wrap:anywhere;color:var(--text,#f3f4f6)">' + esc(value) + '</div></div>'
+    ).join('');
+    // Chapter Insights is a read-only metrics card; remove placeholder values
+    // and render only current backend-derived measurements inside the same card.
+    panel.replaceChildren(title, root);
+  }
+
   async function refreshChapters() {
     chapters = await call('chapter.list'); window.ryuPremiumChapters = chapters;
     if (!chapters.length) { renderDialogueReview(); return; }
@@ -735,6 +778,7 @@
     chapterHistoryGroupOpen = false;
     if (chapterHistoryGroupTimer) { clearTimeout(chapterHistoryGroupTimer); chapterHistoryGroupTimer = null; }
     renderDialogueReview();
+    renderLiveChapterInsights();
   }
   async function refreshCharacters() {
     characters = await call('character.list');
