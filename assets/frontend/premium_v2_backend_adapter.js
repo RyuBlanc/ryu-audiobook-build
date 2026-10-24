@@ -4043,10 +4043,10 @@
             await refreshJobs();
             message((action === 'uninstall' ? 'Uninstall' : action === 'repair' ? 'Repair' : 'Install') +
               ' queued for ' + (model.name || operationId) + '. Track real progress in Background Jobs.');
-            await monitorJob(queued.job_id, async job => {
-              if (job.state !== 'completed') return false;
-              return true;
-            }, async job => {
+            // Model jobs use the terminal callback for refresh/cleanup. They do not
+            // produce preview audio, so they must not use monitorJob's preview
+            // output-validation callback (which treats false as a preview failure).
+            await monitorJob(queued.job_id, null, async job => {
               await refreshModels().catch(error => console.warn('[Ryu model refresh]', error));
               await refreshVoices().catch(error => console.warn('[Ryu voice refresh]', error));
               const providers = operationId === 'piper' || operationId === 'kokoro' ? ['offline'] :
@@ -4057,8 +4057,6 @@
               }
               button.disabled = false;
               button.textContent = disableLabel;
-              if (job.state === 'completed') message((action === 'uninstall' ? 'Uninstalled ' : action === 'repair' ? 'Repaired ' : 'Installed ') +
-                (model.name || operationId) + '. Related Voice Studio catalogues were refreshed.');
             });
           } catch (error) {
             button.disabled = false;
