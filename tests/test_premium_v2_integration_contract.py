@@ -918,6 +918,24 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("async function refreshJobsImpl()", refresh)
         self.assertIn("return allJobs;", refresh)
 
+    def test_chapter_refresh_preserves_pending_draft_and_scroll_without_rebuilding_stable_list(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        start = adapter.index("async function refreshChapters()")
+        end = adapter.index("async function refreshCharacters()", start)
+        refresh = adapter[start:end]
+        self.assertIn("const requestToken = ++chapterListEpoch;", refresh)
+        self.assertIn("if (requestToken !== chapterListEpoch) return chapters;", refresh)
+        self.assertIn("const draftIsPending = Boolean(editorBeforeRefresh", refresh)
+        self.assertIn("pendingChapter.text = draft.text;", refresh)
+        self.assertIn("pendingChapter.title = draft.title.trim();", refresh)
+        self.assertIn("const previousScrollTop = list.scrollTop;", refresh)
+        self.assertIn("list.dataset.chapterListSignature !== listSignature", refresh)
+        self.assertIn("list.scrollTop = previousScrollTop;", refresh)
+        self.assertIn("document.activeElement !== editor", refresh)
+        self.assertIn("if (!draft) {", refresh)
+
     def test_provider_catalog_latest_request_wins_and_cannot_render_stale_rows(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
             encoding="utf-8"
