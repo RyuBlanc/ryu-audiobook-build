@@ -1,6 +1,6 @@
 # Known Limitations — Ryu's Audiobook Dragon Studio
 
-**Audited:** 20 October 2026
+**Audited:** 24 October 2026 (Models Center/job-monitor follow-up)
 **Current code baseline:** `eca9cf1a8330e2dcfce697f66233a73740e25ae0` on `fix/import-qa-speaker-hover-hardware`
 **Open PR:** [#15](https://github.com/RyuBlanc/ryu-audiobook-build/pull/15), open and unmerged.
 
@@ -18,7 +18,7 @@ This document records actual source-level limitations. A supported bridge handle
 | Automatic per-line AI speaker suggestions | Automatic per-line AI speaker suggestions remain prototype-only; confidence labels and bulk acceptance are not treated as verified evidence. | Do not treat an AI suggestion as a confirmed speaker assignment. |
 | Manual dialogue-line speaker assignment | Manual source-backed dialogue speaker assignments are persisted after exact passage validation against saved chapter text. | Assignments require an unambiguous source passage and saved character; synthesis integration and interactive Windows acceptance remain to be verified. |
 | Custom storage roots | Custom project-library and audio-assets root selection is not implemented. | Current roots remain the configured local storage locations. |
-| Per-model actions | The model screen's per-model update/verify/repair/uninstall/default-selection/test actions are not all connected to backend operations. Qwen install/repair uses the real `models.install` job; unsupported actions must remain guarded. | Do not treat unsupported model actions as successful. |
+| Per-model actions | Inventory, install, verify, repair and uninstall are connected for supported app-managed local components. Install/repair/uninstall use real background jobs and refresh model/voice catalogues at completion. Remote model update checks, universal default-selection and model test-generation are not established as connected; the Check Updates button only refreshes the local catalogue. | Do not show remote-update success or fake test-generation; complete actual Windows model/voice/narration acceptance. |
 | SQLite | `docs/PREMIUM_V2_DATABASE_SCHEMA.md` describes a target schema, not a deployed migration. Project data/state and Premium V2 job records currently use existing project/state files, QSettings and `premium_v2_jobs.json`. | Do not claim SQLite persistence or migrations are complete. |
 | Durable jobs/history | Job rows persist and unfinished rows are marked recoverable/failed on restart. `history.list` currently reads the same job rows, not a separate immutable history store. | Restart recovery, checkpoint reuse and history independence still require test coverage. |
 | Player state | Browser audio transport can operate on the selected output, but durable playback position/bookmarks and complete chapter-position recovery are not evidenced. | Verify seek, duration, chapter navigation and restart resume with real generated output. |
@@ -46,3 +46,10 @@ CI does not replace interactive Windows acceptance. The following remain pending
 - Compare visual layout at 1920×1080, 1366×768, 1280×720 and resized/narrow supported windows.
 
 **Release gate:** Do not describe Stage 8.2.11 as fully accepted. The current source still requires the Windows manual acceptance above and the remaining items in `docs/STAGE_1_GAP_REGISTER.md`.
+
+## Models Center status update — 24 October 2026
+
+- The current branch implements `models.list/install/verify/repair/uninstall` for supported managed components. Lifecycle operations run as background jobs, prevent conflicting model/audio operations, and refresh the inventory and relevant Voice Studio catalogues when they finish.
+- Storage accounting now includes nested Chatterbox files and the Qwen isolated Python runtime/metadata while keeping each Qwen model-weight directory separately counted. Build #1162 passed 530 automated tests for this change; its package job was superseded by the follow-up job-monitor fix, so its artifact is not the final acceptance candidate.
+- A regression guard was added for the race where a background job is already terminal during the first poll. The current branch workflow must validate this follow-up before that latest package can be considered passed.
+- Still unsupported: true live CPU/GPU/VRAM telemetry. Still requiring target-PC acceptance: install/repair/remove models; provider selector refresh; real preview, audiobook narration and playback; installer and portable first-run.

@@ -873,6 +873,20 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("void hydrateInitialState()", hydration)
         self.assertNotIn("refreshPerformance", hydration)
 
+    def test_monitor_job_does_not_restart_polling_after_initial_terminal_result(self):
+        """A quick install/failed job must not create a stale timer after its first status check."""
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        start = adapter.index("async function monitorJob(")
+        end = adapter.index("function requestElevenLabsApiKey()", start)
+        monitor = adapter[start:end]
+        self.assertIn("let finished = false;", monitor)
+        self.assertIn("if (finished) return;", monitor)
+        self.assertIn("finished = true;", monitor)
+        self.assertIn("await tick();\\n    if (!finished) poll = setInterval(tick, 1000);", monitor)
+
+
     def test_job_polling_updates_existing_rows_without_rebuilding_hidden_panel(self):
         """Job polling should not repeatedly replace DOM rows and trigger visible flicker."""
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(

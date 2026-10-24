@@ -1415,7 +1415,10 @@
   }
   async function monitorJob(jobId, done, terminal) {
     activeJob = jobId; if (poll) clearInterval(poll);
+    poll = null;
+    let finished = false;
     const tick = async () => {
+      if (finished) return;
       try {
         const jobs = await call('job.list', {include_hidden:true}), job = jobs.find(j => j.job_id === jobId);
         if (!job) return;
@@ -1430,7 +1433,9 @@
         if ($('previewState') && job.type === 'voice-preview') $('previewState').textContent = job.stage || job.state;
         await refreshJobs();
         if (['completed','failed','cancelled'].includes(job.state)) {
-          clearInterval(poll); poll = null;
+          finished = true;
+          if (poll) clearInterval(poll);
+          poll = null;
           if (typeof terminal === 'function') {
             try { await terminal(job); } catch (terminalError) { console.warn('[Ryu job terminal callback]', terminalError); }
           }
@@ -1453,7 +1458,8 @@
         }
       } catch (e) { console.error(e); }
     };
-    await tick(); poll = setInterval(tick, 1000);
+    await tick();
+    if (!finished) poll = setInterval(tick, 1000);
   }
   function requestElevenLabsApiKey() {
     return new Promise(resolve => {

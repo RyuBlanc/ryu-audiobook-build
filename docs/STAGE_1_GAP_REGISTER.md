@@ -1,6 +1,6 @@
 # Stage 1 Gap Register — Ryu's Audiobook Premium V2
 
-**Updated:** 20 October 2026
+**Updated:** 24 October 2026 (Models Center and job-monitor follow-up)
 **Audited code:** `eca9cf1a8330e2dcfce697f66233a73740e25ae0`
 **Working branch:** `fix/import-qa-speaker-hover-hardware`
 **Rule:** status is based on source inspection or named test evidence. A registered handler or successful build alone does not mean the user-facing workflow is accepted.
@@ -27,7 +27,7 @@
 6. Pronunciation: import/export, conflict tracking, per-profile test-result storage and invalidation of affected audio are not complete.
 7. Sound: catalog/import/assignment commands exist; licensing, real playback, loudness, missing files, ducking/fades and preview-vs-final mix remain unaccepted.
 8. Player: output metadata and transport exist; persisted resume position/bookmarks and robust chapter timeline persistence are not evidenced.
-9. Models: install/list exist; update/verify/repair/uninstall/default/test actions are guarded as unavailable where no backend implementation exists.
+9. Models: `models.list`, `models.install`, `models.verify`, `models.repair` and `models.uninstall` are connected for supported local components. Lifecycle work runs as a guarded background job and refreshes the model and relevant voice catalogues at completion. Remote model-update checks, universal default-selection and model test-generation actions are not established; the visible catalogue refresh is local-only.
 10. Performance: `performance.info` remains unavailable by capability design; do not show timer-based benchmark output as measured hardware performance.
 11. Settings/storage: custom roots and secure credential storage are incomplete; project/job data currently uses JSON/filesystem/QSettings rather than the documented SQLite target. Restart recovery is not accepted.
 12. Diagnostics and packaging: diagnostic redaction is best-effort; branding, install/upgrade/uninstall and manual packaged-app smoke tests remain release gates.
@@ -66,7 +66,7 @@
 | G-09 | Sound design has real catalogue/import/assignment/manifest/cue/chapter-BGM commands. End-to-end licensing, durations, loudness, missing assets, preview/final consistency and mix quality are not yet accepted. | Test imported and bundled files from disk through preview and final assembly; track unknown licensing accurately. | 5, 6 |
 | G-10 | Job rows are stored in `premium_v2_jobs.json`; unfinished jobs are marked interrupted after startup. `history.list` reads the same job records, not a separate immutable history store. | Implement dedicated durable history separate from task-manager visibility/cleanup; verify checkpoint recovery and retry without regenerating valid chapters. | 6, 7 |
 | G-11 | `player.get_active` returns output metadata and browser audio controls cover transport/speed/seek, but backend playback position/bookmarks and robust chapter timeline persistence are not evidenced. | Verify playback against real output; persist resume position and synchronize main/mini-player state across navigation/restart. | 5, 7 |
-| G-12 | Models list/install are connected, but per-model update/verify/repair/uninstall/default/test operations are intentionally guarded as unavailable. | Add only backend-supported operations with filesystem/checksum checks, job progress and active-job protections. | 8 |
+| G-12 | Models Center now exposes inventory, install, verify, repair and uninstall for supported local components. Lifecycle operations use background jobs with active-job protection and refresh the model inventory plus relevant voice catalogues after completion. Commit `35297b7` corrected nested Chatterbox/Qwen runtime storage accounting; its full regression-test job passed 530 tests. | Keep update checks clearly local-only; add default selection or test-generation only when backed by real operations. Validate storage/health in the packaged Windows app; live CPU/GPU/VRAM telemetry remains unavailable. | 8 |
 | G-13 | `performance.info` is advertised as false; live hardware telemetry is unavailable. The supplied HTML has a timer-style benchmark demonstration to guard. | Connect real telemetry/benchmark where supported or mark each metric unavailable; ensure demo timers cannot claim measured performance. | 8 |
 | G-14 | Custom project/audio/model/cache/output roots and secure provider-specific credential storage are not complete. Settings fields cannot be assumed to persist just because they render. | Map every settings field to storage and a test; implement OS credential store support before enabling credential UI. | 7 |
 | G-15 | SQLite is documented as target schema but current project and job paths are JSON/filesystem/QSettings. Current workflow-stage/chapter selection and player resume persistence are not fully verified. | Decide on a staged migration with backups, preserve existing project folders, and add close/reopen integrity tests before switching authoritative storage. | 7 |
@@ -311,3 +311,12 @@ The **source-level control audit is now closed** for the currently inventoried l
 - Stage 4: real listening for pronunciation on/off and voice identity; sound preview versus final mix; cue boundaries, BGM-off and duration; provider/FFmpeg failure, cancellation, retry, cleanup and checkpoint/source-text preservation.
 - Keep the approved Premium V2 HTML visually unchanged. Automated CI does not establish target-PC operation or perceived audio quality.
 
+
+
+### Models Center and shared job-monitor follow-up — 24 October 2026
+
+- Source review confirmed allow-listed `models.list/install/verify/repair/uninstall` handlers, background lifecycle jobs, and completion-time refreshes for inventory, saved voice profiles, and applicable provider catalogues.
+- Corrected storage reporting so nested Chatterbox runtime files are counted and Qwen runtime files/metadata are measured separately from the individual Qwen weight folders.
+- The first run for the storage fix, Build #1162, passed the full regression-test job: **530 tests in 36.774 seconds**. Its Windows packaging job was superseded by the shared job-monitor timer correction; use the next branch run for the updated package result.
+- Found and corrected an initial-terminal polling race in `monitorJob`: if a job was already terminal during the first tick, the timer could be created after that tick had finished. The new regression contract verifies that the timer is created only if the initial tick remains non-terminal.
+- Still open: target-Windows interaction/visual acceptance; actual model installation/repair/uninstall on the user's PC; true model-provider preview/narration acceptance; and live hardware telemetry, which remains explicitly unavailable.
