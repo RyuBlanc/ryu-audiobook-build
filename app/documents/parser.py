@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 
 from app.tts.pacing import is_heading_line
+from app.chapters.heading_rules import CHAPTER_HEADING_PATTERNS, is_chapter_heading_like as _is_chapter_heading_like
 
 
 @dataclass
@@ -34,30 +35,17 @@ BOOK_NOISE_PATTERNS = (
     re.compile(r"^.*(?:asianovel\.com|mp4directs\.com).*$", re.I),
 )
 
-CHAPTER_HEADING_PATTERNS = (
-    re.compile(r"^\s*(?:chapter|chap\.)\s+[0-9IVXLCDM]+(?:\s*[-:–—.]\s*)?.*$", re.I),
-    re.compile(r"^\s*(?:prologue|epilogue|foreword|preface|introduction|afterword|interlude|side\s+story|extra|bonus)\b.*$", re.I),
-    re.compile(r"^\s*[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ _'’&/-]{0,35}\.\d{1,4}(?:\s+.*)?$", re.I),
-    re.compile(r"^\s*Life\s*[0-9IVXLCDM]+(?:\s+.*)?$", re.I),
-    re.compile(r"^\s*New\s+Life(?:\s*[:–—-].*)?$", re.I),
-)
-
-def _is_chapter_heading_like(line: str) -> bool:
-    candidate = re.sub(r"\s+", " ", line).strip()
-    if not candidate or len(candidate) > 120:
-        return False
-    return any(pattern.fullmatch(candidate) for pattern in CHAPTER_HEADING_PATTERNS)
-
-
 def _split_adjacent_dialogue(line: str) -> str:
     # Separate back-to-back quoted utterances such as:
     # “...?” “...”
     # "..." "..."
     # This is intentionally conservative; ordinary quoted words inside prose remain intact.
-    pattern = re.compile(
-        r'([”’"])(\s+)(?=[“‘"])'
-    )
-    return pattern.sub(lambda match: match.group(1) + "\n", line)
+    pattern = re.compile(r'([”’"」』])\s+(?=[“‘"「『])')
+    separated = pattern.sub(lambda match: match.group(1) + "\n", line)
+    # A few light novels use <<...>> for telepathy, skills, or system messages.
+    # Keep adjacent utterances as separate dialogue units instead of reflowing them
+    # into one long line.
+    return re.sub(r">>\s*(?=<<)", ">>\n", separated)
 
 
 def reflow_source_text(text: str) -> str:
@@ -87,7 +75,7 @@ def reflow_source_text(text: str) -> str:
 
                 # Never join a new dialogue line, heading, list item, or bullet.
                 starts_structural = line.startswith(
-                    ("“", "‘", '"', "'", "—", "–", "-", "•", "*")
+                    ("“", "‘", '"', "'", "「", "『", "<<", "—", "–", "-", "•", "*")
                 )
                 structural = (
                     starts_structural
