@@ -2313,6 +2313,39 @@ class PremiumV2Bridge(QObject):
                         narrating_character=str(state.get("narrating_character") or ""),
                         backend_override=str(state.get("backend") or "automatic"),
                     )
+            def provider_status(detail: str) -> None:
+                detail_text = str(detail or "").strip()
+                if not detail_text or (cancel_event is not None and cancel_event.is_set()):
+                    return
+                lower_detail = detail_text.casefold()
+                if "loading qwen model" in lower_detail or "loading model" in lower_detail:
+                    stage = "Loading model"
+                elif "switching to cpu" in lower_detail or "compatibility mode" in lower_detail:
+                    stage = "Selecting compatible backend"
+                else:
+                    stage = "synthesizing"
+                lock = getattr(self, "_jobs_lock", None)
+                jobs = getattr(self, "_jobs", None)
+                if lock is None or not isinstance(jobs, dict):
+                    return
+                try:
+                    with lock:
+                        row = jobs.get(str(job_id))
+                        if not row or str(row.get("state") or "").casefold() != "running":
+                            return
+                    self._job_update(job_id, stage=stage, message=detail_text)
+                except Exception:
+                    log.debug("Could not publish Qwen preview status.", exc_info=True)
+
+            status_setter = getattr(provider, "set_status_callback", None)
+            if callable(status_setter):
+                status_setter(provider_status)
+            elif callable(getattr(provider, "_status", None)):
+                try:
+                    provider.status_callback = provider_status
+                except Exception:
+                    pass
+
             folder = app_root() / "Previews"
             folder.mkdir(parents=True, exist_ok=True)
             output = folder / f"preview_{job_id}.wav"
