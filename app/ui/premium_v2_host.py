@@ -1729,6 +1729,8 @@ class PremiumV2Bridge(QObject):
                     "locale": str(item.get("locale") or ""),
                     "region": str(item.get("locale") or "").split("-", 1)[-1],
                     "gender": str(item.get("gender") or "Unknown").title(),
+                    "categories": list(item.get("categories") or []),
+                    "personalities": list(item.get("personalities") or []),
                     "description": ", ".join(item.get("categories") or item.get("personalities") or []),
                     "saved": False,
                 } for item in metadata if item.get("name")]
@@ -1755,6 +1757,7 @@ class PremiumV2Bridge(QObject):
                     "locale": str(item.get("language") or ""),
                     "region": str(item.get("accent") or ""),
                     "gender": str(item.get("gender") or "Neutral").title(),
+                    "category": str(item.get("category") or item.get("use_case") or ""),
                     "description": str(item.get("description") or item.get("use_case") or ""),
                     "saved": False,
                 } for item in metadata if item.get("voice_id")]
@@ -2708,7 +2711,7 @@ class PremiumV2Bridge(QObject):
                         state["characters"] = cast
                         state["modified_at"] = self._now()
                         save_state(active_project.folder, state)
-                        self._sync_saved_cast(active_project, cast, state, update_names=True, update_voice=True)
+                        self._sync_saved_cast(active_project, cast, state, update_names=False, update_voice=True)
                         project_updated = True
                         record = next(
                             (item for item in list_reusable_characters()
