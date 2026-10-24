@@ -826,9 +826,18 @@
       const optionsFor=(select,defaultLabel,values,defaultValue)=>{
         if(!select)return;
         const previous=select.value;
-        select.replaceChildren();
-        const first=document.createElement('option');first.value=defaultValue;first.textContent=defaultLabel;select.appendChild(first);
-        for(const value of values){const option=document.createElement('option');option.value=value;option.textContent=value;select.appendChild(option);}
+        const optionRows=[[defaultValue,defaultLabel],...values.map(value=>[value,value])];
+        const signature=JSON.stringify(optionRows);
+        // Retain the existing native select options when the provider metadata
+        // is unchanged. Recreating these controls on every polling refresh causes
+        // a visible flash and can steal keyboard focus from the active filter.
+        if(select.dataset.voiceFacetOptionsSignature!==signature){
+          select.replaceChildren();
+          for(const [value,label] of optionRows){
+            const option=document.createElement('option');option.value=value;option.textContent=label;select.appendChild(option);
+          }
+          select.dataset.voiceFacetOptionsSignature=signature;
+        }
         select.value=values.find(value=>value.toLowerCase()===String(previous).toLowerCase())||defaultValue;
         select.onchange=()=>renderProviderCatalog(providerKey,providerCatalogs[providerKey]);
       };
@@ -1023,10 +1032,29 @@
     };
     for(const [id,value] of Object.entries(values))if($(id))$(id).textContent=String(value||'');
   }
+  function voiceDisplayName(profile) {
+    if(!profile)return '';
+    const provider=String(profile.provider||'').trim().toLowerCase();
+    if(provider==='qwen-character'&&String(profile.qwen_mode||'').toLowerCase()==='design'){
+      const prompt=String(profile.qwen_prompt||'').toLowerCase();
+      if(prompt.includes('anime heroine timbre'))return 'Anime Heroine';
+      if(prompt.includes('anime hero timbre'))return 'Anime Hero';
+      if(prompt.includes('anime rival presence'))return 'Anime Rival';
+      if(prompt.includes('fictional anime villain'))return 'Anime Villain';
+      if(prompt.includes('anime healer presence'))return 'Anime Healer';
+      return String(profile.display_voice||'Custom VoiceDesign');
+    }
+    const voiceId=String(profile.voice_id||selectedVoiceId||'').trim().toLowerCase();
+    const providerKey=providerPanelForProfile(profile);
+    const catalog=Array.isArray(providerCatalogs[providerKey]?.voices)?providerCatalogs[providerKey].voices:[];
+    const match=catalog.find(row=>String(row.voice_id||'').trim().toLowerCase()===voiceId&&
+      String(row.provider||profile.provider||'').trim().toLowerCase()===provider);
+    return String(profile.display_voice||profile.voice_name||match?.name||profile.voice_id||profile.name||'').trim();
+  }
   function updatePreviewTarget(profile,libraryLabel,key) {
     const name=String(profile?.name||'').trim();
     const providerLabel=providerDisplayName(profile);
-    const voice=String(profile?.display_voice||profile?.voice_name||profile?.voice_id||selectedVoiceId||'').trim();
+    const voice=voiceDisplayName(profile);
     let model=String(profile?.model_id||'').trim();
     if(profile?.provider==='qwen-character'){
       model=profile?.qwen_mode==='design'?'VoiceDesign':/clone/i.test(profile?.qwen_mode||'')?'Voice Clone':(model&&model!=='auto'&&model!=='automatic'?model:'CustomVoice');
