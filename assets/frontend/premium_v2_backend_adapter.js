@@ -18,7 +18,7 @@
   let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, activeJob = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
-  let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0, projectListEpoch = 0;
+  let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0, projectListEpoch = 0, characterListEpoch = 0, termsListEpoch = 0, soundListEpoch = 0, historyListEpoch = 0, librarySearchTimer = null, soundSearchTimer = null;
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
   const resumeCheckpointKey = 'ryu.project.resume-checkpoints.v1';
   const resumeStages = new Set(['import','chapters','narrator','characters','sound','production','player']);
@@ -1059,21 +1059,29 @@
     return chapters;
   }
   async function refreshCharacters() {
-    characters = await call('character.list');
+    const requestToken = ++characterListEpoch;
+    const loaded = await call('character.list');
+    if (requestToken !== characterListEpoch) return characters;
+    characters = Array.isArray(loaded) ? loaded : [];
     const list = $('assignedCharacterList');
-    if (list) list.innerHTML = characters.map(c => '<button class="assigned-character" data-character-name="' + esc(c.name) + '">' + esc(c.name) + '<small>' + esc(c.role || 'Character') + ' · ' + Number(c.dialogue_count || 0) + ' lines</small></button>').join('') || '<p class="muted">No saved characters yet. Run analysis on an imported book.</p>';
+    const signature = JSON.stringify(characters.map(c => [c.name,c.role,c.dialogue_count,c.aliases,c.examples,c.voice_profile]));
+    if (list && list.dataset.characterListSignature !== signature) {
+      list.dataset.characterListSignature = signature;
+      list.innerHTML = characters.map(c => '<button class="assigned-character" data-character-name="' + esc(c.name) + '">' + esc(c.name) + '<small>' + esc(c.role || 'Character') + ' · ' + Number(c.dialogue_count || 0) + ' lines</small></button>').join('') || '<p class="muted">No saved characters yet. Run analysis on an imported book.</p>';
+      list.querySelectorAll('[data-character-name]').forEach(el => el.addEventListener('click', () => {
+        const c = characters.find(x => x.name === el.dataset.characterName); if (!c) return;
+        if ($('assignedInspectorName')) $('assignedInspectorName').textContent = c.name;
+        if ($('assignedLineCount')) $('assignedLineCount').textContent = c.dialogue_count || 0;
+        if ($('assignedAliases')) $('assignedAliases').textContent = (c.aliases || []).join(', ') || '—';
+        if ($('assignedQuotes')) $('assignedQuotes').innerHTML = (c.examples || []).map(q => '<p>' + esc(q) + '</p>').join('');
+        if ($('assignedVoiceName')) $('assignedVoiceName').textContent = c.voice_profile || 'Unassigned';
+        if ($('editCharacterVoice')) $('editCharacterVoice').value = c.voice_profile || '';
+        window.ryuPremiumSelectedCharacter = c.name;
+      }));
+    }
     if ($('charFoundMetric')) $('charFoundMetric').textContent = characters.length;
     if ($('assignedCountBadge')) $('assignedCountBadge').textContent = characters.length;
-    list?.querySelectorAll('[data-character-name]').forEach(el => el.addEventListener('click', () => {
-      const c = characters.find(x => x.name === el.dataset.characterName); if (!c) return;
-      if ($('assignedInspectorName')) $('assignedInspectorName').textContent = c.name;
-      if ($('assignedLineCount')) $('assignedLineCount').textContent = c.dialogue_count || 0;
-      if ($('assignedAliases')) $('assignedAliases').textContent = (c.aliases || []).join(', ') || '—';
-      if ($('assignedQuotes')) $('assignedQuotes').innerHTML = (c.examples || []).map(q => '<p>' + esc(q) + '</p>').join('');
-      if ($('assignedVoiceName')) $('assignedVoiceName').textContent = c.voice_profile || 'Unassigned';
-      if ($('editCharacterVoice')) $('editCharacterVoice').value = c.voice_profile || '';
-      window.ryuPremiumSelectedCharacter = c.name;
-    }));
+    return characters;
   }
   const librarySeriesName = c => {
     const raw = String(c?.series || c?.scope || '').trim();
@@ -1303,7 +1311,10 @@
     return String(term.scope_type || 'current_book') + ':' + String(term.scope_id || '');
   }
   async function refreshTerms() {
-    terms = await call('pronunciation.list');
+    const requestToken = ++termsListEpoch;
+    const loaded = await call('pronunciation.list');
+    if (requestToken !== termsListEpoch) return terms;
+    terms = Array.isArray(loaded) ? loaded : [];
     const list = $('pronDictionaryBody');
     if (list) list.innerHTML = terms.map(t => {
       const word = String(t.written_form || t.word || '');
@@ -1330,7 +1341,10 @@
     }
   }
   async function refreshSounds() {
-    sounds = await call('sound.catalog');
+    const requestToken = ++soundListEpoch;
+    const loaded = await call('sound.catalog');
+    if (requestToken !== soundListEpoch) return sounds;
+    sounds = Array.isArray(loaded) ? loaded : [];
     const grid = $('soundTrackGrid');
     const query = ($('soundTrackSearch')?.value || '').trim().toLowerCase();
     const sourceFilter = document.querySelector('#soundSourceFilter [data-source].active')?.dataset.source || 'all';
@@ -1341,7 +1355,11 @@
         (sourceFilter === 'imported' && String(t.source).toLowerCase().includes('imported'));
       return matchesQuery && matchesSource;
     });
-    if (grid) grid.innerHTML = visible.map(t => '<article class="sound-track card"><div class="sound-track-info"><b>' + esc(t.title) + '</b><small>' + esc(t.source) + ' · ' + esc(t.format) + ' · ' + Math.round(Number(t.size_bytes || 0)/1024) + ' KB</small></div><button class="btn small secondary" data-select-sound="' + esc(t.path) + '">Select</button></article>').join('') || '<p class="muted">No local or bundled sound tracks found. Import your own licensed audio files.</p>';
+    const signature = JSON.stringify({query,sourceFilter,rows:visible.map(t => [t.path,t.title,t.source,t.format,t.size_bytes])});
+    if (grid && grid.dataset.soundListSignature !== signature) {
+      grid.dataset.soundListSignature = signature;
+      grid.innerHTML = visible.map(t => '<article class="sound-track card"><div class="sound-track-info"><b>' + esc(t.title) + '</b><small>' + esc(t.source) + ' · ' + esc(t.format) + ' · ' + Math.round(Number(t.size_bytes || 0)/1024) + ' KB</small></div><button class="btn small secondary" data-select-sound="' + esc(t.path) + '">Select</button></article>').join('') || '<p class="muted">No local or bundled sound tracks found. Import your own licensed audio files.</p>';
+    }
     return sounds;
   }
   async function refreshSoundCues() {
@@ -1411,6 +1429,20 @@
     if ($('bgmFadeOut')) $('bgmFadeOut').selectedIndex = ({0:0,3:1,5:2,8:3})[fadeOut] ?? 0;
     renderChapterBgm();
     return chapterBgmState;
+  }
+  function scheduleLibrarySearchRefresh() {
+    if (librarySearchTimer) clearTimeout(librarySearchTimer);
+    librarySearchTimer = setTimeout(() => {
+      librarySearchTimer = null;
+      refreshProjects().catch(error => message(error?.message || String(error), true));
+    }, 160);
+  }
+  function scheduleSoundSearchRefresh() {
+    if (soundSearchTimer) clearTimeout(soundSearchTimer);
+    soundSearchTimer = setTimeout(() => {
+      soundSearchTimer = null;
+      refreshSounds().catch(error => message(error?.message || String(error), true));
+    }, 160);
   }
   let backendJobFilter = 'active';
   async function refreshJobs() {
@@ -2348,10 +2380,12 @@
     return h ? h + ':' + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0') : m + ':' + String(sec).padStart(2,'0');
   };
   async function refreshHistory() {
-    const rows = await call('history.list');
+    const requestToken = ++historyListEpoch;
+    const loaded = await call('history.list');
+    if (requestToken !== historyListEpoch) return [];
+    const rows = Array.isArray(loaded) ? loaded : [];
     const section = $('history');
     const filter = $('historyFilters')?.querySelector('button.active')?.textContent?.trim().toLowerCase() || 'all';
-    section?.querySelectorAll('.history-row').forEach(el => el.remove());
     const host = $('historyFilters')?.parentElement;
     const visible = rows.filter(j => {
       const state = String(j.state || '').toLowerCase();
@@ -2360,6 +2394,9 @@
       if (filter === 'failed') return ['failed','cancelled'].includes(state);
       return true;
     });
+    const signature = JSON.stringify({filter,rows:visible.map(j => [j.job_id,j.title,j.type,j.project_title,j.stage,j.message,j.state,j.elapsed_seconds,j.progress,j.error?.message])});
+    if (section && host && section.dataset.historyRenderSignature === signature) return rows;
+    if (section) section.querySelectorAll('[data-backend-history]').forEach(el => el.remove());
     if (host) {
       let empty = host.querySelector('[data-history-empty]');
       if (!visible.length) {
@@ -2376,12 +2413,13 @@
           '</span></div><span class="badge ' + (label==='failed'?'red':label==='running'?'info':'') + '">' + esc(label) +
           '</span><span>' + Math.round(Number(j.progress || 0)) + '%</span><button class="btn small secondary" data-history-job="' +
           esc(j.job_id) + '">View</button>';
-        host.appendChild(row);
+        if (host) host.appendChild(row);
       });
+      if (section) section.dataset.historyRenderSignature = signature;
     }
     return rows;
   }
-    async function refreshPerformance() {
+  async function refreshPerformance() {
     let result;
     try {
       result = await call('performance.info');
@@ -2946,7 +2984,6 @@
       const q=$('pronSearchAdvanced').value.trim().toLowerCase();
       $('pronDictionaryBody')?.querySelectorAll('tr,[data-pron-row]').forEach(el=>el.hidden=!el.textContent.toLowerCase().includes(q));
     };
-    if ($('librarySearch')) $('librarySearch').oninput = () => refreshProjects().catch(e=>message(e.message,true));
     // Dashboard recent cards are re-rendered from backend project records. Delegate
     // clicks from the stable dashboard container so refreshed cards open their own project.
     if ($('dashboard')) $('dashboard').addEventListener('click', async e => {
@@ -3318,7 +3355,6 @@
     if ($('editCharacterVoice')) $('editCharacterVoice').onchange=act(async()=>{if(!window.ryuPremiumSelectedCharacter)return;await call('character.assign',{name:window.ryuPremiumSelectedCharacter,profile_name:$('editCharacterVoice').value});await refreshCharacters();});
     // Import buttons are handled once by the delegated Sound Design handler below.
     // Import buttons are handled once by the delegated Sound Design handler below.
-    if ($('soundTrackSearch')) $('soundTrackSearch').oninput = () => refreshSounds().catch(e=>message(e.message,true));
     document.querySelectorAll('#cueSourceFilter [data-cue-source]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('#cueSourceFilter [data-cue-source]').forEach(x => x.classList.toggle('active', x === button)); refreshSoundCues().catch(e => message(e.message, true)); }));
     if ($('soundTrackGrid')) $('soundTrackGrid').addEventListener('click', e=>{const b=e.target.closest('[data-select-sound]');if(!b)return;selectedSoundPath=b.dataset.selectSound;if($('selectedSoundTitle'))$('selectedSoundTitle').textContent=sounds.find(t=>t.path===selectedSoundPath)?.title||'Selected track';if($('selectedSoundMeta'))$('selectedSoundMeta').textContent='Selected from the local catalogue';message('Selected sound track. Save it to the active book to apply it.');});
     // setBookDefaultTrack is handled by the single delegated backend listener.
@@ -3333,10 +3369,10 @@
     document.addEventListener('input', e => {
       if (e.target?.id === 'librarySearch') {
         e.stopImmediatePropagation();
-        refreshProjects().catch(err => message(err?.message || String(err), true));
+        scheduleLibrarySearchRefresh();
       } else if (e.target?.id === 'soundTrackSearch') {
         e.stopImmediatePropagation();
-        refreshSounds().catch(err => message(err?.message || String(err), true));
+        scheduleSoundSearchRefresh();
       } else if (e.target?.id === 'cueSearch') {
         e.stopImmediatePropagation();
         refreshSoundCues().catch(err => message(err?.message || String(err), true));
