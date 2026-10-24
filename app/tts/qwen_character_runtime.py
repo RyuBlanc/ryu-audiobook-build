@@ -569,25 +569,32 @@ def reset_voice_cache(progress=None) -> int:
     return removed
 
 
-def install_model(kind: str, progress=None) -> Path:
+def install_model(kind: str, progress=None, force_repair: bool = False) -> Path:
+    """Install or repair one Qwen model in its dedicated, app-managed folder.
+
+    force_repair redownloads the model files even when the manifest looks valid;
+    it never removes the saved voice profiles or another model's folder.
+    """
     if kind not in MODEL_IDS:
         raise ValueError(f"Unknown Qwen model kind: {kind}")
     install_runtime(progress)
     target = MODEL_DIRS[kind]
     target.mkdir(parents=True, exist_ok=True)
-    if model_installed(kind):
+    if model_installed(kind) and not force_repair:
         if progress:
-            progress(f"{MODEL_IDS[kind]} is already installed.")
+            progress(f"{MODEL_IDS[kind]} is already installed and passed the file check.")
         return target
 
     script = (
         "from huggingface_hub import snapshot_download; "
         "snapshot_download(repo_id=%r, local_dir=%r, "
-        "allow_patterns=['*.json','*.safetensors','*.txt','*.model','*.npz','*.bin','tokenizer*','vocab*'])"
-        % (MODEL_IDS[kind], str(target))
+        "allow_patterns=['*.json','*.safetensors','*.txt','*.model','*.npz','*.bin','tokenizer*','vocab*'], "
+        "force_download=%r)"
+        % (MODEL_IDS[kind], str(target), bool(force_repair))
     )
     if progress:
-        progress(f"Downloading {MODEL_IDS[kind]}… This model stays on this PC.")
+        action = "Repairing" if force_repair else "Downloading"
+        progress(f"{action} {MODEL_IDS[kind]}… This model stays on this PC.")
     _run([str(VENV_PYTHON), "-c", script], progress, timeout=7200)
     if not model_installed(kind):
         raise RuntimeError(f"Qwen model download finished, but {MODEL_IDS[kind]} is incomplete.")
