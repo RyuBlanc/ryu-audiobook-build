@@ -649,6 +649,7 @@ class VoicePreviewContractTests(unittest.TestCase):
 
     def test_html_studio_controls_include_delete_batch_and_duration_flicker_guards(self):
         adapter = Path("assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn("ensurePreviewDurationOptions", adapter)
         self.assertIn("90 seconds", adapter)
         self.assertIn("90s", adapter)
@@ -667,6 +668,8 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("overflow-anchor:none", adapter)
         self.assertIn("previewDetailIsUseful", adapter)
         self.assertIn("Synthesis is still running", host)
+        self.assertIn('status_setter = getattr(provider, "set_status_callback", None)', host)
+        self.assertIn('stage = "Loading model"', host)
 
     def test_successful_qwen_preview_is_cached_but_full_generation_releases_it(self):
         host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
