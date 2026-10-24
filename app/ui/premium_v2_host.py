@@ -3396,19 +3396,31 @@ class PremiumV2Bridge(QObject):
             component_type="model",
         ))
 
+        # Avoid constructing a COM speech engine synchronously while the
+        # Models page is painting. Windows SAPI voice tokens are registered in
+        # the system/user registry; Voice Studio later enumerates the full live
+        # provider catalogue when the user opens that library.
+        sapi_tokens: set[str] = set()
         try:
-            import pyttsx3
-            sapi_engine = pyttsx3.init()
-            try:
-                sapi_voices = sapi_engine.getProperty("voices") or []
-                sapi_count = len(sapi_voices)
-            finally:
+            import winreg
+            registry_paths = (
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\\Microsoft\\Speech\\Voices\\Tokens"),
+                (winreg.HKEY_CURRENT_USER, r"SOFTWARE\\Microsoft\\Speech\\Voices\\Tokens"),
+            )
+            for hive, registry_path in registry_paths:
                 try:
-                    sapi_engine.stop()
-                except Exception:
-                    pass
-        except Exception:
-            sapi_count = 0
+                    with winreg.OpenKey(hive, registry_path) as key:
+                        count = winreg.QueryInfoKey(key)[0]
+                        for index in range(count):
+                            try:
+                                sapi_tokens.add(str(winreg.EnumKey(key, index)).casefold())
+                            except OSError:
+                                continue
+                except OSError:
+                    continue
+        except ImportError:
+            pass
+        sapi_count = len(sapi_tokens)
         result.append(row(
             "windows-sapi", "Windows SAPI System Voices", "windows-sapi", sapi_count > 0,
             "Uses voices installed in Windows. These are managed by Windows settings, not downloaded or removed by Ryu's Audiobook.",
