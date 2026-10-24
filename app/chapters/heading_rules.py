@@ -152,6 +152,21 @@ def heading_title(line: str, *, allow_slash: bool = False) -> str | None:
     if candidate.casefold() in {"table of contents", "contents"}:
         return None
 
+    # Some light novels put the actual section heading on the next line:
+    # "BLACK DOG/BIRTH" followed by "Part 1". Treat the pair as one displayed
+    # title once the importer combines it, so it is also a chapter boundary.
+    compound = re.fullmatch(
+        rf"(?P<base>.+?\s*/\s*.+?)\s*[:：–—-]?\s+"
+        rf"(?P<section>(?:part|volume|vol\.?|book|arc)\s+{_NUMBER_TOKEN})",
+        candidate,
+        re.I,
+    )
+    if compound:
+        base = _normalize_line(compound.group("base"))
+        section = re.sub(r"\s+", " ", compound.group("section").strip())
+        if is_slash_title_candidate(base):
+            return f"{base}: {section}"
+
     for pattern in (_CHAPTER_PREFIX_RE, _NUMBERED_SECTION_RE, _NAMED_SECTION_RE):
         match = pattern.fullmatch(candidate)
         if match:
