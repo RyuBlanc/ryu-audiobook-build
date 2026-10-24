@@ -89,7 +89,14 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('"models.install": True', self.host)
         self.assertIn('"character.update": True', self.host)
         self.assertIn('"character.delete": True', self.host)
-        self.assertIn('match = re.search(r"(?<!\\d)(\\d{1,3})%", detail)', self.host)
+        # Model readiness is derived from installed files and runtime health,
+        # not from a fragile percentage parser for installer log text.
+        self.assertIn('"models.list": self._models_list', self.host)
+        self.assertIn('"models.list": True', self.host)
+        self.assertIn('def _models_list(', self.host)
+        self.assertIn('PiperProvider.model_paths()', self.host)
+        self.assertIn('qwen_model_installed(kind)', self.host)
+        self.assertIn('def _assert_no_active_model_lifecycle(', self.host)
         self.assertIn("Confirm that you have permission", self.host)
         self.assertIn("def _voice_save(", self.host)
         self.assertIn('if provider_name == "chatterbox" and not voice_id:', self.host)
@@ -501,7 +508,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "call('pronunciation.save'",
             "button.matches('[data-test-pron]')",
             "button.matches('[data-qwen-install]')",
-            "Per-model ' + action + ' is not connected to a backend operation",
+            "const modelLifecycleCommands = {install:'models.install',repair:'models.repair',uninstall:'models.uninstall'};",
+            "call(modelCommand, payload)",
+            "call('models.verify', {model_id:operationId})",
             "call('chapter.dialogue.assign'",
         ):
             self.assertIn(token, adapter)
@@ -634,6 +643,10 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             r"""\bcall\(\s*['"]([^'"]+)['"]""",
             adapter,
         ))
+
+        # Dynamic lifecycle actions must map explicitly to registered handlers.
+        self.assertIn("const modelLifecycleCommands = {install:'models.install',repair:'models.repair',uninstall:'models.uninstall'};", adapter)
+        self.assertTrue({"models.install", "models.repair", "models.uninstall"}.issubset(handler_commands))
 
         self.assertFalse(
             adapter_commands - handler_commands,
