@@ -3557,44 +3557,129 @@ class PremiumV2Bridge(QObject):
                 progress(text)
 
         if model_id == "piper":
+            import json
+            import ssl
+            import urllib.request
             from app.tts.providers.piper import PiperProvider
             voice_name = str(payload.get("voice_name") or "en_US-lessac-medium").strip()
-            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,119}", voice_name):
+            parsed_voice = re.fullmatch(
+                r"(?P<locale>[a-z]{2,3}_[A-Z]{2})-(?P<speaker>[A-Za-z0-9][A-Za-z0-9_-]*)-(?P<quality>x_low|x_high|low|medium|high)",
+                voice_name,
+            )
+            if not parsed_voice:
                 raise ValueError("Use a valid Piper voice ID such as en_US-lessac-medium.")
-            target_root = root / "piper"
+            target_root = (root / "piper").resolve()
             target_root.mkdir(parents=True, exist_ok=True)
-            existing = next((item for item in PiperProvider.model_paths() if item.stem.casefold() == voice_name.casefold()), None)
-            if existing and not force_repair:
-                return f"Piper voice {voice_name} is already present."
+            existing_local = next((
+                item.resolve() for item in PiperProvider.model_paths()
+                if item.stem.casefold() == voice_name.casefold()
+                and target_root in item.resolve().parents
+                and item.suffix.casefold() == ".onnx"
+            ), None)
+            if existing_local and not force_repair:
+                sidecar = existing_local.with_suffix(existing_local.suffix + ".json")
+                if sidecar.is_file() and existing_local.stat().st_size > 1024:
+                    return f"Piper voice {voice_name} is already installed locally."
+            locale = parsed_voice.group("locale")
+            family = locale.split("_", 1)[0].lower()
+            speaker = parsed_voice.group("speaker")
+            quality = parsed_voice.group("quality")
+            base_url = (
+                "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
+                f"{family}/{locale}/{speaker}/{quality}/{voice_name}"
+            )
+            file_specs = (
+                (base_url + ".onnx?download=true", target_root / (voice_name + ".onnx"), 1024, "Piper voice model"),
+                (base_url + ".onnx.json?download=true", target_root / (voice_name + ".onnx.json"), 100, "Piper voice configuration"),
+            )
+            try:
+                import certifi
+                context = ssl.create_default_context(cafile=certifi.where())
+            except Exception:
+                context = ssl.create_default_context()
+            token = uuid.uuid4().hex
+            staged: list[tuple[Path, Path]] = []
             backups: list[tuple[Path, Path]] = []
-            backup_root = target_root / (".repair-" + uuid.uuid4().hex)
-            if force_repair and existing:
-                backup_root.mkdir(parents=True, exist_ok=True)
-                for path in (existing, existing.with_suffix(existing.suffix + ".json")):
-                    if path.exists():
-                        backup = backup_root / path.name
-                        shutil.move(str(path), str(backup))
-                        backups.append((backup, path))
-            report(f"Downloading Piper voice {voice_name}.")
-            command = [sys.executable, "-m", "piper.download_voices", voice_name, "--data-dir", str(target_root)]
-            completed = subprocess.run(command, capture_output=True, text=True, timeout=1800)
-            if completed.returncode != 0:
-                for backup, original in reversed(backups):
-                    if backup.exists():
-                        original.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.move(str(backup), str(original))
-                detail = (completed.stderr or completed.stdout or "").strip()
-                raise RuntimeError(detail or "Piper voice download failed.")
-            installed = next((item for item in PiperProvider.model_paths() if item.stem.casefold() == voice_name.casefold()), None)
-            if installed is None or not installed.is_file() or installed.stat().st_size < 1024:
-                for backup, original in reversed(backups):
-                    if backup.exists():
-                        original.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.move(str(backup), str(original))
-                raise RuntimeError("Piper download completed but the requested voice files were not found.")
-            shutil.rmtree(backup_root, ignore_errors=True)
-            mark_installed("piper", True)
-            return f"Piper voice {voice_name} is installed."
+            backup_root = root / (".piper-repair-backup-" + token)
+            try:
+                for url, target, minimum, label in file_specs:
+                    temporary = target.with_name(target.name + "." + token + ".part")
+                    request = urllib.request.Request(
+                        url,
+                        headers={"User-Agent": "Ryu-Audiobook/1.1", "Accept": "application/octet-stream"},
+                    )
+                    report(f"Downloading {label} for {voice_name}…")
+                    try:
+                        with urllib.request.urlopen(request, timeout=120, context=context) as response, temporary.open("wb") as handle:
+                            total = int(response.headers.get("Content-Length", "0") or 0)
+                            received = 0
+                            while True:
+                                chunk = response.read(1024 * 1024)
+                                if not chunk:
+                                    break
+                                handle.write(chunk)
+                                received += len(chunk)
+                                if total:
+                                    report(f"Downloading {label} for {voice_name}… {min(99, received * 100 // total)}%")
+                        if not temporary.is_file() or temporary.stat().st_size < minimum:
+                            raise RuntimeError(f"{label} download is incomplete.")
+                        if target.name.endswith(".onnx.json"):
+                            try:
+                                metadata = json.loads(temporary.read_text(encoding="utf-8"))
+                            except (OSError, ValueError, TypeError) as exc:
+                                raise RuntimeError("Piper voice configuration is not valid JSON.") from exc
+                            if not isinstance(metadata, dict) or not metadata:
+                                raise RuntimeError("Piper voice configuration is empty or invalid.")
+                        staged.append((temporary, target))
+                    except Exception:
+                        temporary.unlink(missing_ok=True)
+                        raise
+
+                # Keep the last known-good pair until both new files have downloaded
+                # and validated. The backup is outside Models/piper, so the voice
+                # discovery scan cannot accidentally select the backup during repair.
+                if existing_local:
+                    backup_root.mkdir(parents=True, exist_ok=True)
+                    for source in (existing_local, existing_local.with_suffix(existing_local.suffix + ".json")):
+                        if source.is_file():
+                            backup = backup_root / source.name
+                            shutil.move(str(source), str(backup))
+                            backups.append((backup, source))
+                try:
+                    for temporary, target in staged:
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        temporary.replace(target)
+                except Exception:
+                    for _temporary, target in staged:
+                        target.unlink(missing_ok=True)
+                    for backup, original in reversed(backups):
+                        if backup.exists():
+                            original.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.move(str(backup), str(original))
+                    raise
+
+                installed = next((
+                    item.resolve() for item in PiperProvider.model_paths()
+                    if item.stem.casefold() == voice_name.casefold()
+                    and target_root in item.resolve().parents
+                    and item.suffix.casefold() == ".onnx"
+                ), None)
+                metadata_path = target_root / (voice_name + ".onnx.json")
+                if installed is None or not installed.is_file() or installed.stat().st_size < 1024 or not metadata_path.is_file():
+                    for _temporary, target in staged:
+                        target.unlink(missing_ok=True)
+                    for backup, original in reversed(backups):
+                        if backup.exists():
+                            original.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.move(str(backup), str(original))
+                    raise RuntimeError("Piper model download finished, but its local ONNX/config pair did not pass verification.")
+                mark_installed("piper", True)
+                report(f"Piper voice {voice_name} installed and verified.")
+                return f"Piper voice {voice_name} is installed and verified."
+            finally:
+                for temporary, _target in staged:
+                    temporary.unlink(missing_ok=True)
+                shutil.rmtree(backup_root, ignore_errors=True)
 
         if model_id == "kokoro":
             import ssl
