@@ -28,12 +28,52 @@ NOISE_PATTERNS = (
 )
 
 BOOK_NOISE_PATTERNS = (
+    # These candidates are only considered removable when they appear in at
+    # least two chapters. A standalone "Report" or a number can be real story
+    # content and must never be removed from a single occurrence by itself.
     re.compile(r"^(?:report|read\s+online|download)$", re.I),
     re.compile(r"^\d{1,5}$"),
     re.compile(r"^page\s+\d{1,5}$", re.I),
     re.compile(r"^(?:www\.)?[^\s]+\.(?:com|net|org|cc|me)(?:/.*)?$", re.I),
     re.compile(r"^.*(?:asianovel\.com|mp4directs\.com).*$", re.I),
 )
+
+# A conservative, reusable word-coverage check for import previews. Chapter
+# bodies can repeat short headings/TOC labels, so compare normalized token
+# multisets rather than requiring raw text equality.
+def chapter_text_coverage(source_text: str, chapters: list) -> tuple[int, int, float]:
+    source_words = len(re.findall(r"\b[\w’'-]+\b", str(source_text or ""), re.UNICODE))
+    chapter_text = "\n".join(str(getattr(chapter, "text", "") or "") for chapter in chapters)
+    chapter_words = len(re.findall(r"\b[\w’'-]+\b", chapter_text, re.UNICODE))
+    coverage = chapter_words / source_words if source_words else (1.0 if not chapter_text.strip() else 0.0)
+    return source_words, chapter_words, coverage
+
+def validate_chapter_text_coverage(source_text: str, chapters: list, *, minimum: float = 0.90) -> None:
+    """Raise an actionable error when chapter segmentation loses source content.
+
+    This is deliberately a token-coverage guard, not an equality assertion:
+    headings are excluded from bodies by design, and TOC/duplicate cleanup may
+    legitimately remove text. For short texts it uses the same ratio but does
+    not let a zero denominator accidentally pass.
+    """
+    if not 0.0 <= minimum <= 1.0:
+        raise ValueError("minimum coverage must be between 0 and 1")
+    source_words, chapter_words, coverage = chapter_text_coverage(source_text, chapters)
+    # Short books can legitimately have more of their extracted text in
+    # headings/front matter, so guard them by absolute loss too.
+    minimum_words = min(20, max(1, int(source_words * minimum))) if source_words else 0
+    if source_words and chapter_words < minimum_words:
+        raise ValueError(
+            f"Chapter detection retained only {chapter_words:,} of {source_words:,} words. "
+            "Import was stopped to protect your book from losing content."
+        )
+    if source_words >= 40 and coverage < minimum:
+        raise ValueError(
+            f"Chapter detection retained only {chapter_words:,} of {source_words:,} "
+            f"source words ({coverage:.0%} coverage). Import was stopped to protect "
+            "your book from losing content. Review the heading rules or choose a "
+            "different import format."
+        )
 
 def _split_adjacent_dialogue(line: str) -> str:
     # Separate back-to-back quoted utterances such as:
