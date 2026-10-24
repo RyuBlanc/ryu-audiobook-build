@@ -946,6 +946,18 @@
     panel.replaceChildren(title, root);
   }
 
+  function syncCurrentChapterPreviewText(chapter) {
+    const modeGroup = [...document.querySelectorAll('#voices .seg')].find(el =>
+      [...el.querySelectorAll('button')].some(button => /Current Chapter|Selected Passage|Custom Text/.test(button.textContent))
+    );
+    const mode = modeGroup?.querySelector('button.active')?.textContent.trim() || 'Current Chapter';
+    if (!/Current Chapter/i.test(mode)) return;
+    const box = [...document.querySelectorAll('#voices textarea')].find(el =>
+      /Preview text/i.test(el.closest('label')?.textContent || '')
+    );
+    if (box) box.value = String(chapter?.text || '');
+  }
+
   async function refreshChapters() {
     chapters = await call('chapter.list'); window.ryuPremiumChapters = chapters;
     if (!chapters.length) { renderDialogueReview(); return; }
@@ -963,6 +975,7 @@
         const c = chapters.find(x => x.number === Number(el.dataset.chapterNumber)); if (!c) return;
         window.ryuPremiumSelectedChapter = c.number;
         if (title) title.textContent = c.title; if (editor) editor.value = c.text;
+        syncCurrentChapterPreviewText(c);
         if ($('wordCount')) $('wordCount').textContent = c.word_count;
         chapterLastText = c.text || ''; chapterHistoryGroupOpen = false;
         if (chapterHistoryGroupTimer) { clearTimeout(chapterHistoryGroupTimer); chapterHistoryGroupTimer = null; }
@@ -971,6 +984,7 @@
     }
     if (title) title.textContent = current.title;
     if (editor && document.activeElement !== editor) editor.value = current.text;
+    syncCurrentChapterPreviewText(current);
     if ($('wordCount')) $('wordCount').textContent = current.word_count;
     chapterLastText = current.text || '';
     chapterHistoryGroupOpen = false;
