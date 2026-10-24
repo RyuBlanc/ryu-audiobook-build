@@ -1430,6 +1430,9 @@
         await refreshJobs();
         if (['completed','failed','cancelled'].includes(job.state)) {
           clearInterval(poll); poll = null;
+          if (typeof arguments[2] === 'function') {
+            try { await arguments[2](job); } catch (terminalError) { console.warn('[Ryu job terminal callback]', terminalError); }
+          }
           const completionResult = job.state === 'completed' && done ? await done(job) : undefined;
           if (completionResult === false) {
             message('The preview job ended, but its output did not pass playback validation. Check the preview status and retry.', true);
@@ -2291,6 +2294,47 @@
     }
     return result;
   }
+  function requestModelActionDialog(options = {}) {
+    return new Promise(resolve => {
+      $('ryuModelActionDialog')?.remove();
+      const overlay = document.createElement('div');
+      overlay.id = 'ryuModelActionDialog';
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(3,5,10,.80);backdrop-filter:blur(7px)';
+      const input = options.input ? '<label for="ryuModelActionInput" style="display:block;font-size:12px;color:#aeb6c5;margin:14px 0 6px">' + esc(options.input.label || 'Value') + '</label><input id="ryuModelActionInput" maxlength="140" value="' + esc(options.input.value || '') + '" placeholder="' + esc(options.input.placeholder || '') + '" style="box-sizing:border-box;width:100%;padding:12px;border-radius:10px;border:1px solid #42495a;background:#0c1018;color:#f6f7fa;font:inherit;outline-color:#e63361" />' : '';
+      overlay.innerHTML =
+        '<section role="dialog" aria-modal="true" aria-labelledby="ryuModelActionTitle" style="width:min(500px,100%);max-height:85vh;overflow:auto;background:#151a25;border:1px solid rgba(255,255,255,.13);border-radius:18px;box-shadow:0 24px 80px rgba(0,0,0,.5);padding:22px;color:#f4f5f8">' +
+          '<div style="color:#e8b957;font-size:11px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;margin-bottom:8px">Model management</div>' +
+          '<h2 id="ryuModelActionTitle" style="margin:0 0 9px;font-size:22px">' + esc(options.title || 'Confirm action') + '</h2>' +
+          '<p style="margin:0;color:#aeb6c5;font-size:13px;line-height:1.6;white-space:pre-line">' + esc(options.description || '') + '</p>' +
+          input +
+          '<div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;flex-wrap:wrap">' +
+            '<button type="button" data-model-dialog-cancel style="padding:10px 14px;border-radius:10px;background:#1c2230;border:1px solid #343b4a;color:#f2f4f8;font-weight:700;cursor:pointer">Cancel</button>' +
+            '<button type="button" data-model-dialog-confirm style="padding:10px 16px;border-radius:10px;background:' + (options.danger ? '#7e1f36' : '#c92050') + ';border:1px solid ' + (options.danger ? '#b63350' : '#e7426a') + ';color:white;font-weight:800;cursor:pointer">' + esc(options.confirmLabel || 'Continue') + '</button>' +
+          '</div></section>';
+      const field = overlay.querySelector('#ryuModelActionInput');
+      const finish = value => { overlay.remove(); resolve(value); };
+      overlay.querySelector('[data-model-dialog-cancel]').addEventListener('click', () => finish(null));
+      overlay.querySelector('[data-model-dialog-confirm]').addEventListener('click', () => {
+        if (options.input) {
+          const value = String(field?.value || '').trim();
+          if (!value) { field?.focus(); message('Enter a value before continuing.', true); return; }
+          if (!/^[A-Za-z0-9][A-Za-z0-9._-]{2,119}$/.test(value)) {
+            field?.focus(); message('Use letters, numbers, dots, underscores or hyphens only.', true); return;
+          }
+          finish(value);
+        } else finish(true);
+      });
+      overlay.addEventListener('click', event => { if (event.target === overlay) finish(null); });
+      overlay.addEventListener('keydown', event => {
+        if (event.key === 'Escape') { event.preventDefault(); finish(null); }
+        if (event.key === 'Enter' && options.input) { event.preventDefault(); overlay.querySelector('[data-model-dialog-confirm]').click(); }
+      });
+      document.body.appendChild(overlay);
+      (field || overlay.querySelector('[data-model-dialog-confirm]'))?.focus();
+      field?.select();
+    });
+  }
+
   function formatModelBytes(raw) {
     const value = Number(raw || 0);
     if (!Number.isFinite(value) || value <= 0) return '—';
@@ -3864,22 +3908,110 @@
         });
         return;
       }
-      if (button.matches('[data-model-update], [data-model-repair], [data-model-verify], [data-model-uninstall]')) {
+      if (button.matches('[data-model-open-provider]')) {
+        e.preventDefault(); e.stopImmediatePropagation(); stop();
+        const providerKey = button.dataset.modelOpenProvider;
+        const target = $('voices');
+        if (!target) throw new Error('Voice Studio is unavailable in this build.');
+        window.go?.('voices');
+        document.querySelectorAll('#voices .provider').forEach(panel => panel.classList.toggle('active', panel.dataset.provider === providerKey));
+        const defaults = {offline:'Amy',sapi:'David',customvoice:'Serena',voicedesign:'Custom voice description',qwenclone:'Reference voice',customref:'Reference voice',edge:'Edge neural voice',eleven:'ElevenLabs voice'};
+        selectedVoice = null; selectedVoiceId = null; selectedVoiceProvider = null;
+        if ($('profileName')) $('profileName').value = '';
+        if ($('premiumName')) $('premiumName').value = '';
+        if ($('profileVoice')) $('profileVoice').textContent = defaults[providerKey] || 'Select a voice';
+        void refreshProviderCatalog(providerKey, false).catch(error => message(error?.message || String(error), true));
+        message('Opened Voice Studio for ' + (voiceLibraryTitles[providerKey] || providerKey) + '.');
+        return;
+      }
+      if (button.matches('[data-model-open-page]')) {
+        e.preventDefault(); e.stopImmediatePropagation(); stop();
+        window.go?.(button.dataset.modelOpenPage);
+        message('Opened ' + button.dataset.modelOpenPage + ' for the corresponding local model feature.');
+        return;
+      }
+      if (button.matches('[data-model-install], [data-model-repair], [data-model-verify], [data-model-uninstall]')) {
+        e.preventDefault(); e.stopImmediatePropagation(); stop();
         void run(async () => {
-          const action = button.hasAttribute('data-model-update') ? 'update' :
+          const action = button.hasAttribute('data-model-install') ? 'install' :
             button.hasAttribute('data-model-repair') ? 'repair' :
             button.hasAttribute('data-model-verify') ? 'verify' : 'uninstall';
-          const id = button.getAttribute('data-model-update') || button.getAttribute('data-model-repair') ||
-            button.getAttribute('data-model-verify') || button.getAttribute('data-model-uninstall') || '';
-          if (action === 'verify') {
-            const result = await call('models.verify', {model_id:id});
-            await refreshModels();
-            message((result.available ? 'Model verification passed. ' : 'Model verification found missing files. ') +
-              result.detail + ' Checked: ' + result.models.map(model => model.model_id).join(', '),
-              !result.available);
-            return;
+          const operationId = button.getAttribute('data-model-' + action) || '';
+          const card = button.closest('.model-card');
+          const visibleModelId = String(card?.dataset.modelId || operationId).trim();
+          const model = (window.ryuModelInventoryRows || []).find(item => item.model_id === visibleModelId) ||
+            (window.ryuModelInventoryRows || []).find(item => item.model_id === operationId) || {};
+          const voiceSelect = card?.querySelector('[data-piper-voice-select]');
+          let payload = {model_id:operationId};
+          if (visibleModelId === 'piper' && ['repair','uninstall'].includes(action)) {
+            const voiceName = String(voiceSelect?.value || '').trim();
+            if (!voiceName) throw new Error('Choose one installed local Piper voice first.');
+            payload.voice_name = voiceName;
           }
-          throw new Error('Per-model ' + action + ' is not connected to a backend operation for "' + id + '". No model state was changed.');
+          if (visibleModelId === 'piper' && action === 'install') {
+            const name = await requestModelActionDialog({
+              title:'Install a Piper voice',
+              description:'Choose a Piper voice model ID. The model and its metadata will be stored in the local Models folder and then become available in Offline Neural Voices.',
+              confirmLabel:'Download voice',
+              input:{label:'Piper voice ID',value:'en_US-lessac-medium',placeholder:'en_US-lessac-medium'}
+            });
+            if (!name) return;
+            payload = {model_id:'piper',voice_name:name};
+          } else if (action === 'verify') {
+            const result = await call('models.verify', {model_id:operationId});
+            await refreshModels();
+            message((result.available ? 'Verification passed. ' : 'Verification needs attention. ') + result.detail, !result.available);
+            return;
+          } else {
+            const displayName = String(model.name || operationId);
+            const details = action === 'uninstall'
+              ? 'Only the selected app-managed files will be removed. Projects, source books, generated audiobooks and saved voice profiles will be retained. Uninstall is blocked while a voice preview, generation, analysis or model lifecycle job is running.'
+              : action === 'repair'
+                ? 'This may re-download model files and can take time or use several GB of network data. Saved projects and voice profiles are kept.'
+                : String(model.requirements || model.notes || 'The local installer will check the required files and dependencies before reporting success.');
+            const approved = await requestModelActionDialog({
+              title:action === 'uninstall' ? 'Uninstall ' + displayName : action === 'repair' ? 'Repair ' + displayName : 'Install ' + displayName,
+              description:details,
+              confirmLabel:action === 'uninstall' ? 'Uninstall component' : action === 'repair' ? 'Repair component' : 'Start installation',
+              danger:action === 'uninstall'
+            });
+            if (!approved) return;
+          }
+          if (action === 'uninstall' && operationId === 'qwen-model') payload.model_kind = button.dataset.modelKind || visibleModelId;
+          if (action === 'uninstall' && operationId === 'piper') {
+            payload.model_id = 'piper';
+            payload.voice_name = String(voiceSelect?.value || '').trim();
+          }
+          const disableLabel = button.textContent;
+          button.disabled = true;
+          button.textContent = action === 'uninstall' ? 'Removing…' : action === 'repair' ? 'Repairing…' : 'Starting…';
+          try {
+            const queued = await call('models.' + action, payload);
+            await refreshJobs();
+            message((action === 'uninstall' ? 'Uninstall' : action === 'repair' ? 'Repair' : 'Install') +
+              ' queued for ' + (model.name || operationId) + '. Track real progress in Background Jobs.');
+            await monitorJob(queued.job_id, async job => {
+              if (job.state !== 'completed') return false;
+              return true;
+            }, async job => {
+              await refreshModels().catch(error => console.warn('[Ryu model refresh]', error));
+              await refreshVoices().catch(error => console.warn('[Ryu voice refresh]', error));
+              const providers = operationId === 'piper' || operationId === 'kokoro' ? ['offline'] :
+                /qwen|custom-|design-|base-/.test(operationId) ? ['customvoice','voicedesign','qwenclone'] :
+                /chatterbox/.test(operationId) ? ['customref'] : [];
+              for (const providerKey of providers) {
+                try { await refreshProviderCatalog(providerKey, false); } catch (error) { console.warn('[Ryu provider refresh]', error); }
+              }
+              button.disabled = false;
+              button.textContent = disableLabel;
+              if (job.state === 'completed') message((action === 'uninstall' ? 'Uninstalled ' : action === 'repair' ? 'Repaired ' : 'Installed ') +
+                (model.name || operationId) + '. Related Voice Studio catalogues were refreshed.');
+            });
+          } catch (error) {
+            button.disabled = false;
+            button.textContent = disableLabel;
+            throw error;
+          }
         });
         return;
       }
