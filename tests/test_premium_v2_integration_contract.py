@@ -887,6 +887,20 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertLess(monitor.index("await tick();"), monitor.index("if (!finished && monitorToken === monitorEpoch) poll = setInterval(tick, 1000);"))
 
 
+    def test_elevenlabs_credential_dialog_is_separate_from_job_monitor(self):
+        """A monitor refactor must not leave the old monitor body inside a dialog handler."""
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(adapter.count("function requestElevenLabsApiKey()"), 1)
+        start = adapter.index("async function monitorJob(")
+        dialog = adapter.index("function requestElevenLabsApiKey()", start)
+        self.assertLess(start, dialog)
+        dialog_body = adapter[dialog:dialog + 300]
+        self.assertIn("return new Promise(resolve => {", dialog_body)
+        self.assertNotIn("activeJob = jobId", dialog_body)
+        self.assertNotIn("const tick = async () =>", dialog_body)
+
     def test_monitor_job_serializes_ticks_ignores_stale_responses_and_clears_active_job(self):
         """A slow job-list response must not finish a job twice or mutate a newer task's UI."""
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
