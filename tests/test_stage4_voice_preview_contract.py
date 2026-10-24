@@ -152,6 +152,7 @@ class VoicePreviewContractTests(unittest.TestCase):
         adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
         source = adapter.read_text(encoding="utf-8")
         self.assertIn("if(!previewAudio||!voicePreviewValid)", source)
+        self.assertIn("if($('playPreview'))$('playPreview').disabled=!voicePreviewValid;", source)
         self.assertIn("previewAudio.volume=previewVolume", source)
         self.assertIn("previewAudio.ontimeupdate=syncPreviewPlaybackTime", source)
         self.assertIn("voice.preview.save", source)
