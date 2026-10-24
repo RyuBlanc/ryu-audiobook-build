@@ -165,7 +165,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("function preparePreviewPlayback(job, requestedSeconds)", adapter)
         self.assertIn("Preview shorter than requested", adapter)
         self.assertIn("requested_duration_seconds", adapter)
-        self.assertIn("preparePreviewPlayback(job, Number(duration))", adapter)
+        self.assertIn("preparePreviewPlayback(job,Number(duration))", adapter)
 
     def test_chapter_merge_preserves_assignment_offsets_and_final_chapter(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
@@ -1201,7 +1201,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("requestVoiceProfileSaveName", adapter)
         self.assertIn("payload.voice_id = voiceId", adapter)
         self.assertIn("let previewText = previewBox?.value || c?.text || ''", adapter)
-        self.assertIn("call('voice.preview', payload)", adapter)
+        self.assertIn("call('voice.preview',payload)", adapter)
         self.assertIn("call('voice.elevenlabs.design'", adapter)
         self.assertIn("call('voice.elevenlabs.create'", adapter)
         self.assertNotIn(
