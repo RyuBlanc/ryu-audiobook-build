@@ -3244,7 +3244,6 @@ class PremiumV2Bridge(QObject):
             MODEL_IDS, MODEL_DIRS, model_installed as qwen_model_installed,
             runtime_ready as qwen_runtime_ready, RUNTIME_ROOT as QWEN_ROOT,
         )
-        from app.ai.model_runtime import installed as audiobook_ai_ready, recommended_model
         root = models_root()
         root.mkdir(parents=True, exist_ok=True)
         try:
@@ -3378,20 +3377,39 @@ class PremiumV2Bridge(QObject):
                 component_type="model",
             ))
 
-        try:
-            ai_installed = bool(audiobook_ai_ready())
-            ai_model_id, ai_filename, ai_size = recommended_model()
-        except Exception:
-            ai_installed, ai_model_id, ai_filename, ai_size = False, "unknown", "AI model", 0
+        # This is a status-card refresh, not an installation operation. Do not
+        # launch nvidia-smi here just to decide which model to display; inspect
+        # the known local candidates directly and let the background installer
+        # select hardware-appropriate weights when installation is requested.
         ai_root = root / "audiobook-ai"
         ai_present = ai_root.exists()
+        ai_candidates = (
+            ("qwen3-4b-q4", "Qwen3-4B-Q4_K_M.gguf"),
+            ("qwen3-1.7b-q5", "Qwen3-1.7B-Q5_K_M.gguf"),
+        )
+        ai_models_on_disk = [
+            (model_id, filename, ai_root / filename)
+            for model_id, filename in ai_candidates
+            if (ai_root / filename).is_file()
+        ]
+        ai_server_present = (ai_root / "llama-server.exe").is_file()
+        ai_installed = bool(ai_server_present and ai_models_on_disk)
+        if ai_models_on_disk:
+            ai_model_id, ai_filename, ai_model_path = ai_models_on_disk[0]
+            try:
+                ai_size = int(ai_model_path.stat().st_size)
+            except OSError:
+                ai_size = 0
+        else:
+            ai_model_id, ai_filename, ai_size = "auto-selected", "Selected for this PC during installation", 0
         result.append(row(
             "audiobook-ai", "Audiobook AI · Local Book Analysis", "audiobook-ai", ai_installed,
             "Local analysis engine used by book/character analysis. Installer selects a model for detected hardware and runs a real inference self-test.",
             status=("Installed · model files present" if ai_installed else "Runtime/model needs setup" if ai_present else "Not installed"),
             installable=not ai_installed, repairable=ai_present or ai_installed, uninstallable=ai_present,
             model_name=ai_model_id, model_filename=ai_filename, download_bytes=int(ai_size),
-            requirements=f"Recommended local model download: about {ai_size / (1024 ** 3):.1f} GB.",
+            requirements=(f"Installed model file: {ai_size / (1024 ** 3):.1f} GB." if ai_size else
+                          "Install downloads a hardware-appropriate local model (typically about 1.2–2.5 GB) and runs a real inference self-test."),
             storage_bytes=byte_size(ai_root, direct_only=True), managed_path=str(ai_root),
             component_type="model",
         ))
