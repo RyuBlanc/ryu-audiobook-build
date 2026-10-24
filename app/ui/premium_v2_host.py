@@ -1663,37 +1663,57 @@ class PremiumV2Bridge(QObject):
                 and str(getattr(profile, "qwen_mode", "custom") or "custom").casefold() == qwen_mode
             ]
             try:
-                from app.tts.qwen_character_runtime import runtime_ready
+                from app.tts.qwen_character_runtime import runtime_ready, model_installed
                 runtime_ok = bool(runtime_ready())
+                custom_weights = bool(model_installed("custom-0.6b") or model_installed("custom-1.7b"))
+                design_weights = bool(model_installed("design-1.7b"))
+                base_weights = bool(model_installed("base-0.6b") or model_installed("base-1.7b"))
             except Exception:
-                runtime_ok = False
+                runtime_ok, custom_weights, design_weights, base_weights = False, False, False, False
             if key == "customvoice":
-                ready = runtime_ok
+                ready = runtime_ok and custom_weights
                 message_text = (
-                    f"{len(rows)} CustomVoice option(s) available; model runtime ready."
-                    if runtime_ok else "Qwen CustomVoice runtime is not ready. Install/repair the matching Qwen model in Models."
+                    f"{len(rows)} saved voice profile(s); CustomVoice runtime and weights are ready."
+                    if ready else
+                    "Install or repair the Qwen runtime and at least one CustomVoice model in Models Center."
                 )
             elif key == "voicedesign":
-                ready = runtime_ok
-                message_text = (
-                    "Enter a voice description or choose a preset, then save it as a profile."
-                    if runtime_ok else "Qwen VoiceDesign runtime is not ready. Install/repair the matching Qwen model in Models."
-                )
+                ready = runtime_ok and design_weights and base_weights
+                if ready:
+                    message_text = "VoiceDesign and its Base identity model are ready. Choose a description/preset, then save the profile."
+                elif not runtime_ok:
+                    message_text = "Install or repair the Qwen3-TTS runtime in Models Center."
+                elif not design_weights:
+                    message_text = "Install Qwen VoiceDesign 1.7B in Models Center."
+                else:
+                    message_text = "VoiceDesign weights are installed, but a Qwen Base model is also required for stable long-form voice identity."
             else:
-                ready = runtime_ok
+                ready = runtime_ok and base_weights
                 message_text = (
-                    "Choose a permitted reference recording and transcript, then save the clone profile."
-                    if runtime_ok else "Qwen Voice Clone runtime is not ready. Install/repair the matching Qwen model in Models."
+                    "Qwen Voice Clone runtime and Base weights are ready. Choose an authorized reference recording."
+                    if ready else
+                    "Install or repair the Qwen runtime and a Base voice-clone model in Models Center."
                 )
             source = "local"
 
         elif key == "customref":
             rows = [profile_row(profile) for profile in profiles if profile.provider == "chatterbox"]
-            ready = any(profile.sample_path for profile in saved_profiles if profile.provider == "chatterbox")
-            message_text = (
-                f"{len(rows)} saved reference-voice profile(s) found."
-                if ready else "Reference voice profiles are local. Import a recording and confirm permission before saving."
+            try:
+                from app.tts.chatterbox_runtime import runtime_ready as chatterbox_runtime_ready
+                ready = bool(chatterbox_runtime_ready())
+            except Exception:
+                ready = False
+            saved_reference_count = sum(
+                1 for profile in saved_profiles
+                if profile.provider == "chatterbox" and profile.sample_path and Path(profile.sample_path).is_file()
             )
+            if not ready:
+                message_text = "Install or repair the Chatterbox runtime in Models Center before previewing a cloned voice."
+            elif saved_reference_count:
+                message_text = f"Chatterbox runtime ready · {saved_reference_count} saved reference-voice profile(s)."
+            else:
+                message_text = "Chatterbox runtime ready. Import an authorized reference recording to create a voice profile."
+            source = "local"
 
         elif key == "edge":
             from app.tts.providers.edge_tts import EdgeTTSProvider, VOICE_CACHE
