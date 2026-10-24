@@ -2752,6 +2752,10 @@
     // scroll anchor and jump the visible part of the Voice Studio workspace.
     // Manual scrolling remains enabled; this only disables automatic anchoring.
     style.textContent = [
+      // The main app uses .workspace as its scroll container. Disabling anchoring
+      // there prevents background status/card updates from jumping the viewport
+      // in any menu, not just Voice Studio.
+      '.workspace{overflow-anchor:none!important}',
       '#voices{overflow-anchor:none!important}',
       '#voices .content,#voices .layout,#voiceWorkspace,#voiceWorkspace .panel{overflow-anchor:none!important}',
       '#voices #previewState{min-height:1.25em;white-space:nowrap;max-width:170px;overflow:hidden;text-overflow:ellipsis;flex:0 0 auto}',
