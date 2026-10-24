@@ -2428,9 +2428,19 @@ class PremiumV2Bridge(QObject):
                         self._cache_preview_provider(cache_signature, provider, voice)
                     except Exception:
                         log.warning("Could not retain a warm preview provider; closing it safely.", exc_info=True)
-                        self._release_preview_provider(provider)
+                        release = getattr(self, "_release_preview_provider", None)
+                        if callable(release):
+                            release(provider)
+                        else:
+                            close = getattr(provider, "close", None)
+                            if callable(close): close()
                 else:
-                    self._release_preview_provider(provider)
+                    release = getattr(self, "_release_preview_provider", None)
+                    if callable(release):
+                        release(provider)
+                    else:
+                        close = getattr(provider, "close", None)
+                        if callable(close): close()
             if cancel_event is not None:
                 with self._jobs_lock:
                     self._preview_cancel_events.pop(job_id, None)
@@ -3125,8 +3135,12 @@ class PremiumV2Bridge(QObject):
 
     def _production_generate_book(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._assert_no_active_model_lifecycle("start audiobook generation")
-        self._assert_no_active_audio_synthesis("start audiobook generation")
-        self.close_preview_provider_cache()
+        check_active = getattr(self, "_assert_no_active_audio_synthesis", None)
+        if callable(check_active):
+            check_active("start audiobook generation")
+        close_cache = getattr(self, "close_preview_provider_cache", None)
+        if callable(close_cache):
+            close_cache()
         project = self._active_project()
         chapters = [c for c in project.chapters if not getattr(c, "skip_for_generation", False) and (c.text or "").strip()]
         skipped = len(project.chapters) - len(chapters)
