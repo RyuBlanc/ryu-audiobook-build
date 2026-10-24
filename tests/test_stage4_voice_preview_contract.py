@@ -14,7 +14,7 @@ class VoicePreviewContractTests(unittest.TestCase):
     def test_preview_handler_preserves_selected_profile_and_all_supported_durations(self):
         profile = SimpleNamespace(name="Saved Narrator")
         project = SimpleNamespace(folder=Path("unused"), chapters=[])
-        for seconds in (10, 20, 30, 45, 60):
+        for seconds in (10, 20, 30, 45, 60, 90):
             with self.subTest(seconds=seconds):
                 thread = Mock()
                 bridge = SimpleNamespace(
@@ -54,7 +54,7 @@ class VoicePreviewContractTests(unittest.TestCase):
         )
         with patch.object(premium_v2_host, "load_state", return_value={}), \
              patch.object(premium_v2_host.threading, "Thread") as thread_factory:
-            with self.assertRaisesRegex(ValueError, "10, 20, 30, 45, or 60"):
+            with self.assertRaisesRegex(ValueError, "10, 20, 30, 45, 60, or 90"):
                 premium_v2_host.PremiumV2Bridge._voice_preview(
                     bridge, {"profile_name": profile.name, "text": "A preview passage.",
                              "duration_seconds": 15}
@@ -645,6 +645,28 @@ class VoicePreviewContractTests(unittest.TestCase):
         details = source[details_start:details_end]
         self.assertIn("if self.details.text() != details_text:", details)
         self.assertIn("if self.examples.toPlainText() != example_text:", details)
+
+
+    def test_html_studio_controls_include_delete_batch_and_duration_flicker_guards(self):
+        adapter = Path("assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("ensurePreviewDurationOptions", adapter)
+        self.assertIn("90 seconds", adapter)
+        self.assertIn("90s", adapter)
+        self.assertIn("ryuDeleteCurrentChapter", adapter)
+        self.assertIn("ryuDeleteSelectedChapters", adapter)
+        self.assertIn("chapterDeleteSelection", adapter)
+        self.assertIn("window.__ryuDialogueReviewRenderSignature", adapter)
+        self.assertIn("panel.dataset.ryuLiveInsightsSignature", adapter)
+        self.assertIn("document.activeElement === box", adapter)
+
+    def test_successful_qwen_preview_is_cached_but_full_generation_releases_it(self):
+        host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("self._cache_preview_provider(cache_signature, provider, voice)", host)
+        self.assertIn("threading.Timer(90.0, self._expire_preview_provider_cache", host)
+        generation = host[host.index("def _production_generate_book"):host.index("def _production_preview")]
+        self.assertIn("self.close_preview_provider_cache()", generation)
+        self.assertIn("close_preview_provider_cache", host[host.index("class PremiumV2Window"):])
+
 
 if __name__ == "__main__":
     unittest.main()
