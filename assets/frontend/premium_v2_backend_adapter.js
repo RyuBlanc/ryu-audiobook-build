@@ -982,6 +982,7 @@
         chapterLastText = c.text || ''; chapterHistoryGroupOpen = false;
         if (chapterHistoryGroupTimer) { clearTimeout(chapterHistoryGroupTimer); chapterHistoryGroupTimer = null; }
         list.querySelectorAll('.list-item').forEach(x => x.classList.toggle('active', x === el));
+        renderLiveChapterInsights();
       }));
     }
     if (title) title.textContent = current.title;
@@ -3051,6 +3052,11 @@
     if ($('chapterEditor')) $('chapterEditor').addEventListener('input', () => {
       const c = selectedChapter(); if (!c) return;
       const editorText = $('chapterEditor').value;
+      // Keep derived UI state in sync with the editor immediately; persistence
+      // is still serialized/debounced below, so this does not trigger a page reload.
+      c.text = editorText;
+      c.word_count = editorText.trim() ? editorText.trim().split(/\\s+/).filter(Boolean).length : 0;
+      renderLiveChapterInsights();
       if (!chapterHistoryApplying && editorText !== chapterLastText) {
         if (!chapterHistoryGroupOpen) {
           if (editorText.length <= 1_000_000 && chapterLastText.length <= 1_000_000) rememberChapterSnapshot(chapterUndoStacks, c.number, chapterLastText);
