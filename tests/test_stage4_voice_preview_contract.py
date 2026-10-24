@@ -129,7 +129,7 @@ class VoicePreviewContractTests(unittest.TestCase):
     def test_frontend_does_not_mark_unplayable_or_unmeasured_preview_ready(self):
         adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
         source = adapter.read_text(encoding="utf-8")
-        self.assertIn("Number.isFinite(actual) || actual <= 0", source)
+        self.assertIn("!Number.isFinite(actual)||actual<=0", source)
         self.assertIn("return false;", source)
         self.assertIn("const playable=preparePreviewPlayback(job,Number(duration));", source)
         self.assertIn("if($('previewState')&&playable)$('previewState').textContent='Ready · 100%';", source)
@@ -164,6 +164,48 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("optionsFor(categoryLabel?.querySelector('select'),'All categories',categoryValues,'All categories')", source)
         self.assertIn("same(voiceLanguageFacet(row),languageFilter)", source)
         self.assertIn("same(voiceRegionFacet(row),regionFilter)", source)
+
+
+    def test_preview_save_uses_native_location_picker_and_only_accepts_preview_files(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            preview_dir = root / "Previews"
+            export_dir = root / "chosen-location"
+            preview_dir.mkdir()
+            export_dir.mkdir()
+            source = preview_dir / "preview_voice-test.wav"
+            source.write_bytes(b"V" * 2048)
+            destination = export_dir / "voice-test.wav"
+            bridge = SimpleNamespace()
+            with patch.object(premium_v2_host, "app_root", return_value=root), \
+                 patch.object(premium_v2_host.QFileDialog, "getSaveFileName",
+                              return_value=(str(destination), "WAV audio (*.wav)")) as dialog:
+                result = premium_v2_host.PremiumV2Bridge._voice_preview_save(
+                    bridge, {"source_path": str(source), "suggested_name": "voice-test"}
+                )
+            dialog.assert_called_once()
+            self.assertEqual(result["path"], str(destination.resolve()))
+            self.assertEqual(destination.read_bytes(), source.read_bytes())
+            self.assertFalse(result["cancelled"])
+
+            external = export_dir / "untrusted.wav"
+            external.write_bytes(b"V" * 2048)
+            with patch.object(premium_v2_host, "app_root", return_value=root):
+                with self.assertRaisesRegex(ValueError, "Only a generated Ryu voice-preview WAV"):
+                    premium_v2_host.PremiumV2Bridge._voice_preview_save(
+                        bridge, {"source_path": str(external)}
+                    )
+
+    def test_character_library_core_keeps_voice_profile_assignment(self):
+        from app.core.character_library import list_characters, sync_characters, update_character
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "character_library.json"
+            rows = sync_characters("Series A", [{"name": "Mira"}], path=path)
+            updated = update_character(rows[0]["id"], {
+                "series": "Series A", "primary_name": "Mira", "voice_name": "Qwen Hero"
+            }, path=path)
+            self.assertEqual(updated["voice_name"], "Qwen Hero")
+            self.assertEqual(list_characters(path=path)[0]["voice_name"], "Qwen Hero")
 
 if __name__ == "__main__":
     unittest.main()
