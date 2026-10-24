@@ -2816,7 +2816,12 @@
       if (next && editor) { editor.value = next.text; if ($('chapterTitle')) $('chapterTitle').textContent = next.title; }
       message('Chapter split and saved · '+result.chapter_count+' chapters now in this book.');
     });
-    ['saveProfile','saveDraft','addPremium','saveOnly'].forEach(id=>{if($(id))$(id).onclick=act(saveVoice);});
+    // Save Profile and Save Profile Only persist the local voice settings. ElevenLabs
+    // "Add Selected to My Voices" has a separate provider-create handler below.
+    ['saveProfile','saveOnly'].forEach(id=>{if($(id))$(id).onclick=act(saveVoice);});
+    // The previous "Save Draft" button was wired to permanent profile save (not a draft
+    // backend) and duplicated the Step 3 save action. Remove this unsupported control.
+    $('saveDraft')?.remove();
     if ($('useNarrator')) $('useNarrator').onclick=act(async()=>{
       const v=await saveVoice();
       if(!v)return;
@@ -3387,11 +3392,9 @@
       const label = button.textContent.trim().replace(/\s+/g,' ').toLowerCase();
       const stop = () => { e.preventDefault(); e.stopImmediatePropagation(); };
       const invokeAssigned = async fn => { stop(); try { await fn(); } catch (err) { message(err?.message || String(err), true); } };
-      if (['generatePreview','playPreview','stopPreview','useNarrator','assignCharacter','startGenerate','pauseGenerate','cancelJob','previewGenerate','saveProfile','saveDraft','addPremium','saveOnly'].includes(button.id) && typeof button.onclick === 'function') {
-        stop();
-        Promise.resolve(button.onclick()).catch(err => message(err?.message || String(err), true));
-        return;
-      }
+      // Do not invoke button.onclick from this bubbling handler: the browser has
+      // already executed it at the target. Re-dispatching caused duplicate saves,
+      // duplicated narrator assignment and overlapping preview jobs.
       if (button.id === 'testAssignedVoice') {
         void invokeAssigned(async () => {
           const c = characters.find(item => item.name === window.ryuPremiumSelectedCharacter);
