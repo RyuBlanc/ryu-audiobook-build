@@ -1994,6 +1994,7 @@ class PremiumV2Bridge(QObject):
         )
 
     def _voice_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._assert_no_active_model_lifecycle("generate a voice preview")
         project = self._active_project()
         state = load_state(project.folder)
         profile = PremiumV2Bridge._preview_profile_from_payload(self, payload, state)
@@ -2223,6 +2224,7 @@ class PremiumV2Bridge(QObject):
         return rows if isinstance(rows, list) else []
 
     def _character_analyze(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        self._assert_no_active_model_lifecycle("start character analysis")
         project = self._active_project()
         if not project.chapters:
             raise ValueError("Import a book with chapters before analysing characters.")
@@ -2853,6 +2855,7 @@ class PremiumV2Bridge(QObject):
         return {"job_id": job_id, "state": "completed", "suggestions": suggestions, "count": len(suggestions)}
 
     def _production_generate_book(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._assert_no_active_model_lifecycle("start audiobook generation")
         project = self._active_project()
         chapters = [c for c in project.chapters if not getattr(c, "skip_for_generation", False) and (c.text or "").strip()]
         skipped = len(project.chapters) - len(chapters)
@@ -3253,6 +3256,20 @@ class PremiumV2Bridge(QObject):
         self.settings.sync()
         return self._settings_get({})
 
+    def _assert_no_active_model_lifecycle(self, activity: str) -> None:
+        """Prevent synthesis/analysis from opening a runtime while files are being changed."""
+        with self._jobs_lock:
+            active = [
+                job for job in self._jobs.values()
+                if str(job.get("state") or "").casefold() in {"queued", "running"}
+                and str(job.get("type") or "").casefold().startswith("model-")
+            ]
+        if active:
+            raise RuntimeError(
+                f"Cannot {activity} while a model install, repair or uninstall is running. "
+                "Let the model operation finish, then retry."
+            )
+
     def _models_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         """Return the live, provider-aware local model and runtime inventory."""
         from app.core.paths import models_root
@@ -3552,7 +3569,7 @@ class PremiumV2Bridge(QObject):
         active_audio_jobs = [
             job for job in active
             if any(token in str(job.get("type") or "").casefold()
-                   for token in ("voice-preview", "production", "generation", "character-analyze", "import"))
+                   for token in ("preview", "production", "generation", "character-analysis", "character-analyze", "import"))
         ]
         if active_audio_jobs:
             raise RuntimeError("A preview, import, analysis, or audiobook generation job is active. Stop or finish it before changing installed model files.")
