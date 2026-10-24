@@ -226,36 +226,62 @@ def load_saved_profile(name: str) -> VoiceProfile | None:
 
 
 def load_profiles() -> list[VoiceProfile]:
-    """Combine installed voices and saved profiles without losing good rows to one bad legacy record."""
-    # Use the tolerant saved-profile reader: historical profiles may contain
-    # fields from an older UI schema. A single malformed row must not make the
-    # entire saved catalogue disappear, which also breaks Load/Preview/Assign.
+    """Combine installed voices and saved profiles, recovering from legacy name collisions."""
     saved = load_saved_profiles()
-    saved_by_name: dict[str, VoiceProfile] = {}
-    for profile in saved:
-        saved_by_name.setdefault(profile.name.strip().casefold(), profile)
-
-    # A deliberately saved profile takes precedence over a built-in row with
-    # the same display name. Different names that use the same installed voice
-    # are valid saved aliases (for example, a user-named Amy narrator profile).
-    builtins = [
-        profile for profile in builtin_voice_profiles()
-        if profile.name.strip().casefold() not in saved_by_name
-    ]
+    builtins = list(builtin_voice_profiles())
     combined = list(builtins)
-    seen_names: set[str] = {p.name.casefold() for p in combined}
+    seen_names: set[str] = {profile.name.strip().casefold() for profile in combined}
+    changed_names = False
+
+    # Built-in catalogue entries must not disappear just because an old custom
+    # profile happens to use their display name. Give the saved custom item a
+    # stable disambiguated name and persist it once so Load/Preview/Assign all
+    # resolve the same identity after restart.
     ordered_saved = sorted(
-        saved_by_name.values(),
-        key=lambda p: (0 if p.provider in {"piper", "kokoro"} else 1, p.name.casefold()),
+        saved,
+        key=lambda profile: (0 if profile.provider in {"piper", "kokoro"} else 1, profile.name.casefold()),
     )
     for profile in ordered_saved:
-        # Do not drop a saved alias merely because it shares a provider/voice ID
-        # with a built-in voice. Its profile name, language, prompts and settings
-        # are persisted user choices and must remain loadable.
-        if profile.name.casefold() in seen_names:
-            continue
+        original_name = profile.name.strip()
+        folded = original_name.casefold()
+        same_installed_voice = any(
+            profile.provider == builtin.provider
+            and profile.voice_id.casefold() == builtin.voice_id.casefold()
+            and not profile.sample_path
+            for builtin in builtins
+        )
+        if same_installed_voice:
+            matching_builtin = next(
+                (builtin for builtin in builtins
+                 if profile.provider == builtin.provider
+                 and profile.voice_id.casefold() == builtin.voice_id.casefold()
+                 and profile.name.strip().casefold() == builtin.name.strip().casefold()),
+                None,
+            )
+            if matching_builtin is not None:
+                continue
+
+        if folded in seen_names:
+            suffix = " • Custom"
+            candidate = original_name + suffix
+            ordinal = 2
+            while candidate.casefold() in seen_names:
+                candidate = f"{original_name}{suffix} {ordinal}"
+                ordinal += 1
+            profile.name = candidate
+            changed_names = True
+            folded = candidate.casefold()
+
         combined.append(profile)
-        seen_names.add(profile.name.casefold())
+        seen_names.add(folded)
+
+    if changed_names:
+        try:
+            save_profiles(saved)
+        except OSError:
+            # Keep the disambiguated in-memory catalogue usable this session.
+            # The original catalogue file remains untouched if persistence fails.
+            pass
     return combined
 
 
