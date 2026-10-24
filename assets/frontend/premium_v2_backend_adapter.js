@@ -932,6 +932,7 @@
     const current=currentVoiceName();
     const saved=Boolean(selectedVoice&&voices.some(item=>item.saved===true&&item.name.toLowerCase()===selectedVoice.toLowerCase()));
     if($('saveOnly'))$('saveOnly').disabled=!current;
+    if($('playPreview'))$('playPreview').disabled=!voicePreviewValid;
     if($('useNarrator'))$('useNarrator').disabled=!voicePreviewValid;
     if($('assignCharacter'))$('assignCharacter').disabled=!voicePreviewValid||!saved;
     if($('downloadPreview'))$('downloadPreview').disabled=!voicePreviewValid||!lastVoicePreviewPath;
