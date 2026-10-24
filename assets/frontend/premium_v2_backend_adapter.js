@@ -17,6 +17,7 @@
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
   let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
+  let providerCatalogs = Object.create(null);
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
   const resumeCheckpointKey = 'ryu.project.resume-checkpoints.v1';
   const resumeStages = new Set(['import','chapters','narrator','characters','sound','production','player']);
@@ -686,6 +687,143 @@
     if (!playerAudio || !playerAudio.src) clearAudiobookPlayerDisplay();
     return projects;
   }
+  const voiceLibraryTitles = {
+    offline:'Offline Neural Voices', sapi:'Windows SAPI', customvoice:'Qwen CustomVoice',
+    voicedesign:'Qwen VoiceDesign', qwenclone:'Qwen Voice Clone', customref:'Qwen Voice Clone',
+    edge:'Edge TTS', eleven:'ElevenLabs'
+  };
+  function voiceLanguageFacet(row) {
+    const raw = String(row.language || row.locale || '').trim();
+    if (!raw) return 'Unknown';
+    if (/[A-Za-z]{3,}/.test(raw) && !/^[a-z]{2,3}[-_]/i.test(raw)) return raw;
+    const code = raw.split(/[-_]/)[0].toLowerCase();
+    return ({en:'English',af:'Afrikaans',ja:'Japanese',zh:'Chinese',cmn:'Chinese',es:'Spanish',fr:'French',de:'German',hi:'Hindi',ko:'Korean',it:'Italian',pt:'Portuguese',ru:'Russian',ar:'Arabic',nl:'Dutch'}[code] || raw);
+  }
+  function voiceRegionFacet(row) {
+    const raw = String(row.region || row.locale || '').trim();
+    if (!raw) return 'Unknown';
+    const code = raw.includes('-') ? raw.split('-').pop().toUpperCase() : raw.toUpperCase();
+    return ({US:'United States',GB:'United Kingdom',UK:'United Kingdom',ZA:'South Africa',IN:'India',AU:'Australia',CA:'Canada',NZ:'New Zealand',IE:'Ireland',SG:'Singapore',NG:'Nigeria',KE:'Kenya'}[code] || raw);
+  }
+  function renderProviderCatalog(providerKey, result) {
+    const panel = document.querySelector('#voices .provider[data-provider="' + providerKey + '"]');
+    if (!panel || !result) return;
+    const rows = Array.isArray(result.voices) ? result.voices : [];
+    const title = voiceLibraryTitles[providerKey] || providerKey;
+    const health = panel.querySelector('.health');
+    const healthTitle = health?.querySelector('b');
+    if (healthTitle) healthTitle.textContent = title + (result.ready ? ' · Ready' : ' · Setup required');
+    let healthDetail = health?.querySelector('small,.muted');
+    if (!healthDetail && healthTitle?.parentElement) {
+      healthDetail = document.createElement('small');
+      healthDetail.className = 'muted';
+      healthDetail.style.cssText = 'display:block;margin-top:4px;line-height:1.45';
+      healthTitle.parentElement.appendChild(healthDetail);
+    }
+    if (healthDetail) healthDetail.textContent = result.message || (result.count + ' live catalogue entries');
+    if (providerKey === 'eleven' && $('apiState')) $('apiState').textContent = result.ready ? 'API key connected · Voice catalogue ready' : (result.message || 'API key not configured');
+
+    const facets = [...panel.querySelectorAll('.form3 select')];
+    const languageValues = [...new Set(rows.map(voiceLanguageFacet).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    const genderValues = [...new Set(rows.map(row=>String(row.gender || 'Unknown').trim() || 'Unknown'))].sort((a,b)=>a.localeCompare(b));
+    const regionValues = [...new Set(rows.map(voiceRegionFacet).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+    const optionsFor = (select, defaultLabel, values, defaultValue) => {
+      if (!select) return;
+      const previous = select.value;
+      select.replaceChildren();
+      const first = document.createElement('option'); first.value = defaultValue; first.textContent = defaultLabel; select.appendChild(first);
+      for (const value of values) { const option = document.createElement('option'); option.value = value; option.textContent = value; select.appendChild(option); }
+      select.value = values.includes(previous) ? previous : defaultValue;
+      select.onchange = () => renderProviderCatalog(providerKey, providerCatalogs[providerKey]);
+    };
+    optionsFor(facets[0], 'All languages', languageValues, 'All languages');
+    optionsFor(facets[1], 'All', genderValues, 'All');
+    optionsFor(facets[2], 'All regions', regionValues, 'All regions');
+
+    const languageFilter = facets[0]?.value || 'All languages';
+    const genderFilter = facets[1]?.value || 'All';
+    const regionFilter = facets[2]?.value || 'All regions';
+    let filtered = rows.filter(row =>
+      (languageFilter === 'All languages' || voiceLanguageFacet(row) === languageFilter) &&
+      (genderFilter === 'All' || String(row.gender || 'Unknown').trim() === genderFilter) &&
+      (regionFilter === 'All regions' || voiceRegionFacet(row) === regionFilter)
+    );
+    const recommended = panel.querySelector('input[type="checkbox"]');
+    if (providerKey === 'offline' && recommended?.checked) {
+      filtered = filtered.slice().sort((a,b) => {
+        const score = row => /amy|ryan|serena|aiden/i.test(String(row.name || '')) ? 0 : 1;
+        return score(a)-score(b) || String(a.name).localeCompare(String(b.name));
+      });
+      recommended.onchange = () => renderProviderCatalog(providerKey, providerCatalogs[providerKey]);
+    }
+
+    let listHost;
+    if (providerKey === 'eleven') {
+      listHost = panel.querySelector('[data-epanel="mine"]');
+      if (!listHost) return;
+      listHost.querySelectorAll(':scope > .voice-row').forEach(row=>row.remove());
+    } else {
+      listHost = panel.querySelector(':scope > .voice-catalog-live');
+      if (!listHost) {
+        listHost = document.createElement('div');
+        listHost.className = 'voice-catalog-live';
+        listHost.style.cssText = 'max-height:340px;overflow-y:auto;overscroll-behavior:contain;display:grid;gap:7px;margin-top:10px;padding-right:4px;min-height:0';
+        const form = panel.querySelector('.form3');
+        if (form) form.insertAdjacentElement('afterend', listHost);
+        else panel.appendChild(listHost);
+      }
+      panel.querySelectorAll(':scope > .voice-row').forEach(row=>row.remove());
+    }
+    listHost.querySelectorAll(':scope > .voice-catalog-empty').forEach(node=>node.remove());
+    if (!filtered.length) {
+      const empty = document.createElement('p');
+      empty.className = 'voice-catalog-empty muted';
+      empty.textContent = rows.length ? 'No voices match these filters.' : (result.message || 'No voices are currently available from this provider.');
+      empty.style.cssText = 'padding:10px 2px;font-size:13px;line-height:1.5';
+      listHost.appendChild(empty);
+    }
+    for (const row of filtered) {
+      const voiceRow = document.createElement('div');
+      voiceRow.className = 'voice-row';
+      voiceRow.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0';
+      const info = document.createElement('div');
+      info.style.cssText = 'min-width:0;overflow-wrap:anywhere';
+      const name = document.createElement('b'); name.textContent = String(row.name || row.voice_id || 'Unnamed voice');
+      const detail = document.createElement('small'); detail.className = 'muted';
+      const detailParts = [];
+      const language = String(row.language || row.locale || '').trim();
+      const gender = String(row.gender || '').trim();
+      const region = String(row.region || '').trim();
+      if (language) detailParts.push(language);
+      if (gender && gender.toLowerCase() !== 'unknown') detailParts.push(gender);
+      if (region && region !== language) detailParts.push(region);
+      if (row.saved) detailParts.push('Saved profile');
+      if (row.description) detailParts.push(String(row.description).slice(0,110));
+      detail.textContent = detailParts.join(' · ') || 'Available in the selected provider';
+      info.append(name, document.createElement('br'), detail);
+      const choose = document.createElement('button');
+      choose.className = 'btn choose'; choose.type = 'button'; choose.textContent = row.saved ? 'Load / Select' : 'Select';
+      choose.dataset.voice = String(row.voice_id || row.name || '');
+      choose.dataset.voiceLabel = String(row.name || row.voice_id || '');
+      choose.title = row.saved ? 'Select this saved profile voice' : 'Select this installed or live catalogue voice';
+      voiceRow.append(info, choose); listHost.appendChild(voiceRow);
+    }
+    if (providerKey === 'eleven' && !filtered.length) {
+      const createPanel = panel.querySelector('[data-epanel="create"]');
+      if (createPanel && result.message) {
+        let note = createPanel.querySelector('.voice-setup-note');
+        if (!note) { note = document.createElement('p'); note.className = 'voice-setup-note muted'; createPanel.prepend(note); }
+        note.textContent = result.message;
+      }
+    }
+  }
+  async function refreshProviderCatalog(providerKey, refresh = false) {
+    const result = await call('voice.catalog', {provider:providerKey,refresh:Boolean(refresh)});
+    providerCatalogs[providerKey] = result;
+    renderProviderCatalog(providerKey, result);
+    return result;
+  }
+
   async function refreshVoices() {
     voices = await call('voice.list');
     const rows = voices.map(v => ({...v, label: v.name + ' · ' + v.provider}));
