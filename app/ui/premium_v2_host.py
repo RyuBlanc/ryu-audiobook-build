@@ -2336,12 +2336,19 @@ class PremiumV2Bridge(QObject):
                         return
                     elapsed = max(0, int(time.monotonic() - preview_started))
                     clock = f"{elapsed // 60}:{elapsed % 60:02d}"
-                    try:
-                        with self._jobs_lock:
-                    row = self._jobs.get(str(job_id))
-                    if not row or str(row.get("state") or "").casefold() != "running":
+                    lock = getattr(self, "_jobs_lock", None)
+                    jobs = getattr(self, "_jobs", None)
+                    if lock is None or not isinstance(jobs, dict):
                         return
-                    self._job_update(job_id, stage="synthesizing", message=f"Synthesis is still running • elapsed {clock}")
+                    try:
+                        with lock:
+                            row = jobs.get(str(job_id))
+                            if not row or str(row.get("state") or "").casefold() != "running":
+                                return
+                        self._job_update(
+                            job_id, stage="synthesizing",
+                            message=f"Synthesis is still running • elapsed {clock}",
+                        )
                     except Exception:
                         return
 
