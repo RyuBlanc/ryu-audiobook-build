@@ -15,7 +15,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
+  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, activeJob = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
   let providerCatalogs = Object.create(null);
@@ -1351,6 +1351,15 @@
   }
   let backendJobFilter = 'active';
   async function refreshJobs() {
+    // Multiple callers share one in-flight refresh so the 1.5s heartbeat, job
+    // monitor and manual refresh cannot issue overlapping DOM updates.
+    if (jobsRefreshPromise) return jobsRefreshPromise;
+    const refreshPromise = refreshJobsImpl();
+    jobsRefreshPromise = refreshPromise;
+    try { return await refreshPromise; }
+    finally { if (jobsRefreshPromise === refreshPromise) jobsRefreshPromise = null; }
+  }
+  async function refreshJobsImpl() {
     const allJobs = await call('job.list', {include_hidden:false});
     refreshDashboardGeneration(allJobs);
     const jobs = allJobs.filter(j => backendJobFilter === 'all' ||
@@ -1412,8 +1421,87 @@
     if ($('jobsQueuedCount')) $('jobsQueuedCount').textContent = allJobs.filter(j => j.state === 'queued').length;
     if ($('jobsCompletedCount')) $('jobsCompletedCount').textContent = allJobs.filter(j => j.state === 'completed').length;
     if ($('backgroundJobCount')) $('backgroundJobCount').textContent = allJobs.filter(j => !['completed','failed','cancelled'].includes(j.state)).length + ' background jobs';
+    return allJobs;
   }
   async function monitorJob(jobId, done, terminal) {
+    const monitorToken = ++monitorEpoch;
+    activeJob = jobId;
+    if (poll) clearInterval(poll);
+    poll = null;
+    let finished = false;
+    let checking = false;
+    const tick = async () => {
+      // setInterval does not wait for async callbacks. Ignore overlapping ticks
+      // and late responses from an older job monitor to avoid duplicate terminal
+      // callbacks, stale progress and UI updates after navigating to another task.
+      if (finished || monitorToken !== monitorEpoch || checking) return;
+      checking = true;
+      try {
+        const jobs = await call('job.list', {include_hidden:true});
+        if (finished || monitorToken !== monitorEpoch) return;
+        const job = jobs.find(j => j.job_id === jobId);
+        if (!job) return;
+        const pct = Math.max(0, Math.min(100, Number(job.progress || 0)));
+        if ($('genPercent')) $('genPercent').textContent = Math.round(pct) + '%';
+        if ($('genRing')) $('genRing').style.setProperty('--progress', pct + '%');
+        if ($('importBar')) $('importBar').style.width = pct + '%';
+        if ($('genStage')) $('genStage').textContent = job.stage || job.message || job.state;
+        if ($('aiProgressText')) $('aiProgressText').textContent = job.stage || job.message || job.state;
+        if ($('aiProgressBar')) $('aiProgressBar').style.width = pct + '%';
+        if ($('previewProgress')) $('previewProgress').style.width = pct + '%';
+        if ($('previewState') && job.type === 'voice-preview') $('previewState').textContent = job.stage || job.state;
+        await refreshJobs();
+        if (finished || monitorToken !== monitorEpoch) return;
+        if (['completed','failed','cancelled'].includes(job.state)) {
+          finished = true;
+          if (poll) clearInterval(poll);
+          poll = null;
+          if (activeJob === jobId) activeJob = null;
+          if (typeof terminal === 'function') {
+            try { await terminal(job); }
+            catch (terminalError) {
+              console.warn('[Ryu job terminal callback]', terminalError);
+              if (monitorToken === monitorEpoch) message('The task finished, but its follow-up refresh did not complete: ' + (terminalError?.message || String(terminalError)), true);
+            }
+          }
+          if (monitorToken !== monitorEpoch) return;
+          let completionResult;
+          try { completionResult = job.state === 'completed' && done ? await done(job) : undefined; }
+          catch (completionError) {
+            console.error('[Ryu job completion callback]', completionError);
+            if (monitorToken === monitorEpoch) message('The task finished, but its output could not be finalized: ' + (completionError?.message || String(completionError)), true);
+            return;
+          }
+          if (monitorToken !== monitorEpoch) return;
+          if (completionResult === false) {
+            message('The preview job ended, but its output did not pass playback validation. Check the preview status and retry.', true);
+          } else {
+            // Import results carry review warnings separately from the concise job status.
+            // Surface those warnings to the user instead of silently dropping them.
+            const importWarnings = job.type === 'import' && job.state === 'completed' &&
+              Array.isArray(job.result?.warnings) ? job.result.warnings.filter(Boolean) : [];
+            const completionMessage = importWarnings.length
+              ? importWarnings.join(' ')
+              : (job.state === 'failed' && job.error?.message
+                  ? (job.message || ((job.title || 'Job') + ' failed')) + ' ' + String(job.error.message)
+                  : (job.message || ((job.title || 'Job') + ' ' + job.state)));
+            message(completionMessage, job.state !== 'completed');
+          }
+          if (job.state === 'completed' && monitorToken === monitorEpoch) {
+            await refreshChapters().catch(()=>{});
+            await refreshCharacters().catch(()=>{});
+          }
+        }
+      } catch (e) {
+        if (monitorToken === monitorEpoch) console.error('[Ryu job monitor]', e);
+      } finally {
+        checking = false;
+      }
+    };
+    await tick();
+    if (!finished && monitorToken === monitorEpoch) poll = setInterval(tick, 1000);
+  }
+  function requestElevenLabsApiKey() {
     activeJob = jobId; if (poll) clearInterval(poll);
     poll = null;
     let finished = false;
