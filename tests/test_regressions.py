@@ -256,7 +256,8 @@ class RegressionTests(unittest.TestCase):
             'QGroupBox("4  •  Preview")',
         ):
             self.assertIn(marker, source)
-        self.assertIn("PREVIEW_DURATION_OPTIONS = (10, 20, 30, 45, 60)", source)
+        self.assertIn("PREVIEW_DURATION_OPTIONS = (10, 30, 60, 90)", source)
+        self.assertIn("PREVIEW_DURATION_OPTIONS.index(30)", source)
         self.assertIn("for seconds in PREVIEW_DURATION_OPTIONS:", source)
         self.assertIn("preview_library", source)
         self.assertIn("preview_voice", source)
