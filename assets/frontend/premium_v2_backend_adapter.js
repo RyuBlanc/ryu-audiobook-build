@@ -1334,8 +1334,13 @@
       qwen_seed:choice === 'voicedesign' ? designSeed : null,
       notes:choice === 'voicedesign' ? designPrompt : '',
       reference_text:$('cloneTranscript')?.value || ''});
-    selectedVoice = result.name; await refreshVoices();
+    selectedVoice = result.name; selectedVoiceId = result.voice_id; await refreshVoices();
     if ($('profileName')) $('profileName').value = result.name;
+    const savedSelect = document.querySelector('#voices .panel[data-panel="3"] .toolbar select');
+    if (savedSelect) savedSelect.value = result.name;
+    document.querySelectorAll('#voices *').forEach(node => {
+      if (node.children.length === 0 && node.textContent.trim() === 'Unsaved') node.textContent = 'Saved';
+    });
     if ($('profileLibrary')) $('profileLibrary').textContent = result.provider;
     if ($('profileVoice')) $('profileVoice').textContent = result.voice_id;
     if ($('previewProfile')) $('previewProfile').textContent = result.name;
@@ -2287,7 +2292,16 @@
       message('Chapter split and saved · '+result.chapter_count+' chapters now in this book.');
     });
     ['saveProfile','saveDraft','addPremium','saveOnly'].forEach(id=>{if($(id))$(id).onclick=act(saveVoice);});
-    if ($('useNarrator')) $('useNarrator').onclick=act(async()=>{const v=await saveVoice();if(v)await call('voice.select',{profile_name:v.name});message('Saved and selected narrator.');});
+    if ($('useNarrator')) $('useNarrator').onclick=act(async()=>{
+      const v=await saveVoice();
+      if(!v)return;
+      await call('voice.select',{profile_name:v.name});
+      await refreshProjects();
+      document.querySelectorAll('#voices *').forEach(node => {
+        if(node.children.length===0 && node.textContent.trim()==='Narrator unchanged') node.textContent='Assigned to this narrator';
+      });
+      message('Profile saved and assigned as the active narrator.');
+    });
     if ($('generatePreview')) $('generatePreview').onclick=act(previewVoice);
     if ($('previewGenerate')) $('previewGenerate').onclick=act(async()=>{const name=selectedVoice||$('profileName')?.value;const group=[...document.querySelectorAll('#generate .segmented')].find(el=>[...el.querySelectorAll('button')].some(b=>/10s|30s|60s/i.test(b.textContent)));const duration=group?.querySelector('button.active')?.textContent.match(/\d+/)?.[0]||'30';const data=await call('production.preview',{profile_name:name,duration_seconds:Number(duration)});await monitorJob(data.job_id,job=>preparePreviewPlayback(job,Number(duration)));});
     if ($('playPreview')) $('playPreview').onclick=act(async()=>{if(!previewAudio)throw new Error('Generate a preview first.');if(!previewAudio.paused){previewAudio.pause();$('playPreview').textContent='▶ Play';}else{await previewAudio.play();$('playPreview').textContent='Ⅱ Pause';}});
