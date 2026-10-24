@@ -310,5 +310,16 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("call('elevenlabs.open_web',{target:'api_keys'})", source)
         self.assertIn("data-open-elevenlabs-web", source)
 
+
+    def test_loaded_profile_updates_every_preview_target_identity_field(self):
+        adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        source = adapter.read_text(encoding="utf-8")
+        self.assertIn("function updatePreviewTarget(profile,libraryLabel,key)", source)
+        for field in ("profileLibrary", "profileVoice", "previewLibrary", "previewProvider",
+                      "previewVoice", "previewModel", "previewProfile"):
+            self.assertIn(field + ":", source)
+        self.assertIn("updatePreviewTarget(profile,libraryLabel,key);", source)
+        self.assertIn("model=profile?.qwen_mode==='design'?'VoiceDesign'", source)
+
 if __name__ == "__main__":
     unittest.main()
