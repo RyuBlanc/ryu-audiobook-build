@@ -341,5 +341,14 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("listHost = panel.querySelector('[data-epanel=\"mine\"]');", source)
         self.assertIn("Render its My Voices catalogue directly without mutating those controls.", source)
 
+
+    def test_provider_health_labels_follow_actual_catalog_readiness(self):
+        adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        source = adapter.read_text(encoding="utf-8")
+        self.assertIn("profileHealthRow", source)
+        self.assertIn("sideHealthRow", source)
+        self.assertIn("const label=!result?'Checking…':result.ready?'Ready':'Setup required';", source)
+        self.assertIn("updateVoiceHealthIndicator(providerKey,result);", source)
+
 if __name__ == "__main__":
     unittest.main()
