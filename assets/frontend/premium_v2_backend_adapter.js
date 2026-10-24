@@ -2733,7 +2733,7 @@
     // backend handlers below are attached to these buttons, so let their target
     // handlers run but prevent the prototype's ancestor listener from also
     // mutating the same progress/status controls.
-    const ids = ['generatePreview','playPreview','stopPreview','useNarrator','assignCharacter'];
+    const ids = ['generatePreview','playPreview','stopPreview','saveProfile','useNarrator','assignCharacter'];
     for (const id of ids) {
       const button = $(id);
       if (!button || button.dataset.ryuPrototypeActionShield === '1') continue;
