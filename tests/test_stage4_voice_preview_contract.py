@@ -332,5 +332,14 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("if($('sumAssign'))$('sumAssign').textContent='';", source)
         self.assertIn("if($('sumAssign'))$('sumAssign').textContent=primary;", source)
 
+
+    def test_elevenlabs_catalog_renders_without_reusing_voice_design_form(self):
+        adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        source = adapter.read_text(encoding="utf-8")
+        self.assertIn("if (!form && providerKey !== 'eleven') return;", source)
+        self.assertIn("if (form) {", source)
+        self.assertIn("listHost = panel.querySelector('[data-epanel=\"mine\"]');", source)
+        self.assertIn("Render its My Voices catalogue directly without mutating those controls.", source)
+
 if __name__ == "__main__":
     unittest.main()
