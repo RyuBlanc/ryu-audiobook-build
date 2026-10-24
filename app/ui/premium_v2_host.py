@@ -1510,15 +1510,37 @@ class PremiumV2Bridge(QObject):
                 "count": len(load_profiles())}
 
     def _voice_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        return [{
-            "name": p.name, "provider": p.provider, "voice_id": p.voice_id,
-            "model_id": p.model_id, "backend": p.backend, "language": p.language or "",
-            "sample_path": p.sample_path, "authorized": bool(p.authorized),
-            "qwen_mode": getattr(p, "qwen_mode", "custom"),
-        } for p in load_profiles()]
+        # The UI needs to distinguish installed catalogue voices from saved,
+        # reusable profiles. It must not infer "saved" from a provider or voice ID:
+        # a saved alias may legitimately point at the same installed Amy/David voice.
+        from app.tts.voice_profile import load_saved_profiles
+
+        saved_names = {p.name.strip().casefold() for p in load_saved_profiles()}
+        rows = []
+        for profile in load_profiles():
+            rows.append({
+                "name": profile.name, "provider": profile.provider, "voice_id": profile.voice_id,
+                "model_id": profile.model_id, "backend": profile.backend, "language": profile.language or "",
+                "sample_path": profile.sample_path, "authorized": bool(profile.authorized),
+                "qwen_mode": getattr(profile, "qwen_mode", "custom"),
+                "saved": profile.name.strip().casefold() in saved_names,
+            })
+        return rows
 
     def _find_profile(self, name: str | None):
         wanted = str(name or "").strip().casefold()
+        if not wanted:
+            return None
+        # Prefer the persistent record over a built-in display entry. This retains
+        # the user's prompt, reference audio, language, model mode and settings.
+        from app.tts.voice_profile import load_saved_profiles
+        saved = next(
+            (profile for profile in load_saved_profiles()
+             if profile.name.strip().casefold() == wanted),
+            None,
+        )
+        if saved is not None:
+            return saved
         return next((p for p in load_profiles() if p.name.strip().casefold() == wanted), None)
 
     def _voice_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
