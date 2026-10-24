@@ -757,6 +757,12 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertNotIn("fakeFreeLabel.textContent = rows.find(model => model.storage_root)", adapter)
         self.assertIn("def _models_verify(self, payload: dict[str, Any])", host)
         self.assertIn("model.requirements", adapter)
+        self.assertIn("function modelNeedsAttention(model)", adapter)
+        self.assertIn("if (filter === 'attention' && !modelNeedsAttention(model)) return false;", adapter)
+        self.assertIn("if (filter === 'ready' && (!model.installed || modelNeedsAttention(model))) return false;", adapter)
+        self.assertIn("const ready = managed.filter(model => model.installed && !modelNeedsAttention(model)).length;", adapter)
+        self.assertIn("const problem = modelNeedsAttention({...model,status});", adapter)
+        self.assertIn("runtime required", adapter)
         self.assertNotIn("Per-model update, repair, and uninstall are not implemented", adapter)
 
 
