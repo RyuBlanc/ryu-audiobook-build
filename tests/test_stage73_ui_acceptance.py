@@ -172,7 +172,8 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
         self.assertIn('if not chapters:', import_page)
         self.assertIn('validate_chapter_text_coverage(book.text, chapters, minimum=0.90)', import_page)
         self.assertIn('def validate_chapter_text_coverage(', (ROOT / "app" / "documents" / "parser.py").read_text(encoding="utf-8"))
-        self.assertIn('Import was stopped to protect your book from losing content.', import_page)
+        self.assertIn('validate_chapter_text_coverage(book.text, chapters, minimum=0.90)', import_page)
+        self.assertIn('Import was stopped to protect your book from losing content.', (ROOT / "app" / "documents" / "parser.py").read_text(encoding="utf-8"))
         self.assertIn('self.status.setText(f"Import analysis failed: {message}")', import_page)
 
 
