@@ -5,7 +5,13 @@
     if (!window.ryuBackend?.invoke) throw new Error('Local backend bridge is unavailable.');
     const response = await window.ryuBackend.invoke(command, payload);
     if (!response?.success) throw new Error(response?.error?.message || command + ' failed.');
-    return response.data;
+    const data = response.data;
+    if (command === 'project.open') {
+      void refreshCurrentProjectCard('Opened · saved locally').catch(() => {});
+    } else if (command === 'project.rename') {
+      void refreshCurrentProjectCard('Renamed · saved locally').catch(() => {});
+    }
+    return data;
   };
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const message = (text, error = false) => {
@@ -20,6 +26,7 @@
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
   let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0, projectListEpoch = 0, characterListEpoch = 0, termsListEpoch = 0, soundListEpoch = 0, historyListEpoch = 0, librarySearchTimer = null, soundSearchTimer = null;
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
+  let activeProjectCardFolder = null, projectCardStatusObserver = null;
   const resumeCheckpointKey = 'ryu.project.resume-checkpoints.v1';
   const resumeStages = new Set(['import','chapters','narrator','characters','sound','production','player']);
   const resumeStageRoutes = {
@@ -654,6 +661,59 @@
     const modal = ensureProjectTrashModal();
     await loadProjectTrashEntries(modal);
   }
+
+  function setProjectCardStatus(status) {
+    const card = document.querySelector('.project-mini');
+    const parts = card?.querySelectorAll('.pm-body small');
+    const statusNode = parts?.length ? parts[parts.length - 1] : null;
+    const text = String(status || '').trim();
+    if (statusNode && text && statusNode.textContent !== text) statusNode.textContent = text;
+  }
+
+  async function refreshCurrentProjectCard(statusOverride = '') {
+    let active = null;
+    try { active = await call('project.get_active'); }
+    catch (_) { return null; } // Do not erase the last confirmed UI state on a transient bridge error.
+    const card = document.querySelector('.project-mini');
+    const titleNode = card?.querySelector('.pm-body b');
+    const crumb = document.querySelector('.topbar .crumb span');
+    const previousTitle = String(titleNode?.textContent || '');
+    const folder = String(active?.folder || '');
+    const title = String(active?.title || '').trim();
+    if (!active || !folder || !title) {
+      activeProjectCardFolder = null;
+      if (titleNode && titleNode.textContent !== 'No project selected') titleNode.textContent = 'No project selected';
+      if (titleNode) titleNode.title = 'Open a project from Library to begin';
+      if (crumb && crumb.textContent !== 'No project selected') crumb.textContent = 'No project selected';
+      setProjectCardStatus('No project selected');
+      return null;
+    }
+    const changedProject = folder !== activeProjectCardFolder;
+    const renamed = !changedProject && previousTitle && previousTitle !== title;
+    activeProjectCardFolder = folder;
+    if (titleNode && titleNode.textContent !== title) titleNode.textContent = title;
+    if (titleNode) {
+      titleNode.title = title;
+      titleNode.setAttribute('aria-label', 'Current project: ' + title);
+    }
+    if (crumb && crumb.textContent !== title + ' · Local project') crumb.textContent = title + ' · Local project';
+    if (statusOverride) setProjectCardStatus(statusOverride);
+    else if (changedProject) setProjectCardStatus('Project open · saved locally');
+    else if (renamed) setProjectCardStatus('Renamed · saved locally');
+    return active;
+  }
+
+  function installProjectCardStatusObserver() {
+    if (projectCardStatusObserver) projectCardStatusObserver.disconnect();
+    const saveState = $('saveState');
+    if (!saveState || typeof MutationObserver === 'undefined') return;
+    projectCardStatusObserver = new MutationObserver(() => {
+      const status = String(saveState.textContent || '').replace(/\\s+/g, ' ').trim();
+      if (status && activeProjectCardFolder) setProjectCardStatus(status);
+    });
+    projectCardStatusObserver.observe(saveState, {subtree:true,childList:true,characterData:true});
+  }
+
   async function refreshProjects() {
     const requestToken = ++projectListEpoch;
     const loadedProjects = await call('project.list');
@@ -711,6 +771,7 @@
       }
     }
     await refreshDashboardHero(projects);
+    await refreshCurrentProjectCard();
     renderAudiobookLibrary(projects);
     if (!playerAudio || !playerAudio.src) clearAudiobookPlayerDisplay();
     return projects;
@@ -3449,6 +3510,8 @@
 
   async function wire() {
     await call('app.get_info');
+    await refreshCurrentProjectCard();
+    installProjectCardStatusObserver();
 
     // The approved HTML prototype attaches a fake timer-based player directly
     // to these buttons. Replace those DOM nodes before attaching real playback,
