@@ -3055,7 +3055,7 @@
       // Keep derived UI state in sync with the editor immediately; persistence
       // is still serialized/debounced below, so this does not trigger a page reload.
       c.text = editorText;
-      c.word_count = editorText.trim() ? editorText.trim().split(/\\s+/).filter(Boolean).length : 0;
+      c.word_count = editorText.trim() ? editorText.trim().split(/\s+/).filter(Boolean).length : 0;
       renderLiveChapterInsights();
       if (!chapterHistoryApplying && editorText !== chapterLastText) {
         if (!chapterHistoryGroupOpen) {
