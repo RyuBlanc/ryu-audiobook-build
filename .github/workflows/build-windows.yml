@@ -12,6 +12,7 @@ on:
       - stage-3/voice-studio-character-assignment
       - stage-4-pronunciation-sound-design
       - fix/installer-branding-accessibility
+      - fix/premium-v2-live-voice-chapter-workflow
       - fix/installer-live-controls-space-and-logo
       - fix/dashboard-live-data-project-covers-player
       - fix/html-installer-transparent-logo
