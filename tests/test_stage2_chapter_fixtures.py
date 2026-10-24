@@ -41,6 +41,44 @@ class ChapterDetectionFixtureTests(unittest.TestCase):
         self.assertEqual(chapters[0].text, "Life.0 The Beginning\nA new story starts.")
         self.assertEqual(chapters[1].text, "Life.1 First Steps\nThe journey continues.")
 
+    def test_named_sections_and_roman_chapter_headings_keep_boundaries(self):
+        source = (
+            "Prologue\n"
+            "Rain crossed the old city as Mira approached the gate. She carried a sealed letter.\n\n"
+            "Chapter IV: The Door\n"
+            "The guards opened the door slowly. Mira stepped inside without looking back.\n\n"
+            "Epilogue — After the Storm\n"
+            "Years later, the city remembered the night the gates first opened."
+        )
+        chapters = detect_chapters(source)
+        self.assertEqual(
+            [chapter.title for chapter in chapters],
+            ["Prologue", "Chapter IV: The Door", "Epilogue — After the Storm"],
+        )
+        self.assertIn("Rain crossed the old city", chapters[0].text)
+        self.assertIn("The guards opened the door slowly", chapters[1].text)
+        self.assertIn("Years later, the city remembered", chapters[2].text)
+        self.assertNotIn("Epilogue — After the Storm", chapters[1].text)
+
+    def test_compound_slash_title_and_part_heading_is_one_boundary(self):
+        source = (
+            "BLACK DOG/BIRTH\n"
+            "Part 1\n"
+            "The first passage begins with a clear event and continues through a complete scene.\n\n"
+            "BLACK DOG/RETURN\n"
+            "Part 2\n"
+            "The second passage follows the earlier scene and moves the story toward its next conflict."
+        )
+        chapters = detect_chapters(source)
+        self.assertEqual(
+            [chapter.title for chapter in chapters],
+            ["BLACK DOG/BIRTH: Part 1", "BLACK DOG/RETURN: Part 2"],
+        )
+        self.assertIn("The first passage begins", chapters[0].text)
+        self.assertNotIn("Part 2", chapters[0].text)
+        self.assertIn("The second passage follows", chapters[1].text)
+
+
     def test_saved_chapter_edits_and_metadata_survive_project_reload(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory) / "project"
