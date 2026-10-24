@@ -1569,8 +1569,11 @@
     if(!selectedElevenCandidate)throw new Error('Select one generated voice preview first.');
     const options=getElevenLabsDesignOptions();
     const input=$('premiumName');
-    const name=String(input?.value||'').trim();
-    if(!name)throw new Error('Enter a name for the selected premium voice.');
+    const initialName=String(input?.value||'').trim();
+    if(!initialName)throw new Error('Enter a name for the selected premium voice.');
+    const name=await requestVoiceProfileSaveName(initialName,'eleven','ElevenLabs Voice Design preview','eleven-create');
+    if(!name){message('Premium voice creation cancelled.');return;}
+    if(input)input.value=name;
     const created=await call('voice.elevenlabs.create',{
       generated_voice_id:selectedElevenCandidate.generated_voice_id,name,
       voice_description:selectedElevenCandidate.description||'',
@@ -1606,7 +1609,7 @@
     textarea.dispatchEvent(new Event('input',{bubbles:true}));
   }
 
-  function requestVoiceProfileSaveName(initialName, providerKey, voiceLabel) {
+  function requestVoiceProfileSaveName(initialName, providerKey, voiceLabel, purpose = 'profile') {
     return new Promise(resolve => {
       $('ryuVoiceProfileSaveConfirm')?.remove();
       const providerNames = {offline:'Offline Neural Voices',sapi:'Windows SAPI',customvoice:'Qwen CustomVoice',voicedesign:'Qwen VoiceDesign',qwenclone:'Qwen Voice Clone',customref:'Reference Voice',edge:'Edge TTS',eleven:'ElevenLabs'};
@@ -1618,13 +1621,16 @@
       panel.setAttribute('aria-labelledby','ryuVoiceSaveTitle');
       panel.style.cssText = 'box-sizing:border-box;width:min(460px,100%);background:#151a25;border:1px solid rgba(255,255,255,.13);border-radius:18px;box-shadow:0 24px 80px rgba(0,0,0,.5);padding:22px;color:#f4f5f8';
       const eyebrow = document.createElement('div');
-      eyebrow.textContent = 'CONFIRM VOICE PROFILE';
+      const creatingProviderVoice = purpose === 'eleven-create';
+      eyebrow.textContent = creatingProviderVoice ? 'CREATE PROVIDER VOICE' : 'CONFIRM VOICE PROFILE';
       eyebrow.style.cssText = 'color:#e8b957;font-size:11px;font-weight:800;letter-spacing:.13em;margin-bottom:8px';
       const title = document.createElement('h2');
-      title.id = 'ryuVoiceSaveTitle'; title.textContent = 'Save this voice profile?';
+      title.id = 'ryuVoiceSaveTitle'; title.textContent = creatingProviderVoice ? 'Create this premium voice?' : 'Save this voice profile?';
       title.style.cssText = 'margin:0 0 8px;font-size:22px';
       const description = document.createElement('p');
-      description.textContent = 'This saves profile settings locally. It does not generate audio or change your narrator until you choose “Save and Use as Narrator”.';
+      description.textContent = creatingProviderVoice
+        ? 'This sends the selected temporary preview to your ElevenLabs account to create a persistent provider voice, then saves a local Ryu profile. It may use your provider plan quota. It will not change your narrator until you explicitly assign it.'
+        : 'This saves profile settings locally. It does not generate audio or change your narrator until you choose “Save and Use as Narrator”.';
       description.style.cssText = 'margin:0 0 16px;color:#aeb6c5;font-size:13px;line-height:1.5';
       const providerLabel = document.createElement('div');
       providerLabel.textContent = 'Voice library · ' + (providerNames[providerKey] || providerKey);
@@ -1644,7 +1650,7 @@
       cancel.type = 'button'; cancel.textContent = 'Cancel';
       cancel.style.cssText = 'padding:10px 14px;border-radius:10px;background:#1c2230;border:1px solid #343b4a;color:#f2f4f8;font-weight:700;cursor:pointer';
       const save = document.createElement('button');
-      save.type = 'button'; save.textContent = 'Confirm & Save Profile';
+      save.type = 'button'; save.textContent = creatingProviderVoice ? 'Confirm & Create Voice' : 'Confirm & Save Profile';
       save.style.cssText = 'padding:10px 16px;border-radius:10px;background:#c92050;border:1px solid #e7426a;color:white;font-weight:800;cursor:pointer';
       actions.append(cancel,save);
       panel.append(eyebrow,title,description,providerLabel,voiceLine,label,input,actions);
