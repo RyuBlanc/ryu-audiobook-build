@@ -809,7 +809,6 @@
     if (providerKey === 'eleven') {
       listHost = panel.querySelector('[data-epanel="mine"]');
       if (!listHost) return;
-      listHost.querySelectorAll(':scope > .voice-row').forEach(row=>row.remove());
     } else {
       listHost = panel.querySelector(':scope > .voice-catalog-live');
       if (!listHost) {
@@ -820,15 +819,18 @@
         if (form) form.insertAdjacentElement('afterend', listHost);
         else panel.appendChild(listHost);
       }
-      panel.querySelectorAll(':scope > .voice-row').forEach(row=>row.remove());
     }
     const renderKey=JSON.stringify(filtered.map(row=>[
       row.voice_id||row.name,row.name,row.provider,row.language,row.locale,row.region,
       row.gender,voiceCategories(row),Boolean(row.saved),row.description
     ]));
+    // Keep the catalogue DOM intact when a refresh returns the same filtered rows.
+    // Replacing hundreds of voice cards unnecessarily caused visible flashes and lost scroll.
     if(listHost.dataset.catalogRenderKey===renderKey)return;
     const previousScrollTop=listHost.scrollTop;
     listHost.dataset.catalogRenderKey=renderKey;
+    listHost.querySelectorAll(':scope > .voice-row').forEach(row=>row.remove());
+    if(providerKey!=='eleven')panel.querySelectorAll(':scope > .voice-row').forEach(row=>row.remove());
     listHost.querySelectorAll(':scope > .voice-catalog-empty').forEach(node=>node.remove());
     if (!filtered.length) {
       const empty = document.createElement('p');
@@ -974,6 +976,16 @@
       if(volume){volume.id='previewVolume';volume.min='0';volume.max='100';volume.step='1';
         if(!volume.dataset.previewVolumeBound){volume.dataset.previewVolumeBound='true';previewVolume=Math.max(0,Math.min(1,Number(volume.value||85)/100));volume.addEventListener('input',()=>{previewVolume=Math.max(0,Math.min(1,Number(volume.value||0)/100));if(previewAudio)previewAudio.volume=previewVolume;volume.setAttribute('aria-valuetext',Math.round(previewVolume*100)+' percent');});}
       }
+    }
+    if (!selectedVoice) {
+      const initialName=String($('profileName')?.value||'').trim();
+      if (/^(?:Offline Neural|Qwen VoiceDesign|Qwen CustomVoice|Edge TTS|Microsoft|ElevenLabs|Windows SAPI)\s*[·•-]/i.test(initialName)) {
+        if($('profileName'))$('profileName').value='';
+        if($('premiumName'))$('premiumName').value='';
+      }
+      updateVoiceSummary(null,{saved:false,previewReady:false,assignment:''});
+      const assigned=$('assignedSide');if(assigned)assigned.textContent='';
+      const assignedParagraph=assigned?.closest('p');if(assignedParagraph)assignedParagraph.hidden=true;
     }
     const previewTextarea=panel&&[...panel.querySelectorAll('textarea')].find(el=>/preview text/i.test(String(el.closest('label')?.textContent||'')));
     if(previewTextarea&&!previewTextarea.dataset.previewIdentityBound){previewTextarea.dataset.previewIdentityBound='true';previewTextarea.addEventListener('input',()=>invalidateVoicePreview());}
@@ -1816,6 +1828,9 @@
         if ($('previewProgress')) $('previewProgress').style.width = pct + '%';
         if ($('previewState') && job.type === 'voice-preview') {
           $('previewState').textContent=(job.stage||job.state)+' · '+Math.round(pct)+'%';
+          if($('sumPreview'))$('sumPreview').textContent=['completed','failed','cancelled'].includes(job.state)
+            ? (job.state==='completed'?'Finalizing':job.state==='failed'?'Failed':'Cancelled')
+            : 'Synthesizing · '+Math.round(pct)+'%';
           if($('validation')&&!['completed','failed','cancelled'].includes(job.state))$('validation').textContent='Synthesizing preview · '+Math.round(pct)+'% · '+(job.stage||job.state);
         }
         await refreshJobs();
