@@ -343,6 +343,7 @@ class PremiumV2Bridge(QObject):
                 "voice.list": self._voice_list,
                 "voice.catalog": self._voice_catalog,
                 "voice.credentials.set": self._voice_credentials_set,
+                "elevenlabs.open_web": self._elevenlabs_open_web,
                 "voice.elevenlabs.design": self._voice_elevenlabs_design,
                 "voice.elevenlabs.create": self._voice_elevenlabs_create,
                 "voice.save": self._voice_save,
@@ -464,6 +465,7 @@ class PremiumV2Bridge(QObject):
             "voice.list": True,
             "voice.catalog": True,
             "voice.credentials.set": True,
+            "elevenlabs.open_web": True,
             "voice.elevenlabs.design": True,
             "voice.elevenlabs.create": True,
             "voice.save": True,
@@ -1861,6 +1863,20 @@ class PremiumV2Bridge(QObject):
         from app.tts.providers.elevenlabs import ElevenLabsProvider
         ElevenLabsProvider.save_api_key(value)
         return {"saved": True, "provider": "elevenlabs"}
+
+    def _elevenlabs_open_web(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Open only official ElevenLabs pages in the user's default browser."""
+        target = str(payload.get("target") or "").strip().casefold()
+        allowed_urls = {
+            "studio": "https://elevenlabs.io/text-to-speech",
+            "api_keys": "https://elevenlabs.io/app/settings/api-keys",
+        }
+        url = allowed_urls.get(target)
+        if not url:
+            raise ValueError("Choose the official ElevenLabs studio or API-key settings page.")
+        if not QDesktopServices.openUrl(QUrl(url)):
+            raise OSError("Windows could not open the ElevenLabs page in your default browser.")
+        return {"opened": True, "target": target, "url": url}
 
     def _voice_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         # The UI needs to distinguish installed catalogue voices from saved,
