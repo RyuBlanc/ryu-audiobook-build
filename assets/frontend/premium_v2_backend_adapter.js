@@ -1556,54 +1556,6 @@
     if (!finished && monitorToken === monitorEpoch) poll = setInterval(tick, 1000);
   }
   function requestElevenLabsApiKey() {
-    activeJob = jobId; if (poll) clearInterval(poll);
-    poll = null;
-    let finished = false;
-    const tick = async () => {
-      if (finished) return;
-      try {
-        const jobs = await call('job.list', {include_hidden:true}), job = jobs.find(j => j.job_id === jobId);
-        if (!job) return;
-        const pct = Math.max(0, Math.min(100, Number(job.progress || 0)));
-        if ($('genPercent')) $('genPercent').textContent = Math.round(pct) + '%';
-        if ($('genRing')) $('genRing').style.setProperty('--progress', pct + '%');
-        if ($('importBar')) $('importBar').style.width = pct + '%';
-        if ($('genStage')) $('genStage').textContent = job.stage || job.message || job.state;
-        if ($('aiProgressText')) $('aiProgressText').textContent = job.stage || job.message || job.state;
-        if ($('aiProgressBar')) $('aiProgressBar').style.width = pct + '%';
-        if ($('previewProgress')) $('previewProgress').style.width = pct + '%';
-        if ($('previewState') && job.type === 'voice-preview') $('previewState').textContent = job.stage || job.state;
-        await refreshJobs();
-        if (['completed','failed','cancelled'].includes(job.state)) {
-          finished = true;
-          if (poll) clearInterval(poll);
-          poll = null;
-          if (typeof terminal === 'function') {
-            try { await terminal(job); } catch (terminalError) { console.warn('[Ryu job terminal callback]', terminalError); }
-          }
-          const completionResult = job.state === 'completed' && done ? await done(job) : undefined;
-          if (completionResult === false) {
-            message('The preview job ended, but its output did not pass playback validation. Check the preview status and retry.', true);
-          } else {
-            // Import results carry review warnings separately from the concise job status.
-            // Surface those warnings to the user instead of silently dropping them.
-            const importWarnings = job.type === 'import' && job.state === 'completed' &&
-              Array.isArray(job.result?.warnings) ? job.result.warnings.filter(Boolean) : [];
-            const completionMessage = importWarnings.length
-              ? importWarnings.join(' ')
-              : (job.state === 'failed' && job.error?.message
-                  ? (job.message || ((job.title || 'Job') + ' failed')) + ' ' + String(job.error.message)
-                  : (job.message || ((job.title || 'Job') + ' ' + job.state)));
-            message(completionMessage, job.state !== 'completed');
-          }
-          if (job.state === 'completed') { await refreshChapters().catch(()=>{}); await refreshCharacters().catch(()=>{}); }
-        }
-      } catch (e) { console.error(e); }
-    };
-    await tick();
-    if (!finished) poll = setInterval(tick, 1000);
-  }
-  function requestElevenLabsApiKey() {
     return new Promise(resolve => {
       $('ryuElevenLabsKeyDialog')?.remove();
       const overlay = document.createElement('div');
