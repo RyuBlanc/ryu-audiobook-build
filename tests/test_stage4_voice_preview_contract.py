@@ -207,5 +207,54 @@ class VoicePreviewContractTests(unittest.TestCase):
             self.assertEqual(updated["voice_name"], "Qwen Hero")
             self.assertEqual(list_characters(path=path)[0]["voice_name"], "Qwen Hero")
 
+
+    def test_character_created_from_voice_assignment_enters_matching_active_cast(self):
+        from unittest.mock import call
+        with tempfile.TemporaryDirectory() as temp:
+            project = SimpleNamespace(folder=Path(temp) / "active", title="Series A · Vol 1")
+            state = {"characters": []}
+            records = []
+
+            def sync_characters(series, rows, **kwargs):
+                item = rows[0]
+                records.append({
+                    "id": "character-1", "series": series,
+                    "primary_name": item["name"], "short": item.get("short") or "",
+                    "aliases": item.get("aliases") or [], "voice_name": item.get("voice") or "",
+                    "notes": item.get("notes") or "", "confidence": 100,
+                    "line_count": 0, "chapter_count": 0,
+                })
+                return records
+
+            bridge = SimpleNamespace(
+                _character_library_bootstrap=lambda: None,
+                settings=SimpleNamespace(value=lambda key: str(project.folder) if key == "project/active_folder" else ""),
+                _find_profile=lambda name: SimpleNamespace(name=name),
+                _project_series_name=lambda active_project, active_state: "Series A",
+                _now=lambda: "2026-10-24T00:00:00+00:00",
+                _sync_saved_cast=Mock(),
+            )
+            with patch.object(premium_v2_host, "list_reusable_characters", side_effect=lambda: records), \
+                 patch.object(premium_v2_host, "sync_reusable_characters", side_effect=sync_characters), \
+                 patch.object(premium_v2_host, "list_projects", return_value=[project]), \
+                 patch.object(premium_v2_host, "load_state", return_value=state), \
+                 patch.object(premium_v2_host, "save_state") as save_state:
+                result = premium_v2_host.PremiumV2Bridge._character_library_save(
+                    bridge, {
+                        "name": "Mira", "series": "Series A", "scope": "Series · Series A",
+                        "short": "Mira", "aliases": [], "voice_profile": "Qwen Anime Hero",
+                    }
+                )
+
+            self.assertTrue(result["saved"])
+            self.assertTrue(result["project_updated"])
+            self.assertEqual(len(state["characters"]), 1)
+            self.assertEqual(state["characters"][0]["name"], "Mira")
+            self.assertEqual(state["characters"][0]["voice_profile"], "Qwen Anime Hero")
+            save_state.assert_called_once()
+            bridge._sync_saved_cast.assert_called_once_with(
+                project, state["characters"], state, update_names=False, update_voice=True
+            )
+
 if __name__ == "__main__":
     unittest.main()
