@@ -129,6 +129,53 @@ class ImportIntegrityTests(unittest.TestCase):
             self.assertNotIn(noise, story)
         self.assertGreaterEqual(len(removed_all), 9)
 
+    def test_justlightnovels_page_header_is_removed_on_import_and_clear_text(self):
+        source = (
+            "Chapter 1: Arrival\\n"
+            "The traveler walked past the ancient gate and greeted the guard.\\n"
+            "Page | 42 www.justlightnovels.com\\n"
+            "She continued toward the village before sunset."
+        )
+        cleaned, removed = clean_import_noise(source)
+        self.assertNotIn("justlightnovels.com", cleaned)
+        self.assertNotIn("Page | 42", cleaned)
+        self.assertTrue(any("justlightnovels.com" in item for item in removed))
+        self.assertIn("greeted the guard", cleaned)
+        self.assertIn("before sunset", cleaned)
+
+        extracted = clean_text(source)
+        self.assertNotIn("justlightnovels.com", extracted)
+        self.assertIn("greeted the guard", extracted)
+        self.assertIn("before sunset", extracted)
+
+    def test_split_slash_title_and_part_line_are_combined_into_one_chapter_title(self):
+        source = (
+            "BLACK DOG/BIRTH\\n\\n"
+            "Part 1\\n"
+            "The hero opened his eyes and wondered why the quiet room smelled of rain. "
+            "He reached for the window and listened to the distant voices outside.\\n\\n"
+            "Chapter 2: The Second Morning\\n"
+            "The next morning began with a clear sky and a long walk through town."
+        )
+        chapters = detect_chapters(source)
+        self.assertEqual(chapters[0].title, "BLACK DOG/BIRTH: Part 1")
+        self.assertIn("opened his eyes", chapters[0].text)
+        self.assertNotIn("\\nPart 1\\n", chapters[0].text)
+        self.assertTrue(any(chapter.title == "Chapter 2: The Second Morning" for chapter in chapters))
+
+    def test_substantive_unheaded_story_opening_becomes_an_opening_chapter(self):
+        opening = (
+            "When he finally opened his eyes, the old station was empty and rain tapped "
+            "against the cracked windows. He remembered the promise he had made yesterday, "
+            "but the voice from the platform had already vanished."
+        )
+        source = opening + "\\n\\nChapter 1: A New Day\\nThe sun rose over the town."
+        chapters = detect_chapters(source)
+        self.assertEqual(chapters[0].title, "Opening")
+        self.assertIn("old station was empty", chapters[0].text)
+        self.assertEqual(chapters[1].title, "Chapter 1: A New Day")
+        self.assertNotIn("old station was empty", chapters[1].text)
+
     def test_single_occurrence_report_page_number_and_general_url_are_not_removed(self):
         source = (
             "Chapter 1: Archive\n"
