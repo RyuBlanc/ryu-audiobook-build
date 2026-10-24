@@ -984,6 +984,9 @@
   async function flushChapterDraftBeforeSwitch() {
     const number = Number(window.ryuPremiumSelectedChapter || 0);
     if (!number) { await chapterSavePromise; return; }
+    if (!chapterSaveTimer && /autosave failed/i.test(String($('saveState')?.textContent || ''))) {
+      throw new Error('The last chapter autosave failed. Save the current chapter successfully before switching away.');
+    }
     if (chapterSaveTimer) {
       const chapter = chapters.find(item => Number(item.number) === number);
       const editor = $('chapterEditor');

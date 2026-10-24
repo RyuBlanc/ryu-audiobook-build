@@ -999,6 +999,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         helper = adapter[start:end]
         self.assertIn("clearTimeout(chapterSaveTimer);", helper)
         self.assertIn("call('chapter.update', {number, title, text})", helper)
+        self.assertIn("if (!chapterSaveTimer && /autosave failed/i.test(String($('saveState')?.textContent || '')))", helper)
+        self.assertIn("The last chapter autosave failed. Save the current chapter successfully before switching away.", helper)
         self.assertIn("chapter draft was not saved, so chapter switching was stopped", helper.lower())
         start = adapter.index("async function refreshChapters()")
         end = adapter.index("async function refreshCharacters()", start)
