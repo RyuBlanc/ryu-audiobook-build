@@ -17,15 +17,20 @@ class ExtractedBook:
 
 SUPPORTED_EXTENSIONS = {".txt", ".pdf", ".epub", ".docx"}
 
-# Standalone ebook download/page watermarks. These patterns are intentionally
-# narrow so normal URLs or story text are not deleted.
+# Standalone ebook download/page watermarks. A bare "Page 12" is only
+# removed if it names a page label from PDF extraction; bare numeric lines are
+# handled by the contextual cleanup below rather than at this stage.
 NOISE_PATTERNS = (
     re.compile(r"^https?://(?:www\.)?mp4directs\.com(?:/.*)?$", re.I),
     re.compile(r"^(?:www\.)?mp4directs\.com(?:/.*)?$", re.I),
     re.compile(r"^Goldenagato\s*\|\s*mp4directs\.com\s*$", re.I),
     re.compile(r"^Page\s+\d+\s*$", re.I),
     re.compile(r"^Page\s+\d+\s+.*mp4directs\.com.*$", re.I),
+    re.compile(r"^https?://(?:www\.)?asianovel\.com(?:/.*)?$", re.I),
+    re.compile(r"^(?:www\.)?asianovel\.com(?:/.*)?$", re.I),
+    re.compile(r"^https?://(?:www\.)?mp4directs\.com(?:/.*)?$", re.I),
 )
+
 
 BOOK_NOISE_PATTERNS = (
     # These candidates are only considered removable when they appear in at
