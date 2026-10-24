@@ -1858,7 +1858,11 @@ class VoicePage(QWidget):
         if not voice_id:
             return
         fallback_profile = getattr(self, "_missing_catalog_voice_profile", None)
-        if fallback_profile is not None and voice_id != fallback_profile.voice_id:
+        if (
+            fallback_profile is not None
+            and voice_id != fallback_profile.voice_id
+            and not getattr(self, "_restoring_saved_profile", False)
+        ):
             self._missing_catalog_voice_profile = None
         if self.mode.currentData() in {"offline-neural", "qwen-custom"}:
             profile = next(
@@ -2168,7 +2172,11 @@ class VoicePage(QWidget):
                 for widget, prior_state in zip(filter_widgets, prior_block_states):
                     widget.blockSignals(prior_state)
             self._missing_catalog_voice_profile = profile
-            self._refresh_voice_list()
+            self._restoring_saved_profile = True
+            try:
+                self._refresh_voice_list()
+            finally:
+                self._restoring_saved_profile = False
             i = self.neural_voice.findData(profile.voice_id)
             if i < 0:
                 # Do not silently select a different voice if a saved ID is
