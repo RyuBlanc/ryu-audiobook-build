@@ -2227,11 +2227,15 @@
         if ($('aiProgressBar')) $('aiProgressBar').style.width = pct + '%';
         if ($('previewProgress')) $('previewProgress').style.width = pct + '%';
         if ($('previewState') && job.type === 'voice-preview') {
-          $('previewState').textContent=(job.stage||job.state)+' · '+Math.round(pct)+'%';
+          const previewDetail = String(job.message || '').trim();
+          const previewDetailIsUseful = /elapsed \d+:\d{2}|loading qwen model|qwen model loaded|switching to cpu/i.test(previewDetail);
+          const previewProgressText = (job.stage || job.state) + ' · ' + Math.round(pct) + '%' +
+            (previewDetailIsUseful ? ' · ' + previewDetail : '');
+          $('previewState').textContent = previewProgressText;
           if($('sumPreview'))$('sumPreview').textContent=['completed','failed','cancelled'].includes(job.state)
             ? (job.state==='completed'?'Finalizing':job.state==='failed'?'Failed':'Cancelled')
             : 'Synthesizing · '+Math.round(pct)+'%';
-          if($('validation')&&!['completed','failed','cancelled'].includes(job.state))$('validation').textContent='Synthesizing preview · '+Math.round(pct)+'% · '+(job.stage||job.state);
+          if($('validation')&&!['completed','failed','cancelled'].includes(job.state))$('validation').textContent='Synthesizing preview · '+Math.round(pct)+'% · '+(job.stage||job.state)+(previewDetailIsUseful ? ' · '+previewDetail : '');
         }
         await refreshJobs();
         if (finished || monitorToken !== monitorEpoch) return;
