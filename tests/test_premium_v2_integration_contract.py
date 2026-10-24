@@ -465,13 +465,14 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         for token in (
             "waitForTerminalJob", "previewSavedProfile", "testSelectedVoices",
             "testAllVoices", "call('models.install'", "refreshVoices()",
-            "Credential management is not connected to a secure provider-specific credential store",
-            "Premium cloud candidate generation is not connected to a provider endpoint",
+            "call('voice.credentials.set'", "call('voice.elevenlabs.design'",
             "call('chapter.review', {number, review_status:nextStatus})",
             "row.hidden = chapter?.review_status === 'reviewed'",
             "playerAudio.playbackRate",
         ):
             self.assertIn(token, adapter)
+        self.assertNotIn("Credential management is not connected to a secure provider-specific credential store", adapter)
+        self.assertNotIn("Premium cloud candidate generation is not connected to a provider endpoint", adapter)
 
     def test_stage829_remaining_demo_actions_are_guarded_and_profile_delete_is_real(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
@@ -867,7 +868,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("EdgeTTSProvider.fetch_voice_metadata(refresh=refresh)", host)
         self.assertIn("ElevenLabsProvider.fetch_voice_metadata(refresh=refresh)", host)
         self.assertIn("pyttsx3.init()", host)
-        self.assertIn("saved: profile.name.strip().casefold() in saved_names", host)
+        self.assertIn('"saved": profile.name.strip().casefold() in saved_names', host)
         self.assertIn("voices.filter(v => v.saved === true)", adapter)
         self.assertIn("async function refreshProviderCatalog", adapter)
         self.assertIn("function applySavedVoiceProfile", adapter)
