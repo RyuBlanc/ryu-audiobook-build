@@ -53,8 +53,8 @@ from app.tts.providers.edge_tts import EdgeTTSProvider
 from app.tts.providers.elevenlabs import ElevenLabsProvider
 
 
-# Keep the longer audition options available; 30 seconds remains the default.
-PREVIEW_DURATION_OPTIONS = (10, 20, 30, 45, 60)
+# Keep native and HTML Voice Studio duration controls aligned; 30 seconds remains the default.
+PREVIEW_DURATION_OPTIONS = (10, 30, 60, 90)
 
 
 class VoicePreviewWorker(QThread):
@@ -803,7 +803,7 @@ class VoicePage(QWidget):
         self.preview_duration = QComboBox()
         for seconds in PREVIEW_DURATION_OPTIONS:
             self.preview_duration.addItem(f"{seconds} seconds", seconds)
-        self.preview_duration.setCurrentIndex(2)
+        self.preview_duration.setCurrentIndex(PREVIEW_DURATION_OPTIONS.index(30))
         settings.addWidget(self.preview_duration)
         self.preview_engine_status = QLabel("Ready")
         self.preview_engine_status.setObjectName("muted")
