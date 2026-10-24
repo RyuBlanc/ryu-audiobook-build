@@ -3804,11 +3804,14 @@ class PremiumV2Bridge(QObject):
 
         if model_id in {"qwen-customvoice", "qwen-voicedesign", "qwen-clone", "qwen-all"}:
             from app.tts.qwen_character_runtime import (
-                install_runtime, install_model, best_custom_kind, best_clone_kind, best_voice_design_kind,
+                install_runtime, install_model, model_installed,
+                best_custom_kind, best_clone_kind, best_voice_design_kind,
             )
             install_runtime(progress, force_repair=force_repair and model_id == "qwen-all")
             choices = {
                 "qwen-customvoice": [best_custom_kind()],
+                # A VoiceDesign reference must also have a Base model available
+                # for stable identity across long chapters.
                 "qwen-voicedesign": [best_voice_design_kind(), best_clone_kind()],
                 "qwen-clone": [best_clone_kind()],
             }
@@ -3819,9 +3822,16 @@ class PremiumV2Bridge(QObject):
                         targets.append(kind)
             else:
                 targets = choices[model_id]
-            for kind in targets:
-                install_model(kind, progress, force_repair=force_repair)
-            return "Qwen3-TTS model(s) installed and file-verified: " + ", ".join(targets)
+            missing = [kind for kind in targets if not model_installed(kind)]
+            # If a composite feature is incomplete, install only its missing
+            # models. A deliberate repair of a fully present feature forces the
+            # existing weights to be downloaded and verified again.
+            install_targets = targets if force_repair and not missing else missing
+            if not install_targets:
+                return "Required Qwen3-TTS runtime and model files are already installed: " + ", ".join(targets)
+            for kind in install_targets:
+                install_model(kind, progress, force_repair=force_repair and not missing)
+            return "Qwen3-TTS model(s) installed and file-verified: " + ", ".join(install_targets)
 
         qwen_model_match = re.fullmatch(r"(?:qwen-model:)?(custom-0\.6b|custom-1\.7b|design-1\.7b|base-0\.6b|base-1\.7b)", model_id)
         if qwen_model_match:
@@ -3963,17 +3973,31 @@ class PremiumV2Bridge(QObject):
             path = str(MODEL_DIRS[requested])
             detail = "Required model files are present." if available else "Qwen model files are missing or incomplete; install or repair this model."
         elif requested in {"qwen-runtime", "qwen-customvoice", "qwen-voicedesign", "qwen-clone", "qwen-all"}:
-            from app.tts.qwen_character_runtime import runtime_ready, model_installed, best_custom_kind, best_voice_design_kind, best_clone_kind, MODEL_DIRS
+            from app.tts.qwen_character_runtime import runtime_ready, model_installed, MODEL_DIRS
             runtime_ok = bool(runtime_ready())
-            kinds = {
-                "qwen-customvoice": [best_custom_kind()],
-                "qwen-voicedesign": [best_voice_design_kind(), best_clone_kind()],
-                "qwen-clone": [best_clone_kind()],
-                "qwen-all": [best_custom_kind(), best_voice_design_kind(), best_clone_kind()],
-            }.get(requested, [])
-            available = runtime_ok if requested == "qwen-runtime" else runtime_ok and all(model_installed(kind) for kind in kinds)
-            path = str(MODEL_DIRS[kinds[0]]) if kinds else ""
-            detail = "Qwen runtime and selected model files are ready." if available else "Qwen runtime or required model files are missing; use Install or Repair."
+            custom_ready = bool(model_installed("custom-0.6b") or model_installed("custom-1.7b"))
+            base_ready = bool(model_installed("base-0.6b") or model_installed("base-1.7b"))
+            design_ready = bool(model_installed("design-1.7b") and base_ready)
+            checks = {
+                "qwen-customvoice": (["custom-0.6b", "custom-1.7b"], custom_ready),
+                "qwen-voicedesign": (["design-1.7b", "base-0.6b", "base-1.7b"], design_ready),
+                "qwen-clone": (["base-0.6b", "base-1.7b"], base_ready),
+                "qwen-all": (["custom-0.6b", "custom-1.7b", "design-1.7b", "base-0.6b", "base-1.7b"], custom_ready and design_ready),
+            }
+            if requested == "qwen-runtime":
+                available = runtime_ok
+                path = ""
+            else:
+                needed, weights_ready = checks[requested]
+                available = runtime_ok and weights_ready
+                path = str(MODEL_DIRS.get("design-1.7b") if requested == "qwen-voicedesign" else
+                           MODEL_DIRS.get("base-0.6b") if requested == "qwen-clone" else
+                           MODEL_DIRS.get("custom-0.6b"))
+            detail = (
+                "Qwen runtime and all required model files are ready."
+                if available else
+                "Qwen runtime or one or more required model files are missing; use Install or Repair."
+            )
         elif requested == "piper":
             from app.tts.providers.piper import PiperProvider
             paths = list(PiperProvider.model_paths())
