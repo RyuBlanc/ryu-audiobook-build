@@ -671,6 +671,7 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("function suppressLegacyVoicePreviewHandlers()", adapter)
         self.assertIn("suppressLegacyVoicePreviewHandlers();", adapter)
         self.assertIn("event.stopPropagation()", adapter)
+        self.assertIn("stopPreview','saveProfile','useNarrator'", adapter)
         preview_handler = adapter.index("if ($('generatePreview')) $('generatePreview').onclick=act(previewVoice);")
         shield_call = adapter.index("suppressLegacyVoicePreviewHandlers();")
         self.assertGreater(shield_call, preview_handler)
