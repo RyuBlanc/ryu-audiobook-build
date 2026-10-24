@@ -873,16 +873,33 @@
     if ($('characterEditorModal')?.classList.contains('show') && $('editCharacterVoice')) $('editCharacterVoice').disabled = true;
     renderSelect($('pronQuickVoice'), rows, 'name', v => v.label);
     const profileSelect = document.querySelector('#voices .panel[data-panel="3"] .toolbar select');
-    if (profileSelect) {
+    const profileSearch = document.querySelector('#voices .panel[data-panel="3"] .form2 input[placeholder^="Profile, provider"]');
+    const updateSavedProfileOptions = () => {
+      if (!profileSelect) return;
       const previous = profileSelect.value;
-      const saved = voices.filter(v => v.saved === true);
-      profileSelect.innerHTML = '<option value="">Select saved profile</option>' +
-        saved.map(v => '<option value="' + esc(v.name) + '">' + esc(v.name) + ' · ' + esc(v.provider) + '</option>').join('');
+      const term = String(profileSearch?.value || '').trim().toLowerCase();
+      const saved = voices.filter(v => v.saved === true && (!term ||
+        [v.name,v.provider,v.language,v.voice_id,v.notes,v.qwen_prompt].some(value => String(value || '').toLowerCase().includes(term))));
+      profileSelect.replaceChildren();
+      const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = 'Select saved profile';
+      profileSelect.appendChild(placeholder);
+      for (const item of saved) {
+        const option = document.createElement('option');
+        option.value = item.name; option.textContent = item.name + ' · ' + item.provider;
+        profileSelect.appendChild(option);
+      }
       profileSelect.value = saved.some(v => v.name === previous) ? previous : '';
       profileSelect.disabled = saved.length === 0;
-      profileSelect.title = saved.length ? 'Choose a saved voice profile to load' : 'No saved profiles yet. Configure and save a voice profile first.';
+      profileSelect.title = saved.length ? 'Choose a saved voice profile to load' : 'No saved profiles match this search.';
+    };
+    if (profileSearch && !profileSearch.dataset.savedProfileSearchBound) {
+      profileSearch.dataset.savedProfileSearchBound = 'true';
+      profileSearch.addEventListener('input', updateSavedProfileOptions);
     }
-    // A catalogue selection is not a saved custom profile; never prefill this name.
+    updateSavedProfileOptions();
+    const activeProviderKey = document.querySelector('#voices .provider.active')?.dataset.provider || 'offline';
+    void refreshProviderCatalog(activeProviderKey, false).catch(error => console.warn('[Ryu voice catalogue]', error));
+    // A catalogue selection is not a saved custom profile; the profile name is supplied by the user.
     return voices;
   }
   function renderLiveChapterInsights() {
