@@ -692,7 +692,17 @@
     renderSelect($('editCharacterVoice'), [{name:'',label:'Unassigned'}, ...rows], 'name', v => v.label || 'Unassigned');
     if ($('characterEditorModal')?.classList.contains('show') && $('editCharacterVoice')) $('editCharacterVoice').disabled = true;
     renderSelect($('pronQuickVoice'), rows, 'name', v => v.label);
-    if ($('profileName') && !$('profileName').value.trim() && voices[0]) $('profileName').value = voices[0].name;
+    const profileSelect = document.querySelector('#voices .panel[data-panel="3"] .toolbar select');
+    if (profileSelect) {
+      const previous = profileSelect.value;
+      const saved = voices.filter(v => v.saved === true);
+      profileSelect.innerHTML = '<option value="">Select saved profile</option>' +
+        saved.map(v => '<option value="' + esc(v.name) + '">' + esc(v.name) + ' · ' + esc(v.provider) + '</option>').join('');
+      profileSelect.value = saved.some(v => v.name === previous) ? previous : '';
+      profileSelect.disabled = saved.length === 0;
+      profileSelect.title = saved.length ? 'Choose a saved voice profile to load' : 'No saved profiles yet. Configure and save a voice profile first.';
+    }
+    // A catalogue selection is not a saved custom profile; never prefill this name.
     return voices;
   }
   async function refreshChapters() {
