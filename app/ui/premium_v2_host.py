@@ -2019,6 +2019,18 @@ class PremiumV2Bridge(QObject):
         )
 
 
+    def _release_preview_provider(self, provider) -> None:
+        closer = getattr(self, "_close_provider_quietly", None)
+        if callable(closer):
+            closer(provider)
+            return
+        close = getattr(provider, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                log.warning("Could not close a voice-preview provider cleanly.", exc_info=True)
+
     def _close_provider_quietly(self, provider) -> None:
         close = getattr(provider, "close", None)
         if callable(close):
@@ -2290,7 +2302,9 @@ class PremiumV2Bridge(QObject):
             else:
                 # Switching providers/signatures releases the previous warm model;
                 # otherwise repeated previews would leave heavyweight workers alive.
-                self.close_preview_provider_cache()
+                close_cache = getattr(self, "close_preview_provider_cache", None)
+                if callable(close_cache):
+                    close_cache()
                 provider, voice = provider_from_profile(profile)
                 if cast_assignments:
                     from app.tts.cast_provider import CastAwareProvider
@@ -2323,7 +2337,11 @@ class PremiumV2Bridge(QObject):
                     elapsed = max(0, int(time.monotonic() - preview_started))
                     clock = f"{elapsed // 60}:{elapsed % 60:02d}"
                     try:
-                        self._job_update(job_id, stage="synthesizing", message=f"Synthesis is still running • elapsed {clock}")
+                        with self._jobs_lock:
+                    row = self._jobs.get(str(job_id))
+                    if not row or str(row.get("state") or "").casefold() != "running":
+                        return
+                    self._job_update(job_id, stage="synthesizing", message=f"Synthesis is still running • elapsed {clock}")
                     except Exception:
                         return
 
@@ -2410,9 +2428,9 @@ class PremiumV2Bridge(QObject):
                         self._cache_preview_provider(cache_signature, provider, voice)
                     except Exception:
                         log.warning("Could not retain a warm preview provider; closing it safely.", exc_info=True)
-                        self._close_provider_quietly(provider)
+                        self._release_preview_provider(provider)
                 else:
-                    self._close_provider_quietly(provider)
+                    self._release_preview_provider(provider)
             if cancel_event is not None:
                 with self._jobs_lock:
                     self._preview_cancel_events.pop(job_id, None)
