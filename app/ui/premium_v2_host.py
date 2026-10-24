@@ -3366,12 +3366,41 @@ class PremiumV2Bridge(QObject):
                 installed = bool(qwen_model_installed(kind))
             except Exception:
                 installed = False
+            folder_exists = MODEL_DIRS[kind].exists()
+            base_ready = False
+            if kind == "design-1.7b":
+                try:
+                    base_ready = bool(qwen_model_installed("base-0.6b") or qwen_model_installed("base-1.7b"))
+                except Exception:
+                    base_ready = False
+            if not installed:
+                status = "Model files incomplete · Repair required" if folder_exists else "Not installed"
+            elif not qwen_ready:
+                status = "Weights installed · Qwen runtime required"
+            elif kind == "design-1.7b" and not base_ready:
+                status = "VoiceDesign weights installed · Base model dependency missing"
+            elif kind == "design-1.7b":
+                status = "Installed · VoiceDesign and Base dependencies ready"
+            else:
+                status = "Installed and file-verified"
+
+            # VoiceDesign needs both the design weights and a Base model to keep
+            # a stable reference identity during long-form generation. Its install/
+            # repair action therefore installs missing dependencies together.
+            install_id = "qwen-voicedesign" if kind == "design-1.7b" else kind
+            repair_id = (
+                "qwen-voicedesign" if kind == "design-1.7b" else
+                "qwen-runtime" if installed and not qwen_ready else kind
+            )
+            verify_id = "qwen-voicedesign" if kind == "design-1.7b" else kind
             result.append(row(
                 kind, qwen_names.get(kind, (repo_id, ""))[0], "qwen", installed,
                 f"Local Qwen3-TTS weights from {repo_id}. The matching Qwen3-TTS runtime is also required.",
-                status="Installed and file-verified" if installed else "Not installed or incomplete",
-                installable=not installed, repairable=MODEL_DIRS[kind].exists() or installed,
-                uninstallable=MODEL_DIRS[kind].exists(),
+                status=status,
+                installable=not installed and not folder_exists,
+                repairable=folder_exists or (installed and (not qwen_ready or (kind == "design-1.7b" and not base_ready))),
+                uninstallable=folder_exists,
+                install_id=install_id, repair_id=repair_id, verify_id=verify_id,
                 feature=qwen_names.get(kind, ("", "qwen"))[1], requirements="Model download can be several GB; requires internet for install/repair.",
                 storage_bytes=byte_size(MODEL_DIRS[kind]), managed_path=str(MODEL_DIRS[kind]),
                 component_type="model",
