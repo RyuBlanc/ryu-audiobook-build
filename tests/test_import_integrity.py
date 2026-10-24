@@ -231,6 +231,88 @@ In the final scene, the family gathered beside the river and remembered how thei
         self.assertAlmostEqual(coverage, 1.0)
         validate_chapter_text_coverage(source, chapters, minimum=0.90)
 
+    def test_premium_v2_import_worker_persists_dotted_toc_book_end_to_end(self):
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        source_text = """TABLE OF CONTENTS
+Prologue ........ 1
+Chapter 1: Arrival ........ 2
+Chapter 2: Return ........ 3
+Epilogue ........ 4
+
+Prologue
+The heroine walked through the old stone gate and greeted the guard before sunrise.
+41
+Report
+www.asianovel.com
+
+Chapter 1: Arrival
+After the long journey, the traveler returned home and shared news with the waiting family.
+42
+Report
+www.asianovel.com
+
+Chapter 2: Return
+They promised to meet again next winter, when the city would celebrate its annual winter festival.
+43
+Report
+www.asianovel.com
+
+Epilogue
+In the final scene, the family gathered beside the river and remembered how their journey had changed everything.
+44
+Report
+www.asianovel.com
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "dotted-toc-book.txt"
+            source.write_text(source_text, encoding="utf-8")
+            app_data = root / "app-data"
+            settings = root / "settings"
+            library = root / "library"
+
+            with (
+                mock.patch("app.ui.premium_v2_host.ensure_roots"),
+                mock.patch("app.ui.premium_v2_host.app_root", return_value=app_data),
+                mock.patch("app.ui.premium_v2_host.settings_root", return_value=settings),
+                mock.patch("app.ui.premium_v2_host.QSettings"),
+                mock.patch("app.ui.premium_v2_host.load_state", return_value={}),
+                mock.patch("app.ui.premium_v2_host.save_state"),
+                mock.patch("app.core.project.library_root", return_value=library),
+            ):
+                bridge = PremiumV2Bridge()
+                job_id = bridge._new_job("import", "Import dotted TOC book", "Acceptance test")
+                bridge._job_update(
+                    job_id, state="running", started_at=bridge._now(),
+                    stage="Reading source file", progress=5,
+                )
+                bridge._import_worker(job_id, source, "Dotted TOC Integration Book")
+                job = bridge._jobs[job_id]
+
+                self.assertEqual(
+                    job["state"], "completed",
+                    f"Premium V2 import failed at {job.get('stage')}: {job.get('error') or job.get('message')}",
+                )
+                self.assertEqual(job["result"]["chapter_count"], 4)
+                self.assertEqual(job["result"]["removed_noise_count"] > 0, True)
+
+                project = Project.load(Path(job["project_folder"]))
+                self.assertEqual(
+                    [chapter.title for chapter in project.chapters],
+                    ["Prologue", "Chapter 1: Arrival", "Chapter 2: Return", "Epilogue"],
+                )
+                joined = "\n".join(chapter.text for chapter in project.chapters)
+                for expected in (
+                    "heroine walked through the old stone gate",
+                    "traveler returned home",
+                    "promised to meet again next winter",
+                    "family gathered beside the river",
+                ):
+                    self.assertIn(expected, joined)
+                for noise in ("TABLE OF CONTENTS", "........", "www.asianovel.com", "Report", "41", "42", "43", "44"):
+                    self.assertNotIn(noise, joined)
+
     def test_noise_cleanup_removes_known_watermark_without_dropping_story(self):
         source = (
             "The story mentions a report in the ordinary narration.\n"
