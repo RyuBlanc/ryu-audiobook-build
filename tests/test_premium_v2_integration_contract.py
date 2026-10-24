@@ -992,6 +992,22 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("list.dataset.characterListSignature !== signature", block)
         self.assertIn("if ($('charFoundMetric'))", block)
 
+    def test_production_pause_and_cancel_controls_only_target_generation_jobs(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        start = adapter.index("if ($('startGenerate'))")
+        end = adapter.index("['analyzeCharacters','runAiAnalysis']", start)
+        production_controls = adapter[start:end]
+        self.assertIn("activeJobType!=='audiobook-generation'", production_controls)
+        self.assertIn("There is no active audiobook generation job to pause.", production_controls)
+        self.assertIn("There is no active audiobook generation job to cancel.", production_controls)
+        monitor_start = adapter.index("async function monitorJob(")
+        monitor_end = adapter.index("function requestElevenLabsApiKey()", monitor_start)
+        monitor = adapter[monitor_start:monitor_end]
+        self.assertIn("if (activeJob === jobId) activeJobType = job.type || null;", monitor)
+        self.assertIn("activeJob = null; activeJobType = null;", monitor)
+
     def test_monitor_job_serializes_ticks_ignores_stale_responses_and_clears_active_job(self):
         """A slow job-list response must not finish a job twice or mutate a newer task's UI."""
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
@@ -1004,7 +1020,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("let checking = false;", monitor)
         self.assertIn("monitorToken !== monitorEpoch || checking", monitor)
         self.assertIn("if (finished || monitorToken !== monitorEpoch) return;", monitor)
-        self.assertIn("if (activeJob === jobId) activeJob = null;", monitor)
+        self.assertIn("if (activeJob === jobId) { activeJob = null; activeJobType = null; }", monitor)
         self.assertIn("finally {\n        checking = false;", monitor)
         self.assertIn("if (!finished && monitorToken === monitorEpoch) poll = setInterval(tick, 1000);", monitor)
         self.assertIn("completion callback", monitor)
