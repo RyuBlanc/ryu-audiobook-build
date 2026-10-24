@@ -1792,8 +1792,11 @@
     return true;
   }
   async function previewVoice() {
-    const name = (selectedVoice || $('profileName')?.value || '').trim();
-    if (!name) throw new Error('Save or select a voice profile first.');
+    const name = String(selectedVoice || $('profileName')?.value || '').trim();
+    const providerKey = document.querySelector('#voices .provider.active')?.dataset.provider || '';
+    const providerMap = {offline:'piper',sapi:'windows-sapi',customvoice:'qwen-character',voicedesign:'qwen-character',qwenclone:'qwen-character',customref:'chatterbox',edge:'edge-tts',eleven:'elevenlabs'};
+    const savedProfile = voices.find(item => item.saved === true && item.name.toLowerCase() === name.toLowerCase());
+    if (!savedProfile && !providerMap[providerKey]) throw new Error('Select a provider and voice from Voice Library first.');
     const c = selectedChapter();
     const lengthGroup = [...document.querySelectorAll('#voices .toolbar')].find(el => /Length/.test(el.textContent));
     const duration = lengthGroup?.querySelector('.seg button.active')?.textContent.match(/\d+/)?.[0] || '30';
@@ -1808,7 +1811,36 @@
       if (!previewText.trim()) throw new Error('Select a passage in Chapter Studio before generating a passage preview.');
     }
     if (!previewText.trim()) throw new Error('The selected preview text is empty.');
-    const data = await call('voice.preview', {profile_name:name,text:previewText,duration_seconds:Number(duration),chapter_number:c?.number});
+    const payload = {profile_name:name,text:previewText,duration_seconds:Number(duration),chapter_number:c?.number};
+    if (!savedProfile) {
+      const panel = document.querySelector('#voices .provider.active');
+      const design = document.querySelector('#voices .provider[data-provider="voicedesign"]');
+      const designLanguage = design?.querySelector('.form2 select')?.value || 'English';
+      let voiceId = String(selectedVoiceId || '').trim();
+      if (!voiceId && providerKey === 'voicedesign') voiceId = ({English:'Ryan',Japanese:'Ono_Anna',Chinese:'Serena',Korean:'Sohee'}[designLanguage] || 'Ryan');
+      if (!voiceId) throw new Error('Select a voice from the active library before previewing. VoiceDesign can preview the current description without a fixed speaker selection.');
+      if (providerKey === 'qwenclone' || providerKey === 'customref') {
+        throw new Error('Save the reference-voice profile first so the imported recording can be used for preview.');
+      }
+      const qwenMode = providerKey === 'voicedesign' ? 'design' : providerKey === 'qwenclone' ? 'clone' : 'custom';
+      const languageSelect = providerKey === 'voicedesign'
+        ? design?.querySelector('.form2 select')
+        : panel?.querySelector('.form3 select');
+      payload.provider = providerMap[providerKey];
+      payload.voice_id = voiceId;
+      payload.model_id = providerKey === 'qwen-character' || ['customvoice','voicedesign','qwenclone'].includes(providerKey) ? 'auto' : providerMap[providerKey];
+      payload.backend = ['piper','kokoro','qwen-character'].includes(providerMap[providerKey]) ? 'automatic' : providerMap[providerKey];
+      payload.language = String(languageSelect?.value || 'English');
+      payload.qwen_mode = qwenMode;
+      payload.qwen_prompt = providerKey === 'voicedesign' ? (design?.querySelector('textarea')?.value || '') : '';
+      payload.qwen_seed = providerKey === 'voicedesign' ? (design?.querySelector('input[type="number"]')?.value || '') : '';
+      payload.reference_text = $('cloneTranscript')?.value || '';
+      payload.authorized = Boolean($('clonePermission')?.checked || $('customPermission')?.checked);
+      payload.exaggeration = Number(panel?.querySelector('input[type="range"]')?.value || 0.5);
+      payload.cfg_weight = 0.35;
+      payload.style_preset = panel?.querySelector('select')?.value || 'Natural';
+    }
+    const data = await call('voice.preview', payload);
     if (previewAudio) { previewAudio.pause(); previewAudio = null; }
     if ($('playPreview')) { $('playPreview').disabled = true; $('playPreview').textContent = '▶ Play'; }
     if ($('previewProgress')) $('previewProgress').style.width = '0%';
