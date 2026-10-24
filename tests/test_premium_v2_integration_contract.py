@@ -884,7 +884,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("let finished = false;", monitor)
         self.assertIn("if (finished) return;", monitor)
         self.assertIn("finished = true;", monitor)
-        self.assertLess(monitor.index("await tick();"), monitor.index("if (!finished) poll = setInterval(tick, 1000);"))
+        self.assertLess(monitor.index("await tick();"), monitor.index("if (!finished && monitorToken === monitorEpoch) poll = setInterval(tick, 1000);"))
 
 
     def test_monitor_job_serializes_ticks_ignores_stale_responses_and_clears_active_job(self):
@@ -918,6 +918,44 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("async function refreshJobsImpl()", refresh)
         self.assertIn("return allJobs;", refresh)
 
+    def test_provider_catalog_latest_request_wins_and_cannot_render_stale_rows(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        start = adapter.index("async function refreshProviderCatalog(")
+        end = adapter.index("function applySavedVoiceProfile(", start)
+        refresh = adapter[start:end]
+        self.assertIn("providerCatalogEpochs[providerKey] = requestToken;", refresh)
+        self.assertIn("if (providerCatalogEpochs[providerKey] !== requestToken) return providerCatalogs[providerKey] || result;", refresh)
+        self.assertLess(refresh.index("if (providerCatalogEpochs[providerKey] !== requestToken)"),
+                        refresh.index("renderProviderCatalog(providerKey, result)"))
+
+    def test_voice_and_model_inventory_refresh_ignore_stale_responses(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        voice_start = adapter.index("async function refreshVoices()")
+        voice_end = adapter.index("function renderLiveChapterInsights()", voice_start)
+        voice_refresh = adapter[voice_start:voice_end]
+        self.assertIn("const requestToken = ++voiceListEpoch;", voice_refresh)
+        self.assertIn("if (requestToken !== voiceListEpoch) return voices;", voice_refresh)
+        model_start = adapter.index("async function refreshModels()")
+        model_end = adapter.index("function ", model_start + 20)
+        model_refresh = adapter[model_start:model_end]
+        self.assertIn("const requestToken = ++modelListEpoch;", model_refresh)
+        self.assertIn("if (requestToken !== modelListEpoch) return window.ryuModelInventoryRows || [];", model_refresh)
+
+    def test_terminal_jobs_refresh_book_panels_only_when_the_job_changes_book_content(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        start = adapter.index("async function monitorJob(")
+        end = adapter.index("function requestElevenLabsApiKey()", start)
+        monitor = adapter[start:end]
+        gate = "['import','character-analysis','audiobook-generation'].includes(job.type)"
+        self.assertIn(gate, monitor)
+        self.assertIn("Model operations, voice previews and sound previews do not mutate", monitor)
+        self.assertLess(monitor.index(gate), monitor.index("await refreshChapters().catch(()=>{})"))
     def test_job_polling_updates_existing_rows_without_rebuilding_hidden_panel(self):
         """Job polling should not repeatedly replace DOM rows and trigger visible flicker."""
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
