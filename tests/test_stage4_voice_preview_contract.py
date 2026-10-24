@@ -663,6 +663,10 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("installProjectCardStatusObserver", adapter)
         self.assertIn("titleNode.title = title", adapter)
         self.assertIn("setProjectCardStatus(status)", adapter)
+        self.assertIn("ensureStableStudioLayout", adapter)
+        self.assertIn("overflow-anchor:none", adapter)
+        self.assertIn("previewDetailIsUseful", adapter)
+        self.assertIn("Synthesis is still running", host)
 
     def test_successful_qwen_preview_is_cached_but_full_generation_releases_it(self):
         host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
