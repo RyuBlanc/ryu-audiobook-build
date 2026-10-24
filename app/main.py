@@ -760,9 +760,9 @@ def main() -> int:
             )
             app.setOverrideCursor(QCursor(cursor_pixmap, 21, 13))
     app_icon = QIcon()
-    # Prefer a lossless PNG if one is present; the branded SVG is the
-    # packaged fallback so the executable never falls back to a generic icon.
-    for icon_name in ("ryu_audiobook_logo.svg", "ryu_audiobook_logo.png", "ryu_audiobook_logo.jpg"):
+    # Prefer the native-resolution, lossless PNG generated from the master
+    # artwork. SVG is only a fallback for an unbuilt source checkout.
+    for icon_name in ("ryu_audiobook_logo.png", "ryu_audiobook_logo.svg", "ryu_audiobook_logo.jpg"):
         icon_path = asset_path(icon_name)
         if icon_path.is_file():
             candidate_icon = QIcon(str(icon_path))

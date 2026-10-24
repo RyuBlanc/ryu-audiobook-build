@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from app.core.project import Project, list_projects
 from app.core.state import load_state
+from app.core.project_history import load_deleted_project_records
 
 
 def _output_for(project: Project, state: dict) -> Path | None:
@@ -211,14 +212,55 @@ class HistoryPage(QWidget):
                 self.table.setItem(row, column, item)
             if str(project.folder) == previous_folder:
                 self.table.selectRow(row)
-        self.summary.setText(
-            f"{len(projects)} local projects · {counts['Completed']} completed · "
-            f"{counts['In progress']} in progress · {counts['Needs attention']} need attention"
+        deleted_records = sorted(
+            load_deleted_project_records(),
+            key=lambda record: str(record.get("deleted_at") or ""),
+            reverse=True,
         )
-        if projects and self.table.currentRow() < 0:
+        for record in deleted_records:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            state = str(record.get("deletion_state") or "deleted").casefold()
+            status = "Deleted" if state == "deleted" else ("Deletion failed" if state == "failed" else "Deletion pending")
+            completed_count = int(record.get("completed_chapters") or 0)
+            chapter_count = int(record.get("chapter_count") or 0)
+            failed_count = int(record.get("failed_chapters") or 0)
+            raw_date = str(record.get("deleted_at") or "")
+            try:
+                stamp = datetime.fromisoformat(raw_date.replace("Z", "+00:00")).astimezone().strftime("%d %b %Y, %H:%M")
+            except (TypeError, ValueError):
+                stamp = raw_date or "—"
+            output_name = Path(str(record.get("output_path") or "")).name
+            output_label = "Output removed" if record.get("output_removed") else (output_name or "No output")
+            values = [
+                str(record.get("title") or "Deleted project"),
+                status,
+                f"{completed_count} / {chapter_count}",
+                str(failed_count),
+                stamp,
+                output_label,
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column == 0:
+                    item.setData(Qt.ItemDataRole.UserRole, "deleted:" + str(record.get("id") or ""))
+                if column == 1:
+                    item.setForeground(QColor("#A5ACB8" if status == "Deleted" else "#F4B740"))
+                self.table.setItem(row, column, item)
+
+        self.summary.setText(
+            f"{len(projects)} active local projects · {counts['Completed']} completed · "
+            f"{counts['In progress']} in progress · {counts['Needs attention']} need attention · "
+            f"{len(deleted_records)} deleted record(s) retained"
+        )
+        if self.table.rowCount() and self.table.currentRow() < 0:
             self.table.selectRow(0)
-        if not projects:
+        if not projects and not deleted_records:
             self.status.setText("No local project history is available yet. Import a book to begin a project.")
+        elif deleted_records:
+            self.status.setText(
+                "Deleted books remain in this history as records only. Their project files and any saved generated output were removed."
+            )
         self._selection_changed()
 
     def _open_project(self) -> None:

@@ -130,8 +130,13 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
 
     def test_library_search_filters_and_destructive_actions_require_confirmation(self):
         library = (ROOT / "app" / "ui" / "library.py").read_text(encoding="utf-8")
-        self.assertIn("self.search.textChanged.connect(self.refresh)", library)
-        self.assertIn("project_matches(project, query, status_filter)", library)
+        self.assertIn("self.search.textChanged.connect(self._schedule_refresh)", library)
+        self.assertIn("self._refresh_timer.setInterval(180)", library)
+        self.assertIn("_project_data_cache", library)
+        self.assertIn("_file_signature", library)
+        self.assertIn("project_matches(", library)
+        self.assertIn("self._state_cache =", library)
+        self.assertIn("self._status_cache =", library)
         self.assertIn("QListWidget.SelectionMode.ExtendedSelection", library)
         self.assertIn("QMessageBox.StandardButton.No,", library)
         self.assertIn("if answer != QMessageBox.StandardButton.Yes:", library)
@@ -165,8 +170,10 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
         import_page = (ROOT / "app" / "ui" / "import_page.py").read_text(encoding="utf-8")
         self.assertIn('if not str(book.text or "").strip():', import_page)
         self.assertIn('if not chapters:', import_page)
-        self.assertIn('chapter_words < int(source_words * 0.90)', import_page)
-        self.assertIn('Import was stopped to protect your book from losing content.', import_page)
+        self.assertIn('validate_chapter_text_coverage(book.text, chapters, minimum=0.90)', import_page)
+        self.assertIn('def validate_chapter_text_coverage(', (ROOT / "app" / "documents" / "parser.py").read_text(encoding="utf-8"))
+        self.assertIn('validate_chapter_text_coverage(book.text, chapters, minimum=0.90)', import_page)
+        self.assertIn('Import was stopped to protect your book from losing content.', (ROOT / "app" / "documents" / "parser.py").read_text(encoding="utf-8"))
         self.assertIn('self.status.setText(f"Import analysis failed: {message}")', import_page)
 
 
@@ -223,11 +230,10 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
         end = self.workflow.index("    def _sidebar_item_clicked(", start)
         transition = self.workflow[start:end]
         self.assertIn("self.stack.setCurrentWidget(widget)", transition)
-        self.assertIn("if reduced_motion_enabled() or not widget.isVisible():", transition)
-        self.assertIn("animation.setDuration(135)", transition)
-        self.assertIn('self._log_ui_failure("Page transition animation", exc)', transition)
-        self.assertIn("widget.setGraphicsEffect(None)", transition)
-
+        self.assertNotIn("QGraphicsOpacityEffect", transition)
+        self.assertNotIn("animation.start()", transition)
+        self.assertIn("self._page_animation_widget.setGraphicsEffect(None)", transition)
+        self.assertIn("self._update_page_chrome(widget)", transition)
 
     def test_generation_history_uses_real_local_state_and_safe_output_paths(self):
         page = (ROOT / "app" / "ui" / "history_page.py").read_text(encoding="utf-8")
@@ -315,6 +321,33 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
             'Your downloaded Qwen model files will NOT be deleted.',
         ):
             self.assertIn(required, page)
+
+    def test_premium_v2_frontend_commands_are_registered_and_callable_in_backend(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        frontend_commands = set(re.findall(r"\bcall\(\s*['\"]([^'\"]+)['\"]", adapter))
+
+        dispatch_start = host.index("            handlers = {", host.index("class PremiumV2Bridge"))
+        dispatch_end = host.index("\n            }", dispatch_start)
+        dispatch = host[dispatch_start:dispatch_end]
+        handler_rows = re.findall(r"""["']([^"']+)["']\s*:\s*self\.([A-Za-z0-9_]+)""", dispatch)
+        backend_commands = {command for command, _method in handler_rows}
+        defined_methods = set(re.findall(r"^    def (_[A-Za-z0-9_]+)\(", host, re.MULTILINE))
+
+        self.assertGreaterEqual(len(frontend_commands), 70, "The audited frontend command set unexpectedly shrank.")
+        self.assertEqual(sorted(frontend_commands - backend_commands), [],
+                         "Frontend commands are missing from the Python bridge allow-list.")
+        missing_methods = sorted({method for _command, method in handler_rows if method not in defined_methods})
+        self.assertEqual(missing_methods, [], "Bridge command handlers reference missing Python methods.")
+
+        # Verify the command map is connected to Qt WebChannel and the adapter
+        # only starts backend-dependent UI work after the bridge-ready event.
+        self.assertIn('channel.registerObject("ryuBackend", self.bridge)', host)
+        self.assertIn("native.dispatch(String(command), JSON.stringify(payload || {}), raw =>", host)
+        self.assertIn('adapter_path = frontend_path().with_name("premium_v2_backend_adapter.js")', host)
+        self.assertIn("self.web.page().runJavaScript(script)", host)
+        self.assertIn("window.dispatchEvent(new CustomEvent('ryu-backend-ready'))", host)
+        self.assertIn("window.addEventListener('ryu-backend-ready', start, {once:true})", adapter)
 
 if __name__ == "__main__":
     unittest.main()

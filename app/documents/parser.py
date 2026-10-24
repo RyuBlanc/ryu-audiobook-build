@@ -5,6 +5,11 @@ from pathlib import Path
 import re
 
 from app.tts.pacing import is_heading_line
+from app.chapters.heading_rules import (
+    CHAPTER_HEADING_PATTERNS, TOC_HEADING_RE,
+    heading_title as _heading_title,
+    is_chapter_heading_like as _is_chapter_heading_like,
+)
 
 
 @dataclass
@@ -16,37 +21,130 @@ class ExtractedBook:
 
 SUPPORTED_EXTENSIONS = {".txt", ".pdf", ".epub", ".docx"}
 
-# Standalone ebook download/page watermarks. These patterns are intentionally
-# narrow so normal URLs or story text are not deleted.
+# Standalone ebook download/page watermarks. A bare "Page 12" is only
+# removed if it names a page label from PDF extraction; bare numeric lines are
+# handled by the contextual cleanup below rather than at this stage.
 NOISE_PATTERNS = (
     re.compile(r"^https?://(?:www\.)?mp4directs\.com(?:/.*)?$", re.I),
     re.compile(r"^(?:www\.)?mp4directs\.com(?:/.*)?$", re.I),
     re.compile(r"^Goldenagato\s*\|\s*mp4directs\.com\s*$", re.I),
     re.compile(r"^Page\s+\d+\s*$", re.I),
     re.compile(r"^Page\s+\d+\s+.*mp4directs\.com.*$", re.I),
+    re.compile(r"^https?://(?:www\.)?asianovel\.com(?:/.*)?$", re.I),
+    re.compile(r"^(?:www\.)?asianovel\.com(?:/.*)?$", re.I),
+    re.compile(r"^https?://(?:www\.)?mp4directs\.com(?:/.*)?$", re.I),
 )
 
+
 BOOK_NOISE_PATTERNS = (
+    # These candidates are only considered removable when they appear in at
+    # least two chapters. A standalone "Report" or a number can be real story
+    # content and must never be removed from a single occurrence by itself.
     re.compile(r"^(?:report|read\s+online|download)$", re.I),
     re.compile(r"^\d{1,5}$"),
     re.compile(r"^page\s+\d{1,5}$", re.I),
-    re.compile(r"^(?:www\.)?[^\s]+\.(?:com|net|org|cc|me)(?:/.*)?$", re.I),
+    # Known light-novel downloader sites are eligible for repeated-noise
+    # removal. A generic domain is not: story text may intentionally mention it.
+    re.compile(r"^(?:https?://)?(?:www\.)?(?:asianovel\.com|mp4directs\.com)(?:/.*)?$", re.I),
     re.compile(r"^.*(?:asianovel\.com|mp4directs\.com).*$", re.I),
 )
 
-CHAPTER_HEADING_PATTERNS = (
-    re.compile(r"^\s*(?:chapter|chap\.)\s+[0-9IVXLCDM]+(?:\s*[-:–—.]\s*)?.*$", re.I),
-    re.compile(r"^\s*(?:prologue|epilogue|foreword|preface|introduction|afterword|interlude|side\s+story|extra|bonus)\b.*$", re.I),
-    re.compile(r"^\s*[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ _'’&/-]{0,35}\.\d{1,4}(?:\s+.*)?$", re.I),
-    re.compile(r"^\s*Life\s*[0-9IVXLCDM]+(?:\s+.*)?$", re.I),
-    re.compile(r"^\s*New\s+Life(?:\s*[:–—-].*)?$", re.I),
-)
+# A conservative, reusable word-coverage check for import previews. Chapter
+# bodies can repeat short headings/TOC labels, so compare normalized token
+# multisets rather than requiring raw text equality.
+def _coverage_heading_key(title: str) -> str:
+    value = str(title or "").strip()
+    value = re.sub(r"(?:\.{2,}|…+)\s*\d+\s*$", "", value)
+    value = re.sub(r"\s{2,}\d+\s*$", "", value)
+    return re.sub(r"[^a-z0-9]+", "", value.casefold())
 
-def _is_chapter_heading_like(line: str) -> bool:
-    candidate = re.sub(r"\s+", " ", line).strip()
-    if not candidate or len(candidate) > 120:
-        return False
-    return any(pattern.fullmatch(candidate) for pattern in CHAPTER_HEADING_PATTERNS)
+
+def _toc_entry_title(line: str) -> str | None:
+    """Accept headings in a declared TOC when they use dotted leaders/page numbers."""
+    raw = str(line or "").strip()
+    if not raw:
+        return None
+    without_page = re.sub(r"(?:\.{2,}|…+)\s*\d+\s*$", "", raw).strip()
+    if without_page != raw:
+        title = _heading_title(without_page, allow_slash=True)
+        if title is not None:
+            return title
+    return _heading_title(raw, allow_slash=True)
+
+
+def _coverage_source_lines(source_text: str) -> list[str]:
+    """Exclude only a duplicate-aware TOC block that the analyzer also removes."""
+    lines = str(source_text or "").splitlines()
+    toc_indices = [i for i, line in enumerate(lines) if TOC_HEADING_RE.fullmatch(line.strip())]
+    for toc_index in toc_indices:
+        candidates: list[tuple[int, str]] = []
+        for index in range(toc_index + 1, len(lines)):
+            title = _toc_entry_title(lines[index])
+            if title is not None:
+                candidates.append((index, title))
+        for first_position, (first_index, first_title) in enumerate(candidates):
+            first_key = _coverage_heading_key(first_title)
+            if not first_key:
+                continue
+            for repeat_index, repeat_title in candidates[first_position + 1:]:
+                if _coverage_heading_key(repeat_title) != first_key:
+                    continue
+                next_marker = next(
+                    (index for index, _title in candidates if index > repeat_index),
+                    len(lines),
+                )
+                story_lines = [
+                    line.strip() for line in lines[repeat_index + 1:next_marker]
+                    if line.strip()
+                ]
+                if sum(len(line.split()) for line in story_lines) >= 12 and story_lines:
+                    return lines[:toc_index] + lines[repeat_index:]
+    return lines
+
+
+def chapter_text_coverage(source_text: str, chapters: list) -> tuple[int, int, float]:
+    coverage_source = "\n".join(_coverage_source_lines(source_text))
+    source_words = len(re.findall(r"\b[\w’'-]+\b", coverage_source, re.UNICODE))
+    chapter_text = "\n".join(str(getattr(chapter, "text", "") or "") for chapter in chapters)
+    body_words = len(re.findall(r"\b[\w’'-]+\b", chapter_text, re.UNICODE))
+    # The detector deliberately removes heading lines from chapter bodies,
+    # but preserves their titles as Chapter.title. Count those titles as
+    # retained source text so books with many short chapters are not rejected.
+    title_text = "\n".join(str(getattr(chapter, "title", "") or "") for chapter in chapters)
+    title_words = len(re.findall(r"\b[\w’'-]+\b", title_text, re.UNICODE))
+    chapter_words = body_words + title_words
+    coverage = chapter_words / source_words if source_words else (
+        1.0 if not (chapter_text or title_text).strip() else 0.0
+    )
+    return source_words, chapter_words, coverage
+
+
+def validate_chapter_text_coverage(source_text: str, chapters: list, *, minimum: float = 0.90) -> None:
+    """Raise an actionable error when chapter segmentation loses source content.
+
+    This is deliberately a token-coverage guard, not an equality assertion:
+    headings are excluded from bodies by design, and TOC/duplicate cleanup may
+    legitimately remove text. For short texts it uses the same ratio but does
+    not let a zero denominator accidentally pass.
+    """
+    if not 0.0 <= minimum <= 1.0:
+        raise ValueError("minimum coverage must be between 0 and 1")
+    source_words, chapter_words, coverage = chapter_text_coverage(source_text, chapters)
+    # Short books can legitimately have more of their extracted text in
+    # headings/front matter, so guard them by absolute loss too.
+    minimum_words = min(20, max(1, int(source_words * minimum))) if source_words else 0
+    if source_words and chapter_words < minimum_words:
+        raise ValueError(
+            f"Chapter detection retained only {chapter_words:,} of {source_words:,} words. "
+            "Import was stopped to protect your book from losing content."
+        )
+    if source_words >= 40 and coverage < minimum:
+        raise ValueError(
+            f"Chapter detection retained only {chapter_words:,} of {source_words:,} "
+            f"source words ({coverage:.0%} coverage). Import was stopped to protect "
+            "your book from losing content. Review the heading rules or choose a "
+            "different import format."
+        )
 
 
 def _split_adjacent_dialogue(line: str) -> str:
@@ -54,10 +152,12 @@ def _split_adjacent_dialogue(line: str) -> str:
     # “...?” “...”
     # "..." "..."
     # This is intentionally conservative; ordinary quoted words inside prose remain intact.
-    pattern = re.compile(
-        r'([”’"])(\s+)(?=[“‘"])'
-    )
-    return pattern.sub(lambda match: match.group(1) + "\n", line)
+    pattern = re.compile(r'([”’"」』])\s+(?=[“‘"「『])')
+    separated = pattern.sub(lambda match: match.group(1) + "\n", line)
+    # A few light novels use <<...>> for telepathy, skills, or system messages.
+    # Keep adjacent utterances as separate dialogue units instead of reflowing them
+    # into one long line.
+    return re.sub(r">>\s*(?=<<)", ">>\n", separated)
 
 
 def reflow_source_text(text: str) -> str:
@@ -87,7 +187,7 @@ def reflow_source_text(text: str) -> str:
 
                 # Never join a new dialogue line, heading, list item, or bullet.
                 starts_structural = line.startswith(
-                    ("“", "‘", '"', "'", "—", "–", "-", "•", "*")
+                    ("“", "‘", '"', "'", "「", "『", "<<", "—", "–", "-", "•", "*")
                 )
                 structural = (
                     starts_structural

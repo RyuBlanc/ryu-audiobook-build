@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 import sys
 import traceback
+import time
 
 from PySide6.QtCore import Qt, QThread, Signal, QEasingCurve, QPropertyAnimation, QTimer, QSize, QSettings
 from PySide6.QtGui import QFontMetrics, QIcon, QColor
@@ -43,6 +44,7 @@ from app.ui.voice_page import VoicePage
 from app.ui.hardware_page import HardwarePage
 from app.ui.models_page import ModelsPage
 from app.ui.voice_cast_page import VoiceCastPage
+from app.ui.character_library import CharacterLibraryPage
 from app.ui.audiobooks_page import AudiobooksPage
 from app.ui.history_page import HistoryPage
 from app.ui.settings_page import SettingsPage
@@ -53,7 +55,7 @@ from app.ui.motion import reduced_motion_enabled
 def _import_book_icon() -> QIcon:
     """Use the Ryu audiobook brand mark instead of a generic plus symbol."""
     base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
-    for filename in ("ryu_audiobook_logo.svg", "ryu_audiobook_logo.png", "ryu_audiobook_logo.jpg"):
+    for filename in ("ryu_audiobook_logo.png", "ryu_audiobook_logo.svg", "ryu_audiobook_logo.jpg"):
         path = base / "assets" / filename
         if path.is_file():
             icon = QIcon(str(path))
@@ -78,9 +80,9 @@ class ImportBookWorker(QThread):
     def run(self) -> None:
         try:
             if self.book is None or self.chapters is None:
-                self.status.emit("Extracting text from the source book…")
+                self.status.emit(f"Extracting text from {self.source_path.name}…")
                 book = extract_text(self.source_path)
-                self.status.emit("Finding chapter and section boundaries…")
+                self.status.emit(f"Finding chapter and section boundaries in {self.source_path.name}…")
                 chapters = detect_chapters(book.text)
             else:
                 # Import Studio already parsed this book in the background.
@@ -88,7 +90,7 @@ class ImportBookWorker(QThread):
                 # parsing large EPUB/PDF files a second time.
                 book = self.book
                 chapters = self.chapters
-                self.status.emit("Verifying the extracted text and chapter map…")
+                self.status.emit(f"Verifying extracted text and chapter map for {self.source_path.name}…")
             if not chapters:
                 raise RuntimeError("No readable chapters were found in this file.")
             source_words = len(book.text.split())
@@ -100,7 +102,7 @@ class ImportBookWorker(QThread):
                     "Import was stopped to protect the book from losing content. "
                     "Review the source text and chapter boundaries, then retry."
                 )
-            self.status.emit("Saving the local audiobook project…")
+            self.status.emit(f"Saving {self.source_path.name} as a local audiobook project…")
             project = create_project(book.title, self.source_path, chapters)
             self.completed.emit(project)
         except Exception as exc:
@@ -290,6 +292,7 @@ class ProjectWorkflow(QMainWindow):
             "Chapters": "Chapter Studio",
             "Voice & Narration": "Voice Studio",
             "Voice Cast": "Character Studio",
+            "Character Library": "Character Library",
             "Pronunciation": "Pronunciation Studio",
             "Sound Design": "Sound Design Studio",
             "Generate": "Production Studio",
@@ -331,6 +334,7 @@ class ProjectWorkflow(QMainWindow):
             ("Chapters", "Chapter Studio", "☷"),
             ("Voice & Narration", "Voice Studio", "◉"),
             ("Voice Cast", "Character Studio", "♙"),
+            ("Character Library", "Character Library", "♙"),
             ("Pronunciation", "Pronunciation Studio", "Aa"),
         ])
         add_nav_group("Production", [
@@ -530,7 +534,11 @@ class ProjectWorkflow(QMainWindow):
         self.loading_overlay = FrostedLoadingOverlay(shell)
         self.loading_overlay.setGeometry(shell.rect())
 
-        self.library = LibraryPage(self.open_project)
+        self.library = LibraryPage(
+            self.open_project,
+            on_before_delete=self._before_project_delete,
+            on_deleted=self._on_project_deleted,
+        )
         self.import_page = ImportPage(self.handle_import)
         self.voice = VoicePage()
 
@@ -548,6 +556,10 @@ class ProjectWorkflow(QMainWindow):
             lambda: self.project.source_path if self.project else None,
         )
         self.stack.addWidget(self.voice_cast)
+        self.character_library_page = CharacterLibraryPage(
+            on_open_in_studio=self._open_character_in_studio,
+        )
+        self.stack.addWidget(self.character_library_page)
         self.models_page = ModelsPage()
         self.stack.addWidget(self.models_page)
         self.hardware_page = HardwarePage()
@@ -558,6 +570,7 @@ class ProjectWorkflow(QMainWindow):
         self.audiobooks_page.player.positionChanged.connect(self._mini_position_changed)
         self.audiobooks_page.player.durationChanged.connect(self._mini_duration_changed)
         self.audiobooks_page.player.playbackStateChanged.connect(self._mini_playback_state_changed)
+        self.audiobooks_page.player.errorOccurred.connect(self._mini_playback_error)
         self.history_page = HistoryPage(
             on_open_project=self.open_project,
             on_open_generation=lambda: self.select_section("Generate"),
@@ -584,20 +597,42 @@ class ProjectWorkflow(QMainWindow):
         minutes, secs = divmod(remainder, 60)
         return f"{hours:d}:{minutes:02d}:{secs:02d}" if hours else f"{minutes:d}:{secs:02d}"
 
-    def _mini_source_changed(self, source) -> None:
-        player = self.audiobooks_page.player
-        if source.isEmpty():
+    def _set_mini_player_visible(self, visible: bool) -> None:
+        """Change bottom-bar layout only when the target visibility actually changes."""
+        currently_hidden = self.mini_player_bar.isHidden()
+        if visible and currently_hidden:
+            self.mini_player_bar.setVisible(True)
+        elif not visible and not currently_hidden:
             self.mini_player_bar.setVisible(False)
+
+    def _mini_source_changed(self, source) -> None:
+        # A non-empty source means Qt accepted a URL, not that it can decode
+        # or play it. Keep the shell layout stable until PlayingState confirms
+        # actual playback; unsupported old M4B files no longer pop the mini-player.
+        if source.isEmpty():
+            self._set_mini_player_visible(False)
             self.mini_title.setText("No audiobook playing")
+            self.mini_title.setToolTip("")
+            self.mini_timeline.setRange(0, 0)
+            self.mini_timeline.setValue(0)
+            self.mini_position.setText("0:00")
+            self.mini_duration.setText("0:00")
             return
         self._mini_player_dismissed = False
         self.mini_title.setText(self.audiobooks_page.now_playing.text())
         self.mini_title.setToolTip(source.toLocalFile())
-        self.mini_player_bar.setVisible(True)
+        # Preserve the existing layout while switching tracks. If the bar was
+        # hidden, a source change does not reveal it; only successful playback does.
+
+    def _mini_playback_error(self, _error, _error_text: str) -> None:
+        # Error details stay in the Audiobooks page. The shared shell only hides
+        # its compact controls: it does not retry, change pages, or show a toast.
+        self._set_mini_player_visible(False)
+        self.mini_play_button.setText("▶")
 
     def _hide_mini_player(self) -> None:
         self._mini_player_dismissed = True
-        self.mini_player_bar.setVisible(False)
+        self._set_mini_player_visible(False)
 
     def _mini_position_changed(self, position: int) -> None:
         self.mini_timeline.blockSignals(True)
@@ -612,11 +647,18 @@ class ProjectWorkflow(QMainWindow):
     def _mini_playback_state_changed(self, state) -> None:
         from PySide6.QtMultimedia import QMediaPlayer
         playing = state == QMediaPlayer.PlaybackState.PlayingState
+        paused = state == QMediaPlayer.PlaybackState.PausedState
         self.mini_play_button.setText("Ⅱ" if playing else "▶")
-        if not self.audiobooks_page.player.source().isEmpty():
+        if playing:
             self.mini_title.setText(self.audiobooks_page.now_playing.text())
             if not self._mini_player_dismissed:
-                self.mini_player_bar.setVisible(True)
+                self._set_mini_player_visible(True)
+        elif paused:
+            # Preserve a visible bar when pausing a track that already started,
+            # but never reveal it for a merely selected or failed source.
+            if not self._mini_player_dismissed and not self.mini_player_bar.isHidden():
+                self.mini_title.setText(self.audiobooks_page.now_playing.text())
+        # StoppedState intentionally does not reveal the mini-player.
 
     def _toggle_mini_playback(self) -> None:
         player = self.audiobooks_page.player
@@ -680,14 +722,26 @@ class ProjectWorkflow(QMainWindow):
         self.theme_toggle.setText("☀" if target == "light" else "◐")
         self.theme_toggle.setToolTip("Switch to dark theme" if target == "light" else "Switch to cream light theme")
 
-    def _refresh_notification_count(self) -> None:
-        """Update the header count from persisted local project state."""
-        count = 0
-        for project in self._safe_list_projects():
-            state = load_state(project.folder)
-            status = str(state.get("status") or "new").strip().lower()
-            if status in {"generating", "running", "queued", "failed", "cancelled"} or state.get("failed_chapters"):
-                count += 1
+    def _refresh_notification_count(self, force: bool = False) -> None:
+        """Refresh the header count with a short cache to avoid disk scans on every page click."""
+        now = time.monotonic()
+        last = float(getattr(self, "_notification_count_last_refresh", 0.0) or 0.0)
+        cached = getattr(self, "_notification_count_cache", None)
+        if (
+            not force
+            and cached is not None
+            and now - last < 3.0
+        ):
+            count = int(cached)
+        else:
+            count = 0
+            for project in self._safe_list_projects():
+                state = load_state(project.folder)
+                status = str(state.get("status") or "new").strip().lower()
+                if status in {"generating", "running", "queued", "failed", "cancelled"} or state.get("failed_chapters"):
+                    count += 1
+            self._notification_count_cache = count
+            self._notification_count_last_refresh = now
         self.notifications_button.setText(f"♧ {count}")
         self.notifications_button.setToolTip(
             f"{count} local project(s) active or needing attention"
@@ -863,6 +917,7 @@ class ProjectWorkflow(QMainWindow):
             (self.import_page, "Import", "Bring a source book into your local workflow."),
             (self.voice, "Voice & Narration", "Choose, configure, and preview the narrator."),
             (self.voice_cast, "Voice Cast", "Review dialogue and assign character voices."),
+            (getattr(self, "character_library_page", None), "Character Library", "Browse reusable series-level character names, aliases, voice profiles, and dialogue samples."),
             (self.audiobooks_page, "Audiobooks", "Listen to finished local audiobook files in the app."),
             (self.history_page, "History", "Review real project and generation status from local files."),
             (self.settings_page, "Settings", "Manage appearance, local folders, and diagnostics."),
@@ -880,74 +935,35 @@ class ProjectWorkflow(QMainWindow):
                 return
 
     def _show_page(self, widget: QWidget) -> None:
-        """Switch pages first; animation is optional and must never block navigation."""
+        """Switch pages without opacity effects that can flash black on Windows."""
         self._refresh_notification_count()
         if widget is None:
             return
-
-        # A page can be re-created when a book is saved or renamed. Never try to
-        # show a widget that is no longer registered with the stacked widget.
         if self.stack.indexOf(widget) < 0:
             raise RuntimeError(
                 f"Cannot navigate to {type(widget).__name__}: page is not in the workflow stack."
             )
 
+        # QWidget graphics effects are expensive for the stacked pages and can
+        # briefly composite a black frame during rapid navigation on Windows.
+        # Stop and detach any effect left by an earlier transition before
+        # changing the visible page.
         if self._page_animation is not None:
             try:
                 self._page_animation.stop()
             except RuntimeError:
-                # The previous page may already have been deleted by Qt.
                 pass
-            if self._page_animation_widget is not None:
-                try:
-                    self._page_animation_widget.setGraphicsEffect(None)
-                except RuntimeError:
-                    pass
-            self._page_animation = None
-            self._page_animation_widget = None
-
-        self.stack.setCurrentWidget(widget)
-        self._sync_workflow_steps()
-        if self.stack.currentWidget() is not widget:
-            raise RuntimeError(
-                f"Navigation did not activate {type(widget).__name__}."
-            )
-        self._update_page_chrome(widget)
-
-        # A graphics effect is decorative. If a platform-specific Qt animation
-        # fails, keep the newly selected page visible and log the issue instead
-        # of falling back to Import and making Generate appear broken.
-        try:
-            if reduced_motion_enabled() or not widget.isVisible():
-                return
-
-            effect = QGraphicsOpacityEffect(widget)
-            effect.setOpacity(0.0)
-            widget.setGraphicsEffect(effect)
-            animation = QPropertyAnimation(effect, b"opacity", self)
-            animation.setDuration(135)
-            animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-            animation.setStartValue(0.0)
-            animation.setEndValue(1.0)
-            self._page_animation = animation
-            self._page_animation_widget = widget
-
-            def finish() -> None:
-                if self._page_animation is animation:
-                    widget.setGraphicsEffect(None)
-                    self._page_animation = None
-                    self._page_animation_widget = None
-
-            animation.finished.connect(finish)
-            animation.start()
-        except Exception as exc:
-            self._log_ui_failure("Page transition animation", exc)
+        if self._page_animation_widget is not None:
             try:
-                widget.setGraphicsEffect(None)
+                self._page_animation_widget.setGraphicsEffect(None)
             except RuntimeError:
                 pass
-            self._page_animation = None
-            self._page_animation_widget = None
+        self._page_animation = None
+        self._page_animation_widget = None
+
+        self._sync_workflow_steps()
+        self._update_page_chrome(widget)
+        self.stack.setCurrentWidget(widget)
 
     def _sidebar_item_clicked(self, item: QListWidgetItem) -> None:
         """Recover navigation when the clicked row is already selected."""
@@ -969,6 +985,8 @@ class ProjectWorkflow(QMainWindow):
             expected = self.voice
         elif name == "Voice Cast":
             expected = self.voice_cast
+        elif name == "Character Library":
+            expected = self.character_library_page
         elif name in {"Pronunciation", "Sound Design"}:
             expected = self.generation if self.project else self.import_page
         elif name == "Audiobooks":
@@ -991,6 +1009,7 @@ class ProjectWorkflow(QMainWindow):
             or name in {"Pronunciation", "Sound Design"}
         ):
             self._sidebar_changed(row)
+
 
     def _refresh_generation_context(self) -> None:
         """Refresh book-dependent fields after the Generate page is already visible."""
@@ -1051,6 +1070,7 @@ class ProjectWorkflow(QMainWindow):
             QMessageBox.warning(self, key, f"{key} could not be initialized. Open Generate once and try again.")
             return
         self._show_page(target)
+
 
     def _install_generation_feature_pages(self, generation_page: GenerationPage) -> None:
         """Mount the existing production controls on dedicated reference-design screens."""
@@ -1314,9 +1334,13 @@ class ProjectWorkflow(QMainWindow):
         elif name == "Voice Cast":
             try:
                 self.voice_cast.refresh_profiles()
+                self.voice_cast.load_current_project()
             except Exception as exc:
                 self._log_ui_failure("Refresh Voice Cast profiles", exc)
             self._show_page(self.voice_cast)
+        elif name == "Character Library":
+            self.character_library_page.refresh()
+            self._show_page(self.character_library_page)
         elif name == "Pronunciation":
             self._open_generation_feature("pronunciation")
         elif name == "Sound Design":
@@ -1426,9 +1450,10 @@ class ProjectWorkflow(QMainWindow):
     def handle_import(self, path: Path, book=None, chapters=None) -> None:
         if self._import_worker is not None and self._import_worker.isRunning():
             return
+        self.import_page.project_creation_started(path)
         self.loading_overlay.show_loading(
             "Importing your book",
-            "Reading the source file, finding chapters and preparing your local project…",
+            f"Adding {Path(path).name} to the local Library and saving its chapter structure…",
         )
         worker = ImportBookWorker(path, book=book, chapters=chapters)
         self._import_worker = worker
@@ -1440,6 +1465,7 @@ class ProjectWorkflow(QMainWindow):
 
     def _import_completed(self, project: Project) -> None:
         self.loading_overlay.dismiss()
+        self.import_page.project_created(project)
         self.project = project
         self._set_project_title(project.title)
         self.library.refresh()
@@ -1448,6 +1474,7 @@ class ProjectWorkflow(QMainWindow):
 
     def _import_failed(self, message: str) -> None:
         self.loading_overlay.dismiss()
+        self.import_page.project_creation_failed(message)
         QMessageBox.critical(self, "Import Failed", message)
 
     def _import_worker_finished(self) -> None:
@@ -1711,6 +1738,101 @@ class ProjectWorkflow(QMainWindow):
                 self.stack.removeWidget(old_generation)
             old_generation.hide()
             old_generation.deleteLater()
+
+    def _before_project_delete(self, project: Project) -> None:
+        """Release local media handles before deleting their source files on Windows."""
+        for page in (
+            getattr(self, "audiobooks_page", None),
+            getattr(self, "generation", None),
+            getattr(self, "voice", None),
+        ):
+            if page is None:
+                continue
+            for name in ("player", "music_player", "preview_player", "pronunciation_player"):
+                player = getattr(page, name, None)
+                stop = getattr(player, "stop", None)
+                if callable(stop):
+                    try:
+                        stop()
+                    except RuntimeError:
+                        pass
+
+    def _on_project_deleted(self, project: Project) -> None:
+        """Refresh dependent views and drop stale widget references after deletion."""
+        active_folder = str(self.project.folder.resolve()) if self.project else ""
+        deleted_folder = str(project.folder.resolve())
+        if active_folder and active_folder == deleted_folder:
+            self.project = None
+            self._set_project_title("No book open")
+            for attribute in ("pronunciation_page", "sound_design_page", "editor", "generation"):
+                page = getattr(self, attribute, None)
+                if page is None:
+                    continue
+                try:
+                    if self.stack.indexOf(page) >= 0:
+                        self.stack.removeWidget(page)
+                    page.hide()
+                    page.deleteLater()
+                except RuntimeError:
+                    pass
+                setattr(self, attribute, None)
+            self._editor_index = -1
+            self._generation_index = -1
+            try:
+                self.voice_cast.load_current_project()
+            except Exception as exc:
+                self._log_ui_failure("Reset Character Studio after project deletion", exc)
+            self.select_section("Library")
+        try:
+            self.import_page.clear_if_source_deleted(project.source_path)
+        except Exception as exc:
+            self._log_ui_failure("Clear stale Import Studio state after deletion", exc)
+        self.history_page.refresh()
+        self.dashboard.refresh()
+        self.audiobooks_page.refresh()
+        self.character_library_page.refresh()
+        self._refresh_notification_count(force=True)
+
+    def _open_character_in_studio(self, record: dict) -> None:
+        """Open a volume belonging to a character's series, then focus that cast member."""
+        from app.core.project import list_projects
+        from app.core.state import load_state
+
+        series = str(record.get("series") or "").strip()
+        wanted = series.casefold()
+        candidates = []
+        for project in list_projects():
+            state = load_state(project.folder)
+            metadata = state.get("metadata") if isinstance(state.get("metadata"), dict) else {}
+            project_series = str(state.get("series_name") or state.get("series") or metadata.get("series") or project.title).strip()
+            if project_series.casefold() == wanted:
+                candidates.append(project)
+        if self.project and str(self.project.folder.resolve()) in {str(item.folder.resolve()) for item in candidates}:
+            target = self.project
+        elif candidates:
+            target = max(candidates, key=lambda item: item.folder.stat().st_mtime if item.folder.exists() else 0)
+        else:
+            QMessageBox.information(
+                self,
+                "Series not found in Library",
+                f"No local book is currently assigned to the series '{series}'. Open a volume in Character Studio and save this same series name to link it.",
+            )
+            return
+        self.open_project(target)
+        self.select_section("Voice Cast")
+        QTimer.singleShot(
+            0,
+            lambda name=str(record.get("primary_name") or ""): self.voice_cast.select_character_name(name),
+        )
+
+    def closeEvent(self, event) -> None:
+        """Stop optional character-preview workers before their Qt widgets are destroyed."""
+        try:
+            if hasattr(self, "character_library_page"):
+                self.character_library_page.shutdown()
+        except Exception as exc:
+            self._log_ui_failure("Character Library shutdown", exc)
+        super().closeEvent(event)
 
     def open_project(self, project: Project) -> None:
         self.project = project

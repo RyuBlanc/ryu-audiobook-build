@@ -14,6 +14,7 @@ from app.chapters.detector import detect_chapters
 from app.documents.parser import extract_text
 from app.tts.voice_profile import load_profiles
 from app.core.state import load_state, save_state
+from app.core.character_library import sync_characters
 
 
 class VoiceCastAnalysisWorker(QThread):
@@ -123,6 +124,20 @@ class VoiceCastPage(QWidget):
         intro.setWordWrap(True)
         root.addWidget(intro)
 
+        series_row = QHBoxLayout()
+        series_label = QLabel("Shared series / novel name")
+        series_label.setToolTip("Use the same series name across volumes to reuse character identities and assigned voices.")
+        series_row.addWidget(series_label)
+        self.series_edit = QLineEdit()
+        self.series_edit.setObjectName("characterSeriesName")
+        self.series_edit.setPlaceholderText("Enter the common series name for all volumes")
+        series_row.addWidget(self.series_edit, 1)
+        self.save_series_button = QPushButton("Save Series")
+        self.save_series_button.clicked.connect(self.save_series)
+        series_row.addWidget(self.save_series_button)
+        root.addLayout(series_row)
+        self._loaded_project_folder: str | None = None
+
         actions = QHBoxLayout()
         self.analyze_button = QPushButton("Analyze Original Book")
         self.analyze_button.setObjectName("primary")
@@ -210,7 +225,7 @@ class VoiceCastPage(QWidget):
         root.addLayout(body, 1)
 
         self.refresh_profiles()
-        self._load_saved_cast()
+        self.load_current_project()
 
     def _project_folder(self):
         project = getattr(self.window(), "project", None)
@@ -222,6 +237,93 @@ class VoiceCastPage(QWidget):
             return {}
         value = load_state(folder).get("voice_cast", {})
         return value if isinstance(value, dict) else {}
+
+    def _series_name(self) -> str:
+        entered = str(self.series_edit.text() or "").strip() if hasattr(self, "series_edit") else ""
+        project = getattr(self.window(), "project", None)
+        return entered or str(getattr(project, "title", "") or "").strip()
+
+    def save_series(self) -> None:
+        folder = self._project_folder()
+        series = self._series_name()
+        if not folder or not series:
+            self.summary.setText("Open a book and enter a shared series name first.")
+            return
+        state = load_state(folder)
+        state["series_name"] = series
+        save_state(folder, state)
+        self._sync_character_library()
+        self.summary.setText(
+            f"Series '{series}' saved. Characters added or analyzed in this book can now be reused across its volumes."
+        )
+
+    def _sync_character_library(self, *, update_names: bool = False, update_voice: bool = False) -> None:
+        folder = self._project_folder()
+        project = getattr(self.window(), "project", None)
+        series = self._series_name()
+        if not folder or not series or not self.rows:
+            return
+        try:
+            sync_characters(
+                series,
+                self.rows,
+                source_project_folder=str(folder),
+                source_project_title=str(getattr(project, "title", "") or ""),
+                update_names=update_names,
+                update_voice=update_voice,
+            )
+        except Exception as exc:
+            # A shared registry write must not break local Character Studio work.
+            self.summary.setText(f"Cast saved to this book; Character Library sync failed: {exc}")
+
+    def load_current_project(self) -> None:
+        folder = self._project_folder()
+        key = str(folder) if folder else ""
+        self.series_edit.setEnabled(folder is not None)
+        self.save_series_button.setEnabled(folder is not None)
+        if key == self._loaded_project_folder:
+            return
+        self._loaded_project_folder = key
+        self.rows = []
+        self.series_edit.blockSignals(True)
+        if not folder:
+            self.series_edit.clear()
+            self.series_edit.blockSignals(False)
+            self._refresh_labels()
+            self.summary.setText("Open a book to analyze or edit its character cast.")
+            return
+        state = load_state(folder)
+        metadata = state.get("metadata") if isinstance(state.get("metadata"), dict) else {}
+        series = str(
+            state.get("series_name")
+            or state.get("series")
+            or metadata.get("series")
+            or getattr(getattr(self.window(), "project", None), "title", "")
+            or ""
+        ).strip()
+        self.series_edit.setText(series)
+        self.series_edit.blockSignals(False)
+        self._load_saved_cast()
+        count = len([row for row in self.rows if row.get("name", "").casefold() != "narrator"])
+        self.summary.setText(
+            f"Loaded {count} saved character(s) for '{series}'. Analyze the original book to refresh the detected cast."
+            if count else f"No saved cast yet for '{series}'. Analyze the original book or add a character manually."
+        )
+
+    def select_character_name(self, name: str) -> None:
+        query = str(name or "").strip()
+        if not query:
+            return
+        self.search.setText(query)
+        visible = self._visible_rows()
+        index = next(
+            (i for i, row in enumerate(visible)
+             if str(row.get("name") or "").casefold() == query.casefold()
+             or query.casefold() in [str(alias).casefold() for alias in (row.get("aliases") or [])]),
+            -1,
+        )
+        if index >= 0:
+            self.list.setCurrentRow(index)
 
     def refresh_profiles(self):
         self.profiles = load_profiles()
@@ -387,7 +489,7 @@ class VoiceCastPage(QWidget):
             return
 
         row["voice"] = voice
-        self._save_cast()
+        self._save_cast(update_voice=True)
         self._refresh_labels()
 
         new_index = next(
@@ -405,7 +507,7 @@ class VoiceCastPage(QWidget):
             return
 
         row["voice"] = None
-        self._save_cast()
+        self._save_cast(update_voice=True)
         self._refresh_labels()
 
         visible = self._visible_rows()
@@ -506,7 +608,7 @@ class VoiceCastPage(QWidget):
             if state.get("voice_cast_narrating_character") == old_name:
                 state["voice_cast_narrating_character"] = name
             save_state(folder, state)
-        self._save_cast()
+        self._save_cast(update_names=True)
         self._refresh_labels()
         self.summary.setText(f"Renamed '{old_name}' to '{name}'.")
 
@@ -552,12 +654,15 @@ class VoiceCastPage(QWidget):
             self.details.setText("No cast members match the current filter.")
             self.examples.clear()
 
-    def _save_cast(self):
+    def _save_cast(self, *, update_names: bool = False, update_voice: bool = False):
         folder = self._project_folder()
         if not folder:
             return
 
         state = load_state(folder)
+        series = self._series_name()
+        if series:
+            state["series_name"] = series
         # Keep the full cast roster, including manually added characters
         # without an assigned voice, so it survives restarts and re-analysis.
         state["voice_cast_character_roster"] = [
@@ -591,3 +696,4 @@ class VoiceCastPage(QWidget):
             state.pop("voice_cast_narrating_character", None)
 
         save_state(folder, state)
+        self._sync_character_library(update_names=update_names, update_voice=update_voice)

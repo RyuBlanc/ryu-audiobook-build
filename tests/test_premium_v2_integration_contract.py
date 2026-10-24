@@ -139,7 +139,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("previewAudio.pause()", script)
         self.assertIn("lengthGroup?.querySelector('.seg button.active')", script)
         self.assertIn("duration_seconds:Number(duration)", script)
-        self.assertIn("function openPlayer()", script)
+        self.assertIn("async function openPlayer(projectFolder = selectedAudiobookFolder)", script)
         self.assertIn("playerAudio.play()", script)
         self.assertIn("async function refreshHistory()", script)
         self.assertIn("async function refreshModels()", script)
@@ -507,10 +507,11 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
 
     def test_character_library_series_scope_matches_default_filter(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
-        self.assertIn("c?.scope || 'Series · Slime'", adapter)
-        self.assertIn("const series = /^Series\\s*[·:-]\\s*Slime$/i.test(scope) ? 'Slime series' : scope;", adapter)
+        self.assertIn("const selectedSeries = $('characterSeriesFilter')?.value || 'All series';", adapter)
+        self.assertIn("c?.series || (selectedSeries !== 'All series' ? selectedSeries : '')", adapter)
+        self.assertIn("const series = requestedSeries;", adapter)
         self.assertIn("librarySeriesName(c) === series", adapter)
-        self.assertIn("return /^Series\\s*[·:-]\\s*Slime$/i.test(raw) ? 'Slime series' : raw;", adapter)
+        self.assertIn("return raw.replace(/^Series\\s*[·:-]\\s*/i, '').replace(/^Global character library$/i, '').trim();", adapter)
 
     def test_reusable_character_library_is_persisted_and_connected(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
@@ -523,7 +524,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         }.items():
             self.assertIn(f'"{command}": self.{handler}', host)
             self.assertIn(f'"{command}": True', host)
-        self.assertIn('settings_root() / "character_library.json"', host)
+        self.assertIn("character_library_path as reusable_character_library_path", host)
+        self.assertIn("return reusable_character_library_path()", host)
+        self.assertIn("migration_path.replace(path)", host)
         self.assertIn("temporary.replace(path)", host)
         self.assertIn("call('character_library.list')", adapter)
         self.assertIn("call('character_library.save'", adapter)
@@ -732,7 +735,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("Type one: add, rename, delete, up, down, merge, review, skip, find, replace, undo, redo", adapter)
         for command in ("chapter.add", "chapter.delete", "chapter.reorder", "chapter.merge", "sound.catalog", "sound.assign", "sound.save_manifest"):
             self.assertIn("call('" + command + "'", adapter)
-        self.assertIn("call('player.get_active')", adapter)
+        self.assertIn("call('player.get_active', {folder})", adapter)
 
 
     def test_legacy_control_ids_are_preserved_or_have_named_successors(self):

@@ -5,6 +5,7 @@ import binascii
 import hashlib
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import re
@@ -28,7 +29,20 @@ from PySide6.QtGui import QDesktopServices
 
 from app.core.paths import app_root, audiobooks_root, ensure_roots, library_root, settings_root
 from app.core.project import create_project, list_projects
-from app.documents.parser import SUPPORTED_EXTENSIONS, clean_import_noise, clean_text, detect_repeated_book_noise, extract_text
+from app.core.character_library import (
+    character_library_path as reusable_character_library_path,
+    list_characters as list_reusable_characters,
+    list_deleted_characters as list_reusable_deleted_characters,
+    restore_character as restore_reusable_character,
+    soft_delete_character as soft_delete_reusable_character,
+    sync_characters as sync_reusable_characters,
+    update_character as update_reusable_character,
+)
+from app.documents.cover_art import COVER_IMAGE_EXTENSIONS, COVER_SOURCE_EXTENSIONS, extract_embedded_cover, persist_project_cover
+from app.documents.parser import (
+    SUPPORTED_EXTENSIONS, clean_import_noise, clean_text, detect_repeated_book_noise,
+    extract_text, validate_chapter_text_coverage,
+)
 from app.chapters.detector import detect_chapters
 from app.chapters.characters import analyze_book, merge_character_analysis_record
 from app.tts.manager import GenerationManager
@@ -48,6 +62,60 @@ def frontend_path() -> Path:
     """Resolve the same self-contained HTML in source and PyInstaller builds."""
     root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
     return root / FRONTEND_RELATIVE_PATH
+
+
+def _parse_audio_chapter_metadata(probe_output: str) -> list[dict[str, Any]]:
+    """Parse FFmpeg chapter metadata without inventing chapter boundaries."""
+    source = str(probe_output or "")
+    header = re.compile(
+        r"(?m)^\s*Chapter #\d+:(\d+):\s*start\s+(\d+(?:\.\d+)?),\s*end\s+(\d+(?:\.\d+)?)",
+        flags=re.IGNORECASE,
+    )
+    matches = list(header.finditer(source))
+    chapters: list[dict[str, Any]] = []
+    for index, match in enumerate(matches):
+        stop = matches[index + 1].start() if index + 1 < len(matches) else len(source)
+        block = source[match.start():stop]
+        title_match = re.search(r"(?mi)^\s*title\s*:\s*(.+?)\s*$", block)
+        try:
+            start_seconds = float(match.group(2))
+            end_seconds = float(match.group(3))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not math.isfinite(start_seconds) or not math.isfinite(end_seconds):
+            continue
+        if start_seconds < 0 or end_seconds <= start_seconds:
+            continue
+        number = int(match.group(1)) + 1
+        title = title_match.group(1).strip() if title_match else f"Chapter {number}"
+        chapters.append({
+            "number": number,
+            "title": title[:500] or f"Chapter {number}",
+            "start_seconds": start_seconds,
+            "end_seconds": end_seconds,
+        })
+    return chapters
+
+
+def _read_audio_chapter_metadata(path: Path) -> list[dict[str, Any]]:
+    """Read embedded M4B chapter boundaries quickly; treat missing metadata as optional."""
+    try:
+        candidate = Path(path)
+        if not candidate.is_file() or candidate.stat().st_size < 1024:
+            return []
+        from app.audio.assembler import ffmpeg_path
+
+        probe = subprocess.run(
+            [ffmpeg_path(), "-hide_banner", "-i", str(candidate)],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        return _parse_audio_chapter_metadata(str(probe.stderr or "") + "\n" + str(probe.stdout or ""))
+    except Exception:
+        log.debug("Could not read embedded audiobook chapter metadata from %s", path, exc_info=True)
+        return []
 
 
 def _json_result(*, success: bool, data: Any = None, error: str | None = None,
@@ -251,6 +319,10 @@ class PremiumV2Bridge(QObject):
                 "app.get_info": self._app_info,
                 "app.get_capabilities": self._capabilities,
                 "project.list": self._project_list,
+                "project.trash": self._project_trash,
+                "project.trash.list": self._project_trash_list,
+                "project.trash.restore": self._project_trash_restore,
+                "project.trash.purge": self._project_trash_purge,
                 "project.open": self._project_open,
                 "project.get_active": self._project_get_active,
                 "chapter.list": self._chapter_list,
@@ -276,6 +348,8 @@ class PremiumV2Bridge(QObject):
                 "voice.preview": self._voice_preview,
                 "character.list": self._character_list,
                 "character_library.list": self._character_library_list,
+                "character_library.deleted.list": self._character_library_deleted_list,
+                "character_library.restore": self._character_library_restore,
                 "character_library.save": self._character_library_save,
                 "character_library.delete": self._character_library_delete,
                 "character_library.import": self._character_library_import,
@@ -297,6 +371,7 @@ class PremiumV2Bridge(QObject):
                 "job.clear_completed": self._job_clear_completed,
                 "history.list": self._history_list,
                 "player.get_active": self._player_get_active,
+                "player.position.save": self._player_position_save,
                 "settings.get": self._settings_get,
                 "settings.save": self._settings_save,
                 "models.list": self._models_list,
@@ -358,6 +433,10 @@ class PremiumV2Bridge(QObject):
             "app.get_capabilities": True,
             "project.create": False,
             "project.list": True,
+            "project.trash": True,
+            "project.trash.list": True,
+            "project.trash.restore": True,
+            "project.trash.purge": True,
             "project.open": True,
             "project.get_active": True,
             "chapter.list": True,
@@ -383,6 +462,8 @@ class PremiumV2Bridge(QObject):
             "voice.preview": True,
             "character.list": True,
             "character_library.list": True,
+            "character_library.deleted.list": True,
+            "character_library.restore": True,
             "character_library.save": True,
             "character_library.delete": True,
             "character_library.import": True,
@@ -404,6 +485,7 @@ class PremiumV2Bridge(QObject):
             "job.clear_completed": True,
             "history.list": True,
             "player.get_active": True,
+            "player.position.save": True,
             "settings.get": True,
             "settings.save": True,
             "models.list": True,
@@ -425,25 +507,300 @@ class PremiumV2Bridge(QObject):
             "reason": "Local import, chapter editing, saved voice selection and preview, character analysis and editing, pronunciation rules, audiobook generation, background jobs, history, playback metadata, local model installation, and settings are connected. Live hardware telemetry remains unavailable.",
         }
 
-    def _project_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        result = []
-        for project in list_projects():
-            state = load_state(project.folder)
-            output_value = state.get("output_path")
-            output = Path(output_value) if output_value else None
-            completed = bool(output and output.is_file() and output.stat().st_size > 0
-                             and str(state.get("status", "")).lower() == "completed")
-            result.append({
-                "title": project.title,
-                "folder": str(project.folder),
-                "source_path": str(project.source_path) if project.source_path else None,
-                "chapter_count": len(project.chapters),
-                "status": str(state.get("status") or "new"),
-                "output_path": str(output) if output else None,
-                "completed": completed,
-            })
-        return result
+    def _project_summary(self, project) -> dict[str, Any]:
+        """Return display data from saved local project files, never HTML sample values."""
+        state = load_state(project.folder)
+        output_value = str(state.get("output_path") or "").strip()
+        output = Path(output_value).expanduser() if output_value else None
+        try:
+            output = output.resolve() if output else None
+            valid_output = bool(output and output.is_file() and output.stat().st_size > 0)
+        except OSError:
+            valid_output = False
+        completed = valid_output and str(state.get("status") or "").casefold() == "completed"
 
+        cover_value = str(state.get("cover_path") or "").strip()
+        candidate_cover = Path(cover_value).expanduser() if cover_value else None
+        cover = None
+        state_changed = False
+        if candidate_cover and candidate_cover.is_file() and candidate_cover.suffix.casefold() in COVER_IMAGE_EXTENSIONS:
+            try:
+                cover = persist_project_cover(candidate_cover, project.folder)
+            except (OSError, ValueError, RuntimeError):
+                # Keep showing a valid source image even if the portable copy could
+                # not be written (for example, a disk with no free space).
+                try:
+                    cover = candidate_cover.resolve()
+                except (OSError, RuntimeError):
+                    cover = None
+            if cover and str(state.get("cover_path") or "") != str(cover):
+                state["cover_path"] = str(cover)
+                state_changed = True
+            if cover and not state.get("cover_detection_attempted"):
+                state["cover_detection_attempted"] = True
+                state_changed = True
+        elif cover_value:
+            # A moved/deleted source image must not hide a cover embedded in the
+            # imported book; discard the stale pointer and search once instead.
+            state.pop("cover_path", None)
+            state_changed = True
+
+        source_for_cover = project.source_path
+        if (cover is None and source_for_cover and source_for_cover.is_file()
+                and source_for_cover.suffix.casefold() in COVER_SOURCE_EXTENSIONS
+                and not state.get("cover_detection_attempted")):
+            state["cover_detection_attempted"] = True
+            state_changed = True
+            try:
+                cover = extract_embedded_cover(source_for_cover, project.folder)
+            except Exception:
+                log.debug("Could not extract embedded cover from %s", source_for_cover, exc_info=True)
+                cover = None
+            if cover:
+                state["cover_path"] = str(cover)
+                state_changed = True
+
+        if state_changed:
+            save_state(project.folder, state)
+
+        chapter_count = len(project.chapters)
+        prepared_chapters = sum(
+            1 for chapter in project.chapters
+            if str(getattr(chapter, "text", "") or "").strip()
+        )
+        chapter_text_ratio = prepared_chapters / chapter_count if chapter_count else 0.0
+
+        character_rows = state.get("characters")
+        if not isinstance(character_rows, list):
+            character_rows = []
+        voice_keys = ("voice_profile", "voice_profile_name", "assigned_voice_profile",
+                      "voice_name", "voice_id", "assigned_voice", "voice")
+        character_names: set[str] = set()
+        assigned_character_names: set[str] = set()
+        for index, row in enumerate(character_rows):
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("name") or row.get("character_id") or f"character-{index}").strip()
+            if not name or name.casefold() == "narrator":
+                continue
+            character_names.add(name.casefold())
+            if any(str(row.get(key) or "").strip() for key in voice_keys):
+                assigned_character_names.add(name.casefold())
+        # Voice Cast persists manual assignments separately from the Character
+        # Studio metadata. Merge both sources so the dashboard count reflects the
+        # same actual assignments shown by Voice Cast, without double counting.
+        voice_cast = state.get("voice_cast")
+        if isinstance(voice_cast, dict):
+            for name, profile in voice_cast.items():
+                character_name = str(name or "").strip()
+                if not character_name or character_name.casefold() == "narrator":
+                    continue
+                character_names.add(character_name.casefold())
+                if str(profile or "").strip():
+                    assigned_character_names.add(character_name.casefold())
+
+        character_voice_count = len(assigned_character_names)
+        character_analysis_done = bool(state.get("character_analysis")) or bool(character_names)
+        # Once analysis confirms that a book has no character speakers, there is
+        # no missing character assignment to penalize in the preparation score.
+        character_voice_ratio = (
+            len(assigned_character_names) / len(character_names)
+            if character_names else (1.0 if character_analysis_done else 0.0)
+        )
+        # Narrator is book metadata; readiness requires a selected, saved TTS voice profile.
+        narrator_ready = bool(str(state.get("voice_profile") or "").strip())
+        output_configured = bool(output_value)
+        pronunciation_rules = (
+            state.get("pronunciation_dictionary")
+            or state.get("pronunciation_rules")
+            or state.get("pronunciation_terms")
+        )
+        pronunciation_ready = bool(pronunciation_rules)
+        if isinstance(pronunciation_rules, (dict, list, tuple, set)):
+            pronunciation_rule_count = len(pronunciation_rules)
+        else:
+            pronunciation_rule_count = 1 if pronunciation_ready else 0
+        sound_design_ready = bool(
+            state.get("background_audio_enabled")
+            or state.get("background_audio_path")
+            or state.get("auto_music_track_path")
+            or state.get("chapter_bgm_overrides")
+            or state.get("sound_cues")
+        )
+        # "Prepared" is a real readiness score, not a prototype number:
+        # chapter text (40%), narrator (20%), output (15%), assigned character
+        # voices (15%), pronunciation rules (5%), and sound design (5%).
+        prepared_percent = round(
+            40 * chapter_text_ratio
+            + (20 if narrator_ready else 0)
+            + (15 if output_configured else 0)
+            + round(15 * character_voice_ratio)
+            + (5 if pronunciation_ready else 0)
+            + (5 if sound_design_ready else 0)
+        )
+        prepared_percent = max(0, min(100, prepared_percent))
+
+        last_edited = state.get("last_edited_chapter_number")
+        try:
+            last_edited = int(last_edited) if last_edited is not None else None
+        except (TypeError, ValueError):
+            last_edited = None
+        if last_edited is not None and not 1 <= last_edited <= max(1, chapter_count):
+            last_edited = None
+
+        try:
+            # project.json and chapters.json are the durable user-edit files.
+            # Exclude state.json here because reading/backfilling optional
+            # Dashboard metadata (such as an embedded cover) also writes it.
+            modified_stamp = max(
+                path.stat().st_mtime
+                for path in (project.project_file, project.text_file)
+                if path.is_file()
+            )
+            filesystem_modified = datetime.fromtimestamp(modified_stamp, timezone.utc).isoformat(timespec="seconds")
+        except (OSError, ValueError):
+            filesystem_modified = ""
+
+        modified_candidates = []
+        for value in (state.get("modified_at"), filesystem_modified):
+            if not value:
+                continue
+            try:
+                timestamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+                if timestamp.tzinfo is None:
+                    timestamp = timestamp.replace(tzinfo=timezone.utc)
+                modified_candidates.append(timestamp.astimezone(timezone.utc))
+            except (TypeError, ValueError, OverflowError):
+                continue
+        modified_at = max(modified_candidates).isoformat(timespec="seconds") if modified_candidates else ""
+        completed_chapters = state.get("completed_chapters")
+        completed_chapter_count = len(completed_chapters) if isinstance(completed_chapters, list) else 0
+
+        return {
+            "title": project.title,
+            "folder": str(project.folder.resolve()),
+            "source_path": str(project.source_path) if project.source_path else None,
+            "chapter_count": chapter_count,
+            "status": str(state.get("status") or "new"),
+            "output_path": str(output) if valid_output and output else None,
+            "completed": bool(completed),
+            "cover_path": str(cover) if cover else None,
+            "author": str(state.get("author") or ""),
+            "narrator": str(state.get("narrator") or state.get("voice_profile") or ""),
+            "voice_profile": str(state.get("voice_profile") or ""),
+            "narrator_voice_configured": narrator_ready,
+            "character_count": len(character_names),
+            "character_voice_count": character_voice_count,
+            "character_analysis_done": character_analysis_done,
+            "prepared_chapter_count": prepared_chapters,
+            "prepared_percent": prepared_percent,
+            "completed_chapter_count": completed_chapter_count,
+            "last_edited_chapter_number": last_edited,
+            "source_exists": bool(project.source_path and project.source_path.is_file()),
+            "output_configured": output_configured,
+            "pronunciation_rule_count": pronunciation_rule_count,
+            "sound_design_configured": sound_design_ready,
+            "modified_at": modified_at,
+        }
+
+    def _mark_project_edited(self, project, chapter_number: int | None = None) -> None:
+        """Persist real edit timestamps used by Dashboard ordering and last-edited labels."""
+        state = load_state(project.folder)
+        state["modified_at"] = self._now()
+        if chapter_number is not None:
+            try:
+                number = int(chapter_number)
+            except (TypeError, ValueError):
+                number = 0
+            if 1 <= number <= len(project.chapters):
+                state["last_edited_chapter_number"] = number
+        save_state(project.folder, state)
+
+    def _project_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
+        return [self._project_summary(project) for project in list_projects()]
+
+    def _project_trash(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Move a local project to recoverable Trash without destroying its work."""
+        from app.core.project_trash import trash_project
+
+        requested = str(payload.get("folder") or "").strip()
+        if not requested:
+            raise ValueError("Choose a saved project before deleting it.")
+        try:
+            target = Path(requested).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ValueError("The selected project path is invalid.") from exc
+        project = next(
+            (item for item in list_projects() if Path(item.folder).resolve() == target),
+            None,
+        )
+        if project is None:
+            raise ValueError("That project is no longer present in the active Library.")
+        active_folder_value = str(self.settings.value("project/active_folder") or "").strip()
+        active_folder = Path(active_folder_value).expanduser().resolve() if active_folder_value else None
+        active_states = {"queued", "running", "paused", "cancelling"}
+        if active_folder == target:
+            with self._jobs_lock:
+                has_active_job = any(str(job.get("state") or "").casefold() in active_states
+                                     for job in self._jobs.values())
+            if has_active_job:
+                raise ValueError("This project has an active background job. Cancel or finish it before moving the book to Trash.")
+        entry = trash_project(project)
+        if active_folder == target:
+            self.settings.remove("project/active_folder")
+            self.settings.sync()
+        manifest_path = entry / "trash-manifest.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            manifest = {}
+        return {"id": str(manifest.get("id") or entry.name), "title": project.title,
+                "trashed": True, "deleted_at": manifest.get("deleted_at")}
+
+    def _project_trash_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
+        from app.core.project_trash import list_trashed_projects
+
+        entries = []
+        for item in list_trashed_projects():
+            entries.append({
+                "id": str(item.get("id") or ""),
+                "title": str(item.get("title") or item.get("original_folder_name") or "Untitled"),
+                "deleted_at": str(item.get("deleted_at") or ""),
+                "original_folder_name": str(item.get("original_folder_name") or ""),
+                "restorable": bool(item.get("restorable")),
+            })
+        return entries
+
+    def _project_trash_entry(self, payload: dict[str, Any]) -> Path:
+        from app.core.project_trash import list_trashed_projects, trash_root
+
+        requested_id = str(payload.get("id") or payload.get("trash_id") or "").strip()
+        if not requested_id:
+            raise ValueError("Choose a Trash entry first.")
+        record = next((item for item in list_trashed_projects()
+                       if str(item.get("id") or "") == requested_id), None)
+        if record is None:
+            raise ValueError("That Trash entry no longer exists. Refresh the recovery list.")
+        stored_project = Path(str(record.get("project_folder") or "")).expanduser().resolve()
+        root = trash_root().resolve()
+        entry = stored_project.parent
+        if root not in entry.parents or not (entry / "trash-manifest.json").is_file():
+            raise ValueError("The selected recovery record is outside the managed Trash.")
+        return entry
+
+    def _project_trash_restore(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from app.core.project_trash import restore_project
+
+        entry = self._project_trash_entry(payload)
+        restored_folder = restore_project(entry)
+        return {"restored": True, "folder": str(restored_folder), "title": restored_folder.name}
+
+    def _project_trash_purge(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from app.core.project_trash import purge_trashed_project
+
+        entry = self._project_trash_entry(payload)
+        purge_trashed_project(entry)
+        return {"purged": True}
 
     def _project_open(self, payload: dict[str, Any]) -> dict[str, Any]:
         requested = str(payload.get("folder") or "").strip()
@@ -455,8 +812,7 @@ class PremiumV2Bridge(QObject):
             raise ValueError("That project is not present in the local library.")
         self.settings.setValue("project/active_folder", str(selected.folder.resolve()))
         self.settings.sync()
-        return {"title": selected.title, "folder": str(selected.folder),
-                "chapter_count": len(selected.chapters)}
+        return self._project_summary(selected)
 
     def _project_get_active(self, _payload: dict[str, Any]) -> dict[str, Any] | None:
         folder = str(self.settings.value("project/active_folder", "") or "")
@@ -468,8 +824,7 @@ class PremiumV2Bridge(QObject):
             self.settings.remove("project/active_folder")
             self.settings.sync()
             return None
-        return {"title": selected.title, "folder": str(selected.folder),
-                "chapter_count": len(selected.chapters)}
+        return self._project_summary(selected)
 
     def _active_project(self):
         folder = str(self.settings.value("project/active_folder", "") or "")
@@ -512,9 +867,7 @@ class PremiumV2Bridge(QObject):
         chapter.title = title_value.strip()[:500]
         chapter.text = text_value
         project.save()
-        project_state = load_state(project.folder)
-        project_state["modified_at"] = self._now()
-        save_state(project.folder, project_state)
+        self._mark_project_edited(project, chapter.number)
         return {"number": chapter.number, "title": chapter.title,
                 "word_count": len((chapter.text or "").split()),
                 "character_count": len(chapter.text or ""),
@@ -857,6 +1210,12 @@ class PremiumV2Bridge(QObject):
             chapters = detect_chapters(text)
             if not chapters:
                 raise ValueError("The document contains no readable chapter text.")
+            stage = "validating chapter coverage"
+            self._job_update(
+                job_id, stage="Validating chapter coverage", progress=56,
+                message="Checking that chapter detection retained the source text",
+            )
+            validate_chapter_text_coverage(text, chapters, minimum=0.90)
             # Clean likely ebook page noise after chapter boundaries are known so
             # repeated boilerplate can be detected across chapters without
             # accidentally treating a single word in normal narration as noise.
@@ -877,6 +1236,16 @@ class PremiumV2Bridge(QObject):
             self.settings.setValue("project/active_folder", str(project.folder.resolve()))
             self.settings.sync()
             state = load_state(project.folder)
+            source_for_cover = project.source_path or path
+            if source_for_cover.suffix.casefold() in COVER_SOURCE_EXTENSIONS:
+                state["cover_detection_attempted"] = True
+                try:
+                    embedded_cover = extract_embedded_cover(source_for_cover, project.folder)
+                except Exception:
+                    log.debug("Could not extract embedded cover from %s", source_for_cover, exc_info=True)
+                    embedded_cover = None
+                if embedded_cover:
+                    state["cover_path"] = str(embedded_cover)
             state.update({"status": "imported", "source_path": str(project.source_path or path),
                           "source_title": book.title, "word_count": sum(len((c.text or "").split()) for c in chapters),
                           "imported_at": self._now(), "modified_at": self._now()})
@@ -925,6 +1294,7 @@ class PremiumV2Bridge(QObject):
         text_value = str(payload.get("text") or "")
         project.chapters.append(Chapter(len(project.chapters) + 1, title[:500], text_value))
         project.save()
+        self._mark_project_edited(project, project.chapters[-1].number)
         return {"number": project.chapters[-1].number, "title": project.chapters[-1].title}
 
     def _chapter_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -939,6 +1309,7 @@ class PremiumV2Bridge(QObject):
         for i, chapter in enumerate(project.chapters, 1):
             chapter.number = i
         project.save()
+        self._mark_project_edited(project, min(number, len(project.chapters)))
         return {"deleted": number, "chapter_count": len(project.chapters)}
 
     def _chapter_reorder(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -951,6 +1322,7 @@ class PremiumV2Bridge(QObject):
         for i, item in enumerate(project.chapters, 1):
             item.number = i
         project.save()
+        self._mark_project_edited(project, destination)
         return {"chapter_count": len(project.chapters), "moved_to": destination}
 
     def _chapter_merge(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -982,9 +1354,7 @@ class PremiumV2Bridge(QObject):
         for index, chapter in enumerate(project.chapters, 1):
             chapter.number = index
         project.save()
-        project_state = load_state(project.folder)
-        project_state["modified_at"] = self._now()
-        save_state(project.folder, project_state)
+        self._mark_project_edited(project, number - 1)
         return {"merged": number, "into": number - 1, "chapter_count": len(project.chapters)}
 
     def _chapter_split(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1022,9 +1392,7 @@ class PremiumV2Bridge(QObject):
         for i, item in enumerate(project.chapters, 1):
             item.number = i
         project.save()
-        project_state = load_state(project.folder)
-        project_state["modified_at"] = self._now()
-        save_state(project.folder, project_state)
+        self._mark_project_edited(project, new_chapter.number)
         return {
             "number": chapter.number,
             "new_number": new_chapter.number,
@@ -1440,7 +1808,9 @@ class PremiumV2Bridge(QObject):
             state["character_analysis"] = {"dialogue_total": analysis.dialogue_total,
                                            "unassigned_dialogue": analysis.unassigned_dialogue,
                                            "updated_at": self._now()}
+            state["modified_at"] = self._now()
             save_state(project.folder, state)
+            self._sync_saved_cast(project, items, state, update_names=False, update_voice=False)
             self._job_update(job_id, state="completed", stage="Analysis complete", progress=100,
                              message=f"Detected {len(items)} character candidate(s) from saved chapter text",
                              result={"characters": items, "dialogue_total": analysis.dialogue_total,
@@ -1465,7 +1835,9 @@ class PremiumV2Bridge(QObject):
             raise ValueError("That character is not in saved analysis. Run analysis again.")
         item["voice_profile"] = profile_name or None
         state["characters"] = characters
+        state["modified_at"] = self._now()
         save_state(project.folder, state)
+        self._sync_saved_cast(project, characters, state, update_names=True, update_voice=True)
         return {"name": name, "voice_profile": item["voice_profile"], "saved": True}
 
     def _character_update(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1526,7 +1898,9 @@ class PremiumV2Bridge(QObject):
             "voice_profile": profile_name or None,
         })
         state["characters"] = characters
+        state["modified_at"] = self._now()
         save_state(project.folder, state)
+        self._sync_saved_cast(project, characters, state, update_names=True, update_voice=True)
         return {"character": item, "saved": True}
 
     def _character_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1544,80 +1918,375 @@ class PremiumV2Bridge(QObject):
         if not removed:
             raise ValueError("The selected character is no longer in the saved cast.")
         state["characters"] = kept
+        state["modified_at"] = self._now()
         save_state(project.folder, state)
         return {"name": name, "deleted": True, "remaining": len(kept)}
 
     def _character_library_path(self) -> Path:
-        return settings_root() / "character_library.json"
+        return reusable_character_library_path()
 
-    def _character_library_read(self) -> list[dict[str, Any]]:
-        path = self._character_library_path()
+    @staticmethod
+    def _character_library_ui_count(value: Any, default: int = 0, maximum: int | None = None) -> int:
         try:
-            data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
-        except (OSError, ValueError, TypeError):
-            raise ValueError("The saved Character Library file is invalid. Import a valid JSON cast file to restore it.")
-        rows = data.get("characters", []) if isinstance(data, dict) else data
-        if not isinstance(rows, list): raise ValueError("Character Library data must be a list of characters.")
-        return [row for row in rows if isinstance(row, dict) and str(row.get("name") or "").strip()]
+            result = int(value if value is not None else default)
+        except (TypeError, ValueError, OverflowError):
+            result = default
+        result = max(0, result)
+        return min(result, maximum) if maximum is not None else result
 
-    def _character_library_write(self, rows: list[dict[str, Any]]) -> None:
-        path = self._character_library_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps({"version": 1, "characters": rows}, ensure_ascii=False, indent=2), encoding="utf-8")
-        temporary.replace(path)
+    @staticmethod
+    def _character_library_ui_record(record: dict[str, Any]) -> dict[str, Any]:
+        """Translate the persistent registry record into the Premium V2 UI contract."""
+        name = str(record.get("primary_name") or record.get("name") or "").strip()
+        series = str(record.get("series") or "").strip()
+        aliases = record.get("aliases") or []
+        if not isinstance(aliases, list):
+            aliases = []
+        voice = str(record.get("voice_name") or record.get("voice") or "").strip() or "Unassigned"
+        return {
+            "id": str(record.get("id") or ""),
+            "name": name,
+            "primary_name": name,
+            "short": str(record.get("short") or (name.split()[0] if name else "?")),
+            "aliases": [str(alias).strip() for alias in aliases if str(alias).strip()][:5],
+            "voice": voice,
+            "voice_profile": voice if voice != "Unassigned" else "",
+            "scope": ("Series · " + series) if series else "Unassigned series",
+            "series": series,
+            "notes": str(record.get("notes") or ""),
+            "dialogue_sample": str(record.get("dialogue_sample") or ""),
+            "pronunciation": str(record.get("pronunciation") or ""),
+            "lines": PremiumV2Bridge._character_library_ui_count(record.get("line_count", record.get("lines", 0))),
+            "chapters": PremiumV2Bridge._character_library_ui_count(record.get("chapter_count", record.get("chapters", 0))),
+            "confidence": PremiumV2Bridge._character_library_ui_count(record.get("confidence", 100), default=100, maximum=100),
+            "source_project_folder": str(record.get("source_project_folder") or ""),
+            "source_project_title": str(record.get("source_project_title") or ""),
+            "updated_at": str(record.get("updated_at") or ""),
+        }
+
+    def _project_series_name(self, project, state: dict[str, Any] | None = None) -> str:
+        state = state if isinstance(state, dict) else load_state(project.folder)
+        for key in ("series_name", "series_title", "novel_series", "series"):
+            value = str(state.get(key) or "").strip()
+            value = re.sub(r"(?i)^\s*series\s*[·:-]\s*", "", value).strip()
+            if value and value.casefold() not in {"global character library", "all series", "unassigned series"}:
+                return value[:300]
+        title = str(getattr(project, "title", "") or "").strip()
+        inferred = re.sub(
+            r"(?i)(?:[\s._-]*(?:vol(?:ume)?\.?\s*\d+|book\s*\d+|part\s*\d+))(?:\s*[-–—:|]\s*.*)?\s*$",
+            "",
+            title,
+        ).strip(" \t-–—_.:|")
+        return (inferred or title or "Unassigned series")[:300]
+
+    def _sync_saved_cast(
+        self,
+        project,
+        characters: list[dict[str, Any]],
+        state: dict[str, Any] | None = None,
+        *,
+        update_names: bool = False,
+        update_voice: bool = False,
+        registry_path: Path | None = None,
+    ) -> None:
+        """Merge the real saved Character Studio cast into the shared registry."""
+        if not isinstance(characters, list) or not characters:
+            return
+        state = state if isinstance(state, dict) else load_state(project.folder)
+        series = self._project_series_name(project, state)
+        normalized = []
+        for row in characters:
+            if not isinstance(row, dict):
+                continue
+            examples = row.get("examples") or []
+            if not isinstance(examples, list):
+                examples = [str(examples)] if str(examples or "").strip() else []
+            chapter_rows = row.get("chapter_numbers") or row.get("chapters") or []
+            chapter_count = row.get("chapter_count")
+            if chapter_count is None:
+                chapter_count = len(chapter_rows) if isinstance(chapter_rows, (list, tuple, set)) else 0
+            normalized.append({
+                "name": str(row.get("name") or row.get("primary_name") or "").strip(),
+                "short": row.get("short") or row.get("short_name") or "",
+                "aliases": row.get("aliases") or [],
+                "voice": row.get("voice_profile") or row.get("voice_name") or row.get("voice") or "",
+                "examples": examples,
+                "dialogue_sample": row.get("dialogue_sample") or (examples[0] if examples else ""),
+                "pronunciation": row.get("pronunciation") or "",
+                "notes": row.get("notes") or "",
+                "line_count": row.get("dialogue_count", row.get("line_count", row.get("lines", 0))),
+                "chapter_count": chapter_count,
+                "confidence": row.get("confidence", 100),
+            })
+        sync_reusable_characters(
+            series,
+            normalized,
+            source_project_folder=str(project.folder),
+            source_project_title=str(getattr(project, "title", "") or ""),
+            update_names=update_names,
+            update_voice=update_voice,
+            path=registry_path,
+        )
+
+    def _character_library_bootstrap(self) -> None:
+        """Migrate the old flat file transactionally and import already-saved project casts."""
+        if getattr(self, "_character_library_bootstrapped", False):
+            return
+        path = reusable_character_library_path()
+        registry_path = path
+        migration_path: Path | None = None
+        legacy_rows: list[dict[str, Any]] = []
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+                raise ValueError(
+                    "The saved Character Library file could not be read. It was left untouched; export or back it up before repairing it."
+                ) from exc
+            is_legacy = isinstance(data, list) or (
+                isinstance(data, dict) and "characters" in data
+                and "active" not in data and "deleted" not in data
+            )
+            if is_legacy:
+                candidates = data if isinstance(data, list) else data.get("characters", [])
+                if isinstance(candidates, list):
+                    legacy_rows = [dict(row) for row in candidates if isinstance(row, dict)]
+                # Build the migrated registry beside the original. If a disk write
+                # or merge fails, the user's original file remains intact.
+                migration_path = path.with_suffix(path.suffix + ".migration")
+                migration_path.unlink(missing_ok=True)
+                registry_path = migration_path
+
+        for row in legacy_rows:
+            name = str(row.get("name") or row.get("primary_name") or "").strip()
+            if not name:
+                continue
+            scope = str(row.get("scope") or "").strip()
+            series = str(row.get("series") or "").strip()
+            if not series and re.match(r"(?i)^series\s*[·:-]", scope):
+                series = re.sub(r"(?i)^series\s*[·:-]\s*", "", scope).strip()
+            if not series or series.casefold() in {"global character library", "all series"}:
+                series = str(row.get("source_project_title") or "Unassigned series").strip()
+            aliases = row.get("aliases") or []
+            if isinstance(aliases, str):
+                aliases = [part.strip() for part in aliases.replace("\n", ",").split(",") if part.strip()]
+            examples = row.get("examples") or []
+            sample = str(row.get("dialogue_sample") or row.get("sample") or "").strip()
+            if not isinstance(examples, list):
+                examples = [str(examples)] if str(examples or "").strip() else []
+            if sample:
+                examples = [sample, *examples]
+            normalized = {
+                "name": name,
+                "short": row.get("short") or row.get("short_name") or "",
+                "aliases": aliases,
+                "voice": row.get("voice") or row.get("voice_name") or "",
+                "examples": examples,
+                "dialogue_sample": sample,
+                "notes": row.get("notes") or "",
+                "pronunciation": row.get("pronunciation") or "",
+                "line_count": row.get("lines", row.get("line_count", 0)),
+                "chapter_count": row.get("chapters", row.get("chapter_count", 0)),
+                "confidence": row.get("confidence", 100),
+            }
+            sync_reusable_characters(
+                series, [normalized],
+                source_project_folder=str(row.get("source_project_folder") or ""),
+                source_project_title=str(row.get("source_project_title") or ""),
+                update_names=True, update_voice=True, path=registry_path,
+            )
+
+        # Existing projects can already have saved analysis even if the global
+        # registry was never hydrated. Reuse it once on first Character Library load.
+        for project in list_projects():
+            try:
+                state = load_state(project.folder)
+                rows = state.get("characters") or []
+                if isinstance(rows, list) and rows:
+                    self._sync_saved_cast(project, rows, state, registry_path=registry_path)
+            except (OSError, ValueError, TypeError):
+                log.warning("Could not import the saved cast for %s into Character Library", project.title, exc_info=True)
+
+        if migration_path is not None:
+            if not migration_path.is_file():
+                migration_path.parent.mkdir(parents=True, exist_ok=True)
+                migration_path.write_text(
+                    json.dumps({"version": 1, "active": [], "deleted": []}, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            # Atomic same-directory replace: a partially migrated file is never
+            # exposed as the live registry.
+            migration_path.replace(path)
+        self._character_library_bootstrapped = True
 
     def _character_library_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        return self._character_library_read()
+        self._character_library_bootstrap()
+        return [self._character_library_ui_record(row) for row in list_reusable_characters()]
+
+    def _character_library_deleted_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
+        self._character_library_bootstrap()
+        return [self._character_library_ui_record(row) for row in list_reusable_deleted_characters()]
 
     def _character_library_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._character_library_bootstrap()
         name = str(payload.get("name") or "").strip()
-        if not name: raise ValueError("Enter a character name before saving it to the Character Library.")
+        if not name:
+            raise ValueError("Enter a character name before saving it to the Character Library.")
         aliases = payload.get("aliases") or []
-        if isinstance(aliases, str): aliases = aliases.split(",")
-        if not isinstance(aliases, list): raise ValueError("Character aliases must be a list or comma-separated text.")
-        row_id = str(payload.get("id") or "").strip() or uuid.uuid4().hex
-        scope = str(payload.get("scope") or "Global character library").strip()[:100]
-        item = {"id": row_id, "name": name[:300], "short": str(payload.get("short") or name.split()[0]).strip()[:120],
-                "aliases": list(dict.fromkeys(str(x).strip()[:160] for x in aliases if str(x).strip())),
-                "voice": str(payload.get("voice") or "Unassigned").strip()[:200], "scope": scope,
-                "series": str(payload.get("series") or scope).strip()[:100], "notes": str(payload.get("notes") or "").strip()[:4000],
-                "lines": max(0, int(payload.get("lines") or 0)), "chapters": max(0, int(payload.get("chapters") or 0)),
-                "confidence": max(0, min(100, int(payload.get("confidence", 100)))), "updated_at": self._now()}
-        rows = self._character_library_read()
-        old = next((i for i, row in enumerate(rows) if str(row.get("id") or "") == row_id or str(row.get("name") or "").casefold() == name.casefold()), None)
-        if old is None: rows.append(item)
-        else: rows[old] = item
-        self._character_library_write(rows)
-        return {"character": item, "count": len(rows), "saved": True}
+        if isinstance(aliases, str):
+            aliases = [part.strip() for part in aliases.replace("\n", ",").split(",") if part.strip()]
+        if not isinstance(aliases, list):
+            raise ValueError("Character aliases must be a list or comma-separated text.")
+        aliases = list(dict.fromkeys(str(item).strip()[:160] for item in aliases if str(item).strip()))[:5]
+
+        series = str(payload.get("series") or "").strip()
+        scope = str(payload.get("scope") or "").strip()
+        if not series and re.match(r"(?i)^series\s*[·:-]", scope):
+            series = re.sub(r"(?i)^series\s*[·:-]\s*", "", scope).strip()
+        if not series and scope.casefold() not in {"global character library", "all series"}:
+            series = scope
+        if not series or series.casefold() in {"global character library", "all series"}:
+            active_folder = str(self.settings.value("project/active_folder") or "").strip()
+            active_project = next(
+                (project for project in list_projects()
+                 if active_folder and str(Path(project.folder).resolve()) == str(Path(active_folder).resolve())),
+                None,
+            )
+            if active_project:
+                series = self._project_series_name(active_project, load_state(active_project.folder))
+            else:
+                series = "Unassigned series"
+        series = series[:300]
+
+        sample = str(payload.get("dialogue_sample") or "").strip()[:4000]
+        notes = str(payload.get("notes") or "").strip()[:4000]
+        existing = next(
+            (row for row in list_reusable_characters()
+             if str(row.get("id") or "") == str(payload.get("id") or "").strip()),
+            None,
+        )
+        if existing:
+            record = update_reusable_character(existing["id"], {
+                "series": series,
+                "primary_name": name[:300],
+                "short": str(payload.get("short") or "").strip(),
+                "aliases": aliases,
+                "dialogue_sample": sample,
+                "notes": notes,
+            })
+        else:
+            active_folder = str(self.settings.value("project/active_folder") or "").strip()
+            active_project = next(
+                (project for project in list_projects()
+                 if active_folder and str(Path(project.folder).resolve()) == str(Path(active_folder).resolve())),
+                None,
+            )
+            sync_reusable_characters(
+                series,
+                [{
+                    "name": name[:300],
+                    "short": str(payload.get("short") or "").strip(),
+                    "aliases": aliases,
+                    "dialogue_sample": sample,
+                    "examples": [sample] if sample else [],
+                    "notes": notes,
+                    "confidence": 100,
+                    "voice": "",
+                }],
+                source_project_folder=str(active_project.folder) if active_project else "",
+                source_project_title=str(active_project.title) if active_project else "",
+                update_names=True,
+                update_voice=False,
+            )
+            record = next(
+                (row for row in list_reusable_characters()
+                 if str(row.get("series") or "").casefold() == series.casefold()
+                 and (
+                     str(row.get("primary_name") or "").casefold() == name.casefold()
+                     or name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])}
+                 )),
+                None,
+            )
+            if record is None:
+                raise RuntimeError("The character could not be saved to the reusable registry.")
+        self._character_library_bootstrapped = True
+        public = self._character_library_ui_record(record)
+        return {"character": public, "count": len(list_reusable_characters()), "saved": True}
 
     def _character_library_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._character_library_bootstrap()
         row_id = str(payload.get("id") or "").strip()
-        name = str(payload.get("name") or "").strip().casefold()
-        rows = self._character_library_read()
-        kept = [row for row in rows if not ((row_id and str(row.get("id") or "") == row_id) or (name and str(row.get("name") or "").casefold() == name))]
-        if len(kept) == len(rows): raise ValueError("The selected character is no longer in the Character Library.")
-        self._character_library_write(kept)
-        return {"deleted": len(rows)-len(kept), "count": len(kept)}
+        if not row_id:
+            name = str(payload.get("name") or "").strip().casefold()
+            record = next((row for row in list_reusable_characters()
+                           if str(row.get("primary_name") or "").casefold() == name), None)
+            row_id = str(record.get("id") or "") if record else ""
+        if not row_id:
+            raise ValueError("Choose a character from the reusable Character Library.")
+        record = soft_delete_reusable_character(row_id)
+        return {"deleted": 1, "count": len(list_reusable_characters()), "character": self._character_library_ui_record(record)}
+
+    def _character_library_restore(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._character_library_bootstrap()
+        row_id = str(payload.get("id") or "").strip()
+        if not row_id:
+            raise ValueError("Choose a deleted character to restore.")
+        record = restore_reusable_character(row_id)
+        return {"restored": True, "character": self._character_library_ui_record(record),
+                "count": len(list_reusable_characters())}
 
     def _character_library_import(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._character_library_bootstrap()
         incoming = payload.get("characters")
-        if isinstance(incoming, dict): incoming = incoming.get("characters")
-        if not isinstance(incoming, list) or not incoming: raise ValueError("Choose a JSON file containing a non-empty character list.")
-        rows = self._character_library_read()
-        by_name = {str(row.get("name") or "").casefold(): i for i, row in enumerate(rows)}
+        if isinstance(incoming, dict):
+            incoming = incoming.get("characters")
+        if not isinstance(incoming, list) or not incoming:
+            raise ValueError("Choose a JSON file containing a non-empty character list.")
         imported = 0
         for candidate in incoming:
-            if not isinstance(candidate, dict) or not str(candidate.get("name") or "").strip(): continue
-            item = dict(candidate); item["name"] = str(item["name"]).strip(); item["id"] = str(item.get("id") or uuid.uuid4().hex)
-            aliases = item.get("aliases") or []; item["aliases"] = aliases if isinstance(aliases, list) else str(aliases).split(",")
-            key = item["name"].casefold()
-            if key in by_name: rows[by_name[key]] = {**rows[by_name[key]], **item}
-            else: by_name[key] = len(rows); rows.append(item)
+            if not isinstance(candidate, dict):
+                continue
+            name = str(candidate.get("name") or candidate.get("primary_name") or "").strip()
+            if not name:
+                continue
+            scope = str(candidate.get("scope") or "").strip()
+            series = str(candidate.get("series") or "").strip()
+            if not series and re.match(r"(?i)^series\s*[·:-]", scope):
+                series = re.sub(r"(?i)^series\s*[·:-]\s*", "", scope).strip()
+            if not series or series.casefold() in {"global character library", "all series"}:
+                series = str(candidate.get("source_project_title") or "Imported cast").strip()
+            aliases = candidate.get("aliases") or []
+            if isinstance(aliases, str):
+                aliases = [part.strip() for part in aliases.replace("\n", ",").split(",") if part.strip()]
+            examples = candidate.get("examples") or []
+            sample = str(candidate.get("dialogue_sample") or candidate.get("sample") or "").strip()
+            if sample:
+                examples = [sample, *(examples if isinstance(examples, list) else [])]
+            sync_reusable_characters(
+                series,
+                [{
+                    "name": name,
+                    "short": candidate.get("short") or candidate.get("short_name") or "",
+                    "aliases": aliases if isinstance(aliases, list) else [],
+                    "voice": candidate.get("voice") or candidate.get("voice_name") or "",
+                    "dialogue_sample": sample,
+                    "examples": examples if isinstance(examples, list) else [],
+                    "notes": candidate.get("notes") or "",
+                    "pronunciation": candidate.get("pronunciation") or "",
+                    "line_count": candidate.get("line_count", candidate.get("lines", 0)),
+                    "chapter_count": candidate.get("chapter_count", candidate.get("chapters", 0)),
+                    "confidence": candidate.get("confidence", 100),
+                }],
+                source_project_folder=str(candidate.get("source_project_folder") or ""),
+                source_project_title=str(candidate.get("source_project_title") or ""),
+                update_names=True,
+                update_voice=True,
+            )
             imported += 1
-        if not imported: raise ValueError("The selected JSON file contained no valid named characters.")
-        self._character_library_write(rows)
-        return {"imported": imported, "count": len(rows), "merged_by_name": True}
+        if not imported:
+            raise ValueError("The selected JSON file contained no valid named characters.")
+        return {"imported": imported, "count": len(list_reusable_characters()), "merged_by_name_and_series": True}
+
     def _pronunciation_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         project = self._active_project()
         state = load_state(project.folder)
@@ -2020,24 +2689,101 @@ class PremiumV2Bridge(QObject):
             self._persist_jobs()
         return {"hidden": count, "history_preserved": True}
 
-    def _player_get_active(self, _payload: dict[str, Any]) -> dict[str, Any]:
-        project = self._active_project()
+    def _player_get_active(self, payload: dict[str, Any]) -> dict[str, Any]:
+        requested_folder = str(payload.get("folder") or "").strip()
+        if requested_folder:
+            requested_path = Path(requested_folder).expanduser()
+            project = next(
+                (item for item in list_projects()
+                 if str(item.folder.resolve()) == str(requested_path.resolve())),
+                None,
+            )
+            if project is None:
+                raise ValueError("The selected audiobook is no longer available in the local library.")
+        else:
+            project = self._active_project()
+
         state = load_state(project.folder)
-        output = Path(str(state.get("output_path") or "")).expanduser()
-        if not output.is_file() or output.stat().st_size <= 0:
+        output_value = str(state.get("output_path") or "").strip()
+        output = Path(output_value).expanduser() if output_value else None
+        if not output or not output.is_file() or output.stat().st_size <= 0:
             raise FileNotFoundError("This project does not have a validated generated audiobook yet.")
-        return {"title": project.title, "author": str(state.get("author") or ""),
-                "narrator": str(state.get("voice_profile") or ""), "output_path": str(output.resolve()),
-                "file_url": output.resolve().as_uri(),
-                "chapters": [{"number": c.number, "title": c.title} for c in project.chapters],
-                "format": output.suffix.lower(), "file_size": output.stat().st_size}
+        summary = self._project_summary(project)
+        actual_chapters = _read_audio_chapter_metadata(output)
+        chapters = actual_chapters or [
+            {"number": c.number, "title": c.title}
+            for c in project.chapters
+        ]
+        try:
+            playback_position = float(state.get("playback_position_seconds") or 0)
+        except (TypeError, ValueError, OverflowError):
+            playback_position = 0.0
+        if not math.isfinite(playback_position) or playback_position < 0:
+            playback_position = 0.0
+        try:
+            playback_rate = float(self.settings.value("player/playback_rate", 1.0))
+        except (TypeError, ValueError, OverflowError):
+            playback_rate = 1.0
+        if not math.isfinite(playback_rate) or not 0.5 <= playback_rate <= 2.0:
+            playback_rate = 1.0
+        try:
+            playback_volume = float(self.settings.value("player/playback_volume", 0.8))
+        except (TypeError, ValueError, OverflowError):
+            playback_volume = 0.8
+        if not math.isfinite(playback_volume) or not 0.0 <= playback_volume <= 1.0:
+            playback_volume = 0.8
+        return {
+            **summary,
+            "title": project.title,
+            "author": str(state.get("author") or ""),
+            "narrator": str(state.get("narrator") or state.get("voice_profile") or ""),
+            "output_path": str(output.resolve()),
+            "file_url": output.resolve().as_uri(),
+            "chapters": chapters,
+            "format": output.suffix.lower(),
+            "file_size": output.stat().st_size,
+            "playback_position_seconds": playback_position,
+            "playback_rate": playback_rate,
+            "playback_volume": playback_volume,
+        }
+
+    def _player_position_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Remember listening position inside the selected project's local state."""
+        folder_value = str(payload.get("folder") or "").strip()
+        if not folder_value:
+            raise ValueError("Select an audiobook before saving playback position.")
+        requested_folder = Path(folder_value).expanduser().resolve()
+        project = next(
+            (item for item in list_projects()
+             if str(item.folder.resolve()) == str(requested_folder)),
+            None,
+        )
+        if project is None:
+            raise ValueError("The selected audiobook is no longer available in the local library.")
+        raw_position = payload.get("position_seconds", 0)
+        if isinstance(raw_position, bool):
+            raise ValueError("Playback position must be a non-negative number.")
+        try:
+            position = float(raw_position)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("Playback position must be a non-negative number.") from exc
+        if not math.isfinite(position) or position < 0 or position > 7 * 24 * 60 * 60:
+            raise ValueError("Playback position is outside the supported range.")
+        state = load_state(project.folder)
+        state["playback_position_seconds"] = round(position, 2)
+        # Listening progress must not reorder Recent Projects or masquerade as a content edit.
+        save_state(project.folder, state)
+        return {"saved": True, "folder": str(project.folder.resolve()),
+                "position_seconds": state["playback_position_seconds"]}
 
     def _settings_save(self, payload: dict[str, Any]) -> dict[str, Any]:
         allowed = {"theme": "ui/theme", "accent": "ui/accent", "interface_scale": "ui/interface_scale",
                    "effects": "ui/effects", "reduce_motion": "ui/reduce_motion",
                    "preview_seconds": "audio/preview_seconds", "bitrate": "production/bitrate",
                    "concurrency": "production/concurrency", "local_first": "privacy/local_first",
-                   "output_folder": "paths/output_folder"}
+                   "output_folder": "paths/output_folder",
+                   "player_rate": "player/playback_rate",
+                   "player_volume": "player/playback_volume"}
         for key, setting in allowed.items():
             if key not in payload:
                 continue
@@ -2048,6 +2794,20 @@ class PremiumV2Bridge(QObject):
                 raise ValueError("Preview duration must be 10, 20, 30, 45, or 60 seconds.")
             if key == "bitrate" and not 128 <= int(value) <= 320:
                 raise ValueError("Bitrate must be from 128 to 320 kbps.")
+            if key == "player_rate":
+                try:
+                    value = float(value)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError("Playback speed must be between 0.5× and 2.0×.") from exc
+                if not math.isfinite(value) or not 0.5 <= value <= 2.0:
+                    raise ValueError("Playback speed must be between 0.5× and 2.0×.")
+            if key == "player_volume":
+                try:
+                    value = float(value)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError("Player volume must be between 0 and 100 percent.") from exc
+                if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+                    raise ValueError("Player volume must be between 0 and 100 percent.")
             if key == "output_folder":
                 folder = Path(str(value)).expanduser().resolve()
                 folder.mkdir(parents=True, exist_ok=True)

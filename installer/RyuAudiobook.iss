@@ -16,10 +16,18 @@ DefaultDirName={autopf}\Ryu's Audiobook
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=installer-output
-OutputBaseFilename=Ryu's Audiobook Setup
+OutputBaseFilename=Ryu's Audiobook Core Setup
 Compression=lzma
 SolidCompression=yes
-WizardStyle=modern
+WizardStyle=modern dark hidebevels includetitlebar
+WizardResizable=yes
+WizardSizePercent=125,110
+WizardBackColor=#05060A
+WizardImageFile=..\assets\installer_brand_panel.bmp
+WizardImageBackColor=#05060A
+WizardSmallImageFile=..\assets\ryu_audiobook_logo.bmp
+WizardSmallImageBackColor=#05060A
+DefaultDialogFontName=Segoe UI
 SetupIconFile=..\assets\ryu_audiobook_logo.ico
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
@@ -37,11 +45,12 @@ VersionInfoProductName={#MyAppName}
 Source: "..\dist\Ryu's Audiobook\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startmenuicon
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
+Name: "startmenuicon"; Description: "Create a Start menu entry"; GroupDescription: "Shortcuts:"; Flags: unchecked
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent
@@ -54,34 +63,3 @@ WelcomeLabel1=Welcome to [name/ver]
 WelcomeLabel2=Install Ryu's Audiobook Dragon Studio on this computer.\n\nYour books, voice profiles, models, and settings are kept in your user profile and are not removed by uninstalling the application.
 FinishedHeadingLabel=Ryu's Audiobook is ready
 FinishedLabel=Setup has finished installing Ryu's Audiobook. Launch Dragon Studio to continue your audiobook projects.
-
-[Code]
-procedure InitializeWizard();
-var
-  I: Integer;
-begin
-  { Premium V2-inspired dark canvas and warm crimson/gold identity.
-    Set every wizard label explicitly so default black text cannot disappear
-    against the dark page surfaces. Keep native controls and keyboard support. }
-  WizardForm.Color := $000F0A09;
-  WizardForm.MainPanel.Color := $001A130F;
-  WizardForm.InnerPage.Color := $001A130F;
-  WizardForm.Font.Name := 'Segoe UI';
-
-  for I := 0 to WizardForm.ComponentCount - 1 do
-  begin
-    if WizardForm.Components[I] is TLabel then
-    begin
-      TLabel(WizardForm.Components[I]).Font.Name := 'Segoe UI';
-      TLabel(WizardForm.Components[I]).Font.Color := $00B8ACA5;
-    end;
-  end;
-
-  { Restore higher-contrast gold for page and completion headings. }
-  WizardForm.PageNameLabel.Font.Color := $006AB0D6;
-  WizardForm.WelcomeLabel1.Font.Color := $006AB0D6;
-  WizardForm.FinishedHeadingLabel.Font.Color := $006AB0D6;
-  WizardForm.PageDescriptionLabel.Font.Color := $00E0D7D0;
-  WizardForm.WelcomeLabel2.Font.Color := $00E0D7D0;
-  WizardForm.FinishedLabel.Font.Color := $00E0D7D0;
-end;

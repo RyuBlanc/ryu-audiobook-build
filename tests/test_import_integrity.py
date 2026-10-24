@@ -7,7 +7,10 @@ from unittest import mock
 
 from app.chapters.detector import Chapter, detect_chapters
 from app.core.project import Project, create_project, list_projects
-from app.documents.parser import extract_text, clean_import_noise, pdf_extraction_quality_warning
+from app.documents.parser import (
+    extract_text, clean_import_noise, pdf_extraction_quality_warning,
+    detect_repeated_book_noise, chapter_text_coverage, validate_chapter_text_coverage,
+)
 
 
 class ImportIntegrityTests(unittest.TestCase):
@@ -102,6 +105,214 @@ class ImportIntegrityTests(unittest.TestCase):
         self.assertIn("First chapter text ends here.", chapters[0].text)
         self.assertIn("Second chapter text ends here.", chapters[1].text)
 
+    def test_realistic_multi_chapter_watermark_cleanup_keeps_story_and_removes_page_noise(self):
+        chapters_text = [
+            "Chapter 1: The Arrival\nA heroine followed a long road toward the old city gate.\n41\nReport\nwww.asianovel.com",
+            "Chapter 2: The Return\nThe hero came back from the northern pass after the battle ended.\n42\nReport\nwww.asianovel.com",
+            "Chapter 3: The Promise\nThey promised to meet again before the next winter festival.\n43\nReport\nwww.asianovel.com",
+        ]
+        repeated = set(detect_repeated_book_noise(chapters_text))
+        self.assertIn("report", repeated)
+        self.assertIn("www.asianovel.com", repeated)
+
+        cleaned_chapters = []
+        removed_all = []
+        for text in chapters_text:
+            cleaned, removed = clean_import_noise(text, repeated)
+            cleaned_chapters.append(cleaned)
+            removed_all.extend(removed)
+
+        story = "\n".join(cleaned_chapters)
+        for expected in ("heroine followed", "hero came back", "promised to meet"):
+            self.assertIn(expected, story)
+        for noise in ("www.asianovel.com", "Report", "41", "42", "43"):
+            self.assertNotIn(noise, story)
+        self.assertGreaterEqual(len(removed_all), 9)
+
+    def test_single_occurrence_report_page_number_and_general_url_are_not_removed(self):
+        source = (
+            "Chapter 1: Archive\n"
+            "The report was placed beside the old ledger.\n\n"
+            "Report\n\n"
+            "The portal at https://example.com/archive remained open in the story.\n\n"
+            "17\n\n"
+            "The keeper locked the library before sunrise."
+        )
+        cleaned, removed = clean_import_noise(source)
+        self.assertIn("Report", cleaned)
+        self.assertIn("17", cleaned)
+        self.assertIn("https://example.com/archive", cleaned)
+        self.assertEqual(removed, [])
+
+    def test_chapter_coverage_guard_handles_short_book_and_detected_content_loss(self):
+        source = (
+            "Chapter 1: Begin\nThe first body keeps enough words to verify the small book.\n"
+            "Chapter 2: End\nThe last body remains in the story and should be preserved."
+        )
+        chapters = detect_chapters(source)
+        source_words, chapter_words, coverage = chapter_text_coverage(source, chapters)
+        self.assertGreater(source_words, 0)
+        self.assertGreater(chapter_words, 0)
+        self.assertGreater(coverage, 0.90)
+        validate_chapter_text_coverage(source, chapters)
+
+        with self.assertRaisesRegex(ValueError, "Import was stopped"):
+            validate_chapter_text_coverage(source, [Chapter(1, "Only", "one word")])
+
+    def test_many_short_chapters_pass_coverage_guard_without_false_loss(self):
+        parts = []
+        for number in range(1, 13):
+            parts.append(f"Chapter {number}: The Quiet Return")
+            parts.append("The dawn breaks now.")
+        source = "\n".join(parts)
+        chapters = detect_chapters(source)
+
+        self.assertEqual(len(chapters), 12)
+        source_words, chapter_words, coverage = chapter_text_coverage(source, chapters)
+        self.assertEqual(chapter_words, source_words)
+        self.assertAlmostEqual(coverage, 1.0)
+        validate_chapter_text_coverage(source, chapters, minimum=0.90)
+
+    def test_txt_import_to_chapter_cleanup_pipeline_preserves_story_bodies(self):
+        source_text = "\n\n".join([
+            "Chapter 1: The Arrival\nA heroine followed the old road to the city gate.\n41\nReport\nwww.asianovel.com",
+            "Chapter 2: The Return\nThe hero came home after the long battle ended.\n42\nReport\nwww.asianovel.com",
+            "Chapter 3: The Promise\nThey promised to meet again before the winter festival.\n43\nReport\nwww.asianovel.com",
+        ])
+        with tempfile.TemporaryDirectory() as temp:
+            source = Path(temp) / "realistic-light-novel.txt"
+            source.write_text(source_text, encoding="utf-8")
+            book = extract_text(source)
+
+        chapters = detect_chapters(book.text)
+        self.assertEqual(len(chapters), 3)
+        validate_chapter_text_coverage(book.text, chapters, minimum=0.90)
+        repeated = set(detect_repeated_book_noise([chapter.text for chapter in chapters]))
+        cleaned_chapters = []
+        for chapter in chapters:
+            chapter.text, _removed = clean_import_noise(chapter.text, repeated)
+            cleaned_chapters.append(chapter)
+
+        joined = "\n".join(chapter.text for chapter in cleaned_chapters)
+        for body in ("heroine followed", "hero came home", "promised to meet"):
+            self.assertIn(body, joined)
+        self.assertNotIn("Report", joined)
+        self.assertNotIn("41", joined)
+        self.assertNotIn("42", joined)
+        self.assertNotIn("43", joined)
+        self.assertNotIn("www.asianovel.com", joined)
+
+    def test_duplicate_dotted_toc_is_removed_and_passes_coverage_guard(self):
+        source = """TABLE OF CONTENTS
+Prologue ........ 1
+Chapter 1: Arrival ........ 2
+Chapter 2: Return ........ 3
+Epilogue ........ 4
+
+Prologue
+The heroine walked through the old stone gate and greeted the guard before sunrise.
+Chapter 1: Arrival
+After the long journey, the traveler returned home and shared news with the waiting family.
+Chapter 2: Return
+They promised to meet again next winter, when the city would celebrate its annual winter festival.
+Epilogue
+In the final scene, the family gathered beside the river and remembered how their journey had changed everything.
+"""
+        chapters = detect_chapters(source)
+        self.assertEqual(
+            [chapter.title for chapter in chapters],
+            ["Prologue", "Chapter 1: Arrival", "Chapter 2: Return", "Epilogue"],
+        )
+        joined = "\n".join(chapter.text for chapter in chapters)
+        self.assertNotIn("TABLE OF CONTENTS", joined)
+        self.assertNotIn("........", joined)
+        source_words, chapter_words, coverage = chapter_text_coverage(source, chapters)
+        self.assertEqual(source_words, chapter_words)
+        self.assertAlmostEqual(coverage, 1.0)
+        validate_chapter_text_coverage(source, chapters, minimum=0.90)
+
+    def test_premium_v2_import_worker_persists_dotted_toc_book_end_to_end(self):
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        source_text = """TABLE OF CONTENTS
+Prologue ........ 1
+Chapter 1: Arrival ........ 2
+Chapter 2: Return ........ 3
+Epilogue ........ 4
+
+Prologue
+The heroine walked through the old stone gate and greeted the guard before sunrise.
+41
+Report
+www.asianovel.com
+
+Chapter 1: Arrival
+After the long journey, the traveler returned home and shared news with the waiting family.
+42
+Report
+www.asianovel.com
+
+Chapter 2: Return
+They promised to meet again next winter, when the city would celebrate its annual winter festival.
+43
+Report
+www.asianovel.com
+
+Epilogue
+In the final scene, the family gathered beside the river and remembered how their journey had changed everything.
+44
+Report
+www.asianovel.com
+"""
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "dotted-toc-book.txt"
+            source.write_text(source_text, encoding="utf-8")
+            app_data = root / "app-data"
+            settings = root / "settings"
+            library = root / "library"
+
+            with (
+                mock.patch("app.ui.premium_v2_host.ensure_roots"),
+                mock.patch("app.ui.premium_v2_host.app_root", return_value=app_data),
+                mock.patch("app.ui.premium_v2_host.settings_root", return_value=settings),
+                mock.patch("app.ui.premium_v2_host.QSettings"),
+                mock.patch("app.ui.premium_v2_host.load_state", return_value={}),
+                mock.patch("app.ui.premium_v2_host.save_state"),
+                mock.patch("app.core.project.library_root", return_value=library),
+            ):
+                bridge = PremiumV2Bridge()
+                job_id = bridge._new_job("import", "Import dotted TOC book", "Acceptance test")
+                bridge._job_update(
+                    job_id, state="running", started_at=bridge._now(),
+                    stage="Reading source file", progress=5,
+                )
+                bridge._import_worker(job_id, source, "Dotted TOC Integration Book")
+                job = bridge._jobs[job_id]
+
+                self.assertEqual(
+                    job["state"], "completed",
+                    f"Premium V2 import failed at {job.get('stage')}: {job.get('error') or job.get('message')}",
+                )
+                self.assertEqual(job["result"]["chapter_count"], 4)
+                self.assertEqual(job["result"]["removed_noise_count"] > 0, True)
+
+                project = Project.load(Path(job["project_folder"]))
+                self.assertEqual(
+                    [chapter.title for chapter in project.chapters],
+                    ["Prologue", "Chapter 1: Arrival", "Chapter 2: Return", "Epilogue"],
+                )
+                joined = "\n".join(chapter.text for chapter in project.chapters)
+                for expected in (
+                    "heroine walked through the old stone gate",
+                    "traveler returned home",
+                    "promised to meet again next winter",
+                    "family gathered beside the river",
+                ):
+                    self.assertIn(expected, joined)
+                for noise in ("TABLE OF CONTENTS", "........", "www.asianovel.com", "Report", "41", "42", "43", "44"):
+                    self.assertNotIn(noise, joined)
+
     def test_noise_cleanup_removes_known_watermark_without_dropping_story(self):
         source = (
             "The story mentions a report in the ordinary narration.\n"
@@ -125,6 +336,7 @@ class ImportIntegrityTests(unittest.TestCase):
 
     def test_import_worker_applies_noise_cleanup_and_reports_removed_count(self):
         source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("validate_chapter_text_coverage(text, chapters, minimum=0.90)", source)
         self.assertIn("detect_repeated_book_noise([chapter.text for chapter in chapters])", source)
         self.assertIn("chapter.text, removed = clean_import_noise(chapter.text, repeated_noise)", source)
         self.assertIn('"removed_noise_count": len(removed_noise)', source)
@@ -146,6 +358,17 @@ class ImportIntegrityTests(unittest.TestCase):
         self.assertIn("世界はまだ終わっていない。", cleaned)
         self.assertIn("walking—slowly, carefully.", cleaned)
         self.assertIn("The next paragraph stays separate.", cleaned)
+        self.assertEqual(removed, [])
+
+    def test_repeated_generic_domain_is_preserved_as_story_content(self):
+        source = [
+            "Chapter 1: Archive\nThe character reads a note linking to www.example.com before leaving.",
+            "Chapter 2: Portal\nA second character mentions www.example.com while describing the old city.",
+        ]
+        repeated = detect_repeated_book_noise(source)
+        self.assertNotIn("www.example.com", repeated)
+        cleaned, removed = clean_import_noise(source[0], set(repeated))
+        self.assertIn("www.example.com", cleaned)
         self.assertEqual(removed, [])
 
     def test_reflow_joins_hyphenated_line_wrap_without_losing_paragraph_or_heading_boundaries(self):

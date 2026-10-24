@@ -11,6 +11,10 @@ on:
       - stage-2/import-integrity
       - stage-3/voice-studio-character-assignment
       - stage-4-pronunciation-sound-design
+      - fix/installer-branding-accessibility
+      - fix/installer-live-controls-space-and-logo
+      - fix/dashboard-live-data-project-covers-player
+      - fix/html-installer-transparent-logo
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.
@@ -20,16 +24,63 @@ permissions:
   actions: write
 
 concurrency:
-  group: ryu-audiobook-windows-build
+  # A push on a separate review branch must not cancel another branch's validation run.
+  group: ryu-audiobook-windows-build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
+  tests:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          if ($pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "setup-python did not provide a real Python interpreter: $pythonExe"
+          }
+          & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 --upgrade pip
+          if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed with exit code $LASTEXITCODE." }
+          & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 -r requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw "Test dependency installation failed with exit code $LASTEXITCODE." }
+      - name: Run regression tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          $env:PYTHONPATH = (Get-Location).Path
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw "Regression tests failed with exit code $LASTEXITCODE." }
+
+  build:
+    needs: tests
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate installer JavaScript syntax
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+          if ([string]::IsNullOrWhiteSpace($nodeExe) -or -not (Test-Path -LiteralPath $nodeExe -PathType Leaf)) {
+            throw 'Node.js is required to validate the functional HTML installer script.'
+          }
+          & $nodeExe --check 'installer\ryu_installer.js'
+          if ($LASTEXITCODE -ne 0) { throw "Installer JavaScript syntax validation failed with exit code $LASTEXITCODE." }
+          & $nodeExe --check 'assets\frontend\premium_v2_backend_adapter.js'
+          if ($LASTEXITCODE -ne 0) { throw "Premium V2 backend adapter syntax validation failed with exit code $LASTEXITCODE." }
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -37,6 +88,7 @@ jobs:
           python-version: '3.12'
 
       - name: Prepare, validate and build application
+        timeout-minutes: 60
         shell: pwsh
         env:
           RYU_BUILD_NUMBER: ${{ github.run_number }}
@@ -63,12 +115,8 @@ jobs:
           & $pythonExe -c "import sys; print(sys.executable); print(sys.version)"
 
           Write-Host '=== Install dependencies ==='
-          & $pythonExe -m pip install --upgrade pip
-          & $pythonExe -m pip install -r requirements.txt
-
-          Write-Host '=== Run regression tests ==='
-          git reset --hard HEAD
-          git clean -ffdx
+          & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 --upgrade pip
+          & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 -r requirements.txt
 
           # Freeze the CI build number into source so the installed EXE does not
           # fall back to "Build dev" when launched outside the build environment.
@@ -76,8 +124,6 @@ jobs:
 
           $env:PYTHONPATH = (Get-Location).Path
           $env:PYTHONDONTWRITEBYTECODE = '1'
-          & $pythonExe -B -m unittest discover -s tests -v
-          if ($LASTEXITCODE -ne 0) { throw "Regression tests failed with exit code $LASTEXITCODE." }
 
           Write-Host '=== Verify pinned Chatterbox Nano source ==='
           $source = Get-Content 'app\tts\chatterbox_runtime.py' -Raw
@@ -88,7 +134,8 @@ jobs:
           $cbZip = Join-Path $cbRoot 'chatterbox.zip'
           $cbExtract = Join-Path $cbRoot 'src'
           New-Item -ItemType Directory -Force -Path $cbRoot | Out-Null
-          curl.exe -L --fail --retry 3 -o $cbZip "https://github.com/resemble-ai/chatterbox/archive/$revision.zip"
+          Write-Host "Downloading pinned Chatterbox source revision $revision (180-second transfer cap)." 
+          curl.exe --connect-timeout 15 --max-time 180 -L --fail --retry 2 -o $cbZip "https://github.com/resemble-ai/chatterbox/archive/$revision.zip"
           Expand-Archive -Force $cbZip $cbExtract
           $ttsTurbo = Get-ChildItem $cbExtract -Recurse -Filter 'tts_turbo.py' | Select-Object -First 1
           $nanoExample = Get-ChildItem $cbExtract -Recurse -Filter 'example_tts_nano.py' | Select-Object -First 1
@@ -106,8 +153,10 @@ jobs:
 
           Write-Host '=== Download bundled offline Kokoro voices ==='
           New-Item -ItemType Directory -Force -Path 'bundled_models\kokoro' | Out-Null
-          curl.exe -L --fail --retry 3 -o 'bundled_models\kokoro\kokoro-v1.0.fp16.onnx' 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.fp16.onnx'
-          curl.exe -L --fail --retry 3 -o 'bundled_models\kokoro\voices-v1.0.bin' 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin'
+          Write-Host 'Downloading Kokoro ONNX model (maximum 600 seconds).' 
+          curl.exe --connect-timeout 15 --max-time 600 -L --fail --retry 2 -o 'bundled_models\kokoro\kokoro-v1.0.fp16.onnx' 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.fp16.onnx'
+          Write-Host 'Downloading Kokoro voice pack (maximum 240 seconds).' 
+          curl.exe --connect-timeout 15 --max-time 240 -L --fail --retry 2 -o 'bundled_models\kokoro\voices-v1.0.bin' 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin'
           $model = Get-Item 'bundled_models\kokoro\kokoro-v1.0.fp16.onnx'
           $voices = Get-Item 'bundled_models\kokoro\voices-v1.0.bin'
           if ($model.Length -lt 100MB -or $voices.Length -lt 10MB) { throw 'Kokoro offline assets are incomplete.' }
@@ -151,7 +200,8 @@ jobs:
             $downloaded = $false
             foreach ($candidateUrl in $candidateUrls) {
               try {
-                curl.exe -L --fail --retry 1 --silent --show-error -A 'RyuAudiobookStarterAudio/1.0' -o $target $candidateUrl
+                Write-Host "Trying starter track '$($item.Rel)' from $candidateUrl (45-second cap)."
+                curl.exe --connect-timeout 10 --max-time 45 -L --fail --retry 0 --silent --show-error -A 'RyuAudiobookStarterAudio/1.0' -o $target $candidateUrl
                 if ($LASTEXITCODE -ne 0) { throw "Download exit code $LASTEXITCODE from $candidateUrl" }
                 if (-not (Test-Path $target) -or (Get-Item $target).Length -lt $item.Min) {
                   throw "File is missing or below minimum size from $candidateUrl"
@@ -188,7 +238,8 @@ jobs:
               if ($url.StartsWith('//')) { $url = 'https:' + $url }
               elseif ($url.StartsWith('/')) { $url = 'https://cdn.freesound.org' + $url }
               New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Destination) | Out-Null
-              curl.exe -L --fail --retry 2 --silent --show-error -A 'Mozilla/5.0 Ryu-Audiobook-asset-builder/1.0' -o $Destination $url
+              Write-Host "Downloading preview for $PageUrl (60-second cap)."
+              curl.exe --connect-timeout 10 --max-time 60 -L --fail --retry 1 --silent --show-error -A 'Mozilla/5.0 Ryu-Audiobook-asset-builder/1.0' -o $Destination $url
               if ($LASTEXITCODE -ne 0 -or -not (Test-Path $Destination) -or (Get-Item $Destination).Length -lt 5000) {
                 Remove-Item -Force -ErrorAction SilentlyContinue $Destination
                 Write-Warning "Could not download preview for $PageUrl."
@@ -280,6 +331,7 @@ jobs:
 
           Write-Host '=== Build Windows application ==='
           & $pythonExe build.py
+          if ($LASTEXITCODE -ne 0) { throw "Windows application build failed with exit code $LASTEXITCODE." }
 
           Write-Host '=== Live Audiobook AI + application integration smoke ==='
           $aiRoot = Join-Path $env:RUNNER_TEMP 'ryu-ai-smoke'
@@ -289,13 +341,15 @@ jobs:
           $llamaZip = Join-Path $aiRoot 'llama.zip'
           if (-not (Test-Path $aiBin)) {
             New-Item -ItemType Directory -Force -Path $aiBin | Out-Null
-            curl.exe -L --fail --retry 3 -o $llamaZip 'https://github.com/ggml-org/llama.cpp/releases/download/b11193/llama-b11193-bin-win-cpu-x64.zip'
+            Write-Host 'Downloading llama.cpp CPU runtime (maximum 300 seconds).'
+            curl.exe --connect-timeout 15 --max-time 300 -L --fail --retry 2 -o $llamaZip 'https://github.com/ggml-org/llama.cpp/releases/download/b11193/llama-b11193-bin-win-cpu-x64.zip'
             Expand-Archive -Force $llamaZip $aiBin
           }
           $server = Get-ChildItem $aiBin -Recurse -Filter 'llama-server.exe' | Select-Object -First 1
           if (-not $server) { throw 'llama-server.exe was not found.' }
           if (-not (Test-Path $aiModel)) {
-            curl.exe -L --fail --retry 3 -o "$aiModel.part" 'https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/ef4088322893040952513f532f736ddeab518403/Qwen3-0.6B-Q5_K_M.gguf?download=true'
+            Write-Host 'Downloading Qwen3 GGUF model for the integration smoke test (maximum 900 seconds).'
+            curl.exe --connect-timeout 20 --max-time 900 -L --fail --retry 2 -o "$aiModel.part" 'https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/ef4088322893040952513f532f736ddeab518403/Qwen3-0.6B-Q5_K_M.gguf?download=true'
             Move-Item -Force "$aiModel.part" $aiModel
           }
           $stdoutLog = Join-Path $aiRoot 'llama.stdout.log'
@@ -364,7 +418,8 @@ jobs:
           $target = Join-Path $root 'python312'
           $venv = Join-Path $root 'runtime'
           New-Item -ItemType Directory -Force -Path $root | Out-Null
-          curl.exe -L --fail --retry 3 -o $installer 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe'
+          Write-Host 'Downloading Python 3.12.10 bootstrap installer (maximum 240 seconds).'
+          curl.exe --connect-timeout 15 --max-time 240 -L --fail --retry 2 -o $installer 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe'
           $arguments = @('/quiet','/passive','InstallAllUsers=0','Include_launcher=0','Include_test=0','PrependPath=0','Shortcuts=0',"TargetDir=$target")
           $process = Start-Process -FilePath $installer -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
           if ($process.ExitCode -notin @(0,3010)) { throw "Private Python installer failed with exit code $($process.ExitCode)." }
@@ -375,7 +430,7 @@ jobs:
           $venvPython = Join-Path $venv 'Scripts\python.exe'
           if (-not (Test-Path $venvPython)) { throw 'Private Qwen venv was not created.' }
           & $venvPython -m pip --version
-          & $venvPython -m pip install --no-deps qwen-tts==0.1.1
+          & $venvPython -m pip install --disable-pip-version-check --timeout 60 --retries 2 --no-deps qwen-tts==0.1.1
           & $venvPython -c "import importlib.metadata as md; assert md.version('qwen-tts') == '0.1.1'; print('qwen_tts wheel bootstrap OK')"
 
       - name: Verify frozen application
@@ -467,7 +522,7 @@ jobs:
           choco install innosetup -y --no-progress
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed with exit code $LASTEXITCODE." }
 
-      - name: Build installer
+      - name: Build core installer payload
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -479,23 +534,81 @@ jobs:
           if (-not $isccPath) { throw 'ISCC.exe was not found after Inno Setup installation.' }
           Write-Host "Using Inno Setup compiler: $isccPath"
           & $isccPath 'installer\RyuAudiobook.iss'
-          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed with exit code $LASTEXITCODE." }
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup core compilation failed with exit code $LASTEXITCODE." }
+          $coreInstaller = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Core Setup.exe"
+          if (-not (Test-Path $coreInstaller)) { throw "Core installer was not produced: $coreInstaller" }
+
+      - name: Restore Python for HTML installer packaging
+        id: html_python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build functional HTML installer
+        shell: pwsh
+        env:
+          HTML_PYTHON: ${{ steps.html_python.outputs.python-path }}
+        run: |
+          # Re-select Python after the long core-setup compile. Prefer the
+          # freshly restored setup-python interpreter, then use the private
+          # Python runtime already installed and smoke-tested earlier in this job.
+          $pythonExe = $env:HTML_PYTHON
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            $privatePython = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap\python312\python.exe'
+            if (Test-Path -LiteralPath $privatePython -PathType Leaf) {
+              $pythonExe = $privatePython
+              Write-Host "Using verified private Python fallback: $pythonExe"
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            $pathCandidate = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
+            if (-not [string]::IsNullOrWhiteSpace($pathCandidate) -and $pathCandidate -notlike '*WindowsApps*' -and (Test-Path -LiteralPath $pathCandidate -PathType Leaf)) {
+              $pythonExe = $pathCandidate
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "No usable Python interpreter for HTML packaging. setup-python=$($env:HTML_PYTHON); private fallback=$privatePython"
+          }
+          Write-Host "Using HTML-installer Python: $pythonExe"
+          & $pythonExe -m pip --version
+          if ($LASTEXITCODE -ne 0) {
+            & $pythonExe -m ensurepip --upgrade
+            if ($LASTEXITCODE -ne 0) { throw "Could not bootstrap pip for HTML installer Python (exit $LASTEXITCODE)." }
+          }
+          $env:PYTHONPATH = (Get-Location).Path
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 PyInstaller PySide6
+          if ($LASTEXITCODE -ne 0) { throw "HTML installer build dependencies failed to install (exit $LASTEXITCODE)." }
+          Write-Host '=== Package functional HTML setup interface ==='
+          & $pythonExe -B 'installer\build_html_installer.py'
+          if ($LASTEXITCODE -ne 0) { throw "HTML installer packaging failed with exit code $LASTEXITCODE." }
           $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
-          if (-not (Test-Path $installer)) { throw "Installer was not produced: $installer" }
-          Write-Host "Installer created: $installer"
+          if (-not (Test-Path $installer)) { throw "HTML installer frontend was not produced: $installer" }
+          Write-Host "Functional HTML installer created: $installer"
 
       - name: Verify original logo transparency and generate release hashes
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           Add-Type -AssemblyName System.Drawing
+          $masterLogo = Join-Path (Get-Location) 'assets\ryu_audiobook_logo_master.png'
           $png = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.png'
           $ico = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.ico'
+          $logoBmp = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.bmp'
+          $panel = Join-Path (Get-Location) 'assets\installer_brand_panel.png'
+          $panelBmp = Join-Path (Get-Location) 'assets\installer_brand_panel.bmp'
+          $coreInstaller = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Core Setup.exe"
           $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
           $exe = Join-Path (Get-Location) "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
-          foreach ($path in @($png, $ico, $installer, $exe)) {
+          foreach ($path in @($masterLogo, $png, $ico, $logoBmp, $panel, $panelBmp, $coreInstaller, $installer, $exe)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required release asset missing: $path" }
           }
+          $masterBitmap = [System.Drawing.Bitmap]::FromFile($masterLogo)
+          try {
+            if ($masterBitmap.GetPixel(0,0).A -ne 0 -or $masterBitmap.GetPixel($masterBitmap.Width-1,0).A -ne 0 -or $masterBitmap.GetPixel(0,$masterBitmap.Height-1).A -ne 0 -or $masterBitmap.GetPixel($masterBitmap.Width-1,$masterBitmap.Height-1).A -ne 0) {
+              throw 'Approved master logo must remain transparent at all canvas corners.'
+            }
+          } finally { $masterBitmap.Dispose() }
           $bitmap = [System.Drawing.Bitmap]::FromFile($png)
           try {
             $transparent = 0
@@ -506,17 +619,30 @@ jobs:
               }
             }
             $total = $bitmap.Width * $bitmap.Height
-            if ($transparent -lt 1 -or $nonTransparent -lt ($total * 0.1)) {
-              throw "Logo alpha/content check failed: dimensions=$($bitmap.Width)x$($bitmap.Height), transparent=$transparent, nonTransparent=$nonTransparent"
+            if ($bitmap.Width -lt 1200 -or $bitmap.Height -lt 1200 -or $transparent -lt 1 -or $nonTransparent -lt ($total * 0.1)) {
+              throw "Logo alpha/content/resolution check failed: dimensions=$($bitmap.Width)x$($bitmap.Height), transparent=$transparent, nonTransparent=$nonTransparent"
             }
-            Write-Host "Original logo PNG transparency verified: $($bitmap.Width)x$($bitmap.Height), transparent pixels=$transparent."
+            if ($bitmap.GetPixel(0,0).A -ne 0 -or $bitmap.GetPixel($bitmap.Width-1,0).A -ne 0 -or $bitmap.GetPixel(0,$bitmap.Height-1).A -ne 0 -or $bitmap.GetPixel($bitmap.Width-1,$bitmap.Height-1).A -ne 0) {
+              throw 'Original logo canvas corners must remain fully transparent; do not add a background.'
+            }
+            Write-Host "Logo resolution and transparency verified: $($bitmap.Width)x$($bitmap.Height), transparent pixels=$transparent."
           } finally {
             $bitmap.Dispose()
           }
+          $logoBitmap = [System.Drawing.Bitmap]::FromFile($logoBmp)
+          try {
+            $corner = $logoBitmap.GetPixel(0,0)
+            if ($corner.R -ne 5 -or $corner.G -ne 6 -or $corner.B -ne 10) { throw "Installer logo BMP has the wrong matte: $($corner.R),$($corner.G),$($corner.B)" }
+          } finally { $logoBitmap.Dispose() }
+          $panelBitmap = [System.Drawing.Bitmap]::FromFile($panelBmp)
+          try {
+            $corner = $panelBitmap.GetPixel(0,0)
+            if ($corner.R -ne 5 -or $corner.G -ne 6 -or $corner.B -ne 10) { throw "Installer panel BMP has the wrong matte: $($corner.R),$($corner.G),$($corner.B)" }
+          } finally { $panelBitmap.Dispose() }
           if ((Get-Item -LiteralPath $ico).Length -lt 1024) { throw 'Generated Windows ICO is unexpectedly small.' }
           Write-Host "Generated Windows ICO exists and is non-trivial in size: $((Get-Item -LiteralPath $ico).Length) bytes."
           $manifest = @()
-          foreach ($path in @($installer, $exe, $png, $ico)) {
+          foreach ($path in @($installer, $coreInstaller, $exe, $masterLogo, $png, $ico, $logoBmp, $panel, $panelBmp)) {
             $hash = Get-FileHash -LiteralPath $path -Algorithm SHA256
             $manifest += [pscustomobject]@{
               file = [System.IO.Path]::GetRelativePath((Get-Location).Path, $path)
@@ -534,7 +660,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $exe = Join-Path (Get-Location) "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
           $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
-          foreach ($path in @($exe, $installer)) {
+          $coreInstaller = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Core Setup.exe"
+          foreach ($path in @($exe, $installer, $coreInstaller)) {
             if (-not (Test-Path $path)) { throw "Release executable missing for security scan: $path" }
           }
           $status = Get-MpComputerStatus -ErrorAction Stop
@@ -547,7 +674,7 @@ jobs:
               Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
           }
           if (-not $mp -or -not (Test-Path $mp)) { throw 'Microsoft Defender command-line scanner was not found.' }
-          foreach ($path in @($exe, $installer)) {
+          foreach ($path in @($exe, $installer, $coreInstaller)) {
             Write-Host "Microsoft Defender custom scan: $path"
             $scanOutput = @(& $mp -Scan -ScanType 3 -File $path -DisableRemediation 2>&1)
             $scanExit = $LASTEXITCODE
@@ -563,6 +690,7 @@ jobs:
           Write-Host 'Microsoft Defender completed both release executable scans without reporting a detection.'
 
       - name: Upload Windows installer artifact
+        id: upload_installer
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Installer-${{ github.run_number }}
@@ -588,7 +716,7 @@ jobs:
           compression-level: 0
           retention-days: 30
 
-      - name: Remove older Windows build runs and artifacts
+      - name: Remove superseded Windows artifacts after successful build
         if: success()
         shell: pwsh
         env:
@@ -597,20 +725,35 @@ jobs:
           CURRENT_RUN_ID: ${{ github.run_id }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $runs = gh api --paginate "/repos/$env:REPOSITORY/actions/runs?per_page=100" --jq '.workflow_runs[] | select(.name == "Build Windows App") | [.id,.status,.created_at] | @tsv'
-          foreach ($line in $runs) {
-            if ([string]::IsNullOrWhiteSpace($line)) { continue }
-            $parts = $line -split "	"
-            $runId = $parts[0]
-            $status = $parts[1]
-            if ($runId -eq $env:CURRENT_RUN_ID) { continue }
-            if ($status -in @('in_progress','queued','waiting','requested','pending')) { continue }
-            Write-Host "Removing old Windows build run $runId ($status) and its artifact."
-            gh api --method DELETE "/repos/$env:REPOSITORY/actions/runs/$runId" | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "Could not remove old workflow run $runId." }
+          # This job is tied to the canonical 1.1.1 installer track. Keep run 1021,
+          # runs attached to open PRs, active runs, and every unsuccessful run for diagnostics.
+          $openPrRuns = @{}
+          $pullRequests = gh api --paginate "/repos/$env:REPOSITORY/pulls?state=open&per_page=100"
+          if ($LASTEXITCODE -ne 0) { throw "Could not enumerate open pull requests; refusing cleanup." }
+          $pullRequests | ConvertFrom-Json | ForEach-Object {
+            if ($_.head.repo.full_name -eq $env:REPOSITORY -and $_.head.sha) { $openPrRuns[$_.head.sha] = $true }
           }
-          Write-Host "Only the newly uploaded Windows build is retained."
-
+          $runs = gh api --paginate "/repos/$env:REPOSITORY/actions/runs?per_page=100" --jq '.workflow_runs[] | select(.name == "Build Windows App" and .status == "completed" and .conclusion == "success") | [.id,.head_sha,.head_branch] | @tsv'
+          if ($LASTEXITCODE -ne 0) { throw "Could not enumerate build runs; refusing cleanup." }
+          foreach ($line in @($runs)) {
+            if ([string]::IsNullOrWhiteSpace("$line")) { continue }
+            $parts = "$line" -split [char]9, 3
+            $runId = $parts[0]
+            $sha = $parts[1]
+            $runBranch = $parts[2]
+            if ($runId -eq $env:CURRENT_RUN_ID) { continue }
+            if ($runId -eq "39933305387" -or $runBranch -eq "fix/installer-branding-accessibility" -and $sha -eq "ec9ba04c5f14be5a0efa6b2467132b7b18d921f0") {
+              Write-Host "Preserving canonical 1.1.1 reference Build 1021 ($runId)."
+              continue
+            }
+            if ($openPrRuns.ContainsKey($sha)) { Write-Host "Preserving build required by open PR: $runId ($sha)"; continue }
+            # Never delete review-branch runs or different app/version tracks.
+            if ($runBranch -ne "main" -and $runBranch -ne "fix/installer-branding-accessibility") { continue }
+            Write-Host "Removing superseded successful 1.1.1-track build $runId ($runBranch, $sha)."
+            gh api --method DELETE "/repos/$env:REPOSITORY/actions/runs/$runId" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Could not remove superseded build run $runId." }
+          }
+          Write-Host "Cleanup complete: Build 1021 and open-PR runs were preserved."
       - name: Publish verified installer release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: pwsh

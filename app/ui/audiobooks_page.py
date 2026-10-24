@@ -221,9 +221,21 @@ class AudiobooksPage(QWidget):
         self.open_output_button = QPushButton("Open Output Folder")
         self.open_output_button.clicked.connect(self._open_output_folder)
         player_layout.addWidget(self.open_output_button)
+        self.external_play_button = QPushButton("Try in Default Player")
+        self.external_play_button.setToolTip(
+            "Open this unchanged audiobook with the Windows app associated with its file type."
+        )
+        self.external_play_button.clicked.connect(self._open_in_default_player)
+        # Keep the fallback button's place reserved; showing it only after a
+        # decode error would itself resize the player panel during failure.
+        self.external_play_button.setVisible(True)
+        self.external_play_button.setEnabled(False)
+        player_layout.addWidget(self.external_play_button)
         self.status = QLabel("Ready")
         self.status.setObjectName("muted")
         self.status.setWordWrap(True)
+        self.status.setMinimumHeight(38)
+        self.status.setMaximumHeight(66)
         player_layout.addWidget(self.status)
         player_layout.addStretch(1)
         body.addWidget(player_box, 4)
@@ -245,9 +257,12 @@ class AudiobooksPage(QWidget):
     def _selection_changed(self, current, _previous=None) -> None:
         path = self._selected_path()
         item = self._selected_item()
+        self.external_play_button.setEnabled(bool(path))
         if not path or item is None:
             self.now_playing.setText("Select a finished audiobook to begin.")
             self.file_detail.setText("No verified output file is selected.")
+            self.open_project_button.setEnabled(False)
+            self.open_output_button.setEnabled(False)
             return
         title = str(item.data(Qt.ItemDataRole.UserRole + 2) or item.text().splitlines()[0])
         self.now_playing.setText(title)
@@ -327,16 +342,27 @@ class AudiobooksPage(QWidget):
     def play_selected(self) -> None:
         path = self._selected_path()
         if path is None:
-            self.status.setText("Select an existing audiobook output first.")
+            self.status.setText(
+                "The selected audiobook file is missing or no longer accessible. "
+                "Refresh the Library and verify the output path."
+            )
             return
+        self.external_play_button.setEnabled(True)
         try:
             if self.player.source().toLocalFile() != str(path):
+                # Stop the previous track before changing sources. Do not let a
+                # source-change event imply that playback succeeded.
+                self.player.stop()
                 self.player.setSource(QUrl.fromLocalFile(str(path)))
             self._active_path = path
+            self.status.setText(f"Opening local audio: {path.name}…")
             self.player.play()
-            self.status.setText(f"Opening local audio: {path.name}")
         except Exception as exc:
-            self.status.setText(f"Could not play {path.name}: {type(exc).__name__}: {exc}")
+            self.status.setText(
+                f"Could not play {path.name}: {type(exc).__name__}: {exc}. "
+                "The original file has not been changed."
+            )
+            self.external_play_button.setEnabled(path.is_file())
 
     def pause_resume(self) -> None:
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
@@ -355,9 +381,14 @@ class AudiobooksPage(QWidget):
         self.status.setText("Playback stopped.")
 
     def _playback_state_changed(self, state) -> None:
-        self.pause_button.setText(
-            "Pause" if state == QMediaPlayer.PlaybackState.PlayingState else "Resume"
-        )
+        playing = state == QMediaPlayer.PlaybackState.PlayingState
+        self.pause_button.setText("Pause" if playing else "Resume")
+        if playing:
+            self.status.setText(f"Playing {self._active_path.name}" if self._active_path else "Playing audiobook.")
+        elif state == QMediaPlayer.PlaybackState.PausedState:
+            self.status.setText("Playback paused.")
+        # StoppedState deliberately does not announce success: a failed decoder
+        # can transition to stopped immediately after the user presses Play.
 
     def _position_changed(self, position: int) -> None:
         self.timeline.blockSignals(True)
@@ -369,12 +400,30 @@ class AudiobooksPage(QWidget):
         self.timeline.setRange(0, max(0, duration))
         self.duration_label.setText(_time_text(duration))
 
-    def _playback_error(self, _error, error_text: str) -> None:
-        if error_text:
+    def _playback_error(self, error, error_text: str) -> None:
+        current = self.player.source().toLocalFile()
+        path = Path(current) if current else self._active_path
+        detail = str(error_text or "").strip() or str(error)
+        name = path.name if path else "the selected audiobook"
+        self.status.setText(
+            f"In-app playback could not open {name}. The audio file was not modified. "
+            f"Playback backend details: {detail}"
+        )
+        self.external_play_button.setEnabled(bool(path and path.is_file()))
+
+    def _open_in_default_player(self) -> None:
+        path = self._selected_path() or self._active_path
+        if path is None or not path.is_file():
+            self.status.setText("The audiobook file is no longer available at its saved location.")
+            self.external_play_button.setEnabled(False)
+            return
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
             self.status.setText(
-                "The local media backend could not play this file. "
-                "Try a Windows-supported audio format. Details: " + str(error_text)
+                f"Windows could not open {path.name} with its default player. "
+                "Check the file association or open the output folder."
             )
+        else:
+            self.status.setText(f"Asked Windows to open {path.name} in its default player.")
 
     def _open_project(self) -> None:
         item = self._selected_item()
