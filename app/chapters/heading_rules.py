@@ -17,6 +17,7 @@ _WORD_NUMBER = (
     r"fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|"
     r"twentieth|thirtieth|fortieth|fiftieth|sixtieth|seventieth|eightieth|"
     r"ninetieth|last)"
+)
 _NUMBER_TOKEN = rf"(?:\d{{1,4}}|[IVXLCDM]{{1,12}}|{_WORD_NUMBER})"
 _SUFFIX = r"(?:(?P<delim>\s*[-:–—|.]\s*)(?P<delimited_title>.*)|\s+(?P<space_title>.*))?"
 
