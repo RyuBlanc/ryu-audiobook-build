@@ -321,5 +321,16 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("updatePreviewTarget(profile,libraryLabel,key);", source)
         self.assertIn("model=profile?.qwen_mode==='design'?'VoiceDesign'", source)
 
+
+    def test_voice_details_and_assignment_summary_are_loaded_or_empty(self):
+        adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        source = adapter.read_text(encoding="utf-8")
+        self.assertIn("function ensureVoiceProfileDetails()", source)
+        self.assertIn("'Voice ID':'detailVoiceId'", source)
+        self.assertIn("'Language':'detailLanguage'", source)
+        self.assertIn("detailAuthorization", source)
+        self.assertIn("if($('sumAssign'))$('sumAssign').textContent='';", source)
+        self.assertIn("if($('sumAssign'))$('sumAssign').textContent=primary;", source)
+
 if __name__ == "__main__":
     unittest.main()
