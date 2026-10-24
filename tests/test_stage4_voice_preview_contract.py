@@ -664,7 +664,9 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("self._cache_preview_provider(cache_signature, provider, voice)", host)
         self.assertIn("threading.Timer(90.0, self._expire_preview_provider_cache", host)
         generation = host[host.index("def _production_generate_book"):host.index("def _production_preview")]
-        self.assertIn("self.close_preview_provider_cache()", generation)
+        self.assertIn('close_cache = getattr(self, "close_preview_provider_cache", None)', generation)
+        self.assertIn("if callable(close_cache):", generation)
+        self.assertIn("close_cache()", generation)
         self.assertIn("close_preview_provider_cache", host[host.index("class PremiumV2Window"):])
 
 
