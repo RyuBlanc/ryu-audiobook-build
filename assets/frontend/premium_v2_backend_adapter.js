@@ -1235,6 +1235,67 @@
     };
     await tick(); poll = setInterval(tick, 1000);
   }
+  function requestVoiceProfileSaveName(initialName, providerKey, voiceLabel) {
+    return new Promise(resolve => {
+      $('ryuVoiceProfileSaveConfirm')?.remove();
+      const providerNames = {offline:'Offline Neural Voices',sapi:'Windows SAPI',customvoice:'Qwen CustomVoice',voicedesign:'Qwen VoiceDesign',qwenclone:'Qwen Voice Clone',customref:'Reference Voice',edge:'Edge TTS',eleven:'ElevenLabs'};
+      const overlay = document.createElement('div');
+      overlay.id = 'ryuVoiceProfileSaveConfirm';
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(3,5,10,.78);backdrop-filter:blur(7px)';
+      const panel = document.createElement('section');
+      panel.setAttribute('role','dialog'); panel.setAttribute('aria-modal','true');
+      panel.setAttribute('aria-labelledby','ryuVoiceSaveTitle');
+      panel.style.cssText = 'box-sizing:border-box;width:min(460px,100%);background:#151a25;border:1px solid rgba(255,255,255,.13);border-radius:18px;box-shadow:0 24px 80px rgba(0,0,0,.5);padding:22px;color:#f4f5f8';
+      const eyebrow = document.createElement('div');
+      eyebrow.textContent = 'CONFIRM VOICE PROFILE';
+      eyebrow.style.cssText = 'color:#e8b957;font-size:11px;font-weight:800;letter-spacing:.13em;margin-bottom:8px';
+      const title = document.createElement('h2');
+      title.id = 'ryuVoiceSaveTitle'; title.textContent = 'Save this voice profile?';
+      title.style.cssText = 'margin:0 0 8px;font-size:22px';
+      const description = document.createElement('p');
+      description.textContent = 'This saves profile settings locally. It does not generate audio or change your narrator until you choose “Save and Use as Narrator”.';
+      description.style.cssText = 'margin:0 0 16px;color:#aeb6c5;font-size:13px;line-height:1.5';
+      const providerLabel = document.createElement('div');
+      providerLabel.textContent = 'Voice library · ' + (providerNames[providerKey] || providerKey);
+      providerLabel.style.cssText = 'font-size:13px;font-weight:700;margin:8px 0';
+      const voiceLine = document.createElement('div');
+      voiceLine.textContent = 'Selected voice / model · ' + (voiceLabel || 'Provider default');
+      voiceLine.style.cssText = 'font-size:13px;font-weight:700;margin:8px 0 16px;overflow-wrap:anywhere';
+      const label = document.createElement('label');
+      label.htmlFor = 'ryuVoiceProfileNameConfirm'; label.textContent = 'Profile name (editable)';
+      label.style.cssText = 'display:block;font-size:12px;color:#aeb6c5;margin:12px 0 6px';
+      const input = document.createElement('input');
+      input.id = 'ryuVoiceProfileNameConfirm'; input.maxLength = 160; input.value = initialName || '';
+      input.style.cssText = 'box-sizing:border-box;width:100%;padding:12px;border-radius:10px;border:1px solid #42495a;background:#0c1018;color:#f6f7fa;font:inherit;outline-color:#e63361';
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;justify-content:flex-end;gap:10px;margin-top:20px;flex-wrap:wrap';
+      const cancel = document.createElement('button');
+      cancel.type = 'button'; cancel.textContent = 'Cancel';
+      cancel.style.cssText = 'padding:10px 14px;border-radius:10px;background:#1c2230;border:1px solid #343b4a;color:#f2f4f8;font-weight:700;cursor:pointer';
+      const save = document.createElement('button');
+      save.type = 'button'; save.textContent = 'Confirm & Save Profile';
+      save.style.cssText = 'padding:10px 16px;border-radius:10px;background:#c92050;border:1px solid #e7426a;color:white;font-weight:800;cursor:pointer';
+      actions.append(cancel,save);
+      panel.append(eyebrow,title,description,providerLabel,voiceLine,label,input,actions);
+      overlay.append(panel);
+      let finished = false;
+      const finish = value => { if (finished) return; finished = true; overlay.remove(); resolve(value); };
+      cancel.addEventListener('click', () => finish(null));
+      save.addEventListener('click', () => {
+        const value = String(input.value || '').trim();
+        if (!value) { input.focus(); message('Enter a profile name before saving.', true); return; }
+        finish(value);
+      });
+      overlay.addEventListener('click', event => { if (event.target === overlay) finish(null); });
+      input.addEventListener('keydown', event => {
+        if (event.key === 'Enter') { event.preventDefault(); save.click(); }
+        if (event.key === 'Escape') { event.preventDefault(); finish(null); }
+      });
+      document.body.appendChild(overlay);
+      input.focus(); input.select();
+    });
+  }
+
   async function saveVoice() {
     const name = ($('profileName')?.value || $('premiumName')?.value || '').trim();
     if (!name) throw new Error('Enter a name for this voice profile.');
