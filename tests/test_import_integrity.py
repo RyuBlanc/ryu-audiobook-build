@@ -164,7 +164,7 @@ class ImportIntegrityTests(unittest.TestCase):
         for number in range(1, 13):
             parts.append(f"Chapter {number}: The Quiet Return")
             parts.append("The dawn breaks now.")
-        source = "\\n".join(parts)
+        source = "\n".join(parts)
         chapters = detect_chapters(source)
 
         self.assertEqual(len(chapters), 12)
@@ -174,10 +174,10 @@ class ImportIntegrityTests(unittest.TestCase):
         validate_chapter_text_coverage(source, chapters, minimum=0.90)
 
     def test_txt_import_to_chapter_cleanup_pipeline_preserves_story_bodies(self):
-        source_text = "\\n\\n".join([
-            "Chapter 1: The Arrival\\nA heroine followed the old road to the city gate.\\n41\\nReport\\nwww.asianovel.com",
-            "Chapter 2: The Return\\nThe hero came home after the long battle ended.\\n42\\nReport\\nwww.asianovel.com",
-            "Chapter 3: The Promise\\nThey promised to meet again before the winter festival.\\n43\\nReport\\nwww.asianovel.com",
+        source_text = "\n\n".join([
+            "Chapter 1: The Arrival\nA heroine followed the old road to the city gate.\n41\nReport\nwww.asianovel.com",
+            "Chapter 2: The Return\nThe hero came home after the long battle ended.\n42\nReport\nwww.asianovel.com",
+            "Chapter 3: The Promise\nThey promised to meet again before the winter festival.\n43\nReport\nwww.asianovel.com",
         ])
         with tempfile.TemporaryDirectory() as temp:
             source = Path(temp) / "realistic-light-novel.txt"
@@ -193,7 +193,7 @@ class ImportIntegrityTests(unittest.TestCase):
             chapter.text, _removed = clean_import_noise(chapter.text, repeated)
             cleaned_chapters.append(chapter)
 
-        joined = "\\n".join(chapter.text for chapter in cleaned_chapters)
+        joined = "\n".join(chapter.text for chapter in cleaned_chapters)
         for body in ("heroine followed", "hero came home", "promised to meet"):
             self.assertIn(body, joined)
         self.assertNotIn("Report", joined)
