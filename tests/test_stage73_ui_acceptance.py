@@ -170,7 +170,8 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
         import_page = (ROOT / "app" / "ui" / "import_page.py").read_text(encoding="utf-8")
         self.assertIn('if not str(book.text or "").strip():', import_page)
         self.assertIn('if not chapters:', import_page)
-        self.assertIn('chapter_words < int(source_words * 0.90)', import_page)
+        self.assertIn('validate_chapter_text_coverage(book.text, chapters, minimum=0.90)', import_page)
+        self.assertIn('def validate_chapter_text_coverage(', (ROOT / "app" / "documents" / "parser.py").read_text(encoding="utf-8"))
         self.assertIn('Import was stopped to protect your book from losing content.', import_page)
         self.assertIn('self.status.setText(f"Import analysis failed: {message}")', import_page)
 
