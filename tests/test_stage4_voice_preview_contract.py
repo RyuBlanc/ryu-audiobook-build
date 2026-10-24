@@ -359,6 +359,81 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("Recreating these controls on every polling refresh causes", source)
         self.assertIn("a visible flash and can steal keyboard focus from the active filter.", source)
 
+    def test_native_preview_completion_is_bound_to_the_request_and_profile(self):
+        voice_page = Path(__file__).resolve().parents[1] / "app" / "ui" / "voice_page.py"
+        source = voice_page.read_text(encoding="utf-8")
+        self.assertIn("self._preview_request_id = int(getattr(self, \"_preview_request_id\", 0)) + 1", source)
+        self.assertIn("self._preview_requested_signature = self._voice_profile_signature(profile)", source)
+        self.assertIn("if not self._preview_request_is_current(request_id):", source)
+        self.assertIn("requested_signature is not None and active_signature != requested_signature", source)
+        self.assertIn('tempfile.mkdtemp(prefix="ryu_audiobook_voice_preview_")', source)
+        self.assertIn("self._discard_preview_output(path)", source)
+
+    def test_voice_combo_refresh_does_not_rebuild_identical_rows_and_preserves_selection(self):
+        from types import SimpleNamespace
+        from app.ui.voice_page import VoicePage
+
+        class MemoryCombo:
+            def __init__(self, items, index):
+                self.items = list(items)
+                self.index = index
+                self.blocked = False
+                self.rebuilds = 0
+
+            def count(self):
+                return len(self.items)
+
+            def itemText(self, index):
+                return self.items[index][0]
+
+            def itemData(self, index):
+                return self.items[index][1]
+
+            def currentData(self):
+                return self.items[self.index][1] if 0 <= self.index < len(self.items) else None
+
+            def blockSignals(self, blocked):
+                previous = self.blocked
+                self.blocked = blocked
+                return previous
+
+            def clear(self):
+                self.rebuilds += 1
+                self.items.clear()
+                self.index = -1
+
+            def addItem(self, label, data):
+                self.items.append((label, data))
+                if self.index < 0:
+                    self.index = 0
+
+            def findData(self, data):
+                return next((i for i, (_, value) in enumerate(self.items) if value == data), -1)
+
+            def setCurrentIndex(self, index):
+                self.index = index
+
+        combo = MemoryCombo([("Voice A", "a"), ("Voice B", "b")], 1)
+        page = SimpleNamespace(neural_voice=combo)
+        self.assertFalse(VoicePage._set_voice_combo_items(page, [("Voice A", "a"), ("Voice B", "b")]))
+        self.assertEqual(combo.rebuilds, 0)
+        self.assertEqual(combo.currentData(), "b")
+
+        self.assertTrue(VoicePage._set_voice_combo_items(
+            page, [("Voice A updated", "a"), ("Voice B", "b"), ("Voice C", "c")]
+        ))
+        self.assertEqual(combo.currentData(), "b")
+        self.assertEqual(combo.items[0][0], "Voice A updated")
+
+    def test_native_saved_profile_restores_qwen_language_and_saved_name(self):
+        voice_page = Path(__file__).resolve().parents[1] / "app" / "ui" / "voice_page.py"
+        source = voice_page.read_text(encoding="utf-8")
+        self.assertIn("self.qwen_design_language.findText(profile.language or \"\")", source)
+        self.assertIn('profile.provider in {"piper", "kokoro", "edge-tts", "elevenlabs"}', source)
+        self.assertIn("self.name.setText(profile.name)", source)
+        self.assertIn("self.saved_profiles.setCurrentIndex(selected_profile_index)", source)
+        self.assertIn("No substitute voice was selected", source)
+
     def test_qwen_voice_design_preview_uses_the_friendly_preset_name(self):
         adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
         source = adapter.read_text(encoding="utf-8")
