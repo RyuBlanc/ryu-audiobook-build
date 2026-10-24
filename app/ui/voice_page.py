@@ -1224,16 +1224,19 @@ class VoicePage(QWidget):
         ).strip()
         if series:
             roster = state.get("voice_cast_character_roster", [])
-            source_row = next(
+            roster_row = next(
                 (
-                    dict(row) for row in roster
+                    row for row in roster
                     if isinstance(row, dict)
                     and str(row.get("name") or "").strip().casefold() == character.casefold()
                 ),
-                {"name": character},
-            ) if isinstance(roster, list) else {"name": character}
-            source_row["name"] = str(source_row.get("name") or character).strip()
-            source_row["voice"] = saved_profile.name
+                None,
+            ) if isinstance(roster, list) else None
+            # Only update the selected identity and voice. Sending analysis
+            # confidence/line counts here could overwrite richer library metadata.
+            source_row = {"name": character, "voice": saved_profile.name}
+            if isinstance(roster_row, dict) and isinstance(roster_row.get("aliases"), list):
+                source_row["aliases"] = list(roster_row["aliases"])
             try:
                 sync_characters(
                     series,

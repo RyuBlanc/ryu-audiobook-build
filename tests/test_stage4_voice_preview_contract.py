@@ -450,6 +450,8 @@ class VoicePreviewContractTests(unittest.TestCase):
         method = source[source.index("    def assign_to_character("):source.index("    def _set_voice_step(")]
         self.assertIn("from app.core.character_library import sync_characters", source)
         self.assertIn("sync_characters(\n                    series,\n                    [source_row]", method)
+        self.assertIn('source_row = {"name": character, "voice": saved_profile.name}', method)
+        self.assertIn('source_row["aliases"] = list(roster_row["aliases"])', method)
         self.assertIn("update_voice=True", method)
         self.assertIn('state["voice_cast"] = assignments', method)
         self.assertIn("but Character Library sync failed", method)
@@ -461,6 +463,45 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("No substitute voice was selected", source)
         self.assertIn("selected_voice_changed = previous_voice_id != self.neural_voice.currentData()", source)
         self.assertIn('not getattr(self, "_restoring_saved_profile", False)', source)
+
+    def test_character_library_normalizes_fractional_confidence_and_preserves_it_on_voice_update(self):
+        from app.core.character_library import list_characters, sync_characters
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "character_library.json"
+            sync_characters(
+                "Series Confidence",
+                [{"name": "Mira", "confidence": 0.82, "voice": "Original Voice"}],
+                path=path,
+            )
+            row = list_characters(series="Series Confidence", path=path)[0]
+            self.assertEqual(row["confidence"], 82)
+            self.assertEqual(row["voice_name"], "Original Voice")
+
+            sync_characters(
+                "Series Confidence",
+                [{"name": "Mira", "voice": "Updated Voice"}],
+                update_voice=True,
+                path=path,
+            )
+            row = list_characters(series="Series Confidence", path=path)[0]
+            self.assertEqual(row["confidence"], 82)
+            self.assertEqual(row["voice_name"], "Updated Voice")
+
+    def test_character_library_clamps_percentage_confidence(self):
+        from app.core.character_library import list_characters, sync_characters
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "character_library.json"
+            sync_characters(
+                "Series Confidence",
+                [{"name": "Mira", "confidence": 135, "voice": "Voice"}],
+                path=path,
+            )
+            self.assertEqual(
+                list_characters(series="Series Confidence", path=path)[0]["confidence"],
+                100,
+            )
 
     def test_qwen_voice_design_preview_uses_the_friendly_preset_name(self):
         adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"

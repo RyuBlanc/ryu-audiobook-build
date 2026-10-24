@@ -67,6 +67,19 @@ def _safe_count(value: Any, *, maximum: int | None = None) -> int:
     return min(number, maximum) if maximum is not None else number
 
 
+def _safe_confidence(value: Any, *, default: int = 0) -> int:
+    """Normalize fractional analyzer confidence and percentage inputs to 0–100."""
+    try:
+        score = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    if not (score == score and abs(score) != float("inf")):
+        return default
+    if 0.0 <= score <= 1.0:
+        score *= 100.0
+    return max(0, min(100, int(round(score))))
+
+
 def _clean_names(values, primary: str = "") -> list[str]:
     result: list[str] = []
     seen = {str(primary or "").strip().casefold()} if str(primary or "").strip() else set()
@@ -177,7 +190,7 @@ def sync_characters(
                 "notes": str(source.get("notes") or "").strip()[:4000],
                 "line_count": _safe_count(source.get("line_count", source.get("lines", source.get("dialogue_count", 0)))),
                 "chapter_count": _safe_count(source.get("chapter_count", source.get("chapters", 0))),
-                "confidence": _safe_count(source.get("confidence", 100), maximum=100),
+                "confidence": _safe_confidence(source.get("confidence", 100)),
                 "source_project_folder": str(source_project_folder or ""),
                 "source_project_title": str(source_project_title or ""),
                 "created_at": _timestamp(),
@@ -217,7 +230,7 @@ def sync_characters(
         if any(key in source for key in ("chapter_count", "chapters")):
             match["chapter_count"] = _safe_count(source.get("chapter_count", source.get("chapters", 0)))
         if "confidence" in source:
-            match["confidence"] = _safe_count(source.get("confidence", 100), maximum=100)
+            match["confidence"] = _safe_confidence(source.get("confidence", 100))
         match["source_project_folder"] = str(source_project_folder or match.get("source_project_folder") or "")
         match["source_project_title"] = str(source_project_title or match.get("source_project_title") or "")
         match["updated_at"] = _timestamp()
