@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import re
 
 from app.documents.parser import remove_page_noise
-from app.chapters.heading_rules import heading_title as parse_heading_title, is_slash_title_candidate
+from app.chapters.heading_rules import TOC_HEADING_RE, heading_title as parse_heading_title, is_slash_title_candidate
 
 
 @dataclass
@@ -82,7 +82,7 @@ def _remove_toc_when_story_heading_repeats(lines: list[str]) -> list[str]:
     Requiring a duplicate heading plus a substantive body avoids deleting a
     legitimate mention of 'Contents' or a short front-matter heading.
     """
-    toc_indices = [i for i, line in enumerate(lines) if _TOC_HEADING_RE.fullmatch(line.strip())]
+    toc_indices = [i for i, line in enumerate(lines) if TOC_HEADING_RE.fullmatch(line.strip())]
     for toc_index in toc_indices:
         candidates: list[tuple[int, str]] = []
         for index in range(toc_index + 1, len(lines)):

@@ -60,7 +60,7 @@ CHAPTER_HEADING_PATTERNS = (
     _NEW_LIFE_RE,
     _SLASH_TITLE_RE,
 )
-_TOC_HEADING_RE = re.compile(
+TOC_HEADING_RE = re.compile(
     r"^(?:table\s+of\s+contents|contents(?:\s+(?:of|for)\s+.{1,80})?)\s*[:.]?$",
     re.I,
 )
