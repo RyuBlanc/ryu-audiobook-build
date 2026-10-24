@@ -3959,10 +3959,17 @@ class PremiumV2Bridge(QObject):
             available = bool(runtime_ready())
             detail = "Chatterbox runtime ready; model weights may still be fetched on first use." if available else "Chatterbox runtime is missing or incomplete."
         elif requested == "audiobook-ai":
-            from app.ai.model_runtime import installed, model_path, server_path
-            available = bool(installed())
-            path = str(model_path())
-            detail = "Audiobook AI runtime and recommended model file are present." if available else "Audiobook AI runtime or recommended model file is missing."
+            from app.core.paths import models_root
+            ai_root = models_root() / "audiobook-ai"
+            server_present = (ai_root / "llama-server.exe").is_file()
+            candidates = (
+                ai_root / "Qwen3-4B-Q4_K_M.gguf",
+                ai_root / "Qwen3-1.7B-Q5_K_M.gguf",
+            )
+            installed_model = next((candidate for candidate in candidates if candidate.is_file()), None)
+            available = bool(server_present and installed_model)
+            path = str(installed_model or ai_root)
+            detail = "Audiobook AI runtime and a local model file are present; actual inference is checked when the installer completes." if available else "Audiobook AI runtime or local model file is missing. Install or repair the component, then verify again."
         elif requested == "windows-sapi":
             available = bool(item and item.get("installed"))
             detail = str(item.get("status") if item else "Windows SAPI provider was not found.")
