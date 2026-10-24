@@ -3384,7 +3384,7 @@ class PremiumV2Bridge(QObject):
             status=("Runtime ready · English and multilingual modes available" if chat_installed else "Runtime incomplete" if chat_present else "Not installed"),
             installable=not chat_installed, repairable=chat_present or chat_installed,
             uninstallable=chat_present, requirements="Python 3.11 isolated runtime; internet for setup and first-use model weights.",
-            storage_bytes=byte_size(CHATTERBOX_ROOT, direct_only=True), component_type="runtime",
+            storage_bytes=byte_size(CHATTERBOX_ROOT), component_type="runtime",
             managed_path=str(CHATTERBOX_ROOT),
         ))
 
@@ -3400,7 +3400,7 @@ class PremiumV2Bridge(QObject):
             status="Runtime ready" if qwen_ready else "Runtime needs installation or repair",
             installable=not qwen_ready, repairable=qwen_runtime_present or qwen_ready,
             uninstallable=qwen_runtime_present, requirements="Large offline runtime; model weights are managed separately.",
-            storage_bytes=0, managed_path=str(QWEN_ROOT), component_type="runtime",
+            storage_bytes=sum(byte_size(path) for path in qwen_runtime_paths), managed_path=str(QWEN_ROOT), component_type="runtime",
         ))
         qwen_names = {
             "custom-0.6b": ("Qwen CustomVoice 0.6B", "qwen-customvoice"),

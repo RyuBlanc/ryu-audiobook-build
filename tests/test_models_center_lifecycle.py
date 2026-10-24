@@ -51,6 +51,73 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             self.assertIn(f'"{command}": self.{handler}', source)
             self.assertIn(f'"{command}": True', source)
 
+    def test_inventory_counts_nested_runtime_files_without_double_counting_qwen_weights(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            model_root = base / "Models"
+            model_root.mkdir()
+
+            chatterbox_root = base / "chatterbox-runtime"
+            chatterbox_file = chatterbox_root / "Lib" / "site-packages" / "sample.py"
+            chatterbox_file.parent.mkdir(parents=True)
+            chatterbox_file.write_bytes(b"c" * 9)
+
+            qwen_root = base / "qwen3-tts"
+            venv_root = qwen_root / "runtime"
+            python_root = qwen_root / "python312"
+            marker = qwen_root / "runtime.json"
+            installer = qwen_root / "python-installer.exe"
+            installer_log = qwen_root / "python-install.log"
+            for path, payload in (
+                (venv_root / "Scripts" / "python.exe", b"v" * 5),
+                (python_root / "python.exe", b"p" * 7),
+                (marker, b"m" * 2),
+                (installer, b"i" * 3),
+                (installer_log, b"l" * 4),
+            ):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(payload)
+
+            model_kinds = {
+                "custom-0.6b": "example/custom",
+                "custom-1.7b": "example/custom-large",
+                "design-1.7b": "example/design",
+                "base-0.6b": "example/base",
+                "base-1.7b": "example/base-large",
+            }
+            model_dirs = {kind: qwen_root / kind for kind in model_kinds}
+            weights = model_dirs["custom-0.6b"] / "weights.safetensors"
+            weights.parent.mkdir(parents=True)
+            weights.write_bytes(b"w" * 13)
+
+            bridge = self.make_bridge()
+            with (
+                patch("app.core.paths.models_root", return_value=model_root),
+                patch("app.tts.providers.piper.PiperProvider.model_paths", return_value=[]),
+                patch("app.tts.providers.kokoro.KokoroProvider.assets_available", return_value=False),
+                patch("app.tts.chatterbox_runtime.RUNTIME_DIR", new=chatterbox_root),
+                patch("app.tts.chatterbox_runtime.runtime_ready", return_value=False),
+                patch("app.tts.qwen_character_runtime.RUNTIME_ROOT", new=qwen_root),
+                patch("app.tts.qwen_character_runtime.VENV_ROOT", new=venv_root),
+                patch("app.tts.qwen_character_runtime.PYTHON_ROOT", new=python_root),
+                patch("app.tts.qwen_character_runtime.MARKER", new=marker),
+                patch("app.tts.qwen_character_runtime.INSTALLER_PATH", new=installer),
+                patch("app.tts.qwen_character_runtime.INSTALLER_LOG", new=installer_log),
+                patch("app.tts.qwen_character_runtime.MODEL_IDS", new=model_kinds),
+                patch("app.tts.qwen_character_runtime.MODEL_DIRS", new=model_dirs),
+                patch("app.tts.qwen_character_runtime.model_installed", return_value=False),
+                patch("app.tts.qwen_character_runtime.runtime_ready", return_value=False),
+            ):
+                rows = bridge._models_list({})
+
+            by_id = {row["model_id"]: row for row in rows}
+            self.assertEqual(by_id["chatterbox-runtime"]["storage_bytes"], 9)
+            # Count the isolated Python runtimes and metadata, but leave the
+            # separately inventoried model weights out of the runtime total.
+            self.assertEqual(by_id["qwen-runtime"]["storage_bytes"], 21)
+            self.assertEqual(by_id["custom-0.6b"]["storage_bytes"], 13)
+
+
     def test_piper_install_downloads_and_validates_model_and_config_pair(self):
         with tempfile.TemporaryDirectory() as temporary:
             model_root = Path(temporary) / "Models"
