@@ -15,7 +15,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, activeJob = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
+  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, activeJob = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
   let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0;
@@ -969,9 +969,38 @@
   }
 
   async function refreshChapters() {
-    chapters = await call('chapter.list'); window.ryuPremiumChapters = chapters;
-    if (!chapters.length) { renderDialogueReview(); return; }
-    if (!chapters.some(c => c.number === window.ryuPremiumSelectedChapter)) window.ryuPremiumSelectedChapter = chapters[0].number;
+    const requestToken = ++chapterListEpoch;
+    const editorBeforeRefresh = $('chapterEditor');
+    const titleBeforeRefresh = $('chapterTitle');
+    const selectedBeforeRefresh = Number(window.ryuPremiumSelectedChapter || 0);
+    const saveLabelBeforeRefresh = String($('saveState')?.textContent || '');
+    // Preserve the editor draft if it has focus or a debounce/save is in progress.
+    // A job finishing in the background must never make a pending user edit vanish.
+    const draftIsPending = Boolean(editorBeforeRefresh && selectedBeforeRefresh && (
+      document.activeElement === editorBeforeRefresh ||
+      document.activeElement === titleBeforeRefresh ||
+      Boolean(chapterSaveTimer) ||
+      /unsaved changes|saving|autosave failed/i.test(saveLabelBeforeRefresh)
+    ));
+    const draft = draftIsPending ? {
+      number: selectedBeforeRefresh,
+      text: editorBeforeRefresh.value,
+      title: String(titleBeforeRefresh?.textContent || '')
+    } : null;
+    const loaded = await call('chapter.list');
+    if (requestToken !== chapterListEpoch) return chapters;
+    chapters = Array.isArray(loaded) ? loaded : [];
+    if (draft) {
+      const pendingChapter = chapters.find(chapter => Number(chapter.number) === draft.number);
+      if (pendingChapter) {
+        pendingChapter.text = draft.text;
+        pendingChapter.word_count = String(draft.text || '').trim().split(/\\s+/).filter(Boolean).length;
+        if (draft.title.trim()) pendingChapter.title = draft.title.trim();
+      }
+    }
+    window.ryuPremiumChapters = chapters;
+    if (!chapters.length) { renderDialogueReview(); return chapters; }
+    if (!chapters.some(c => Number(c.number) === Number(window.ryuPremiumSelectedChapter))) window.ryuPremiumSelectedChapter = chapters[0].number;
     const current = selectedChapter(), list = $('chapterList'), editor = $('chapterEditor'), title = $('chapterTitle');
     if (list) {
       list.style.maxHeight = 'calc(100vh - 270px)';
@@ -980,28 +1009,41 @@
       list.style.minHeight = '0';
       list.style.paddingRight = '4px';
       list.setAttribute('aria-label', 'Scrollable chapter list');
-      list.innerHTML = chapters.map(c => '<div class="list-item ' + (c.number === current.number ? 'active' : '') + '" data-chapter-number="' + c.number + '">' + esc('Chapter ' + c.number + ' · ' + c.title) + '</div>').join('');
-      list.querySelectorAll('[data-chapter-number]').forEach(el => el.addEventListener('click', () => {
-        const c = chapters.find(x => x.number === Number(el.dataset.chapterNumber)); if (!c) return;
-        window.ryuPremiumSelectedChapter = c.number;
-        if (title) title.textContent = c.title; if (editor) editor.value = c.text;
-        syncCurrentChapterPreviewText(c);
-        if ($('wordCount')) $('wordCount').textContent = c.word_count;
-        chapterLastText = c.text || ''; chapterHistoryGroupOpen = false;
-        if (chapterHistoryGroupTimer) { clearTimeout(chapterHistoryGroupTimer); chapterHistoryGroupTimer = null; }
-        list.querySelectorAll('.list-item').forEach(x => x.classList.toggle('active', x === el));
-        renderLiveChapterInsights();
-      }));
+      const listSignature = chapters.map(c => String(c.number) + '\\u001f' + String(c.title || '')).join('\\u001e');
+      if (list.dataset.chapterListSignature !== listSignature) {
+        const previousScrollTop = list.scrollTop;
+        list.innerHTML = chapters.map(c => '<div class="list-item ' + (c.number === current.number ? 'active' : '') + '" data-chapter-number="' + c.number + '">' + esc('Chapter ' + c.number + ' · ' + c.title) + '</div>').join('');
+        list.dataset.chapterListSignature = listSignature;
+        list.querySelectorAll('[data-chapter-number]').forEach(el => el.addEventListener('click', () => {
+          const c = chapters.find(x => x.number === Number(el.dataset.chapterNumber)); if (!c) return;
+          window.ryuPremiumSelectedChapter = c.number;
+          if (title) title.textContent = c.title; if (editor) editor.value = c.text;
+          syncCurrentChapterPreviewText(c);
+          if ($('wordCount')) $('wordCount').textContent = c.word_count;
+          chapterLastText = c.text || ''; chapterHistoryGroupOpen = false;
+          if (chapterHistoryGroupTimer) { clearTimeout(chapterHistoryGroupTimer); chapterHistoryGroupTimer = null; }
+          list.querySelectorAll('.list-item').forEach(x => x.classList.toggle('active', x === el));
+          renderLiveChapterInsights();
+        }));
+        list.scrollTop = previousScrollTop;
+      } else {
+        list.querySelectorAll('[data-chapter-number]').forEach(el =>
+          el.classList.toggle('active', Number(el.dataset.chapterNumber) === Number(current.number))
+        );
+      }
     }
-    if (title) title.textContent = current.title;
+    if (title && document.activeElement !== title) title.textContent = current.title;
     if (editor && document.activeElement !== editor) editor.value = current.text;
     syncCurrentChapterPreviewText(current);
     if ($('wordCount')) $('wordCount').textContent = current.word_count;
     chapterLastText = current.text || '';
-    chapterHistoryGroupOpen = false;
-    if (chapterHistoryGroupTimer) { clearTimeout(chapterHistoryGroupTimer); chapterHistoryGroupTimer = null; }
+    if (!draft) {
+      chapterHistoryGroupOpen = false;
+      if (chapterHistoryGroupTimer) { clearTimeout(chapterHistoryGroupTimer); chapterHistoryGroupTimer = null; }
+    }
     renderDialogueReview();
     renderLiveChapterInsights();
+    return chapters;
   }
   async function refreshCharacters() {
     characters = await call('character.list');
