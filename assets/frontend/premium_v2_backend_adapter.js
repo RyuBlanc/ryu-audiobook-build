@@ -2291,18 +2291,149 @@
     }
     return result;
   }
+  function formatModelBytes(raw) {
+    const value = Number(raw || 0);
+    if (!Number.isFinite(value) || value <= 0) return '—';
+    const units = ['B','KB','MB','GB','TB'];
+    let amount = value, unit = 0;
+    while (amount >= 1024 && unit < units.length - 1) { amount /= 1024; unit++; }
+    return amount.toFixed(unit >= 3 ? 1 : 0) + ' ' + units[unit];
+  }
+  function modelLifecycleActionButtons(model) {
+    const actions = [];
+    const installId = model.install_id || model.model_id;
+    const repairId = model.repair_id || model.model_id;
+    const uninstallId = model.uninstall_id || model.model_id;
+    if (model.installable) {
+      actions.push('<button type="button" class="btn primary small" data-model-install="' + esc(installId) + '" title="Install this component using the local backend">Install</button>');
+    }
+    if (model.repairable) {
+      actions.push('<button type="button" class="btn secondary small" data-model-repair="' + esc(repairId) + '" title="Recheck or repair this component using its real installer">Repair</button>');
+    }
+    if (model.uninstallable) {
+      const kind = model.model_id && /^(custom-|design-|base-)/.test(model.model_id) ? model.model_id : '';
+      actions.push('<button type="button" class="btn danger small" data-model-uninstall="' + esc(uninstallId) + '"' +
+        (kind ? ' data-model-kind="' + esc(kind) + '"' : '') +
+        ' title="Remove only this app-managed component">Uninstall</button>');
+    }
+    actions.push('<button type="button" class="btn secondary small" data-model-verify="' + esc(model.model_id) + '" title="Check the actual installed files or provider prerequisites">Verify</button>');
+    const providerTarget = {
+      piper:'offline', kokoro:'offline', 'custom-0.6b':'customvoice', 'custom-1.7b':'customvoice',
+      'design-1.7b':'voicedesign', 'base-0.6b':'qwenclone', 'base-1.7b':'qwenclone',
+      'qwen-runtime':'customvoice', 'qwen-customvoice':'customvoice', 'qwen-voicedesign':'voicedesign',
+      'qwen-clone':'qwenclone', 'chatterbox-runtime':'customref', 'chatterbox':'customref',
+      'chatterbox-multilingual':'customref', 'windows-sapi':'sapi', 'edge-tts':'edge', 'elevenlabs':'eleven'
+    }[model.model_id];
+    if (providerTarget) {
+      actions.push('<button type="button" class="btn secondary small" data-model-open-provider="' + esc(providerTarget) + '">Open Voice Studio</button>');
+    } else if (model.model_id === 'audiobook-ai') {
+      actions.push('<button type="button" class="btn secondary small" data-model-open-page="characters">Open Character Studio</button>');
+    }
+    return actions.join('');
+  }
+  function renderModelInventory() {
+    const rows = Array.isArray(window.ryuModelInventoryRows) ? window.ryuModelInventoryRows : [];
+    const grid = $('modelGrid');
+    const toolbar = $('modelInventoryToolbar');
+    const query = String($('modelInventorySearch')?.value || '').trim().toLowerCase();
+    const filter = $('modelInventoryFilter')?.value || 'all';
+    const filtered = rows.filter(model => {
+      const searchText = [model.name,model.provider,model.model_id,model.status,model.notes,model.requirements].join(' ').toLowerCase();
+      if (query && !searchText.includes(query)) return false;
+      if (filter === 'attention' && model.installed && !/incomplete|missing|not installed|setup required|api key required|no .* detected/i.test(String(model.status || ''))) return false;
+      if (filter === 'ready' && !model.installed) return false;
+      if (filter === 'local' && model.component_type === 'provider') return false;
+      return true;
+    });
+    if (!grid) return;
+    const signature = JSON.stringify(rows);
+    if (grid.dataset.modelSignature !== signature || grid.dataset.modelFilter !== query + '|' + filter) {
+      grid.dataset.modelSignature = signature;
+      grid.dataset.modelFilter = query + '|' + filter;
+      grid.innerHTML = filtered.map(model => {
+        const local = model.component_type !== 'provider';
+        const status = String(model.status || (model.installed ? 'Installed' : 'Needs setup'));
+        const problem = /incomplete|missing|not installed|needs installation|needs setup|api key required|no .* detected/i.test(status);
+        const badge = model.installed && !problem ? 'good' : problem ? 'warn' : 'info';
+        const storage = Number(model.storage_bytes || 0) > 0 ? '<span class="model-meta-item">Local files · ' + esc(formatModelBytes(model.storage_bytes)) + '</span>' : '';
+        const requirement = model.requirements ? '<p class="model-requirements">' + esc(model.requirements) + '</p>' : '';
+        const piperVoices = model.model_id === 'piper' && Array.isArray(model.installed_voice_names) && model.installed_voice_names.length
+          ? '<div class="model-voice-manager"><label>Installed local voices<select data-piper-voice-select>' +
+            model.installed_voice_names.map(name => '<option value="' + esc(name) + '">' + esc(name) + '</option>').join('') +
+            '</select></label><div class="model-actions model-voice-actions">' +
+            '<button type="button" class="btn secondary small" data-model-repair="piper">Repair selected voice</button>' +
+            '<button type="button" class="btn danger small" data-model-uninstall="piper">Remove selected voice</button></div></div>'
+          : '';
+        return '<article class="card model-card" data-model-id="' + esc(model.model_id) + '" style="display:flex;flex-direction:column;gap:12px;min-width:0">' +
+          '<div class="model-card-head" style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">' +
+            '<div style="min-width:0"><div class="model-eyebrow">' + esc(String(model.provider || 'Local component').replace(/-/g,' ')) + '</div>' +
+            '<h3 style="margin:6px 0 0;overflow-wrap:anywhere">' + esc(model.name) + '</h3></div>' +
+            '<span class="badge ' + badge + '" title="' + esc(status) + '">' + esc(status) + '</span></div>' +
+          '<p class="muted model-description">' + esc(model.notes || 'No additional details were returned by the local backend.') + '</p>' +
+          (storage ? '<div class="model-meta">' + storage + '</div>' : '') + requirement +
+          piperVoices +
+          '<div class="model-actions">' + modelLifecycleActionButtons(model) + '</div>' +
+        '</article>';
+      }).join('') || '<p class="muted model-empty">No components match this filter. Refresh the model status or change the filter.</p>';
+    }
+
+    const status = $('modelInventorySummary');
+    if (status) {
+      const managed = rows.filter(model => model.component_type !== 'provider');
+      const installed = managed.filter(model => model.installed).length;
+      const needsSetup = managed.filter(model => !model.installed).length;
+      const providers = rows.filter(model => model.component_type === 'provider');
+      const providersReady = providers.filter(model => model.installed).length;
+      const free = rows.find(model => model.disk_free_bytes != null)?.disk_free_bytes;
+      const storageRoot = rows.find(model => model.storage_root)?.storage_root || 'Local application model folder';
+      status.innerHTML =
+        '<div class="model-summary-metrics">' +
+          '<div><span>Managed components ready</span><strong>' + installed + ' / ' + managed.length + '</strong></div>' +
+          '<div><span>Need setup or attention</span><strong>' + needsSetup + '</strong></div>' +
+          '<div><span>System / online providers ready</span><strong>' + providersReady + ' / ' + providers.length + '</strong></div>' +
+          '<div><span>Drive free at model location</span><strong>' + esc(formatModelBytes(free)) + '</strong></div>' +
+        '</div><p class="model-storage-path">Storage root: <code>' + esc(storageRoot) + '</code></p>';
+    }
+  }
   async function refreshModels() {
     const rows = await call('models.list');
+    window.ryuModelInventoryRows = Array.isArray(rows) ? rows : [];
+    const root = $('models');
     const grid = $('modelGrid');
-    if (grid) grid.innerHTML = rows.map(m => '<article class="card model-card"><div><span class="badge ' +
-      (m.installed ? '' : 'info') + '">' + (m.installed ? 'Installed' : 'Available') + '</span><h3>' + esc(m.name) +
-      '</h3><p class="muted">' + esc(m.provider || 'Local model') + ' · ' +
-      (m.voice_cloning ? 'Voice cloning capable' : 'Narration / speech') + '</p><p class="muted">' +
-      esc(m.notes || (m.multilingual ? 'Multilingual support' : 'Local voice model')) + '</p></div></article>').join('') ||
-      '<p class="muted">No model catalogue entries were returned by the local backend.</p>';
-    applyUnavailableControlStates();
-    const heading = $('models')?.querySelector('.model-runtime h2');
-    if (heading) heading.textContent = rows.filter(m => m.installed).length + ' installed · ' + rows.filter(m => !m.installed).length + ' available in catalogue';
+    if (!root || !grid) return rows;
+    let toolbar = $('modelInventoryToolbar');
+    if (!toolbar) {
+      toolbar = document.createElement('div');
+      toolbar.id = 'modelInventoryToolbar';
+      toolbar.className = 'model-inventory-toolbar';
+      toolbar.style.cssText = 'display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 12px';
+      toolbar.innerHTML =
+        '<input id="modelInventorySearch" type="search" aria-label="Search models and providers" placeholder="Search models, provider or status" style="flex:1;min-width:220px" />' +
+        '<select id="modelInventoryFilter" aria-label="Filter model components" style="min-width:170px"><option value="all">All components</option><option value="attention">Needs setup / attention</option><option value="ready">Installed / ready</option><option value="local">Local models and runtimes</option></select>';
+      grid.parentNode.insertBefore(toolbar, grid);
+      $('modelInventorySearch').addEventListener('input', renderModelInventory);
+      $('modelInventoryFilter').addEventListener('change', renderModelInventory);
+    }
+    let summary = $('modelInventorySummary');
+    if (!summary) {
+      summary = document.createElement('section');
+      summary.id = 'modelInventorySummary';
+      summary.className = 'model-inventory-summary card';
+      summary.style.cssText = 'margin:0 0 14px;padding:14px 16px';
+      toolbar.insertAdjacentElement('beforebegin', summary);
+    }
+    const heading = root.querySelector('.model-runtime h2');
+    const managed = rows.filter(model => model.component_type !== 'provider');
+    const ready = managed.filter(model => model.installed).length;
+    const missing = managed.filter(model => !model.installed).length;
+    if (heading) heading.textContent = ready + ' managed component(s) ready · ' + missing + ' need setup or attention';
+    // Retire prototype-only disk numbers and labels. Live free space is displayed
+    // in the status card above using the backend's actual models-root volume.
+    const storageLabel = [...root.querySelectorAll('*')].find(node => node.children.length === 0 && node.textContent.trim() === 'Models storage');
+    if (storageLabel) storageLabel.textContent = 'Drive free space';
+    const fakeFreeLabel = [...root.querySelectorAll('*')].find(node => node.children.length === 0 && /free in model folder/i.test(node.textContent));
+    if (fakeFreeLabel) fakeFreeLabel.textContent = rows.find(model => model.storage_root)?.storage_root || 'Storage path unavailable';
+    renderModelInventory();
     return rows;
   }
   async function loadSettings() {
@@ -2333,8 +2464,7 @@
     const dialogueReason = 'Bulk AI predictions are not verified against source passages in this build. Select an individual source-backed dialogue passage to assign a saved character.';
     document.querySelectorAll('#acceptHighConfidence, #skipAiSuggestion, #aiUseLibrary, #aiCreateNew, #createCharacterQuick, [data-ai-line]:not([data-dialogue-id])')
       .forEach(element => disable(element, dialogueReason));
-    document.querySelectorAll('[data-model-update], [data-model-repair], [data-model-uninstall]')
-      .forEach(element => disable(element, 'Per-model update, repair, and uninstall are not implemented. No model files will be changed by these controls.'));
+    // Model Center lifecycle actions are backed by models.install/repair/uninstall/verify.
     document.querySelectorAll('#settings button').forEach(element => {
       if ((element.textContent || '').trim().toLowerCase() === 'choose folder') {
         disable(element, 'Changing the application storage root is not implemented. Existing project and asset paths remain unchanged.');
