@@ -33,6 +33,11 @@ NOISE_PATTERNS = (
     re.compile(r"^https?://(?:www\.)?asianovel\.com(?:/.*)?$", re.I),
     re.compile(r"^(?:www\.)?asianovel\.com(?:/.*)?$", re.I),
     re.compile(r"^https?://(?:www\.)?mp4directs\.com(?:/.*)?$", re.I),
+    # JustLightNovels and similar ebook mirrors put page labels and domains
+    # together in either the header or footer; remove only known watermark patterns.
+    re.compile(r"^Page\s*\|\s*\d{1,5}\s+.*(?:justlightnovels|asianovel|mp4directs)\.com.*$", re.I),
+    re.compile(r"^Page\s*\|\s*\d{1,5}$", re.I),
+    re.compile(r"^(?:https?://)?(?:www\.)?justlightnovels\.com(?:/.*)?$", re.I),
 )
 
 
@@ -255,7 +260,7 @@ def clean_import_noise(text: str, repeated_noise: set[str] | None = None) -> tup
     # removable; this also handles extracted PDF text where columns reflow.
     for idx, raw in enumerate(lines):
         value = raw.strip().casefold()
-        if re.fullmatch(r"\d{1,5}", value):
+        if re.fullmatch(r"\d{1,5}", value) or re.fullmatch(r"page\s*\|\s*\d{1,5}", value):
             neighbors = []
             if idx > 0:
                 neighbors.append(lines[idx - 1].strip().casefold())
@@ -265,14 +270,17 @@ def clean_import_noise(text: str, repeated_noise: set[str] | None = None) -> tup
                 neighbor == "report"
                 or "asianovel.com" in neighbor
                 or "mp4directs.com" in neighbor
+                or "justlightnovels.com" in neighbor
                 for neighbor in neighbors
             ):
                 page_noise_indices.add(idx)
 
     obvious_noise = (
+        re.compile(r"^page\s*\|\s*\d{1,5}\s+.*(?:justlightnovels|asianovel|mp4directs)\.com.*$", re.I),
+        re.compile(r"^page\s*\|\s*\d{1,5}$", re.I),
         re.compile(r"^https?://", re.I),
         re.compile(r"^(?:www\.)?[^\s]+\.(?:com|net|org|cc|me)(?:/.*)?$", re.I),
-        re.compile(r"^.*(?:asianovel\.com|mp4directs\.com).*$", re.I),
+        re.compile(r"^.*(?:justlightnovels\.com|asianovel\.com|mp4directs\.com).*$", re.I),
         re.compile(r"^\d{1,5}\s+report$", re.I),
     )
     for idx, raw_line in enumerate(lines):
