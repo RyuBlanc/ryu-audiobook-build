@@ -3263,6 +3263,9 @@ class PremiumV2Bridge(QObject):
         from app.tts.qwen_character_runtime import (
             MODEL_IDS, MODEL_DIRS, model_installed as qwen_model_installed,
             runtime_ready as qwen_runtime_ready, RUNTIME_ROOT as QWEN_ROOT,
+            VENV_ROOT as QWEN_VENV_ROOT, PYTHON_ROOT as QWEN_PYTHON_ROOT,
+            MARKER as QWEN_MARKER, INSTALLER_PATH as QWEN_INSTALLER_PATH,
+            INSTALLER_LOG as QWEN_INSTALLER_LOG,
         )
         root = models_root()
         root.mkdir(parents=True, exist_ok=True)
@@ -3372,12 +3375,14 @@ class PremiumV2Bridge(QObject):
             qwen_ready = bool(qwen_runtime_ready())
         except Exception:
             qwen_ready = False
+        qwen_runtime_paths = (QWEN_VENV_ROOT, QWEN_PYTHON_ROOT, QWEN_MARKER, QWEN_INSTALLER_PATH, QWEN_INSTALLER_LOG)
+        qwen_runtime_present = any(path.exists() for path in qwen_runtime_paths)
         result.append(row(
             "qwen-runtime", "Qwen3-TTS Runtime", "qwen", qwen_ready,
             "Isolated Python, PyTorch, torchaudio and Qwen TTS runtime shared by CustomVoice, VoiceDesign and Voice Clone models.",
             status="Runtime ready" if qwen_ready else "Runtime needs installation or repair",
-            installable=not qwen_ready, repairable=QWEN_ROOT.exists() or qwen_ready,
-            uninstallable=QWEN_ROOT.exists(), requirements="Large offline runtime; model weights are managed separately.",
+            installable=not qwen_ready, repairable=qwen_runtime_present or qwen_ready,
+            uninstallable=qwen_runtime_present, requirements="Large offline runtime; model weights are managed separately.",
             storage_bytes=0, managed_path=str(QWEN_ROOT), component_type="runtime",
         ))
         qwen_names = {
@@ -3415,8 +3420,8 @@ class PremiumV2Bridge(QObject):
             # repair action therefore installs missing dependencies together.
             install_id = "qwen-voicedesign" if kind == "design-1.7b" else kind
             repair_id = (
-                "qwen-voicedesign" if kind == "design-1.7b" else
-                "qwen-runtime" if installed and not qwen_ready else kind
+                "qwen-runtime" if installed and not qwen_ready else
+                "qwen-voicedesign" if kind == "design-1.7b" else kind
             )
             verify_id = "qwen-voicedesign" if kind == "design-1.7b" else kind
             result.append(row(
