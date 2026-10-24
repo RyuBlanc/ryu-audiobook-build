@@ -887,6 +887,37 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertLess(monitor.index("await tick();"), monitor.index("if (!finished) poll = setInterval(tick, 1000);"))
 
 
+    def test_monitor_job_serializes_ticks_ignores_stale_responses_and_clears_active_job(self):
+        """A slow job-list response must not finish a job twice or mutate a newer task's UI."""
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        start = adapter.index("async function monitorJob(")
+        end = adapter.index("function requestElevenLabsApiKey()", start)
+        monitor = adapter[start:end]
+        self.assertIn("const monitorToken = ++monitorEpoch;", monitor)
+        self.assertIn("let checking = false;", monitor)
+        self.assertIn("monitorToken !== monitorEpoch || checking", monitor)
+        self.assertIn("if (finished || monitorToken !== monitorEpoch) return;", monitor)
+        self.assertIn("if (activeJob === jobId) activeJob = null;", monitor)
+        self.assertIn("finally {\n        checking = false;", monitor)
+        self.assertIn("if (!finished && monitorToken === monitorEpoch) poll = setInterval(tick, 1000);", monitor)
+        self.assertIn("completion callback", monitor)
+
+    def test_job_list_refresh_calls_share_one_in_flight_request(self):
+        """Heartbeat, job monitor and manual refresh should not race to replace job DOM."""
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
+            encoding="utf-8"
+        )
+        start = adapter.index("async function refreshJobs()")
+        end = adapter.index("async function monitorJob(", start)
+        refresh = adapter[start:end]
+        self.assertIn("if (jobsRefreshPromise) return jobsRefreshPromise;", refresh)
+        self.assertIn("const refreshPromise = refreshJobsImpl();", refresh)
+        self.assertIn("finally { if (jobsRefreshPromise === refreshPromise) jobsRefreshPromise = null; }", refresh)
+        self.assertIn("async function refreshJobsImpl()", refresh)
+        self.assertIn("return allJobs;", refresh)
+
     def test_job_polling_updates_existing_rows_without_rebuilding_hidden_panel(self):
         """Job polling should not repeatedly replace DOM rows and trigger visible flicker."""
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
