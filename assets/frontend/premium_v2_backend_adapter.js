@@ -690,7 +690,7 @@
   }
   const voiceLibraryTitles = {
     offline:'Offline Neural Voices', sapi:'Windows SAPI', customvoice:'Qwen CustomVoice',
-    voicedesign:'Qwen VoiceDesign', qwenclone:'Qwen Voice Clone', customref:'Qwen Voice Clone',
+    voicedesign:'Qwen VoiceDesign', qwenclone:'Qwen Voice Clone', customref:'Chatterbox Reference Voice',
     edge:'Edge TTS', eleven:'ElevenLabs'
   };
   function voiceLanguageFacet(row) {
