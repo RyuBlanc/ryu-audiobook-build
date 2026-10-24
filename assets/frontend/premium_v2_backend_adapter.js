@@ -2348,13 +2348,18 @@
     const installId = model.install_id || model.model_id;
     const repairId = model.repair_id || model.model_id;
     const uninstallId = model.uninstall_id || model.model_id;
-    if (model.installable) {
-      actions.push('<button type="button" class="btn primary small" data-model-install="' + esc(installId) + '" title="Install this component using the local backend">Install</button>');
+    const isPiper = model.model_id === 'piper';
+    if (model.installable && (!model.installed || isPiper)) {
+      const label = isPiper ? 'Add voice model' : 'Install';
+      actions.push('<button type="button" class="btn primary small" data-model-install="' + esc(installId) + '" title="Install this component using the local backend">' + label + '</button>');
     }
-    if (model.repairable) {
+    // Piper can contain several independently installed voices. Its dedicated
+    // selector below targets the exact voice, so generic duplicate repair/delete
+    // buttons would be ambiguous and are intentionally omitted.
+    if (model.repairable && !isPiper) {
       actions.push('<button type="button" class="btn secondary small" data-model-repair="' + esc(repairId) + '" title="Recheck or repair this component using its real installer">Repair</button>');
     }
-    if (model.uninstallable) {
+    if (model.uninstallable && !isPiper) {
       const kind = model.model_id && /^(custom-|design-|base-)/.test(model.model_id) ? model.model_id : '';
       actions.push('<button type="button" class="btn danger small" data-model-uninstall="' + esc(uninstallId) + '"' +
         (kind ? ' data-model-kind="' + esc(kind) + '"' : '') +
@@ -2425,8 +2430,9 @@
     const status = $('modelInventorySummary');
     if (status) {
       const managed = rows.filter(model => model.component_type !== 'provider');
-      const installed = managed.filter(model => model.installed).length;
-      const needsSetup = managed.filter(model => !model.installed).length;
+      const needsAttention = model => /incomplete|missing|not installed|needs installation|needs setup|api key required|unavailable|runtime required|no .* detected/i.test(String(model.status || ''));
+      const installed = managed.filter(model => model.installed && !needsAttention(model)).length;
+      const needsSetup = managed.length - installed;
       const providers = rows.filter(model => model.component_type === 'provider');
       const providersReady = providers.filter(model => model.installed).length;
       const free = rows.find(model => model.disk_free_bytes != null)?.disk_free_bytes;
