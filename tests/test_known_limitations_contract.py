@@ -41,14 +41,21 @@ class KnownLimitationsContractTests(unittest.TestCase):
         self.assertIn('"chapter.review": True', self.host)
         self.assertIn("call('chapter.review'", self.adapter)
         for phrase in (
-            "Credential management is not connected to a secure provider-specific credential store",
-            "Premium cloud candidate generation is not connected to a provider endpoint",
             "Automatic per-line AI speaker suggestions remain prototype-only",
             "Custom project-library and audio-assets root selection is not implemented",
             "Manual source-backed dialogue speaker assignments are persisted",
         ):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, self.adapter)
+
+        # These older disconnected-feature warnings must stay removed now that
+        # actual provider-specific backend commands have been connected.
+        self.assertIn("call('voice.credentials.set'", self.adapter)
+        self.assertIn("call('voice.elevenlabs.design'", self.adapter)
+        self.assertIn('"voice.credentials.set": self._voice_credentials_set', self.host)
+        self.assertIn('"voice.elevenlabs.design": self._voice_elevenlabs_design', self.host)
+        self.assertNotIn("Credential management is not connected to a secure provider-specific credential store", self.adapter)
+        self.assertNotIn("Premium cloud candidate generation is not connected to a provider endpoint", self.adapter)
 
     def test_document_does_not_claim_manual_acceptance_from_ci(self):
         self.assertIn("CI does not replace interactive Windows acceptance", self.doc)
