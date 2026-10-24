@@ -337,6 +337,8 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
         self.assertGreaterEqual(len(frontend_commands), 70, "The audited frontend command set unexpectedly shrank.")
         self.assertEqual(sorted(frontend_commands - backend_commands), [],
                          "Frontend commands are missing from the Python bridge allow-list.")
+        self.assertIn("const modelLifecycleCommands = {install:'models.install',repair:'models.repair',uninstall:'models.uninstall'};", adapter)
+        self.assertTrue({"models.install", "models.repair", "models.uninstall"}.issubset(backend_commands))
         missing_methods = sorted({method for _command, method in handler_rows if method not in defined_methods})
         self.assertEqual(missing_methods, [], "Bridge command handlers reference missing Python methods.")
 
