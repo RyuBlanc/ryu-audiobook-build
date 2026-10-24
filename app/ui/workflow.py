@@ -363,11 +363,12 @@ class ProjectWorkflow(QMainWindow):
         current_project_layout.addWidget(current_project_eyebrow)
         self.project_mini_title = QLabel("No book open")
         self.project_mini_title.setObjectName("projectMiniTitle")
-        self.project_mini_title.setWordWrap(True)
+        self.project_mini_title.setWordWrap(False)
         self.project_mini_title.setToolTip("No book open")
         current_project_layout.addWidget(self.project_mini_title)
-        self.project_mini_status = QLabel("Local-first workspace")
+        self.project_mini_status = QLabel("No project selected")
         self.project_mini_status.setObjectName("muted")
+        self._project_mini_status_text = "No project selected"
         current_project_layout.addWidget(self.project_mini_status)
         side_layout.addWidget(self.current_project_card)
 
@@ -835,8 +836,19 @@ class ProjectWorkflow(QMainWindow):
             # Diagnostics must never crash or block a navigation action.
             pass
 
+    def _set_project_mini_status(self, status: str) -> None:
+        """Publish a real project save/open status to the persistent sidebar card."""
+        self._project_mini_status_text = str(status or "No project selected")
+        label = getattr(self, "project_mini_status", None)
+        if label is not None:
+            label.setText(self._project_mini_status_text)
+
     def _set_project_title(self, title: str) -> None:
         self._project_title_full = title or "No book open"
+        if self.project is None:
+            self._set_project_mini_status("No project selected")
+        elif not getattr(self, "_project_mini_status_text", ""):
+            self._set_project_mini_status("Saved locally")
         self._refresh_project_label()
 
     def _refresh_project_label(self) -> None:
@@ -848,12 +860,17 @@ class ProjectWorkflow(QMainWindow):
         self.project_label.setText(text)
         self.project_label.setToolTip(title)
         if hasattr(self, "project_mini_title"):
-            self.project_mini_title.setText(title)
-            self.project_mini_title.setToolTip(title)
-            is_open = self.project is not None
-            self.project_mini_status.setText(
-                "Project open • saved locally" if is_open else "Local-first workspace"
+            mini_width = max(80, self.project_mini_title.contentsRect().width() - 8)
+            mini_text = QFontMetrics(self.project_mini_title.font()).elidedText(
+                title, Qt.TextElideMode.ElideRight, mini_width
             )
+            self.project_mini_title.setText(mini_text)
+            self.project_mini_title.setToolTip(title)
+            status = getattr(
+                self, "_project_mini_status_text",
+                "Saved locally" if self.project is not None else "No project selected",
+            )
+            self.project_mini_status.setText(status)
 
     def _search_library(self) -> None:
         """Route top-bar search to the real local library filter."""
@@ -1468,6 +1485,7 @@ class ProjectWorkflow(QMainWindow):
         self.import_page.project_created(project)
         self.project = project
         self._set_project_title(project.title)
+        self._set_project_mini_status("Imported • saved locally")
         self.library.refresh()
         self.dashboard.refresh()
         self.open_editor()
@@ -1546,6 +1564,7 @@ class ProjectWorkflow(QMainWindow):
         self.project.title = title.strip()
         self.project.save()
         self._set_project_title(self.project.title)
+        self._set_project_mini_status("Renamed • saved locally")
         self.library.refresh()
         self.dashboard.refresh()
         if self.editor:
@@ -1559,17 +1578,24 @@ class ProjectWorkflow(QMainWindow):
     def autosave_project(self, chapters: list[Chapter]) -> bool:
         """Persist editor text without rebuilding heavyweight UI pages."""
         if not self.project:
+            self._set_project_mini_status("No project selected")
             return False
+        self._set_project_mini_status("Saving…")
         try:
             self.project.chapters = list(chapters)
             self.project.save()
+            self._set_project_mini_status("Autosaved just now")
             return True
         except Exception as exc:
+            self._set_project_mini_status("Autosave failed • use Save")
+            self._log_ui_failure("Autosave project", exc)
             return False
 
     def save_project(self, chapters: list[Chapter]) -> bool:
         if not self.project:
+            self._set_project_mini_status("No project selected")
             return False
+        self._set_project_mini_status("Saving…")
         try:
             # Save the exact manual editor state first. Do not re-run chapter
             # detection or repair during a normal Save operation.
@@ -1585,8 +1611,10 @@ class ProjectWorkflow(QMainWindow):
 
             self.library.refresh()
             self.ensure_generation_page()
+            self._set_project_mini_status("Saved just now")
             return True
         except Exception as exc:
+            self._set_project_mini_status("Save failed • check details")
             QMessageBox.critical(
                 self,
                 "Save Failed",
@@ -1764,6 +1792,7 @@ class ProjectWorkflow(QMainWindow):
         if active_folder and active_folder == deleted_folder:
             self.project = None
             self._set_project_title("No book open")
+            self._set_project_mini_status("No project selected")
             for attribute in ("pronunciation_page", "sound_design_page", "editor", "generation"):
                 page = getattr(self, attribute, None)
                 if page is None:
@@ -1837,6 +1866,7 @@ class ProjectWorkflow(QMainWindow):
     def open_project(self, project: Project) -> None:
         self.project = project
         self._set_project_title(project.title)
+        self._set_project_mini_status("Opened • saved locally")
         # Repair legacy empty chapter records before creating either editor or
         # generation UI so both views show the same corrected chapter list.
         self._repair_empty_chapters()
