@@ -1976,7 +1976,33 @@
       if(studio){e.preventDefault();e.stopImmediatePropagation();const c=libraryCharacters.find(x=>String(x.id)===studio.dataset.characterStudio);if(!c){message('Choose a saved character first.',true);return;}if(!c.source_project_folder){window.ryuPremiumSelectedCharacter=c.name;window.go?.('characters');message('Opened Character Studio. Open a project from this series to assign a voice.');return;}void (async()=>{try{await call('project.open',{folder:c.source_project_folder});await refreshProjects();await refreshChapters();await refreshCharacters();window.ryuPremiumSelectedCharacter=c.name;window.go?.('characters');const castItem=[...document.querySelectorAll('[data-character-name]')].find(node=>node.dataset.characterName===c.name);castItem?.click();message('Opened Character Studio for '+c.name+'. Manage its voice assignment here.');}catch(err){message(err?.message||String(err),true);}})();return;}
       if(test){e.preventDefault();e.stopImmediatePropagation();const c=libraryCharacters.find(x=>String(x.id)===test.dataset.testLibrary);const profile=voices.find(v=>String(v.name).toLowerCase()===String(c?.voice||'').toLowerCase());if(!c||!profile){message('No matching saved voice profile exists for this character. Choose a saved profile in Voice Studio first.',true);return;}call('voice.preview',{profile_name:profile.name,text:'Hello, my name is '+c.name+'.',duration_seconds:10}).then(data=>monitorJob(data.job_id,async job=>{const url=job?.result?.file_url;if(!url)throw new Error('The character preview finished without a playable audio file.');if(previewAudio)previewAudio.pause();previewAudio=new Audio(url);await previewAudio.play();message('Playing character voice preview.');})).catch(err=>message(err?.message||String(err),true));return;}
     }, true);
-    document.addEventListener('click', e => { const b=e.target.closest('[data-voice]'); if(b){selectedVoiceId=b.dataset.voice;const label=b.dataset.voice;if($('profileVoice'))$('profileVoice').textContent=label;if($('premiumName')&&!$('premiumName').value.trim())$('premiumName').value=label+' Custom';if($('profileName')&&!$('profileName').value.trim())$('profileName').value=label+' Custom';return;}if(e.target.closest('.provider'))selectedVoiceId=null; });
+    document.addEventListener('click', e => {
+      const b=e.target.closest('[data-voice]');
+      if(b){
+        selectedVoiceId=b.dataset.voice;
+        selectedVoice=null;
+        const label=b.dataset.voice;
+        if($('profileVoice'))$('profileVoice').textContent=label;
+        if($('premiumName')&&!$('premiumName').value.trim())$('premiumName').value=label+' Custom';
+        if($('profileName')&&!$('profileName').value.trim())$('profileName').value=label+' Custom';
+        document.querySelectorAll('#voices *').forEach(node => {
+          if(node.children.length===0 && node.textContent.trim()==='Saved') node.textContent='Unsaved';
+        });
+        return;
+      }
+      const provider = e.target.closest('.provider');
+      if(provider && !e.target.closest('button,input,textarea,select,label,[data-voice]')) {
+        selectedVoiceId=null; selectedVoice=null;
+        const key = provider.dataset.provider;
+        const defaultLabels = {offline:'Amy',sapi:'David',customvoice:'Serena',voicedesign:'Custom voice description',qwenclone:'Reference voice',customref:'Reference voice',edge:'Edge neural voice',eleven:'ElevenLabs voice'};
+        if($('profileVoice'))$('profileVoice').textContent=defaultLabels[key] || 'Custom voice';
+        if($('profileName'))$('profileName').value='';
+        if($('premiumName'))$('premiumName').value='';
+        document.querySelectorAll('#voices *').forEach(node => {
+          if(node.children.length===0 && node.textContent.trim()==='Saved') node.textContent='Unsaved';
+        });
+      }
+    });
     if ($('historyFilters')) $('historyFilters').querySelectorAll('button').forEach(button => button.addEventListener('click', () => {
       $('historyFilters').querySelectorAll('button').forEach(b=>b.classList.toggle('active',b===button));
       refreshHistory().catch(e=>message(e.message,true));
