@@ -771,6 +771,7 @@
       healthTitle.parentElement.appendChild(healthDetail);
     }
     if (healthDetail) healthDetail.textContent = result.message || (result.count + ' live catalogue entries');
+    updateVoiceHealthIndicator(providerKey,result);
     if (providerKey === 'eleven' && $('apiState')) $('apiState').textContent = result.ready ? 'API key connected · Voice catalogue ready' : (result.message || 'API key not configured');
     if (providerKey === 'eleven') {
       const createPanel = panel.querySelector('[data-epanel="create"]');
@@ -978,6 +979,25 @@
       const value=label?.nextElementSibling;
       if(value&&!value.id)value.id=id;
     }
+    const profileHealthRow=[...document.querySelectorAll('#voices .panel[data-panel="3"] .form2 .ready')]
+      .find(row=>String(row.querySelector('span')?.textContent||'').trim()==='Health');
+    const profileHealth=profileHealthRow?.querySelector('b');
+    if(profileHealth&&!profileHealth.id)profileHealth.id='profileHealth';
+    const sideHealthRow=[...document.querySelectorAll('#voices aside.summary .ready')]
+      .find(row=>String(row.querySelector('span')?.textContent||'').trim()==='Provider health');
+    const sideHealth=sideHealthRow?.querySelector('b');
+    if(sideHealth&&!sideHealth.id)sideHealth.id='sumProviderHealth';
+  }
+  function updateVoiceHealthIndicator(providerKey,result) {
+    ensureVoiceProfileDetails();
+    const profile=selectedVoice?voices.find(item=>item.saved===true&&item.name.toLowerCase()===selectedVoice.toLowerCase()):null;
+    const selectedKey=profile?providerPanelForProfile(profile):(document.querySelector('#voices .provider.active')?.dataset.provider||providerKey||'');
+    if(!providerKey||!selectedKey||providerKey!==selectedKey)return;
+    const label=!result?'Checking…':result.ready?'Ready':'Setup required';
+    const color=!result?'var(--muted)':result.ready?'var(--green)':'var(--amber)';
+    for(const id of ['profileHealth','sumProviderHealth']){
+      const node=$(id);if(node){node.textContent=label;node.style.color=color;}
+    }
   }
   function updateVoiceProfileDetails(profile) {
     ensureVoiceProfileDetails();
@@ -1032,6 +1052,8 @@
       'edge-tts':'Edge TTS','windows-sapi':'Windows SAPI',elevenlabs:'ElevenLabs',chatterbox:'Reference Voice'
     }[profile.provider]||profile.provider||'')):'';
     updatePreviewTarget(profile,libraryLabel,key);
+    const healthKey=key||document.querySelector('#voices .provider.active')?.dataset.provider||'';
+    updateVoiceHealthIndicator(healthKey,providerCatalogs[healthKey]||null);
     if($('workingSide'))$('workingSide').textContent=name;
     if($('sumLibrary'))$('sumLibrary').textContent=libraryLabel;
     if($('sumProfile'))$('sumProfile').textContent=name?(options.saved?'Saved':'Unsaved'):'';
