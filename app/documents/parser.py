@@ -39,7 +39,9 @@ BOOK_NOISE_PATTERNS = (
     re.compile(r"^(?:report|read\s+online|download)$", re.I),
     re.compile(r"^\d{1,5}$"),
     re.compile(r"^page\s+\d{1,5}$", re.I),
-    re.compile(r"^(?:www\.)?[^\s]+\.(?:com|net|org|cc|me)(?:/.*)?$", re.I),
+    # Known light-novel downloader sites are eligible for repeated-noise
+    # removal. A generic domain is not: story text may intentionally mention it.
+    re.compile(r"^(?:https?://)?(?:www\.)?(?:asianovel\.com|mp4directs\.com)(?:/.*)?$", re.I),
     re.compile(r"^.*(?:asianovel\.com|mp4directs\.com).*$", re.I),
 )
 
