@@ -59,16 +59,17 @@ def detect_chapters(text: str) -> list[Chapter]:
     # so empty headings can never leak into the preceding chapter's body.
     for position, (start, title) in enumerate(markers):
         end = markers[position + 1][0] if position + 1 < len(markers) else len(lines)
-        body = "\n".join(lines[start + 1:end]).strip()
-        if position == 0 and preamble and not opening_is_story:
-            body = f"{preamble}\n\n{body}".strip()
-        if not body:
+        body_text = "\n".join(lines[start + 1:end]).strip()
+        if not body_text:
             continue
-        # Preserve the source heading in the editable/narrated text as well as
-        # in Chapter.title. Users need to hear the actual section being played,
-        # especially titles split across page boundaries (for example
-        # "BLACK DOG/BIRTH" followed by "Part 1").
-        body = f"{title}\n{body}".strip()
+        # Preserve original reading order. The first chapter may have real
+        # unheaded opening/front-matter text before the first source heading.
+        if position == 0 and preamble and not opening_is_story:
+            body = f"{preamble}\n\n{title}\n{body_text}".strip()
+        else:
+            body = f"{title}\n{body_text}".strip()
+        # Keep the detected source heading in editable/narrated text as well as
+        # in Chapter.title so the audiobook says which chapter is playing.
         chapters.append(Chapter(len(chapters) + 1, title, body))
 
     if chapters:

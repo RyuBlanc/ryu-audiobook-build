@@ -869,7 +869,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("ElevenLabsProvider.fetch_voice_metadata(refresh=refresh)", host)
         self.assertIn("pyttsx3.init()", host)
         self.assertIn('"saved": profile.name.strip().casefold() in saved_names', host)
-        self.assertIn("voices.filter(v => v.saved === true)", adapter)
+        self.assertIn("const saved = voices.filter(v => v.saved === true &&", adapter)
         self.assertIn("async function refreshProviderCatalog", adapter)
         self.assertIn("function applySavedVoiceProfile", adapter)
         self.assertIn("requestVoiceProfileSaveName", adapter)

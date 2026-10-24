@@ -24,7 +24,7 @@ class ChapterDetectionFixtureTests(unittest.TestCase):
         self.assertIn("The story begins here.", chapters[0].text)
         self.assertNotIn("Chapter 2: Empty on purpose", chapters[0].text)
         self.assertNotIn("Chapter 3: Return", chapters[0].text)
-        self.assertEqual(chapters[1].text, "The story resumes here.")
+        self.assertEqual(chapters[1].text, "Chapter 3: Return\nThe story resumes here.")
 
     def test_plain_text_without_recognized_headings_falls_back_to_full_book(self):
         source = "A first paragraph.\n\nA second paragraph without chapter markers."
@@ -38,8 +38,8 @@ class ChapterDetectionFixtureTests(unittest.TestCase):
         chapters = detect_chapters(source)
         self.assertEqual([chapter.title for chapter in chapters],
                          ["Life.0 The Beginning", "Life.1 First Steps"])
-        self.assertEqual(chapters[0].text, "A new story starts.")
-        self.assertEqual(chapters[1].text, "The journey continues.")
+        self.assertEqual(chapters[0].text, "Life.0 The Beginning\nA new story starts.")
+        self.assertEqual(chapters[1].text, "Life.1 First Steps\nThe journey continues.")
 
     def test_saved_chapter_edits_and_metadata_survive_project_reload(self):
         with tempfile.TemporaryDirectory() as directory:

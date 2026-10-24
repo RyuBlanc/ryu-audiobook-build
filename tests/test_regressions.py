@@ -2336,8 +2336,8 @@ Second chapter story text.
 """
         chapters = detect_chapters(text)
         self.assertEqual([chapter.title for chapter in chapters], ["Life.0", "Life.2"])
-        self.assertEqual(chapters[0].text, "Opening story text.")
-        self.assertEqual(chapters[1].text, "Second chapter story text.")
+        self.assertEqual(chapters[0].text, "Life.0\nOpening story text.")
+        self.assertEqual(chapters[1].text, "Life.2\nSecond chapter story text.")
         self.assertNotIn("Life.1", "\\n".join(chapter.text for chapter in chapters))
         self.assertTrue(all(chapter.text.strip() for chapter in chapters))
 
