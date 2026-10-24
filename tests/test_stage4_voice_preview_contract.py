@@ -350,5 +350,21 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("const label=!result?'Checking…':result.ready?'Ready':'Setup required';", source)
         self.assertIn("updateVoiceHealthIndicator(providerKey,result);", source)
 
+
+    def test_provider_filter_option_rows_are_not_rebuilt_when_unchanged(self):
+        adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        source = adapter.read_text(encoding="utf-8")
+        self.assertIn("select.dataset.voiceFacetOptionsSignature!==signature", source)
+        self.assertIn("const optionRows=[[defaultValue,defaultLabel],...values.map(value=>[value,value])];", source)
+        self.assertIn("causes a visible flash and can steal keyboard focus", source)
+
+    def test_qwen_voice_design_preview_uses_the_friendly_preset_name(self):
+        adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        source = adapter.read_text(encoding="utf-8")
+        self.assertIn("function voiceDisplayName(profile)", source)
+        for friendly in ("Anime Heroine", "Anime Hero", "Anime Rival", "Anime Villain", "Anime Healer"):
+            self.assertIn("return '" + friendly + "';", source)
+        self.assertIn("const voice=voiceDisplayName(profile);", source)
+
 if __name__ == "__main__":
     unittest.main()
