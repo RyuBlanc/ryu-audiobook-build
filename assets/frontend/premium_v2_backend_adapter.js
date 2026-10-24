@@ -1443,7 +1443,9 @@
               Array.isArray(job.result?.warnings) ? job.result.warnings.filter(Boolean) : [];
             const completionMessage = importWarnings.length
               ? importWarnings.join(' ')
-              : (job.message || ((job.title || 'Job') + ' ' + job.state));
+              : (job.state === 'failed' && job.error?.message
+                  ? (job.message || ((job.title || 'Job') + ' failed')) + ' ' + String(job.error.message)
+                  : (job.message || ((job.title || 'Job') + ' ' + job.state)));
             message(completionMessage, job.state !== 'completed');
           }
           if (job.state === 'completed') { await refreshChapters().catch(()=>{}); await refreshCharacters().catch(()=>{}); }
@@ -2365,7 +2367,8 @@
         (kind ? ' data-model-kind="' + esc(kind) + '"' : '') +
         ' title="Remove only this app-managed component">Uninstall</button>');
     }
-    actions.push('<button type="button" class="btn secondary small" data-model-verify="' + esc(model.model_id) + '" title="Check the actual installed files or provider prerequisites">Verify</button>');
+    const verifyId = model.verify_id || model.model_id;
+    actions.push('<button type="button" class="btn secondary small" data-model-verify="' + esc(verifyId) + '" title="Check the actual installed files and all required dependencies">Verify</button>');
     const providerTarget = ({
       piper:'offline', kokoro:'offline', 'custom-0.6b':'customvoice', 'custom-1.7b':'customvoice',
       'design-1.7b':'voicedesign', 'base-0.6b':'qwenclone', 'base-1.7b':'qwenclone',
@@ -2396,6 +2399,11 @@
       return true;
     });
     if (!grid) return;
+    grid.style.display = 'grid';
+    grid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))';
+    grid.style.gap = '12px';
+    grid.style.alignItems = 'stretch';
+    grid.style.minWidth = '0';
     const signature = JSON.stringify(rows);
     if (grid.dataset.modelSignature !== signature || grid.dataset.modelFilter !== query + '|' + filter) {
       grid.dataset.modelSignature = signature;
