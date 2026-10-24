@@ -3692,6 +3692,7 @@ class PremiumV2Bridge(QObject):
             staged: list[tuple[Path, Path]] = []
             backups: list[tuple[Path, Path]] = []
             backup_root = root / (".piper-repair-backup-" + token)
+            operation_published = False
             try:
                 for url, target, minimum, label in file_specs:
                     temporary = target.with_name(target.name + "." + token + ".part")
@@ -3731,11 +3732,19 @@ class PremiumV2Bridge(QObject):
                 # discovery scan cannot accidentally select the backup during repair.
                 if existing_local:
                     backup_root.mkdir(parents=True, exist_ok=True)
-                    for source in (existing_local, existing_local.with_suffix(existing_local.suffix + ".json")):
-                        if source.is_file():
-                            backup = backup_root / source.name
-                            shutil.move(str(source), str(backup))
-                            backups.append((backup, source))
+                    try:
+                        for source in (existing_local, existing_local.with_suffix(existing_local.suffix + ".json")):
+                            if source.is_file():
+                                backup = backup_root / source.name
+                                shutil.move(str(source), str(backup))
+                                backups.append((backup, source))
+                    except Exception:
+                        # Restore any piece already moved if preparing the backup pair fails.
+                        for backup, original in reversed(backups):
+                            if backup.exists():
+                                original.parent.mkdir(parents=True, exist_ok=True)
+                                shutil.move(str(backup), str(original))
+                        raise
                 try:
                     for temporary, target in staged:
                         target.parent.mkdir(parents=True, exist_ok=True)
@@ -3765,12 +3774,16 @@ class PremiumV2Bridge(QObject):
                             shutil.move(str(backup), str(original))
                     raise RuntimeError("Piper model download finished, but its local ONNX/config pair did not pass verification.")
                 mark_installed("piper", True)
+                operation_published = True
                 report(f"Piper voice {voice_name} installed and verified.")
                 return f"Piper voice {voice_name} is installed and verified."
             finally:
                 for temporary, _target in staged:
                     temporary.unlink(missing_ok=True)
-                shutil.rmtree(backup_root, ignore_errors=True)
+                # If restoring a backup itself failed, leave the backup directory
+                # in place rather than destroying the user's last known-good model.
+                if operation_published or not any(backup.exists() for backup, _original in backups):
+                    shutil.rmtree(backup_root, ignore_errors=True)
 
         if model_id == "kokoro":
             import ssl
