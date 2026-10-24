@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unicodedata
 import uuid
 import wave
@@ -24,7 +25,7 @@ from PySide6.QtCore import QObject, QSettings, QUrl, Slot
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QFileDialog, QLabel, QMainWindow, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMainWindow, QVBoxLayout, QWidget
 from PySide6.QtGui import QDesktopServices
 
 from app.core.paths import app_root, audiobooks_root, ensure_roots, library_root, settings_root
@@ -306,6 +307,9 @@ class PremiumV2Bridge(QObject):
         self._generators: dict[str, GenerationManager] = {}
         self._import_cancel_events: dict[str, threading.Event] = {}
         self._preview_cancel_events: dict[str, threading.Event] = {}
+        self._preview_provider_cache_lock = threading.RLock()
+        self._preview_provider_cache: dict[str, Any] | None = None
+        self._preview_provider_cache_timer: threading.Timer | None = None
         self._load_durable_jobs()
 
     @Slot(str, str, result=str)
@@ -2014,8 +2018,86 @@ class PremiumV2Bridge(QObject):
             qwen_profile_id=qwen_profile_id,
         )
 
+
+    def _close_provider_quietly(self, provider) -> None:
+        close = getattr(provider, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                log.warning("Could not close a voice-preview provider cleanly.", exc_info=True)
+
+    def close_preview_provider_cache(self) -> None:
+        """Release an idle warm preview model before app shutdown or full generation."""
+        with self._preview_provider_cache_lock:
+            entry = self._preview_provider_cache
+            timer = self._preview_provider_cache_timer
+            self._preview_provider_cache = None
+            self._preview_provider_cache_timer = None
+        if timer is not None:
+            timer.cancel()
+        if entry:
+            self._close_provider_quietly(entry.get("provider"))
+
+    def _take_preview_provider_cache(self, signature: str):
+        with self._preview_provider_cache_lock:
+            entry = self._preview_provider_cache
+            if not entry or entry.get("signature") != signature:
+                return None
+            timer = self._preview_provider_cache_timer
+            self._preview_provider_cache = None
+            self._preview_provider_cache_timer = None
+        if timer is not None:
+            timer.cancel()
+        return entry
+
+    def _expire_preview_provider_cache(self, signature: str) -> None:
+        with self._preview_provider_cache_lock:
+            entry = self._preview_provider_cache
+            if not entry or entry.get("signature") != signature:
+                return
+            timer = self._preview_provider_cache_timer
+            self._preview_provider_cache = None
+            self._preview_provider_cache_timer = None
+        if timer is not None and timer is not threading.current_thread():
+            timer.cancel()
+        self._close_provider_quietly(entry.get("provider"))
+
+    def _cache_preview_provider(self, signature: str, provider, voice) -> None:
+        """Keep a successful Qwen preview worker warm briefly, without changing model quality."""
+        self.close_preview_provider_cache()
+        timer = threading.Timer(90.0, self._expire_preview_provider_cache, args=(signature,))
+        timer.daemon = True
+        with self._preview_provider_cache_lock:
+            self._preview_provider_cache = {
+                "signature": signature,
+                "provider": provider,
+                "voice": voice,
+            }
+            self._preview_provider_cache_timer = timer
+        timer.start()
+
+    def _assert_no_active_audio_synthesis(self, activity: str) -> None:
+        with self._jobs_lock:
+            active = [
+                job for job in self._jobs.values()
+                if str(job.get("state") or "").casefold() in {"queued", "running", "cancel_requested"}
+                and str(job.get("type") or "").casefold() in {
+                    "voice-preview", "sound-design-preview", "audiobook-generation"
+                }
+            ]
+        if active:
+            title = str(active[0].get("title") or "Audio synthesis")
+            raise RuntimeError(
+                f"Cannot {activity} while {title} is still running. "
+                "Wait for the active preview or audiobook generation to finish first."
+            )
+
     def _voice_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._assert_no_active_model_lifecycle("generate a voice preview")
+        check_active = getattr(self, "_assert_no_active_audio_synthesis", None)
+        if callable(check_active):
+            check_active("generate a preview")
         project = self._active_project()
         state = load_state(project.folder)
         profile = PremiumV2Bridge._preview_profile_from_payload(self, payload, state)
@@ -2029,8 +2111,8 @@ class PremiumV2Bridge(QObject):
                 raise ValueError("Select a chapter that contains narration text.")
             text_value = chapter.text
         seconds = int(payload.get("duration_seconds") or payload.get("duration") or 30)
-        if seconds not in {10, 20, 30, 45, 60}:
-            raise ValueError("Preview duration must be 10, 20, 30, 45, or 60 seconds.")
+        if seconds not in {10, 20, 30, 45, 60, 90}:
+            raise ValueError("Preview duration must be 10, 20, 30, 45, 60, or 90 seconds.")
         include_sound_design = bool(payload.get("include_sound_design"))
         if include_sound_design:
             state["_include_sound_design_preview"] = True
@@ -2154,10 +2236,16 @@ class PremiumV2Bridge(QObject):
         from app.tts.preview import PreviewCancelledError
         output = app_root() / "Previews" / f"preview_{job_id}.wav"
         preview_path = output
+        provider = None
+        voice = None
+        cache_signature = None
+        cacheable_provider = False
+        preview_succeeded = False
+        heartbeat_stop = threading.Event()
+        heartbeat_thread = None
         try:
             if cancel_event is not None and cancel_event.is_set():
                 raise PreviewCancelledError("Preview cancelled by user.")
-            provider, voice = provider_from_profile(profile)
             # Keep Voice Studio previews consistent with production: saved
             # character assignments must route quoted dialogue through their
             # selected profiles, while narration continues to use the narrator.
@@ -2184,18 +2272,65 @@ class PremiumV2Bridge(QObject):
                 for character_name in character_names:
                     if character_name:
                         cast_assignments[character_name] = assigned_profile.name
-            if cast_assignments:
-                from app.tts.cast_provider import CastAwareProvider
-                provider = CastAwareProvider(
-                    provider, voice, cast_profiles, cast_assignments,
-                    narrating_character=str(state.get("narrating_character") or ""),
-                    backend_override=str(state.get("backend") or "automatic"),
-                )
+            cache_signature = json.dumps({
+                "profile": getattr(profile, "__dict__", str(profile)),
+                "cast_profiles": {
+                    name: getattr(item, "__dict__", str(item))
+                    for name, item in sorted(cast_profiles.items(), key=lambda pair: pair[0].casefold())
+                },
+                "cast_assignments": dict(sorted(cast_assignments.items(), key=lambda pair: pair[0].casefold())),
+                "narrating_character": str(state.get("narrating_character") or ""),
+                "backend": str(state.get("backend") or "automatic"),
+            }, sort_keys=True, default=str, ensure_ascii=False)
+            cacheable_provider = str(getattr(profile, "provider", "") or "").casefold() == "qwen-character"
+            cached_entry = self._take_preview_provider_cache(cache_signature) if cacheable_provider else None
+            if cached_entry:
+                provider = cached_entry["provider"]
+                voice = cached_entry["voice"]
+            else:
+                # Switching providers/signatures releases the previous warm model;
+                # otherwise repeated previews would leave heavyweight workers alive.
+                self.close_preview_provider_cache()
+                provider, voice = provider_from_profile(profile)
+                if cast_assignments:
+                    from app.tts.cast_provider import CastAwareProvider
+                    provider = CastAwareProvider(
+                        provider, voice, cast_profiles, cast_assignments,
+                        narrating_character=str(state.get("narrating_character") or ""),
+                        backend_override=str(state.get("backend") or "automatic"),
+                    )
             folder = app_root() / "Previews"
             folder.mkdir(parents=True, exist_ok=True)
             output = folder / f"preview_{job_id}.wav"
+            preview_started = time.monotonic()
+
             def progress(stage: str, current: int, total: int) -> None:
-                self._job_update(job_id, stage=str(stage), progress=min(95, max(2, 5 + int(90 * current / max(1, total)))))
+                elapsed = max(0, int(time.monotonic() - preview_started))
+                clock = f"{elapsed // 60}:{elapsed % 60:02d}"
+                if stage == "synthesizing":
+                    detail = f"Generating segment {min(total, max(1, current + 1))}/{max(1, total)} • elapsed {clock}"
+                elif stage == "finalizing":
+                    detail = f"Finalizing preview • elapsed {clock}"
+                else:
+                    detail = f"Preparing preview • elapsed {clock}"
+                self._job_update(job_id, stage=str(stage), message=detail,
+                                 progress=min(95, max(2, 5 + int(90 * current / max(1, total)))))
+
+            def report_elapsed_time() -> None:
+                while not heartbeat_stop.wait(5.0):
+                    if cancel_event is not None and cancel_event.is_set():
+                        return
+                    elapsed = max(0, int(time.monotonic() - preview_started))
+                    clock = f"{elapsed // 60}:{elapsed % 60:02d}"
+                    try:
+                        self._job_update(job_id, stage="synthesizing", message=f"Synthesis is still running • elapsed {clock}")
+                    except Exception:
+                        return
+
+            heartbeat_thread = threading.Thread(
+                target=report_elapsed_time, name="RyuPreviewHeartbeat", daemon=True
+            )
+            heartbeat_thread.start()
             result = build_voice_preview(
                 text_value, provider, voice, output,
                 pronunciation_dictionary=_effective_pronunciation_dictionary(state),
@@ -2242,6 +2377,7 @@ class PremiumV2Bridge(QObject):
                                  "pronunciation_replacements": replacements,
                                  "pronunciation_rule_counts": dict(rule_counts),
                              })
+            preview_succeeded = True
         except Exception as exc:
             if cancel_event is not None and cancel_event.is_set() or isinstance(exc, PreviewCancelledError):
                 for candidate in {output, preview_path,
@@ -2265,6 +2401,18 @@ class PremiumV2Bridge(QObject):
                 self._job_update(job_id, state="failed", stage="Preview failed", progress=0, message=str(exc),
                                  error={"code": "preview_failed", "message": str(exc)}, recoverable=True)
         finally:
+            heartbeat_stop.set()
+            if heartbeat_thread is not None and heartbeat_thread is not threading.current_thread():
+                heartbeat_thread.join(timeout=1.0)
+            if provider is not None:
+                if cacheable_provider and preview_succeeded and not (cancel_event is not None and cancel_event.is_set()):
+                    try:
+                        self._cache_preview_provider(cache_signature, provider, voice)
+                    except Exception:
+                        log.warning("Could not retain a warm preview provider; closing it safely.", exc_info=True)
+                        self._close_provider_quietly(provider)
+                else:
+                    self._close_provider_quietly(provider)
             if cancel_event is not None:
                 with self._jobs_lock:
                     self._preview_cancel_events.pop(job_id, None)
@@ -2959,6 +3107,8 @@ class PremiumV2Bridge(QObject):
 
     def _production_generate_book(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._assert_no_active_model_lifecycle("start audiobook generation")
+        self._assert_no_active_audio_synthesis("start audiobook generation")
+        self.close_preview_provider_cache()
         project = self._active_project()
         chapters = [c for c in project.chapters if not getattr(c, "skip_for_generation", False) and (c.text or "").strip()]
         skipped = len(project.chapters) - len(chapters)
@@ -4686,6 +4836,9 @@ class PremiumV2Window(QMainWindow):
         self.web.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
 
         self.bridge = PremiumV2Bridge(self)
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self.bridge.close_preview_provider_cache)
         self.channel = QWebChannel(self.web.page())
         self.channel.registerObject("ryuBackend", self.bridge)
         self.web.page().setWebChannel(self.channel)
