@@ -992,6 +992,46 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("list.dataset.characterListSignature !== signature", block)
         self.assertIn("if ($('charFoundMetric'))", block)
 
+    def test_chapter_switch_flushes_debounced_draft_before_changing_selection(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("async function flushChapterDraftBeforeSwitch()")
+        end = adapter.index("async function refreshChapters()", start)
+        helper = adapter[start:end]
+        self.assertIn("clearTimeout(chapterSaveTimer);", helper)
+        self.assertIn("call('chapter.update', {number, title, text})", helper)
+        self.assertIn("chapter draft was not saved, so chapter switching was stopped", helper.lower())
+        start = adapter.index("async function refreshChapters()")
+        end = adapter.index("async function refreshCharacters()", start)
+        refresh = adapter[start:end]
+        hstart = refresh.index("list.querySelectorAll('[data-chapter-number]').forEach")
+        hend = refresh.index("list.scrollTop = previousScrollTop;", hstart)
+        handler = refresh[hstart:hend]
+        self.assertIn("await flushChapterDraftBeforeSwitch();", handler)
+        self.assertIn("const selectionToken = ++chapterSelectionEpoch;", handler)
+        self.assertLess(handler.index("await flushChapterDraftBeforeSwitch();"), handler.index("window.ryuPremiumSelectedChapter = c.number;"))
+
+    def test_completed_generation_refreshes_output_metadata_without_reloading_chapter_editor(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("async function monitorJob(")
+        end = adapter.index("function requestElevenLabsApiKey()", start)
+        monitor = adapter[start:end]
+        self.assertIn("job.type === 'audiobook-generation'", monitor)
+        self.assertIn("await refreshProjects().catch(() => {});", monitor)
+        self.assertIn("await refreshHistory().catch(() => {});", monitor)
+        self.assertNotIn("'audiobook-generation'].includes(job.type)", monitor)
+
+    def test_sound_design_cue_search_is_debounced_and_does_not_redraw_unchanged_catalogue(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("function scheduleCueSearchRefresh()", adapter)
+        self.assertIn("cueSearchTimer = setTimeout", adapter)
+        self.assertIn("scheduleCueSearchRefresh();", adapter)
+        start = adapter.index("async function refreshSoundCues()")
+        end = adapter.index("function ", start + 30)
+        cue = adapter[start:end]
+        self.assertIn("const requestToken = ++cueListEpoch;", cue)
+        self.assertIn("if (requestToken !== cueListEpoch) return cueAssignments;", cue)
+        self.assertIn("grid.dataset.cueListSignature !== signature", cue)
+
     def test_production_pause_and_cancel_controls_only_target_generation_jobs(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
             encoding="utf-8"
@@ -1091,9 +1131,10 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         start = adapter.index("async function monitorJob(")
         end = adapter.index("function requestElevenLabsApiKey()", start)
         monitor = adapter[start:end]
-        gate = "['import','character-analysis','audiobook-generation'].includes(job.type)"
+        gate = "['import','character-analysis'].includes(job.type)"
         self.assertIn(gate, monitor)
-        self.assertIn("Model operations, voice previews and sound previews do not mutate", monitor)
+        self.assertIn("await refreshProjects().catch(() => {});", monitor)
+        self.assertIn("await refreshHistory().catch(() => {});", monitor)
         self.assertLess(monitor.index(gate), monitor.index("await refreshChapters().catch(()=>{})"))
     def test_job_polling_updates_existing_rows_without_rebuilding_hidden_panel(self):
         """Job polling should not repeatedly replace DOM rows and trigger visible flicker."""

@@ -15,7 +15,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
+  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
   let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0, projectListEpoch = 0, characterListEpoch = 0, termsListEpoch = 0, soundListEpoch = 0, historyListEpoch = 0, librarySearchTimer = null, soundSearchTimer = null;
@@ -981,6 +981,41 @@
     if (box) box.value = String(chapter?.text || '');
   }
 
+  async function flushChapterDraftBeforeSwitch() {
+    const number = Number(window.ryuPremiumSelectedChapter || 0);
+    if (!number) { await chapterSavePromise; return; }
+    if (chapterSaveTimer) {
+      const chapter = chapters.find(item => Number(item.number) === number);
+      const editor = $('chapterEditor');
+      if (!chapter || !editor) throw new Error('The current chapter draft could not be preserved. Stay on this chapter and retry Save.');
+      clearTimeout(chapterSaveTimer);
+      chapterSaveTimer = null;
+      const text = String(editor.value ?? chapter.text ?? '');
+      const title = String($('chapterTitle')?.textContent || chapter.title || '');
+      const saveTask = chapterSavePromise.catch(() => {}).then(async () => {
+        const result = await call('chapter.update', {number, title, text});
+        const saved = chapters.find(item => Number(item.number) === number);
+        if (saved) {
+          saved.text = text;
+          saved.title = result?.title || title;
+          saved.word_count = result?.word_count ?? (text.trim() ? text.trim().split(/\s+/).filter(Boolean).length : 0);
+        }
+        if (window.ryuPremiumSelectedChapter === number && $('saveState')) $('saveState').textContent = 'Autosaved just now';
+        return result;
+      });
+      chapterSavePromise = saveTask;
+      try { await saveTask; }
+      catch (error) {
+        if (window.ryuPremiumSelectedChapter === number && $('saveState')) $('saveState').textContent = 'Autosave failed';
+        message('Chapter draft was not saved, so chapter switching was stopped: ' + (error?.message || String(error)), true);
+        throw error;
+      } finally {
+        if (chapterSavePromise === saveTask) chapterSavePromise = Promise.resolve();
+      }
+    } else {
+      await chapterSavePromise;
+    }
+  }
   async function refreshChapters() {
     const requestToken = ++chapterListEpoch;
     const editorBeforeRefresh = $('chapterEditor');
@@ -1027,8 +1062,13 @@
         const previousScrollTop = list.scrollTop;
         list.innerHTML = chapters.map(c => '<div class="list-item ' + (c.number === current.number ? 'active' : '') + '" data-chapter-number="' + c.number + '">' + esc('Chapter ' + c.number + ' · ' + c.title) + '</div>').join('');
         list.dataset.chapterListSignature = listSignature;
-        list.querySelectorAll('[data-chapter-number]').forEach(el => el.addEventListener('click', () => {
-          const c = chapters.find(x => x.number === Number(el.dataset.chapterNumber)); if (!c) return;
+        list.querySelectorAll('[data-chapter-number]').forEach(el => el.addEventListener('click', async () => {
+          const targetNumber = Number(el.dataset.chapterNumber);
+          const selectionToken = ++chapterSelectionEpoch;
+          try { await flushChapterDraftBeforeSwitch(); }
+          catch (_) { return; }
+          if (selectionToken !== chapterSelectionEpoch) return;
+          const c = chapters.find(x => Number(x.number) === targetNumber); if (!c) return;
           window.ryuPremiumSelectedChapter = c.number;
           if (title) title.textContent = c.title; if (editor) editor.value = c.text;
           syncCurrentChapterPreviewText(c);
@@ -1363,7 +1403,10 @@
     return sounds;
   }
   async function refreshSoundCues() {
-    cueAssignments = await call('sound.cues.get');
+    const requestToken = ++cueListEpoch;
+    const loadedAssignments = await call('sound.cues.get');
+    if (requestToken !== cueListEpoch) return cueAssignments;
+    cueAssignments = loadedAssignments && typeof loadedAssignments === 'object' ? loadedAssignments : {};
     const names = {opening:'openingCueName',chapter:'chapterCueName',scene:'sceneCueName',closing:'closingCueName'};
     for (const [slot,id] of Object.entries(names)) {
       const node = $(id);
@@ -1380,8 +1423,12 @@
         (sourceFilter === 'all' || (sourceFilter === 'built-in' && source.includes('bundled')) ||
          (sourceFilter === 'imported' && source.includes('imported')));
     });
-    grid.innerHTML = visible.map(t => '<button type="button" class="cue-track card" data-cue-path="' + esc(t.path) + '"><b>' + esc(t.title) + '</b><small>' + esc(t.source) + ' · ' + esc(t.format) + '</small></button>').join('') ||
-      '<p class="muted">No matching local cue clips. Import licensed audio clips to use them here.</p>';
+    const signature = JSON.stringify({query,sourceFilter,rows:visible.map(t => [t.path,t.title,t.source,t.format,t.size_bytes])});
+    if (grid.dataset.cueListSignature !== signature) {
+      grid.dataset.cueListSignature = signature;
+      grid.innerHTML = visible.map(t => '<button type="button" class="cue-track card" data-cue-path="' + esc(t.path) + '"><b>' + esc(t.title) + '</b><small>' + esc(t.source) + ' · ' + esc(t.format) + '</small></button>').join('') ||
+        '<p class="muted">No matching local cue clips. Import licensed audio clips to use them here.</p>';
+    }
     return cueAssignments;
   }
   function renderChapterBgm() {
@@ -1442,6 +1489,13 @@
     soundSearchTimer = setTimeout(() => {
       soundSearchTimer = null;
       refreshSounds().catch(error => message(error?.message || String(error), true));
+    }, 160);
+  }
+  function scheduleCueSearchRefresh() {
+    if (cueSearchTimer) clearTimeout(cueSearchTimer);
+    cueSearchTimer = setTimeout(() => {
+      cueSearchTimer = null;
+      refreshSoundCues().catch(error => message(error?.message || String(error), true));
     }, 160);
   }
   let backendJobFilter = 'active';
@@ -1584,11 +1638,12 @@
                   : (job.message || ((job.title || 'Job') + ' ' + job.state)));
             message(completionMessage, job.state !== 'completed');
           }
-          // Model operations, voice previews and sound previews do not mutate
-          // book chapters/cast. Avoid rebuilding those panels after unrelated jobs:
-          // doing so reset scroll positions and competed with chapter autosave.
+          await refreshHistory().catch(() => {});
+          if (job.state === 'completed' && monitorToken === monitorEpoch && job.type === 'audiobook-generation') {
+            await refreshProjects().catch(() => {});
+          }
           if (job.state === 'completed' && monitorToken === monitorEpoch &&
-              ['import','character-analysis','audiobook-generation'].includes(job.type)) {
+              ['import','character-analysis'].includes(job.type)) {
             await refreshChapters().catch(()=>{});
             await refreshCharacters().catch(()=>{});
           }
@@ -3377,7 +3432,7 @@
         scheduleSoundSearchRefresh();
       } else if (e.target?.id === 'cueSearch') {
         e.stopImmediatePropagation();
-        refreshSoundCues().catch(err => message(err?.message || String(err), true));
+        scheduleCueSearchRefresh();
       }
     }, true);
     document.addEventListener('click', async e => {

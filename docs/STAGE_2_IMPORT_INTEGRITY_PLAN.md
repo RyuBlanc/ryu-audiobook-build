@@ -18,7 +18,7 @@
 - [x] Confirm reflow preserves paragraph/dialogue/heading boundaries and hyphenated line wraps with regression fixtures.
 
 ### 2.3 Chapter detection and editing
-- [ ] Automated fixtures cover numbered/Roman chapters, prologue/epilogue, preambles, books without headings, and dialogue-like false headings; still add explicit named-section and empty-heading fixtures.
+- [x] Automated fixtures cover numbered/Roman chapters, prologue/epilogue, preambles, books without headings, empty-heading boundaries and named/compound slash-title/Part headings. Continue adding real-book fixtures during acceptance.
 - [x] Verify covered chapter boundaries preserve body text; project save normalizes chapter numbering to current order, and regression tests verify reordered chapters reload in that order.
 - [ ] Persistence regression now covers chapter title/text edits, reorder, dialogue assignments, review status, and skip-for-generation after reload. Still verify all editor operations (add/delete/merge/split/clean/find-replace/undo-redo) in automated or packaged-app tests.
 - [ ] Keep re-detection disabled unless it can show a before/after review and protect manual edits.
@@ -45,3 +45,8 @@ Run #877 passed on final Stage 2 commit `05e03c14637bb4ff3fe8514a50101ebde0d2ab4
 - Scanned/image-only PDFs are not automatically OCR'd. The import should block or clearly diagnose sparse extraction rather than create a misleading partial audiobook.
 - Existing projects use JSON/filesystem persistence; this stage does not silently migrate them to SQLite.
 - Stage 1 hardware-specific freeze/crash validation remains a separate target-PC acceptance item; Stage 2 proceeds in parallel with that outstanding evidence and does not mark it resolved.
+
+
+## 2026-10-24 reliability addendum
+
+Chapter selection flushes a queued autosave before navigation and blocks selection if save fails. Job polling and catalogue/list refreshes are guarded against overlaps/stale replies. Generation completion refreshes output metadata and History without rebuilding the Chapter editor. Target-Windows import/edit/save/reopen and real audio acceptance remain open.

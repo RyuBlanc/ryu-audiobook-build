@@ -1,6 +1,8 @@
 # Screen-to-Function Map — Premium V2
 
-**Audit snapshot:** 24 October 2026 (Models Center/job-monitor delta; other screens retain earlier audit basis)
+**Audit snapshot:** 24 October 2026; see docs/SIX_STAGE_AUDIT_AND_ACCEPTANCE.md for the current branch and the 15-screen status ledger.
+
+**Legacy snapshot metadata:** 24 October 2026 (Models Center/job-monitor delta; other screens retain earlier audit basis)
 **Current review checkpoint:** [Run #782](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39583746634) passed on `a7c6baa4`; the Premium V2 adapter/dispatcher/capability parity regression now passes. The earlier Run #780 was cancelled and Run #781 failed because the new test's regex was over-escaped; that test-only defect was corrected in #782. This map is a source audit, not manual runtime acceptance.
 **Visual authority:** `assets/frontend/ryu_audiobook_premium_v2.html`
 **User-supplied visual source fingerprint:** 1,436,954 bytes; SHA-256 `e70f630d99e75f07fdd704bb1931910dd972795390ae0af0d29b07b9118abf95`; Git blob SHA `0da8d4a60c69530325fff9af7e516d251dc442cd`, matching the file in the audited repository commit.
@@ -51,3 +53,7 @@ The approved HTML contains 15 `section.page` screens, 15 unique navigation desti
 ## Acceptance boundary
 
 This map is a source inspection result. It does not certify all screens or actions as manually accepted. The current known CI result is Run #731 for commit `eca9cf1a8330e2dcfce697f66233a73740e25ae0`: 308 automated tests passed and Windows installer/portable packaging completed. Target-Windows interactive acceptance remains pending.
+
+## 2026-10-24 reliability addendum
+
+Serialized job polling; stale-response guards for screen data; stable DOM for unchanged cards/lists; debounced Library/Sound/Cue search; chapter draft/scroll preservation and save-before-switch. Generation refreshes output metadata and History without reloading text. Check the workflow run matching current HEAD; this source map is not manual Windows acceptance.

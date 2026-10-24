@@ -320,3 +320,8 @@ The **source-level control audit is now closed** for the currently inventoried l
 - The first run for the storage fix, Build #1162, passed the full regression-test job: **530 tests in 36.774 seconds**. Its Windows packaging job was superseded by the shared job-monitor timer correction; use the next branch run for the updated package result.
 - Found and corrected an initial-terminal polling race in `monitorJob`: if a job was already terminal during the first tick, the timer could be created after that tick had finished. The new regression contract verifies that the timer is created only if the initial tick remains non-terminal.
 - Still open: target-Windows interaction/visual acceptance; actual model installation/repair/uninstall on the user's PC; true model-provider preview/narration acceptance; and live hardware telemetry, which remains explicitly unavailable.
+
+
+## 2026-10-24 current-branch reliability addendum
+
+Production Pause/Cancel is generation-type guarded. Chapter switching saves a pending draft before navigation and aborts on save failure. Stale replies are ignored across project/chapter/cast/pronunciation/sound/cues/model/voice/provider/history lists; unchanged DOM is retained and search is debounced. See docs/SIX_STAGE_AUDIT_AND_ACCEPTANCE.md for the 15-screen ledger. Do not claim zero flicker/crash without repeated target-Windows evidence.
