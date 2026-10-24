@@ -2728,19 +2728,28 @@
 
 
   function suppressLegacyVoicePreviewHandlers() {
-    // The shipped HTML prototype registers a delegated click listener that
-    // simulates preview progress and toggles fake playback state. The real
-    // backend handlers below are attached to these buttons, so let their target
-    // handlers run but prevent the prototype's ancestor listener from also
-    // mutating the same progress/status controls.
-    const ids = ['generatePreview','playPreview','stopPreview','saveProfile','useNarrator','assignCharacter'];
+    // The approved HTML is a visual prototype and attaches simulated actions
+    // to several Voice Studio controls. A bubbling guard added after those
+    // handlers is too late: same-element handlers have already run. Replace
+    // each control before binding the backend actions so cloned nodes retain
+    // the approved markup but not prototype listeners or inline click handlers.
+    // Install the propagation guard first; the real backend handlers are bound
+    // later in wire(), while the prototype's delegated bubble listener is blocked.
+    const ids = [
+      'generatePreview','playPreview','stopPreview',
+      'saveProfile','saveOnly','useNarrator','assignCharacter'
+    ];
     for (const id of ids) {
-      const button = $(id);
-      if (!button || button.dataset.ryuPrototypeActionShield === '1') continue;
-      button.dataset.ryuPrototypeActionShield = '1';
-      button.addEventListener('click', event => {
+      const original = $(id);
+      if (!original || original.dataset.ryuPrototypeActionShield === '1') continue;
+      const replacement = original.cloneNode(true);
+      replacement.removeAttribute('onclick');
+      replacement.removeAttribute('onmousedown');
+      replacement.dataset.ryuPrototypeActionShield = '1';
+      replacement.addEventListener('click', event => {
         event.stopPropagation();
       });
+      original.replaceWith(replacement);
     }
   }
 
@@ -3561,6 +3570,9 @@
   }
 
   async function wire() {
+    // Remove the prototype's same-element click handlers synchronously, before
+    // any asynchronous backend initialization or real handler registration.
+    suppressLegacyVoicePreviewHandlers();
     await call('app.get_info');
     await refreshCurrentProjectCard();
     installProjectCardStatusObserver();
@@ -5116,9 +5128,8 @@
     };
     void hydrateInitialState();
     applyUnavailableControlStates();
-    // Bind after the real target handlers so legacy prototype click simulations
-    // cannot race the backend worker and force layout/status changes.
-    suppressLegacyVoicePreviewHandlers();
+    // The prototype action controls were replaced before any async work above;
+    // only backend-owned Voice Studio actions remain active here.
 
     if (!window.__ryuBackendJobTimer) window.__ryuBackendJobTimer=setInterval(()=>refreshJobs().catch(()=>{}),1500);
     const jobsBox = $('backgroundJobsList');
