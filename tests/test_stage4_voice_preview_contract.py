@@ -235,6 +235,7 @@ class VoicePreviewContractTests(unittest.TestCase):
                 _project_series_name=lambda active_project, active_state: "Series A",
                 _now=lambda: "2026-10-24T00:00:00+00:00",
                 _sync_saved_cast=Mock(),
+                _character_library_ui_record=premium_v2_host.PremiumV2Bridge._character_library_ui_record,
             )
             with patch.object(premium_v2_host, "list_reusable_characters", side_effect=lambda: records), \
                  patch.object(premium_v2_host, "sync_reusable_characters", side_effect=sync_characters), \
