@@ -162,7 +162,8 @@ def heading_title(line: str, *, allow_slash: bool = False) -> str | None:
     match = _TITLE_WITH_NUMBER_RE.fullmatch(candidate)
     if match:
         suffix = (match.group(2) or "").strip()
-        if not _looks_like_body_sentence(candidate, suffix, False) and len(suffix.split()) <= 12:
+        # The dotted number is itself a structural separator (e.g. Life.1 Title).
+        if not _looks_like_body_sentence(candidate, suffix, True) and len(suffix.split()) <= 12:
             return candidate
 
     match = _NEW_LIFE_RE.fullmatch(candidate)

@@ -22,11 +22,14 @@ The second volume begins with a substantial opening passage and several sentence
 
 Life.0
 This is a supported numbered-life format and it must remain a real chapter boundary.
+
+Life.1 I Quit Being a Human
+The dotted chapter-title style can include a title after its number without triggering the prose false-positive guard.
 """
         chapters = detect_chapters(source)
         self.assertEqual(
             [chapter.title for chapter in chapters],
-            ["Prologue", "Chapter One - Return/Attack", "Part II: The Hidden Battle", "Volume 2", "Life.0"],
+            ["Prologue", "Chapter One - Return/Attack", "Part II: The Hidden Battle", "Volume 2", "Life.0", "Life.1 I Quit Being a Human"],
         )
         self.assertTrue(all(chapter.text.strip() for chapter in chapters))
         self.assertIn("ruined hall", chapters[1].text)
