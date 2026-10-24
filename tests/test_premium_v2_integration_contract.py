@@ -712,7 +712,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("Estimated narration", adapter)
 
         selection_start = adapter.index("list.querySelectorAll('[data-chapter-number]').forEach")
-        selection_end = adapter.index("    }\n    if (title)", selection_start)
+        selection_end = adapter.index("list.scrollTop = previousScrollTop;", selection_start)
         selection_handler = adapter[selection_start:selection_end]
         self.assertIn("renderLiveChapterInsights();", selection_handler)
 
@@ -882,7 +882,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         end = adapter.index("function requestElevenLabsApiKey()", start)
         monitor = adapter[start:end]
         self.assertIn("let finished = false;", monitor)
-        self.assertIn("if (finished) return;", monitor)
+        self.assertIn("if (finished || monitorToken !== monitorEpoch || checking) return;", monitor)
         self.assertIn("finished = true;", monitor)
         self.assertLess(monitor.index("await tick();"), monitor.index("if (!finished && monitorToken === monitorEpoch) poll = setInterval(tick, 1000);"))
 
