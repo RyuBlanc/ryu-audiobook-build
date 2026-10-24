@@ -16,6 +16,7 @@
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
   let selectedVoice = null, selectedVoiceId = null, activeJob = null, poll = null, previewAudio = null, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
+  let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
   let providerCatalogs = Object.create(null);
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
@@ -1432,6 +1433,179 @@
     };
     await tick(); poll = setInterval(tick, 1000);
   }
+  function requestElevenLabsApiKey() {
+    return new Promise(resolve => {
+      $('ryuElevenLabsKeyDialog')?.remove();
+      const overlay = document.createElement('div');
+      overlay.id = 'ryuElevenLabsKeyDialog';
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(3,5,10,.8);backdrop-filter:blur(7px)';
+      const panel = document.createElement('section');
+      panel.setAttribute('role','dialog'); panel.setAttribute('aria-modal','true'); panel.setAttribute('aria-labelledby','ryuElevenLabsKeyTitle');
+      panel.style.cssText = 'box-sizing:border-box;width:min(460px,100%);background:#151a25;border:1px solid rgba(255,255,255,.13);border-radius:18px;box-shadow:0 24px 80px rgba(0,0,0,.5);padding:22px;color:#f4f5f8';
+      const heading = document.createElement('h2'); heading.id='ryuElevenLabsKeyTitle'; heading.textContent='Connect ElevenLabs';
+      heading.style.cssText='margin:0 0 8px;font-size:22px';
+      const description = document.createElement('p');
+      description.textContent='Paste your ElevenLabs API key. It is saved in the app’s local settings and is sent only to the ElevenLabs provider when you use its service. Do not paste passwords or other account credentials.';
+      description.style.cssText='margin:0 0 16px;color:#aeb6c5;font-size:13px;line-height:1.5';
+      const label = document.createElement('label'); label.textContent='API key'; label.htmlFor='ryuElevenLabsKeyInput';
+      label.style.cssText='display:block;margin-bottom:6px;font-size:12px;color:#aeb6c5';
+      const input = document.createElement('input'); input.id='ryuElevenLabsKeyInput'; input.type='password';
+      input.autocomplete='new-password'; input.spellcheck=false; input.placeholder='Paste ElevenLabs API key';
+      input.style.cssText='box-sizing:border-box;width:100%;padding:12px;border-radius:10px;border:1px solid #42495a;background:#0c1018;color:#f6f7fa;font:inherit';
+      const actions=document.createElement('div'); actions.style.cssText='display:flex;justify-content:flex-end;gap:10px;margin-top:20px';
+      const cancel=document.createElement('button'); cancel.type='button'; cancel.textContent='Cancel';
+      cancel.style.cssText='padding:10px 14px;border-radius:10px;background:#1c2230;border:1px solid #343b4a;color:#f2f4f8;font-weight:700;cursor:pointer';
+      const save=document.createElement('button'); save.type='button'; save.textContent='Save Key & Connect';
+      save.style.cssText='padding:10px 16px;border-radius:10px;background:#c92050;border:1px solid #e7426a;color:white;font-weight:800;cursor:pointer';
+      actions.append(cancel,save); panel.append(heading,description,label,input,actions); overlay.append(panel);
+      let finished=false;
+      const finish=value=>{if(finished)return;finished=true;overlay.remove();resolve(value)};
+      cancel.addEventListener('click',()=>finish(false));
+      overlay.addEventListener('click',event=>{if(event.target===overlay)finish(false)});
+      input.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();finish(false)}if(event.key==='Enter'){event.preventDefault();save.click()}});
+      save.addEventListener('click',async()=>{
+        const key=String(input.value||'').trim();
+        if(!key){input.focus();message('Paste an ElevenLabs API key first.',true);return}
+        save.disabled=true; save.textContent='Saving…';
+        try {
+          await call('voice.credentials.set',{api_key:key});
+          input.value='';
+          await refreshProviderCatalog('eleven',true);
+          message('ElevenLabs API key saved to local app settings. The catalogue has been checked.');
+          finish(true);
+        } catch(error) {
+          message(error?.message||String(error),true);
+          save.disabled=false; save.textContent='Save Key & Connect';
+        }
+      });
+      document.body.append(overlay); input.focus();
+    });
+  }
+
+  function getElevenLabsDesignOptions() {
+    const panel = document.querySelector('#voices .provider[data-provider="eleven"] [data-epanel="create"]');
+    const selects = [...(panel?.querySelectorAll('.form5 select') || [])];
+    const styleText = String(selects[0]?.value || 'Anime').trim();
+    const archetypeText = String(selects[1]?.value || 'Anime Heroine').trim();
+    const gender = String(selects[2]?.value || 'Female').trim().toLowerCase();
+    const age = String(selects[3]?.value || 'Young adult').trim();
+    const temperament = String(selects[4]?.value || 'Bright / cheerful').trim();
+    let archetype = archetypeText.toLowerCase();
+    if (/villain/.test(archetype)) archetype='villain';
+    else if (/heroine/.test(archetype)) archetype='heroine';
+    else if (/\bhero\b/.test(archetype)) archetype='hero';
+    else if (/rival/.test(archetype)) archetype='rival';
+    else if (/healer/.test(archetype)) archetype='healer';
+    else if (/mentor/.test(archetype)) archetype='mentor';
+    else if (/tsundere/.test(archetype)) archetype='tsundere';
+    else if (/sidekick/.test(archetype)) archetype='sidekick';
+    else if (/chibi/.test(archetype)) archetype='chibi';
+    else if (/mysterious/.test(archetype)) archetype='mysterious';
+    else archetype='heroine';
+    return {panel,style:/cartoon/i.test(styleText)?'cartoon':'anime',archetype,gender,age,temperament};
+  }
+
+  function renderElevenLabsCandidates() {
+    const container = $('candidates');
+    if (!container) return;
+    container.replaceChildren();
+    if (!elevenCandidates.length) {
+      const empty=document.createElement('div'); empty.className='candidate';
+      const title=document.createElement('b'); title.textContent='No candidates yet';
+      const description=document.createElement('p'); description.className='muted';
+      description.textContent='Generate temporary voice previews first. Choose one before creating it in My Voices.';
+      empty.append(title,description); container.appendChild(empty);
+      if ($('addPremium')) $('addPremium').disabled=true;
+      return;
+    }
+    elevenCandidates.forEach((candidate,index)=>{
+      const card=document.createElement('div'); card.className='candidate';
+      card.style.cssText='border:1px solid '+(selectedElevenCandidate?.generated_voice_id===candidate.generated_voice_id?'#e63361':'rgba(148,163,184,.2)')+';border-radius:12px;padding:12px;margin:8px 0;background:rgba(9,12,18,.45)';
+      const title=document.createElement('b'); title.textContent='Voice Design candidate '+(index+1);
+      const info=document.createElement('p'); info.className='muted'; info.textContent=[candidate.gender,candidate.age,candidate.style,candidate.archetype].filter(Boolean).join(' · ');
+      const audio=document.createElement('audio'); audio.controls=true; audio.preload='none';
+      audio.style.cssText='display:block;width:100%;margin:8px 0';
+      audio.src='data:audio/mpeg;base64,'+String(candidate.audio_base_64||'');
+      const select=document.createElement('button'); select.type='button'; select.className='btn choose';
+      select.textContent=selectedElevenCandidate?.generated_voice_id===candidate.generated_voice_id?'Selected':'Select this voice';
+      select.addEventListener('click',()=>{
+        selectedElevenCandidate=candidate;
+        elevenCandidates.forEach((item,idx)=>{
+          const other=container.children[idx];
+          if(other)other.style.borderColor=item.generated_voice_id===candidate.generated_voice_id?'#e63361':'rgba(148,163,184,.2)';
+          const button=other?.querySelector('button.choose');
+          if(button)button.textContent=item.generated_voice_id===candidate.generated_voice_id?'Selected':'Select this voice';
+        });
+        if($('addPremium'))$('addPremium').disabled=false;
+        if($('premiumName')&&!$('premiumName').value.trim())$('premiumName').value=(candidate.archetype||'Character')+' Voice '+(index+1);
+      });
+      card.append(title,info,audio,select); container.appendChild(card);
+    });
+    if ($('addPremium')) $('addPremium').disabled=!selectedElevenCandidate;
+  }
+
+  async function generateElevenLabsCandidates(appendMore = false) {
+    const options=getElevenLabsDesignOptions();
+    if (!options.panel) throw new Error('ElevenLabs Voice Design panel is unavailable.');
+    const button = $(appendMore?'generateMore':'generateCandidates');
+    if (button) {button.disabled=true;button.textContent='Generating…'}
+    try {
+      const result=await call('voice.elevenlabs.design',{
+        style:options.style,archetype:options.archetype,gender:options.gender,
+        age:options.age,temperament:options.temperament,seed:elevenDesignSeed++
+      });
+      const generated=Array.isArray(result.candidates)?result.candidates:[];
+      if(!appendMore)elevenCandidates=[];
+      elevenCandidates.push(...generated);
+      selectedElevenCandidate=null;
+      renderElevenLabsCandidates();
+      message('Generated '+generated.length+' real ElevenLabs preview(s). Select one to create it in My Voices.');
+    } finally {
+      if(button){button.disabled=false;button.textContent=appendMore?'Generate 3 More':'Generate 3 Premium Character Voices'}
+    }
+  }
+
+  async function createSelectedElevenLabsVoice() {
+    if(!selectedElevenCandidate)throw new Error('Select one generated voice preview first.');
+    const options=getElevenLabsDesignOptions();
+    const input=$('premiumName');
+    const name=String(input?.value||'').trim();
+    if(!name)throw new Error('Enter a name for the selected premium voice.');
+    const created=await call('voice.elevenlabs.create',{
+      generated_voice_id:selectedElevenCandidate.generated_voice_id,name,
+      voice_description:selectedElevenCandidate.description||'',
+      style:options.style,gender:options.gender,age:options.age
+    });
+    selectedVoice=created.name;selectedVoiceId=created.voice_id;
+    if($('profileName'))$('profileName').value=created.name;
+    if($('profileLibrary'))$('profileLibrary').textContent='elevenlabs';
+    if($('profileVoice'))$('profileVoice').textContent=created.voice_id;
+    if($('previewProfile'))$('previewProfile').textContent=created.name;
+    if($('addPremium'))$('addPremium').disabled=true;
+    await refreshVoices();
+    await refreshProviderCatalog('eleven',true);
+    message('Created the voice in ElevenLabs and saved its local Ryu profile. Narrator assignment is still explicit.');
+  }
+
+  function applyVoiceDesignPreset(button) {
+    const panel=document.querySelector('.provider[data-provider="voicedesign"]');
+    const textarea=panel?.querySelector('textarea');
+    if(!panel||!textarea)return;
+    const preset=String(button.textContent||'').trim().toLowerCase();
+    const prompts={
+      'anime heroine':'Young adult female voice, bright and warm, slightly playful anime heroine timbre, clear natural English diction, expressive emotional reactions and cinematic storytelling.',
+      'anime hero':'Young adult male voice, confident and warm anime hero timbre, clear natural English diction, determined energy with sincere emotional range and cinematic storytelling.',
+      'anime rival':'Young adult voice with cool controlled intensity, precise diction, restrained emotion, competitive edge and a confident, slightly mysterious anime rival presence.',
+      'anime villain':'Mature, controlled voice with elegant menace, precise diction, quiet intensity and theatrical restraint for a fictional anime villain.',
+      'anime healer':'Gentle, reassuring voice with soft warmth, sincere emotion, clear diction and a calm, supportive anime healer presence.',
+      'custom description':''
+    };
+    if(!(preset in prompts))return;
+    panel.querySelectorAll('.preset').forEach(item=>item.classList.toggle('active',item===button));
+    textarea.value=prompts[preset];
+    textarea.dispatchEvent(new Event('input',{bubbles:true}));
+  }
+
   function requestVoiceProfileSaveName(initialName, providerKey, voiceLabel) {
     return new Promise(resolve => {
       $('ryuVoiceProfileSaveConfirm')?.remove();
