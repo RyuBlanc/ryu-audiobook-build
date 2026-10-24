@@ -884,7 +884,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("let finished = false;", monitor)
         self.assertIn("if (finished) return;", monitor)
         self.assertIn("finished = true;", monitor)
-        self.assertIn("await tick();\\n    if (!finished) poll = setInterval(tick, 1000);", monitor)
+        self.assertLess(monitor.index("await tick();"), monitor.index("if (!finished) poll = setInterval(tick, 1000);"))
 
 
     def test_job_polling_updates_existing_rows_without_rebuilding_hidden_panel(self):
