@@ -3595,7 +3595,7 @@
     if ($('stopPreview')) $('stopPreview').onclick=()=>{if(previewAudio){previewAudio.pause();previewAudio.currentTime=0;}if($('playPreview'))$('playPreview').textContent='▶ Play';syncPreviewPlaybackTime();};
     if ($('downloadPreview')) $('downloadPreview').onclick=act(async()=>{
       if(!voicePreviewValid||!lastVoicePreviewPath)throw new Error('Generate a validated preview before downloading it.');
-      const name=(lastVoicePreviewProfileName||currentVoiceName()||'Ryu Voice Preview').replace(/[<>:"/\\|?*\x00-\x1f]+/g,'-').trim()||'Ryu Voice Preview';
+      const name=(lastVoicePreviewProfileName||currentVoiceName()||'Ryu Voice Preview').replace(/[<>:"\/\\|?*\x00-\x1f]+/g,'-').trim()||'Ryu Voice Preview';
       const result=await call('voice.preview.save',{source_path:lastVoicePreviewPath,suggested_name:name.replace(/\s+/g,'_')});
       if(result.cancelled){message('Preview save cancelled.');return;}
       message('Voice preview saved to '+result.path);
