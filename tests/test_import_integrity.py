@@ -159,6 +159,7 @@ class ImportIntegrityTests(unittest.TestCase):
         )
         chapters = detect_chapters(source)
         self.assertEqual(chapters[0].title, "BLACK DOG/BIRTH: Part 1")
+        self.assertTrue(chapters[0].text.startswith("BLACK DOG/BIRTH: Part 1\n"))
         self.assertIn("opened his eyes", chapters[0].text)
         self.assertNotIn("\nPart 1\n", chapters[0].text)
         self.assertTrue(any(chapter.title == "Chapter 2: The Second Morning" for chapter in chapters))
