@@ -55,7 +55,13 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             model_root = Path(temporary) / "Models"
             model = b"piper-model-bytes" * 100
-            config = json.dumps({"audio": {"sample_rate": 22050}, "phoneme_id_map": {"_": [0]}}).encode()
+            config = json.dumps({
+                "audio": {"sample_rate": 22050},
+                "phoneme_id_map": {"_": [0]},
+                "phoneme_type": "espeak",
+                "speaker_id_map": {"default": 0},
+                "language": {"code": "en_US"},
+            }).encode()
             requests = []
 
             def open_url(request, timeout=0, context=None):
