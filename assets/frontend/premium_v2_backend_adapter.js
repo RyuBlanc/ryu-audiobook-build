@@ -953,12 +953,38 @@
       if(valueNode&&valueNode!==label)valueNode.textContent=name;
     }
   }
+  function updatePreviewTarget(profile,libraryLabel,key) {
+    const name=String(profile?.name||'').trim();
+    const provider=String(profile?.provider||'').trim();
+    const providerLabel=({
+      'qwen-character':'Qwen Voice Studio','edge-tts':'Edge TTS','elevenlabs':'ElevenLabs',
+      'windows-sapi':'Windows SAPI','piper':'Piper','kokoro':'Kokoro','chatterbox':'Chatterbox'
+    })[provider]||provider;
+    const voice=String(profile?.display_voice||profile?.voice_name||profile?.voice_id||selectedVoiceId||'').trim();
+    let model=String(profile?.model_id||'').trim();
+    if(provider==='qwen-character'){
+      model=profile?.qwen_mode==='design'?'VoiceDesign':/clone/i.test(profile?.qwen_mode||'')?'Voice Clone':(model&&model!=='auto'&&model!=='automatic'?model:'CustomVoice');
+    } else if(!model||['auto','automatic'].includes(model.toLowerCase())) {
+      model=provider==='edge-tts'?'Neural TTS':provider==='piper'?'Piper model':provider==='kokoro'?'Kokoro model':providerLabel;
+    }
+    const values={
+      profileLibrary:libraryLabel||'',
+      profileVoice:voice||'',
+      previewLibrary:libraryLabel||'',
+      previewProvider:providerLabel,
+      previewVoice:voice,
+      previewModel:model,
+      previewProfile:name
+    };
+    for(const [id,value] of Object.entries(values))if($(id))$(id).textContent=String(value||'');
+  }
   function updateVoiceSummary(profile=null,options={}){
     const name=String(profile?.name||'').trim(),key=providerPanelForProfile(profile);
     const libraryLabel=name?(voiceLibraryTitles[key]||({
       piper:'Offline Neural Voices',kokoro:'Offline Neural Voices','qwen-character':profile.qwen_mode==='design'?'Qwen VoiceDesign':/clone/i.test(profile.qwen_mode||'')?'Qwen Voice Clone':'Qwen CustomVoice',
       'edge-tts':'Edge TTS','windows-sapi':'Windows SAPI',elevenlabs:'ElevenLabs',chatterbox:'Reference Voice'
     }[profile.provider]||profile.provider||'')):'';
+    updatePreviewTarget(profile,libraryLabel,key);
     if($('workingSide'))$('workingSide').textContent=name;
     if($('sumLibrary'))$('sumLibrary').textContent=libraryLabel;
     if($('sumProfile'))$('sumProfile').textContent=name?(options.saved?'Saved':'Unsaved'):'';
