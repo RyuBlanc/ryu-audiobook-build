@@ -170,8 +170,17 @@
   const renderSelect = (select, rows, value, label) => {
     if (!select) return;
     const previous = select.value;
-    select.innerHTML = rows.map(r => '<option value="' + esc(r[value]) + '">' + esc(label(r)) + '</option>').join('');
-    if (rows.some(r => String(r[value]) === previous)) select.value = previous;
+    const renderedRows = rows.map(row => [String(row[value] ?? ''), String(label(row) ?? '')]);
+    const signature = JSON.stringify(renderedRows);
+    if (select.dataset.backendOptionsSignature === signature && select.options.length === renderedRows.length) {
+      if (renderedRows.some(([optionValue]) => optionValue === previous)) select.value = previous;
+      return;
+    }
+    select.innerHTML = renderedRows.map(([optionValue, optionLabel]) =>
+      '<option value="' + esc(optionValue) + '">' + esc(optionLabel) + '</option>'
+    ).join('');
+    select.dataset.backendOptionsSignature = signature;
+    if (renderedRows.some(([optionValue]) => optionValue === previous)) select.value = previous;
   };
   const dashboardText = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
   function dashboardLeaves(root) {
@@ -736,8 +745,14 @@
     return raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : 'Unknown';
   }
   function voiceCategories(row) {
-    const raw = row.categories ?? row.category ?? row.use_case ?? row.personalities ?? [];
-    const values = Array.isArray(raw) ? raw : String(raw || '').split(/[,;|]/);
+    // Provider payloads often include an empty categories array alongside a useful
+    // category/use_case/personality field. Combine all present fields instead of
+    // letting the first empty array hide the remaining metadata.
+    const values = [];
+    for (const raw of [row.categories, row.category, row.use_case, row.personalities, row.styles]) {
+      if (Array.isArray(raw)) values.push(...raw);
+      else if (raw != null) values.push(...String(raw).split(/[,;|]/));
+    }
     return [...new Set(values.map(value => String(value || '').trim()).filter(Boolean))];
   }
   function renderProviderCatalog(providerKey, result) {
@@ -757,6 +772,37 @@
     }
     if (healthDetail) healthDetail.textContent = result.message || (result.count + ' live catalogue entries');
     if (providerKey === 'eleven' && $('apiState')) $('apiState').textContent = result.ready ? 'API key connected · Voice catalogue ready' : (result.message || 'API key not configured');
+    if (providerKey === 'eleven') {
+      const createPanel = panel.querySelector('[data-epanel="create"]');
+      if (createPanel) {
+        let note = createPanel.querySelector('.voice-setup-note');
+        if (!note) { note = document.createElement('p'); note.className = 'voice-setup-note muted'; createPanel.prepend(note); }
+        note.textContent = result.ready
+          ? (result.message || 'ElevenLabs is connected. Voice creation uses your account and may consume credits.')
+          : (result.message || 'ElevenLabs API key is not configured.') +
+            ' You can still create and download audio manually on the ElevenLabs website; Ryu cannot fetch account audio without supported API access.';
+        let website = createPanel.querySelector('#openElevenLabsWebsite');
+        if (!website) {
+          website = document.createElement('button'); website.id = 'openElevenLabsWebsite';
+          website.type = 'button'; website.className = 'btn secondary'; website.textContent = 'Open ElevenLabs Website';
+          website.dataset.openElevenlabsWeb = 'studio';
+          website.style.cssText = 'margin:8px 0 12px';
+          createPanel.appendChild(website);
+        }
+      }
+      for (const id of ['generateCandidates','generateMore']) {
+        const button = $(id);
+        if (button) {
+          button.disabled = !result.ready;
+          button.title = result.ready ? 'Generate temporary voice candidates using your connected account'
+            : 'Connect an ElevenLabs API key to generate voices inside Ryu. Website-based generation is available separately.';
+        }
+      }
+      if (!result.ready && $('addPremium')) {
+        $('addPremium').disabled = true;
+        $('addPremium').title = 'Connect an ElevenLabs API key before creating and saving a voice in Ryu.';
+      }
+    }
 
     const form = panel.querySelector('.form3');
     if (!form) return;
@@ -821,8 +867,9 @@
       }
     }
     const renderKey=JSON.stringify(filtered.map(row=>[
-      row.voice_id||row.name,row.name,row.provider,row.language,row.locale,row.region,
-      row.gender,voiceCategories(row),Boolean(row.saved),row.description
+      row.voice_id||row.name,row.name,row.provider,row.language,row.language_name,row.locale,row.locale_code,
+      row.region,row.region_name,row.accent,row.gender,row.category,row.use_case,
+      voiceCategories(row),Boolean(row.saved),row.description
     ]));
     // Keep the catalogue DOM intact when a refresh returns the same filtered rows.
     // Replacing hundreds of voice cards unnecessarily caused visible flashes and lost scroll.
@@ -871,14 +918,8 @@
       voiceRow.append(info, choose); listHost.appendChild(voiceRow);
     }
     listHost.scrollTop=previousScrollTop;
-    if (providerKey === 'eleven' && !filtered.length) {
-      const createPanel = panel.querySelector('[data-epanel="create"]');
-      if (createPanel && result.message) {
-        let note = createPanel.querySelector('.voice-setup-note');
-        if (!note) { note = document.createElement('p'); note.className = 'voice-setup-note muted'; createPanel.prepend(note); }
-        note.textContent = result.message;
-      }
-    }
+    // ElevenLabs setup guidance and native browser button are maintained above,
+    // regardless of whether saved voices happen to exist in the catalogue.
   }
   async function refreshProviderCatalog(providerKey, refresh = false) {
     // Several lifecycle screens can refresh catalogues at the same time. Only
@@ -1132,13 +1173,17 @@
       const term = String(profileSearch?.value || '').trim().toLowerCase();
       const saved = voices.filter(v => v.saved === true && (!term ||
         [v.name,v.provider,v.language,v.voice_id,v.notes,v.qwen_prompt].some(value => String(value || '').toLowerCase().includes(term))));
-      profileSelect.replaceChildren();
-      const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = 'Select saved profile';
-      profileSelect.appendChild(placeholder);
-      for (const item of saved) {
-        const option = document.createElement('option');
-        option.value = item.name; option.textContent = item.name + ' · ' + item.provider;
-        profileSelect.appendChild(option);
+      const optionSignature = JSON.stringify(saved.map(item => [item.name,item.provider]));
+      if (profileSelect.dataset.savedOptionsSignature !== optionSignature) {
+        profileSelect.replaceChildren();
+        const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = 'Select saved profile';
+        profileSelect.appendChild(placeholder);
+        for (const item of saved) {
+          const option = document.createElement('option');
+          option.value = item.name; option.textContent = item.name + ' · ' + item.provider;
+          profileSelect.appendChild(option);
+        }
+        profileSelect.dataset.savedOptionsSignature = optionSignature;
       }
       profileSelect.value = saved.some(v => v.name === previous) ? previous : '';
       profileSelect.disabled = saved.length === 0;
@@ -4049,10 +4094,21 @@
         void requestElevenLabsApiKey();
         return;
       }
+      if (button.matches('[data-open-elevenlabs-web]')) {
+        stop();
+        const target = button.dataset.openElevenlabsWeb === 'api_keys' ? 'api_keys' : 'studio';
+        void call('elevenlabs.open_web',{target})
+          .then(() => message(target === 'api_keys'
+            ? 'Opened ElevenLabs API-key settings in your default browser.'
+            : 'Opened ElevenLabs website in your default browser. Generate audio there and download it manually.'))
+          .catch(error => message(error?.message || String(error),true));
+        return;
+      }
       if (label === 'get api key') {
         stop();
-        const opened = window.open('https://elevenlabs.io/app/settings/api-keys', '_blank', 'noopener,noreferrer');
-        if (!opened) message('Open https://elevenlabs.io/app/settings/api-keys in your browser to create an API key.', true);
+        void call('elevenlabs.open_web',{target:'api_keys'})
+          .then(() => message('Opened ElevenLabs API-key settings in your default browser.'))
+          .catch(error => message(error?.message || String(error),true));
         return;
       }
       if (button.id === 'generateCandidates' || button.id === 'generateMore') {
