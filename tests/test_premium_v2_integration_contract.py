@@ -691,22 +691,31 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertNotRegex(self.html, r'<span class="flow-link (?:is-current|is-done|has-warning)')
 
 
-    def test_model_verification_uses_real_local_file_checks(self):
-        """The Models screen's Verify action must inspect installed files, not report fake success."""
+    def test_model_verification_and_lifecycle_actions_use_real_backend_operations(self):
+        """Model Center lifecycle controls must target live backend handlers, not be disabled prototype buttons."""
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
-        self.assertIn('"models.verify": True', host)
+        self.assertIn('"models.list": self._models_list', host)
+        self.assertIn('"models.install": self._models_install', host)
+        self.assertIn('"models.repair": self._models_repair', host)
+        self.assertIn('"models.uninstall": self._models_uninstall', host)
         self.assertIn('"models.verify": self._models_verify', host)
-        self.assertIn("def _models_verify(self, payload: dict[str, Any])", host)
-        self.assertIn("from app.tts.qwen_character_runtime import MODEL_IDS, MODEL_DIRS, model_installed", host)
-        self.assertIn("if (action === 'verify')", adapter)
-        self.assertIn("call('models.verify', {model_id:id})", adapter)
-        self.assertIn("result.models.map(model => model.model_id).join(', ')", adapter)
-        self.assertIn("One or more required model files are missing or incomplete.", host)
-        self.assertNotRegex(
-            host[host.index("def _models_verify"):host.index("def _performance_info")],
-            r"(?i)\b(?:requests\.(?:get|post)|urlopen|snapshot_download|download_model|hf_hub_download)\s*\("
-        )
+        for handler in ("_models_install_component", "_models_uninstall_component", "_models_start_operation"):
+            self.assertIn("def " + handler + "(", host)
+        self.assertIn("data-model-install", adapter)
+        self.assertIn("data-model-repair", adapter)
+        self.assertIn("data-model-uninstall", adapter)
+        self.assertIn("data-model-verify", adapter)
+        self.assertIn("call('models.' + action, payload)", adapter)
+        self.assertIn("call('models.verify', {model_id:operationId})", adapter)
+        self.assertIn("await refreshModels()", adapter)
+        self.assertIn("await refreshProviderCatalog(providerKey, false)", adapter)
+        self.assertIn("disk_free_bytes", host)
+        self.assertIn("installed_voice_names", host)
+        self.assertIn("One or more model", host)
+        self.assertIn("Provider model and voice requirements", adapter)
+        self.assertNotIn("Per-model update, repair, and uninstall are not implemented", adapter)
+
 
     def test_legacy_controls_without_ids_have_semantic_successors_and_event_paths(self):
         """Map no-ID legacy control groups to stable selectors and real event/backend paths."""
@@ -830,8 +839,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("progress.style.width = pct + '%'", refresh_jobs)
 
 
-    def test_unavailable_prototype_actions_are_disabled_with_truthful_reasons(self):
+    def test_only_unimplemented_prototype_actions_are_disabled(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         start = adapter.index("function applyUnavailableControlStates()")
         end = adapter.index("async function wire()", start)
         guard = adapter[start:end]
@@ -839,7 +849,6 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "#acceptHighConfidence", "#skipAiSuggestion", "#aiUseLibrary",
             "#aiCreateNew", "#createCharacterQuick",
             "[data-ai-line]:not([data-dialogue-id])",
-            "[data-model-update]", "[data-model-repair]", "[data-model-uninstall]",
             "#settings button", "$('runBenchmark')",
         ):
             self.assertIn(selector, guard)
@@ -847,9 +856,12 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("element.setAttribute('aria-disabled', 'true')", guard)
         self.assertIn("element.title = reason", guard)
         self.assertIn("Bulk AI predictions are not verified against source passages", guard)
-        self.assertIn("Per-model update, repair, and uninstall are not implemented", guard)
         self.assertIn("Changing the application storage root is not implemented", guard)
         self.assertIn("performance is intentionally marked Not tested", guard)
+        self.assertNotIn("[data-model-repair]", guard)
+        self.assertNotIn("[data-model-uninstall]", guard)
+        self.assertIn("models.repair", host)
+        self.assertIn("models.uninstall", host)
         self.assertIn("applyUnavailableControlStates();", adapter[adapter.index("async function wire()"):])
 
 
