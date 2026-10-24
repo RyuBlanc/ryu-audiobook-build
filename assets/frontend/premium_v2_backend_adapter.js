@@ -132,7 +132,12 @@
         });
       }
     }
+    const renderSignature = JSON.stringify(items.map(item => [item.id,item.text,item.speakers,item.assigned,item.assignmentPresent]));
     window.ryuPremiumDialogueReviewItems = items;
+    // Preserve list nodes while source data is unchanged; rebuilding these trees
+    // on every background refresh causes flicker and can steal focus.
+    if (window.__ryuDialogueReviewRenderSignature === renderSignature) return;
+    window.__ryuDialogueReviewRenderSignature = renderSignature;
     const assignedCount = items.filter(item => item.assigned).length;
     const remaining = Math.max(0, items.length - assignedCount);
     const percent = items.length ? Math.round(assignedCount / items.length * 100) : 0;
@@ -1358,6 +1363,8 @@
       ['Selected chapter', selected ? selectedWords.toLocaleString() + ' words' : '—']
     ];
     if (skippedCount) cards.push(['Excluded from generation', skippedCount.toLocaleString()]);
+    const insightsSignature = JSON.stringify({selected:Number(selected?.number || 0),cards});
+    if (panel.dataset.ryuLiveInsightsSignature === insightsSignature) return;
     root.innerHTML = cards.map(([label,value]) =>
       '<div style="background:rgba(9,12,18,.72);border:1px solid rgba(148,163,184,.15);border-radius:10px;padding:10px 12px;min-width:0">' +
       '<div style="font-size:11px;letter-spacing:.04em;color:var(--muted,#9ca3af);margin-bottom:6px">' + esc(label) + '</div>' +
@@ -1365,6 +1372,7 @@
     ).join('');
     // Chapter Insights is a read-only metrics card; remove placeholder values
     // and render only current backend-derived measurements inside the same card.
+    panel.dataset.ryuLiveInsightsSignature = insightsSignature;
     panel.replaceChildren(title, root);
   }
 
@@ -1377,7 +1385,19 @@
     const box = [...document.querySelectorAll('#voices textarea')].find(el =>
       /Preview text/i.test(el.closest('label')?.textContent || '')
     );
-    if (box) box.value = String(chapter?.text || '');
+    if (!box || !chapter) return;
+    const chapterNumber = String(Number(chapter.number || 0));
+    const sourceText = String(chapter.text || '');
+    const previousChapterNumber = String(box.dataset.ryuSourceChapterNumber || '');
+    const previousSourceText = String(box.dataset.ryuSourceText || '');
+    const sameChapter = previousChapterNumber === chapterNumber;
+    // Keep deliberate preview-text edits. Only hydrate a newly selected chapter,
+    // or update the source copy when it was not separately edited by the user.
+    if (sameChapter && (box.value !== previousSourceText || document.activeElement === box)) return;
+    if (sameChapter && previousSourceText === sourceText && box.value === sourceText) return;
+    if (box.value !== sourceText) box.value = sourceText;
+    box.dataset.ryuSourceChapterNumber = chapterNumber;
+    box.dataset.ryuSourceText = sourceText;
   }
 
   async function flushChapterDraftBeforeSwitch() {
@@ -1418,6 +1438,136 @@
       await chapterSavePromise;
     }
   }
+
+  function chapterDeleteSelection() {
+    if (!(window.ryuPremiumChapterDeleteSelection instanceof Set)) {
+      window.ryuPremiumChapterDeleteSelection = new Set();
+    }
+    return window.ryuPremiumChapterDeleteSelection;
+  }
+
+  function refreshChapterDeleteControls(list = $('chapterList')) {
+    const selected = chapterDeleteSelection();
+    const known = new Set(chapters.map(item => Number(item.number)));
+    for (const number of [...selected]) if (!known.has(number)) selected.delete(number);
+    if (list) list.querySelectorAll('[data-chapter-select]').forEach(input => {
+      input.checked = selected.has(Number(input.dataset.chapterSelect));
+    });
+    const count = selected.size;
+    const selectedButton = $('ryuDeleteSelectedChapters');
+    const currentButton = $('ryuDeleteCurrentChapter');
+    if (selectedButton) {
+      selectedButton.textContent = 'Delete selected (' + count + ')';
+      selectedButton.disabled = count === 0 || count >= chapters.length;
+      selectedButton.title = count >= chapters.length
+        ? 'At least one chapter must remain in the project.'
+        : count ? 'Delete the selected chapters' : 'Select one or more chapters first';
+    }
+    if (currentButton) {
+      currentButton.disabled = chapters.length <= 1 || !selectedChapter();
+      currentButton.title = chapters.length <= 1
+        ? 'At least one chapter must remain in the project.'
+        : 'Delete the currently open chapter';
+    }
+  }
+
+  function ensureChapterDeleteControls(list) {
+    if (!list) return;
+    let toolbar = $('ryuChapterDeleteToolbar');
+    if (!toolbar) {
+      toolbar = document.createElement('div');
+      toolbar.id = 'ryuChapterDeleteToolbar';
+      toolbar.setAttribute('aria-label', 'Chapter delete actions');
+      toolbar.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px;';
+      const style = document.createElement('style');
+      style.id = 'ryuChapterDeleteStyle';
+      style.textContent = [
+        '#ryuChapterDeleteToolbar button{border:1px solid rgba(148,163,184,.24);border-radius:8px;padding:7px 10px;background:rgba(148,163,184,.08);color:inherit;font:inherit;font-size:12px;cursor:pointer;transition:background-color .16s ease,color .16s ease,border-color .16s ease,transform .16s ease}',
+        '#ryuChapterDeleteToolbar button:hover:not(:disabled){transform:translateY(-1px);border-color:rgba(212,55,93,.65)}',
+        '#ryuChapterDeleteToolbar button[data-danger="true"]{border-color:rgba(212,55,93,.45)}',
+        '#ryuChapterDeleteToolbar button:disabled{opacity:.42;cursor:not-allowed}',
+        '#chapterList [data-chapter-select]{accent-color:#d4375d;flex:0 0 auto;width:15px;height:15px;margin:0 2px 0 0;cursor:pointer}'
+      ].join('');
+      document.head.appendChild(style);
+      const currentButton = document.createElement('button');
+      currentButton.id = 'ryuDeleteCurrentChapter';
+      currentButton.type = 'button';
+      currentButton.textContent = 'Delete current';
+      currentButton.title = 'Delete the currently open chapter';
+      currentButton.addEventListener('click', () => {
+        const current = selectedChapter();
+        if (current) deleteChapterNumbers([current.number], 'current');
+      });
+      const selectedButton = document.createElement('button');
+      selectedButton.id = 'ryuDeleteSelectedChapters';
+      selectedButton.type = 'button';
+      selectedButton.textContent = 'Delete selected (0)';
+      selectedButton.dataset.danger = 'true';
+      selectedButton.addEventListener('click', () => {
+        deleteChapterNumbers([...chapterDeleteSelection()], 'selected');
+      });
+      toolbar.append(currentButton, selectedButton);
+    }
+    if (toolbar.parentElement !== list.parentElement || toolbar.nextElementSibling !== list) {
+      list.insertAdjacentElement('beforebegin', toolbar);
+    }
+    refreshChapterDeleteControls(list);
+  }
+
+  async function deleteChapterNumbers(values, source) {
+    const knownNumbers = new Set(chapters.map(item => Number(item.number)));
+    const numbers = [...new Set((values || []).map(Number))]
+      .filter(number => Number.isInteger(number) && knownNumbers.has(number))
+      .sort((a,b) => b-a);
+    if (!numbers.length) return;
+    if (numbers.length >= chapters.length) {
+      message('Keep at least one chapter in the project. Select fewer chapters to delete.', true);
+      return;
+    }
+    const titles = numbers.map(number => {
+      const item = chapters.find(chapter => Number(chapter.number) === number);
+      return item ? 'Chapter ' + number + ' · ' + item.title : 'Chapter ' + number;
+    });
+    const description = numbers.length === 1 ? titles[0] : numbers.length + ' selected chapters';
+    if (!window.confirm('Permanently delete ' + description + '? This cannot be undone.')) return;
+    try {
+      await flushChapterDraftBeforeSwitch();
+    } catch (_) {
+      return;
+    }
+    const priorCurrent = Number(window.ryuPremiumSelectedChapter || 0);
+    let deleted = 0;
+    try {
+      // Delete highest numbers first, so any automatic renumbering cannot change
+      // the identity of a later chapter in the selected batch.
+      for (const number of numbers) {
+        await call('chapter.delete', {number});
+        deleted += 1;
+      }
+      const remaining = await call('chapter.list');
+      chapters = Array.isArray(remaining) ? remaining : [];
+      chapterDeleteSelection().clear();
+      const next = chapters.find(chapter => Number(chapter.number) === priorCurrent) ||
+        chapters.find(chapter => Number(chapter.number) >= Math.min(...numbers)) ||
+        chapters[chapters.length - 1];
+      if (next) window.ryuPremiumSelectedChapter = Number(next.number);
+      await refreshChapters();
+      message('Deleted ' + deleted + ' chapter' + (deleted === 1 ? '' : 's') + '.');
+    } catch (error) {
+      try {
+        const remaining = await call('chapter.list');
+        chapters = Array.isArray(remaining) ? remaining : chapters;
+        chapterDeleteSelection().clear();
+        if (!chapters.some(chapter => Number(chapter.number) === priorCurrent)) {
+          const fallbackIndex = Math.max(0, Math.min(numbers[numbers.length - 1] - 1, chapters.length - 1));
+          window.ryuPremiumSelectedChapter = Number(chapters[fallbackIndex]?.number || chapters[0]?.number || 0);
+        }
+        await refreshChapters();
+      } catch (_) {}
+      message((deleted ? 'Deleted ' + deleted + ' chapter(s), but the remaining deletion batch stopped: ' : 'Could not delete the chapter(s): ') + (error?.message || String(error)), true);
+    }
+  }
+
   async function refreshChapters() {
     const requestToken = ++chapterListEpoch;
     const editorBeforeRefresh = $('chapterEditor');
@@ -1453,6 +1603,7 @@
     if (!chapters.some(c => Number(c.number) === Number(window.ryuPremiumSelectedChapter))) window.ryuPremiumSelectedChapter = chapters[0].number;
     const current = selectedChapter(), list = $('chapterList'), editor = $('chapterEditor'), title = $('chapterTitle');
     if (list) {
+      ensureChapterDeleteControls(list);
       list.style.maxHeight = 'calc(100vh - 270px)';
       list.style.overflowY = 'auto';
       list.style.overscrollBehavior = 'contain';
@@ -1462,9 +1613,20 @@
       const listSignature = chapters.map(c => String(c.number) + '\u001f' + String(c.title || '')).join('\u001e');
       if (list.dataset.chapterListSignature !== listSignature) {
         const previousScrollTop = list.scrollTop;
-        list.innerHTML = chapters.map(c => '<div class="list-item ' + (c.number === current.number ? 'active' : '') + '" data-chapter-number="' + c.number + '">' + esc('Chapter ' + c.number + ' · ' + c.title) + '</div>').join('');
+        list.innerHTML = chapters.map(c => '<div class="list-item ' + (Number(c.number) === Number(current.number) ? 'active' : '') + '" data-chapter-number="' + Number(c.number) + '" style="display:flex;align-items:center;gap:8px;min-width:0"><input type="checkbox" data-chapter-select="' + Number(c.number) + '" aria-label="Select chapter ' + Number(c.number) + '" style="accent-color:#d4375d;flex:0 0 auto;width:15px;height:15px;margin:0 2px 0 0;cursor:pointer"><span style="flex:1;min-width:0">' + esc('Chapter ' + c.number + ' · ' + c.title) + '</span></div>').join('');
         list.dataset.chapterListSignature = listSignature;
-        list.querySelectorAll('[data-chapter-number]').forEach(el => el.addEventListener('click', async () => {
+        list.querySelectorAll('[data-chapter-select]').forEach(input => {
+          input.checked = chapterDeleteSelection().has(Number(input.dataset.chapterSelect));
+          input.addEventListener('click', event => event.stopPropagation());
+          input.addEventListener('change', () => {
+            const number = Number(input.dataset.chapterSelect);
+            if (input.checked) chapterDeleteSelection().add(number);
+            else chapterDeleteSelection().delete(number);
+            refreshChapterDeleteControls(list);
+          });
+        });
+        list.querySelectorAll('[data-chapter-number]').forEach(el => el.addEventListener('click', async (event) => {
+          if (event?.target?.closest?.('[data-chapter-select]')) return;
           const targetNumber = Number(el.dataset.chapterNumber);
           const selectionToken = ++chapterSelectionEpoch;
           try { await flushChapterDraftBeforeSwitch(); }
@@ -1486,6 +1648,7 @@
           el.classList.toggle('active', Number(el.dataset.chapterNumber) === Number(current.number))
         );
       }
+      refreshChapterDeleteControls(list);
     }
     if (title && document.activeElement !== title) title.textContent = current.title;
     if (editor && document.activeElement !== editor) editor.value = current.text;
@@ -2487,6 +2650,59 @@
       {saved:Boolean(selectedVoice),previewReady:true,assignment: $('sumAssign')?.textContent || ''});
     updateVoiceActionButtons();return voicePreviewValid;
   }
+
+  function ensurePreviewDurationOptions() {
+    if (!document.getElementById('ryuPreviewDurationStyle')) {
+      const style = document.createElement('style');
+      style.id = 'ryuPreviewDurationStyle';
+      style.textContent = '.ryuPreviewDurationOption{transition:background-color .16s ease,color .16s ease,border-color .16s ease,box-shadow .16s ease,transform .16s ease}.ryuPreviewDurationOption:active{transform:scale(.98)}';
+      document.head.appendChild(style);
+    }
+    const groups = [];
+    const voiceToolbar = [...document.querySelectorAll('#voices .toolbar')].find(el => /Length/i.test(el.textContent));
+    const voiceGroup = voiceToolbar?.querySelector('.seg');
+    if (voiceGroup) groups.push({group:voiceGroup,scope:'voices',compact:false});
+    const generateGroup = [...document.querySelectorAll('#generate .segmented')].find(el =>
+      [...el.querySelectorAll('button')].some(button => /10s|30s|60s/i.test(button.textContent))
+    );
+    if (generateGroup) groups.push({group:generateGroup,scope:'generate',compact:true});
+    for (const {group,scope,compact} of groups) {
+      let buttons = [...group.querySelectorAll('button')];
+      const has90 = buttons.some(button => /^\s*90\s*(?:s|seconds?)\b/i.test(button.textContent.trim()));
+      if (!has90) {
+        const template = buttons.find(button => /^\s*60\s*(?:s|seconds?)\b/i.test(button.textContent.trim())) || buttons[buttons.length-1];
+        if (template) {
+          const option = template.cloneNode(false);
+          option.removeAttribute('id');
+          option.classList.remove('active');
+          option.classList.add('ryuPreviewDurationOption');
+          option.textContent = compact ? '90s' : '90 seconds';
+          option.setAttribute('aria-pressed','false');
+          option.dataset.ryuDurationOption = '90';
+          group.appendChild(option);
+          buttons = [...group.querySelectorAll('button')];
+        }
+      }
+      if (!buttons.some(button => button.classList.contains('active'))) {
+        const preferred = buttons.find(button => /^\s*30\s*(?:s|seconds?)\b/i.test(button.textContent.trim()));
+        if (preferred) preferred.classList.add('active');
+      }
+      for (const button of buttons) {
+        button.classList.add('ryuPreviewDurationOption');
+        if (button.dataset.ryuDurationWired === '1') continue;
+        button.dataset.ryuDurationWired = '1';
+        button.addEventListener('click', () => {
+          for (const item of group.querySelectorAll('button')) {
+            const active = item === button;
+            item.classList.toggle('active', active);
+            item.setAttribute('aria-pressed', active ? 'true' : 'false');
+          }
+          if (scope === 'voices' && typeof invalidateVoicePreview === 'function') invalidateVoicePreview();
+        });
+      }
+    }
+  }
+
   async function previewVoice() {
     const name=String(selectedVoice||$('profileName')?.value||'').trim();
     const activeProviderKey=document.querySelector('#voices .provider.active')?.dataset.provider||'';
@@ -3238,6 +3454,7 @@
     // to these buttons. Replace those DOM nodes before attaching real playback,
     // so the demo timer can never masquerade as audiobook audio.
     ensureVoiceStudioRuntimeControls();
+    ensurePreviewDurationOptions();
     for (const id of ['mainPlay','miniPlay']) {
       const original = $(id);
       if (!original) continue;
