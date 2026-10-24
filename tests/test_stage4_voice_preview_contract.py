@@ -434,6 +434,35 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("self.saved_profiles.setCurrentIndex(selected_profile_index)", source)
         self.assertIn("No substitute voice was selected", source)
 
+    def test_preview_worker_callbacks_are_routed_through_queued_qobject_slots(self):
+        voice_page = Path(__file__).resolve().parents[1] / "app" / "ui" / "voice_page.py"
+        source = voice_page.read_text(encoding="utf-8")
+        self.assertIn("class VoicePreviewCallbackRouter(QObject)", source)
+        for callback in ("on_status", "on_progress", "on_success", "on_failure", "on_cancelled", "on_thread_finished"):
+            self.assertIn("def " + callback + "(", source)
+        self.assertIn("worker.status.connect(router.on_status)", source)
+        self.assertIn("worker.finished_ok.connect(router.on_success)", source)
+        self.assertNotIn("worker.status.connect(\\n            lambda", source)
+        self.assertNotIn("worker.progress.connect(\\n            lambda", source)
+
+    def test_native_voice_assignment_syncs_only_assigned_character_to_series_library(self):
+        voice_page = Path(__file__).resolve().parents[1] / "app" / "ui" / "voice_page.py"
+        source = voice_page.read_text(encoding="utf-8")
+        method = source[source.index("    def assign_to_character("):source.index("    def _set_voice_step(")]
+        self.assertIn("from app.core.character_library import sync_characters", source)
+        self.assertIn("sync_characters(\\n                    series,\\n                    [source_row]", method)
+        self.assertIn("update_voice=True", method)
+        self.assertIn("state[\\"voice_cast\\"] = assignments", method)
+        self.assertIn("but Character Library sync failed", method)
+
+    def test_missing_saved_native_voice_stays_visible_without_substitution(self):
+        voice_page = Path(__file__).resolve().parents[1] / "app" / "ui" / "voice_page.py"
+        source = voice_page.read_text(encoding="utf-8")
+        self.assertIn("_missing_catalog_voice_profile", source)
+        self.assertIn("saved voice (catalogue unavailable)", source)
+        self.assertIn("No substitute voice was selected", source)
+        self.assertIn("selected_voice_changed = previous_voice_id != self.neural_voice.currentData()", source)
+
     def test_qwen_voice_design_preview_uses_the_friendly_preset_name(self):
         adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
         source = adapter.read_text(encoding="utf-8")

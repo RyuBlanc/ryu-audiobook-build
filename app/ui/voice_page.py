@@ -11,7 +11,7 @@ import wave
 import time
 import uuid
 
-from PySide6.QtCore import QUrl, QThread, QTimer, Signal
+from PySide6.QtCore import QUrl, QThread, QTimer, Signal, QObject, Slot
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QInputDialog, QFormLayout, QGroupBox, QHBoxLayout,
@@ -31,6 +31,7 @@ class PassiveScrollComboBox(QComboBox):
 
 from app.ui.motion import SmoothProgressBar
 from app.core.state import load_state, save_state
+from app.core.character_library import sync_characters
 from app.tts.profile_provider import provider_from_profile
 from app.tts.preview import build_voice_preview
 from app.tts.expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT
@@ -214,6 +215,55 @@ class VoicePreviewWorker(QThread):
                 cancel()
             except Exception:
                 pass
+
+
+class VoicePreviewCallbackRouter(QObject):
+    """Queue preview-worker callbacks safely onto the Voice Studio UI thread."""
+
+    def __init__(self, page, worker, request_id: int, output_path: Path):
+        super().__init__(page)
+        self.page = page
+        self.worker = worker
+        self.request_id = int(request_id)
+        self.output_path = Path(output_path)
+
+    @Slot(str)
+    def on_status(self, message: str) -> None:
+        self.page._preview_worker_status(message, self.request_id)
+
+    @Slot(int)
+    def on_progress(self, value: int) -> None:
+        if not self.page._preview_request_is_current(self.request_id):
+            return
+        bar = getattr(self.page, "preview_percent_bar", None)
+        if bar is not None:
+            bar.setValue(value)
+
+    @Slot(str, float)
+    def on_success(self, path: str, elapsed_seconds: float) -> None:
+        self.page._preview_worker_ok(path, elapsed_seconds, self.request_id)
+
+    @Slot(str)
+    def on_failure(self, message: str) -> None:
+        self.page._preview_worker_failed(
+            message, self.request_id, self.output_path
+        )
+
+    @Slot()
+    def on_cancelled(self) -> None:
+        self.page._preview_worker_cancelled(
+            self.request_id, self.output_path
+        )
+
+    @Slot()
+    def on_thread_finished(self) -> None:
+        page = self.page
+        page._preview_worker_finished(
+            self.request_id, self.worker, self.output_path
+        )
+        if getattr(page, "_preview_callback_router", None) is self:
+            page._preview_callback_router = None
+        self.deleteLater()
 
 
 class PremiumCharacterVoiceWorker(QThread):
@@ -1158,6 +1208,45 @@ class VoicePage(QWidget):
         assignments[character] = saved_profile.name
         state["voice_cast"] = assignments
         save_state(folder, state)
+
+        # Native Voice Studio must update the shared series-level registry too,
+        # not only this book's voice_cast mapping. Sync only this character so
+        # unrelated/unassigned character voices are never cleared by the update.
+        library_sync_error = None
+        project = getattr(window, "project", None)
+        metadata = state.get("metadata") if isinstance(state.get("metadata"), dict) else {}
+        series = str(
+            state.get("series_name")
+            or state.get("series")
+            or metadata.get("series")
+            or getattr(project, "title", "")
+            or ""
+        ).strip()
+        if series:
+            roster = state.get("voice_cast_character_roster", [])
+            source_row = next(
+                (
+                    dict(row) for row in roster
+                    if isinstance(row, dict)
+                    and str(row.get("name") or "").strip().casefold() == character.casefold()
+                ),
+                {"name": character},
+            ) if isinstance(roster, list) else {"name": character}
+            source_row["name"] = str(source_row.get("name") or character).strip()
+            source_row["voice"] = saved_profile.name
+            try:
+                sync_characters(
+                    series,
+                    [source_row],
+                    source_project_folder=str(folder),
+                    source_project_title=str(getattr(project, "title", "") or ""),
+                    update_voice=True,
+                )
+            except Exception as exc:
+                library_sync_error = str(exc)
+        else:
+            library_sync_error = "Set a shared series name in Voice Cast to enable cross-volume reuse."
+
         if cast_page is not None:
             for row in getattr(cast_page, "rows", []):
                 if str(row.get("name", "")).casefold() == character.casefold():
@@ -1167,9 +1256,16 @@ class VoicePage(QWidget):
         if generation is not None:
             generation._load_voice_cast_summary()
             generation._refresh_readiness()
-        self.status.setText(f"Assigned '{saved_profile.name}' to {character} for this book.")
+        if library_sync_error:
+            self.status.setText(
+                f"Assigned '{saved_profile.name}' to {character} for this book, "
+                f"but Character Library sync failed: {library_sync_error}"
+            )
+        else:
+            self.status.setText(
+                f"Assigned '{saved_profile.name}' to {character} for this book and series Character Library."
+            )
         self._refresh_assignment_actions()
-
     def _set_voice_step(self, index: int) -> None:
         """Select a Voice Studio step without rebuilding or losing its controls."""
         self.voice_step_index = max(0, min(3, int(index)))
@@ -1730,17 +1826,40 @@ class VoicePage(QWidget):
                     voice.get("name"),
                 ))
 
-        if not matches:
+        fallback_profile = getattr(self, "_missing_catalog_voice_profile", None)
+        fallback_mode = None
+        if fallback_profile is not None:
+            if fallback_profile.provider in {"piper", "kokoro"}:
+                fallback_mode = "offline-neural"
+            elif fallback_profile.provider == "qwen-character" and (fallback_profile.qwen_mode or "custom") == "custom":
+                fallback_mode = "qwen-custom"
+            else:
+                fallback_mode = fallback_profile.provider
+            visible_ids = {value for _, value in voice_items}
+            if fallback_mode == mode and fallback_profile.voice_id not in visible_ids:
+                voice_items.append((
+                    f"{fallback_profile.name} · saved voice (catalogue unavailable)",
+                    fallback_profile.voice_id,
+                ))
+            elif fallback_profile.voice_id in visible_ids:
+                self._missing_catalog_voice_profile = None
+                fallback_profile = None
+        if not matches and not voice_items:
             voice_items = [("No matching voices", None)]
-        combo_changed = self._set_voice_combo_items(voice_items)
+        previous_voice_id = getattr(self, "neural_voice").currentData()
+        self._set_voice_combo_items(voice_items)
+        selected_voice_changed = previous_voice_id != self.neural_voice.currentData()
         mode_changed = getattr(self, "_voice_combo_mode", None) != mode
         self._voice_combo_mode = mode
-        if combo_changed or mode_changed:
+        if selected_voice_changed or mode_changed:
             self._neural_voice_changed()
     def _neural_voice_changed(self) -> None:
         voice_id = self.neural_voice.currentData()
         if not voice_id:
             return
+        fallback_profile = getattr(self, "_missing_catalog_voice_profile", None)
+        if fallback_profile is not None and voice_id != fallback_profile.voice_id:
+            self._missing_catalog_voice_profile = None
         if self.mode.currentData() in {"offline-neural", "qwen-custom"}:
             profile = next(
                 (
@@ -2013,6 +2132,7 @@ class VoicePage(QWidget):
             self.sample_label.setText("⚠ Saved reference audio is missing from this PC.")
 
         missing_catalog_voice = False
+        self._missing_catalog_voice_profile = None
         if profile.provider == "qwen-character":
             self.qwen_design_prompt.setPlainText(
                 (profile.qwen_prompt or profile.notes).replace("Qwen VoiceDesign • ", "")
@@ -2047,12 +2167,14 @@ class VoicePage(QWidget):
             finally:
                 for widget, prior_state in zip(filter_widgets, prior_block_states):
                     widget.blockSignals(prior_state)
+            self._missing_catalog_voice_profile = profile
             self._refresh_voice_list()
             i = self.neural_voice.findData(profile.voice_id)
             if i < 0:
                 # Do not silently select a different voice if a saved ID is
                 # temporarily absent because catalogue/API access is unavailable.
                 missing_catalog_voice = True
+                self._missing_catalog_voice_profile = profile
                 was_blocked = self.neural_voice.blockSignals(True)
                 try:
                     self.neural_voice.addItem(
@@ -2064,6 +2186,9 @@ class VoicePage(QWidget):
                     self.neural_voice.blockSignals(was_blocked)
             else:
                 self.neural_voice.setCurrentIndex(i)
+                missing_catalog_voice = bool(
+                    getattr(self, "_missing_catalog_voice_profile", None)
+                )
 
         # Catalogue callbacks can replace the editable profile name with the
         # provider's default label. Restore the saved identity after controls settle.
@@ -2780,31 +2905,14 @@ class VoicePage(QWidget):
         self.preview_target_seconds = seconds
         self.preview_worker = VoicePreviewWorker(preview_profile, text, output, seconds)
         worker = self.preview_worker
-        worker.status.connect(
-            lambda message, token=request_id: self._preview_worker_status(message, token)
-        )
-        worker.progress.connect(
-            lambda value, token=request_id: (
-                self.preview_percent_bar.setValue(value)
-                if self._preview_request_is_current(token) else None
-            )
-        )
-        worker.finished_ok.connect(
-            lambda path, elapsed, token=request_id:
-                self._preview_worker_ok(path, elapsed, token)
-        )
-        worker.failed.connect(
-            lambda message, token=request_id, output_path=output:
-                self._preview_worker_failed(message, token, output_path)
-        )
-        worker.cancelled.connect(
-            lambda token=request_id, output_path=output:
-                self._preview_worker_cancelled(token, output_path)
-        )
-        worker.finished.connect(
-            lambda token=request_id, active=worker, output_path=output:
-                self._preview_worker_finished(token, active, output_path)
-        )
+        router = VoicePreviewCallbackRouter(self, worker, request_id, output)
+        self._preview_callback_router = router
+        worker.status.connect(router.on_status)
+        worker.progress.connect(router.on_progress)
+        worker.finished_ok.connect(router.on_success)
+        worker.failed.connect(router.on_failure)
+        worker.cancelled.connect(router.on_cancelled)
+        worker.finished.connect(router.on_thread_finished)
         worker.start()
         # If the UI remains on "Queued", distinguish a worker that never
         # reported its first status from a slow model load. Do not interrupt
