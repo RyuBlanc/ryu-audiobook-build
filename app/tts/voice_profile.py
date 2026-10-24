@@ -226,54 +226,34 @@ def load_saved_profile(name: str) -> VoiceProfile | None:
 
 
 def load_profiles() -> list[VoiceProfile]:
-    path = profiles_file()
-    saved: list[VoiceProfile] = []
-    if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            saved = [VoiceProfile(**item) for item in data]
-            migrated = False
-            for profile in saved:
-                if profile.provider == "qwen-character" and not profile.qwen_profile_id:
-                    profile.qwen_profile_id = uuid.uuid4().hex
-                    migrated = True
-            if migrated:
-                try:
-                    save_profiles(saved)
-                except OSError:
-                    pass
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            saved = []
+    """Combine installed voices and saved profiles without losing good rows to one bad legacy record."""
+    # Use the tolerant saved-profile reader: historical profiles may contain
+    # fields from an older UI schema. A single malformed row must not make the
+    # entire saved catalogue disappear, which also breaks Load/Preview/Assign.
+    saved = load_saved_profiles()
+    saved_by_name: dict[str, VoiceProfile] = {}
+    for profile in saved:
+        saved_by_name.setdefault(profile.name.strip().casefold(), profile)
 
-    builtins = list(builtin_voice_profiles())
+    # A deliberately saved profile takes precedence over a built-in row with
+    # the same display name. Different names that use the same installed voice
+    # are valid saved aliases (for example, a user-named Amy narrator profile).
+    builtins = [
+        profile for profile in builtin_voice_profiles()
+        if profile.name.strip().casefold() not in saved_by_name
+    ]
     combined = list(builtins)
-
-    builtin_keys = {
-        (p.provider, p.voice_id.casefold(), "")
-        for p in builtins
-    }
     seen_names: set[str] = {p.name.casefold() for p in combined}
     ordered_saved = sorted(
-        saved,
+        saved_by_name.values(),
         key=lambda p: (0 if p.provider in {"piper", "kokoro"} else 1, p.name.casefold()),
     )
     for profile in ordered_saved:
-        sample_key = str(profile.sample_path or "").casefold()
-        identity = (profile.provider, profile.voice_id.casefold(), sample_key)
-
-        if identity in builtin_keys and not sample_key:
-            continue
-
+        # Do not drop a saved alias merely because it shares a provider/voice ID
+        # with a built-in voice. Its profile name, language, prompts and settings
+        # are persisted user choices and must remain loadable.
         if profile.name.casefold() in seen_names:
-            if profile.provider not in {"piper", "kokoro"}:
-                suffix = " • Custom"
-                base = profile.name
-                candidate = base + suffix
-                n = 2
-                while candidate.casefold() in seen_names:
-                    candidate = f"{base}{suffix} {n}"
-                    n += 1
-                profile.name = candidate
+            continue
         combined.append(profile)
         seen_names.add(profile.name.casefold())
     return combined
@@ -284,15 +264,16 @@ def save_profiles(profiles: list[VoiceProfile]) -> None:
     for profile in profiles:
         if profile.provider == "qwen-character" and not profile.qwen_profile_id:
             profile.qwen_profile_id = uuid.uuid4().hex
-    builtins = {
-        (p.provider, p.voice_id.casefold())
+    builtin_names_by_identity = {
+        (p.provider, p.voice_id.casefold()): p.name.casefold()
         for p in builtin_voice_profiles()
     }
     persistent = [
         p for p in profiles
-        if (p.provider, p.voice_id.casefold()) not in builtins
-        or p.sample_path
-        or p.provider not in {"piper", "kokoro"}
+        if p.sample_path
+        or (p.provider, p.voice_id.casefold()) not in builtin_names_by_identity
+        or p.name.strip().casefold()
+        != builtin_names_by_identity[(p.provider, p.voice_id.casefold())]
     ]
     # Replace the profile catalogue atomically. A crash or forced shutdown
     # during a direct write must not leave voices.json truncated and make
