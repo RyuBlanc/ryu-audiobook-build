@@ -509,7 +509,127 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("function voiceDisplayName(profile)", source)
         for friendly in ("Anime Heroine", "Anime Hero", "Anime Rival", "Anime Villain", "Anime Healer"):
             self.assertIn("return '" + friendly + "';", source)
+        # These aliases match the prompt wording emitted by native VoicePage.py.
+        for native_prompt in (
+            "prompt.includes('anime protagonist timbre')",
+            "prompt.includes('anime rival timbre')",
+            "prompt.includes('anime villain timbre')",
+            "prompt.includes('anime healer timbre')",
+        ):
+            self.assertIn(native_prompt, source)
+        self.assertIn("presetName.includes('anime hero')", source)
         self.assertIn("const voice=voiceDisplayName(profile);", source)
+
+    def test_native_preview_stop_invalidates_queued_completion_and_waits_for_worker_cleanup(self):
+        from app.ui.voice_page import VoicePage
+
+        worker = Mock()
+        worker.isRunning.return_value = True
+        player = SimpleNamespace(stop=Mock(), setSource=Mock())
+        preview_button = Mock()
+        preview_button.isEnabled.return_value = False
+        page = SimpleNamespace(
+            preview_worker=worker,
+            last_preview=None,
+            player=player,
+            preview_button=preview_button,
+            play_button=Mock(),
+            save_preview_button=Mock(),
+            preview_activity_bar=Mock(),
+            preview_engine_status=Mock(),
+            status=Mock(),
+            _preview_request_id=7,
+            _preview_requested_signature=("voice",),
+            _preview_profile_signature=("voice",),
+        )
+        page._is_live_qt_object = lambda value: value is not None
+
+        VoicePage.stop_preview_or_playback(page)
+
+        self.assertEqual(page._preview_request_id, 8)
+        self.assertIsNone(page._preview_requested_signature)
+        self.assertIsNone(page._preview_profile_signature)
+        worker.cancel.assert_called_once()
+        player.stop.assert_called_once()
+        player.setSource.assert_called_once()
+        preview_button.setEnabled.assert_called_with(False)
+        page.play_button.setEnabled.assert_called_with(False)
+
+    def test_native_stale_preview_finish_reenables_preview_after_worker_exit(self):
+        from app.ui.voice_page import VoicePage
+
+        worker = object()
+        preview_button = Mock()
+        activity_bar = Mock()
+        progress_bar = Mock()
+        discarded = []
+        page = SimpleNamespace(
+            _preview_request_is_current=lambda _request_id=None: False,
+            _is_live_qt_object=lambda value: value is not None,
+            preview_worker=worker,
+            preview_button=preview_button,
+            preview_activity_bar=activity_bar,
+            preview_percent_bar=progress_bar,
+            last_preview=None,
+            _discard_preview_output=lambda path: discarded.append(path),
+        )
+        stale_path = Path(tempfile.gettempdir()) / "stale_voice_preview.wav"
+
+        VoicePage._preview_worker_finished(page, 7, worker, stale_path)
+
+        self.assertIsNone(page.preview_worker)
+        preview_button.setEnabled.assert_called_with(True)
+        activity_bar.setVisible.assert_called_with(False)
+        progress_bar.setValue.assert_called_with(0)
+        self.assertEqual(discarded, [stale_path])
+
+    def test_native_playback_button_state_and_replay_after_end_of_media(self):
+        from app.ui.voice_page import QMediaPlayer, VoicePage
+
+        page = SimpleNamespace(
+            _is_live_qt_object=lambda value: value is not None,
+            play_button=Mock(),
+        )
+        VoicePage._playback_state_changed(page, QMediaPlayer.PlaybackState.PlayingState)
+        page.play_button.setText.assert_called_with("Ⅱ  Pause")
+        VoicePage._playback_state_changed(page, QMediaPlayer.PlaybackState.StoppedState)
+        page.play_button.setText.assert_called_with("▶  Play")
+
+        with tempfile.TemporaryDirectory() as temp:
+            preview = Path(temp) / "preview.wav"
+            preview.write_bytes(b"preview")
+
+            player = SimpleNamespace(
+                playbackState=Mock(return_value=QMediaPlayer.PlaybackState.StoppedState),
+                mediaStatus=Mock(return_value=QMediaPlayer.MediaStatus.EndOfMedia),
+                duration=Mock(return_value=12000),
+                position=Mock(return_value=12000),
+                setPosition=Mock(),
+                play=Mock(),
+                pause=Mock(),
+            )
+            playback_page = SimpleNamespace(last_preview=preview, player=player)
+            VoicePage.play_last_preview(playback_page)
+            player.setPosition.assert_called_once_with(0)
+            player.play.assert_called_once()
+
+    def test_native_preview_refuses_to_overlap_an_unwinding_worker(self):
+        from app.ui.voice_page import VoicePage
+
+        worker = Mock()
+        worker.isRunning.return_value = True
+        page = SimpleNamespace(
+            preview_worker=worker,
+            status=Mock(),
+            _is_live_qt_object=lambda value: value is not None,
+        )
+
+        VoicePage.preview(page)
+
+        page.status.setText.assert_called_once()
+        self.assertIn("still stopping", page.status.setText.call_args.args[0])
+
+    def test_voice_cast_refresh_updates_stable_rows_in_place_to_reduce_flicker(self):
 
     def test_voice_cast_refresh_updates_stable_rows_in_place_to_reduce_flicker(self):
         voice_cast = Path(__file__).resolve().parents[1] / "app" / "ui" / "voice_cast_page.py"

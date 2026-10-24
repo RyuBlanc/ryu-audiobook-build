@@ -332,6 +332,7 @@ class VoicePage(QWidget):
         self.player.errorOccurred.connect(self._player_error)
         self.player.durationChanged.connect(self._duration_changed)
         self.player.positionChanged.connect(self._position_changed)
+        self.player.playbackStateChanged.connect(self._playback_state_changed)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(22, 18, 22, 18)
@@ -1018,17 +1019,21 @@ class VoicePage(QWidget):
         self._preview_requested_signature = None
         try:
             worker = getattr(self, "preview_worker", None)
-            if self._is_live_qt_object(worker) and worker.isRunning():
+            worker_running = self._is_live_qt_object(worker) and worker.isRunning()
+            if worker_running:
                 worker.cancel()
             player = getattr(self, "player", None)
             if self._is_live_qt_object(player):
                 player.stop()
+                # Release the media handle before deleting a preview on Windows.
+                player.setSource(QUrl())
             self._discard_preview_output(getattr(self, "last_preview", None))
             self.last_preview = None
             self.last_preview_elapsed_seconds = None
             preview_button = getattr(self, "preview_button", None)
             if self._is_live_qt_object(preview_button):
-                preview_button.setEnabled(True)
+                # Keep synthesis disabled until a cancelled worker has actually exited.
+                preview_button.setEnabled(not worker_running)
             play_button = getattr(self, "play_button", None)
             if self._is_live_qt_object(play_button):
                 play_button.setEnabled(False)
@@ -2793,6 +2798,13 @@ class VoicePage(QWidget):
             self._preview_text_is_auto = True
 
     def preview(self) -> None:
+        existing_worker = getattr(self, "preview_worker", None)
+        if self._is_live_qt_object(existing_worker) and existing_worker.isRunning():
+            self.status.setText(
+                "The previous preview is still stopping. Wait for it to finish before generating another."
+            )
+            return
+
         profile = self._profile_from_ui()
         if not profile:
             return
@@ -2899,6 +2911,7 @@ class VoicePage(QWidget):
         request_id = self._preview_request_id
         self._preview_requested_signature = self._voice_profile_signature(profile)
         self.player.stop()
+        self.player.setSource(QUrl())
         self._discard_preview_output(getattr(self, "last_preview", None))
         self.last_preview = None
         self.last_preview_elapsed_seconds = None
@@ -3050,8 +3063,19 @@ class VoicePage(QWidget):
     ) -> None:
         current = self._preview_request_is_current(request_id)
         if not current:
+            # A cancelled/stale worker must not change the active preview, but
+            # it must release its own slot and re-enable Preview when it exits.
             if getattr(self, "preview_worker", None) is worker:
                 self.preview_worker = None
+                preview_button = getattr(self, "preview_button", None)
+                if self._is_live_qt_object(preview_button):
+                    preview_button.setEnabled(True)
+                activity_bar = getattr(self, "preview_activity_bar", None)
+                if self._is_live_qt_object(activity_bar):
+                    activity_bar.setVisible(False)
+                percent_bar = getattr(self, "preview_percent_bar", None)
+                if self._is_live_qt_object(percent_bar) and getattr(self, "last_preview", None) is None:
+                    percent_bar.setValue(0)
             if output_path and Path(output_path) != getattr(self, "last_preview", None):
                 self._discard_preview_output(output_path)
             return
@@ -3168,26 +3192,84 @@ class VoicePage(QWidget):
             self.status.setText(f"Could not save voice preview: {exc}")
 
     def stop_preview_or_playback(self) -> None:
+        worker = getattr(self, "preview_worker", None)
+        worker_live = self._is_live_qt_object(worker)
+        worker_running = worker_live and worker.isRunning()
+        preview_button = getattr(self, "preview_button", None)
+        completion_pending = (
+            worker_live
+            and self._is_live_qt_object(preview_button)
+            and not preview_button.isEnabled()
+            and getattr(self, "last_preview", None) is None
+        )
+        generation_pending = (
+            worker_live
+            and getattr(self, "last_preview", None) is None
+            and (worker_running or completion_pending)
+        )
+        if generation_pending:
+            # Invalidate even if the QThread has just exited but its queued
+            # success callback has not run yet. Otherwise Stop can be followed
+            # by a late callback that reactivates the cancelled preview.
+            self._preview_request_id = int(getattr(self, "_preview_request_id", 0)) + 1
+            self._preview_requested_signature = None
+            self._preview_profile_signature = None
+            self.player.stop()
+            self.player.setSource(QUrl())
+            if worker_running:
+                worker.cancel()
+            if self._is_live_qt_object(preview_button):
+                preview_button.setEnabled(False)
+            play_button = getattr(self, "play_button", None)
+            if self._is_live_qt_object(play_button):
+                play_button.setEnabled(False)
+                play_button.setText("▶  Play")
+            save_button = getattr(self, "save_preview_button", None)
+            if self._is_live_qt_object(save_button):
+                save_button.setEnabled(False)
+            activity_bar = getattr(self, "preview_activity_bar", None)
+            if self._is_live_qt_object(activity_bar):
+                activity_bar.setVisible(True)
+            engine_status = getattr(self, "preview_engine_status", None)
+            if self._is_live_qt_object(engine_status):
+                engine_status.setText("Stopping preview…")
+            self.status.setText("Stopping voice preview…")
+            return
+
+        # Stop playback only; keep the generated file so it can be replayed or saved.
         self.player.stop()
         self.play_button.setText("▶  Play")
-        worker = self.preview_worker
-        if worker is not None and worker.isRunning():
-            worker.cancel()
-            self.status.setText("Stopping voice preview…")
 
     def play_last_preview(self) -> None:
         if not self.last_preview or not self.last_preview.exists():
             return
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
             self.player.pause()
-            self.play_button.setText("▶  Play")
+            return
+        duration = self.player.duration()
+        if (
+            self.player.mediaStatus() == QMediaPlayer.MediaStatus.EndOfMedia
+            or (duration > 0 and self.player.position() >= duration)
+        ):
+            self.player.setPosition(0)
+        self.player.play()
+
+    def _playback_state_changed(self, state) -> None:
+        button = getattr(self, "play_button", None)
+        if not self._is_live_qt_object(button):
+            return
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            button.setText("Ⅱ  Pause")
         else:
-            self.player.play()
-            self.play_button.setText("Ⅱ  Pause")
+            # Also restores the right label after natural end-of-media or Stop.
+            button.setText("▶  Play")
 
     def _player_error(self, _error, error_string):
         if error_string:
             self.status.setText(f"Preview playback error: {error_string}")
+            button = getattr(self, "play_button", None)
+            if self._is_live_qt_object(button):
+                button.setText("▶  Play")
 
     def _duration_changed(self, duration):
         self._update_preview_time(0, duration)

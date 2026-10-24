@@ -1037,11 +1037,14 @@
     const provider=String(profile.provider||'').trim().toLowerCase();
     if(provider==='qwen-character'&&String(profile.qwen_mode||'').toLowerCase()==='design'){
       const prompt=String(profile.qwen_prompt||'').toLowerCase();
-      if(prompt.includes('anime heroine timbre'))return 'Anime Heroine';
-      if(prompt.includes('anime hero timbre'))return 'Anime Hero';
-      if(prompt.includes('anime rival presence'))return 'Anime Rival';
-      if(prompt.includes('fictional anime villain'))return 'Anime Villain';
-      if(prompt.includes('anime healer presence'))return 'Anime Healer';
+      const presetName=String(profile.name||'').toLowerCase().replace(/[·•]/g,' ');
+      // Native and web presets use slightly different, but equivalent,
+      // descriptions. Resolve the preset identity from either source.
+      if(prompt.includes('anime heroine timbre')||presetName.includes('anime heroine'))return 'Anime Heroine';
+      if(prompt.includes('anime hero timbre')||prompt.includes('anime protagonist timbre')||presetName.includes('anime hero'))return 'Anime Hero';
+      if(prompt.includes('anime rival presence')||prompt.includes('anime rival timbre')||presetName.includes('anime rival'))return 'Anime Rival';
+      if(prompt.includes('fictional anime villain')||prompt.includes('anime villain timbre')||presetName.includes('anime villain'))return 'Anime Villain';
+      if(prompt.includes('anime healer presence')||prompt.includes('anime healer timbre')||presetName.includes('anime healer'))return 'Anime Healer';
       return String(profile.display_voice||'Custom VoiceDesign');
     }
     const voiceId=String(profile.voice_id||selectedVoiceId||'').trim().toLowerCase();
