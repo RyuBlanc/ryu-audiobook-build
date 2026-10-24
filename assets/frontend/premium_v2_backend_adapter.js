@@ -994,7 +994,7 @@
       const pendingChapter = chapters.find(chapter => Number(chapter.number) === draft.number);
       if (pendingChapter) {
         pendingChapter.text = draft.text;
-        pendingChapter.word_count = String(draft.text || '').trim().split(/\\s+/).filter(Boolean).length;
+        pendingChapter.word_count = String(draft.text || '').trim().split(/\s+/).filter(Boolean).length;
         if (draft.title.trim()) pendingChapter.title = draft.title.trim();
       }
     }
@@ -1009,7 +1009,7 @@
       list.style.minHeight = '0';
       list.style.paddingRight = '4px';
       list.setAttribute('aria-label', 'Scrollable chapter list');
-      const listSignature = chapters.map(c => String(c.number) + '\\u001f' + String(c.title || '')).join('\\u001e');
+      const listSignature = chapters.map(c => String(c.number) + '\u001f' + String(c.title || '')).join('\u001e');
       if (list.dataset.chapterListSignature !== listSignature) {
         const previousScrollTop = list.scrollTop;
         list.innerHTML = chapters.map(c => '<div class="list-item ' + (c.number === current.number ? 'active' : '') + '" data-chapter-number="' + c.number + '">' + esc('Chapter ' + c.number + ' · ' + c.title) + '</div>').join('');
