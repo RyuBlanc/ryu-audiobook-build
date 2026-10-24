@@ -1,6 +1,8 @@
 """Stage 4 contract tests for selected voice profile and requested preview duration."""
 from pathlib import Path
 from types import SimpleNamespace
+import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -255,6 +257,18 @@ class VoicePreviewContractTests(unittest.TestCase):
             bridge._sync_saved_cast.assert_called_once_with(
                 project, state["characters"], state, update_names=False, update_voice=True
             )
+
+
+    def test_premium_v2_adapter_passes_javascript_syntax_check(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is not installed on this test runner.")
+        adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        result = subprocess.run(
+            [node, "--check", str(adapter)],
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
 
 if __name__ == "__main__":
     unittest.main()
