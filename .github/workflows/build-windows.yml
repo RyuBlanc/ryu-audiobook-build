@@ -15,6 +15,7 @@ on:
       - fix/premium-v2-live-voice-chapter-workflow
       - fix/voice-studio-event-state-suppression
       - fix/live-character-studio-qwen-preview-latency
+      - fix/native-ui-font-scale-learning-ai
       - fix/installer-live-controls-space-and-logo
       - fix/dashboard-live-data-project-covers-player
       - fix/html-installer-transparent-logo
