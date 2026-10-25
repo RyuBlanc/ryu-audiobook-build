@@ -7,9 +7,9 @@ import uuid
 from PySide6.QtCore import QThread, Signal, Qt, QUrl
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
-    QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QListWidget,
-    QListWidgetItem, QPushButton, QVBoxLayout, QWidget, QLineEdit, QTextEdit, QScrollArea,
-    QInputDialog,
+    QComboBox, QDialog, QDialogButtonBox, QFormLayout, QGroupBox, QHBoxLayout,
+    QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget,
+    QLineEdit, QTextEdit, QScrollArea, QInputDialog,
 )
 
 from app.chapters.characters import Character, analyze_book, _is_plausible_name
@@ -356,12 +356,16 @@ class VoiceCastPage(QWidget):
         assignment_actions = QHBoxLayout()
         self.test_voice_button = QPushButton("Test Selected Voice")
         self.test_voice_button.setToolTip("Generate and play a short preview of the selected saved profile using a real dialogue passage for this character.")
+        self.test_voice_button.setEnabled(False)
         self.test_voice_button.clicked.connect(self.test_assigned_voice)
         assignment_actions.addWidget(self.test_voice_button)
-        self.assign_button = QPushButton("Assign Voice")
+        self.assign_button = QPushButton("Save / Assign Profile")
+        self.assign_button.setEnabled(False)
         self.assign_button.clicked.connect(self.assign_voice)
         self.unassign_button = QPushButton("Unassign")
+        self.unassign_button.setEnabled(False)
         self.unassign_button.clicked.connect(self.unassign_voice)
+        self.profile.currentIndexChanged.connect(self._update_character_action_state)
         assignment_actions.addWidget(self.assign_button)
         assignment_actions.addWidget(self.unassign_button)
         form.addRow(assignment_actions)
@@ -432,18 +436,28 @@ class VoiceCastPage(QWidget):
     def _sync_character_library(self, *, update_names: bool = False, update_voice: bool = False) -> None:
         folder = self._project_folder()
         project = getattr(self.window(), "project", None)
-        series = self._series_name()
-        if not folder or not series or not self.rows:
+        default_series = self._series_name()
+        if not folder or not self.rows:
             return
+        groups: dict[str, list[dict]] = {}
+        for row in self.rows:
+            if not isinstance(row, dict) or not str(row.get("name") or "").strip():
+                continue
+            series = str(row.get("series") or default_series or "").strip()
+            if not series:
+                continue
+            row["series"] = series
+            groups.setdefault(series, []).append(row)
         try:
-            sync_characters(
-                series,
-                self.rows,
-                source_project_folder=str(folder),
-                source_project_title=str(getattr(project, "title", "") or ""),
-                update_names=update_names,
-                update_voice=update_voice,
-            )
+            for series, rows in groups.items():
+                sync_characters(
+                    series,
+                    rows,
+                    source_project_folder=str(folder),
+                    source_project_title=str(getattr(project, "title", "") or ""),
+                    update_names=update_names,
+                    update_voice=update_voice,
+                )
         except Exception as exc:
             # A shared registry write must not break local Character Studio work.
             self.summary.setText(f"Cast saved to this book; Character Library sync failed: {exc}")
@@ -633,6 +647,9 @@ class VoiceCastPage(QWidget):
                 self.details.setText("Select a cast member.")
             if self.examples.toPlainText():
                 self.examples.clear()
+            self.test_voice_button.setEnabled(False)
+            self.assign_button.setEnabled(False)
+            self.unassign_button.setEnabled(False)
             return
 
         aliases = row.get("aliases") or []
@@ -644,7 +661,7 @@ class VoiceCastPage(QWidget):
             f"Dialogue cues: {row['dialogue_count']}<br>"
             f"Confidence: {confidence:.0%} • {confidence_band(confidence)}<br>"
             f"Aliases: {', '.join(aliases) if aliases else 'None'}<br>"
-            f"Series: {self._series_name() or 'Unassigned series'}<br>"
+            f"Series: {row.get('series') or self._series_name() or 'Unassigned series'}<br>"
             f"Assigned voice: {assigned}"
         )
         if self.details.text() != details_text:
@@ -663,6 +680,15 @@ class VoiceCastPage(QWidget):
             voice_index = self.profile.findData(assigned)
             if voice_index >= 0 and self.profile.currentIndex() != voice_index:
                 self.profile.setCurrentIndex(voice_index)
+        self._update_character_action_state()
+    def _update_character_action_state(self, *_args) -> None:
+        row = self._row_for_visible_index(self.list.currentRow())
+        profile_name = str(self.profile.currentData() or "").strip()
+        has_profile = bool(profile_name and any(item.name == profile_name for item in self.profiles))
+        self.assign_button.setEnabled(bool(row and has_profile))
+        self.test_voice_button.setEnabled(bool(row and has_profile))
+        self.unassign_button.setEnabled(bool(row and row.get("voice")))
+
     def test_assigned_voice(self) -> None:
         row = self._row_for_visible_index(self.list.currentRow())
         profile_name = str(self.profile.currentData() or "").strip()
@@ -817,6 +843,7 @@ class VoiceCastPage(QWidget):
                     "voice": saved.get(name.casefold()),
                     "confidence": float(item.get("confidence", 1.0)),
                     "aliases": list(item.get("aliases") or []),
+                    "series": str(item.get("series") or self._series_name()),
                 })
                 existing.add(name.casefold())
         for row in self.rows:
@@ -981,6 +1008,7 @@ class VoiceCastPage(QWidget):
                 "examples": list(row.get("examples") or []),
                 "confidence": float(row.get("confidence", 0.0)),
                 "aliases": list(row.get("aliases") or []),
+                "series": str(row.get("series") or series or ""),
             }
             for row in self.rows if row.get("name") and row["name"].casefold() != "narrator"
         ]
