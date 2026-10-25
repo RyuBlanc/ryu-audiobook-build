@@ -56,6 +56,40 @@ from app.tts.providers.edge_tts import EdgeTTSProvider
 from app.tts.providers.elevenlabs import ElevenLabsProvider
 
 
+def _sync_combo_items_in_place(
+    combo: QComboBox,
+    rows: list[tuple[str, object]],
+    selected_data: object = None,
+) -> None:
+    """Synchronize a dropdown without clearing unchanged rows or flashing blank."""
+    was_blocked = combo.blockSignals(True)
+    updates_were_enabled = combo.updatesEnabled()
+    if updates_were_enabled:
+        combo.setUpdatesEnabled(False)
+    try:
+        for index, (label, data) in enumerate(rows):
+            if index < combo.count():
+                if combo.itemText(index) != label:
+                    combo.setItemText(index, label)
+                if combo.itemData(index) != data:
+                    combo.setItemData(index, data)
+            else:
+                combo.addItem(label, data)
+
+        while combo.count() > len(rows):
+            combo.removeItem(combo.count() - 1)
+
+        selected_index = combo.findData(selected_data) if selected_data is not None else -1
+        if selected_index < 0 and rows:
+            selected_index = 0
+        combo.setCurrentIndex(selected_index)
+    finally:
+        combo.blockSignals(was_blocked)
+        if updates_were_enabled:
+            combo.setUpdatesEnabled(True)
+            combo.update()
+
+
 # Keep native and HTML Voice Studio duration controls aligned; 30 seconds remains the default.
 PREVIEW_DURATION_OPTIONS = (10, 30, 60, 90)
 
@@ -2186,8 +2220,6 @@ class VoicePage(QWidget):
         current = self.saved_profiles.currentData() if hasattr(self, "saved_profiles") else None
         category = self.library_filter.currentData() if hasattr(self, "library_filter") else "all"
         query = self.library_search.text().strip().casefold() if hasattr(self, "library_search") else ""
-        self.saved_profiles.blockSignals(True)
-        self.saved_profiles.clear()
 
         matches = []
         for profile in self.profiles:
@@ -2207,19 +2239,11 @@ class VoicePage(QWidget):
                 continue
             matches.append(profile)
 
-        for profile in matches:
-            label = f"{profile.name}  ·  {self._provider_label(profile)}"
-            self.saved_profiles.addItem(label, profile.name)
-
-        selected_index = -1
-        if current:
-            selected_index = self.saved_profiles.findData(current)
-        if selected_index >= 0:
-            self.saved_profiles.setCurrentIndex(selected_index)
-        elif self.saved_profiles.count():
-            self.saved_profiles.setCurrentIndex(0)
-
-        self.saved_profiles.blockSignals(False)
+        rows = [
+            (f"{profile.name}  ·  {self._provider_label(profile)}", profile.name)
+            for profile in matches
+        ]
+        _sync_combo_items_in_place(self.saved_profiles, rows, current)
         self._saved_profile_changed()
 
     def _saved_profile_changed(self) -> None:
@@ -3247,11 +3271,14 @@ class VoicePage(QWidget):
         ]
         profiles.append(profile)
         save_profiles(profiles)
-        self.refresh_profiles()
-        # Make the saved profile the active profile immediately. This keeps
-        # the UI, preview, Voice Cast and later generation on the same provider.
-        self.library_filter.setCurrentIndex(0)
-        self.library_search.clear()
+        # Reset filters without firing an intermediate textChanged refresh. The
+        # next single refresh adds/selects the saved profile with no blank flash.
+        search_was_blocked = self.library_search.blockSignals(True)
+        try:
+            self.library_filter.setCurrentIndex(0)
+            self.library_search.clear()
+        finally:
+            self.library_search.blockSignals(search_was_blocked)
         self.refresh_profiles()
         self.saved_profiles.setCurrentIndex(self.saved_profiles.findData(profile.name))
         self.load_selected_profile()
