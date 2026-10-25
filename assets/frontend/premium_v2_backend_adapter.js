@@ -28,9 +28,17 @@
     // getComputedStyle() with per-node font-size writes forces repeated style/layout
     // recalculation and was a source of pauses on larger Character Studio chapters.
     const rows = [];
+    const scaleFactor = ryuUiTextScale !== 100 &&
+      document.documentElement?.dataset?.ryuTextScaleActive === '1'
+      ? ryuUiTextScale / 100 : 1;
+    const skipTags = new Set(['SCRIPT','STYLE','LINK','META','NOSCRIPT','TEMPLATE','SVG','CANVAS','VIDEO','AUDIO']);
     const visit = (node, parentBase = null, parentCurrent = NaN) => {
-      if (!node || node.nodeType !== 1) return;
-      const current = Number.parseFloat(getComputedStyle(node).fontSize) || 14;
+      if (!node || node.nodeType !== 1 || skipTags.has(node.tagName)) return;
+      const computed = Number.parseFloat(getComputedStyle(node).fontSize) || 14;
+      // New elements inserted after the user picks (say) 120% inherit computed
+      // sizes that already include the CSS scale. Divide that out before saving
+      // a baseline; otherwise every new render progressively grows text again.
+      const current = computed / scaleFactor;
       const stored = Number.parseFloat(node.style.getPropertyValue('--ryu-base-font-px'));
       let base = Number.isFinite(stored) && stored > 0 ? stored : NaN;
       if (!Number.isFinite(base)) {
