@@ -436,6 +436,27 @@ class UiStabilityRegressions(unittest.TestCase):
         app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
 
+    def test_voice_studio_refreshes_provider_availability_on_reentry_and_requires_qwen_base_for_design(self):
+        voice = (ROOT / "app/ui/voice_page.py").read_text(encoding="utf-8")
+        workflow = (ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")
+        refresh = voice.split("def refresh_runtime_availability(", 1)[1].split(
+            "\n    def _set_filter_values(", 1
+        )[0]
+        design = voice.split("elif mode == \"qwen-design\":", 1)[1].split(
+            "elif mode == \"qwen-clone\":", 1
+        )[0]
+        route = workflow.split('elif name == "Voice & Narration":', 1)[1].split(
+            'elif name == "Voice Cast":', 1
+        )[0]
+
+        self.assertIn("self.update_mode()", refresh)
+        self.assertIn("self._refresh_assignment_actions()", refresh)
+        self.assertIn("self._schedule_visible_refresh(", route)
+        self.assertIn("self.voice.refresh_runtime_availability", route)
+        self.assertIn('qwen_model_installed(kind) for kind in ("base-0.6b", "base-1.7b")', design)
+        self.assertIn("Base model required for long-form generation is not installed", design)
+        self.assertIn("design_model_installed and base_model_installed", design)
+
     def test_models_center_guards_all_model_mutations_with_a_single_operation_slot(self):
         source = (ROOT / "app/ui/models_page.py").read_text(encoding="utf-8")
         helpers = source.split("def _update_operation_controls(", 1)[1].split(

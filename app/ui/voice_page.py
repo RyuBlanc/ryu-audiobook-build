@@ -1465,6 +1465,14 @@ class VoicePage(QWidget):
         elif mode == "edge-tts":
             self._refresh_online_catalog()
 
+    def refresh_runtime_availability(self) -> None:
+        """Re-check provider/model readiness when returning from Models or Settings."""
+        # update_mode refreshes local catalogues and reads current runtime/model/key
+        # state from disk. It does not load saved profiles, so unsaved drafts and
+        # the current working voice configuration remain intact.
+        self.update_mode()
+        self._refresh_assignment_actions()
+
     def _set_filter_values(self, profiles: list[VoiceProfile]) -> None:
         current_lang = self.language_filter.currentData()
         current_region = self.accent_filter.currentData()
@@ -2415,14 +2423,20 @@ class VoicePage(QWidget):
             # filesystem-only choice here; the provider makes the true GPU-aware
             # choice in its worker thread before generation.
             kind = best_custom_kind(vram_gb=0.0)
-            installed = ready and qwen_model_installed(kind)
+            model_files_ready = qwen_model_installed(kind)
+            installed = ready and model_files_ready
+            if not ready:
+                readiness = "runtime unavailable — install or repair in Models"
+            elif not model_files_ready:
+                readiness = "model not installed"
+            else:
+                readiness = "ready"
             self.source_hint.setText(
-                "Qwen3-TTS CustomVoice • reusable named speakers with local style instructions on the 1.7B path. "
+                "Qwen3-TTS CustomVoice • reusable named speakers with local style instructions. "
                 "Ryan and Aiden are the native-English Qwen speakers."
             )
             self.offline_character_status.setText(
-                f"{'✓' if installed else '○'} CustomVoice model: {kind} • "
-                + ("ready" if installed else "not installed")
+                f"{'✓' if installed else '○'} CustomVoice model: {kind} • {readiness}"
             )
             self.qwen_phase_status.setText(
                 "Phase 1 • CustomVoice — stable reusable speakers. The 1.7B model is the quality path."
@@ -2440,14 +2454,26 @@ class VoicePage(QWidget):
                     )
                 )
             ready = qwen_runtime_ready()
-            design_installed = ready and qwen_model_installed(best_voice_design_kind())
-            installed = design_installed
+            design_model_installed = qwen_model_installed(best_voice_design_kind())
+            # VoiceDesign requires a Base model too: the long-form generation
+            # path uses it to keep the designed voice identity consistent.
+            base_model_installed = any(
+                qwen_model_installed(kind) for kind in ("base-0.6b", "base-1.7b")
+            )
+            installed = ready and design_model_installed and base_model_installed
+            if not ready:
+                readiness = "runtime unavailable — install or repair in Models"
+            elif not design_model_installed:
+                readiness = "VoiceDesign model not installed"
+            elif not base_model_installed:
+                readiness = "Base model required for long-form generation is not installed"
+            else:
+                readiness = "ready"
             self.source_hint.setText(
-                "Qwen3-TTS VoiceDesign • the same VoiceDesign engine is used for preview and audiobook narration, keeping the selected voice identity and expression consistent."
+                "Qwen3-TTS VoiceDesign • preview uses the selected design; long-form generation also requires a compatible Base model to preserve voice identity."
             )
             self.offline_character_status.setText(
-                f"{'✓' if installed else '○'} VoiceDesign model • "
-                + ("ready" if installed else "not installed")
+                f"{'✓' if installed else '○'} VoiceDesign • {readiness}"
             )
             self.qwen_phase_status.setText(
                 "Phase 2 • VoiceDesign — ideal for anime heroines, heroes, villains, narrators and cinematic character voices. "
@@ -2458,13 +2484,19 @@ class VoicePage(QWidget):
             ready = qwen_runtime_ready()
             # Keep hardware detection out of the Qt event loop.
             kind = best_clone_kind(vram_gb=0.0)
-            installed = ready and qwen_model_installed(kind)
+            model_files_ready = qwen_model_installed(kind)
+            installed = ready and model_files_ready
+            if not ready:
+                readiness = "runtime unavailable — install or repair in Models"
+            elif not model_files_ready:
+                readiness = "model not installed"
+            else:
+                readiness = "ready"
             self.source_hint.setText(
                 "Qwen3-TTS Base • authorized voice cloning from a short local reference recording."
             )
             self.offline_character_status.setText(
-                f"{'✓' if installed else '○'} Clone model: {kind} • "
-                + ("ready" if installed else "not installed")
+                f"{'✓' if installed else '○'} Clone model: {kind} • {readiness}"
             )
             self.qwen_phase_status.setText(
                 "Phase 3 • Voice Clone — provide the exact reference transcript for Qwen's higher-fidelity ICL mode."

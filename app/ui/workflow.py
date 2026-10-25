@@ -1418,6 +1418,11 @@ class ProjectWorkflow(QMainWindow):
                 self._show_page(self.import_page)
         elif name == "Voice & Narration":
             self._show_page(self.voice)
+            self._schedule_visible_refresh(
+                self.voice,
+                self.voice.refresh_runtime_availability,
+                "Refresh Voice Studio availability",
+            )
         elif name == "Voice Cast":
             self._show_page(self.voice_cast)
             self._schedule_visible_refresh(
