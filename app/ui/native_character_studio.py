@@ -10,7 +10,7 @@ import tempfile
 import traceback
 from typing import Any
 
-from PySide6.QtCore import QThread, Signal, Slot, Qt, QUrl
+from PySide6.QtCore import QObject, QThread, Signal, Slot, Qt, QUrl
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
