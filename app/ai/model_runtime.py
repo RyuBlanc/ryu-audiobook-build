@@ -188,7 +188,17 @@ def install_runtime(progress=None) -> Path:
                     continue
 
                 for staged_path, destination in staged_targets:
-                    staged_path.replace(destination)
+                    # Temporary folders and user model folders can be on
+                    # different Windows volumes. Copy to a .part file beside
+                    # each destination, then replace on the same volume.
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    destination_temp = destination.with_name(destination.name + ".part")
+                    destination_temp.unlink(missing_ok=True)
+                    try:
+                        shutil.copy2(staged_path, destination_temp)
+                        destination_temp.replace(destination)
+                    finally:
+                        destination_temp.unlink(missing_ok=True)
                 installed = True
                 if runtime_label == "CPU" and vram > 0 and progress:
                     progress(

@@ -47,6 +47,7 @@ class AudiobookAIRuntimeFallbackTests(unittest.TestCase):
             self.assertTrue((ai_root / "llama-server.exe").is_file())
             self.assertGreater((ai_root / "llama-server.exe").stat().st_size, 1024)
             self.assertEqual((ai_root / "ggml-base.dll").read_bytes(), b"cpu-runtime-dll")
+            self.assertFalse(list(ai_root.glob("*.part")))
             self.assertTrue(any("retrying with the CPU runtime" in line for line in progress))
             self.assertTrue(any("CPU fallback runtime installed" in line for line in progress))
 
