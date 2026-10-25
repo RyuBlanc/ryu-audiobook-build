@@ -580,8 +580,9 @@ class ChapterEditorPage(QWidget):
         try:
             self._autosave_timer.stop()
             self.commit_current()
-            if self.on_save:
-                result = self.on_save(self.editor.chapters)
+            callback = self.on_save or self.on_autosave
+            if callback:
+                result = callback(self.editor.chapters)
                 if result is False:
                     self._fields_dirty = True
                     self.save_status.setText("Save failed — your editor buffer remains available for retry.")
