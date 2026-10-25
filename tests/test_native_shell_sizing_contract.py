@@ -83,12 +83,12 @@ class NativeShellSizingContracts(unittest.TestCase):
         for relative_path, class_name, forbidden in page_specs:
             source = (ROOT / relative_path).read_text(encoding="utf-8")
             class_start = source.index(f"class {class_name}")
-            class_end = source.find("\\nclass ", class_start + 1)
+            class_end = source.find("\nclass ", class_start + 1)
             if class_end < 0:
                 class_end = len(source)
             class_source = source[class_start:class_end]
             init_start = class_source.index("    def __init__(")
-            init_end = class_source.find("\\n    def ", init_start + 1)
+            init_end = class_source.find("\n    def ", init_start + 1)
             constructor = class_source[init_start:init_end if init_end >= 0 else None]
             self.assertNotIn(forbidden, constructor, f"{relative_path} still scans during construction")
             if class_name == "VoiceCastPage":
@@ -96,10 +96,10 @@ class NativeShellSizingContracts(unittest.TestCase):
 
         hardware_source = (ROOT / "app/ui/hardware_page.py").read_text(encoding="utf-8")
         hardware_start = hardware_source.index("class HardwarePage")
-        hardware_end = hardware_source.find("\\nclass ", hardware_start + 1)
+        hardware_end = hardware_source.find("\nclass ", hardware_start + 1)
         hardware_class = hardware_source[hardware_start:hardware_end if hardware_end >= 0 else None]
         hardware_init_start = hardware_class.index("    def __init__(")
-        hardware_init_end = hardware_class.index("\\n    def refresh(", hardware_init_start)
+        hardware_init_end = hardware_class.index("\n    def refresh(", hardware_init_start)
         hardware_init = hardware_class[hardware_init_start:hardware_init_end]
         self.assertNotIn("detect_hardware()", hardware_init)
 
