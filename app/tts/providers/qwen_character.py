@@ -186,7 +186,12 @@ class QwenCharacterProvider(TTSProvider):
                 "Open Models and install the corresponding Qwen3-TTS phase."
             )
         clone_kind = None
-        if self.qwen_mode in {"design", "design-preview"}:
+        # A VoiceDesign preview is deliberately a one-pass audition using the
+        # same VoiceDesign model and profile prompt. It must not generate the
+        # long-form anchor bank or require a separate Qwen Base model merely to
+        # audition a profile. Production narration remains on the stable
+        # VoiceDesign/Base identity-lock path.
+        if self.qwen_mode == "design":
             clone_kind = best_long_form_clone_kind()
             if not model_installed(clone_kind):
                 raise RuntimeError(
