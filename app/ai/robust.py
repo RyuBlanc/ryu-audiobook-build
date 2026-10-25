@@ -4,7 +4,11 @@ import re
 from typing import Any
 
 from .brain import AudiobookBrain, _numeric_score
-from app.tts.pronunciation_suggester import COMMON_ENGLISH_WORDS, suggest_names_from_text, suggest_pronunciation
+from app.chapters.characters import _is_plausible_name
+from app.tts.pronunciation_suggester import (
+    is_likely_character_name_candidate,
+    suggest_pronunciation,
+)
 
 
 def _safe_list(value: Any, limit: int = 12) -> list:
@@ -19,7 +23,10 @@ def _safe_merge(self, out: dict, data: Any, seen: set[str], source_text: str = "
         if not isinstance(raw, dict):
             continue
         name = str(raw.get("name") or "").strip()
-        if not name:
+        # The model can label discourse words ("Having", "Right", "Already")
+        # as speakers. Run the same source-grounded name gate used by the
+        # local analyzer before these records become the book's character bible.
+        if not name or not _is_plausible_name(name):
             continue
         item = dict(raw)
         item["confidence"] = _numeric_score(item.get("confidence", 0.0))
@@ -63,13 +70,27 @@ def _safe_merge(self, out: dict, data: Any, seen: set[str], source_text: str = "
         confidence = _numeric_score(raw.get("confidence", 0.0))
         if confidence < 0.80 or written.casefold() in existing_pron:
             continue
-        words = [w.strip(".,!?;:()[]{}") for w in written.split()]
-        ordinary = bool(words) and all(
-            re.fullmatch(r"[A-Za-z][A-Za-z'’-]*", w or "") and w.casefold() in COMMON_ENGLISH_WORDS
-            for w in words
-        )
-        language = str(raw.get("source_language") or "").casefold()
-        if ordinary and language in {"", "english", "en", "unknown"}:
+        known_names = set()
+        for character in out.get("characters", []):
+            if not isinstance(character, dict):
+                continue
+            primary = str(character.get("name") or "").strip()
+            if primary:
+                known_names.add(primary)
+            aliases = character.get("aliases") or []
+            if isinstance(aliases, str):
+                aliases = [aliases]
+            if isinstance(aliases, (list, tuple)):
+                known_names.update(str(alias).strip() for alias in aliases if str(alias or "").strip())
+        language = str(raw.get("source_language") or "unknown").strip()
+        script = str(raw.get("script") or "Latin").strip()
+        # Do not trust the model's language label on its own. A common English
+        # word does not become a pronunciation target just because it is tagged
+        # Japanese/Korean. Keep verified cast names and genuine native-script
+        # terms; require unrecognized Latin terms to look like plausible names.
+        if not is_likely_character_name_candidate(
+            written, known_names=known_names, script=script
+        ):
             continue
         item = dict(raw)
         item.update({
@@ -139,20 +160,34 @@ _original_analyze_chapter = AudiobookBrain.analyze_chapter
 
 
 def _fallback_pronunciations(text: str, result: dict) -> None:
+    """Add conservative readings only for names already found by character analysis."""
     existing = {
         str(item.get("written") or "").casefold()
         for item in result.get("pronunciation", [])
         if isinstance(item, dict)
     }
-    for name in suggest_names_from_text(text):
-        key = name.casefold()
-        if key in existing or key in COMMON_ENGLISH_WORDS:
+    character_names = []
+    for row in result.get("characters", []) or []:
+        if not isinstance(row, dict):
             continue
-        words = [w.strip(".,!?;:()[]{}") for w in name.split()]
-        if not words or all(
-            re.fullmatch(r"[A-Za-z][A-Za-z'’-]*", w or "") and w.casefold() in COMMON_ENGLISH_WORDS
-            for w in words
-        ):
+        name = str(row.get("name") or "").strip()
+        if name:
+            character_names.append(name)
+        aliases = row.get("aliases") or []
+        if isinstance(aliases, str):
+            aliases = [aliases]
+        if isinstance(aliases, (list, tuple)):
+            character_names.extend(str(alias).strip() for alias in aliases if str(alias or "").strip())
+
+    for name in dict.fromkeys(character_names):
+        key = name.casefold()
+        if key in existing or key not in text.casefold():
+            continue
+        if not is_likely_character_name_candidate(name, known_names=character_names):
+            continue
+        # Prevent a misspelled/fabricated model label from creating a rule even
+        # when it happened to be emitted in the character list.
+        if not _is_plausible_name(name):
             continue
         spoken = suggest_pronunciation(name)
         if not spoken or spoken.casefold() == key:
@@ -163,7 +198,7 @@ def _fallback_pronunciations(text: str, result: dict) -> None:
             "ipa": None,
             "source_language": "heuristic",
             "script": "Latin",
-            "reason": "Conservative local name-pronunciation heuristic; review before saving.",
+            "reason": "Pronunciation draft for a detected character; review before saving.",
             "confidence": 0.86,
             "alternatives": [],
         })
