@@ -1425,6 +1425,7 @@
     const activeProviderKey = document.querySelector('#voices .provider.active')?.dataset.provider || 'offline';
     void refreshProviderCatalog(activeProviderKey, false).catch(error => console.warn('[Ryu voice catalogue]', error));
     // A catalogue selection is not a saved custom profile; the profile name is supplied by the user.
+    renderCharacterStudioLive();
     return voices;
   }
   function renderLiveChapterInsights() {
@@ -2610,6 +2611,7 @@
       return '<article class="library-character-card" data-library-id="' + esc(c.id) + '"><div class="library-character-top"><span class="avatar">' + esc((c.short||c.name||'?').slice(0,1)) + '</span><div><h3>' + esc(c.name) + '</h3><p>' + esc(librarySeriesName(c)||'Unassigned series') + ' · ' + esc(c.voice||'Unassigned') + '</p></div></div><div class="alias-row">' + ((c.aliases||[]).map(x=>'<span class="alias-tag">' + esc(x) + '</span>').join('') || '<span class="alias-tag">No aliases</span>') + '</div>' + sampleText + '<div class="library-character-meta"><span>' + Number(c.lines||0) + ' assigned lines</span><span>' + Number(c.chapters||0) + ' chapters</span><span>' + Number(c.confidence??100) + '% confidence</span><span>' + esc(librarySeriesName(c)||'Unassigned series') + '</span></div><div class="library-character-actions" style="display:flex;gap:7px;flex-wrap:wrap"><button type="button" class="btn small secondary" data-test-library="' + esc(c.id) + '">▶ Test</button><button type="button" class="btn small secondary" data-edit-library="' + esc(c.id) + '">Edit</button><button type="button" class="btn small secondary" data-character-studio="' + esc(c.id) + '">Character Studio</button><button type="button" class="btn small ghost library-delete" data-delete-library="' + esc(c.id) + '">Delete</button></div></article>';
     }).join('') || '<div class="card"><b>No saved characters found</b><p class="muted">Import a cast or run Character Studio analysis on an imported book. Existing saved casts are indexed automatically; no sample characters are inserted.</p></div>';
     applyCharacterLibraryViewMode(grid);
+    renderCharacterStudioLive();
     return libraryCharacters;
   }
   function openLibraryEditor(c) {
