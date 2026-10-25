@@ -15,7 +15,7 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertIn("event.modifiers() & Qt.KeyboardModifier.ControlModifier", host)
         self.assertIn("self.web.setZoomFactor(1.0)", host)
         self.assertIn("def apply_window_size(self, choice: str)", host)
-        self.assertIn("self.resize(max(640, width), max(480, height))", host)
+        self.assertIn("self.resize(max(min_width, width), max(min_height, height))", host)
         self.assertIn('"window_size": self.settings.value("ui/window_size", "auto")', host)
         self.assertIn('"text_scale": self.settings.value("ui/text_scale", 100)', host)
 

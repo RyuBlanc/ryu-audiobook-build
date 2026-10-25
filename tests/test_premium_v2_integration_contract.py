@@ -388,7 +388,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("Starting with {empty_skipped} empty and {excluded_skipped} excluded chapter(s) skipped", worker)
 
     def test_preview_duration_setting_accepts_every_supported_target(self):
-        self.assertIn('if key == "preview_seconds" and int(value) not in {10, 20, 30, 45, 60, 90}:', self.host)
+        self.assertIn('if key == "preview_seconds":', self.host)
+        self.assertIn('if value not in {10, 30, 60, 90}:', self.host)
         self.assertIn('Preview duration must be 10, 30, 60, or 90 seconds.', self.host)
 
     def test_chapter_bgm_and_scene_cues_reach_final_assembly(self):
@@ -859,25 +860,25 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
                 f"Legacy control {old_id} has no markup successor from {sorted(candidates)}",
             )
 
-    def test_initial_backend_hydration_does_not_block_ui_handler_registration(self):
-        """Optional backend panels hydrate after handlers are registered and yield between calls."""
+    def test_initial_backend_hydration_registers_handlers_first_and_gates_startup_on_core_state(self):
+        """Wire visible handlers first, load saved Settings/core project data before revealing, then hydrate optional panels."""
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
             encoding="utf-8"
         )
         wire_start = adapter.index("async function wire()")
-        hydration_start = adapter.index("const hydrateInitialState = async () =>", wire_start)
+        core_hydration = adapter.index("await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters]);", wire_start)
         first_handler = adapter.index("document.addEventListener('click', e => {", wire_start)
-        timer_start = adapter.index("if (!window.__ryuBackendJobTimer)", hydration_start)
-        wire_end = adapter.index("message('Premium V2 local backend connected.')", timer_start)
-        self.assertLess(first_handler, hydration_start)
-        self.assertLess(hydration_start, timer_start)
-        hydration = adapter[hydration_start:timer_start]
-        self.assertIn("[refreshProjects, refreshVoices, refreshChapters, loadSettings]", hydration)
-        self.assertIn("[refreshCharacters, refreshCharacterLibrary, refreshTerms]", hydration)
-        self.assertIn("[refreshSounds, refreshSoundCues, refreshChapterBgm]", hydration)
-        self.assertIn("[refreshJobs, refreshHistory, refreshModels]", hydration)
-        self.assertIn("await new Promise(resolve => setTimeout(resolve, 0))", hydration)
-        self.assertIn("void hydrateInitialState()", hydration)
+        settings_loaded = adapter.index("async function loadSettings()", wire_start)
+        optional_hydration = adapter.index("void (async () => {", core_hydration)
+        timer_start = adapter.index("if (!window.__ryuBackendJobTimer)", optional_hydration)
+        self.assertLess(first_handler, core_hydration)
+        self.assertLess(settings_loaded, core_hydration)
+        self.assertLess(core_hydration, optional_hydration)
+        hydration = adapter[core_hydration:timer_start]
+        self.assertIn("await hydratePhase([refreshCharacters, refreshCharacterLibrary, refreshTerms]);", hydration)
+        self.assertIn("await hydratePhase([refreshSounds, refreshSoundCues, refreshChapterBgm]);", hydration)
+        self.assertIn("await hydratePhase([refreshJobs, refreshHistory, refreshModels]);", hydration)
+        self.assertIn("await new Promise(resolve => setTimeout(resolve, 0))", adapter[adapter.index("const hydratePhase = async phase =>", wire_start):timer_start])
         self.assertNotIn("refreshPerformance", hydration)
 
     def test_monitor_job_does_not_restart_polling_after_initial_terminal_result(self):

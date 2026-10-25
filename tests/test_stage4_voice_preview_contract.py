@@ -146,7 +146,6 @@ class VoicePreviewContractTests(unittest.TestCase):
             _settings_get=lambda _payload: {"preview_seconds": settings.values.get("audio/preview_seconds", 30)},
             parent=lambda: None,
         )
-        from types import SimpleNamespace
         from app.ui.premium_v2_host import PremiumV2Bridge
         for seconds in (10, 30, 60, 90):
             with self.subTest(seconds=seconds):
