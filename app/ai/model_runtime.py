@@ -157,6 +157,11 @@ def install_runtime(progress=None) -> Path:
                             path for path in extracted.rglob("*")
                             if path.is_file() and path.name.lower() == "llama-server.exe"
                         )
+                    if not server_source.is_file() or server_source.stat().st_size < 1024:
+                        raise BrainRuntimeError(
+                            f"The llama.cpp {runtime_label} runtime contains a "
+                            "missing or truncated llama-server.exe."
+                        )
 
                     # Stage every runtime file before replacing the active
                     # executable/DLLs. A failed download or archive validation
