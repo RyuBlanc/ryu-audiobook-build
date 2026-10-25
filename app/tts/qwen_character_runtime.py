@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import queue
 import shutil
 import subprocess
+import threading
+import time
 import urllib.request
 from functools import lru_cache
 
@@ -553,6 +556,12 @@ def profile_model_readiness(profile) -> tuple[bool, str]:
     return False, "Missing or incomplete model files: " + "; ".join(labels) + f". {action} in Models."
 
 def _run(command: list[str], progress=None, timeout: int = 3600) -> None:
+    """Run a child command with streaming progress and an enforceable wall-clock timeout.
+
+    Reading stdout directly on the controlling thread can block forever when a
+    subprocess stalls without emitting a newline. A daemon reader thread feeds
+    a queue so this function can enforce the deadline even during silent stalls.
+    """
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
@@ -563,18 +572,78 @@ def _run(command: list[str], progress=None, timeout: int = 3600) -> None:
         bufsize=1,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
     )
+    output: queue.Queue[object] = queue.Queue()
+    finished = object()
+    deadline = time.monotonic() + max(0.0, float(timeout))
+
+    def drain_stdout() -> None:
+        try:
+            if process.stdout is not None:
+                for line in iter(process.stdout.readline, ""):
+                    output.put(line)
+        except Exception as exc:
+            output.put(exc)
+        finally:
+            output.put(finished)
+
+    reader = threading.Thread(target=drain_stdout, name="QwenCommandOutput", daemon=True)
+    reader.start()
+
     try:
-        for line in iter(process.stdout.readline, ""):
-            line = line.strip()
-            if line and progress:
-                progress(line[-500:])
-        code = process.wait(timeout=timeout)
+        stream_finished = False
+        while not stream_finished:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(command, timeout)
+            try:
+                item = output.get(timeout=min(0.2, remaining))
+            except queue.Empty:
+                continue
+
+            if item is finished:
+                stream_finished = True
+            elif isinstance(item, BaseException):
+                raise item
+            elif isinstance(item, str):
+                line = item.strip()
+                if line and progress:
+                    progress(line[-500:])
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(command, timeout)
+        code = process.wait(timeout=remaining)
+    except subprocess.TimeoutExpired as exc:
+        try:
+            process.kill()
+        except OSError:
+            pass
+        try:
+            process.wait(timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        reader.join(timeout=1)
+        raise RuntimeError(
+            f"Qwen character runtime command timed out after {timeout} seconds."
+        ) from exc
     except Exception:
         try:
             process.kill()
-        except Exception:
+        except OSError:
             pass
+        try:
+            process.wait(timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        reader.join(timeout=1)
         raise
+    finally:
+        if process.stdout is not None:
+            try:
+                process.stdout.close()
+            except OSError:
+                pass
+
     if code != 0:
         raise RuntimeError(f"Qwen character runtime command failed with exit code {code}.")
 
