@@ -359,6 +359,7 @@ class PremiumV2Bridge(QObject):
                 "character.list": self._character_list,
                 "character.create": self._character_create,
                 "character.dialogue.suggestions.list": self._character_dialogue_suggestions_list,
+                "character.dialogue.suggestion.skip": self._character_dialogue_suggestion_skip,
                 "character_library.list": self._character_library_list,
                 "character_library.deleted.list": self._character_library_deleted_list,
                 "character_library.restore": self._character_library_restore,
@@ -2575,8 +2576,27 @@ class PremiumV2Bridge(QObject):
                     else ([str(assignment.get("speaker"))] if assignment.get("speaker") else [])
                 )
             row["assigned"] = bool(row["assigned_speakers"])
+            skipped = state.get("character_dialogue_skips") or []
+            row["skipped"] = str(row.get("id") or "") in {str(value) for value in skipped}
             rows.append(row)
         return rows
+
+    def _character_dialogue_suggestion_skip(self, payload: dict[str, Any]) -> dict[str, Any]:
+        project = self._active_project()
+        suggestion_id = str(payload.get("id") or "").strip()
+        if not suggestion_id or len(suggestion_id) > 300:
+            raise ValueError("Select a dialogue suggestion to skip.")
+        state = load_state(project.folder)
+        rows = state.get("character_dialogue_suggestions") or []
+        if not any(isinstance(row, dict) and str(row.get("id") or "") == suggestion_id for row in rows):
+            raise ValueError("This dialogue suggestion is no longer available. Re-run analysis and try again.")
+        skipped = list(dict.fromkeys(str(value) for value in (state.get("character_dialogue_skips") or []) if str(value)))
+        if suggestion_id not in skipped:
+            skipped.append(suggestion_id)
+        state["character_dialogue_skips"] = skipped
+        state["modified_at"] = self._now()
+        save_state(project.folder, state)
+        return {"id": suggestion_id, "skipped": True}
 
     def _character_create(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Create/update a real project cast member and synchronize its reusable series record."""
@@ -2778,19 +2798,41 @@ class PremiumV2Bridge(QObject):
         description_value = payload.get("short_description") if "short_description" in payload else item.get("short_description", "")
         notes_value = payload.get("notes") if "notes" in payload else item.get("notes", "")
         scope_value = payload.get("scope") if "scope" in payload else item.get("scope", "Current book only")
+        series_value = payload.get("series") if "series" in payload else item.get("series", "")
+        if isinstance(series_value, str):
+            series_value = series_value.strip()[:300]
+        else:
+            series_value = ""
         item.update({
             "name": name,
             "role": str(role_value or "Character").strip()[:160],
             "short_description": str(description_value or "").strip()[:1000],
             "aliases": list(dict.fromkeys(str(alias).strip()[:160] for alias in aliases if str(alias).strip())),
             "notes": str(notes_value or "").strip()[:4000],
-            "scope": str(scope_value or "Current book only").strip()[:80],
+            "scope": ("Series · " + series_value) if series_value else str(scope_value or "Current book only").strip()[:80],
+            "series": series_value,
             "voice_profile": profile_name or None,
         })
         state["characters"] = characters
         state["modified_at"] = self._now()
         save_state(project.folder, state)
         self._sync_saved_cast(project, characters, state, update_names=True, update_voice=True)
+        if series_value:
+            try:
+                library_row = next((row for row in list_reusable_characters()
+                                    if str(row.get("primary_name") or "").casefold() == name.casefold()
+                                    or name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])}), None)
+                self._character_library_save({
+                    "id": str((library_row or {}).get("id") or ""),
+                    "name": name, "series": series_value, "scope": "Series · " + series_value,
+                    "short": str(item.get("short_description") or name.split()[0]),
+                    "aliases": aliases, "notes": item.get("notes") or "",
+                    "dialogue_sample": (item.get("examples") or [""])[0],
+                    "voice_profile": profile_name,
+                })
+            except Exception:
+                log.exception("Could not synchronize edited series details to Character Library")
+                raise
         return {"character": item, "saved": True}
 
     def _character_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
