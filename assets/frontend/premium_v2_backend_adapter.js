@@ -3456,6 +3456,10 @@
   function syncPreviewPlaybackTime(){const node=$('previewPlaybackTime');if(!node)return;node.textContent=formatPlaybackTime(previewAudio?.currentTime||0)+' / '+formatPlaybackTime(previewAudio?.duration||0);}
   function preparePreviewPlayback(job, requestedSeconds) {
     const url=job?.result?.file_url,actual=Number(job?.result?.actual_duration_seconds),requested=Number(requestedSeconds||job?.result?.requested_duration_seconds||0),play=$('playPreview');
+    const totalElapsed = Number(job?.result?.total_seconds);
+    const synthesisElapsed = Number(job?.result?.synthesis_seconds);
+    const realTimeFactor = Number(job?.result?.real_time_factor);
+    const performanceTargetMet = job?.result?.performance_target_met;
     if(!url||!Number.isFinite(actual)||actual<=0){
       voicePreviewValid=false;lastVoicePreviewPath=null;if(play)play.disabled=true;if($('downloadPreview'))$('downloadPreview').disabled=true;
       if($('previewState'))$('previewState').textContent='Failed';
@@ -3472,9 +3476,15 @@
     previewAudio.onerror=()=>{voicePreviewValid=false;if(play)play.disabled=true;if($('downloadPreview'))$('downloadPreview').disabled=true;if($('previewState'))$('previewState').textContent='Playback error';if($('validation'))$('validation').textContent='The preview file exists but the embedded player could not open it. Generate another preview and check the local audio runtime.';updateVoiceActionButtons();};
     if(play)play.disabled=false;if($('downloadPreview'))$('downloadPreview').disabled=false;
     if($('previewState'))$('previewState').textContent='Ready · 100%';if($('previewProgress'))$('previewProgress').style.width='100%';
+    const timingNote = Number.isFinite(totalElapsed) && totalElapsed >= 0
+      ? ' · generated in ' + totalElapsed.toFixed(1) + 's' +
+        (Number.isFinite(synthesisElapsed) ? ' synthesis ' + synthesisElapsed.toFixed(1) + 's' : '') +
+        (Number.isFinite(realTimeFactor) ? ' (' + realTimeFactor.toFixed(2) + '× real time)' : '') +
+        (requested === 30 && performanceTargetMet === false ? ' · exceeds 30s preview target (<60s generation)' : '')
+      : '';
     if($('validation'))$('validation').textContent=requested>0&&actual+1.5<requested
-      ?'Preview shorter than requested · '+actual.toFixed(1)+'s of '+requested.toFixed(0)+'s. The source text or voice provider produced less audio than requested; try a longer passage and check the selected voice.'
-      :'Preview ready · '+actual.toFixed(1)+' seconds'+(requested>0?' (requested '+requested.toFixed(0)+'s)':'');
+      ?'Preview shorter than requested · '+actual.toFixed(1)+'s of '+requested.toFixed(0)+'s. The source text or voice provider produced less audio than requested; try a longer passage and check the selected voice.'+timingNote
+      :'Preview ready · '+actual.toFixed(1)+' seconds'+(requested>0?' (requested '+requested.toFixed(0)+'s)':'')+timingNote;
     syncPreviewPlaybackTime();
     updateVoiceSummary({name:currentVoiceName(),provider:selectedVoiceProvider||({offline:'piper',sapi:'windows-sapi',customvoice:'qwen-character',voicedesign:'qwen-character',qwenclone:'qwen-character',customref:'chatterbox',edge:'edge-tts',eleven:'elevenlabs'}[document.querySelector('#voices .provider.active')?.dataset.provider]||'piper'),qwen_mode:document.querySelector('#voices .provider.active')?.dataset.provider==='voicedesign'?'design':'custom'},
       {saved:Boolean(selectedVoice),previewReady:true,assignment: $('sumAssign')?.textContent || ''});
