@@ -133,7 +133,7 @@ def apply_application_theme(
     # so toggling 120% -> 100% does not compound previous scaling.
     if text_scale != 100:
         text_factor = text_scale / 100.0
-        font_size = re.compile(r"(font-size\\s*:\\s*)(\\d+(?:\\.\\d+)?)\\s*(px|pt)", re.IGNORECASE)
+        font_size = re.compile(r"(font-size\s*:\s*)(\d+(?:\.\d+)?)\s*(px|pt)", re.IGNORECASE)
         def scale_font_size(match):
             value = float(match.group(2)) * text_factor
             unit = match.group(3).lower()
