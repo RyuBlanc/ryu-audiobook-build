@@ -458,6 +458,24 @@ class UiStabilityRegressions(unittest.TestCase):
         self.assertIn("Base model required for long-form generation is not installed", design)
         self.assertIn("design_model_installed and base_model_installed", design)
 
+    def test_audiobook_ai_hardware_recommendation_stays_off_the_qt_event_thread(self):
+        source = (ROOT / "app/ui/models_page.py").read_text(encoding="utf-8")
+        handler = source.split("def install_audiobook_ai_runtime(", 1)[1].split(
+            "\n    def _audiobook_ai_ok(", 1
+        )[0]
+        worker = source.split("class AudiobookAIInstallWorker", 1)[1].split(
+            "\n\nclass ChatterboxInstallWorker", 1
+        )[0]
+
+        self.assertNotIn("recommended_model()", handler)
+        self.assertNotIn("recommended_model()", worker)
+        self.assertIn("hardware compatibility in the background", handler)
+        self.assertIn("1.2 GiB", handler)
+        self.assertIn("2.3 GiB", handler)
+        self.assertIn("Checking hardware and selecting a compatible local model", worker)
+        self.assertIn("install_audiobook_ai(self.progress.emit)", worker)
+        self.assertIn("self.progress.emit(f\"Testing local Audiobook AI model:", worker)
+
     def test_models_center_guards_all_model_mutations_with_a_single_operation_slot(self):
         source = (ROOT / "app/ui/models_page.py").read_text(encoding="utf-8")
         helpers = source.split("def _update_operation_controls(", 1)[1].split(

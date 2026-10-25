@@ -41,7 +41,7 @@ from app.tts.qwen_character_runtime import (
     INSTALLER_PATH as QWEN_INSTALLER_PATH,
     INSTALLER_LOG as QWEN_INSTALLER_LOG,
 )
-from app.ai.model_runtime import brain_root, install_runtime as install_audiobook_ai, recommended_model, self_test as test_audiobook_ai
+from app.ai.model_runtime import brain_root, install_runtime as install_audiobook_ai, self_test as test_audiobook_ai
 
 
 KOKORO_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.onnx"
@@ -228,11 +228,13 @@ class AudiobookAIInstallWorker(QThread):
 
     def run(self) -> None:
         try:
-            model_id, filename, size = recommended_model()
-            install_audiobook_ai(self.progress.emit)
-            self.progress.emit("Testing local Audiobook AI inference…")
+            # Hardware probing and model selection are delegated to the runtime
+            # worker path. Never run nvidia-smi synchronously from the Qt slot.
+            self.progress.emit("Checking hardware and selecting a compatible local model…")
+            model_path = install_audiobook_ai(self.progress.emit)
+            self.progress.emit(f"Testing local Audiobook AI model: {model_path.name}…")
             test_result = test_audiobook_ai()
-            self.finished_ok.emit(f"{model_id}|{filename}|{size}|{test_result}")
+            self.finished_ok.emit(f"local|{model_path.name}|{model_path.stat().st_size}|{test_result}")
         except Exception as exc:
             self.failed.emit(str(exc))
 
@@ -857,14 +859,12 @@ class ModelsPage(QWidget):
         QMessageBox.warning(self, "Qwen3-TTS Runtime Repair Failed", message)
 
     def install_audiobook_ai_runtime(self) -> None:
-        model_id, filename, size = recommended_model()
-        size_gb = size / (1024 ** 3)
         answer = QMessageBox.question(
             self,
             "Install Audiobook AI",
-            f"Ryu's Audiobook will install a local analysis engine using {model_id}. "
-            f"The model download is about {size_gb:.1f} GB. "
-            "After installation, book analysis works offline and the AI does not modify your source text. Continue?",
+            "Ryu's Audiobook will check hardware compatibility in the background and select a suitable local analysis model. "
+            "The model download is about 1.2 GiB for the compact option or 2.3 GiB for the larger option. "
+            "After installation, the local engine will self-test; book analysis works offline and does not modify your source text. Continue?",
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
