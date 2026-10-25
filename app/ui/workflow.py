@@ -794,10 +794,16 @@ class ProjectWorkflow(QMainWindow):
             return []
 
     def apply_window_size(self, choice: str) -> None:
-        """Apply the saved native window size without changing display/browser zoom."""
+        """Apply saved native geometry while respecting the active display work area."""
         choice = str(choice or "auto").strip().lower()
         screen = self.screen() or QApplication.primaryScreen()
         available = screen.availableGeometry() if screen is not None else None
+        if available is not None:
+            min_width = max(480, min(960, int(available.width())))
+            min_height = max(360, min(620, int(available.height())))
+        else:
+            min_width, min_height = 960, 620
+        self.setMinimumSize(min_width, min_height)
         if choice == "maximized":
             self.showMaximized()
             return
@@ -806,17 +812,17 @@ class ProjectWorkflow(QMainWindow):
         if choice == "auto":
             width = int(available.width() * 0.90) if available is not None else 1440
             height = int(available.height() * 0.90) if available is not None else 900
-            width = min(1600, max(960, width))
-            height = min(1000, max(620, height))
+            width = min(1600, max(min_width, width))
+            height = min(1000, max(min_height, height))
         else:
             try:
                 width, height = (int(part) for part in choice.split("x", 1))
             except (TypeError, ValueError):
                 width, height = 1440, 900
         if available is not None:
-            width = min(width, max(640, available.width()))
-            height = min(height, max(480, available.height()))
-        self.resize(max(640, width), max(480, height))
+            width = min(width, int(available.width()))
+            height = min(height, int(available.height()))
+        self.resize(max(min_width, width), max(min_height, height))
 
     def _settings_saved(self, reduce_motion: bool) -> None:
         """Apply saved UI preferences to an already-open native generation page."""

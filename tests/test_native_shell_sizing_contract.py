@@ -19,6 +19,14 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertIn('"window_size": self.settings.value("ui/window_size", "auto")', host)
         self.assertIn('"text_scale": self.settings.value("ui/text_scale", 100)', host)
 
+
+    def test_native_shell_does_not_import_webengine_in_default_mode(self):
+        main = (ROOT / "app/main.py").read_text(encoding="utf-8")
+        before_main = main[:main.index("def main()")]
+        self.assertNotIn("from app.ui.premium_v2_host import", before_main)
+        self.assertIn('os.environ.get("RYU_UI_MODE", "native")', main)
+        self.assertIn("window = ProjectWorkflow()", main)
+
     def test_settings_exposes_persisted_text_scale_and_window_size_not_browser_zoom(self):
         html = (ROOT / "assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
