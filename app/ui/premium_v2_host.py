@@ -360,6 +360,7 @@ class PremiumV2Bridge(QObject):
                 "character.create": self._character_create,
                 "character.dialogue.suggestions.list": self._character_dialogue_suggestions_list,
                 "character.dialogue.suggestion.skip": self._character_dialogue_suggestion_skip,
+                "character.analysis.status": self._character_analysis_status,
                 "character_library.list": self._character_library_list,
                 "character_library.deleted.list": self._character_library_deleted_list,
                 "character_library.restore": self._character_library_restore,
@@ -482,6 +483,10 @@ class PremiumV2Bridge(QObject):
             "voice.preview": True,
             "voice.preview.save": True,
             "character.list": True,
+            "character.create": True,
+            "character.dialogue.suggestions.list": True,
+            "character.dialogue.suggestion.skip": True,
+            "character.analysis.status": True,
             "character_library.list": True,
             "character_library.deleted.list": True,
             "character_library.restore": True,
@@ -2566,6 +2571,26 @@ class PremiumV2Bridge(QObject):
         state = load_state(self._active_project().folder)
         rows = state.get("characters") or []
         return rows if isinstance(rows, list) else []
+
+    def _character_analysis_status(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Return only analysis status persisted for the active project."""
+        state = load_state(self._active_project().folder)
+        raw = state.get("character_analysis") or {}
+        if not isinstance(raw, dict):
+            raw = {}
+        updated_at = str(raw.get("updated_at") or "").strip()
+        def as_count(value: Any) -> int:
+            try:
+                return max(0, int(value or 0))
+            except (TypeError, ValueError, OverflowError):
+                return 0
+        return {
+            "analyzed": bool(updated_at),
+            "updated_at": updated_at or None,
+            "dialogue_total": as_count(raw.get("dialogue_total")),
+            "unassigned_dialogue": as_count(raw.get("unassigned_dialogue")),
+            "suggestion_count": as_count(raw.get("suggestion_count")),
+        }
 
     def _character_dialogue_suggestions_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         """Return source-backed dialogue suggestions created from the active project's chapters."""
