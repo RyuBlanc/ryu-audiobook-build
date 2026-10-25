@@ -191,20 +191,24 @@ class DialogueAssignmentPersistenceTests(unittest.TestCase):
         self.assertIn("unassign_dialogue_from_chapters(", host)
         self.assertIn("chapter.dialogue.unassign", adapter)
         self.assertIn("removeAiCharacterAssignment", adapter)
-        self.assertIn("Number.isInteger(item.start) && Number.isInteger(item.end)", adapter)
+        self.assertIn("!Number.isInteger(start) || !Number.isInteger(end)", adapter)
+        self.assertIn("await call('chapter.dialogue.unassign'", adapter)
         self.assertNotIn("return normalize(item.text) === normalize(text)", adapter)
 
     def test_dialogue_review_uses_saved_chapter_passages_and_scopes_duplicate_quotes(self):
         adapter = (Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("function renderDialogueReview()", adapter)
         self.assertIn("const source = String(chapter.text || '')", adapter)
-        self.assertIn("chapter.dialogue_assignments || []", adapter)
+        self.assertIn("function characterAssignmentsFor(chapter)", adapter)
+        self.assertIn("const start = Number(assignment?.start), end = Number(assignment?.end);", adapter)
         self.assertIn("data-chapter-number", adapter)
         self.assertIn("chapter_number:window.ryuPremiumPendingDialogueChapter", adapter)
         self.assertIn("dialogue passages assigned", adapter)
         self.assertIn("data-dialogue-id", adapter)
+        self.assertIn("Analysis has not run for this project", adapter)
         html = (Path(__file__).resolve().parents[1] / "assets" / "frontend" / "ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
-        self.assertIn("The eastern route is clear…", html)  # approved visual baseline remains untouched
+        self.assertNotIn("The eastern route is clear…", html)  # no screenshot/example dialogue may substitute for project data
+        self.assertIn("Loading the selected project", html)
 
 
 if __name__ == "__main__":
