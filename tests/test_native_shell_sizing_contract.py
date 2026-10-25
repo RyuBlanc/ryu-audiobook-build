@@ -7,6 +7,31 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class NativeShellSizingContracts(unittest.TestCase):
+    def test_native_qt_workflow_is_the_default_windows_launch_path(self):
+        main = (ROOT / "app/main.py").read_text(encoding="utf-8")
+        self.assertIn("window = ProjectWorkflow()", main)
+        self.assertIn("RYU_EXPERIMENTAL_PREMIUM_WEB_UI", main)
+        self.assertIn("if use_experimental_web_ui and frontend_path().is_file():", main)
+        self.assertIn("apply_window_geometry(window, window_size)", main)
+
+    def test_native_settings_persist_text_size_and_window_resolution(self):
+        settings = (ROOT / "app/ui/settings_page.py").read_text(encoding="utf-8")
+        main = (ROOT / "app/main.py").read_text(encoding="utf-8")
+        for token in (
+            'self.text_scale = QComboBox()',
+            'appearance_layout.addRow("UI text size", self.text_scale)',
+            'appearance_layout.addRow("Window size / resolution", self.window_size)',
+            'self.settings.setValue("ui/text_scale", int(self.text_scale.currentData() or 100))',
+            'self.settings.setValue("ui/window_size", str(self.window_size.currentData() or "maximized"))',
+            'def apply_window_geometry(window: QWidget, choice: str)',
+            'def apply_application_theme(',
+            'text_scale: int | None = None',
+            'font-size\\s*:',
+        ):
+            self.assertIn(token, settings)
+        self.assertIn('text_scale=int(settings.value("ui/text_scale", 100) or 100)', main)
+        self.assertIn('window_size = str(settings.value("ui/window_size", "maximized") or "maximized")', main)
+
     def test_embedded_window_blocks_chromium_zoom_and_uses_native_geometry(self):
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn("class StableQWebEngineView(QWebEngineView)", host)
