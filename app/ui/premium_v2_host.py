@@ -2706,6 +2706,10 @@ class PremiumV2Bridge(QObject):
         if profile_name and self._find_profile(profile_name) is None:
             raise ValueError("Choose a voice profile from the saved Voice Studio catalogue.")
         state = load_state(project.folder)
+        if str(payload.get("series") or "").strip():
+            # The user's explicit series choice defines the selected book's
+            # cast/learning scope, rather than relying only on its filename.
+            state["series_name"] = series
         characters = [dict(row) for row in (state.get("characters") or []) if isinstance(row, dict)]
         match = next((row for row in characters if
                       str(row.get("name") or "").casefold() == name.casefold()
@@ -2715,14 +2719,15 @@ class PremiumV2Bridge(QObject):
                 "name": name, "role": str(payload.get("role") or "Character")[:160],
                 "dialogue_count": 0, "examples": [], "confidence": 1.0,
                 "aliases": aliases, "voice_profile": profile_name or None,
-                "series": series, "short_description": str(payload.get("short_description") or "")[:1000],
+                "series": series, "user_created": True,
+                "short_description": str(payload.get("short_description") or "")[:1000],
                 "notes": str(payload.get("notes") or "")[:4000], "scope": "Series · " + series,
             }
             characters.append(match)
         else:
             match.update({
                 "name": name, "aliases": aliases or list(match.get("aliases") or []),
-                "series": series, "scope": "Series · " + series,
+                "series": series, "scope": "Series · " + series, "user_created": True,
                 "short_description": str(payload.get("short_description", match.get("short_description", "")) or "")[:1000],
                 "notes": str(payload.get("notes", match.get("notes", "")) or "")[:4000],
             })
