@@ -57,6 +57,20 @@ NAME_STOPWORDS = {
     "School","Building","Room","Street","Day","Night","Morning","Afternoon","Evening","God","Devil","Demon",
     "Human","Humans","Girl","Boy","Man","Woman","Someone","Something","Anything","Nothing","Everyone","Everybody",
     "Him","Her","Me","Us","His","Our","Their","These","Those","Wha","Heh","Ah","Oh","Uh","Hmm",
+    # Frequent sentence-initial prose/discourse words that are not cast members.
+    # These were repeatedly misclassified as speakers in imported light novels.
+    "Having","Well","Right","Already","Magic","Speaking","Feeling","Let","Two","Three",
+    "First","Second","Third","Saying","Says","Think","Thinking","Sure","Fine","Okay",
+    "Wait","Guess","Damn","Good","Bad","Enough","Please","Sorry","Great","Actually",
+    "Suddenly","Finally","Probably","Course","OfCourse","Anyway","Anyway","Almost",
+    "Rather","Instead","Perhaps","Maybe","Clearly","Certainly","Obviously","Seriously",
+    "Especially","Exactly","Anyway","Nevertheless","Unfortunately","Fortunately",
+    "Meanwhile","Besides","Otherwise","Still","Yet","Then","Now","Today","Tomorrow",
+    "Yesterday","Later","Earlier","Beforehand","Somehow","Apparently","Eventually",
+    "Perhaps","Indeed","Naturally","Simply","Quickly","Slowly","Carefully","Suddenly",
+    "Beginning","Ending","During","Across","Around","Inside","Outside","Beyond","Together",
+    "Magic","Power","Strength","Ability","Skill","Knowledge","Experience","Training",
+    "School","Academy","Student","Teacher","President","Captain","Commander","General",
 }
 
 
