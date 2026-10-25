@@ -173,11 +173,6 @@ def _fallback_pronunciations(text: str, result: dict) -> None:
         name = str(row.get("name") or "").strip()
         if name:
             character_names.append(name)
-        aliases = row.get("aliases") or []
-        if isinstance(aliases, str):
-            aliases = [aliases]
-        if isinstance(aliases, (list, tuple)):
-            character_names.extend(str(alias).strip() for alias in aliases if str(alias or "").strip())
 
     for name in dict.fromkeys(character_names):
         key = name.casefold()
