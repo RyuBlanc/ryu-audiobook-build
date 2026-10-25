@@ -2658,7 +2658,9 @@ class PremiumV2Bridge(QObject):
         if "voice_profile" in payload:
             library_payload["voice_profile"] = profile_name
         saved_library = self._character_library_save(library_payload)
-        self._sync_saved_cast(project, characters, state, update_names=True, update_voice=True)
+        # _character_library_save already wrote this character in the explicitly
+        # selected series. Do not bulk-sync every cast member into the book's
+        # inferred default series here.
         return {"character": match, "library_character": saved_library.get("character"),
                 "saved": True, "series": series}
 
@@ -2760,7 +2762,20 @@ class PremiumV2Bridge(QObject):
         state["characters"] = characters
         state["modified_at"] = self._now()
         save_state(project.folder, state)
-        self._sync_saved_cast(project, characters, state, update_names=True, update_voice=True)
+        series = str(item.get("series") or self._project_series_name(project, state)).strip()
+        registry_rows = list_reusable_characters()
+        matched_registry = next((row for row in registry_rows
+            if str(row.get("series") or "").casefold() == series.casefold()
+            and (str(row.get("primary_name") or row.get("name") or "").casefold() == name.casefold()
+                 or name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])})), None)
+        self._character_library_save({
+            "id": str((matched_registry or {}).get("id") or ""),
+            "name": name, "series": series, "scope": "Series · " + series,
+            "short": str(item.get("short_description") or name.split()[0]),
+            "aliases": list(item.get("aliases") or []), "notes": str(item.get("notes") or ""),
+            "dialogue_sample": str((item.get("examples") or [""])[0] if item.get("examples") else ""),
+            "voice_profile": profile_name,
+        })
         return {"name": name, "voice_profile": item["voice_profile"], "saved": True}
 
     def _character_update(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -2811,6 +2826,7 @@ class PremiumV2Bridge(QObject):
         description_value = payload.get("short_description") if "short_description" in payload else item.get("short_description", "")
         notes_value = payload.get("notes") if "notes" in payload else item.get("notes", "")
         scope_value = payload.get("scope") if "scope" in payload else item.get("scope", "Current book only")
+        current_series = str(item.get("series") or "")
         series_value = payload.get("series") if "series" in payload else item.get("series", "")
         if isinstance(series_value, str):
             series_value = series_value.strip()[:300]
@@ -2829,12 +2845,26 @@ class PremiumV2Bridge(QObject):
         state["characters"] = characters
         state["modified_at"] = self._now()
         save_state(project.folder, state)
-        self._sync_saved_cast(project, characters, state, update_names=True, update_voice=True)
         if series_value:
             try:
-                library_row = next((row for row in list_reusable_characters()
-                                    if str(row.get("primary_name") or "").casefold() == name.casefold()
-                                    or name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])}), None)
+                registry_rows = list_reusable_characters()
+                old_series = str(current_series or '').casefold()
+                active_folder = str(Path(project.folder).resolve())
+                library_row = next((row for row in registry_rows
+                    if str(row.get("source_project_folder") or "") and
+                       str(Path(str(row.get("source_project_folder"))).resolve()) == active_folder and
+                       str(row.get("primary_name") or row.get("name") or "").casefold() in
+                       {original_name.casefold(), name.casefold()}), None)
+                if library_row is None:
+                    library_row = next((row for row in registry_rows
+                        if str(row.get("series") or "").casefold() == series_value.casefold()
+                        and (str(row.get("primary_name") or row.get("name") or "").casefold() == name.casefold()
+                             or name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])})), None)
+                if library_row is None:
+                    library_row = next((row for row in registry_rows
+                        if str(row.get("series") or "").casefold() == old_series
+                        and (str(row.get("primary_name") or row.get("name") or "").casefold() == original_name.casefold()
+                             or original_name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])})), None)
                 self._character_library_save({
                     "id": str((library_row or {}).get("id") or ""),
                     "name": name, "series": series_value, "scope": "Series · " + series_value,
