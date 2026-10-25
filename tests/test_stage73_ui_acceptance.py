@@ -269,7 +269,7 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
             '("Open Audio Library", audio_library_root())',
             '("Open Models Folder", models_root())',
             '("Open Logs Folder", app_root() / "Logs")',
-            '"All content stays local."',
+            'All content stays local. Project Library controls',
             'self.settings.setValue("storage/library_root"',
             'self.settings.setValue("storage/audio_assets_root"',
             "QFileDialog.getExistingDirectory",
