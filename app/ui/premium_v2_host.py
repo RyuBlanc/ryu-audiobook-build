@@ -4121,6 +4121,8 @@ class PremiumV2Bridge(QObject):
             value = payload[key]
             if key == "theme" and value not in {"dark", "light"}:
                 raise ValueError("Theme must be dark or light.")
+            if key == "reduce_motion" and not isinstance(value, bool):
+                raise ValueError("Reduce motion must be a boolean preference.")
             if key == "text_scale":
                 try:
                     value = int(value)
@@ -5496,6 +5498,7 @@ class PremiumV2Bridge(QObject):
         return {
             "theme": self.settings.value("ui/theme", "dark"),
             "effects": self.settings.value("ui/effects", "high"),
+            "reduce_motion": self.settings.value("ui/reduce_motion", False, type=bool),
             "accent": self.settings.value("ui/accent", "crimson"),
             "interface_scale": self.settings.value("ui/interface_scale", 100),
             "text_scale": self.settings.value("ui/text_scale", 100),
