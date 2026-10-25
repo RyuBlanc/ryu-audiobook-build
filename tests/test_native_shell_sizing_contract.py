@@ -33,6 +33,31 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertIn('"text_scale": "ui/text_scale"', host)
         self.assertIn('"window_size": "ui/window_size"', host)
 
+    def test_blank_interface_diagnostics_and_recovery_watchdog_are_wired(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        for token in (
+            "class DiagnosticQWebEnginePage(QWebEnginePage)",
+            "def javaScriptConsoleMessage(",
+            "def report_frontend_diagnostic(",
+            "window.addEventListener('error'",
+            "window.addEventListener('unhandledrejection'",
+            "def _check_frontend_ready(",
+            "def _finish_frontend_health_check(",
+            "did not finish initializing",
+        ):
+            self.assertIn(token, host)
+        self.assertIn("window.__ryuPremiumAdapterReady = true", adapter)
+        self.assertIn("adapter-start-failed", adapter)
+
+    def test_text_scaling_batches_inserted_subtrees_to_avoid_repeated_style_walks(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("const ryuUiScalePendingRoots = new Set()", adapter)
+        self.assertIn("existing.contains(node)", adapter)
+        self.assertIn("Number(root.dataset.ryuScaleApplied) === scale", adapter)
+        self.assertIn("ryuUiScalePendingRoots.clear()", adapter)
+        self.assertIn("no full document reload,\\n        // browser zoom, or repeated recursive walk", adapter)
+
     def test_character_studio_static_samples_are_removed_and_empty_states_are_real(self):
         html = (ROOT / "assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
