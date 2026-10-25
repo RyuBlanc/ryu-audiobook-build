@@ -2115,7 +2115,7 @@
         if (!c) throw new Error('Select a character from the active project cast first.');
         const profileName = String($('assignedAudioProfile')?.value || '').trim();
         if (profileName && !characterProfileByName(profileName)) throw new Error('Choose a saved audio profile.');
-        await call('character.assign', {name:characterCanonical(c), profile_name:profileName});
+        await call('character.assign', {name:characterCanonical(c), series:characterSeries(c), profile_name:profileName});
         await refreshCharacters();
         await refreshCharacterLibrary();
         message(profileName ? 'Saved ' + profileName + ' for ' + characterCanonical(c) + '.' : 'Removed the assigned voice profile from ' + characterCanonical(c) + '.');
@@ -2429,18 +2429,18 @@
     const merged = [];
     const seen = new Set();
     for (const item of characters) {
-      const name = characterCanonical(item);
-      const key = name.toLowerCase();
+      const name = characterCanonical(item), series = characterSeries(item);
+      const key = name.toLowerCase() + '::' + series.toLowerCase();
       if (!name || seen.has(key)) continue;
       seen.add(key);
-      merged.push({name, series:characterSeries(item), aliases:characterAliases(item), voice_profile:String(item.voice_profile || ''), project:true, item});
+      merged.push({name, series, aliases:characterAliases(item), voice_profile:String(item.voice_profile || ''), project:true, item});
     }
     for (const item of libraryCharacters) {
-      const name = characterCanonical(item);
-      const key = name.toLowerCase();
+      const name = characterCanonical(item), series = characterSeries(item);
+      const key = name.toLowerCase() + '::' + series.toLowerCase();
       if (!name || seen.has(key)) continue;
       seen.add(key);
-      merged.push({name, series:characterSeries(item), aliases:characterAliases(item), voice_profile:String(item.voice_profile || item.voice || ''), project:false, item});
+      merged.push({name, series, aliases:characterAliases(item), voice_profile:String(item.voice_profile || item.voice || ''), project:false, item});
     }
     const visible = merged.filter(item => [item.name,item.series,item.voice_profile,...item.aliases].join(' ').toLowerCase().includes(query));
     list.innerHTML = visible.map(item => '<button type="button" class="quick-character" data-live-character="' + esc(item.name) + '" data-live-series="' + esc(item.series) + '" data-live-profile="' + esc(item.voice_profile) + '" data-live-project="' + (item.project ? 'true' : 'false') + '"><b>' + esc(item.name) + '</b><small>' + esc(item.series) + ' · ' + esc(item.voice_profile || 'Unassigned audio profile') + (item.project ? ' · This project' : ' · Character Library') + '</small></button>').join('') ||
@@ -2485,7 +2485,14 @@
     const canonical = String(name || '').trim();
     if (!canonical) throw new Error('Choose a character before assigning dialogue.');
     let current = characterRowForName(canonical);
-    if (current) return current;
+    const requestedSeries = String(preferredSeries || '').trim();
+    if (current) {
+      if (requestedSeries && characterSeries(current).toLowerCase() !== requestedSeries.toLowerCase()) {
+        throw new Error('A character with this name is already assigned to the project under series "' +
+          characterSeries(current) + '". Change the selected series to match, or use a distinct character name.');
+      }
+      return current;
+    }
     if (!libraryCharacters.length) await refreshCharacterLibrary();
     const saved = libraryCharacters.find(item => characterCanonical(item).toLowerCase() === canonical.toLowerCase() ||
       characterAliases(item).some(alias => alias.toLowerCase() === canonical.toLowerCase()));
@@ -2517,12 +2524,12 @@
     const selectedProfile = String(preferredProfile || '').trim();
     if (selectedProfile && selectedProfile !== String(character.voice_profile || '')) {
       if (!characterProfileByName(selectedProfile)) throw new Error('Choose a saved voice profile.');
-      await call('character.assign', {name:characterCanonical(character),profile_name:selectedProfile});
+      await call('character.assign', {name:characterCanonical(character),series:characterSeries(character),profile_name:selectedProfile});
       await refreshCharacters();
       character = characterRowForName(characterCanonical(character)) || character;
     }
     const result = await call('chapter.dialogue.assign', {
-      dialogue_text:dialogueText, speakers:[characterCanonical(character)],
+      dialogue_text:dialogueText, speakers:[characterCanonical(character)], series:characterSeries(character),
       chapter_number, start, end, mode:'single'
     });
     closeCharacterAssignmentPopover();
@@ -2552,7 +2559,8 @@
     if (!current) throw new Error('Character was not returned by the active project cast.');
     await call('chapter.dialogue.assign', {
       dialogue_text:String(window.ryuPremiumPendingDialogueText || ''),
-      speakers:[characterCanonical(current)], chapter_number:Number(window.ryuPremiumPendingDialogueChapter),
+      speakers:[characterCanonical(current)], series:characterSeries(current),
+      chapter_number:Number(window.ryuPremiumPendingDialogueChapter),
       start:Number(window.ryuPremiumPendingDialogueStart), end:Number(window.ryuPremiumPendingDialogueEnd), mode:'single'
     });
     closeCharacterAssignmentPopover();
@@ -2600,9 +2608,13 @@
         window.ryuPremiumPendingDialogueChapter = Number(row.chapter_number);
         window.ryuPremiumPendingDialogueStart = Number(row.start);
         window.ryuPremiumPendingDialogueEnd = Number(row.end);
-        await ensureCharacterInActiveProject(candidate.name, librarySeriesName(libraryCharacters.find(item => characterCanonical(item).toLowerCase() === String(candidate.name).toLowerCase()) || {}) || activeCharacterProjectSeries());
+        const libraryCandidate = libraryCharacters.find(item =>
+          characterCanonical(item).toLowerCase() === String(candidate.name).toLowerCase());
+        const castCandidate = await ensureCharacterInActiveProject(
+          candidate.name, librarySeriesName(libraryCandidate || {}) || activeCharacterProjectSeries());
         await call('chapter.dialogue.assign', {
-          dialogue_text:String(row.source_text || row.text), speakers:[candidate.name],
+          dialogue_text:String(row.source_text || row.text), speakers:[characterCanonical(castCandidate)],
+          series:characterSeries(castCandidate),
           chapter_number:Number(row.chapter_number), start:Number(row.start), end:Number(row.end), mode:'single'
         });
         applied++;
@@ -3873,8 +3885,10 @@
       if (button.matches('#quickCharacterList [data-live-character]')) {
         handle(async () => {
           const name = button.dataset.liveCharacter;
+          const selectedSeries = String(button.dataset.liveSeries || '').trim().toLowerCase();
           const candidate = [...characters,...libraryCharacters].find(item =>
-            characterCanonical(item).toLowerCase() === String(name).toLowerCase());
+            characterCanonical(item).toLowerCase() === String(name).toLowerCase() &&
+            characterSeries(item).toLowerCase() === selectedSeries);
           if (!candidate) throw new Error('That character is no longer in the live project or Character Library.');
           await assignPassageToCharacter(name, button.dataset.liveSeries || characterSeries(candidate),
             String(button.dataset.liveProfile || $('ryuManualNewProfile')?.value || ''));
