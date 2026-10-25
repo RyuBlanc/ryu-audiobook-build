@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import sys
 
 from PySide6.QtCore import Qt, QSettings
@@ -770,9 +771,14 @@ def main() -> int:
                 app_icon = candidate_icon
                 break
     app.setWindowIcon(app_icon)
-    # Premium V2 is the approved frontend. Keep the widget shell as a safe fallback
-    # only for source trees or builds where the frontend asset is genuinely absent.
-    if frontend_path().is_file():
+    # Use the real Qt widget workflow by default. The embedded Premium V2 HTML
+    # remains available only for explicit developer opt-in while its native
+    # equivalents are completed; normal Windows installs must not depend on a
+    # browser/WebEngine document to render the main application.
+    use_experimental_web_ui = str(
+        os.environ.get("RYU_EXPERIMENTAL_PREMIUM_WEB_UI", "")
+    ).strip().casefold() in {"1", "true", "yes"}
+    if use_experimental_web_ui and frontend_path().is_file():
         window = PremiumV2Window()
     else:
         window = ProjectWorkflow()
