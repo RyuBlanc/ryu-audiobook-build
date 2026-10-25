@@ -593,8 +593,12 @@ def server(args) -> int:
             batch_texts = request.get("texts")
             batch_outputs = request.get("outputs")
 
-            if active_task in {"design", "design-preview"}:
+            if active_task == "design":
                 lock_design_identity(request)
+            elif active_task == "design-preview" and model is None:
+                # One-pass audition: load only VoiceDesign, without preparing
+                # multiple anchor recordings or swapping to a Base model.
+                load_model(args.kind)
 
             if isinstance(batch_texts, list):
                 if not isinstance(batch_outputs, list) or len(batch_texts) != len(batch_outputs):
@@ -665,20 +669,12 @@ def server(args) -> int:
                     flush=True,
                 )
                 _generate_custom(model, request, output)
-            elif active_task in {"design", "design-preview"}:
-                print(
-                    json.dumps(
-                        {
-                            "progress": (
-                                "Generating natural VoiceDesign narration…"
-                                if active_task == "design"
-                                else "Generating natural VoiceDesign preview…"
-                            )
-                        }
-                    ),
-                    flush=True,
-                )
+            elif active_task == "design":
+                print(json.dumps({"progress": "Generating natural VoiceDesign narration…"}), flush=True)
                 _generate_design_locked(model, locked_clone_prompts, request, output)
+            elif active_task == "design-preview":
+                print(json.dumps({"progress": "Generating one-pass VoiceDesign preview…"}), flush=True)
+                _generate_design_preview(model, request, output)
             elif active_task == "clone":
                 print(
                     json.dumps({"progress": "Generating Qwen Base clone speech…"}),
@@ -722,14 +718,16 @@ def server(args) -> int:
                 except Exception:
                     pass
                 try:
-                    if active_task in {"design", "design-preview"}:
-                        # The stable clone model is always the active model once
-                        # identity is locked. Re-load it on CPU and reuse prompts.
-                        model, device = _load_model(
-                            str(args.clone_kind),
-                            "cpu",
-                            root,
-                        )
+                    if active_task == "design-preview":
+                        # A preview may fall back to CPU, but keep it on the same
+                        # VoiceDesign model/prompt path; never swap into the
+                        # production Base-anchor identity workflow during audition.
+                        model, device = _load_model(str(args.kind), "cpu", root)
+                        active_kind = str(args.kind)
+                        _generate_design_preview(model, request, Path(str(request.get("output"))))
+                    elif active_task == "design":
+                        # Production narration retains the stable VoiceDesign/Base identity lock.
+                        model, device = _load_model(str(args.clone_kind), "cpu", root)
                         active_kind = str(args.clone_kind)
                         if locked_clone_prompts is None:
                             raise RuntimeError("The stable VoiceDesign identity could not be restored after GPU memory fallback.")
