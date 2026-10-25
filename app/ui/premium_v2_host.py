@@ -984,7 +984,8 @@ class PremiumV2Bridge(QObject):
                         {"start": start, "end": end, "text": exact_text, "source": "manual"})
             base.update({"start": start, "end": end, "text": exact_text, "source": "manual"})
             normalized = normalize_assignment(base, speakers, mode)
-            normalized.update({"source": "manual", "confidence": 1.0})
+            assignment_series = requested_series or default_series
+            normalized.update({"source": "manual", "confidence": 1.0, "series": assignment_series})
             chapter.dialogue_assignments = [
                 item for item in existing if not (isinstance(item, dict)
                     and item.get("start") == start and item.get("end") == end)
@@ -992,10 +993,12 @@ class PremiumV2Bridge(QObject):
             chapter.dialogue_assignments.sort(key=lambda item: (int(item.get("start", 0)), int(item.get("end", 0))))
             result = {"chapter_number": chapter.number, "start": start, "end": end,
                       "text": exact_text, "speakers": speakers, "source": "manual",
-                      "confidence": 1.0, "saved": True}
+                      "confidence": 1.0, "series": assignment_series, "saved": True}
         else:
             result = assign_dialogue_to_chapters(project.chapters, dialogue_text, speakers,
                                                  chapter_number=chapter_number, mode=mode)
+            assignment_series = requested_series or default_series
+            result["series"] = assignment_series
         project.save()
         project_state = load_state(project.folder)
         project_state["modified_at"] = self._now()
@@ -1014,8 +1017,11 @@ class PremiumV2Bridge(QObject):
                                          and (str(item.get("name") or "").casefold() == speakers[0].casefold()
                                               or speakers[0].casefold() in {
                                                   str(alias).casefold() for alias in (item.get("aliases") or [])
-                                              })), {})
-                learning_series = str(saved_character.get("series") or "").strip()
+                                              })
+                                         and (not str(result.get("series") or "").strip()
+                                              or str(item.get("series") or self._project_series_name(project, project_state)).casefold()
+                                                 == str(result.get("series") or "").casefold())), {})
+                learning_series = str(result.get("series") or saved_character.get("series") or "").strip()
                 if not learning_series:
                     learning_series = self._project_series_name(project, project_state)
                 if saved_chapter is not None:
@@ -1058,11 +1064,15 @@ class PremiumV2Bridge(QObject):
         )
         state_before = load_state(project.folder)
         project_state_characters = [item for item in (state_before.get("characters") or []) if isinstance(item, dict)]
+        saved_assignment_series = str((assignment_before or {}).get("series") or "").strip()
         learning_character = next((item for item in project_state_characters if any(
             str(candidate or "").casefold() == speaker.casefold()
             for candidate in [item.get("name"), *(item.get("aliases") or [])]
-        ) for speaker in assigned_before), {})
-        learning_series = str(learning_character.get("series") or "").strip()
+        ) and (not saved_assignment_series
+               or str(item.get("series") or self._project_series_name(project, state_before)).casefold()
+                  == saved_assignment_series.casefold())
+        for speaker in assigned_before), {})
+        learning_series = str(saved_assignment_series or learning_character.get("series") or "").strip()
         if not learning_series:
             learning_series = self._project_series_name(project, state_before)
         result = unassign_dialogue_from_chapters(
