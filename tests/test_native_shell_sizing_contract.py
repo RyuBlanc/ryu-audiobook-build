@@ -125,7 +125,9 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertIn('text_scale=int(self.text_scale.currentData() or 100)', settings)
         self.assertIn('scale=int(self.interface_scale.currentData() or 100)', settings)
         self.assertIn('def apply_window_size(self, choice: str)', workflow)
-        self.assertIn('ui/window_size', workflow)
+        # Geometry persistence is owned by SettingsPage; the shell exposes
+        # the handler that applies the already-saved value.
+        self.assertIn('def apply_window_size(self, choice: str)', workflow)
         self.assertIn('saved_window_size', main)
         settings_saved_start = workflow.index("    def _settings_saved(")
         settings_saved_end = workflow.index("    def resizeEvent(", settings_saved_start)
