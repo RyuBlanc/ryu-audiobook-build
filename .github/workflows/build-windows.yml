@@ -622,9 +622,12 @@ jobs:
             # PowerShell once per pixel (which can stall release builds for very
             # large transparent logos).
             # PowerShell 7 forwards Bitmap to System.Drawing.Common; make
-            # that runtime assembly an explicit C# compilation reference.
-            $drawingAssembly = [System.Drawing.Bitmap].Assembly.Location
-            Add-Type -ReferencedAssemblies @($drawingAssembly) -TypeDefinition @'
+            # the runtime drawing assemblies explicit C# compilation references.
+            $drawingAssemblies = @(
+              [System.Drawing.Bitmap].Assembly.Location,
+              [System.Drawing.Rectangle].Assembly.Location
+            ) | Select-Object -Unique
+            Add-Type -ReferencedAssemblies $drawingAssemblies -TypeDefinition @'
           using System;
           using System.Drawing;
           using System.Drawing.Imaging;
