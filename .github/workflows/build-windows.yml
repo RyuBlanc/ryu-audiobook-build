@@ -785,6 +785,7 @@ jobs:
   # preserves the latest successful run whenever this run did not pass.
   cleanup:
     name: Clean stale Actions runs and storage
+    continue-on-error: true
     if: always()
     needs: [tests, build]
     runs-on: ubuntu-latest

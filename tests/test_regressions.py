@@ -1074,6 +1074,11 @@ class RegressionTests(unittest.TestCase):
         inline_start = workflow.index("name: Clean old Actions runs and storage after verified Windows build")
         publish_start = workflow.index("name: Publish verified installer release")
         self.assertGreater(inline_start, publish_start)
+        self.assertIn("continue-on-error: true", workflow[inline_start:inline_start + 400])
+        cleanup_job_start = workflow.index("\\n  cleanup:\\n")
+        cleanup_steps_start = workflow.index("    steps:", cleanup_job_start)
+        cleanup_job_header = workflow[cleanup_job_start:cleanup_steps_start]
+        self.assertIn("    continue-on-error: true", cleanup_job_header)
         self.assertIn("continue-on-error: true", workflow[workflow.index("name: Prune stale completed runs"):])
 
 
