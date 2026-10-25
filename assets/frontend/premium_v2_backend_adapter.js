@@ -2375,11 +2375,116 @@
     renderCharacterInspector();
     ensureManualAssignmentFields();
   }
+  function availableCharacterSeriesNames() {
+    return [...new Set([
+      ...libraryCharacters.map(librarySeriesName),
+      ...characters.map(characterSeries),
+      activeCharacterProjectSeries(),
+      characterStudioSelectedSeries
+    ].map(value => String(value || '').trim()).filter(value =>
+      value && !['All series','Unassigned series','Global character library','__new_series__'].includes(value)
+    ))].sort((a,b) => a.localeCompare(b));
+  }
+  function syncAssignmentSeriesControls() {
+    const outer = $('ryuAssignmentSeries');
+    const outerNew = $('ryuAssignmentNewSeries');
+    const outerNewLabel = $('ryuAssignmentNewSeriesLabel');
+    const inner = $('ryuManualSeries');
+    const innerNew = $('ryuManualNewSeries');
+    const innerNewLabel = $('ryuManualNewSeriesLabel');
+    const names = availableCharacterSeriesNames();
+    const currentInput = String(outer?.value === '__new_series__' ? outerNew?.value || '' : '').trim();
+    const wanted = currentInput || String(characterStudioSelectedSeries || activeCharacterProjectSeries() || '').trim();
+    if (outer) {
+      outer.innerHTML = '<option value="">Choose a series</option>' +
+        names.map(name => '<option value="' + esc(name) + '">' + esc(name) + '</option>').join('') +
+        '<option value="__new_series__">＋ Create a new series…</option>';
+      if (names.some(name => normalizeCharacterSeries(name) === normalizeCharacterSeries(wanted))) {
+        const exact = names.find(name => normalizeCharacterSeries(name) === normalizeCharacterSeries(wanted)) || wanted;
+        outer.value = exact;
+        characterStudioSelectedSeries = exact;
+        if (outerNewLabel) outerNewLabel.hidden = true;
+      } else if (wanted) {
+        outer.value = '__new_series__';
+        if (outerNew) outerNew.value = wanted;
+        if (outerNewLabel) outerNewLabel.hidden = false;
+        characterStudioSelectedSeries = wanted;
+      } else {
+        outer.value = '';
+        if (outerNew) outerNew.value = '';
+        if (outerNewLabel) outerNewLabel.hidden = true;
+        characterStudioSelectedSeries = '';
+      }
+    }
+    if (inner) {
+      const selected = String(characterStudioSelectedSeries || '').trim();
+      inner.innerHTML = '<option value="">Choose a series</option>' +
+        names.map(name => '<option value="' + esc(name) + '">' + esc(name) + '</option>').join('') +
+        '<option value="__new_series__">＋ Create a new series…</option>';
+      if (names.some(name => normalizeCharacterSeries(name) === normalizeCharacterSeries(selected))) {
+        inner.value = names.find(name => normalizeCharacterSeries(name) === normalizeCharacterSeries(selected)) || selected;
+        if (innerNewLabel) innerNewLabel.hidden = true;
+      } else if (selected) {
+        inner.value = '__new_series__';
+        if (innerNew) innerNew.value = selected;
+        if (innerNewLabel) innerNewLabel.hidden = false;
+      } else {
+        inner.value = '';
+        if (innerNew) innerNew.value = '';
+        if (innerNewLabel) innerNewLabel.hidden = true;
+      }
+    }
+  }
+  function setAssignmentSeries(value) {
+    characterStudioSelectedSeries = String(value || '').trim();
+    syncAssignmentSeriesControls();
+    renderManualCharacterChoices();
+  }
   function ensureManualAssignmentFields() {
     const popover = $('characterAssignPopover');
-    if (!popover || characterManualFormBound) return;
     const quick = $('quickCharacterList');
-    if (!quick) return;
+    const search = $('assignCharacterSearch');
+    if (!popover || !quick || !search) return;
+
+    if (!$('ryuAssignmentSeriesControls')) {
+      const controls = document.createElement('div');
+      controls.id = 'ryuAssignmentSeriesControls';
+      controls.className = 'ryu-manual-create';
+      controls.style.padding = '8px 0';
+      controls.innerHTML =
+        '<label>Series for this assignment<select id="ryuAssignmentSeries"><option value="">Choose a series</option></select></label>' +
+        '<label id="ryuAssignmentNewSeriesLabel" hidden>New series name<input id="ryuAssignmentNewSeries" maxlength="300" placeholder="Enter novel / series name"/></label>';
+      search.insertAdjacentElement('beforebegin', controls);
+      $('ryuAssignmentSeries')?.addEventListener('change', () => {
+        const selected = String($('ryuAssignmentSeries')?.value || '');
+        if (selected === '__new_series__') {
+          characterStudioSelectedSeries = '';
+          if ($('ryuAssignmentNewSeries')) $('ryuAssignmentNewSeries').value = '';
+          if ($('ryuAssignmentNewSeriesLabel')) $('ryuAssignmentNewSeriesLabel').hidden = false;
+          if ($('ryuManualSeries')) $('ryuManualSeries').value = '__new_series__';
+          if ($('ryuManualNewSeriesLabel')) $('ryuManualNewSeriesLabel').hidden = false;
+          $('ryuAssignmentNewSeries')?.focus();
+          renderManualCharacterChoices();
+          return;
+        }
+        if (!selected) {
+          characterStudioSelectedSeries = '';
+        } else {
+          characterStudioSelectedSeries = selected;
+          if ($('ryuAssignmentNewSeries')) $('ryuAssignmentNewSeries').value = '';
+          if ($('ryuAssignmentNewSeriesLabel')) $('ryuAssignmentNewSeriesLabel').hidden = true;
+        }
+        syncAssignmentSeriesControls();
+        renderManualCharacterChoices();
+      });
+      $('ryuAssignmentNewSeries')?.addEventListener('input', () => {
+        characterStudioSelectedSeries = String($('ryuAssignmentNewSeries')?.value || '').trim();
+        syncAssignmentSeriesControls();
+        renderManualCharacterChoices();
+      });
+    }
+
+    if (characterManualFormBound) return;
     const form = document.createElement('div');
     form.id = 'ryuManualCharacterCreate';
     form.className = 'ryu-manual-create';
@@ -2392,15 +2497,28 @@
       '<label>Audio profile<select id="ryuManualNewProfile"><option value="">Unassigned</option></select></label>' +
       '<div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap"><button type="button" class="btn small secondary" id="cancelManualCharacterCreate">Cancel</button><button type="button" class="btn small" id="saveManualCharacterCreate">Save & Assign</button></div>';
     quick.insertAdjacentElement('afterend', form);
-    const series = $('ryuManualSeries');
-    series.addEventListener('change', () => {
-      characterStudioSelectedSeries = series.value === '__new_series__' ? '' : series.value;
-      const isNew = series.value === '__new_series__';
-      if ($('ryuManualNewSeriesLabel')) $('ryuManualNewSeriesLabel').hidden = !isNew;
-      if (isNew) $('ryuManualNewSeries')?.focus();
+    $('ryuManualSeries')?.addEventListener('change', () => {
+      const selected = String($('ryuManualSeries')?.value || '');
+      if (selected === '__new_series__') {
+        characterStudioSelectedSeries = String($('ryuManualNewSeries')?.value || '').trim();
+        if ($('ryuManualNewSeriesLabel')) $('ryuManualNewSeriesLabel').hidden = false;
+        if ($('ryuAssignmentSeries')) $('ryuAssignmentSeries').value = '__new_series__';
+        if ($('ryuAssignmentNewSeriesLabel')) $('ryuAssignmentNewSeriesLabel').hidden = false;
+        $('ryuManualNewSeries')?.focus();
+      } else {
+        characterStudioSelectedSeries = selected;
+        if ($('ryuManualNewSeries')) $('ryuManualNewSeries').value = '';
+        if ($('ryuManualNewSeriesLabel')) $('ryuManualNewSeriesLabel').hidden = true;
+      }
+      syncAssignmentSeriesControls();
+      renderManualCharacterChoices();
     });
     $('ryuManualNewSeries')?.addEventListener('input', () => {
       characterStudioSelectedSeries = String($('ryuManualNewSeries')?.value || '').trim();
+      if ($('ryuAssignmentSeries')) $('ryuAssignmentSeries').value = '__new_series__';
+      if ($('ryuAssignmentNewSeries')) $('ryuAssignmentNewSeries').value = characterStudioSelectedSeries;
+      if ($('ryuAssignmentNewSeriesLabel')) $('ryuAssignmentNewSeriesLabel').hidden = false;
+      renderManualCharacterChoices();
     });
     $('cancelManualCharacterCreate')?.addEventListener('click', () => {
       form.hidden = true; quick.hidden = false;
@@ -2410,17 +2528,27 @@
   }
   function populateCharacterCreateFields() {
     ensureManualAssignmentFields();
+    if (!characterStudioSelectedSeries) characterStudioSelectedSeries = activeCharacterProjectSeries();
+    syncAssignmentSeriesControls();
+    const selectedSeries = String(characterStudioSelectedSeries || '').trim();
     const seriesSelect = $('ryuManualSeries'), profileSelect = $('ryuManualNewProfile');
     if (seriesSelect) {
-      const activeSeries = activeCharacterProjectSeries();
-      const names = [...new Set([...libraryCharacters.map(librarySeriesName),activeSeries,characterStudioSelectedSeries].filter(Boolean))].sort((a,b) => a.localeCompare(b));
-      const previous = characterStudioSelectedSeries || activeSeries;
+      const names = availableCharacterSeriesNames();
       seriesSelect.innerHTML = '<option value="">Choose a series</option>' +
         names.map(name => '<option value="' + esc(name) + '">' + esc(name) + '</option>').join('') +
         '<option value="__new_series__">＋ Create a new series…</option>';
-      seriesSelect.value = names.includes(previous) ? previous : (activeSeries && names.includes(activeSeries) ? activeSeries : '');
-      characterStudioSelectedSeries = seriesSelect.value || '';
-      if ($('ryuManualNewSeriesLabel')) $('ryuManualNewSeriesLabel').hidden = seriesSelect.value !== '__new_series__';
+      if (names.some(name => normalizeCharacterSeries(name) === normalizeCharacterSeries(selectedSeries))) {
+        seriesSelect.value = names.find(name => normalizeCharacterSeries(name) === normalizeCharacterSeries(selectedSeries)) || selectedSeries;
+        if ($('ryuManualNewSeriesLabel')) $('ryuManualNewSeriesLabel').hidden = true;
+      } else if (selectedSeries) {
+        seriesSelect.value = '__new_series__';
+        if ($('ryuManualNewSeries')) $('ryuManualNewSeries').value = selectedSeries;
+        if ($('ryuManualNewSeriesLabel')) $('ryuManualNewSeriesLabel').hidden = false;
+      } else {
+        seriesSelect.value = '';
+        if ($('ryuManualNewSeries')) $('ryuManualNewSeries').value = '';
+        if ($('ryuManualNewSeriesLabel')) $('ryuManualNewSeriesLabel').hidden = true;
+      }
     }
     if (profileSelect) {
       const saved = characterSavedProfiles();
@@ -2435,25 +2563,28 @@
     const list = $('quickCharacterList');
     if (!list) return;
     const query = String($('assignCharacterSearch')?.value || '').trim().toLowerCase();
+    const selectedSeries = normalizeCharacterSeries(characterStudioSelectedSeries);
     const merged = [];
     const seen = new Set();
     for (const item of characters) {
-      const name = characterCanonical(item);
-      const key = name.toLowerCase();
+      const name = characterCanonical(item), series = characterSeries(item);
+      const key = normalizeCharacterSeries(series) + '\u0000' + name.toLowerCase();
       if (!name || seen.has(key)) continue;
+      if (selectedSeries && normalizeCharacterSeries(series) !== selectedSeries) continue;
       seen.add(key);
-      merged.push({name, series:characterSeries(item), aliases:characterAliases(item), voice_profile:String(item.voice_profile || ''), project:true, item});
+      merged.push({name, series, aliases:characterAliases(item), voice_profile:String(item.voice_profile || ''), project:true, item});
     }
     for (const item of libraryCharacters) {
-      const name = characterCanonical(item);
-      const key = name.toLowerCase();
+      const name = characterCanonical(item), series = characterSeries(item);
+      const key = normalizeCharacterSeries(series) + '\u0000' + name.toLowerCase();
       if (!name || seen.has(key)) continue;
+      if (selectedSeries && normalizeCharacterSeries(series) !== selectedSeries) continue;
       seen.add(key);
-      merged.push({name, series:characterSeries(item), aliases:characterAliases(item), voice_profile:String(item.voice_profile || item.voice || ''), project:false, item});
+      merged.push({name, series, aliases:characterAliases(item), voice_profile:String(item.voice_profile || item.voice || ''), project:false, item});
     }
     const visible = merged.filter(item => [item.name,item.series,item.voice_profile,...item.aliases].join(' ').toLowerCase().includes(query));
     list.innerHTML = visible.map(item => '<button type="button" class="quick-character" data-live-character="' + esc(item.name) + '" data-live-series="' + esc(item.series) + '" data-live-profile="' + esc(item.voice_profile) + '" data-live-project="' + (item.project ? 'true' : 'false') + '"><b>' + esc(item.name) + '</b><small>' + esc(item.series) + ' · ' + esc(item.voice_profile || 'Unassigned audio profile') + (item.project ? ' · This project' : ' · Character Library') + '</small></button>').join('') ||
-      '<div class="ryu-character-empty"><b>No matching characters</b>Create a new character and assign a series.</div>';
+      '<div class="ryu-character-empty"><b>No characters in this series</b>Choose another series or use ＋ New character to add one to the selected series.</div>';
   }
   async function openCharacterAssignmentPopover(passage, x, y) {
     if (!passage || !passage.text || !Number.isInteger(Number(passage.chapter_number))) {
