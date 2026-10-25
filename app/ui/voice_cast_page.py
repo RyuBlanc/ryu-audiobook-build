@@ -851,23 +851,107 @@ class VoiceCastPage(QWidget):
         self._refresh_labels()
 
     def add_character(self):
-        name, ok = QInputDialog.getText(self, "Add Character", "Character name:")
-        name = str(name or "").strip()
-        if not ok or not name:
+        """Create a real project character with a reusable series, aliases and optional saved voice."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("New Character")
+        dialog.setMinimumWidth(460)
+        root = QVBoxLayout(dialog)
+        root.addWidget(QLabel("<h3>Create Character</h3>"))
+        root.addWidget(QLabel("The character is saved to this book and the shared Character Library."))
+        form = QFormLayout()
+
+        name_edit = QLineEdit()
+        name_edit.setPlaceholderText("Canonical character name")
+        form.addRow("Character name", name_edit)
+
+        series_edit = QComboBox()
+        series_edit.setEditable(True)
+        series_edit.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        series_edit.lineEdit().setPlaceholderText("Choose a series or type a new one")
+        try:
+            known_series = {
+                str(item.get("series") or "").strip()
+                for item in list_reusable_characters()
+                if isinstance(item, dict) and str(item.get("series") or "").strip()
+            }
+        except Exception:
+            known_series = set()
+        active_series = self._series_name()
+        if active_series:
+            known_series.add(active_series)
+        series_edit.addItems(sorted(known_series, key=str.casefold))
+        series_edit.setEditText(active_series)
+        form.addRow("Series", series_edit)
+
+        aliases_edit = QLineEdit()
+        aliases_edit.setPlaceholderText("Aliases separated by commas")
+        form.addRow("Aliases", aliases_edit)
+
+        voice_edit = QComboBox()
+        voice_edit.addItem("Unassigned", "")
+        for profile in self.profiles:
+            voice_edit.addItem(profile.name, profile.name)
+        current_voice = self.profile.currentData()
+        if current_voice:
+            index = voice_edit.findData(current_voice)
+            if index >= 0:
+                voice_edit.setCurrentIndex(index)
+        form.addRow("Audio profile", voice_edit)
+        root.addLayout(form)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel,
+            parent=dialog,
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        root.addWidget(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        name = name_edit.text().strip()
+        series = series_edit.currentText().strip()
+        aliases = list(dict.fromkeys(
+            value.strip() for value in aliases_edit.text().replace("\\n", ",").split(",")
+            if value.strip() and value.strip().casefold() != name.casefold()
+        ))[:30]
+        voice = str(voice_edit.currentData() or "").strip() or None
+        if not name:
+            self.summary.setText("Enter a character name first.")
             return
         if name.casefold() == "narrator" or any(
-            row["name"].casefold() == name.casefold() for row in self.rows
+            row["name"].casefold() == name.casefold()
+            or name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])}
+            for row in self.rows
         ):
             self.summary.setText("That character name already exists or is reserved for the narrator.")
             return
+        if not series:
+            self.summary.setText("Choose an existing series or enter a new series name.")
+            return
+        conflict = next((row for row in self.rows
+                         if str(row.get("series") or self._series_name()).casefold() == series.casefold()
+                         and any(str(alias).casefold() in {value.casefold() for value in (row.get("aliases") or [])}
+                                 for alias in aliases)), None)
+        if conflict:
+            self.summary.setText(f"One of those aliases is already used by {conflict.get('name')}.")
+            return
+
         self.rows.append({
             "name": name, "role": "Manually Added Character",
-            "dialogue_count": 0, "examples": [], "voice": None,
-            "confidence": 1.0, "aliases": [],
+            "dialogue_count": 0, "examples": [], "voice": voice,
+            "confidence": 1.0, "aliases": aliases, "series": series,
         })
-        self._save_cast()
+        self._save_cast(update_voice=True)
+        self.search.clear()
         self._refresh_labels()
-        self.summary.setText(f"Added '{name}' to this book's cast.")
+        new_index = next((i for i, row in enumerate(self._visible_rows()) if row.get("name") == name), -1)
+        if new_index >= 0:
+            self.list.setCurrentRow(new_index)
+        self.summary.setText(
+            f"Added '{name}' to series '{series}'."
+            + (f" Voice profile '{voice}' saved with the character." if voice else " Choose and save a voice profile when ready.")
+        )
 
     def rename_character(self):
         row = self._row_for_visible_index(self.list.currentRow())
