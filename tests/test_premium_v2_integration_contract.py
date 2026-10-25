@@ -461,6 +461,35 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("monitorJob(data.job_id, async job=>", adapter)
         self.assertIn("await previewAudio.play()", adapter)
 
+
+    def test_terminal_jobs_are_persisted_to_independent_history(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn('return settings_root() / "premium_v2_history.json"', host)
+        self.assertIn("def _load_durable_history(self)", host)
+        self.assertIn("def _record_history_job(self, row: dict[str, Any])", host)
+        self.assertIn("self._record_history_job(row)", host)
+        history_start = host.index("def _history_list(")
+        history_end = host.index("def _project_rename(", history_start)
+        history = host[history_start:history_end]
+        self.assertIn("self._history.values()", history)
+        self.assertNotIn("self._jobs.values()", history)
+        clear_start = host.index("def _job_clear_completed(")
+        clear_end = host.index("def _player_get_active(", clear_start)
+        clear = host[clear_start:clear_end]
+        self.assertIn("self._record_history_job(row)", clear)
+        self.assertIn('"history_preserved": True', clear)
+
+    def test_history_is_loaded_from_its_own_durable_file_on_startup(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        init = host[host.index("def __init__(self, parent: QObject | None = None)"):]
+        init = init[:init.index("@Slot(str, str, result=str)")]
+        self.assertIn("self._history: dict[str, dict[str, Any]] = {}", init)
+        self.assertIn("self._load_durable_history()", init)
+        loader_start = host.index("def _load_durable_history(self)")
+        loader_end = host.index("def _persist_history(self)", loader_start)
+        loader = host[loader_start:loader_end]
+        self.assertIn("history[str(row[\"job_id\"])] = dict(row)", loader)
+
     def test_output_folder_resume_and_history_controls_use_backend(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("buttonLabel === 'open output folder'", adapter)

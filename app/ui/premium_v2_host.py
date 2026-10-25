@@ -308,6 +308,8 @@ class PremiumV2Bridge(QObject):
         # reconciliation so a click during a long analysis cannot be overwritten.
         self._character_review_state_lock = threading.RLock()
         self._jobs: dict[str, dict[str, Any]] = {}
+        self._history: dict[str, dict[str, Any]] = {}
+        self._load_durable_history()
         self._generators: dict[str, GenerationManager] = {}
         self._import_cancel_events: dict[str, threading.Event] = {}
         self._preview_cancel_events: dict[str, threading.Event] = {}
@@ -1149,12 +1151,51 @@ class PremiumV2Bridge(QObject):
     def _jobs_path(self) -> Path:
         return settings_root() / "premium_v2_jobs.json"
 
-    def _persist_jobs(self) -> None:
-        path = self._jobs_path()
+    def _history_path(self) -> Path:
+        """Immutable-ish completed-operation journal, independent of queue visibility."""
+        return settings_root() / "premium_v2_history.json"
+
+    @staticmethod
+    def _terminal_job_state(row: dict[str, Any]) -> bool:
+        return str(row.get("state") or "").lower() in {"completed", "failed", "cancelled"}
+
+    def _persist_json_rows(self, path: Path, rows: list[dict[str, Any]]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps(list(self._jobs.values()), ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        temporary.write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
         temporary.replace(path)
+
+    def _persist_jobs(self) -> None:
+        path = self._jobs_path()
+        self._persist_json_rows(path, list(self._jobs.values()))
+
+    def _load_durable_history(self) -> None:
+        path = self._history_path()
+        try:
+            rows = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else []
+        except (OSError, ValueError, TypeError):
+            rows = []
+        if not isinstance(rows, list):
+            rows = []
+        history: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            if isinstance(row, dict) and row.get("job_id"):
+                history[str(row["job_id"])] = dict(row)
+        self._history = history
+
+    def _persist_history(self) -> None:
+        self._persist_json_rows(self._history_path(), list(self._history.values()))
+
+    def _record_history_job(self, row: dict[str, Any]) -> None:
+        """Store a terminal snapshot without coupling it to the active job queue."""
+        if not self._terminal_job_state(row) or not row.get("job_id"):
+            return
+        snapshot = dict(row)
+        snapshot["job_id"] = str(snapshot["job_id"])
+        snapshot["id"] = snapshot["job_id"]
+        snapshot["history_recorded_at"] = self._now()
+        self._history[snapshot["job_id"]] = snapshot
+        self._persist_history()
 
     def _load_durable_jobs(self) -> None:
         path = self._jobs_path()
@@ -1173,8 +1214,8 @@ class PremiumV2Bridge(QObject):
                             "error": {"code": "interrupted", "message": "Worker did not survive restart."},
                             "recoverable": True, "updated_at": self._now()})
             self._jobs[str(row["job_id"])] = row
-        if rows:
-            self._persist_jobs()
+            if self._terminal_job_state(row):
+                self._record_history_job(row)
 
     def _new_job(self, job_type: str, title: str, description: str, project=None) -> str:
         job_id = uuid.uuid4().hex
@@ -1219,6 +1260,7 @@ class PremiumV2Bridge(QObject):
             if row.get("state") in {"completed", "failed", "cancelled"}:
                 row["completed_at"] = row.get("completed_at") or row["updated_at"]
                 row["eta_seconds"] = 0
+                self._record_history_job(row)
             self._persist_jobs()
             return dict(row)
 
@@ -1229,9 +1271,14 @@ class PremiumV2Bridge(QObject):
         return sorted(rows, key=lambda j: str(j.get("queued_at") or ""), reverse=True)
 
     def _history_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
+        # History is independent of queue visibility and survives queue cleanup.
         with self._jobs_lock:
-            rows = [dict(j) for j in self._jobs.values()]
-        return sorted(rows, key=lambda j: str(j.get("queued_at") or ""), reverse=True)
+            rows = [dict(row) for row in self._history.values()]
+        return sorted(
+            rows,
+            key=lambda row: str(row.get("completed_at") or row.get("updated_at") or row.get("queued_at") or ""),
+            reverse=True,
+        )
 
     def _project_rename(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
@@ -4092,6 +4139,7 @@ class PremiumV2Bridge(QObject):
         with self._jobs_lock:
             for row in self._jobs.values():
                 if row.get("state") in {"completed", "cancelled"} and not row.get("hidden"):
+                    self._record_history_job(row)
                     row["hidden"] = True
                     count += 1
             self._persist_jobs()
