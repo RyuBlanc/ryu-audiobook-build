@@ -504,6 +504,24 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("def _voice_delete(", host)
         self.assertIn("Built-in voices cannot be deleted", host)
 
+
+    def test_performance_panel_never_preserves_prototype_metrics_or_fake_benchmark_success(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("async function refreshPerformance()")
+        end = adapter.index("function requestModelActionDialog", start)
+        performance = adapter[start:end]
+        self.assertIn("if (!result?.available)", performance)
+        self.assertIn("['Not tested', 'Generation performance']", performance)
+        self.assertIn("node.textContent = 'Not measured'", performance)
+        self.assertIn("result.cpu_percent", performance)
+        self.assertIn("result.gpu_percent", performance)
+        self.assertIn("result.vram_used_mb", performance)
+        self.assertIn("result.generation_seconds", performance)
+        self.assertIn("duration === null ? 'Not tested'", performance)
+        self.assertNotIn("Math.random", performance)
+        self.assertNotIn("setInterval", performance)
+        self.assertIn("Live hardware telemetry and repeatable benchmark execution are not implemented", adapter)
+
     def test_stage829_pronunciation_matrix_and_model_registry_never_fake_success(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         for token in (

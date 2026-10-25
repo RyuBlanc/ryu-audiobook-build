@@ -4633,7 +4633,7 @@
     }
     return rows;
   }
-  async function refreshPerformance() {
+  async async function refreshPerformance() {
     let result;
     try {
       result = await call('performance.info');
@@ -4641,7 +4641,7 @@
       result = {available:false, reason:error?.message || 'Live hardware telemetry is unavailable in this build.'};
     }
     const section = $('performance');
-    if (!result.available) {
+    if (!result?.available) {
       const metrics = section?.querySelectorAll('.grid.metrics .metric');
       const labels = [
         ['Unavailable', 'CPU telemetry unavailable'],
@@ -4658,8 +4658,34 @@
       section?.querySelectorAll('.ready-list .ready b').forEach(node => { node.textContent = 'Not measured'; });
       if ($('benchmarkResult')) $('benchmarkResult').textContent = 'Unavailable';
       const note = $('benchmarkResult')?.parentElement?.querySelector('p.muted');
-      if (note) note.textContent = result.reason || 'Live hardware telemetry and benchmark results are not connected in this build.';
+      if (note) note.textContent = result?.reason || 'Live hardware telemetry and benchmark results are not connected in this build.';
+      return {...(result || {}), available:false};
     }
+
+    // Only render actual backend measurements. If a field is missing or invalid,
+    // overwrite any legacy sample value rather than leaving it on screen.
+    const metrics = section?.querySelectorAll('.grid.metrics .metric');
+    const numeric = value => value !== null && value !== undefined && value !== '' &&
+      Number.isFinite(Number(value)) ? Number(value) : null;
+    const cpu = numeric(result.cpu_percent);
+    const gpu = numeric(result.gpu_percent);
+    const vram = numeric(result.vram_used_mb);
+    const duration = numeric(result.generation_seconds);
+    const values = [
+      [cpu === null ? 'Unavailable' : cpu.toFixed(1) + '%', 'CPU usage'],
+      [gpu === null ? 'Unavailable' : gpu.toFixed(1) + '%',
+        vram === null ? 'VRAM unavailable' : Math.round(vram) + ' MB VRAM'],
+      [duration === null ? 'Not tested' : duration.toFixed(1) + ' s', 'Measured generation time'],
+      [String(result.recommended_backend || 'Unavailable'), 'Backend recommendation']
+    ];
+    metrics?.forEach((metric, index) => {
+      const strong = metric.querySelector('strong');
+      const detail = metric.querySelector('span');
+      if (strong && values[index]) strong.textContent = values[index][0];
+      if (detail && values[index]) detail.textContent = values[index][1];
+    });
+    if ($('benchmarkResult')) $('benchmarkResult').textContent =
+      duration === null ? 'Not tested' : duration.toFixed(1) + ' s';
     return result;
   }
   function requestModelActionDialog(options = {}) {
