@@ -142,7 +142,7 @@ class QwenCharacterProvider(TTSProvider):
                 self.model_kind,
                 (
                     best_long_form_clone_kind()
-                    if self.qwen_mode in {"design", "design-preview"}
+                    if self.qwen_mode == "design"
                     else ""
                 ),
                 self.instruct,
