@@ -84,14 +84,18 @@ class NativeDialogueAnalysisWorker(QThread):
             examples = load_learning_examples(self.series) if self.series else []
             learning_index = prepare_learning_index(examples)
             all_rows: list[dict[str, Any]] = []
-            continuity_speaker = ""
-            continuity_series = self.series
 
             total = max(1, len(self.chapters))
             for chapter_index, chapter in enumerate(self.chapters, 1):
                 chapter_number = int(getattr(chapter, "number", chapter_index) or chapter_index)
                 chapter_title = str(getattr(chapter, "title", "") or "")
                 source = str(getattr(chapter, "text", "") or "")
+                # Pronoun continuity is deliberately chapter-local and short-lived.
+                # Never let the last speaker of another chapter or a distant line
+                # become ground truth for an ambiguous "he/she/they" passage.
+                continuity_speaker = ""
+                continuity_series = self.series
+                continuity_end = -1
                 self.progress.emit(
                     f"Analyzing chapter {chapter_index}/{len(self.chapters)} · "
                     f"{chapter_title or ('Chapter ' + str(chapter_number))}"
@@ -117,6 +121,9 @@ class NativeDialogueAnalysisWorker(QThread):
                         for name, confidence, evidence in (getattr(segment, "suggestions", ()) or ())
                         if str(name or "").strip()
                     ]
+                    continuity_is_local = bool(
+                        continuity_speaker and 0 <= start - continuity_end <= 420
+                    )
                     ranked = rank_speaker_suggestions(
                         chapter_text=source,
                         start=start,
@@ -124,8 +131,8 @@ class NativeDialogueAnalysisWorker(QThread):
                         detected=detected,
                         known_characters=known,
                         learning_examples=learning_index,
-                        last_speaker=continuity_speaker,
-                        last_speaker_series=continuity_series,
+                        last_speaker=continuity_speaker if continuity_is_local else "",
+                        last_speaker_series=continuity_series if continuity_is_local else "",
                     )
                     manual = next((
                         item for item in assignments
@@ -162,6 +169,7 @@ class NativeDialogueAnalysisWorker(QThread):
                              if str(item.get("name") or "").casefold() == continuity_speaker.casefold()),
                             self.series,
                         )
+                        continuity_end = end
                     else:
                         explicit = source_grounded_speaker_for_continuity(ranked)
                         if explicit:
@@ -171,6 +179,7 @@ class NativeDialogueAnalysisWorker(QThread):
                                  if str(item.get("name") or "").casefold() == explicit.casefold()),
                                 self.series,
                             )
+                            continuity_end = end
                 self.progress.emit(f"Analyzed {chapter_index}/{len(self.chapters)} chapters")
             self.completed.emit(all_rows)
         except Exception as exc:

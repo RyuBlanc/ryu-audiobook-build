@@ -812,6 +812,20 @@ class RegressionTests(unittest.TestCase):
             page.close()
             page.deleteLater()
 
+    def test_native_speaker_continuity_is_chapter_local_and_distance_limited(self):
+        source = Path("app/ui/native_character_studio.py").read_text(encoding="utf-8")
+        worker_start = source.index("class NativeDialogueAnalysisWorker")
+        worker_end = source.index("class NativeCharacterPreviewCallbackRouter", worker_start)
+        worker = source[worker_start:worker_end]
+        chapter_loop = worker.index("for chapter_index, chapter in enumerate(self.chapters, 1):")
+        anchor_reset = worker.index('continuity_speaker = ""', chapter_loop)
+        segment_parse = worker.index("segments = dialogue_segments(chapter)", chapter_loop)
+        self.assertLess(anchor_reset, segment_parse)
+        self.assertIn("continuity_end = -1", worker[chapter_loop:segment_parse])
+        self.assertIn("0 <= start - continuity_end <= 420", worker)
+        self.assertIn('last_speaker=continuity_speaker if continuity_is_local else ""', worker)
+        self.assertIn("continuity_end = end", worker)
+
     def test_character_assignment_rolls_back_memory_and_learning_on_save_failure(self):
         source = Path("app/ui/native_character_studio.py").read_text(encoding="utf-8")
         assign_start = source.index("    def assign_passage(")
