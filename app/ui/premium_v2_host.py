@@ -2504,7 +2504,7 @@ class PremiumV2Bridge(QObject):
                                  "synthesis_seconds": synthesis_seconds,
                                  "total_seconds": total_seconds,
                                  "real_time_factor": real_time_factor,
-                                 "performance_target_met": bool(int(seconds) != 30 or total_seconds <= 60),
+                                 "performance_target_met": (bool(total_seconds <= 60) if int(seconds) == 30 else None),
                                  "voices_used": list(result.voices_used), "segments": result.segments,
                                  "selected_profile": profile.name,
                                  "selected_provider": str(getattr(profile, "provider", "") or ""),
