@@ -812,6 +812,21 @@ class RegressionTests(unittest.TestCase):
             page.close()
             page.deleteLater()
 
+    def test_character_assignment_rolls_back_memory_and_learning_on_save_failure(self):
+        source = Path("app/ui/native_character_studio.py").read_text(encoding="utf-8")
+        assign_start = source.index("    def assign_passage(")
+        unassign_start = source.index("    def unassign_passage(", assign_start)
+        test_voice_start = source.index("    def test_voice_profile(", unassign_start)
+        assign = source[assign_start:unassign_start]
+        unassign = source[unassign_start:test_voice_start]
+        save_failure = assign.index('except Exception as exc:', assign.index("project.save()"))
+        feedback_removal = assign.index("remove_assignment_feedback(")
+        self.assertIn("chapter.dialogue_assignments = existing", assign[save_failure:feedback_removal])
+        self.assertGreater(feedback_removal, assign.index("project.save()"))
+        self.assertIn("chapter.dialogue_assignments = assignments", unassign)
+        self.assertIn("chapter.dialogue_assignments = assignments", unassign[unassign.index("project.save()"):])
+        self.assertLess(assign.index("project.save()"), feedback_removal)
+
     def test_character_sentence_preview_routes_worker_callbacks_through_qobject_slots(self):
         source = Path("app/ui/native_character_studio.py").read_text(encoding="utf-8")
         self.assertIn("class NativeCharacterPreviewCallbackRouter(QObject):", source)

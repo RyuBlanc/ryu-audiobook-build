@@ -1133,15 +1133,6 @@ class NativeCharacterDialoguePanel(QWidget):
 
         previous = next((item for item in existing if isinstance(item, dict)
                          and item.get("start") == start and item.get("end") == end), None)
-        if previous:
-            try:
-                remove_assignment_feedback(
-                    series=str(previous.get("series") or series),
-                    chapter_text=source, start=start, end=end, source_text=exact,
-                )
-            except Exception:
-                # A legacy assignment may not have a matching feedback row.
-                pass
         base = dict(previous or {"start": start, "end": end, "text": exact, "source": "manual"})
         normalized = normalize_assignment(base, [name], "single")
         normalized.update({"start": start, "end": end, "text": exact, "source": "manual",
@@ -1154,8 +1145,23 @@ class NativeCharacterDialoguePanel(QWidget):
         try:
             project.save()
         except Exception as exc:
+            # Revert the in-memory object too. Otherwise the UI could display an
+            # assignment that was never persisted and a later save could commit it.
+            chapter.dialogue_assignments = existing
             QMessageBox.critical(self, "Assignment could not be saved", f"The assignment was not confirmed because project saving failed:\n{exc}")
             return
+
+        # Learn only after the project save commits. On a failed save, the old
+        # assignment and its learning evidence remain intact.
+        if previous:
+            try:
+                remove_assignment_feedback(
+                    series=str(previous.get("series") or series),
+                    chapter_text=source, start=start, end=end, source_text=exact,
+                )
+            except Exception:
+                # Legacy assignments may not have a matching feedback row.
+                pass
 
         row = self.cast_page.find_character(name, series)
         if row is None:
@@ -1233,6 +1239,8 @@ class NativeCharacterDialoguePanel(QWidget):
         try:
             project.save()
         except Exception as exc:
+            # Restore the visible in-memory assignment if the save failed.
+            chapter.dialogue_assignments = assignments
             QMessageBox.critical(self, "Could not save unassignment", f"The saved assignment was not removed:\n{exc}")
             return
         try:
