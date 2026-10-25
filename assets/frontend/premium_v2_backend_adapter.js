@@ -1959,10 +1959,24 @@
   function characterSeries(item) {
     return librarySeriesName(item || {}) || activeCharacterProjectSeries() || 'Unassigned series';
   }
-  function characterRowForName(name) {
+  function normalizeCharacterSeries(value) {
+    return String(value || '').replace(/^\\s*Series\\s*[·:-]\\s*/i, '').trim().toLowerCase();
+  }
+  function characterMatchesName(item, key) {
+    return characterCanonical(item).toLowerCase() === key ||
+      characterAliases(item).some(alias => alias.toLowerCase() === key);
+  }
+  function characterRowForName(name, preferredSeries = '') {
     const key = String(name || '').trim().toLowerCase();
-    return characters.find(item => characterCanonical(item).toLowerCase() === key ||
-      characterAliases(item).some(alias => alias.toLowerCase() === key)) || null;
+    if (!key) return null;
+    const matches = characters.filter(item => characterMatchesName(item, key));
+    if (!matches.length) return null;
+    const wanted = normalizeCharacterSeries(preferredSeries || window.ryuPremiumSelectedCharacterSeries || '');
+    if (wanted) return matches.find(item => normalizeCharacterSeries(characterSeries(item)) === wanted) || null;
+    if (matches.length === 1) return matches[0];
+    const active = normalizeCharacterSeries(activeCharacterProjectSeries());
+    const inActiveSeries = matches.filter(item => normalizeCharacterSeries(characterSeries(item)) === active);
+    return inActiveSeries.length === 1 ? inActiveSeries[0] : null;
   }
   function characterAssignmentsFor(chapter) {
     return Array.isArray(chapter?.dialogue_assignments) ? chapter.dialogue_assignments.filter(item => item && typeof item === 'object') : [];
@@ -2108,7 +2122,7 @@
         if (!c) throw new Error('Select a character from the active project cast first.');
         const profileName = String($('assignedAudioProfile')?.value || '').trim();
         if (profileName && !characterProfileByName(profileName)) throw new Error('Choose a saved audio profile.');
-        await call('character.assign', {name:characterCanonical(c), profile_name:profileName});
+        await call('character.assign', {name:characterCanonical(c), series:characterSeries(c), profile_name:profileName});
         await refreshCharacters();
         await refreshCharacterLibrary();
         message(profileName ? 'Saved ' + profileName + ' for ' + characterCanonical(c) + '.' : 'Removed the assigned voice profile from ' + characterCanonical(c) + '.');
@@ -2335,9 +2349,9 @@
       const signature = JSON.stringify([assignedQuery,visibleCharacters.map(item => [item.name,item.series,item.voice_profile,item.aliases,item.examples,item.dialogue_count,item.confidence])]);
       if (castList.dataset.liveSignature !== signature) {
         castList.innerHTML = visibleCharacters.map(item => {
-          const name = characterCanonical(item), assignments = characterVoiceAssignments(name);
-          return '<button type="button" class="assigned-character" data-character-name="' + esc(name) + '">' +
-            '<span><b>' + esc(name) + '</b><small>' + esc(characterSeries(item)) + ' · ' + assignments.passages.length + ' assigned line(s) · ' + esc(item.voice_profile || 'Unassigned voice') + '</small></span></button>';
+          const name = characterCanonical(item), series = characterSeries(item), assignments = characterVoiceAssignments(name);
+          return '<button type="button" class="assigned-character" data-character-name="' + esc(name) + '" data-character-series="' + esc(series) + '">' +
+            '<span><b>' + esc(name) + '</b><small>' + esc(series) + ' · ' + assignments.passages.length + ' assigned line(s) · ' + esc(item.voice_profile || 'Unassigned voice') + '</small></span></button>';
         }).join('') || (characters.length
           ? '<div class="ryu-character-empty">No characters match this search.</div>'
           : '<div class="ryu-character-empty"><b>No Characters Found</b>Assign Characters from the selected project text to build this cast.<button type="button" class="btn small" id="assignCharactersEmpty">Assign Characters</button></div>');
@@ -2349,6 +2363,8 @@
           const button = event.target.closest('[data-character-name]');
           if (!button) return;
           window.ryuPremiumSelectedCharacter = button.dataset.characterName;
+          window.ryuPremiumSelectedCharacterSeries = button.dataset.characterSeries || activeCharacterProjectSeries();
+          characterStudioSelectedSeries = window.ryuPremiumSelectedCharacterSeries;
           castList.querySelectorAll('[data-character-name]').forEach(row => row.classList.toggle('active', row === button));
           renderCharacterInspector();
         });
@@ -3762,7 +3778,7 @@
     if (!current || !name) throw new Error('Select a saved project character and enter its canonical name.');
     if (!series) throw new Error('Choose an existing series or create a new series before saving this character.');
     const result = await call('character.update', {
-      original_name:characterCanonical(current), name,
+      original_name:characterCanonical(current), original_series:characterSeries(current), name,
       short_description:$('editCharacterShort')?.value || '',
       aliases:$('editCharacterAliases')?.value || '',
       voice_profile:String(current.voice_profile || ''),
@@ -3770,6 +3786,8 @@
       notes:$('editCharacterNotes')?.value || ''
     });
     window.ryuPremiumSelectedCharacter = name;
+    window.ryuPremiumSelectedCharacterSeries = series;
+    characterStudioSelectedSeries = series;
     $('characterEditorModal')?.classList.remove('show');
     await refreshCharacters();
     await refreshCharacterLibrary();
@@ -3777,12 +3795,13 @@
     return result;
   }
   async function deleteSelectedProjectCharacter() {
-    const current = characterRowForName(window.ryuPremiumSelectedCharacter);
-    if (!current) throw new Error('Select a real project character before deleting.');
-    const name = characterCanonical(current);
-    if (!window.confirm('Remove "' + name + '" from this project cast? Reusable Character Library data is retained.')) return;
-    await call('character.delete', {name});
+    const current = characterRowForName(window.ryuPremiumSelectedCharacter, window.ryuPremiumSelectedCharacterSeries);
+    if (!current) throw new Error('Select a real project character and its series before deleting.');
+    const name = characterCanonical(current), series = characterSeries(current);
+    if (!window.confirm('Remove "' + name + '" from series "' + series + '" in this project cast? Reusable Character Library data is retained.')) return;
+    await call('character.delete', {name, series});
     window.ryuPremiumSelectedCharacter = '';
+    window.ryuPremiumSelectedCharacterSeries = '';
     $('characterEditorModal')?.classList.remove('show');
     await refreshCharacters(); await refreshCharacterLibrary();
     message('Removed ' + name + ' from this project cast.');
@@ -3904,6 +3923,8 @@
       if (button.matches('#characters #assignedCharacterList [data-character-name]')) {
         handle(() => {
           window.ryuPremiumSelectedCharacter = button.dataset.characterName;
+          window.ryuPremiumSelectedCharacterSeries = button.dataset.characterSeries || activeCharacterProjectSeries();
+          characterStudioSelectedSeries = window.ryuPremiumSelectedCharacterSeries;
           document.querySelectorAll('#assignedCharacterList [data-character-name]').forEach(item => item.classList.toggle('active', item === button));
           renderCharacterInspector();
         });
