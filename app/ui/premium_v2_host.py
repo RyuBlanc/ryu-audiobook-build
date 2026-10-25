@@ -2706,14 +2706,26 @@ class PremiumV2Bridge(QObject):
         if profile_name and self._find_profile(profile_name) is None:
             raise ValueError("Choose a voice profile from the saved Voice Studio catalogue.")
         state = load_state(project.folder)
-        if str(payload.get("series") or "").strip():
-            # The user's explicit series choice defines the selected book's
-            # cast/learning scope, rather than relying only on its filename.
-            state["series_name"] = series
         characters = [dict(row) for row in (state.get("characters") or []) if isinstance(row, dict)]
-        match = next((row for row in characters if
-                      str(row.get("name") or "").casefold() == name.casefold()
-                      or name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])}), None)
+        # Series selection belongs to this character identity, not to the entire
+        # project/learning scope. Never mutate the book's series just because a
+        # user creates a character for another library series.
+        default_series = self._project_series_name(project, state)
+        def series_key(value: Any) -> str:
+            return re.sub(r"(?i)^\\s*series\\s*[·:-]\\s*", "", str(value or "").strip()).casefold()
+        wanted_series = series_key(series)
+        identity_rows = [row for row in characters if
+            str(row.get("name") or "").casefold() == name.casefold()
+            or name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])}]
+        match = next((row for row in identity_rows
+            if series_key(row.get("series") or default_series) == wanted_series), None)
+        if match is None and identity_rows:
+            other_series = str(identity_rows[0].get("series") or default_series).strip()
+            raise ValueError(
+                f"A character named '{name}' already exists in series '{other_series}'. "
+                "A project cannot assign the same character name from two series until dialogue assignments support series-specific identities. "
+                "Rename the existing project cast entry or choose its current series."
+            )
         if match is None:
             match = {
                 "name": name, "role": str(payload.get("role") or "Character")[:160],
