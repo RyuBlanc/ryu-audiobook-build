@@ -101,7 +101,9 @@ class QwenCharacterProvider(TTSProvider):
         """Resolve automatic model/GPU choices outside the Qt main thread."""
         if not self._auto_select_model:
             return
-        if self.qwen_mode == "clone":
+        if self.qwen_mode in {"design", "design-preview"}:
+            self.model_kind = best_voice_design_kind()
+        elif self.qwen_mode == "clone":
             self.model_kind = best_clone_kind()
         else:
             self.model_kind = best_custom_kind()
