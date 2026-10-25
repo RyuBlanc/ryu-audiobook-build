@@ -1893,7 +1893,11 @@
       '.ryu-ai-option{display:flex!important;flex-direction:column;align-items:flex-start!important;gap:4px!important;text-align:left;}' +
       '.ryu-ai-option small{color:#aeb6c5;font-size:11px;font-weight:400;line-height:1.4;}' +
       '.ryu-assigned-series{border-left:3px solid #e3b65e;padding-left:12px;}' +
-      '#aiPredictionModal .ai-prediction-modal{width:min(720px,calc(100vw - 32px));max-height:min(82vh,760px);overflow:auto;}';
+      '#characters .ai-sentence.unassigned{display:block;width:100%;max-width:100%;box-sizing:border-box;background:transparent!important;border:1px solid transparent!important;border-left:3px solid transparent!important;box-shadow:none!important;color:inherit!important;text-align:left;font:inherit;font-weight:400;white-space:pre-wrap;}' +
+      '#characters .ai-sentence.review{display:block;width:100%;max-width:100%;box-sizing:border-box;background:rgba(236,160,45,.075)!important;border:1px solid rgba(236,160,45,.18)!important;border-left:3px solid #efae35!important;box-shadow:none!important;color:inherit!important;text-align:left;white-space:pre-wrap;}' +
+      '#characters .ai-sentence.confirmed{display:block;width:100%;max-width:100%;box-sizing:border-box;background:rgba(36,190,122,.07)!important;border:1px solid rgba(36,190,122,.18)!important;border-left:3px solid #22c982!important;box-shadow:none!important;color:inherit!important;text-align:left;white-space:pre-wrap;}' +
+      '#aiPredictionModal .ai-prediction-modal{width:min(640px,calc(100vw - 32px));height:min(680px,82vh);max-height:min(82vh,760px);overflow:auto;}' +
+      '#aiPredictionModal .selected-dialogue-preview{margin-bottom:12px;min-height:64px;display:flex;align-items:center;line-height:1.6;}';
     document.head.appendChild(style);
   }
   function ensureAssignedAudioProfileControls() {
@@ -2242,7 +2246,7 @@
       merged.push({name, series:characterSeries(item), aliases:characterAliases(item), voice_profile:String(item.voice_profile || item.voice || ''), project:false, item});
     }
     const visible = merged.filter(item => [item.name,item.series,item.voice_profile,...item.aliases].join(' ').toLowerCase().includes(query));
-    list.innerHTML = visible.map(item => '<button type="button" class="quick-character" data-live-character="' + esc(item.name) + '" data-live-series="' + esc(item.series) + '" data-live-project="' + (item.project ? 'true' : 'false') + '"><b>' + esc(item.name) + '</b><small>' + esc(item.series) + ' · ' + esc(item.voice_profile || 'Unassigned audio profile') + (item.project ? ' · This project' : ' · Character Library') + '</small></button>').join('') ||
+    list.innerHTML = visible.map(item => '<button type="button" class="quick-character" data-live-character="' + esc(item.name) + '" data-live-series="' + esc(item.series) + '" data-live-profile="' + esc(item.voice_profile) + '" data-live-project="' + (item.project ? 'true' : 'false') + '"><b>' + esc(item.name) + '</b><small>' + esc(item.series) + ' · ' + esc(item.voice_profile || 'Unassigned audio profile') + (item.project ? ' · This project' : ' · Character Library') + '</small></button>').join('') ||
       '<div class="ryu-character-empty"><b>No matching characters</b>Create a new character and assign a series.</div>';
   }
   async function openCharacterAssignmentPopover(passage, x, y) {
@@ -3608,7 +3612,7 @@
             characterCanonical(item).toLowerCase() === String(name).toLowerCase());
           if (!candidate) throw new Error('That character is no longer in the live project or Character Library.');
           await assignPassageToCharacter(name, button.dataset.liveSeries || characterSeries(candidate),
-            String($('ryuManualNewProfile')?.value || ''));
+            String(button.dataset.liveProfile || $('ryuManualNewProfile')?.value || ''));
         });
         return;
       }
