@@ -71,6 +71,7 @@
   let chapterLastText = '', chapterHistoryGroupOpen = false, chapterHistoryGroupTimer = null, chapterHistoryApplying = false;
   let libraryCharacters = [], libraryEditorId = null, libraryEditorActive = false;
   let characterDialogueSuggestions = [], characterSuggestionsEpoch = 0;
+  let characterAnalysisStatus = {analyzed:false, updated_at:null, dialogue_total:0, unassigned_dialogue:0, suggestion_count:0};
   let characterStudioSelectedChapter = null, characterStudioSelectedSeries = '', characterStudioRenderEpoch = 0;
   let characterManualFormBound = false, characterAssignedActionsBound = false, characterStudioCaptureBound = false;
   // The approved HTML ships legacy prototype listeners. Replace only sound controls
@@ -119,47 +120,62 @@
         items.push({...row, chapter_number:Number(chapter.number), chapter_title:String(chapter.title || '')});
       }
     }
-    const renderSignature = JSON.stringify(items.map(item => [
-      item.id,item.chapter_number,item.start,item.end,item.text,item.speakers,item.assigned,
-      item.skipped,(item.suggestions||[]).map(candidate=>[candidate.name,candidate.confidence,candidate.evidence])
-    ]));
+    const analyzedIds = new Set(characterDialogueSuggestions.map(row => String(row.id || '')));
+    const analyzedItems = items.filter(item =>
+      item.source === 'local-dialogue-analysis' || analyzedIds.has(String(item.id || ''))
+    );
+    const renderSignature = JSON.stringify([
+      characterAnalysisStatus.analyzed, items.map(item => [
+        item.id,item.chapter_number,item.start,item.end,item.text,item.speakers,item.assigned,
+        item.skipped,(item.suggestions||[]).map(candidate=>[candidate.name,candidate.confidence,candidate.evidence])
+      ])
+    ]);
     window.ryuPremiumDialogueReviewItems = items;
     if (window.__ryuDialogueReviewRenderSignature === renderSignature) {
       renderAiChapterDocument();
       return;
     }
     window.__ryuDialogueReviewRenderSignature = renderSignature;
-    const counted = items.filter(item => !item.skipped);
+    const counted = analyzedItems.filter(item => !item.skipped);
     const assignedCount = counted.filter(item => item.assigned).length;
     const remaining = Math.max(0, counted.length - assignedCount);
     const percent = counted.length ? Math.round(assignedCount / counted.length * 100) : 0;
-    if (progressText) progressText.textContent = counted.length
-      ? assignedCount + ' of ' + counted.length + ' dialogue passages assigned'
-      : 'No quoted dialogue passages found';
-    if (progressBar) progressBar.style.width = percent + '%';
-    if (progressLabel) progressLabel.textContent = counted.length ? percent + '% assigned' : 'Waiting for chapter text';
-    if (pendingBadge) pendingBadge.textContent = remaining + ' left';
+    if (progressText) {
+      if (!characterAnalysisStatus.analyzed) progressText.textContent = 'Analysis has not run for this project';
+      else if (!counted.length) progressText.textContent = 'No dialogue suggestions found';
+      else progressText.textContent = assignedCount + ' of ' + counted.length + ' analyzed dialogue passages assigned';
+    }
+    if (progressBar) progressBar.style.width = characterAnalysisStatus.analyzed ? percent + '%' : '0%';
+    if (progressLabel) progressLabel.textContent = !characterAnalysisStatus.analyzed
+      ? 'Run Analyze book' : (counted.length ? percent + '% assigned' : 'No suggestions');
+    if (pendingBadge) pendingBadge.textContent = characterAnalysisStatus.analyzed ? remaining + ' left' : 'Not analyzed';
     const selectedNumber = Number(window.ryuPremiumAiChapterNumber || characterStudioSelectedChapter || window.ryuPremiumSelectedChapter || chapters[0]?.number || 0);
     const selectedChapter = chapters.find(chapter => Number(chapter.number) === selectedNumber) || chapters[0] || null;
     if (title) title.textContent = selectedChapter
       ? 'Chapter ' + selectedChapter.number + ' · ' + String(selectedChapter.title || 'Untitled chapter')
       : 'Dialogue review';
-    if (subtitle) subtitle.textContent = selectedChapter
-      ? 'Green passages are saved assignments; orange passages have real analysis suggestions; plain passages need manual review.'
-      : 'Open a local project to review its source text and dialogue assignments.';
+    if (subtitle) subtitle.textContent = !characterAnalysisStatus.analyzed
+      ? 'Run Analyze book to create source-backed suggestions. Existing saved assignments remain visible in green.'
+      : (selectedChapter
+        ? 'Green passages are saved assignments; orange passages have real analysis suggestions; plain passages have no saved assignment or supported prediction.'
+        : 'Open a local project to review its source text and dialogue assignments.');
     if (queue) {
-      const pending = items.filter(item => !item.assigned && !item.skipped);
-      queue.innerHTML = pending.slice(0, 120).map(item => {
-        const preview = item.text.length > 75 ? item.text.slice(0, 72) + '…' : item.text;
-        const candidate = item.suggestions?.[0];
-        const note = candidate
-          ? 'Suggested: ' + candidate.name + ' · ' + Math.round(Number(candidate.confidence || 0) * 100) + '%'
-          : 'No supported candidate yet · manual review';
-        return '<button type="button" class="ai-queue-item' + (window.ryuPremiumSelectedDialogueId === item.id ? ' active' : '') +
-          '" data-ai-line="' + esc(item.id) + '" data-dialogue-id="' + esc(item.id) + '">' +
-          '<span>Chapter ' + Number(item.chapter_number) + ' · ' + esc(item.chapter_title) + '</span><b>' + esc(preview) +
-          '</b><small>' + esc(note) + '</small></button>';
-      }).join('') || '<div class="ryu-character-empty"><b>Review queue is clear</b>All source-backed passages are assigned or skipped. Run analysis again to refresh suggestions.</div>';
+      const pending = analyzedItems.filter(item => !item.assigned && !item.skipped);
+      if (!characterAnalysisStatus.analyzed) {
+        queue.innerHTML = '<div class="ryu-character-empty"><b>Analysis has not run</b>Select Run analysis again to create review suggestions from the active project. Manual source-text assignment is still available.</div>';
+      } else {
+        queue.innerHTML = pending.slice(0, 120).map(item => {
+          const preview = item.text.length > 75 ? item.text.slice(0, 72) + '…' : item.text;
+          const candidate = item.suggestions?.[0];
+          const note = candidate
+            ? 'Suggested: ' + candidate.name + ' · ' + Math.round(Number(candidate.confidence || 0) * 100) + '%'
+            : 'No supported candidate yet · manual review';
+          return '<button type="button" class="ai-queue-item' + (window.ryuPremiumSelectedDialogueId === item.id ? ' active' : '') +
+            '" data-ai-line="' + esc(item.id) + '" data-dialogue-id="' + esc(item.id) + '">' +
+            '<span>Chapter ' + Number(item.chapter_number) + ' · ' + esc(item.chapter_title) + '</span><b>' + esc(preview) +
+            '</b><small>' + esc(note) + '</small></button>';
+        }).join('') || '<div class="ryu-character-empty"><b>Review queue is clear</b>All analyzed passages are assigned or skipped, or the analysis found no suggestions. Run analysis again to refresh suggestions.</div>';
+      }
     }
     renderAiChapterDocument();
   }
@@ -1884,13 +1900,26 @@
   async function refreshCharacterDialogueSuggestions() {
     const token = ++characterSuggestionsEpoch;
     try {
-      const loaded = await call('character.dialogue.suggestions.list');
+      const [loaded, status] = await Promise.all([
+        call('character.dialogue.suggestions.list'),
+        call('character.analysis.status')
+      ]);
       if (token !== characterSuggestionsEpoch) return characterDialogueSuggestions;
       characterDialogueSuggestions = Array.isArray(loaded) ? loaded : [];
+      if (status && typeof status === 'object') {
+        characterAnalysisStatus = {
+          analyzed: status.analyzed === true,
+          updated_at: status.updated_at || null,
+          dialogue_total: Math.max(0, Number(status.dialogue_total) || 0),
+          unassigned_dialogue: Math.max(0, Number(status.unassigned_dialogue) || 0),
+          suggestion_count: Math.max(0, Number(status.suggestion_count) || 0)
+        };
+      }
       window.ryuPremiumCharacterDialogueSuggestions = characterDialogueSuggestions;
+      window.ryuPremiumCharacterAnalysisStatus = characterAnalysisStatus;
       return characterDialogueSuggestions;
     } catch (error) {
-      console.warn('[Ryu character dialogue suggestions]', error);
+      console.warn('[Ryu character dialogue suggestions/status]', error);
       // A temporary bridge error should not erase the last confirmed local data.
       return characterDialogueSuggestions;
     }
