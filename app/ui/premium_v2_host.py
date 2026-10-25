@@ -5378,6 +5378,36 @@ class PremiumV2Bridge(QObject):
         save_state(project.folder, state)
         return {"saved": True, "cleared": ["opening", "chapter", "scene", "closing"]}
 
+    @Slot(str, result=bool)
+    def report_frontend_diagnostic(self, payload_json: str) -> bool:
+        """Write a bounded frontend runtime diagnostic to the local application log."""
+        try:
+            payload = json.loads(str(payload_json or "{}"))
+        except (TypeError, ValueError):
+            log.warning("Premium V2 frontend reported an invalid diagnostic payload")
+            return False
+        if not isinstance(payload, dict):
+            return False
+        kind = str(payload.get("kind") or "frontend-event")[:40]
+        message = str(payload.get("message") or "")[:2500].replace("\\x00", "")
+        source = str(payload.get("source") or "")[:600].replace("\\x00", "")
+        stack = str(payload.get("stack") or "")[:3000].replace("\\x00", "")
+        try:
+            line = max(0, min(10_000_000, int(payload.get("line") or 0)))
+        except (TypeError, ValueError, OverflowError):
+            line = 0
+        if kind == "frontend-ready":
+            log.info("Premium V2 frontend initialized successfully")
+            return True
+        if kind in {"javascript-error", "unhandled-rejection", "adapter-start-failed"}:
+            log.error("Premium V2 frontend %s: %s (source=%s, line=%s)%s",
+                      kind, message or "(no message)", source or "(inline)", line,
+                      ("\\n" + stack) if stack else "")
+        else:
+            log.warning("Premium V2 frontend %s: %s (source=%s, line=%s)",
+                        kind, message or "(no message)", source or "(inline)", line)
+        return True
+
     def _settings_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
         self.settings.sync()
         return {
@@ -5390,6 +5420,20 @@ class PremiumV2Bridge(QObject):
             "storage_root": str(app_root()),
             "library_root": str(library_root()),
         }
+
+
+class DiagnosticQWebEnginePage(QWebEnginePage):
+    """Capture JavaScript console failures for diagnosis of blank/frozen UI states."""
+
+    def javaScriptConsoleMessage(self, level, message: str, line_number: int, source_id: str) -> None:
+        source = str(source_id or "(inline)")
+        if level == QWebEnginePage.JavaScriptConsoleMessageLevel.ErrorMessageLevel:
+            log.error("Premium V2 JavaScript console error: %s (source=%s, line=%s)",
+                      str(message)[:2000], source[:600], int(line_number))
+        elif level == QWebEnginePage.JavaScriptConsoleMessageLevel.WarningMessageLevel:
+            log.warning("Premium V2 JavaScript console warning: %s (source=%s, line=%s)",
+                        str(message)[:1200], source[:600], int(line_number))
+        super().javaScriptConsoleMessage(level, message, line_number, source_id)
 
 
 class StableQWebEngineView(QWebEngineView):
@@ -5426,6 +5470,7 @@ class PremiumV2Window(QMainWindow):
         self.resize(1440, 900)
 
         self.web = StableQWebEngineView(self)
+        self.web.setPage(DiagnosticQWebEnginePage(self.web))
         self.web.setZoomFactor(1.0)
         self.web.settings().setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows, False)
         self.web.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, False)
@@ -5439,6 +5484,8 @@ class PremiumV2Window(QMainWindow):
         self.channel.registerObject("ryuBackend", self.bridge)
         self.web.page().setWebChannel(self.channel)
         self._renderer_restart_attempts = 0
+        self._frontend_generation = 0
+        self._frontend_ready = False
         self.web.loadFinished.connect(self._install_bridge)
         self.web.page().renderProcessTerminated.connect(self._handle_renderer_terminated)
 
@@ -5530,15 +5577,64 @@ class PremiumV2Window(QMainWindow):
             self._show_web_failure(message)
             return
         self._renderer_restart_attempts = 0
+        self._frontend_generation += 1
+        self._frontend_ready = False
+        generation = self._frontend_generation
         if hasattr(self, "_web_stack"):
             self._web_stack.setCurrentWidget(self.web)
-        # The bridge is injected without altering the supplied HTML/CSS rendering.
+        # Install error handlers before the adapter executes. A page load may
+        # succeed while a JavaScript exception leaves the visible interface blank.
         script = r"""
+        (() => {
+          if (window.__ryuFrontendDiagnosticsInstalled) return;
+          window.__ryuFrontendDiagnosticsInstalled = true;
+          window.__ryuFrontendPendingDiagnostics = [];
+          window.__ryuSendFrontendDiagnostic = null;
+          const emit = (kind, details = {}) => {
+            const row = {
+              kind: String(kind || 'frontend-event').slice(0, 40),
+              message: String(details.message || '').slice(0, 2500),
+              source: String(details.source || '').slice(0, 600),
+              line: Number.isFinite(Number(details.line)) ? Number(details.line) : 0,
+              stack: String(details.stack || '').slice(0, 3000)
+            };
+            try {
+              if (typeof window.__ryuSendFrontendDiagnostic === 'function') {
+                window.__ryuSendFrontendDiagnostic(row);
+              } else if (window.__ryuFrontendPendingDiagnostics.length < 30) {
+                window.__ryuFrontendPendingDiagnostics.push(row);
+              }
+            } catch (_) {}
+          };
+          window.__ryuEmitFrontendDiagnostic = emit;
+          window.addEventListener('error', event => emit('javascript-error', {
+            message: event.message || 'Uncaught JavaScript error',
+            source: event.filename || '',
+            line: event.lineno || 0,
+            stack: event.error && event.error.stack || ''
+          }), true);
+          window.addEventListener('unhandledrejection', event => {
+            const reason = event.reason;
+            emit('unhandled-rejection', {
+              message: reason && reason.message || String(reason || 'Unhandled promise rejection'),
+              source: '',
+              line: 0,
+              stack: reason && reason.stack || ''
+            });
+          }, true);
+        })();
         (() => {
           const setup = () => {
             if (!window.QWebChannel || !window.qt || !qt.webChannelTransport) return false;
             new QWebChannel(qt.webChannelTransport, channel => {
               const native = channel.objects.ryuBackend;
+              window.__ryuSendFrontendDiagnostic = payload => {
+                try { native.report_frontend_diagnostic(JSON.stringify(payload || {})); }
+                catch (_) {}
+              };
+              const pendingDiagnostics = window.__ryuFrontendPendingDiagnostics || [];
+              window.__ryuFrontendPendingDiagnostics = [];
+              pendingDiagnostics.forEach(payload => window.__ryuSendFrontendDiagnostic(payload));
               window.ryuBackend = Object.freeze({
                 invoke(command, payload = {}) {
                   return new Promise(resolve => {
@@ -5579,3 +5675,34 @@ class PremiumV2Window(QMainWindow):
         else:
             log.error("Premium V2 backend adapter is missing: %s", adapter_path)
         self.web.page().runJavaScript(script)
+        # Check for a UI that loaded at the HTML level but never finished
+        # initializing the backend adapter. This gives the user a native
+        # recovery surface instead of an indefinitely blank black window.
+        QTimer.singleShot(15000, lambda: self._check_frontend_ready(generation))
+
+    def _check_frontend_ready(self, generation: int) -> None:
+        if generation != self._frontend_generation or self._frontend_ready:
+            return
+        self.web.page().runJavaScript(
+            "({adapter:window.__ryuPremiumAdapterReady===true, body:!!document.body && "
+            "document.body.innerText.trim().length>20})",
+            lambda result: self._finish_frontend_health_check(generation, result),
+        )
+
+    def _finish_frontend_health_check(self, generation: int, result: Any) -> None:
+        if generation != self._frontend_generation or self._frontend_ready:
+            return
+        if isinstance(result, dict) and result.get("adapter") and result.get("body"):
+            self._frontend_ready = True
+            return
+        log.error(
+            "Premium V2 frontend failed its initialization watchdog (adapter_ready=%s, body_present=%s, generation=%s)",
+            bool(result.get("adapter")) if isinstance(result, dict) else False,
+            bool(result.get("body")) if isinstance(result, dict) else False,
+            generation,
+        )
+        self._show_web_failure(
+            "The application window opened, but its interface did not finish initializing. "
+            "Your local project data has not been deleted. Select Retry interface; if the issue repeats, "
+            "send the local application log so the JavaScript error and failing file/line can be identified."
+        )
