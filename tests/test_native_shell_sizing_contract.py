@@ -56,7 +56,8 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertIn("existing.contains(node)", adapter)
         self.assertIn("Number(root.dataset.ryuScaleApplied) === scale", adapter)
         self.assertIn("ryuUiScalePendingRoots.clear()", adapter)
-        self.assertIn("no full document reload,\\n        // browser zoom, or repeated recursive walk", adapter)
+        self.assertIn("no full document reload,", adapter)
+        self.assertIn("browser zoom, or repeated recursive walk", adapter)
 
     def test_character_studio_static_samples_are_removed_and_empty_states_are_real(self):
         html = (ROOT / "assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
