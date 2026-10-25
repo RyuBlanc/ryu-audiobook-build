@@ -78,14 +78,21 @@ _LIGHT_COLOURS = {
 }
 
 
-def apply_application_theme(app, theme: str, accent: str | None = None, scale: int | None = None) -> None:
-    """Apply theme, crimson-family accent and accessible interface scaling."""
+def apply_application_theme(
+    app, theme: str, accent: str | None = None, scale: int | None = None,
+    text_scale: int | None = None,
+) -> None:
+    """Apply theme, accent, layout scaling, and independent accessible text sizing."""
     settings = QSettings("RyuBlanc", "Ryu's Audiobook")
     accent = str(accent or settings.value("ui/accent", "crimson")).casefold()
     try:
         scale = max(80, min(150, int(scale if scale is not None else settings.value("ui/interface_scale", 100))))
     except (TypeError, ValueError):
         scale = 100
+    try:
+        text_scale = max(85, min(140, int(text_scale if text_scale is not None else settings.value("ui/text_scale", 100))))
+    except (TypeError, ValueError):
+        text_scale = 100
 
     base = app.property("_ryuDarkStylesheet")
     if not isinstance(base, str) or not base:
@@ -121,6 +128,19 @@ def apply_application_theme(app, theme: str, accent: str | None = None, scale: i
 
         style = scalable.sub(scale_declaration, style)
 
+    # Scale text independently from layout density. QSS supports point and
+    # pixel sizes; reapply from the original stylesheet on each settings change
+    # so toggling 120% -> 100% does not compound previous scaling.
+    if text_scale != 100:
+        text_factor = text_scale / 100.0
+        font_size = re.compile(r"(font-size\\s*:\\s*)(\\d+(?:\\.\\d+)?)\\s*(px|pt)", re.IGNORECASE)
+        def scale_font_size(match):
+            value = float(match.group(2)) * text_factor
+            unit = match.group(3).lower()
+            rounded = round(value, 2) if unit == "pt" else round(value, 1)
+            return f"{match.group(1)}{rounded:g}{unit}"
+        style = font_size.sub(scale_font_size, style)
+
     if str(theme).lower() == "light":
         style = re.sub(
             r"#[0-9A-Fa-f]{6}",
@@ -128,6 +148,38 @@ def apply_application_theme(app, theme: str, accent: str | None = None, scale: i
             style,
         )
     app.setStyleSheet(style)
+
+
+def apply_window_geometry(window: QWidget, choice: str) -> None:
+    """Apply a saved native window size without browser-style zoom."""
+    choice = str(choice or "maximized").strip().lower()
+    screen = window.screen() or QApplication.primaryScreen()
+    available = screen.availableGeometry() if screen is not None else None
+    if choice == "maximized":
+        window.showMaximized()
+        return
+    if window.isMaximized():
+        window.showNormal()
+    if choice == "auto":
+        width = int(available.width() * 0.90) if available is not None else 1440
+        height = int(available.height() * 0.90) if available is not None else 900
+        width, height = min(1600, max(960, width)), min(1000, max(620, height))
+    else:
+        try:
+            width, height = (int(part) for part in choice.split("x", 1))
+        except (TypeError, ValueError):
+            width, height = 1440, 900
+    if available is not None:
+        width = min(width, available.width())
+        height = min(height, available.height())
+    width, height = max(640, width), max(480, height)
+    window.resize(width, height)
+    if available is not None:
+        window.move(
+            available.x() + max(0, (available.width() - width) // 2),
+            available.y() + max(0, (available.height() - height) // 2),
+        )
+    window.show()
 
 
 class SettingsPage(QWidget):
@@ -182,6 +234,28 @@ class SettingsPage(QWidget):
         stored_scale = int(self.settings.value("ui/interface_scale", 100) or 100)
         self.interface_scale.setCurrentIndex(max(0, self.interface_scale.findData(stored_scale)))
         appearance_layout.addRow("Interface scale", self.interface_scale)
+
+        self.text_scale = QComboBox()
+        for percentage in (85, 90, 100, 110, 120, 130, 140):
+            self.text_scale.addItem(f"{percentage}%", percentage)
+        stored_text_scale = int(self.settings.value("ui/text_scale", 100) or 100)
+        self.text_scale.setCurrentIndex(max(0, self.text_scale.findData(stored_text_scale)))
+        appearance_layout.addRow("UI text size", self.text_scale)
+
+        self.window_size = QComboBox()
+        for label, value in (
+            ("Automatic · fit screen", "auto"),
+            ("1280 × 720", "1280x720"),
+            ("1440 × 900", "1440x900"),
+            ("1600 × 900", "1600x900"),
+            ("1920 × 1080", "1920x1080"),
+            ("Maximized", "maximized"),
+        ):
+            self.window_size.addItem(label, value)
+        stored_window_size = str(self.settings.value("ui/window_size", "maximized") or "maximized")
+        self.window_size.setCurrentIndex(max(0, self.window_size.findData(stored_window_size)))
+        appearance_layout.addRow("Window size / resolution", self.window_size)
+
         self.reduce_motion = QCheckBox("Reduce page and waveform motion")
         self.reduce_motion.setChecked(self.settings.value("ui/reduce_motion", False, type=bool))
         appearance_layout.addRow("Motion", self.reduce_motion)
@@ -276,6 +350,8 @@ class SettingsPage(QWidget):
         self.reduce_motion.setChecked(self.settings.value("ui/reduce_motion", False, type=bool))
         self.accent.setCurrentIndex(max(0, self.accent.findData(str(self.settings.value("ui/accent", "crimson")).lower())))
         self.interface_scale.setCurrentIndex(max(0, self.interface_scale.findData(int(self.settings.value("ui/interface_scale", 100) or 100))))
+        self.text_scale.setCurrentIndex(max(0, self.text_scale.findData(int(self.settings.value("ui/text_scale", 100) or 100))))
+        self.window_size.setCurrentIndex(max(0, self.window_size.findData(str(self.settings.value("ui/window_size", "maximized") or "maximized"))))
         self.default_bitrate.setCurrentIndex(max(0, self.default_bitrate.findData(int(self.settings.value("audio/default_bitrate", 256) or 256))))
 
     def save_settings(self) -> None:
@@ -283,12 +359,19 @@ class SettingsPage(QWidget):
         self.settings.setValue("ui/theme", theme)
         self.settings.setValue("ui/accent", str(self.accent.currentData() or "crimson"))
         self.settings.setValue("ui/interface_scale", int(self.interface_scale.currentData() or 100))
+        self.settings.setValue("ui/text_scale", int(self.text_scale.currentData() or 100))
+        self.settings.setValue("ui/window_size", str(self.window_size.currentData() or "maximized"))
         self.settings.setValue("audio/default_bitrate", int(self.default_bitrate.currentData() or 256))
         self.settings.setValue("ui/reduce_motion", self.reduce_motion.isChecked())
         self.settings.sync()
         app = QApplication.instance()
         if app is not None:
             apply_application_theme(app, theme)
+        try:
+            apply_window_geometry(self.window(), str(self.window_size.currentData() or "maximized"))
+        except RuntimeError:
+            # The settings widget may be detached during application shutdown.
+            pass
         if self.on_saved:
             try:
                 self.on_saved(self.reduce_motion.isChecked())
@@ -296,7 +379,7 @@ class SettingsPage(QWidget):
                 self.status.setText(f"Settings saved, but one live preference could not refresh: {exc}")
                 return
         self.status.setText(
-            "Settings saved locally. Theme, accent and interface scale preferences are recorded; "
+            "Settings saved locally. Theme, accent, interface scale, text size, and window size are recorded; "
             "default bitrate is used for new books unless a book already has its own saved quality."
         )
 
