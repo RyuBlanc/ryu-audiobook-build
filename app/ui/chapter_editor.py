@@ -98,6 +98,8 @@ class ChapterEditorPage(QWidget):
         self.title.setMaximumHeight(55)
         self.text = QTextEdit()
         self._loading_fields = False
+        self._fields_dirty = False
+        self._loaded_chapter: Chapter | None = None
         self._assignment_plus = QPushButton("", self.text.viewport())
         self._assignment_plus.setObjectName("assignmentPlus")
         dragon_assets = Path(__file__).resolve().parents[2] / "assets"
@@ -278,15 +280,37 @@ class ChapterEditorPage(QWidget):
             target_row = max(0, min(target_row, len(chapters) - 1))
             if self.list.currentRow() != target_row:
                 self.list.setCurrentRow(target_row)
+            elif self._fields_dirty:
+                # Keep the live editor buffer visible while its debounce timer is
+                # pending; refreshing metadata must never discard user input.
+                self._update_current_chapter_list_label()
             else:
-                # setCurrentRow emits no signal when the row is unchanged, but
-                # refresh still needs to reload its latest saved title and text.
                 self.load_selected(target_row)
         else:
             self.list.setCurrentRow(-1)
-            self.load_selected(-1)
+            if self._fields_dirty:
+                self.save_status.setText(
+                    "Unsaved chapter edits remain in the editor. Save successfully before continuing."
+                )
+            else:
+                self.load_selected(-1)
 
     def load_selected(self, index: int) -> None:
+        if self._fields_dirty and not self._persist_loaded_fields():
+            old_chapter = self._loaded_chapter
+            previous_row = next(
+                (row for row, chapter in enumerate(self.editor.chapters) if chapter is old_chapter),
+                -1,
+            )
+            if previous_row >= 0:
+                blocked = self.list.blockSignals(True)
+                try:
+                    self.list.setCurrentRow(previous_row)
+                finally:
+                    self.list.blockSignals(blocked)
+            return
+
+        self._autosave_timer.stop()
         self._loading_fields = True
         try:
             if 0 <= index < len(self.editor.chapters):
@@ -296,11 +320,15 @@ class ChapterEditorPage(QWidget):
                 self._clear_assignment_hover_state()
                 self._refresh_assignment_visuals()
                 self.save_status.setText("Auto-save enabled")
+                self._loaded_chapter = chapter
             else:
                 self.title.clear()
                 self.text.clear()
+                self._loaded_chapter = None
         finally:
             self._loading_fields = False
+            self._fields_dirty = False
+
 
     def _update_current_chapter_list_label(self) -> None:
         if self._loading_fields:
@@ -511,50 +539,77 @@ class ChapterEditorPage(QWidget):
     def _schedule_autosave(self) -> None:
         if self._loading_fields:
             return
+        self._fields_dirty = True
         self.save_status.setText("Unsaved changes…")
         self._autosave_timer.start()
 
-    def _autosave(self) -> None:
-        if self._loading_fields:
-            return
-        try:
-            self.commit_current()
-            callback = self.on_autosave or self.on_save
-            if callback:
+    def _persist_loaded_fields(self) -> bool:
+        """Commit and persist pending editor text before replacing the active chapter."""
+        if not self._fields_dirty:
+            return True
+        self._autosave_timer.stop()
+        loaded = self._loaded_chapter
+        if loaded is None or not any(chapter is loaded for chapter in self.editor.chapters):
+            self.save_status.setText(
+                "Cannot safely switch chapters: the unsaved chapter is no longer available. Save or recover the edit first."
+            )
+            return False
+
+        self.commit_current()
+        callback = self.on_autosave or self.on_save
+        if callback:
+            try:
                 result = callback(self.editor.chapters)
-                if result is False:
-                    self.save_status.setText("Auto-save failed — use Save Now.")
-                    return
-            self.save_status.setText("✓ Auto-saved")
-        except Exception as exc:
-            self.save_status.setText(f"Auto-save failed: {exc}")
+            except Exception as exc:
+                self.save_status.setText(f"Auto-save failed — keep the edit open and retry: {exc}")
+                return False
+            if result is False:
+                self.save_status.setText("Auto-save failed — keep the edit open and retry Save Now.")
+                return False
+
+        self._fields_dirty = False
+        self.save_status.setText("✓ Auto-saved")
+        return True
+
+    def _autosave(self) -> None:
+        if self._loading_fields or not self._fields_dirty:
+            return
+        self._persist_loaded_fields()
 
     def _save_silently(self) -> bool:
         try:
+            self._autosave_timer.stop()
             self.commit_current()
             if self.on_save:
                 result = self.on_save(self.editor.chapters)
                 if result is False:
-                    self.save_status.setText("Save failed.")
+                    self._fields_dirty = True
+                    self.save_status.setText("Save failed — your editor buffer remains available for retry.")
                     return False
+            self._fields_dirty = False
             self.save_status.setText("✓ Saved")
             return True
         except Exception as exc:
-            self.save_status.setText(f"Save failed: {exc}")
+            self._fields_dirty = True
+            self.save_status.setText(f"Save failed — your editor buffer remains available for retry: {exc}")
             return False
 
     def commit_current(self) -> bool:
-        index = self.list.currentRow()
-        if index < 0:
-            return False
-        chapter = self.editor.chapters[index]
+        self._autosave_timer.stop()
+        chapter = self._loaded_chapter
+        if chapter is None or not any(item is chapter for item in self.editor.chapters):
+            index = self.list.currentRow()
+            if index < 0 or index >= len(self.editor.chapters):
+                return False
+            chapter = self.editor.chapters[index]
+
         new_title = self.title.toPlainText()
         new_text = self.text.toPlainText()
-        # Most editor actions do not change the chapter text. Avoid rebuilding
-        # every dialogue-assignment offset on every click, especially on large
-        # chapters with dozens of assigned dialogue spans.
+        # Most editor actions do not change chapter text. Avoid rebuilding every
+        # dialogue-assignment offset when a refresh or toolbar click is a no-op.
         if new_title == chapter.title and new_text == chapter.text:
             return False
+        index = next(i for i, item in enumerate(self.editor.chapters) if item is chapter)
         if new_title != chapter.title:
             self.editor.rename(index, new_title)
         if new_text != chapter.text:
@@ -563,12 +618,13 @@ class ChapterEditorPage(QWidget):
 
     def rename(self) -> None:
         index = self.list.currentRow()
-        if index < 0:
+        if index < 0 or not self._save_silently():
             return
         value, ok = QInputDialog.getText(self, "Rename Chapter", "Title:", text=self.editor.chapters[index].title)
         if ok:
             self.editor.rename(index, value)
             self.refresh(index)
+            self._save_silently()
 
     def mark_selection_as_chapter(self) -> None:
         index = self.list.currentRow()
@@ -875,6 +931,8 @@ class ChapterEditorPage(QWidget):
         if index < 0:
             return
         if QMessageBox.question(self, "Delete Chapter", "Delete this chapter?") == QMessageBox.StandardButton.Yes:
+            if not self._save_silently():
+                return
             self.editor.delete(index)
             self.refresh(min(index, len(self.editor.chapters) - 1) if self.editor.chapters else None)
             self._save_silently()
@@ -895,6 +953,8 @@ class ChapterEditorPage(QWidget):
             QMessageBox.StandardButton.No,
         )
         if answer != QMessageBox.StandardButton.Yes:
+            return
+        if not self._save_silently():
             return
         for index in rows:
             if 0 <= index < len(self.editor.chapters):
@@ -940,4 +1000,6 @@ class ChapterEditorPage(QWidget):
             QMessageBox.StandardButton.No,
         )
         if answer == QMessageBox.StandardButton.Yes:
+            if not self._save_silently():
+                return
             self.on_redetect()

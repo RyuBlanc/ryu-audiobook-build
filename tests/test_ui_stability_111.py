@@ -343,6 +343,67 @@ class UiStabilityRegressions(unittest.TestCase):
         browser.close()
         app.processEvents()
 
+    def test_chapter_refresh_does_not_overwrite_pending_unsaved_editor_text(self):
+        from PySide6.QtWidgets import QApplication
+        from app.chapters.detector import Chapter
+        from app.ui.chapter_editor import ChapterEditorPage
+
+        app = QApplication.instance()
+        if app is None:
+            self.__class__._qt_app = QApplication([])
+            app = self.__class__._qt_app
+        page = ChapterEditorPage([
+            Chapter(1, "First", "Original first text"),
+            Chapter(2, "Second", "Original second text"),
+        ])
+        page._autosave_timer.stop()
+        page.text.setPlainText("Edited first text before auto-save fires")
+
+        page.refresh()
+
+        self.assertEqual(page.text.toPlainText(), "Edited first text before auto-save fires")
+        self.assertEqual(page.editor.chapters[0].text, "Original first text")
+        self.assertTrue(page._fields_dirty)
+        page._autosave_timer.stop()
+        page.close()
+        app.processEvents()
+
+    def test_switching_chapters_persists_previous_editor_buffer_before_loading_next(self):
+        from PySide6.QtWidgets import QApplication
+        from app.chapters.detector import Chapter
+        from app.ui.chapter_editor import ChapterEditorPage
+
+        app = QApplication.instance()
+        if app is None:
+            self.__class__._qt_app = QApplication([])
+            app = self.__class__._qt_app
+        persisted = []
+
+        def on_autosave(chapters):
+            persisted.append([chapter.text for chapter in chapters])
+            return True
+
+        page = ChapterEditorPage(
+            [
+                Chapter(1, "First", "Original first text"),
+                Chapter(2, "Second", "Original second text"),
+            ],
+            on_autosave=on_autosave,
+        )
+        page._autosave_timer.stop()
+        page.text.setPlainText("Edited first text before selection changes")
+        page._autosave_timer.stop()
+        page.list.setCurrentRow(1)
+
+        self.assertEqual(page.editor.chapters[0].text, "Edited first text before selection changes")
+        self.assertEqual(page.text.toPlainText(), "Original second text")
+        self.assertTrue(persisted)
+        self.assertEqual(persisted[0][0], "Edited first text before selection changes")
+        self.assertFalse(page._fields_dirty)
+        page._autosave_timer.stop()
+        page.close()
+        app.processEvents()
+
     def test_page_navigation_avoids_opacity_effects_and_keeps_handlers(self):
         source = (ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")
         transition = source.split("def _show_page", 1)[1].split("def _sidebar_item_clicked", 1)[0]
