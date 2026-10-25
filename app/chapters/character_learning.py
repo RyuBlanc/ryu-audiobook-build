@@ -313,7 +313,10 @@ def rank_speaker_suggestions(
             scope = str(row.get("scope") or "").strip()
             series = re.sub(r"(?i)^\s*series\s*[·:-]\s*", "", scope).strip() if re.match(r"(?i)^\s*series\s*[·:-]", scope) else scope
         known_names.add(name.casefold())
-        canonical_by_name[name.casefold()] = (name, aliases, series)
+        # A canonical name may be reused in a different series. Preserve the
+        # first project-scoped match instead of allowing a later library row to
+        # silently rebind a detected alias to another series.
+        canonical_by_name.setdefault(name.casefold(), (name, aliases, series))
         for alias in aliases:
             known_names.add(alias.casefold())
             canonical_by_name.setdefault(alias.casefold(), (name, aliases, series))
