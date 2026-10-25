@@ -27,6 +27,14 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertIn('os.environ.get("RYU_UI_MODE", "native")', main)
         self.assertIn("window = ProjectWorkflow()", main)
 
+    def test_native_window_applies_saved_size_before_first_display(self):
+        main = (ROOT / "app/main.py").read_text(encoding="utf-8")
+        main_body = main[main.index("def main()"):]
+        first_display = main_body.index("window.show()")
+        self.assertLess(main_body.index("saved_window_size ="), first_display)
+        self.assertLess(main_body.rindex("apply_size(saved_window_size)"), first_display)
+        self.assertNotIn("window.show()\n    saved_window_size =", main_body)
+
     def test_settings_exposes_persisted_text_scale_and_window_size_not_browser_zoom(self):
         html = (ROOT / "assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
