@@ -324,14 +324,16 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
     def test_models_page_keeps_optional_runtime_install_and_repair_recovery(self):
         page = (ROOT / "app" / "ui" / "models_page.py").read_text(encoding="utf-8")
         for required in (
-            'self.install_audiobook_ai.setEnabled(False)',
+            'if not self._begin_operation("install Audiobook AI"):',
+            'self.audiobook_ai_worker.finished.connect(self._end_operation)',
             'self.audiobook_ai_worker.finished_ok.connect(self._audiobook_ai_ok)',
             'self.audiobook_ai_worker.failed.connect(self._audiobook_ai_failed)',
-            'self.install_audiobook_ai.setEnabled(True)',
-            'self.install_chatterbox.setEnabled(False)',
+            'if not self._begin_operation("install Chatterbox custom voice engine"):',
+            'self.chatterbox_worker.finished.connect(self._end_operation)',
             'self.chatterbox_worker.finished_ok.connect(self._chatterbox_ok)',
             'self.chatterbox_worker.failed.connect(self._chatterbox_failed)',
-            'self.repair_qwen.setEnabled(False)',
+            'if not self._begin_operation("repair Qwen3-TTS runtime"):',
+            'self.qwen_repair_worker.finished.connect(self._end_operation)',
             'self.qwen_repair_worker.finished_ok.connect(self._qwen_repair_ok)',
             'self.qwen_repair_worker.failed.connect(self._qwen_repair_failed)',
             'saved profiles and downloaded models were kept.',

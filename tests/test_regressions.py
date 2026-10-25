@@ -3653,8 +3653,14 @@ Rias Gremory
         self.assertIn("self.failed.emit(str(exc))", worker)
         self.assertIn("self.qwen_cache_worker.failed.connect(self._qwen_cache_reset_failed)", source)
         self.assertIn("def _qwen_cache_reset_failed(self, message: str)", source)
+        reset = source[source.index("def reset_qwen_voice_cache"):source.index("def _qwen_cache_reset_ok")]
         failed_handler = source[source.index("def _qwen_cache_reset_failed"):source.index("def repair_qwen_runtime")]
-        self.assertIn("self.reset_qwen_cache.setEnabled(True)", failed_handler)
+        # Every model action now shares a single lifecycle lock. The button is
+        # restored centrally after QThread.finished, not from each callback.
+        self.assertIn('if not self._begin_operation("reset Qwen voice cache"):', reset)
+        self.assertIn("self.qwen_cache_worker.finished.connect(self._end_operation)", reset)
+        self.assertIn("self._update_operation_controls()", source[source.index("def _end_operation"):source.index("def _update_uninstall_button")])
+        self.assertNotIn("self.reset_qwen_cache.setEnabled(True)", failed_handler)
         self.assertIn("QMessageBox.warning", failed_handler)
 
     def test_stage5_hardware_studio_scrolls_and_preserves_benchmark_actions(self):

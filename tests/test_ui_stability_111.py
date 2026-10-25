@@ -632,6 +632,20 @@ class UiStabilityRegressions(unittest.TestCase):
         self.assertGreater(guard, question, "cancelled analysis should not start or replace anything")
         self.assertLess(guard, worker, "analysis must persist editor text before reading the chapters")
 
+    def test_delayed_page_refresh_cancels_cleanly_after_qt_stack_is_destroyed(self):
+        source = (ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")
+        refresh = source.split("def _schedule_visible_refresh(", 1)[1].split(
+            "\n    def _sidebar_item_clicked(", 1
+        )[0]
+
+        guard = refresh.find("if self.stack.currentWidget() is not widget:")
+        deleted = refresh.find("except RuntimeError:")
+        actual_refresh = refresh.find("refresh()")
+        self.assertGreaterEqual(guard, 0)
+        self.assertGreater(deleted, guard)
+        self.assertGreater(actual_refresh, deleted)
+        self.assertIn("QTimer.singleShot(75, run_refresh)", refresh)
+
     def test_page_navigation_avoids_opacity_effects_and_keeps_handlers(self):
         source = (ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")
         transition = source.split("def _show_page", 1)[1].split("def _sidebar_item_clicked", 1)[0]

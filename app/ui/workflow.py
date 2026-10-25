@@ -1027,10 +1027,13 @@ class ProjectWorkflow(QMainWindow):
     def _schedule_visible_refresh(self, widget: QWidget, refresh, context: str) -> None:
         """Refresh disk-backed page data only after its native page is visible."""
         def run_refresh() -> None:
-            # A user may navigate away during the first-paint delay. Do not spend
-            # time scanning a screen that is no longer visible; its next visit
-            # will schedule a fresh read.
-            if self.stack.currentWidget() is not widget:
+            # A user may navigate away or close the whole window during the
+            # first-paint delay. Native Qt objects can already be deleted when
+            # this queued callback runs; treat that as a cancelled refresh.
+            try:
+                if self.stack.currentWidget() is not widget:
+                    return
+            except RuntimeError:
                 return
             try:
                 refresh()
