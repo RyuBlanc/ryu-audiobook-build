@@ -5,6 +5,7 @@ from app.ai.robust import _fallback_pronunciations, _safe_merge
 from app.tts.pronunciation_suggester import (
     is_likely_character_name_candidate,
     suggest_names_from_text,
+    suggest_pronunciation,
 )
 
 
@@ -74,15 +75,49 @@ class PronunciationCandidateGuardTests(unittest.TestCase):
             "characters": [
                 {"name": "Having", "aliases": []},
                 {"name": "Jin Natsume", "aliases": ["Jin"]},
+                {"name": "Rias", "aliases": []},
             ],
             "pronunciation": [],
         }
-        source = "Having walked away. Jin Natsume said hello. Jin waved."
+        source = "Having walked away. Jin Natsume said hello. Jin waved. Rias arrived."
         _fallback_pronunciations(source, result)
         rules = {row["written"] for row in result["pronunciation"]}
         self.assertNotIn("Having", rules)
-        self.assertIn("Jin Natsume", rules)
+        self.assertNotIn("Jin Natsume", rules)
         self.assertNotIn("Jin", rules)
+        self.assertIn("Rias", rules)
+
+    def test_unknown_latin_pronunciation_is_not_transliterated_as_japanese_by_default(self):
+        self.assertEqual(suggest_pronunciation("John Smith"), "John Smith")
+        self.assertEqual(suggest_pronunciation("Himejima Hanezu"), "Himejima Hanezu")
+        self.assertEqual(
+            suggest_pronunciation("Himejima Hanezu", language="Japanese"),
+            "Hee-meh-jee-mah Hah-neh-zoo",
+        )
+
+    def test_auto_detect_pronunciation_keeps_original_spelling_until_language_is_known(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        project = SimpleNamespace(
+            title="Series A",
+            chapters=[SimpleNamespace(number=1, title="Chapter 1", text="John Smith spoke.")],
+        )
+        bridge = SimpleNamespace(
+            _active_project=lambda: project,
+            _pronunciation_list=lambda _payload: [],
+            _new_job=Mock(return_value="pronunciation-job"),
+            _job_update=Mock(),
+            _now=lambda: "2026-10-25T00:00:00",
+        )
+        with patch("app.ui.premium_v2_host.suggest_names_from_text", return_value=["John Smith"]):
+            result = PremiumV2Bridge._pronunciation_analyze(bridge, {})
+        self.assertEqual(result["suggestions"][0]["language"], "Auto-detect")
+        self.assertEqual(result["suggestions"][0]["spoken_form"], "John Smith")
+        self.assertFalse(result["suggestions"][0]["enabled"])
+        self.assertTrue(result["suggestions"][0]["review_required"])
+
 
 
 if __name__ == "__main__":

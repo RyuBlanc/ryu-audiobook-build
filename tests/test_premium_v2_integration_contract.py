@@ -44,9 +44,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
 
     def test_voice_preview_bridge_accepts_every_supported_duration_target(self):
         # Keep the real desktop bridge aligned with the frontend and duration regression suite.
-        self.assertIn("if seconds not in {10, 20, 30, 45, 60, 90}:", self.host)
-        self.assertIn("Preview duration must be 10, 20, 30, 45, 60, or 90 seconds.", self.host)
-        self.assertIn("for requested_seconds in (10, 20, 30, 45, 60, 90):", (ROOT / "tests" / "test_stage823_preview_duration_acceptance.py").read_text(encoding="utf-8"))
+        self.assertIn("if seconds not in {10, 30, 60, 90}:", self.host)
+        self.assertIn("Preview duration must be 10, 30, 60, or 90 seconds.", self.host)
+        self.assertIn("for requested_seconds in (10, 30, 60, 90):", (ROOT / "tests" / "test_stage823_preview_duration_acceptance.py").read_text(encoding="utf-8"))
 
     def test_only_real_bridge_commands_are_advertised_as_connected(self):
         self.assertIn('"app.get_info": True', self.host)
@@ -389,7 +389,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
 
     def test_preview_duration_setting_accepts_every_supported_target(self):
         self.assertIn('if key == "preview_seconds" and int(value) not in {10, 20, 30, 45, 60, 90}:', self.host)
-        self.assertIn('Preview duration must be 10, 20, 30, 45, 60, or 90 seconds.', self.host)
+        self.assertIn('Preview duration must be 10, 30, 60, or 90 seconds.', self.host)
 
     def test_chapter_bgm_and_scene_cues_reach_final_assembly(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
