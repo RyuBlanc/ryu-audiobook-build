@@ -357,6 +357,8 @@ class PremiumV2Bridge(QObject):
                 "voice.preview": self._voice_preview,
                 "voice.preview.save": self._voice_preview_save,
                 "character.list": self._character_list,
+                "character.create": self._character_create,
+                "character.dialogue.suggestions.list": self._character_dialogue_suggestions_list,
                 "character_library.list": self._character_library_list,
                 "character_library.deleted.list": self._character_library_deleted_list,
                 "character_library.restore": self._character_library_restore,
@@ -934,8 +936,46 @@ class PremiumV2Bridge(QObject):
         mode = str(payload.get("mode") or "single").strip().lower()
         if mode not in {"single", "chorus", "alternating"}:
             raise ValueError("Assignment mode must be single, chorus, or alternating.")
-        result = assign_dialogue_to_chapters(project.chapters, dialogue_text, speakers,
-                                             chapter_number=chapter_number, mode=mode)
+        has_offsets = "start" in payload or "end" in payload
+        if has_offsets:
+            try:
+                start = int(payload.get("start"))
+                end = int(payload.get("end"))
+            except (TypeError, ValueError):
+                raise ValueError("Refresh the dialogue review and select an exact source passage.")
+            if isinstance(payload.get("start"), bool) or isinstance(payload.get("end"), bool):
+                raise ValueError("Dialogue offsets must be integer positions.")
+            chapter = next((item for item in project.chapters if item.number == chapter_number), None)
+            if chapter is None or start < 0 or end <= start or end > len(chapter.text or ""):
+                raise ValueError("The selected dialogue span is no longer available. Refresh the chapter and try again.")
+            exact_text = str(chapter.text or "")[start:end]
+            if exact_text != dialogue_text:
+                raise ValueError("The selected passage changed before it could be saved. Refresh the chapter and select it again.")
+            from app.chapters.assignment_utils import normalize_assignment
+            existing = list(getattr(chapter, "dialogue_assignments", []) or [])
+            overlapping = [item for item in existing if isinstance(item, dict)
+                and isinstance(item.get("start"), int) and isinstance(item.get("end"), int)
+                and item["start"] < end and item["end"] > start
+                and not (item["start"] == start and item["end"] == end)]
+            if overlapping:
+                raise ValueError("The selected passage overlaps another saved speaker assignment. Edit or remove the existing assignment first.")
+            base = next((dict(item) for item in existing if isinstance(item, dict)
+                         and item.get("start") == start and item.get("end") == end),
+                        {"start": start, "end": end, "text": exact_text, "source": "manual"})
+            base.update({"start": start, "end": end, "text": exact_text, "source": "manual"})
+            normalized = normalize_assignment(base, speakers, mode)
+            normalized.update({"source": "manual", "confidence": 1.0})
+            chapter.dialogue_assignments = [
+                item for item in existing if not (isinstance(item, dict)
+                    and item.get("start") == start and item.get("end") == end)
+            ] + [normalized]
+            chapter.dialogue_assignments.sort(key=lambda item: (int(item.get("start", 0)), int(item.get("end", 0))))
+            result = {"chapter_number": chapter.number, "start": start, "end": end,
+                      "text": exact_text, "speakers": speakers, "source": "manual",
+                      "confidence": 1.0, "saved": True}
+        else:
+            result = assign_dialogue_to_chapters(project.chapters, dialogue_text, speakers,
+                                                 chapter_number=chapter_number, mode=mode)
         project.save()
         project_state = load_state(project.folder)
         project_state["modified_at"] = self._now()
@@ -2490,6 +2530,108 @@ class PremiumV2Bridge(QObject):
         rows = state.get("characters") or []
         return rows if isinstance(rows, list) else []
 
+    def _character_dialogue_suggestions_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return source-backed dialogue suggestions created from the active project's chapters."""
+        project = self._active_project()
+        state = load_state(project.folder)
+        stored = state.get("character_dialogue_suggestions") or []
+        if not isinstance(stored, list):
+            return []
+        rows = []
+        chapters_by_number = {int(chapter.number): chapter for chapter in project.chapters}
+        for raw in stored:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                number, start, end = int(raw.get("chapter_number")), int(raw.get("start")), int(raw.get("end"))
+            except (TypeError, ValueError):
+                continue
+            chapter = chapters_by_number.get(number)
+            if chapter is None or start < 0 or end <= start or end > len(chapter.text or ""):
+                continue
+            source_text = str(chapter.text or "")
+            if source_text[start:end] != str(raw.get("source_text") or ""):
+                continue
+            row = dict(raw)
+            row["chapter_title"] = str(chapter.title or f"Chapter {number}")
+            row["text"] = source_text[start:end]
+            row["assigned_speakers"] = []
+            assignment = next((item for item in (chapter.dialogue_assignments or [])
+                               if isinstance(item, dict) and item.get("start") == start
+                               and item.get("end") == end and source_text[start:end] == str(item.get("text") or "")), None)
+            if assignment:
+                row["assigned_speakers"] = (
+                    list(assignment.get("speakers") or []) if isinstance(assignment.get("speakers"), list)
+                    else ([str(assignment.get("speaker"))] if assignment.get("speaker") else [])
+                )
+            row["assigned"] = bool(row["assigned_speakers"])
+            rows.append(row)
+        return rows
+
+    def _character_create(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create/update a real project cast member and synchronize its reusable series record."""
+        project = self._active_project()
+        name = str(payload.get("name") or "").strip()
+        series = str(payload.get("series") or "").strip()[:300]
+        if not name:
+            raise ValueError("Enter a character name.")
+        if not series:
+            series = self._project_series_name(project)
+        if len(name) > 160:
+            raise ValueError("Character names must be 160 characters or fewer.")
+        aliases = payload.get("aliases") or []
+        if isinstance(aliases, str):
+            aliases = [part.strip() for part in aliases.replace("\\n", ",").split(",") if part.strip()]
+        if not isinstance(aliases, list):
+            raise ValueError("Character aliases must be a list or comma-separated text.")
+        aliases = list(dict.fromkeys(str(value).strip()[:160] for value in aliases
+                                     if str(value).strip() and str(value).strip().casefold() != name.casefold()))[:5]
+        profile_name = str(payload.get("voice_profile") or "").strip()
+        if profile_name and self._find_profile(profile_name) is None:
+            raise ValueError("Choose a voice profile from the saved Voice Studio catalogue.")
+        state = load_state(project.folder)
+        characters = [dict(row) for row in (state.get("characters") or []) if isinstance(row, dict)]
+        match = next((row for row in characters if
+                      str(row.get("name") or "").casefold() == name.casefold()
+                      or name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])}), None)
+        if match is None:
+            match = {
+                "name": name, "role": str(payload.get("role") or "Character")[:160],
+                "dialogue_count": 0, "examples": [], "confidence": 1.0,
+                "aliases": aliases, "voice_profile": profile_name or None,
+                "series": series, "short_description": str(payload.get("short_description") or "")[:1000],
+                "notes": str(payload.get("notes") or "")[:4000], "scope": "Series · " + series,
+            }
+            characters.append(match)
+        else:
+            match.update({
+                "name": name, "aliases": aliases or list(match.get("aliases") or []),
+                "series": series, "scope": "Series · " + series,
+                "short_description": str(payload.get("short_description", match.get("short_description", "")) or "")[:1000],
+                "notes": str(payload.get("notes", match.get("notes", "")) or "")[:4000],
+            })
+            if "voice_profile" in payload:
+                match["voice_profile"] = profile_name or None
+        state["characters"] = characters
+        state["modified_at"] = self._now()
+        save_state(project.folder, state)
+        # The reusable library is the source of truth for cross-volume identities.
+        library_payload = {
+            "id": str(payload.get("library_id") or ""),
+            "name": name, "series": series, "scope": "Series · " + series,
+            "short": str(payload.get("short") or name.split()[0]),
+            "aliases": aliases or list(match.get("aliases") or []),
+            "notes": str(match.get("notes") or ""),
+            "dialogue_sample": str(payload.get("dialogue_sample") or
+                                   ((match.get("examples") or [""])[0] if match.get("examples") else "")),
+        }
+        if "voice_profile" in payload:
+            library_payload["voice_profile"] = profile_name
+        saved_library = self._character_library_save(library_payload)
+        self._sync_saved_cast(project, characters, state, update_names=True, update_voice=True)
+        return {"character": match, "library_character": saved_library.get("character"),
+                "saved": True, "series": series}
+
     def _character_analyze(self, _payload: dict[str, Any]) -> dict[str, Any]:
         self._assert_no_active_model_lifecycle("start character analysis")
         project = self._active_project()
@@ -2510,9 +2652,41 @@ class PremiumV2Bridge(QObject):
             for c in analysis.characters:
                 prior = old.get(c.name.casefold(), {})
                 items.append(merge_character_analysis_record(c, prior))
+            # Store dialogue evidence and ranked, deterministic speaker suggestions with
+            # exact source offsets. The UI may recommend a name, but never auto-assigns it.
+            from app.chapters.dialogue import dialogue_segments
+            suggestions = []
+            max_suggestions = 3000
+            for chapter in project.chapters:
+                if len(suggestions) >= max_suggestions:
+                    break
+                for segment in dialogue_segments(chapter):
+                    if len(suggestions) >= max_suggestions:
+                        break
+                    source = str(chapter.text or "")
+                    start, end = int(segment.start), int(segment.end)
+                    if start < 0 or end <= start or end > len(source):
+                        continue
+                    exact = source[start:end]
+                    candidates = [
+                        {"name": str(name), "confidence": round(float(confidence), 4), "evidence": str(evidence)}
+                        for name, confidence, evidence in (segment.suggestions or [])
+                        if str(name).strip()
+                    ][:5]
+                    suggestions.append({
+                        "id": f"dialogue-{int(chapter.number)}-{start}-{end}",
+                        "chapter_number": int(chapter.number), "chapter_title": str(chapter.title or ""),
+                        "start": start, "end": end, "source_text": exact, "text": exact,
+                        "suggested_speaker": str(segment.suggested_speaker or ""),
+                        "confidence": round(float(segment.confidence or 0.0), 4),
+                        "suggestions": candidates, "assigned_speakers": [], "assigned": False,
+                        "source": "local-dialogue-analysis",
+                    })
             state["characters"] = items
+            state["character_dialogue_suggestions"] = suggestions
             state["character_analysis"] = {"dialogue_total": analysis.dialogue_total,
                                            "unassigned_dialogue": analysis.unassigned_dialogue,
+                                           "suggestion_count": len(suggestions),
                                            "updated_at": self._now()}
             state["modified_at"] = self._now()
             save_state(project.folder, state)
