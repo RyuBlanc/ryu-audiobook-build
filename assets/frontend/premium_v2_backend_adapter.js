@@ -2132,6 +2132,9 @@
       '.ryu-ai-option{display:flex!important;flex-direction:column;align-items:flex-start!important;gap:4px!important;text-align:left;}' +
       '.ryu-ai-option small{color:#aeb6c5;font-size:11px;font-weight:400;line-height:1.4;}' +
       '.ryu-assigned-series{border-left:3px solid #e3b65e;padding-left:12px;}' +
+      '#characterAssignPopover{max-height:82vh;overflow-y:auto;box-sizing:border-box;}' +
+      '#characterAssignPopover .popover-head>div{min-width:0;flex:1 1 auto;}' +
+      '#characterAssignPopover .popover-head b{display:block;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;overflow:visible;text-overflow:clip;line-height:1.45;max-height:150px;overflow-y:auto;}' +
       '#characters .ai-sentence.unassigned{display:block;width:100%;max-width:100%;box-sizing:border-box;background:transparent!important;border:1px solid transparent!important;border-left:3px solid transparent!important;box-shadow:none!important;color:inherit!important;text-align:left;font:inherit;font-weight:400;white-space:pre-wrap;}' +
       '#characters .ai-sentence.review{display:block;width:100%;max-width:100%;box-sizing:border-box;background:rgba(236,160,45,.075)!important;border:1px solid rgba(236,160,45,.18)!important;border-left:3px solid #efae35!important;box-shadow:none!important;color:inherit!important;text-align:left;white-space:pre-wrap;}' +
       '#characters .ai-sentence.confirmed{display:block;width:100%;max-width:100%;box-sizing:border-box;background:rgba(36,190,122,.07)!important;border:1px solid rgba(36,190,122,.18)!important;border-left:3px solid #22c982!important;box-shadow:none!important;color:inherit!important;text-align:left;white-space:pre-wrap;}' +
@@ -2488,6 +2491,24 @@
     list.innerHTML = visible.map(item => '<button type="button" class="quick-character" data-live-character="' + esc(item.name) + '" data-live-series="' + esc(item.series) + '" data-live-profile="' + esc(item.voice_profile) + '" data-live-project="' + (item.project ? 'true' : 'false') + '"><b>' + esc(item.name) + '</b><small>' + esc(item.series) + ' · ' + esc(item.voice_profile || 'Unassigned audio profile') + (item.project ? ' · This project' : ' · Character Library') + '</small></button>').join('') ||
       '<div class="ryu-character-empty"><b>No matching characters</b>Create a new character and assign a series.</div>';
   }
+  function positionCharacterAssignmentPopover(popover, x, y) {
+    if (!popover) return;
+    const viewportWidth = Math.max(320, Number(window.innerWidth || 1024));
+    const viewportHeight = Math.max(240, Number(window.innerHeight || 768));
+    const maxHeight = Math.max(180, Math.min(680, viewportHeight - 24));
+    const width = Math.max(280, Math.min(390, viewportWidth - 24));
+    popover.style.position = 'fixed';
+    popover.style.boxSizing = 'border-box';
+    popover.style.width = width + 'px';
+    popover.style.maxHeight = maxHeight + 'px';
+    popover.style.overflowY = 'auto';
+    const measuredHeight = Math.min(Math.max(160, popover.scrollHeight || popover.offsetHeight || 420), maxHeight);
+    const left = Math.max(12, Math.min(viewportWidth - width - 12, Number(x || 0) + 10));
+    const top = Math.max(12, Math.min(viewportHeight - measuredHeight - 12, Number(y || 0) + 10));
+    popover.style.left = left + 'px';
+    popover.style.top = top + 'px';
+  }
+
   async function openCharacterAssignmentPopover(passage, x, y) {
     if (!passage || !passage.text || !Number.isInteger(Number(passage.chapter_number))) {
       throw new Error('Select a valid source passage from the active project first.');
@@ -2497,16 +2518,10 @@
     window.ryuPremiumPendingDialogueStart = Number(passage.start);
     window.ryuPremiumPendingDialogueEnd = Number(passage.end);
     window.ryuPremiumPendingDialogueId = String(passage.id || '');
-    if ($('selectedTextPreview')) $('selectedTextPreview').textContent = String(passage.text).slice(0, 120);
+    if ($('selectedTextPreview')) $('selectedTextPreview').textContent = String(passage.text);
     $('characterAssignPopover')?.classList.add('show');
     const popover = $('characterAssignPopover');
-    if (popover) {
-      popover.style.position = 'fixed';
-      const width = Math.min(370, window.innerWidth - 24);
-      popover.style.width = width + 'px';
-      popover.style.left = Math.max(12, Math.min(window.innerWidth - width - 12, Number(x || 0) + 10)) + 'px';
-      popover.style.top = Math.max(12, Math.min(window.innerHeight - Math.min(popover.offsetHeight || 410, 480) - 12, Number(y || 0) + 10)) + 'px';
-    }
+    positionCharacterAssignmentPopover(popover, x, y);
     $('selectionPlus')?.classList.remove('show');
     if ($('assignCharacterSearch')) $('assignCharacterSearch').value = '';
     $('ryuManualCharacterCreate') && ($('ryuManualCharacterCreate').hidden = true);
@@ -2517,6 +2532,9 @@
     const form = $('ryuManualCharacterCreate');
     if (form) form.hidden = true;
     if ($('quickCharacterList')) $('quickCharacterList').hidden = false;
+    // The list grows asynchronously after the popup opens; recalculate using its
+    // final live content so it remains on-screen at common display sizes.
+    positionCharacterAssignmentPopover(popover, x, y);
   }
   function closeCharacterAssignmentPopover() {
     $('characterAssignPopover')?.classList.remove('show');

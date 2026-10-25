@@ -77,6 +77,16 @@ class LiveCharacterStudioContracts(unittest.TestCase):
         self.assertIn(".ai-sentence.review", adapter)
         self.assertIn(".ai-sentence.confirmed", adapter)
 
+
+    def test_assignment_popup_preserves_full_source_passage_and_repositions_after_live_choices(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("function positionCharacterAssignmentPopover(popover, x, y)", adapter)
+        self.assertIn("positionCharacterAssignmentPopover(popover, x, y);", adapter)
+        self.assertIn("if ($('selectedTextPreview')) $('selectedTextPreview').textContent = String(passage.text);", adapter)
+        self.assertNotIn("String(passage.text).slice(0, 120)", adapter)
+        self.assertIn("#characterAssignPopover .popover-head b{display:block", adapter)
+        self.assertIn("overflow-wrap:anywhere", adapter)
+
     def test_series_identity_flows_through_analysis_ui_assignment_and_learning(self):
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
