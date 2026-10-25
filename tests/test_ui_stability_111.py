@@ -58,9 +58,10 @@ class UiStabilityRegressions(unittest.TestCase):
                 selected_project = next(p for p in projects if str(p.folder) == selected_folder)
                 selected_project.title = "Renamed Selected Recent Book"
 
+                reads_before_refresh = load_state_mock.call_count
                 page.refresh()
                 app.processEvents()
-                self.assertEqual(load_state_mock.call_count, 4)
+                self.assertEqual(load_state_mock.call_count, reads_before_refresh + 2)
 
                 row = next(
                     i for i in range(page.recent_list.count())
