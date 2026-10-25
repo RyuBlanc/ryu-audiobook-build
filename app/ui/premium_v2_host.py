@@ -1160,10 +1160,36 @@ class PremiumV2Bridge(QObject):
         return str(row.get("state") or "").lower() in {"completed", "failed", "cancelled"}
 
     def _persist_json_rows(self, path: Path, rows: list[dict[str, Any]]) -> None:
+        """Atomically persist job/history JSON without sharing a fixed temp filename.
+
+        A unique same-directory temp file prevents concurrent writers or a stale
+        temp from colliding, and fsync makes the completed bytes durable before
+        replacing the last known-good store.
+        """
         path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps(rows, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
-        temporary.replace(path)
+        temp_name: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=str(path.parent),
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                temp_name = handle.name
+                json.dump(rows, handle, ensure_ascii=False, indent=2, default=str)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            Path(temp_name).replace(path)
+            temp_name = None
+        finally:
+            if temp_name:
+                try:
+                    Path(temp_name).unlink(missing_ok=True)
+                except OSError:
+                    log.warning("Could not remove temporary persistence file: %s", temp_name, exc_info=True)
 
     def _persist_jobs(self) -> None:
         path = self._jobs_path()

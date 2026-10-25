@@ -124,19 +124,15 @@ def prepare_chapter_plan(
     chunks_dir.mkdir(parents=True, exist_ok=True)
 
     narration = prepare_for_narration(chapter.text)
-    (chapter_dir / "narration.json").write_text(
-        json.dumps(
-            {
-                "chapter": chapter.number,
-                "title": chapter.title,
-                "source_characters": len(chapter.text),
-                "narration_characters": len(narration.narration_text),
-                "narration_text": narration.narration_text,
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
+    _atomic_write_json(
+        chapter_dir / "narration.json",
+        {
+            "chapter": chapter.number,
+            "title": chapter.title,
+            "source_characters": len(chapter.text),
+            "narration_characters": len(narration.narration_text),
+            "narration_text": narration.narration_text,
+        },
     )
 
     if hasattr(provider, "split_for_cast"):
@@ -188,10 +184,7 @@ def prepare_chapter_plan(
             for index, item in enumerate(chunks_with_voices)
         ],
     }
-    (chapter_dir / "chunk_manifest.json").write_text(
-        json.dumps(chunk_manifest, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    _atomic_write_json(chapter_dir / "chunk_manifest.json", chunk_manifest)
 
     configure_narration = getattr(provider, "configure_narration", None)
     if callable(configure_narration):
