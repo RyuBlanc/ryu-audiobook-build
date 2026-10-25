@@ -8,7 +8,7 @@ class Stage1425OutputFormatContractTests(unittest.TestCase):
         host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         assembler = Path("app/audio/assembler.py").read_text(encoding="utf-8")
         start = host.index("def _production_generate_book(")
-        end = host.index("\ndef _production_preview(", start)
+        end = host.index("\n    def _production_preview(", start)
         generation = host[start:end]
         self.assertIn('if output.suffix.lower() != ".m4b":', generation)
         self.assertIn("M4A/MP3 export is not implemented yet", generation)
