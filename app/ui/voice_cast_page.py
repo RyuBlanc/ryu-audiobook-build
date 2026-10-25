@@ -6,7 +6,7 @@ from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtWidgets import (
     QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QPushButton, QVBoxLayout, QWidget, QLineEdit, QTextEdit, QScrollArea,
-    QInputDialog,
+    QInputDialog, QTabWidget, QDialog, QMessageBox,
 )
 
 from app.chapters.characters import analyze_book
@@ -15,6 +15,7 @@ from app.documents.parser import extract_text
 from app.tts.voice_profile import load_profiles
 from app.core.state import load_state, save_state
 from app.core.character_library import sync_characters
+from app.ui.native_character_studio import NativeCharacterDialoguePanel, NativeCharacterRecordDialog
 
 
 class VoiceCastAnalysisWorker(QThread):
@@ -214,15 +215,27 @@ class VoiceCastPage(QWidget):
         self.assign_button.clicked.connect(self.assign_voice)
         self.unassign_button = QPushButton("Unassign")
         self.unassign_button.clicked.connect(self.unassign_voice)
+        self.test_voice_button = QPushButton("Test assigned sentence")
+        self.test_voice_button.clicked.connect(self.test_assigned_sentence)
         assignment_actions.addWidget(self.assign_button)
         assignment_actions.addWidget(self.unassign_button)
+        assignment_actions.addWidget(self.test_voice_button)
         form.addRow(assignment_actions)
 
         right.addWidget(box)
         right.addStretch(1)
         body.addLayout(right, 3)
 
-        root.addLayout(body, 1)
+        self.view_tabs = QTabWidget()
+        cast_tab = QWidget()
+        cast_tab_layout = QVBoxLayout(cast_tab)
+        cast_tab_layout.setContentsMargins(4, 4, 4, 4)
+        cast_tab_layout.addLayout(body, 1)
+        self.view_tabs.addTab(cast_tab, "Characters assigned")
+        self.dialogue_panel = NativeCharacterDialoguePanel(self)
+        self.view_tabs.addTab(self.dialogue_panel.manual_tab, "Character assigning")
+        self.view_tabs.addTab(self.dialogue_panel.ai_tab, "Analyze Book (AI)")
+        root.addWidget(self.view_tabs, 1)
 
         self.refresh_profiles()
         self.load_current_project()
@@ -243,6 +256,94 @@ class VoiceCastPage(QWidget):
         project = getattr(self.window(), "project", None)
         return entered or str(getattr(project, "title", "") or "").strip()
 
+    def find_character(self, name: str, series: str = "") -> dict | None:
+        wanted = str(name or "").strip().casefold()
+        wanted_series = str(series or self._series_name()).strip().casefold()
+        for row in self.rows:
+            keys = {str(row.get("name") or "").strip().casefold(),
+                    *(str(value).strip().casefold() for value in (row.get("aliases") or []))}
+            row_series = str(row.get("series") or self._series_name()).strip().casefold()
+            if wanted and wanted in keys and (not wanted_series or row_series == wanted_series):
+                return row
+        return None
+
+    def create_character_record(self, payload: dict) -> dict | None:
+        name = str(payload.get("name") or "").strip()
+        series = str(payload.get("series") or self._series_name()).strip()
+        aliases = list(dict.fromkeys(str(value).strip() for value in (payload.get("aliases") or [])
+            if str(value or "").strip() and str(value).strip().casefold() != name.casefold()))[:5]
+        voice = str(payload.get("voice_profile") or "").strip()
+        if not name or not series:
+            QMessageBox.warning(self, "Character details required", "Enter a character name and series.")
+            return None
+        row = next((item for item in self.rows
+                    if str(item.get("name") or "").strip().casefold() == name.casefold()), None)
+        if row and str(row.get("series") or self._series_name()).strip().casefold() != series.casefold():
+            QMessageBox.warning(self, "Character name already used",
+                f"'{name}' already exists in this project's cast under another series. Use one project-scoped identity; manage other-series identities in Character Library.")
+            return None
+        if voice and not any(profile.name == voice for profile in self.profiles):
+            self.refresh_profiles()
+        if voice and not any(profile.name == voice for profile in self.profiles):
+            QMessageBox.warning(self, "Audio profile unavailable", "Choose a voice profile saved in Voice Studio.")
+            return None
+        if row is None:
+            row = {"name":name,"role":"Manually Added Character","series":series,
+                   "dialogue_count":0,"examples":[],"voice":voice or None,
+                   "confidence":1.0,"aliases":aliases}
+            self.rows.append(row)
+        else:
+            row.update({"name":name,"series":series,"aliases":aliases or list(row.get("aliases") or [])})
+            if "voice_profile" in payload:
+                row["voice"] = voice or None
+        self._save_cast(update_names=True, update_voice=("voice_profile" in payload))
+        self._refresh_labels()
+        return row
+
+    def _refresh_character_counts(self) -> None:
+        chapters = list(self.get_chapters() or [])
+        for row in self.rows:
+            name = str(row.get("name") or "").strip().casefold()
+            names = {name, *(str(value).strip().casefold() for value in (row.get("aliases") or []))}
+            names.discard("")
+            if not names or name == "narrator":
+                continue
+            count, samples = 0, []
+            for chapter in chapters:
+                source = str(getattr(chapter, "text", "") or "")
+                for assignment in list(getattr(chapter, "dialogue_assignments", []) or []):
+                    if not isinstance(assignment, dict):
+                        continue
+                    speakers = assignment.get("speakers") if isinstance(assignment.get("speakers"), list) else [assignment.get("speaker")]
+                    if not any(str(value or "").strip().casefold() in names for value in speakers):
+                        continue
+                    try:
+                        start, end = int(assignment.get("start")), int(assignment.get("end"))
+                    except (TypeError, ValueError):
+                        continue
+                    if 0 <= start < end <= len(source) and source[start:end] == str(assignment.get("text") or source[start:end]):
+                        count += 1
+                        if source[start:end] not in samples:
+                            samples.append(source[start:end])
+            row["dialogue_count"] = count
+            row["examples"] = (samples + [x for x in (row.get("examples") or []) if x not in samples])[:12]
+
+    def test_assigned_sentence(self) -> None:
+        row = self._row_for_visible_index(self.list.currentRow())
+        if not row:
+            self.summary.setText("Select a character before testing its assigned sentence.")
+            return
+        profile_name = str(row.get("voice") or "").strip()
+        if not profile_name:
+            self.summary.setText("Assign a saved voice profile to this character first.")
+            return
+        sample = self.dialogue_panel.assigned_sample_for_character(row)
+        if not sample:
+            self.summary.setText("No dialogue is assigned to this character yet. Use Character assigning first.")
+            return
+        self.view_tabs.setCurrentWidget(self.dialogue_panel.manual_tab)
+        self.dialogue_panel.test_voice_profile(profile_name, sample, self.summary)
+
     def save_series(self) -> None:
         folder = self._project_folder()
         series = self._series_name()
@@ -260,20 +361,20 @@ class VoiceCastPage(QWidget):
     def _sync_character_library(self, *, update_names: bool = False, update_voice: bool = False) -> None:
         folder = self._project_folder()
         project = getattr(self.window(), "project", None)
-        series = self._series_name()
-        if not folder or not series or not self.rows:
+        default_series = self._series_name()
+        if not folder or not default_series or not self.rows:
             return
+        grouped: dict[str, list[dict]] = {}
+        for row in self.rows:
+            series = str(row.get("series") or default_series).strip() or default_series
+            row["series"] = series
+            grouped.setdefault(series, []).append(row)
         try:
-            sync_characters(
-                series,
-                self.rows,
-                source_project_folder=str(folder),
-                source_project_title=str(getattr(project, "title", "") or ""),
-                update_names=update_names,
-                update_voice=update_voice,
-            )
+            for series, rows in grouped.items():
+                sync_characters(series, rows, source_project_folder=str(folder),
+                    source_project_title=str(getattr(project, "title", "") or ""),
+                    update_names=update_names, update_voice=update_voice)
         except Exception as exc:
-            # A shared registry write must not break local Character Studio work.
             self.summary.setText(f"Cast saved to this book; Character Library sync failed: {exc}")
 
     def load_current_project(self) -> None:
@@ -282,6 +383,8 @@ class VoiceCastPage(QWidget):
         self.series_edit.setEnabled(folder is not None)
         self.save_series_button.setEnabled(folder is not None)
         if key == self._loaded_project_folder:
+            if hasattr(self, "dialogue_panel"):
+                self.dialogue_panel.refresh_project_data()
             return
         self._loaded_project_folder = key
         self.rows = []
@@ -304,11 +407,14 @@ class VoiceCastPage(QWidget):
         self.series_edit.setText(series)
         self.series_edit.blockSignals(False)
         self._load_saved_cast()
+        self._refresh_character_counts()
         count = len([row for row in self.rows if row.get("name", "").casefold() != "narrator"])
         self.summary.setText(
             f"Loaded {count} saved character(s) for '{series}'. Analyze the original book to refresh the detected cast."
             if count else f"No saved cast yet for '{series}'. Analyze the original book or add a character manually."
         )
+        if hasattr(self, "dialogue_panel"):
+            self.dialogue_panel.refresh_project_data()
 
     def select_character_name(self, name: str) -> None:
         query = str(name or "").strip()
@@ -394,20 +500,20 @@ class VoiceCastPage(QWidget):
             "aliases": [],
         }]
 
+        active_series = self._series_name()
+        known_series = {str(row.get("name") or "").casefold(): str(row.get("series") or active_series)
+                        for row in self.rows if isinstance(row, dict)}
         for character in analysis.characters:
             rows.append({
-                "name": character.name,
-                "role": character.role,
-                "dialogue_count": character.dialogue_count,
-                "examples": character.examples,
-                "voice": saved.get(character.name.casefold()),
-                "confidence": character.confidence,
+                "name": character.name, "role": character.role,
+                "dialogue_count": character.dialogue_count, "examples": character.examples,
+                "voice": saved.get(character.name.casefold()), "confidence": character.confidence,
                 "aliases": character.aliases,
+                "series": known_series.get(character.name.casefold(), active_series),
             })
 
         # Preserve user-created cast members that automated analysis cannot
         # rediscover (for example, characters with no explicit speech tags).
-        folder = self._project_folder()
         roster = load_state(folder).get("voice_cast_character_roster", []) if folder else []
         known = {row["name"].casefold() for row in rows}
         for saved_row in roster if isinstance(roster, list) else []:
@@ -424,11 +530,18 @@ class VoiceCastPage(QWidget):
                 "voice": saved.get(name.casefold()),
                 "confidence": float(saved_row.get("confidence", 1.0)),
                 "aliases": list(saved_row.get("aliases") or []),
+                "series": str(saved_row.get("series") or self._series_name()),
             })
             known.add(name.casefold())
 
         self.rows = rows
+        for row in self.rows:
+            row.setdefault("series", self._series_name())
+        self._refresh_character_counts()
         self._save_cast()
+        if hasattr(self, "dialogue_panel"):
+            self.dialogue_panel.refresh_project_data()
+            self.dialogue_panel.analyze_dialogue()
 
         source_note = " from the original source" if source_used else " from the current chapters"
         self.summary.setText(
@@ -464,6 +577,7 @@ class VoiceCastPage(QWidget):
         assigned = row.get("voice") or "Not assigned"
         details_text = (
             f"<h3>{row['name']}</h3>"
+            f"Series: {row.get('series') or self._series_name()}<br>"
             f"Role: {row['role']}<br>"
             f"Dialogue cues: {row['dialogue_count']}<br>"
             f"Confidence: {confidence:.0%} • {confidence_band(confidence)}<br>"
@@ -557,23 +671,19 @@ class VoiceCastPage(QWidget):
         self._refresh_labels()
 
     def add_character(self):
-        name, ok = QInputDialog.getText(self, "Add Character", "Character name:")
-        name = str(name or "").strip()
-        if not ok or not name:
+        dialog = NativeCharacterRecordDialog(self,
+            series_names=self.dialogue_panel.available_series(),
+            profiles=load_profiles(), default_series=self._series_name())
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        if name.casefold() == "narrator" or any(
-            row["name"].casefold() == name.casefold() for row in self.rows
-        ):
-            self.summary.setText("That character name already exists or is reserved for the narrator.")
+        payload = dialog.values()
+        if payload["name"].casefold() == "narrator":
+            self.summary.setText("The narrator is reserved and cannot be added as a story character.")
             return
-        self.rows.append({
-            "name": name, "role": "Manually Added Character",
-            "dialogue_count": 0, "examples": [], "voice": None,
-            "confidence": 1.0, "aliases": [],
-        })
-        self._save_cast()
-        self._refresh_labels()
-        self.summary.setText(f"Added '{name}' to this book's cast.")
+        row = self.create_character_record(payload)
+        if row:
+            self.summary.setText(f"Added '{row['name']}' to the '{row['series']}' series and Character Library.")
+            self.dialogue_panel.refresh_project_data()
 
     def rename_character(self):
         row = self._row_for_visible_index(self.list.currentRow())
@@ -708,8 +818,8 @@ class VoiceCastPage(QWidget):
         # without an assigned voice, so it survives restarts and re-analysis.
         state["voice_cast_character_roster"] = [
             {
-                "name": row["name"],
-                "role": row.get("role") or "Possible Character",
+                "name": row["name"], "role": row.get("role") or "Possible Character",
+                "series": str(row.get("series") or series),
                 "dialogue_count": int(row.get("dialogue_count") or 0),
                 "examples": list(row.get("examples") or []),
                 "confidence": float(row.get("confidence", 0.0)),
@@ -738,3 +848,6 @@ class VoiceCastPage(QWidget):
 
         save_state(folder, state)
         self._sync_character_library(update_names=update_names, update_voice=update_voice)
+        if hasattr(self, "dialogue_panel"):
+            self.dialogue_panel.rows = list(self.rows)
+            self.dialogue_panel.refresh_project_data()
