@@ -812,16 +812,20 @@ class RegressionTests(unittest.TestCase):
             page.close()
             page.deleteLater()
 
-    def test_windows_release_logo_alpha_scan_uses_lockbits_for_large_assets(self):
+    def test_windows_release_logo_alpha_scan_uses_pillow_histogram_for_large_assets(self):
         source = Path(".github/workflows/build-windows.yml").read_text(encoding="utf-8")
         start = source.index("- name: Verify original logo transparency and generate release hashes")
         end = source.index("- name: Scan release executables with Microsoft Defender", start)
         step = source[start:end]
-        self.assertIn("RyuLogoAlphaScanner", step)
-        self.assertIn("LockBits", step)
-        self.assertIn("Marshal.Copy", step)
-        self.assertIn("[RyuLogoAlphaScanner]::Count($bitmap)", step)
-        self.assertNotIn("$bitmap.GetPixel($x, $y)", step)
+        self.assertIn("from PIL import Image", step)
+        self.assertIn('rgba.getchannel("A").histogram()', step)
+        self.assertIn("def transparent_corners(image, label):", step)
+        self.assertIn("width < 1200 or height < 1200", step)
+        self.assertIn("transparent < 1", step)
+        self.assertIn("non_transparent < total * 0.1", step)
+        self.assertIn("corner != (5, 6, 10)", step)
+        self.assertNotIn("RyuLogoAlphaScanner", step)
+        self.assertNotIn("LockBits", step)
 
     def test_rename_speaker_feedback_preserves_series_and_old_name_as_alias(self):
         from app.chapters.character_learning import load_learning_examples, record_assignment_feedback, rename_speaker_feedback
