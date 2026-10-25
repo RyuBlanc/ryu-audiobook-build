@@ -1060,7 +1060,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("worker.finished.connect(", source)
         self.assertIn("shiboken6.isValid(widget)", source)
 
-        def test_actions_storage_cleanup_prunes_prior_success_only_after_validated_build(self):
+    def test_actions_storage_cleanup_prunes_prior_success_only_after_validated_build(self):
         script = Path(".github/scripts/cleanup_actions_storage.ps1").read_text(encoding="utf-8")
         workflow = Path(".github/workflows/build-windows.yml").read_text(encoding="utf-8")
         self.assertIn("$currentRun = $allRuns | Where-Object { $_.id -eq $currentRunId }", script)
@@ -1079,8 +1079,6 @@ class RegressionTests(unittest.TestCase):
         cleanup_job_start = workflow_lines.index("  cleanup:")
         cleanup_steps_start = workflow_lines.index("    steps:", cleanup_job_start)
         cleanup_job_header = "\n".join(workflow_lines[cleanup_job_start:cleanup_steps_start])
-        cleanup_steps_start = workflow.index("    steps:", cleanup_job_start)
-        cleanup_job_header = workflow[cleanup_job_start:cleanup_steps_start]
         self.assertIn("    continue-on-error: true", cleanup_job_header)
         self.assertIn("continue-on-error: true", workflow[workflow.index("name: Prune stale completed runs"):])
 
