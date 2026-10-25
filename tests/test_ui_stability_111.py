@@ -205,7 +205,7 @@ class UiStabilityRegressions(unittest.TestCase):
         page.close()
 
     def test_voice_profile_combo_refresh_preserves_rows_and_selection_without_clearing(self):
-        from PySide6.QtCore import Qt
+        from PySide6.QtCore import Qt, QEvent
         from PySide6.QtWidgets import QApplication, QComboBox
         from app.ui.stable_refresh import sync_combo_items_in_place
 
@@ -232,25 +232,34 @@ class UiStabilityRegressions(unittest.TestCase):
         self.assertFalse(combo.signalsBlocked())
         self.assertTrue(combo.updatesEnabled())
         combo.close()
+        combo.deleteLater()
+        app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
 
     def test_voice_profile_combo_refresh_restores_state_when_an_item_update_fails(self):
         from PySide6.QtWidgets import QApplication, QComboBox
+        from PySide6.QtCore import QEvent
         from app.ui.stable_refresh import sync_combo_items_in_place
 
+        class FailingComboBox(QComboBox):
+            def setItemText(self, index, text):
+                raise TypeError("simulated item label update failure")
+
         app = QApplication.instance() or QApplication([])
-        combo = QComboBox()
+        combo = FailingComboBox()
         combo.addItem("Existing", "existing")
         combo.show()
         app.processEvents()
 
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(TypeError, "simulated item label update failure"):
             sync_combo_items_in_place(combo, [(object(), "existing")], "existing")
 
         self.assertFalse(combo.signalsBlocked())
         self.assertTrue(combo.updatesEnabled())
         self.assertEqual(combo.count(), 1)
         combo.close()
+        combo.deleteLater()
+        app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
 
     def test_generation_dropdown_refreshes_avoid_clear_and_use_shared_sync(self):
@@ -270,7 +279,7 @@ class UiStabilityRegressions(unittest.TestCase):
         self.assertIn("self._update_overview()", profiles)
 
     def test_native_character_studio_chapter_refresh_preserves_items_selection_and_scroll(self):
-        from PySide6.QtCore import Qt
+        from PySide6.QtCore import Qt, QEvent
         from PySide6.QtWidgets import QApplication, QListWidget, QListWidgetItem, QVBoxLayout, QWidget
         from app.chapters.detector import Chapter
         from app.ui.native_character_studio import NativeCharacterDialoguePanel
@@ -309,41 +318,59 @@ class UiStabilityRegressions(unittest.TestCase):
         self.assertTrue(widget.updatesEnabled())
         self.assertFalse(widget.signalsBlocked())
         host.close()
+        host.deleteLater()
+        app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
 
     def test_native_character_story_renderer_skips_identical_html_and_keeps_same_chapter_scroll(self):
-        from PySide6.QtWidgets import QApplication, QTextBrowser
         from app.ui.native_character_studio import NativeCharacterDialoguePanel
 
-        app = QApplication.instance()
-        if app is None:
-            self.__class__._qt_app = QApplication([])
-            app = self.__class__._qt_app
-
-        class CountingBrowser(QTextBrowser):
+        class FakeScrollBar:
             def __init__(self):
-                super().__init__()
+                self._value = 0
+                self._maximum = 100
+
+            def value(self):
+                return self._value
+
+            def maximum(self):
+                return self._maximum
+
+            def setValue(self, value):
+                self._value = max(0, min(int(value), self._maximum))
+
+        class CountingBrowser:
+            def __init__(self):
                 self.html_write_count = 0
+                self.html = ""
+                self._vertical = FakeScrollBar()
+                self._horizontal = FakeScrollBar()
 
             def setHtml(self, html):
                 self.html_write_count += 1
-                super().setHtml(html)
+                self.html = html
+
+            def verticalScrollBar(self):
+                return self._vertical
+
+            def horizontalScrollBar(self):
+                return self._horizontal
 
         browser = CountingBrowser()
         harness = type("Harness", (), {"_story_render_hashes": {}})()
         long_html = "<html><body>" + ("story line<br>" * 300) + "</body></html>"
         NativeCharacterDialoguePanel._set_story_html(harness, browser, False, long_html, 1)
-        browser.verticalScrollBar().setValue(min(40, browser.verticalScrollBar().maximum()))
+        browser.verticalScrollBar().setValue(40)
         previous_scroll = browser.verticalScrollBar().value()
         NativeCharacterDialoguePanel._set_story_html(harness, browser, False, long_html, 1)
-        self.assertEqual(browser.html_write_count, 1, "identical story content should not reset the QTextBrowser document")
+        self.assertEqual(browser.html_write_count, 1, "identical story content should not reset the story document")
         changed_html = "<html><body>" + ("revised story line<br>" * 300) + "</body></html>"
         NativeCharacterDialoguePanel._set_story_html(harness, browser, False, changed_html, 1)
         self.assertEqual(browser.html_write_count, 2)
         self.assertEqual(browser.verticalScrollBar().value(), min(previous_scroll, browser.verticalScrollBar().maximum()))
-        browser.close()
-        app.processEvents()
 
     def test_chapter_refresh_does_not_overwrite_pending_unsaved_editor_text(self):
+        from PySide6.QtCore import QEvent
         from PySide6.QtWidgets import QApplication
         from app.chapters.detector import Chapter
         from app.ui.chapter_editor import ChapterEditorPage
@@ -366,9 +393,12 @@ class UiStabilityRegressions(unittest.TestCase):
         self.assertTrue(page._fields_dirty)
         page._autosave_timer.stop()
         page.close()
+        page.deleteLater()
+        app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
 
     def test_switching_chapters_persists_previous_editor_buffer_before_loading_next(self):
+        from PySide6.QtCore import QEvent
         from PySide6.QtWidgets import QApplication
         from app.chapters.detector import Chapter
         from app.ui.chapter_editor import ChapterEditorPage
@@ -402,6 +432,8 @@ class UiStabilityRegressions(unittest.TestCase):
         self.assertFalse(page._fields_dirty)
         page._autosave_timer.stop()
         page.close()
+        page.deleteLater()
+        app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
 
     def test_page_navigation_avoids_opacity_effects_and_keeps_handlers(self):
