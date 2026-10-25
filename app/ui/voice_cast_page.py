@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tempfile
+import uuid
 
-from PySide6.QtCore import QThread, Signal, Qt
+from PySide6.QtCore import QThread, Signal, Qt, QUrl
+from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QComboBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QPushButton, QVBoxLayout, QWidget, QLineEdit, QTextEdit, QScrollArea,
@@ -17,6 +20,7 @@ from app.documents.parser import extract_text
 from app.tts.voice_profile import load_profiles
 from app.core.state import load_state, save_state
 from app.core.character_library import sync_characters, list_characters as list_reusable_characters
+from app.ui.voice_page import VoicePreviewWorker
 
 
 class VoiceCastAnalysisWorker(QThread):
@@ -222,6 +226,11 @@ class VoiceCastPage(QWidget):
         self.rows: list[dict] = []
         self.profiles = []
         self.analysis_worker: VoiceCastAnalysisWorker | None = None
+        self._test_voice_worker: VoicePreviewWorker | None = None
+        self._test_player = QMediaPlayer(self)
+        self._test_audio_output = QAudioOutput(self)
+        self._test_audio_output.setVolume(0.9)
+        self._test_player.setAudioOutput(self._test_audio_output)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -335,6 +344,10 @@ class VoiceCastPage(QWidget):
         form.addRow("Voice profile", self.profile)
 
         assignment_actions = QHBoxLayout()
+        self.test_voice_button = QPushButton("Test Selected Voice")
+        self.test_voice_button.setToolTip("Generate and play a short preview of the selected saved profile using a real dialogue passage for this character.")
+        self.test_voice_button.clicked.connect(self.test_assigned_voice)
+        assignment_actions.addWidget(self.test_voice_button)
         self.assign_button = QPushButton("Assign Voice")
         self.assign_button.clicked.connect(self.assign_voice)
         self.unassign_button = QPushButton("Unassign")
@@ -613,6 +626,90 @@ class VoiceCastPage(QWidget):
             voice_index = self.profile.findData(assigned)
             if voice_index >= 0 and self.profile.currentIndex() != voice_index:
                 self.profile.setCurrentIndex(voice_index)
+    def test_assigned_voice(self) -> None:
+        row = self._row_for_visible_index(self.list.currentRow())
+        profile_name = str(self.profile.currentData() or "").strip()
+        if not row:
+            self.summary.setText("Select a character before testing a voice.")
+            return
+        if not profile_name:
+            self.summary.setText("Select a saved audio profile first.")
+            return
+        if self._test_voice_worker is not None and self._test_voice_worker.isRunning():
+            self.summary.setText("A character voice preview is already running.")
+            return
+        profile = next((item for item in self.profiles if item.name == profile_name), None)
+        if profile is None:
+            self.refresh_profiles()
+            self.summary.setText(f"Saved voice profile '{profile_name}' is no longer available. Refresh and choose it again.")
+            return
+
+        canonical = str(row.get("name") or "").strip()
+        aliases = {canonical.casefold(), *(str(value).casefold() for value in (row.get("aliases") or []))}
+        sample = ""
+        # Prefer a source span already assigned to this character, so the
+        # test reflects the real project dialogue rather than fabricated text.
+        for chapter in self.get_chapters() or []:
+            source = str(getattr(chapter, "text", "") or "")
+            for assignment in getattr(chapter, "dialogue_assignments", []) or []:
+                if not isinstance(assignment, dict):
+                    continue
+                raw = assignment.get("speakers") if isinstance(assignment.get("speakers"), list) else (
+                    [assignment.get("speaker")] if assignment.get("speaker") else []
+                )
+                if not any(str(name or "").strip().casefold() in aliases for name in raw):
+                    continue
+                try:
+                    start, end = int(assignment.get("start", -1)), int(assignment.get("end", -1))
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= start < end <= len(source):
+                    sample = source[start:end].strip()
+                    if sample:
+                        break
+            if sample:
+                break
+        if not sample:
+            examples = row.get("examples") or []
+            sample = str(examples[0] if examples else "").strip()
+        if not sample:
+            self.summary.setText("No real dialogue example is available for this character yet. Select and assign a sentence in Chapter Studio, or analyze the original book first.")
+            return
+
+        output = Path(tempfile.gettempdir()) / f"ryu-native-cast-test-{uuid.uuid4().hex}.wav"
+        worker = VoicePreviewWorker(profile, sample, output, target_seconds=10)
+        self._test_voice_worker = worker
+        self.test_voice_button.setEnabled(False)
+        self.summary.setText(f"Generating a real preview for {canonical} with {profile_name}…")
+        worker.status.connect(self.summary.setText)
+        worker.finished_ok.connect(self._play_test_voice)
+        worker.failed.connect(lambda error: self.summary.setText(f"Character voice preview failed: {error}"))
+        worker.cancelled.connect(lambda: self.summary.setText("Character voice preview cancelled."))
+        worker.finished.connect(self._test_voice_finished)
+        worker.start()
+
+    def _play_test_voice(self, output_path: str, elapsed_seconds: float) -> None:
+        try:
+            self._test_player.stop()
+            self._test_player.setSource(QUrl.fromLocalFile(str(Path(output_path).resolve())))
+            self._test_player.play()
+            self.summary.setText(f"Playing character voice preview • generated in {max(0.0, float(elapsed_seconds)):.1f}s.")
+        except Exception as exc:
+            self.summary.setText(f"The preview was generated but could not be played: {exc}")
+
+    def _test_voice_finished(self) -> None:
+        self.test_voice_button.setEnabled(True)
+        self._test_voice_worker = None
+
+    def shutdown(self) -> None:
+        """Stop the small character-test player before the Qt page is destroyed."""
+        self._test_player.stop()
+        worker = self._test_voice_worker
+        if worker is not None and worker.isRunning():
+            worker.cancel()
+            worker.wait(1500)
+        self._test_voice_worker = None
+
     def assign_voice(self):
         row = self._row_for_visible_index(self.list.currentRow())
         voice = self.profile.currentData()
