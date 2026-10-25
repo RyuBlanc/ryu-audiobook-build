@@ -355,7 +355,7 @@ def rank_speaker_suggestions(
             item["evidence"] = "Saved character; no strong local speech evidence yet."
 
     last = str(last_speaker or "").strip()
-    pronoun_continuity = bool(re.match(r"(?is)^\s*[,;:—–-]?\s*(?:he|she|they|I)\s+(?:" + _SPEECH_VERBS + r")\b", after[:180]))
+    pronoun_continuity = bool(re.match(r"(?is)^\s*[,.;:!?—–-]?\s*(?:he|she|they|I|we)\s+(?:" + _SPEECH_VERBS + r")\b", after[:180]))
     if last and pronoun_continuity:
         for item in candidate_map.values():
             if item["name"].casefold() == last.casefold() or last.casefold() in {value.casefold() for value in item["aliases"]}:
