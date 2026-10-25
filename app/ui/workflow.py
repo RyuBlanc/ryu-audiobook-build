@@ -1856,11 +1856,17 @@ class ProjectWorkflow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         """Stop optional character-preview workers before their Qt widgets are destroyed."""
-        try:
-            if hasattr(self, "character_library_page"):
-                self.character_library_page.shutdown()
-        except Exception as exc:
-            self._log_ui_failure("Character Library shutdown", exc)
+        for page_name, label in (
+            ("voice_cast", "Character Studio"),
+            ("character_library_page", "Character Library"),
+        ):
+            try:
+                page = getattr(self, page_name, None)
+                shutdown = getattr(page, "shutdown", None)
+                if callable(shutdown):
+                    shutdown()
+            except Exception as exc:
+                self._log_ui_failure(f"{label} shutdown", exc)
         super().closeEvent(event)
 
     def open_project(self, project: Project) -> None:
