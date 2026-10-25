@@ -10,7 +10,7 @@ import tempfile
 import traceback
 from typing import Any
 
-from PySide6.QtCore import QThread, Signal, Qt, QUrl
+from PySide6.QtCore import QThread, Signal, Slot, Qt, QUrl
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
@@ -175,6 +175,61 @@ class NativeDialogueAnalysisWorker(QThread):
             self.completed.emit(all_rows)
         except Exception as exc:
             self.failed.emit(f"{exc}\n{traceback.format_exc(limit=6)}")
+
+
+class NativeCharacterPreviewCallbackRouter(QObject):
+    """Deliver character-sentence preview callbacks safely on the GUI thread."""
+
+    def __init__(self, panel, worker, status_label=None):
+        super().__init__(panel)
+        self.panel = panel
+        self.worker = worker
+        self.status_label = status_label
+
+    @staticmethod
+    def is_live_qt_object(widget) -> bool:
+        if widget is None:
+            return False
+        try:
+            import shiboken6
+            return bool(shiboken6.isValid(widget))
+        except Exception:
+            try:
+                widget.objectName()
+                return True
+            except RuntimeError:
+                return False
+
+    @staticmethod
+    def set_label_text(label, message: str) -> None:
+        if NativeCharacterPreviewCallbackRouter.is_live_qt_object(label):
+            try:
+                label.setText(str(message))
+            except RuntimeError:
+                # The dialog can close between a queued signal and this slot.
+                pass
+
+    @Slot(str)
+    def on_status(self, message: str) -> None:
+        self.set_label_text(self.status_label, message)
+
+    @Slot(str, float)
+    def on_success(self, path: str, _elapsed_seconds: float) -> None:
+        if self.is_live_qt_object(self.panel):
+            self.panel._play_character_preview(path, self.status_label)
+
+    @Slot(str)
+    def on_failure(self, message: str) -> None:
+        self.set_label_text(self.status_label, f"Voice preview failed: {message}")
+
+    @Slot()
+    def on_finished(self) -> None:
+        panel = self.panel
+        if self.is_live_qt_object(panel):
+            panel._clear_preview_worker(self.worker)
+            if getattr(panel, "_preview_status_router", None) is self:
+                panel._preview_status_router = None
+        self.deleteLater()
 
 
 class NativeCharacterRecordDialog(QDialog):
@@ -568,6 +623,7 @@ class NativeCharacterDialoguePanel(QWidget):
         self._selected_manual_chapter: int | None = None
         self._selected_ai_chapter: int | None = None
         self._preview_worker: VoicePreviewWorker | None = None
+        self._preview_status_router: NativeCharacterPreviewCallbackRouter | None = None
         self._preview_dir: Path | None = None
 
         self._audio_output = QAudioOutput(self)
@@ -1229,19 +1285,23 @@ class NativeCharacterDialoguePanel(QWidget):
         output = self._preview_dir / "preview.wav"
         worker = VoicePreviewWorker(preview_profile, sample_text, output, 10)
         self._preview_worker = worker
-        if status_label:
-            status_label.setText(f"Generating a real 10-second voice test with {profile.name}…")
-        worker.status.connect(lambda message: status_label.setText(str(message)) if status_label else None)
-        worker.finished_ok.connect(lambda path, _elapsed: self._play_character_preview(path, status_label))
-        worker.failed.connect(lambda message: status_label.setText(f"Voice preview failed: {message}") if status_label else None)
-        worker.finished.connect(lambda: self._clear_preview_worker(worker))
+        router = NativeCharacterPreviewCallbackRouter(self, worker, status_label)
+        self._preview_status_router = router
+        router.set_label_text(status_label, f"Generating a real 10-second voice test with {profile.name}…")
+        # QObject slots provide queued cross-thread delivery; never update labels
+        # directly from VoicePreviewWorker's background thread.
+        worker.status.connect(router.on_status)
+        worker.finished_ok.connect(router.on_success)
+        worker.failed.connect(router.on_failure)
+        worker.finished.connect(router.on_finished)
         worker.start()
 
     def _play_character_preview(self, path: str, status_label: QLabel | None):
         self._player.setSource(QUrl.fromLocalFile(path))
         self._player.play()
-        if status_label:
-            status_label.setText("Playing the actual selected sentence using the chosen saved profile.")
+        NativeCharacterPreviewCallbackRouter.set_label_text(
+            status_label, "Playing the actual selected sentence using the chosen saved profile."
+        )
 
     def _clear_preview_worker(self, worker):
         if self._preview_worker is worker:
@@ -1251,7 +1311,19 @@ class NativeCharacterDialoguePanel(QWidget):
         try:
             self._player.stop()
             self._player.setSource(QUrl())
-            if self._preview_dir:
-                shutil.rmtree(self._preview_dir, ignore_errors=True)
+            worker = self._preview_worker
+            preview_dir = self._preview_dir
+            self._preview_dir = None
+            if preview_dir:
+                if worker is not None and worker.isRunning():
+                    # Keep the output directory alive until cancellation has
+                    # unwound in the worker; deleting it immediately races WAV
+                    # creation and can turn closing a panel into a synthesis error.
+                    worker.cancel()
+                    worker.finished.connect(
+                        lambda directory=preview_dir: shutil.rmtree(directory, ignore_errors=True)
+                    )
+                else:
+                    shutil.rmtree(preview_dir, ignore_errors=True)
         finally:
             super().closeEvent(event)

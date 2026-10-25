@@ -812,6 +812,19 @@ class RegressionTests(unittest.TestCase):
             page.close()
             page.deleteLater()
 
+    def test_character_sentence_preview_routes_worker_callbacks_through_qobject_slots(self):
+        source = Path("app/ui/native_character_studio.py").read_text(encoding="utf-8")
+        self.assertIn("class NativeCharacterPreviewCallbackRouter(QObject):", source)
+        self.assertIn("@Slot(str, float)", source)
+        self.assertIn("worker.status.connect(router.on_status)", source)
+        self.assertIn("worker.finished_ok.connect(router.on_success)", source)
+        self.assertIn("worker.failed.connect(router.on_failure)", source)
+        self.assertNotIn("worker.status.connect(lambda", source)
+        self.assertNotIn("worker.finished_ok.connect(lambda", source)
+        self.assertIn("worker.cancel()", source)
+        self.assertIn("worker.finished.connect(", source)
+        self.assertIn("shiboken6.isValid(widget)", source)
+
     def test_actions_storage_cleanup_preserves_last_success_until_current_run_completes(self):
         script = Path(".github/scripts/cleanup_actions_storage.ps1").read_text(encoding="utf-8")
         self.assertIn("$currentRun = $allRuns | Where-Object { $_.id -eq $currentRunId }", script)
