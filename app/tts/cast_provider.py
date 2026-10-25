@@ -303,10 +303,15 @@ class CastAwareProvider(TTSProvider):
             for speaker in speakers:
                 name_key = str(speaker or "").strip().casefold()
                 identity_key = character_identity_key(speaker, assignment_series) if assignment_series else ""
+                known_series = self._identity_series_by_name.get(name_key, set())
                 if identity_key and identity_key in self.identity_assignments:
                     # Explicitly saved empty value means this identity is unassigned.
                     profile_name = self.identity_assignments[identity_key]
-                elif len(self._identity_series_by_name.get(name_key, set())) > 1:
+                elif assignment_series and known_series:
+                    # If this name is known in other series but not in the
+                    # assignment's series, don't fall back to its name-only key.
+                    profile_name = ""
+                elif len(known_series) > 1:
                     profile_name = ""
                 else:
                     profile_name = self.assignments.get(name_key, "")

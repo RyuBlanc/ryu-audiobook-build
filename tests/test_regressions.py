@@ -874,6 +874,32 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(provider.split_for_cast(text_value, "Narrator", series_b), [("I know.", "Voice B")])
         provider.close()
 
+    def test_cast_provider_does_not_fallback_to_another_series_legacy_voice(self):
+        from app.core.character_identity import character_identity_key
+        from app.tts.cast_provider import CastAwareProvider
+        from types import SimpleNamespace
+
+        class FakeProvider:
+            def voices(self):
+                return ["Narrator"]
+            def close(self):
+                pass
+
+        text_value = "“I know.”"
+        profiles = {"Voice B": SimpleNamespace(name="Voice B", provider="piper")}
+        provider = CastAwareProvider(
+            FakeProvider(), "Narrator", profiles, {"Rias Gremory": "Voice B"},
+            identity_assignments={
+                character_identity_key("Rias Gremory", "Series B"): "Voice B",
+            },
+        )
+        series_a = [{
+            "start": 0, "end": len(text_value), "text": text_value,
+            "speakers": ["Rias Gremory"], "series": "Series A",
+        }]
+        self.assertEqual(provider.split_for_cast(text_value, "Narrator", series_a), [("I know.", "Narrator")])
+        provider.close()
+
     def test_character_identity_key_is_stable_and_unambiguous(self):
         from app.core.character_identity import character_identity_key, parse_character_identity_key
         key = character_identity_key(" Rias Gremory ", " Series A ")
