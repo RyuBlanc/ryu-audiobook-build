@@ -18,6 +18,7 @@ from app.core.character_library import (
 )
 from app.tts.voice_profile import load_profiles
 from app.ui.voice_page import VoicePreviewWorker
+from app.ui.stable_refresh import stable_view_refresh
 
 
 class CharacterLibraryPage(QWidget):
@@ -175,6 +176,7 @@ class CharacterLibraryPage(QWidget):
         ]).casefold()
         return query in searchable
 
+    @stable_view_refresh
     def refresh(self, *_args) -> None:
         self._pronunciation_map = self._load_pronunciation_map()
         all_rows = list_characters(include_deleted=self._show_recovery)

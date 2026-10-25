@@ -19,6 +19,7 @@ from app.core.state import load_state, save_state
 from app.core.character_library import sync_characters
 from app.core.character_identity import character_identity_key
 from app.ui.native_character_studio import NativeCharacterDialoguePanel, NativeCharacterRecordDialog
+from app.ui.stable_refresh import stable_view_refresh
 
 
 class VoiceCastAnalysisWorker(QThread):
@@ -435,6 +436,7 @@ class VoiceCastPage(QWidget):
         except Exception as exc:
             self.summary.setText(f"Cast saved to this book; Character Library sync failed: {exc}")
 
+    @stable_view_refresh
     def load_current_project(self) -> None:
         folder = self._project_folder()
         key = str(folder) if folder else ""
@@ -493,6 +495,7 @@ class VoiceCastPage(QWidget):
         if index >= 0:
             self.list.setCurrentRow(index)
 
+    @stable_view_refresh
     def refresh_profiles(self):
         self.profiles = load_profiles()
         current = self.profile.currentData() if self.profile.count() else None

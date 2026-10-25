@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from app.core.project import Project, list_projects
 from app.core.state import load_state
 from app.ui.library import project_status
+from app.ui.stable_refresh import stable_view_refresh
 
 
 class DashboardPage(QWidget):
@@ -37,6 +38,7 @@ class DashboardPage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
         scroll = QScrollArea()
+        self.scroll_area = scroll
         scroll.setObjectName("dashboardScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -205,7 +207,10 @@ class DashboardPage(QWidget):
         except OSError:
             return 0.0
 
+    @stable_view_refresh
     def refresh(self) -> None:
+        previous_item = self.recent_list.currentItem()
+        previous_folder = str(previous_item.data(Qt.ItemDataRole.UserRole) or "") if previous_item else ""
         try:
             self.projects = sorted(list_projects(), key=self._project_sort_key, reverse=True)
         except Exception as exc:
@@ -216,7 +221,20 @@ class DashboardPage(QWidget):
             self.empty_note.setText("The dashboard could not read your local project list.")
             return
 
-        statuses = [(project, project_status(project)[0]) for project in self.projects]
+        # Read each project's JSON state once per refresh and derive status from
+        # that same snapshot. This avoids repeated disk reads for metrics, the hero
+        # card, and the recent-project rows.
+        states_by_folder = {}
+        statuses_by_folder = {}
+        for project in self.projects:
+            key = str(project.folder)
+            state = load_state(project.folder)
+            states_by_folder[key] = state
+            statuses_by_folder[key] = project_status(project, state)
+        statuses = [
+            (project, statuses_by_folder[str(project.folder)][0])
+            for project in self.projects
+        ]
         completed = sum(status == "Completed" for _, status in statuses)
         active = sum(status == "In Progress" for _, status in statuses)
         attention = sum(status == "Needs Attention" for _, status in statuses)
@@ -231,8 +249,8 @@ class DashboardPage(QWidget):
         self.continue_latest_button.setEnabled(bool(self.projects))
         if self.projects:
             latest = self.projects[0]
-            latest_status, latest_output = project_status(latest)
-            latest_state = load_state(latest.folder)
+            latest_status, latest_output = statuses_by_folder[str(latest.folder)]
+            latest_state = states_by_folder[str(latest.folder)]
             completed_records = latest_state.get("completed_chapters") or []
             total_chapters = len(latest.chapters)
             self.continue_title.setText(latest.title)
@@ -257,22 +275,7 @@ class DashboardPage(QWidget):
                 self.continue_progress.setValue(0)
                 self.continue_progress.setVisible(False)
                 self.continue_note.setText("No completed-chapter record is available yet. Continue from the project workflow.")
-        self.recent_list.blockSignals(True)
-        self.recent_list.clear()
-        for project in self.visible_projects:
-            status, output = project_status(project)
-            chapter_count = len(project.chapters)
-            completed_chapters = load_state(project.folder).get("completed_chapters") or []
-            detail = f"{chapter_count} chapter(s)"
-            if completed_chapters:
-                detail += f" · {len(completed_chapters)} generated"
-            if output:
-                detail += " · output available"
-            label = f"{project.title}\n{status}  ·  {detail}"
-            item = QListWidgetItem(label)
-            item.setData(Qt.ItemDataRole.UserRole, str(project.folder))
-            self.recent_list.addItem(item)
-        self.recent_list.blockSignals(False)
+        self._sync_recent_projects(previous_folder, states_by_folder, statuses_by_folder)
 
         self.empty_note.setVisible(not self.projects)
         self.recent_list.setVisible(bool(self.projects))
@@ -282,21 +285,96 @@ class DashboardPage(QWidget):
             self.continue_note.setText("Your books and output remain on this device.")
 
         self.continue_button.setEnabled(bool(self.projects))
-        if self.visible_projects:
-            self.recent_list.setCurrentRow(0)
-        else:
+        if not self.visible_projects:
             self.status_title.setText("Your library is ready")
             self.status_detail.setText(
                 "Import your first book to start a local project. Existing supported "
                 "formats and production features remain available through the workflow."
             )
 
-    def _show_selected(self, row: int) -> None:
+    def _sync_recent_projects(self, previous_folder: str, states_by_folder: dict, statuses_by_folder: dict) -> None:
+        records = []
+        for project in self.visible_projects:
+            key = str(project.folder)
+            status, output = statuses_by_folder[key]
+            chapter_count = len(project.chapters)
+            completed_chapters = states_by_folder[key].get("completed_chapters") or []
+            detail = f"{chapter_count} chapter(s)"
+            if completed_chapters:
+                detail += f" · {len(completed_chapters)} generated"
+            if output:
+                detail += " · output available"
+            records.append((key, f"{project.title}\n{status}  ·  {detail}"))
+
+        desired_folders = [key for key, _label in records]
+        current_folders = [
+            str(self.recent_list.item(row).data(Qt.ItemDataRole.UserRole) or "")
+            for row in range(self.recent_list.count())
+        ]
+        signals_blocked = self.recent_list.blockSignals(True)
+        updates_enabled = self.recent_list.updatesEnabled()
+        try:
+            if current_folders != desired_folders:
+                # Reuse existing items by project-folder identity, and repaint only
+                # once after a real membership/order change.
+                self.recent_list.setUpdatesEnabled(False)
+                existing_items = {}
+                for row in range(self.recent_list.count() - 1, -1, -1):
+                    item = self.recent_list.takeItem(row)
+                    key = str(item.data(Qt.ItemDataRole.UserRole) or "")
+                    if key:
+                        existing_items[key] = item
+                for row, (key, label) in enumerate(records):
+                    item = existing_items.pop(key, None)
+                    if item is None:
+                        item = QListWidgetItem()
+                    if item.text() != label:
+                        item.setText(label)
+                    item.setData(Qt.ItemDataRole.UserRole, key)
+                    self.recent_list.insertItem(row, item)
+            else:
+                # The common refresh path updates text in place; item identity,
+                # selection, and any live row state remain intact.
+                for row, (key, label) in enumerate(records):
+                    item = self.recent_list.item(row)
+                    if item.text() != label:
+                        item.setText(label)
+                    if str(item.data(Qt.ItemDataRole.UserRole) or "") != key:
+                        item.setData(Qt.ItemDataRole.UserRole, key)
+        finally:
+            self.recent_list.setUpdatesEnabled(updates_enabled)
+            self.recent_list.blockSignals(signals_blocked)
+
+        self.recent_list.setVisible(bool(self.projects))
+        if records:
+            selected_row = next(
+                (row for row, (key, _label) in enumerate(records) if key == previous_folder),
+                0,
+            )
+            signals_blocked = self.recent_list.blockSignals(True)
+            try:
+                self.recent_list.setCurrentRow(selected_row)
+            finally:
+                self.recent_list.blockSignals(signals_blocked)
+            key = records[selected_row][0]
+            self._show_selected(
+                selected_row,
+                states_by_folder.get(key),
+                statuses_by_folder.get(key),
+            )
+        else:
+            signals_blocked = self.recent_list.blockSignals(True)
+            try:
+                self.recent_list.setCurrentRow(-1)
+            finally:
+                self.recent_list.blockSignals(signals_blocked)
+
+    def _show_selected(self, row: int, state: dict | None = None, status_info: tuple[str, str] | None = None) -> None:
         if not 0 <= row < len(self.visible_projects):
             return
         project = self.visible_projects[row]
-        status, output = project_status(project)
-        state = load_state(project.folder)
+        status, output = status_info if status_info is not None else project_status(project)
+        state = state if state is not None else load_state(project.folder)
         failed = state.get("failed_chapters") or []
         completed = state.get("completed_chapters") or []
         self.status_title.setText(project.title)

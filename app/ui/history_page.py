@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from app.core.project import Project, list_projects
 from app.core.state import load_state
 from app.core.project_history import load_deleted_project_records
+from app.ui.stable_refresh import stable_view_refresh
 
 
 def _output_for(project: Project, state: dict) -> Path | None:
@@ -152,6 +153,7 @@ class HistoryPage(QWidget):
         self.production_button.setEnabled(enabled)
         self.output_button.setEnabled(enabled and _output_for(project, load_state(project.folder)) is not None)
 
+    @stable_view_refresh
     def refresh(self) -> None:
         previous = self._selected_project()
         previous_folder = str(previous.folder) if previous else ""

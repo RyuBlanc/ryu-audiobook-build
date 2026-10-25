@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 from app.core.project import list_projects, delete_project
 from app.core.paths import app_root
 from app.core.state import load_state
+from app.ui.stable_refresh import stable_view_refresh
 
 
 def _resolve_output_path(project, output_value: str | Path | None) -> Path | None:
@@ -294,6 +295,7 @@ class LibraryPage(QWidget):
         }
         return state, status_info
 
+    @stable_view_refresh
     def refresh(self, force_catalog: bool = True) -> None:
         query = self.search.text() if hasattr(self, "search") else ""
         status_filter = self.status_filter.currentText() if hasattr(self, "status_filter") else "All"

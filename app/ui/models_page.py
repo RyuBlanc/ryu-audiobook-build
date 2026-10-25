@@ -45,6 +45,7 @@ from app.ai.model_runtime import brain_root, install_runtime as install_audioboo
 
 KOKORO_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.onnx"
 KOKORO_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin"
+from app.ui.stable_refresh import stable_view_refresh
 
 
 class PiperDownloadWorker(QThread):
@@ -414,6 +415,7 @@ class ModelsPage(QWidget):
         self.status.setText("Model inventory loads when this screen opens.")
 
 
+    @stable_view_refresh
     def refresh(self) -> None:
         self.list.clear()
 

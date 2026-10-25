@@ -24,6 +24,7 @@ from app.core.state import load_state
 
 
 _AUDIO_EXTENSIONS = {".m4b", ".m4a", ".mp3", ".wav", ".flac", ".aac", ".ogg"}
+from app.ui.stable_refresh import stable_view_refresh
 
 
 def _stored_output(project: Project, state: dict) -> Path | None:
@@ -291,6 +292,7 @@ class AudiobooksPage(QWidget):
             ))
             self.cover_art.setToolTip(str(cover_path))
 
+    @stable_view_refresh
     def refresh(self) -> None:
         selected = str(self._active_path or "")
         self.items.clear()

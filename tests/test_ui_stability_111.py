@@ -3,13 +3,145 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class UiStabilityRegressions(unittest.TestCase):
+    def test_dashboard_refresh_preserves_recent_row_identity_selection_and_scroll(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+        from app.ui.dashboard_page import DashboardPage
+
+        app = QApplication.instance()
+        self.assertIsNotNone(app)
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            projects = []
+            for index, title in enumerate(("Alpha Recent Book", "Beta Recent Book")):
+                folder = root / f"project-{index}"
+                folder.mkdir()
+                projects.append(
+                    SimpleNamespace(
+                        title=title,
+                        folder=folder,
+                        chapters=[object(), object()],
+                        source_path=None,
+                    )
+                )
+
+            with (
+                patch("app.ui.dashboard_page.list_projects", return_value=projects),
+                patch("app.ui.dashboard_page.load_state", return_value={}) as load_state_mock,
+                patch("app.ui.dashboard_page.project_status", return_value=("Ready", "")),
+            ):
+                page = DashboardPage()
+                page.resize(1040, 590)
+                page.show()
+                app.processEvents()
+                page.refresh()
+                app.processEvents()
+                self.assertEqual(page.recent_list.count(), 2)
+                self.assertEqual(load_state_mock.call_count, 2)
+
+                selected_item = page.recent_list.item(1)
+                selected_folder = str(selected_item.data(Qt.ItemDataRole.UserRole))
+                selected_item.setData(Qt.ItemDataRole.UserRole + 1, "retain-this-row")
+                page.recent_list.setCurrentRow(1)
+                app.processEvents()
+
+                scroll = page.scroll_area.verticalScrollBar()
+                scroll.setValue(min(48, scroll.maximum()))
+                previous_scroll = scroll.value()
+                selected_project = next(p for p in projects if str(p.folder) == selected_folder)
+                selected_project.title = "Renamed Selected Recent Book"
+
+                page.refresh()
+                app.processEvents()
+                self.assertEqual(load_state_mock.call_count, 4)
+
+                row = next(
+                    i for i in range(page.recent_list.count())
+                    if str(page.recent_list.item(i).data(Qt.ItemDataRole.UserRole)) == selected_folder
+                )
+                self.assertEqual(
+                    page.recent_list.item(row).data(Qt.ItemDataRole.UserRole + 1),
+                    "retain-this-row",
+                    "the unchanged project list should update the existing QListWidgetItem in place",
+                )
+                self.assertEqual(
+                    str(page.recent_list.currentItem().data(Qt.ItemDataRole.UserRole)),
+                    selected_folder,
+                )
+                self.assertIn("Renamed Selected Recent Book", page.recent_list.item(row).text())
+                self.assertEqual(scroll.value(), min(previous_scroll, scroll.maximum()))
+                source = (ROOT / "app/ui/dashboard_page.py").read_text(encoding="utf-8")
+                self.assertNotIn("self.recent_list.clear()", source)
+                self.assertNotIn("self.recent_list.setCurrentRow(0)", source)
+                page.close()
+
+    def test_native_catalog_refresh_guard_restores_paint_and_scroll_after_failure(self):
+        from app.ui.stable_refresh import stable_view_refresh
+        from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QListWidget
+
+        class RefreshWidget(QWidget):
+            def __init__(self):
+                super().__init__()
+                layout = QVBoxLayout(self)
+                self.rows = QListWidget()
+                layout.addWidget(self.rows)
+                self.calls = 0
+
+            @stable_view_refresh
+            def refresh(self):
+                self.calls += 1
+                self.rows.clear()
+                for i in range(30):
+                    self.rows.addItem(f"row {i}")
+                raise RuntimeError("test refresh failure")
+
+        app = QApplication.instance()
+        self.assertIsNotNone(app)
+        widget = RefreshWidget()
+        widget.resize(340, 180)
+        widget.show()
+        for i in range(30):
+            widget.rows.addItem(f"old row {i}")
+        app.processEvents()
+        scroll = widget.rows.verticalScrollBar()
+        scroll.setValue(min(24, scroll.maximum()))
+        expected_scroll = scroll.value()
+
+        with self.assertRaisesRegex(RuntimeError, "test refresh failure"):
+            widget.refresh()
+
+        self.assertTrue(widget.updatesEnabled())
+        self.assertEqual(widget.calls, 1)
+        self.assertEqual(scroll.value(), min(expected_scroll, scroll.maximum()))
+        widget.close()
+
+    def test_native_catalog_refreshes_use_stable_view_guard(self):
+        refresh_methods = (
+            ("app/ui/dashboard_page.py", "refresh"),
+            ("app/ui/library.py", "refresh"),
+            ("app/ui/history_page.py", "refresh"),
+            ("app/ui/audiobooks_page.py", "refresh"),
+            ("app/ui/character_library.py", "refresh"),
+            ("app/ui/voice_cast_page.py", "load_current_project"),
+            ("app/ui/voice_cast_page.py", "refresh_profiles"),
+            ("app/ui/models_page.py", "refresh"),
+        )
+        for relative_path, method in refresh_methods:
+            source = (ROOT / relative_path).read_text(encoding="utf-8")
+            self.assertIn("from app.ui.stable_refresh import stable_view_refresh", source)
+            self.assertRegex(
+                source,
+                r"@stable_view_refresh\s+def " + method + r"\(",
+                f"{relative_path}.{method} is missing the stable-view guard",
+            )
+
     def test_page_navigation_avoids_opacity_effects_and_keeps_handlers(self):
         source = (ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")
         transition = source.split("def _show_page", 1)[1].split("def _sidebar_item_clicked", 1)[0]
