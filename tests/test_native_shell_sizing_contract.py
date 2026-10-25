@@ -117,6 +117,13 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertIn('def apply_window_size(self, choice: str)', workflow)
         self.assertIn('ui/window_size', workflow)
         self.assertIn('saved_window_size', main)
+        settings_saved_start = workflow.index("    def _settings_saved(")
+        settings_saved_end = workflow.index("    def resizeEvent(", settings_saved_start)
+        settings_saved = workflow[settings_saved_start:settings_saved_end]
+        # Window geometry is applied once by SettingsPage after saving. Reapplying
+        # it inside the reduced-motion callback caused duplicate resize events.
+        self.assertNotIn("self.apply_window_size(", settings_saved)
+        self.assertIn("apply_size(window_size)", settings)
 
     def test_native_voice_design_preview_does_not_initialize_long_form_anchor_bank(self):
         voice = (ROOT / "app/ui/voice_page.py").read_text(encoding="utf-8")
