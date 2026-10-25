@@ -135,6 +135,36 @@
       selector.addEventListener('change', () => applyUiTextScale(selector.value));
     }
   }
+  function installReducedMotionStyles() {
+    if ($('ryuReducedMotionStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'ryuReducedMotionStyles';
+    style.textContent = [
+      'html[data-ryu-reduce-motion="1"] *,',
+      'html[data-ryu-reduce-motion="1"] *::before,',
+      'html[data-ryu-reduce-motion="1"] *::after {',
+      'animation-duration:0.01ms!important;',
+      'animation-iteration-count:1!important;',
+      'transition-duration:0.01ms!important;',
+      'transition-delay:0ms!important;',
+      'scroll-behavior:auto!important;',
+      'backdrop-filter:none!important;',
+      '-webkit-backdrop-filter:none!important;',
+      '}'
+    ].join('\n');
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function applyVisualStabilityPreferences(settings = {}) {
+    installReducedMotionStyles();
+    const raw = settings.reduce_motion;
+    const reduce = typeof raw === 'boolean' ? raw : Boolean($('reduceMotionAdvanced')?.checked);
+    const root = document.documentElement;
+    if (root) root.dataset.ryuReduceMotion = reduce ? '1' : '0';
+    const checkbox = $('reduceMotionAdvanced');
+    if (checkbox && checkbox.checked !== reduce) checkbox.checked = reduce;
+  }
+
   const call = async (command, payload = {}) => {
     if (!window.ryuBackend?.invoke) throw new Error('Local backend bridge is unavailable.');
     const response = await window.ryuBackend.invoke(command, payload);
@@ -4843,7 +4873,9 @@
     if ($('effectsModeAdvanced') && settings.effects) $('effectsModeAdvanced').value = settings.effects;
     if ($('uiTextScale')) $('uiTextScale').value = String(settings.text_scale || 100);
     if ($('uiWindowSize')) $('uiWindowSize').value = String(settings.window_size || 'auto');
+    if ($('reduceMotionAdvanced')) $('reduceMotionAdvanced').checked = settings.reduce_motion === true;
     applyUiTextScale(Number(settings.text_scale || 100));
+    applyVisualStabilityPreferences(settings);
     return settings;
   }
   async function runDiagnostics() {
@@ -5526,12 +5558,14 @@
       const payload = {
         theme:$('themeSelectAdvanced')?.value||'dark',
         effects:$('effectsModeAdvanced')?.value||'high',
+        reduce_motion:Boolean($('reduceMotionAdvanced')?.checked),
         text_scale:Number($('uiTextScale')?.value||100),
         window_size:$('uiWindowSize')?.value||'auto'
       };
       await call('settings.save',payload);
       applyUiTextScale(payload.text_scale);
-      message('Settings saved to this PC. Text size and native window sizing are applied without browser zoom.');
+      applyVisualStabilityPreferences(payload);
+      message('Settings saved locally. Text size, native window sizing, and reduced-motion preferences are applied without browser zoom.');
     });
     document.addEventListener('input', e => {
       if (e.target?.id === 'librarySearch') {
