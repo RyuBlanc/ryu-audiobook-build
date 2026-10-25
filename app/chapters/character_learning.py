@@ -265,6 +265,7 @@ def rank_speaker_suggestions(
             item["evidence"] = str(evidence or "")
 
     known_names: set[str] = set()
+    canonical_by_name: dict[str, tuple[str, list[str]]] = {}
     for row in known_characters:
         if not isinstance(row, dict):
             continue
@@ -274,35 +275,48 @@ def rank_speaker_suggestions(
         aliases = row.get("aliases") or []
         if isinstance(aliases, str):
             aliases = [aliases]
-        aliases = list(aliases) if isinstance(aliases, (list, tuple)) else []
+        aliases = list(dict.fromkeys(
+            str(alias).strip() for alias in aliases
+            if str(alias or "").strip() and str(alias).strip().casefold() != name.casefold()
+        )) if isinstance(aliases, (list, tuple)) else []
         known_names.add(name.casefold())
-        known_names.update(str(alias).strip().casefold() for alias in aliases if str(alias or "").strip())
+        canonical_by_name[name.casefold()] = (name, aliases)
+        for alias in aliases:
+            known_names.add(alias.casefold())
+            canonical_by_name.setdefault(alias.casefold(), (name, aliases))
         add_candidate(name, aliases, 0.10, "Saved character in this series.")
+
     for row in detected:
         if not isinstance(row, dict):
             continue
-        name = str(row.get("name") or "").strip()
+        detected_name = str(row.get("name") or "").strip()
+        if not detected_name:
+            continue
         evidence = str(row.get("evidence") or "")
-        is_known = name.casefold() in known_names
-        escaped = "|".join(re.escape(value) for value in sorted(
-            {name, *(alias for cast in known_characters if isinstance(cast, dict)
-                       and str(cast.get("name") or cast.get("primary_name") or "").casefold() == name.casefold()
-                       for alias in (cast.get("aliases") or []) if isinstance(cast.get("aliases") or [], (list, tuple)))},
-            key=len, reverse=True
-        ))
-        explicit_tag = bool(escaped) and bool(
-            re.search(r"(?i)(?:" + escaped + r")\s*(?:,\s*)?" + speech_verb + r"\b", before + "\n" + after)
-            or re.search(r"(?i)" + speech_verb + r"\s+(?:" + escaped + r")\b", before + "\n" + after)
-            or re.search(r"(?m)^\s*(?:" + escaped + r")\s*[:：—–-]\s*$", before)
-        ) if name else False
-        # Non-library names are accepted only with a speech attribution marker.
+        matched = canonical_by_name.get(detected_name.casefold())
+        canonical_name = matched[0] if matched else detected_name
+        canonical_aliases = matched[1] if matched else []
+        is_known = matched is not None or detected_name.casefold() in known_names
+        tag_names = list(dict.fromkeys([detected_name, canonical_name, *canonical_aliases]))
+        escaped = "|".join(re.escape(value) for value in sorted(tag_names, key=len, reverse=True))
+        nearby_context = before + "\\n" + after
+        explicit_tag = bool(
+            re.search(r"(?i)(?:" + escaped + r")\\s*(?:,\\s*)?" + speech_verb + r"\\b", nearby_context)
+            or re.search(r"(?i)" + speech_verb + r"\\s+(?:" + escaped + r")\\b", nearby_context)
+            or re.search(r"(?m)^\\s*(?:" + escaped + r")\\s*[:：—–-]\\s*$", before)
+        )
+        # Unknown detector labels are not accepted merely because they are
+        # capitalized. They require a source-grounded speaker tag or saved cast.
         if not is_known and not explicit_tag:
             continue
         score = float(row.get("confidence") or 0.0)
         if score > 1.0:
             score /= 100.0
-        add_candidate(name, (), max(0.52 if explicit_tag else 0.0, score * (1.0 if explicit_tag else 0.78)),
-                      evidence if is_known else (evidence or "Explicit speech attribution in source text."))
+        add_candidate(
+            canonical_name, canonical_aliases,
+            max(0.52 if explicit_tag else 0.0, score * (1.0 if explicit_tag else 0.78)),
+            evidence if is_known else (evidence or "Explicit speech attribution in source text."),
+        )
 
     # Score direct attribution on either side of a quote. This is stronger than
     # generic proximity or a guess based on sentence-initial capitalization.
