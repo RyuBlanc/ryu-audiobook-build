@@ -700,6 +700,7 @@ class PremiumV2Bridge(QObject):
 
         return {
             "title": project.title,
+            "series_name": self._project_series_name(project, state),
             "folder": str(project.folder.resolve()),
             "source_path": str(project.source_path) if project.source_path else None,
             "chapter_count": chapter_count,
