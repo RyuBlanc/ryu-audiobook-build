@@ -637,7 +637,8 @@ class ChapterEditorPage(QWidget):
         selected = cursor.selectedText().replace("\u2029", " ").strip()
         if not selected:
             return
-        self.commit_current()
+        if not self._save_silently():
+            return
         try:
             self.editor.split_at_selection(index, cursor.selectionStart(), cursor.selectionEnd(), selected)
             self.refresh(index if index == 0 and len(self.editor.chapters) == 1 else index + 1)
@@ -646,7 +647,8 @@ class ChapterEditorPage(QWidget):
 
 
     def clean_book_text(self) -> None:
-        self.commit_current()
+        if not self._save_silently():
+            return
         chapters = self.editor.chapters
         if not chapters:
             return
@@ -703,13 +705,14 @@ class ChapterEditorPage(QWidget):
             return
         if self.ai_worker and self.ai_worker.isRunning():
             return
-        self.commit_current()
         answer = QMessageBox.question(
             self,
             "Analyze Book with Audiobook AI",
             "Ryu will analyze characters, dialogue speakers, scene mood, pacing, pronunciation, ambience, music and SFX locally. Your chapter text is not changed. Continue?",
         )
         if answer != QMessageBox.StandardButton.Yes:
+            return
+        if not self._save_silently():
             return
         import time
         self.ai_started_at = time.monotonic()
@@ -833,7 +836,8 @@ class ChapterEditorPage(QWidget):
         self.ai_started_at = None
 
     def open_dialogue_manager(self) -> None:
-        self.commit_current()
+        if not self._save_silently():
+            return
         dialog = DialogueAssignmentManagerDialog(
             self.editor.chapters,
             project_folder=self.project_folder,
@@ -845,7 +849,8 @@ class ChapterEditorPage(QWidget):
         self.load_selected(self.list.currentRow())
 
     def assign_selected_dialogue(self) -> None:
-        self.commit_current()
+        if not self._save_silently():
+            return
         index = self.list.currentRow()
         if index < 0:
             return
@@ -880,7 +885,8 @@ class ChapterEditorPage(QWidget):
             self.text.setTextCursor(cursor)
 
     def view_characters(self) -> None:
-        self.commit_current()
+        if not self._save_silently():
+            return
         index = self.list.currentRow()
         if index < 0:
             return
@@ -888,7 +894,8 @@ class ChapterEditorPage(QWidget):
         dialog.exec()
 
     def split(self) -> None:
-        self.commit_current()
+        if not self._save_silently():
+            return
         index = self.list.currentRow()
         if index < 0:
             return
@@ -906,7 +913,8 @@ class ChapterEditorPage(QWidget):
             self._save_silently()
 
     def merge(self) -> None:
-        self.commit_current()
+        if not self._save_silently():
+            return
         index = self.list.currentRow()
         if index < 0:
             return
@@ -918,7 +926,8 @@ class ChapterEditorPage(QWidget):
             QMessageBox.information(self, "Merge Chapter", "There is no next chapter.")
 
     def move(self, direction: int) -> None:
-        self.commit_current()
+        if not self._save_silently():
+            return
         index = self.list.currentRow()
         if index < 0:
             return

@@ -436,6 +436,36 @@ class UiStabilityRegressions(unittest.TestCase):
         app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
 
+    def test_chapter_structural_actions_persist_pending_edits_before_mutation(self):
+        source = (ROOT / "app/ui/chapter_editor.py").read_text(encoding="utf-8")
+
+        cases = (
+            ("def mark_selection_as_chapter(", "self.editor.split_at_selection("),
+            ("def clean_book_text(", "detect_repeated_book_noise("),
+            ("def open_dialogue_manager(", "DialogueAssignmentManagerDialog("),
+            ("def assign_selected_dialogue(", "DialogueAssignmentDialog("),
+            ("def view_characters(", "CharacterReviewDialog("),
+            ("def split(", "self.editor.split("),
+            ("def merge(", "self.editor.merge_with_next("),
+            ("def move(", "self.editor.move("),
+        )
+        for method, mutation in cases:
+            body = source.split(method, 1)[1]
+            body = body.split("\n    def ", 1)[0]
+            guard = body.find("if not self._save_silently():")
+            action = body.find(mutation)
+            self.assertGreaterEqual(guard, 0, f"{method} must guard edits with a successful save")
+            self.assertGreaterEqual(action, 0, f"{method} must retain its operation")
+            self.assertLess(guard, action, f"{method} must save pending edits before mutating chapter data")
+
+        analysis = source.split("def analyze_with_ai(", 1)[1].split("\n    def _set_editor_busy(", 1)[0]
+        question = analysis.find("answer = QMessageBox.question(")
+        guard = analysis.find("if not self._save_silently():")
+        worker = analysis.find("self.ai_worker = AudiobookAIWorker(")
+        self.assertGreaterEqual(question, 0)
+        self.assertGreater(guard, question, "cancelled analysis should not start or replace anything")
+        self.assertLess(guard, worker, "analysis must persist editor text before reading the chapters")
+
     def test_page_navigation_avoids_opacity_effects_and_keeps_handlers(self):
         source = (ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")
         transition = source.split("def _show_page", 1)[1].split("def _sidebar_item_clicked", 1)[0]
