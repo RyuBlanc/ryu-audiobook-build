@@ -621,7 +621,10 @@ jobs:
             # Scan pixels in native code instead of calling GDI+ GetPixel from
             # PowerShell once per pixel (which can stall release builds for very
             # large transparent logos).
-            Add-Type -TypeDefinition @'
+            # PowerShell 7 forwards Bitmap to System.Drawing.Common; make
+            # that runtime assembly an explicit C# compilation reference.
+            $drawingAssembly = [System.Drawing.Bitmap].Assembly.Location
+            Add-Type -ReferencedAssemblies @($drawingAssembly) -TypeDefinition @'
           using System;
           using System.Drawing;
           using System.Drawing.Imaging;
