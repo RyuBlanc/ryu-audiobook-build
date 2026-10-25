@@ -4633,7 +4633,7 @@
     }
     return rows;
   }
-  async async function refreshPerformance() {
+  async function refreshPerformance() {
     let result;
     try {
       result = await call('performance.info');
