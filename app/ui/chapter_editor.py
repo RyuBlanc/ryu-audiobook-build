@@ -474,6 +474,8 @@ class ChapterEditorPage(QWidget):
             or key in {str(alias).strip().casefold() for alias in (item.get("aliases") or [])}
         )), None)
         aliases = row.get("aliases") or [] if isinstance(row, dict) else []
+        if isinstance(row, dict):
+            series = str(row.get("series") or series).strip()
         if isinstance(aliases, str):
             aliases = [aliases]
         return series, [str(value).strip() for value in aliases if str(value or "").strip()] if isinstance(aliases, (list, tuple)) else []
