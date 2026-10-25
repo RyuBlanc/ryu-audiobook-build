@@ -90,6 +90,8 @@ class LiveCharacterStudioContracts(unittest.TestCase):
         self.assertIn('const hintedSeries = String(candidate.series || \'\').trim();', adapter)
         self.assertIn("row.name.toLowerCase() + '::' + row.series.toLowerCase()", adapter)
         self.assertIn('candidateSeries.toLowerCase() === String(item.assignmentSeries).toLowerCase()', adapter)
+        self.assertIn('const ambiguousSeriesMatch = (row.suggestions || []).slice(1).some(other => {', adapter)
+        self.assertIn('if (ambiguousSeriesMatch) { skipped++; continue; }', adapter)
 
     def test_qwen_design_preview_uses_design_model_without_production_anchor_setup(self):
         provider = (ROOT / "app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
