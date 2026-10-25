@@ -33,6 +33,18 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertIn('"text_scale": "ui/text_scale"', host)
         self.assertIn('"window_size": "ui/window_size"', host)
 
+    def test_reduced_motion_is_a_saved_preference_and_disables_heavy_visual_effects(self):
+        html = (ROOT / "assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn('id="reduceMotionAdvanced"', html)
+        self.assertIn('reduce_motion:Boolean($\'(reduceMotionAdvanced)\'?.checked)', adapter)
+        self.assertIn("function applyVisualStabilityPreferences(settings = {})", adapter)
+        self.assertIn("backdrop-filter:none!important;", adapter)
+        self.assertIn("transition-duration:0.01ms!important;", adapter)
+        self.assertIn('"reduce_motion": self.settings.value("ui/reduce_motion", False, type=bool)', host)
+        self.assertIn('if key == "reduce_motion" and not isinstance(value, bool):', host)
+
     def test_blank_interface_diagnostics_and_recovery_watchdog_are_wired(self):
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
