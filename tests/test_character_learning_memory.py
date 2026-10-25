@@ -147,6 +147,46 @@ class CharacterLearningMemoryTests(unittest.TestCase):
             self.assertTrue(result["removed"])
             self.assertEqual(load_learning_examples("Slime series", path=store), [])
 
+    def test_confirmed_learning_does_not_leak_between_series_with_same_character_name(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = Path(folder) / "learning.json"
+            source = 'Rimuru Tempest checked the gate. “The northern gate is clear.” He waited.'
+            start = source.index("“")
+            end = source.index("”", start) + 1
+            record_assignment_feedback(
+                series="Slime series", speaker="Rimuru Tempest",
+                chapter_text=source, start=start, end=end, source_text=source[start:end],
+                chapter_title="The Oath", path=store,
+            )
+            examples = load_learning_examples("Slime series", path=store)
+            ranked = rank_speaker_suggestions(
+                chapter_text=source, start=start, end=end,
+                known_characters=[
+                    {"name": "Rimuru Tempest", "series": "Slime series"},
+                    {"name": "Rimuru Tempest", "series": "High School DxD"},
+                ],
+                learning_examples=examples,
+            )
+            self.assertEqual([row["series"] for row in ranked], ["Slime series"])
+            self.assertIn("confirmed example", ranked[0]["evidence"])
+
+    def test_pronoun_continuity_does_not_boost_the_same_name_in_another_series(self):
+        source = "“The gate is closed.” He replied."
+        start = source.index("“")
+        end = source.index("”", start) + 1
+        ranked = rank_speaker_suggestions(
+            chapter_text=source, start=start, end=end,
+            known_characters=[
+                {"name": "Souei", "series": "Slime series"},
+                {"name": "Souei", "series": "Other series"},
+            ],
+            last_speaker="Souei",
+            last_speaker_series="Slime series",
+        )
+        self.assertTrue(ranked)
+        self.assertEqual([row["series"] for row in ranked], ["Slime series"])
+        self.assertIn("Pronoun speech tag", ranked[0]["evidence"])
+
     def test_sentence_initial_english_words_are_not_accepted_as_character_names(self):
         for word in ("Having", "Well", "Right", "Already", "Magic", "Speaking", "Feeling", "Let", "Two"):
             self.assertFalse(_is_plausible_name(word), word)
