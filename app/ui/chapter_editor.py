@@ -604,6 +604,10 @@ class ChapterEditorPage(QWidget):
                 return False
             chapter = self.editor.chapters[index]
 
+        # Rebind the active chapter object before comparing editor fields. Chapter
+        # records are immutable and edit_text/rename replace list entries, so an
+        # autosave must not leave the page pointing at the pre-save object.
+        self._loaded_chapter = chapter
         new_title = self.title.toPlainText()
         new_text = self.text.toPlainText()
         # Most editor actions do not change chapter text. Avoid rebuilding every
@@ -615,6 +619,7 @@ class ChapterEditorPage(QWidget):
             self.editor.rename(index, new_title)
         if new_text != chapter.text:
             self.editor.edit_text(index, new_text)
+        self._loaded_chapter = self.editor.chapters[index]
         return True
 
     def rename(self) -> None:

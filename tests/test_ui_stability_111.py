@@ -521,6 +521,53 @@ class UiStabilityRegressions(unittest.TestCase):
         self.assertNotIn("self.profile.clear()", body)
         self.assertIn("self.show_details(self.list.currentRow())", body)
 
+    def test_repeated_edit_after_autosave_keeps_live_chapter_reference(self):
+        from PySide6.QtCore import QEvent
+        from PySide6.QtWidgets import QApplication
+        from app.chapters.detector import Chapter
+        from app.ui.chapter_editor import ChapterEditorPage
+
+        app = QApplication.instance()
+        if app is None:
+            self.__class__._qt_app = QApplication([])
+            app = self.__class__._qt_app
+        persisted = []
+
+        def on_autosave(chapters):
+            persisted.append([chapter.text for chapter in chapters])
+            return True
+
+        page = ChapterEditorPage(
+            [
+                Chapter(1, "First", "Original first text"),
+                Chapter(2, "Second", "Original second text"),
+            ],
+            on_autosave=on_autosave,
+        )
+        page._autosave_timer.stop()
+        page.text.setPlainText("First edit saved")
+        page._autosave_timer.stop()
+        page._autosave()  # Simulate the 900 ms debounce completing.
+
+        self.assertFalse(page._fields_dirty)
+        self.assertIs(page._loaded_chapter, page.editor.chapters[0])
+        self.assertEqual(page.editor.chapters[0].text, "First edit saved")
+
+        page.text.setPlainText("Second edit after autosave")
+        page._autosave_timer.stop()
+        page.list.setCurrentRow(1)
+
+        self.assertEqual(page.editor.chapters[0].text, "Second edit after autosave")
+        self.assertEqual(page.text.toPlainText(), "Original second text")
+        self.assertTrue(persisted)
+        self.assertEqual(persisted[-1][0], "Second edit after autosave")
+        self.assertIs(page._loaded_chapter, page.editor.chapters[1])
+        page._autosave_timer.stop()
+        page.close()
+        page.deleteLater()
+        app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+
     def test_explicit_save_falls_back_to_autosave_persistence_callback(self):
         from PySide6.QtCore import QEvent
         from PySide6.QtWidgets import QApplication
