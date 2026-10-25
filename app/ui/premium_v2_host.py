@@ -2679,9 +2679,21 @@ class PremiumV2Bridge(QObject):
             state = load_state(project.folder)
             old = {str(c.get("name", "")).casefold(): c for c in (state.get("characters") or []) if isinstance(c, dict)}
             items = []
+            item_names = set()
             for c in analysis.characters:
                 prior = old.get(c.name.casefold(), {})
-                items.append(merge_character_analysis_record(c, prior))
+                merged = merge_character_analysis_record(c, prior)
+                if str(prior.get("series") or "").strip():
+                    merged["series"] = str(prior.get("series")).strip()
+                    merged["scope"] = "Series · " + merged["series"]
+                items.append(merged)
+                item_names.add(str(merged.get("name") or c.name).casefold())
+            # Analysis refreshes must not silently discard characters the user
+            # manually created or imported from the reusable Character Library.
+            for old_name, prior in old.items():
+                if old_name and old_name not in item_names:
+                    items.append(dict(prior))
+                    item_names.add(old_name)
             # Store dialogue evidence and ranked, deterministic speaker suggestions with
             # exact source offsets. The UI may recommend a name, but never auto-assigns it.
             from app.chapters.dialogue import dialogue_segments
@@ -2714,6 +2726,7 @@ class PremiumV2Bridge(QObject):
                     })
             state["characters"] = items
             state["character_dialogue_suggestions"] = suggestions
+            state["character_dialogue_skips"] = []
             state["character_analysis"] = {"dialogue_total": analysis.dialogue_total,
                                            "unassigned_dialogue": analysis.unassigned_dialogue,
                                            "suggestion_count": len(suggestions),
@@ -2921,15 +2934,24 @@ class PremiumV2Bridge(QObject):
         update_voice: bool = False,
         registry_path: Path | None = None,
     ) -> None:
-        """Merge the real saved Character Studio cast into the shared registry."""
+        """Merge the real saved cast into its correct series groups in the shared registry."""
         if not isinstance(characters, list) or not characters:
             return
         state = state if isinstance(state, dict) else load_state(project.folder)
-        series = self._project_series_name(project, state)
-        normalized = []
+        default_series = self._project_series_name(project, state)
+        grouped: dict[str, list[dict[str, Any]]] = {}
         for row in characters:
             if not isinstance(row, dict):
                 continue
+            name = str(row.get("name") or row.get("primary_name") or "").strip()
+            if not name:
+                continue
+            series = str(row.get("series") or "").strip()
+            if not series:
+                scope = str(row.get("scope") or "").strip()
+                if re.match(r"(?i)^series\s*[·:-]", scope):
+                    series = re.sub(r"(?i)^series\s*[·:-]\s*", "", scope).strip()
+            series = (series or default_series or "Unassigned series")[:300]
             examples = row.get("examples") or []
             if not isinstance(examples, list):
                 examples = [str(examples)] if str(examples or "").strip() else []
@@ -2937,8 +2959,8 @@ class PremiumV2Bridge(QObject):
             chapter_count = row.get("chapter_count")
             if chapter_count is None:
                 chapter_count = len(chapter_rows) if isinstance(chapter_rows, (list, tuple, set)) else 0
-            normalized.append({
-                "name": str(row.get("name") or row.get("primary_name") or "").strip(),
+            normalized = {
+                "name": name,
                 "short": row.get("short") or row.get("short_name") or "",
                 "aliases": row.get("aliases") or [],
                 "voice": row.get("voice_profile") or row.get("voice_name") or row.get("voice") or "",
@@ -2949,16 +2971,18 @@ class PremiumV2Bridge(QObject):
                 "line_count": row.get("dialogue_count", row.get("line_count", row.get("lines", 0))),
                 "chapter_count": chapter_count,
                 "confidence": row.get("confidence", 100),
-            })
-        sync_reusable_characters(
-            series,
-            normalized,
-            source_project_folder=str(project.folder),
-            source_project_title=str(getattr(project, "title", "") or ""),
-            update_names=update_names,
-            update_voice=update_voice,
-            path=registry_path,
-        )
+            }
+            grouped.setdefault(series, []).append(normalized)
+        for series, rows in grouped.items():
+            sync_reusable_characters(
+                series,
+                rows,
+                source_project_folder=str(project.folder),
+                source_project_title=str(getattr(project, "title", "") or ""),
+                update_names=update_names,
+                update_voice=update_voice,
+                registry_path=registry_path,
+            )
 
     def _character_library_bootstrap(self) -> None:
         """Migrate the old flat file transactionally and import already-saved project casts."""
