@@ -439,6 +439,14 @@ jobs:
           & $venvPython -m pip --version
           & $venvPython -m pip install --disable-pip-version-check --timeout 60 --retries 2 --no-deps qwen-tts==0.1.1
           & $venvPython -c "import importlib.metadata as md; assert md.version('qwen-tts') == '0.1.1'; print('qwen_tts wheel bootstrap OK')"
+          # Install the release logo validator's dependency in the durable private interpreter.
+          # Do not rely on actions/setup-python's toolcache after the later installer steps.
+          & $privatePython -m pip install --disable-pip-version-check --timeout 60 --retries 2 'Pillow>=11,<13'
+          if ($LASTEXITCODE -ne 0) { throw "Private Python Pillow installation failed with exit code $LASTEXITCODE." }
+          $pillowProbe = & $privatePython -B -c "from PIL import Image; print('Private release Pillow=' + Image.__version__)" 2>&1
+          $pillowProbeExitCode = $LASTEXITCODE
+          $pillowProbe | Write-Host
+          if ($pillowProbeExitCode -ne 0) { throw "Private Python cannot import Pillow (exit $pillowProbeExitCode): $($pillowProbe -join ' ')" }
 
       - name: Verify frozen application
         shell: pwsh
@@ -610,14 +618,19 @@ jobs:
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required release asset missing: $path" }
           }
 
-          # Pillow is pinned by requirements.txt and is already used by the logo
-          # builder. Use the same portable pixel checks here instead of an inline
-          # C# System.Drawing scanner whose forwarded assemblies vary across PS7.
-          $pythonExe = [string]$env:RYU_CI_PYTHON_EXE
-          if ([string]::IsNullOrWhiteSpace($pythonExe) -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
-            $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          # Use the standalone private interpreter installed and verified during bootstrap.
+          # Never fall back to Get-Command python.exe: on Windows that may resolve to
+          # the Microsoft Store execution alias (exit code 9009) after toolcache changes.
+          $pythonExe = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap\python312\python.exe'
+          if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "Verified private Python for release logo validation is missing: $pythonExe"
           }
-          if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) { throw "Python for release logo validation was not found: $pythonExe" }
+          $probeOutput = & $pythonExe -B -c "import sys; from PIL import Image; print('Release validator Python=' + sys.executable); print('Pillow=' + Image.__version__)" 2>&1
+          $probeExitCode = $LASTEXITCODE
+          $probeOutput | Write-Host
+          if ($probeExitCode -ne 0) {
+            throw "Verified private Python cannot import Pillow (exit $probeExitCode): $($probeOutput -join ' ')"
+          }
           $logoValidationScript = @'
           from pathlib import Path
           import sys

@@ -812,18 +812,28 @@ class RegressionTests(unittest.TestCase):
             page.close()
             page.deleteLater()
 
-    def test_windows_release_logo_alpha_scan_uses_pillow_histogram_for_large_assets(self):
+    def test_windows_release_logo_alpha_scan_uses_verified_private_python_and_pillow(self):
         source = Path(".github/workflows/build-windows.yml").read_text(encoding="utf-8")
+        bootstrap_start = source.index("=== Verify offline character Python bootstrap ===")
+        bootstrap_end = source.index("- name: Verify frozen application", bootstrap_start)
+        bootstrap = source[bootstrap_start:bootstrap_end]
+        self.assertIn("'Pillow>=11,<13'", bootstrap)
+        self.assertIn("Private Python cannot import Pillow", bootstrap)
+
         start = source.index("- name: Verify original logo transparency and generate release hashes")
         end = source.index("- name: Scan release executables with Microsoft Defender", start)
         step = source[start:end]
         self.assertIn("from PIL import Image", step)
+        self.assertIn("ryu-qwen-python-bootstrap\\python312\\python.exe", step)
+        self.assertIn("$probeExitCode = $LASTEXITCODE", step)
         self.assertIn('rgba.getchannel("A").histogram()', step)
         self.assertIn("def transparent_corners(image, label):", step)
         self.assertIn("width < 1200 or height < 1200", step)
         self.assertIn("transparent < 1", step)
         self.assertIn("non_transparent < total * 0.1", step)
         self.assertIn("corner != (5, 6, 10)", step)
+        self.assertNotIn("$pythonExe = (Get-Command python.exe", step)
+        self.assertNotIn("RYU_CI_PYTHON_EXE", step)
         self.assertNotIn("RyuLogoAlphaScanner", step)
         self.assertNotIn("LockBits", step)
 
