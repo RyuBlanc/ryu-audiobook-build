@@ -641,7 +641,7 @@ class UiStabilityRegressions(unittest.TestCase):
 
         guard = refresh.find("if self.stack.currentWidget() is not widget:")
         deleted = refresh.find("except RuntimeError:")
-        actual_refresh = refresh.find("refresh()")
+        actual_refresh = refresh.find("\n                refresh()")
         self.assertGreaterEqual(guard, 0)
         self.assertGreater(deleted, guard)
         self.assertGreater(actual_refresh, deleted)
