@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import hashlib
+import threading
 from dataclasses import replace
 import re
 from pathlib import Path
@@ -63,13 +64,17 @@ class VoicePreviewWorker(QThread):
     cancelled = Signal()
     status = Signal(str)
     progress = Signal(int)
+    provider_cache_ready = Signal(object, object, object)
 
-    def __init__(self, profile: VoiceProfile, text: str, output: Path, target_seconds: int = 30):
+    def __init__(
+        self, profile: VoiceProfile, text: str, output: Path, target_seconds: int = 30,
+        *, cached_provider=None, cached_voice=None, cache_signature=None, keep_provider_warm: bool = False,
+    ):
         super().__init__()
         # Every VoicePreviewWorker is an audition path, including previews
         # opened from Character Library and Character Studio. Keep it on the
-        # same VoiceDesign model/prompt/seed but avoid building the long-form
-        # Base identity-anchor bank just to test a saved profile.
+        # same VoiceDesign model/prompt/seed but avoid building long-form Base
+        # identity anchors just to audition a saved profile.
         self.profile = (
             replace(profile, qwen_mode="design-preview")
             if profile.provider == "qwen-character" and profile.qwen_mode == "design"
@@ -79,6 +84,10 @@ class VoicePreviewWorker(QThread):
         self.output = output
         self.target_seconds = max(1, int(target_seconds))
         self.provider = None
+        self.cached_provider = cached_provider
+        self.cached_voice = cached_voice
+        self.cache_signature = cache_signature
+        self.keep_provider_warm = bool(keep_provider_warm)
         self.cancel_requested = False
         self._progress_floor = 0
         self._preview_started = 0.0
@@ -127,13 +136,20 @@ class VoicePreviewWorker(QThread):
         preview_started = time.monotonic()
         self._preview_started = preview_started
         self._progress_floor = 0
+        voice = self.cached_voice
+        successful = False
         try:
             self._emit_progress(5)
             self._status(
                 f"[5%] Preparing preview • {self.profile.provider} • "
                 f"{self.profile.qwen_mode if self.profile.provider == 'qwen-character' else self.profile.backend}"
             )
-            self.provider, voice = provider_from_profile(self.profile)
+            if self.cached_provider is not None:
+                self.provider = self.cached_provider
+                self.cached_provider = None
+                self._status("[7%] Reusing the warmed preview voice engine…")
+            else:
+                self.provider, voice = provider_from_profile(self.profile)
             callback = getattr(self.provider, "set_status_callback", None)
             if callable(callback):
                 callback(self._status)
@@ -195,6 +211,7 @@ class VoicePreviewWorker(QThread):
             self._emit_progress(100)
             elapsed_seconds = max(0.0, time.monotonic() - preview_started)
             self._status(f"[100%] Preview ready • generated in {fmt_seconds(elapsed_seconds)}")
+            successful = True
             self.finished_ok.emit(str(self.output), elapsed_seconds)
         except Exception as exc:
             if self.cancel_requested:
@@ -204,12 +221,24 @@ class VoicePreviewWorker(QThread):
         finally:
             provider = self.provider
             self.provider = None
-            close = getattr(provider, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except Exception:
-                    pass
+            can_keep_warm = (
+                successful and not self.cancel_requested and self.keep_provider_warm
+                and self.cache_signature is not None
+                and self.profile.provider == "qwen-character"
+                and self.profile.qwen_mode == "design-preview"
+                and provider is not None
+            )
+            if can_keep_warm:
+                # Transfer ownership to VoicePage. The native UI holds at most
+                # one provider and expires it after 90 seconds of idle time.
+                self.provider_cache_ready.emit(provider, voice, self.cache_signature)
+            else:
+                close = getattr(provider, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception:
+                        pass
 
     def cancel(self) -> None:
         self.cancel_requested = True
@@ -327,6 +356,12 @@ class VoicePage(QWidget):
         self.last_preview: Path | None = None
         self.last_preview_elapsed_seconds: float | None = None
         self.preview_worker: VoicePreviewWorker | None = None
+        self._native_preview_provider = None
+        self._native_preview_voice = None
+        self._native_preview_signature = None
+        self._native_preview_cache_timer = QTimer(self)
+        self._native_preview_cache_timer.setSingleShot(True)
+        self._native_preview_cache_timer.timeout.connect(self._expire_native_preview_provider_cache)
         self.character_worker: PremiumCharacterVoiceWorker | None = None
         self.character_previews: list[dict] = []
         self.edge_voices: list[dict] = []
@@ -1081,6 +1116,59 @@ class VoicePage(QWidget):
             profile.reference_text, profile.authorized, profile.style_preset,
             profile.exaggeration, profile.cfg_weight,
         )
+
+    @staticmethod
+    def _close_preview_provider_in_background(provider) -> None:
+        close = getattr(provider, "close", None)
+        if not callable(close):
+            return
+        def release():
+            try:
+                close()
+            except Exception:
+                pass
+        threading.Thread(target=release, name="RyuPreviewProviderCleanup", daemon=True).start()
+
+    def _expire_native_preview_provider_cache(self) -> None:
+        provider = self._native_preview_provider
+        self._native_preview_provider = None
+        self._native_preview_voice = None
+        self._native_preview_signature = None
+        if provider is not None:
+            self._close_preview_provider_in_background(provider)
+
+    def _take_native_preview_provider_cache(self, signature):
+        if self._native_preview_provider is None:
+            return None, None
+        if signature != self._native_preview_signature:
+            self._expire_native_preview_provider_cache()
+            return None, None
+        provider, voice = self._native_preview_provider, self._native_preview_voice
+        self._native_preview_provider = None
+        self._native_preview_voice = None
+        self._native_preview_signature = None
+        self._native_preview_cache_timer.stop()
+        return provider, voice
+
+    def _cache_native_preview_provider(self, provider, voice, signature) -> None:
+        if provider is None or signature is None:
+            return
+        self._expire_native_preview_provider_cache()
+        self._native_preview_provider = provider
+        self._native_preview_voice = voice
+        self._native_preview_signature = signature
+        self._native_preview_cache_timer.start(90_000)
+
+    def shutdown(self) -> None:
+        """Release preview resources without blocking the Qt main window."""
+        try:
+            self.player.stop()
+        except Exception:
+            pass
+        worker = getattr(self, "preview_worker", None)
+        if worker is not None and worker.isRunning():
+            worker.cancel()
+        self._expire_native_preview_provider_cache()
 
     def _preview_request_is_current(self, request_id: int | None = None) -> bool:
         """Return whether a callback still belongs to the active preview request."""
@@ -2776,7 +2864,11 @@ class VoicePage(QWidget):
         # Supply enough source text to reach the requested duration. The
         # preview renderer stops on actual audio duration, so this is only a
         # safety margin rather than a fixed word-count target.
-        max_words = max(24, int(seconds * 14.0))
+        # Do not hand Qwen a large novel excerpt for a short audition.
+        # At this rate, 30 seconds is roughly 96 words of dialogue; the
+        # measured WAV duration remains the real stop condition in build_voice_preview.
+        # Keep a little margin for slower styles, without creating minutes of audio.
+        max_words = max(24, int(seconds * 3.4))
         if len(words) <= max_words:
             return text.strip()
         shortened = " ".join(words[:max_words]).strip()
@@ -2926,13 +3018,29 @@ class VoicePage(QWidget):
         self.stop_button.setEnabled(True)
         self.preview_activity_bar.setVisible(True)
         self.preview_target_seconds = seconds
-        self.preview_worker = VoicePreviewWorker(preview_profile, text, output, seconds)
+        preview_cache_signature = self._voice_profile_signature(preview_profile)
+        keep_provider_warm = (
+            preview_profile.provider == "qwen-character"
+            and preview_profile.qwen_mode == "design-preview"
+        )
+        cached_provider, cached_voice = (
+            self._take_native_preview_provider_cache(preview_cache_signature)
+            if keep_provider_warm else (None, None)
+        )
+        self.preview_worker = VoicePreviewWorker(
+            preview_profile, text, output, seconds,
+            cached_provider=cached_provider,
+            cached_voice=cached_voice,
+            cache_signature=preview_cache_signature,
+            keep_provider_warm=keep_provider_warm,
+        )
         worker = self.preview_worker
         router = VoicePreviewCallbackRouter(self, worker, request_id, output)
         self._preview_callback_router = router
         worker.status.connect(router.on_status)
         worker.progress.connect(router.on_progress)
         worker.finished_ok.connect(router.on_success)
+        worker.provider_cache_ready.connect(self._cache_native_preview_provider)
         worker.failed.connect(router.on_failure)
         worker.cancelled.connect(router.on_cancelled)
         worker.finished.connect(router.on_thread_finished)
