@@ -2645,6 +2645,18 @@
       try {
         const candidate = row.suggestions?.[0];
         if (!candidate?.name) { skipped++; continue; }
+        const topConfidence = Number(candidate.confidence ?? row.confidence ?? 0);
+        const topSeries = String(candidate.series || '').trim().toLowerCase();
+        const ambiguousSeriesMatch = (row.suggestions || []).slice(1).some(other => {
+          const otherConfidence = Number(other?.confidence || 0);
+          const sameCharacterName = String(other?.name || '').trim().toLowerCase() === String(candidate.name).trim().toLowerCase();
+          const otherSeries = String(other?.series || '').trim().toLowerCase();
+          return sameCharacterName && topSeries && otherSeries && otherSeries !== topSeries &&
+            Math.abs(otherConfidence - topConfidence) < 0.05;
+        });
+        // A high numeric score is not enough when an identical name exists in two
+        // series. Leave that row for the person to select the intended series.
+        if (ambiguousSeriesMatch) { skipped++; continue; }
         const source = chapters.find(chapter => Number(chapter.number) === Number(row.chapter_number));
         if (!source || String(source.text || '').slice(Number(row.start), Number(row.end)) !== String(row.source_text || row.text || '')) {
           skipped++; continue;
@@ -3767,7 +3779,14 @@
       name:characterCanonical(c), series:characterSeries(c), profile:String(c.voice_profile || c.voice || ''),
       aliases:characterAliases(c), source:'library'
     }));
-    const suggestions = Array.isArray(item.suggestions) ? item.suggestions.filter(c => c && c.name) : [];
+    const projectSeriesKey = activeCharacterProjectSeries().toLowerCase();
+    const suggestions = Array.isArray(item.suggestions) ? item.suggestions.filter(c => c && c.name).slice().sort((left,right) => {
+      const lc = Number(left.confidence || 0), rc = Number(right.confidence || 0);
+      if (Math.abs(lc - rc) > 0.025) return rc - lc;
+      const leftActive = String(left.series || '').toLowerCase() === projectSeriesKey ? 1 : 0;
+      const rightActive = String(right.series || '').toLowerCase() === projectSeriesKey ? 1 : 0;
+      return rightActive - leftActive || String(left.name).localeCompare(String(right.name));
+    }) : [];
     const candidateHtml = suggestions.length ? suggestions.map((candidate,index) => {
       const name = String(candidate.name || '').trim();
       const matchesName = row => row.name.toLowerCase() === name.toLowerCase()
