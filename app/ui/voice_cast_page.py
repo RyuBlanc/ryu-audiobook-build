@@ -28,16 +28,20 @@ class VoiceCastAnalysisWorker(QThread):
     failed = Signal(str)
     progress = Signal(str)
 
-    def __init__(self, chapters, source_path=None, series_name: str = "", known_characters=None):
+    def __init__(
+        self, chapters, source_path=None, series_name: str = "", known_characters=None,
+        learning_path: Path | None = None,
+    ):
         super().__init__()
         self.chapters = list(chapters or [])
         self.source_path = source_path
         self.series_name = str(series_name or "").strip()
         self.known_characters = [dict(row) for row in (known_characters or []) if isinstance(row, dict)]
+        self.learning_path = learning_path
 
     def _apply_series_learning(self, chapters, analysis):
         """Blend explicit source evidence and saved corrections into the native cast view."""
-        feedback = load_learning_examples(self.series_name) if self.series_name else []
+        feedback = load_learning_examples(self.series_name, path=self.learning_path) if self.series_name else []
         try:
             shared = list_reusable_characters(self.series_name) if self.series_name else []
         except Exception:
@@ -91,7 +95,7 @@ class VoiceCastAnalysisWorker(QThread):
                 exact = source[start:end]
                 manual = next((row for row in assignments
                     if int(row.get("start", -1)) == start and int(row.get("end", -1)) == end
-                    and source[start:end] == str(row.get("text") or exact)), None)
+                    and source[start:end].strip() == str(row.get("text") or exact).strip()), None)
                 speakers = []
                 confidence = 0.0
                 evidence = ""
@@ -113,7 +117,10 @@ class VoiceCastAnalysisWorker(QThread):
                         detected=detected, known_characters=cast_rows,
                         learning_examples=feedback, last_speaker=last_speaker,
                     )
-                    if ranked and float(ranked[0].get("confidence") or 0.0) >= 0.78:
+                    # Medium-confidence pronoun continuity and learned context are
+                    # useful evidence for cast examples, but remain suggestions:
+                    # the user must still explicitly save every speaker assignment.
+                    if ranked and float(ranked[0].get("confidence") or 0.0) >= 0.68:
                         best = ranked[0]
                         speakers = [str(best.get("name") or "")]
                         confidence = float(best.get("confidence") or 0.0)
