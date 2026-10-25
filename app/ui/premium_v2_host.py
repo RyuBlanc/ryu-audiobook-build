@@ -3136,9 +3136,22 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Choose a character to delete.")
         state = load_state(project.folder)
         characters = list(state.get("characters") or [])
-        kept = [c for c in characters if not (
-            isinstance(c, dict) and str(c.get("name", "")).casefold() == name.casefold()
-        )]
+        default_series = self._project_series_name(project, state)
+        def series_key(value: Any) -> str:
+            return re.sub(r"(?i)^\\s*series\\s*[·:-]\\s*", "", str(value or "").strip()).casefold()
+        requested_series = str(payload.get("series") or "").strip()
+        same_name_rows = [c for c in characters if isinstance(c, dict)
+                          and str(c.get("name", "")).casefold() == name.casefold()]
+        if requested_series:
+            target_series = series_key(requested_series)
+            kept = [c for c in characters if not (
+                isinstance(c, dict) and str(c.get("name", "")).casefold() == name.casefold()
+                and series_key(c.get("series") or default_series) == target_series
+            )]
+        elif len(same_name_rows) == 1:
+            kept = [c for c in characters if c is not same_name_rows[0]]
+        else:
+            raise ValueError("Select the character's series before deleting it; the same name is not unique in this cast.")
         removed = len(characters) - len(kept)
         if not removed:
             raise ValueError("The selected character is no longer in the saved cast.")
