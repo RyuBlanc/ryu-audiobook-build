@@ -89,7 +89,7 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
         for required in (
             "list_projects()",
             "project_status(project)",
-            "load_state(latest.folder)",
+            "states_by_folder[str(latest.folder)]",
             "self.metric_total.metric_value.setText(str(len(self.projects)))",
             "self.on_open_project(self.projects[0])",
             "self.on_open_project(self.visible_projects[row])",
