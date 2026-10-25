@@ -77,6 +77,20 @@ class LiveCharacterStudioContracts(unittest.TestCase):
         self.assertIn(".ai-sentence.review", adapter)
         self.assertIn(".ai-sentence.confirmed", adapter)
 
+    def test_series_identity_flows_through_analysis_ui_assignment_and_learning(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        learning = (ROOT / "app/chapters/character_learning.py").read_text(encoding="utf-8")
+        self.assertIn('learning_examples.extend(load_learning_examples(learning_series))', host)
+        self.assertIn('last_speaker_series=continuity_series', host)
+        self.assertIn('last_speaker_series: str = ""', learning)
+        self.assertIn('candidate_series = _series_key(str(item.get("series") or ""))', learning)
+        self.assertIn('"series": str(item.get("series") or "")', learning)
+        self.assertIn('series:characterSeries(character)', adapter)
+        self.assertIn('const hintedSeries = String(candidate.series || \'\').trim();', adapter)
+        self.assertIn("row.name.toLowerCase() + '::' + row.series.toLowerCase()", adapter)
+        self.assertIn('candidateSeries.toLowerCase() === String(item.assignmentSeries).toLowerCase()', adapter)
+
     def test_qwen_design_preview_uses_design_model_without_production_anchor_setup(self):
         provider = (ROOT / "app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         worker = (ROOT / "app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
