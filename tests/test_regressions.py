@@ -846,6 +846,10 @@ class RegressionTests(unittest.TestCase):
             # preview-setting signals are disconnected. The callback must
             # tolerate a surviving Python wrapper with a deleted Qt object.
             status = page.status
+            self.assertTrue(
+                shiboken6.isValid(status),
+                "Voice Studio must reparent its status label into the guided UI before replacing scroll content.",
+            )
             parent = status.parentWidget()
             if parent is not None:
                 layout = parent.layout()

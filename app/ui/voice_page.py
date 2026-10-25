@@ -961,6 +961,9 @@ class VoicePage(QWidget):
         step_footer.addStretch(1)
         step_footer.addWidget(self.voice_step_continue_button)
         step_root.addLayout(step_footer)
+        # Keep the status label alive when replacing the scroll area's original
+        # content widget with the guided workflow container.
+        step_root.addWidget(self.status)
 
         self.voice_scroll = scroll
         scroll.setWidget(step_content)
