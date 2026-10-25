@@ -50,14 +50,19 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertIn("window.__ryuPremiumAdapterReady = true", adapter)
         self.assertIn("adapter-start-failed", adapter)
 
-    def test_text_scaling_batches_inserted_subtrees_to_avoid_repeated_style_walks(self):
+    def test_text_scaling_uses_one_css_scale_variable_and_skips_default_size_work(self):
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("function captureUiFontBaselines(root)", adapter)
+        self.assertIn("function queueUiTextScaleBaselineCapture(node)", adapter)
         self.assertIn("const ryuUiScalePendingRoots = new Set()", adapter)
         self.assertIn("existing.contains(node)", adapter)
-        self.assertIn("Number(root.dataset.ryuScaleApplied) === scale", adapter)
         self.assertIn("ryuUiScalePendingRoots.clear()", adapter)
-        self.assertIn("no full document reload,", adapter)
-        self.assertIn("browser zoom, or repeated recursive walk", adapter)
+        self.assertIn("if (ryuUiTextScale === 100 && !ryuUiTextBaselinesReady) return;", adapter)
+        self.assertIn("root.style.setProperty('--ryu-ui-text-scale', String(ryuUiTextScale / 100))", adapter)
+        self.assertIn("font-size: calc(var(--ryu-base-font-px, 14px) * var(--ryu-ui-text-scale, 1)) !important;", adapter)
+        self.assertIn("not hundreds of inline font mutations", adapter)
+        self.assertNotIn("root.style.setProperty('font-size', (base * scale / 100)", adapter)
+        self.assertIn("browser zoom shortcuts and Ctrl+mousewheel", adapter)
 
     def test_character_studio_static_samples_are_removed_and_empty_states_are_real(self):
         html = (ROOT / "assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
