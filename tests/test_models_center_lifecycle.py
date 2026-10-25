@@ -226,6 +226,9 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
         self.assertIn("Kokoro 82M — Incomplete", refresh)
         self.assertNotIn("if audiobook_ai_installed()", refresh)
         self.assertIn('"qwen-runtime")', refresh)
+        self.assertIn("_directory_has_entries(model_root)", refresh)
+        self.assertIn("Qwen3-TTS • {qwen_labels.get(kind, kind)} — Incomplete", refresh)
+        self.assertIn('component_id = f"qwen-model:{kind}"', refresh)
         self.assertIn('"audiobook-ai")', refresh)
 
     def test_active_model_lifecycle_blocks_preview_analysis_and_generation(self):

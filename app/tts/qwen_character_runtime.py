@@ -358,9 +358,55 @@ def model_path(kind: str) -> Path:
     return MODEL_DIRS[kind]
 
 
+def _model_weight_file_ready(path: Path) -> bool:
+    try:
+        return path.is_file() and path.stat().st_size >= 1024
+    except OSError:
+        return False
+
+
 def model_installed(kind: str) -> bool:
+    """Return true only when the local model's config and required weights are present."""
     root = MODEL_DIRS[kind]
-    return (root / "config.json").exists() and any(root.glob("*.safetensors"))
+    if not (root / "config.json").is_file():
+        return False
+
+    index_path = root / "model.safetensors.index.json"
+    if index_path.is_file():
+        try:
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            weight_map = index.get("weight_map")
+            if not isinstance(weight_map, dict) or not weight_map:
+                return False
+            names = list(weight_map.values())
+            if any(not isinstance(name, str) or not name or Path(name).name != name for name in names):
+                return False
+            shards = {root / name for name in names}
+            if not all(_model_weight_file_ready(path) for path in shards):
+                return False
+
+            # A sharded download may leave all filenames in place but only
+            # partially write the last file. Compare the aggregate byte count
+            # with the index's declared tensor size when that metadata exists.
+            metadata = index.get("metadata")
+            expected_size = metadata.get("total_size", 0) if isinstance(metadata, dict) else 0
+            try:
+                expected_size = int(expected_size or 0)
+            except (TypeError, ValueError):
+                expected_size = 0
+            actual_size = sum(path.stat().st_size for path in shards)
+            if expected_size > 0 and actual_size < int(expected_size * 0.95):
+                return False
+            return True
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            return False
+
+    # Without an index, a sharded naming convention is not safe to accept:
+    # a missing index can itself be the result of an interrupted download.
+    weights = list(root.glob("*.safetensors"))
+    if not weights or any("-of-" in path.name for path in weights):
+        return False
+    return all(_model_weight_file_ready(path) for path in weights)
 
 
 @lru_cache(maxsize=1)

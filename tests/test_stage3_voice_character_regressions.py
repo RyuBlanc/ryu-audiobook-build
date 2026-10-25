@@ -18,6 +18,38 @@ from app.tts.cast_provider import CastAwareProvider
 
 
 
+class QwenModelIntegrityTests(unittest.TestCase):
+    def test_model_is_not_installed_when_any_indexed_shard_is_missing_or_truncated(self):
+        import json
+        from unittest.mock import patch
+        from app.tts.qwen_character_runtime import model_installed
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "custom-0.6b"
+            root.mkdir(parents=True)
+            (root / "config.json").write_text("{}", encoding="utf-8")
+            index = root / "model.safetensors.index.json"
+            index.write_text(json.dumps({
+                "metadata": {"total_size": 4096},
+                "weight_map": {
+                    "layer_a.weight": "model-00001-of-00002.safetensors",
+                    "layer_b.weight": "model-00002-of-00002.safetensors",
+                },
+            }), encoding="utf-8")
+            first = root / "model-00001-of-00002.safetensors"
+            second = root / "model-00002-of-00002.safetensors"
+            first.write_bytes(b"a" * 2048)
+
+            with patch("app.tts.qwen_character_runtime.MODEL_DIRS", {"custom-0.6b": root}):
+                self.assertFalse(model_installed("custom-0.6b"), "missing second shard must not be treated as installed")
+                second.write_bytes(b"b" * 1024)
+                self.assertFalse(model_installed("custom-0.6b"), "short aggregate weights must be treated as incomplete")
+                second.write_bytes(b"b" * 2048)
+                self.assertTrue(model_installed("custom-0.6b"))
+                first.unlink()
+                self.assertFalse(model_installed("custom-0.6b"))
+
+
 class Stage3VoiceProfilePersistenceTests(unittest.TestCase):
     def test_custom_voice_profile_round_trips_unicode_metadata(self):
         with tempfile.TemporaryDirectory() as temp:

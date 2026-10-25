@@ -55,6 +55,14 @@ def _file_ready(path: Path) -> bool:
         return False
 
 
+def _directory_has_entries(path: Path) -> bool:
+    """Return a filesystem-only presence signal; treat inaccessible paths as incomplete."""
+    try:
+        return path.is_dir() and any(path.iterdir())
+    except OSError:
+        return path.exists()
+
+
 from app.ui.stable_refresh import stable_view_refresh
 
 
@@ -515,15 +523,22 @@ class ModelsPage(QWidget):
             "base-0.6b": "Voice Clone Base 0.6B",
             "base-1.7b": "Voice Clone Base 1.7B",
         }
-        any_qwen_model = False
-        for kind in QWEN_MODEL_DIRS:
+        any_qwen_model_entry = False
+        for kind, model_root in QWEN_MODEL_DIRS.items():
+            component_id = f"qwen-model:{kind}"
             if qwen_model_installed(kind):
-                any_qwen_model = True
+                any_qwen_model_entry = True
                 add_component(
                     f"Qwen3-TTS • {qwen_labels.get(kind, kind)} — Installed",
-                    f"qwen-model:{kind}",
+                    component_id,
                 )
-        if not any_qwen_model:
+            elif _directory_has_entries(model_root):
+                any_qwen_model_entry = True
+                add_component(
+                    f"Qwen3-TTS • {qwen_labels.get(kind, kind)} — Incomplete • reinstall or remove partial files",
+                    component_id,
+                )
+        if not any_qwen_model_entry:
             add_component("Qwen3-TTS Voice Studio — no model installed")
 
         qwen_runtime_present = any(
@@ -555,7 +570,7 @@ class ModelsPage(QWidget):
         )
         ai_ready = _file_ready(ai_server) and any(_file_ready(path) for path in ai_models)
         if ai_ready:
-            add_component("Audiobook AI — Ready (local runtime and model files present)", "audiobook-ai")
+            add_component("Audiobook AI — Runtime + model files present", "audiobook-ai")
         elif ai_root_present:
             add_component("Audiobook AI — Incomplete • install/repair required", "audiobook-ai")
         else:
