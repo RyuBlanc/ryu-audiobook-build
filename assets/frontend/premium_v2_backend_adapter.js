@@ -1874,6 +1874,23 @@
       });
     }
     const assignments = characterAssignmentsFor(chapter);
+    // Any persisted assignment is source data even when the passage has no
+    // quotation marks and was selected manually. Include it in the visual source
+    // map so green assignment highlights never disappear on refresh.
+    for (const assignment of assignments) {
+      const start = Number(assignment?.start), end = Number(assignment?.end);
+      if (!Number.isInteger(start) || !Number.isInteger(end) ||
+          start < 0 || end <= start || end > source.length) continue;
+      const exact = source.slice(start, end);
+      if (!exact || (assignment?.text && String(assignment.text) !== exact)) continue;
+      const key = start + ':' + end;
+      if (!candidates.has(key)) candidates.set(key, {
+        id:'assignment-' + Number(chapter.number) + '-' + start + '-' + end,
+        chapter_number:Number(chapter.number), chapter_title:String(chapter.title || ''),
+        start, end, source_text:exact, text:exact, suggestions:[],
+        suggested_speaker:'', confidence:0, skipped:false, source:'saved-assignment'
+      });
+    }
     const result = [];
     for (const row of [...candidates.values()].sort((a,b) => a.start - b.start)) {
       const assignment = assignments.find(item => Number(item.start) === row.start && Number(item.end) === row.end &&
