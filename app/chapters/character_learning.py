@@ -246,6 +246,7 @@ def rank_speaker_suggestions(
     known_characters: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
     learning_examples: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
     last_speaker: str = "",
+    last_speaker_series: str = "",
 ) -> list[dict[str, Any]]:
     """Rank known or explicitly evidenced speakers using rules and user feedback.
 
@@ -395,7 +396,11 @@ def rank_speaker_suggestions(
     last = str(last_speaker or "").strip()
     pronoun_continuity = bool(re.match(r"(?is)^\s*[,.;:!?—–-]?\s*(?:he|she|they|I|we)\s+(?:" + _SPEECH_VERBS + r")\b", after[:180]))
     if last and pronoun_continuity:
+        last_series_key = _series_key(last_speaker_series)
         for item in candidate_map.values():
+            item_series_key = _series_key(str(item.get("series") or ""))
+            if last_series_key and item_series_key and item_series_key != last_series_key:
+                continue
             if item["name"].casefold() == last.casefold() or last.casefold() in {value.casefold() for value in item["aliases"]}:
                 if float(item["score"]) < 0.74:
                     item["score"] = 0.74
