@@ -787,16 +787,20 @@ def main() -> int:
         window = ProjectWorkflow()
         window.setWindowTitle(f"{APP_NAME} • {full_version()}")
     window.setWindowIcon(app_icon)
-    # Window size is a native, persisted preference. Do not force every launch
-    # into maximized mode; that discards the user's Settings choice.
-    window.show()
+    # Apply persisted geometry before the first display. Showing the default
+    # size and resizing immediately afterward caused a visible startup jump on
+    # Windows, especially when reopening at a saved window preset.
     saved_window_size = str(QSettings("RyuBlanc", "Ryu's Audiobook").value("ui/window_size", "auto"))
+    apply_size = getattr(window, "apply_window_size", None)
     if saved_window_size == "maximized":
-        window.showMaximized()
-    else:
-        apply_size = getattr(window, "apply_window_size", None)
         if callable(apply_size):
             apply_size(saved_window_size)
+        else:
+            window.showMaximized()
+    else:
+        if callable(apply_size):
+            apply_size(saved_window_size)
+        window.show()
     return app.exec()
 
 
