@@ -262,9 +262,12 @@ class VoiceCastPage(QWidget):
         series_label = QLabel("Shared series / novel name")
         series_label.setToolTip("Use the same series name across volumes to reuse character identities and assigned voices.")
         series_row.addWidget(series_label)
-        self.series_edit = QLineEdit()
+        self.series_edit = QComboBox()
         self.series_edit.setObjectName("characterSeriesName")
-        self.series_edit.setPlaceholderText("Enter the common series name for all volumes")
+        self.series_edit.setEditable(True)
+        self.series_edit.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.series_edit.lineEdit().setPlaceholderText("Choose an existing series or type a new one")
+        self.series_edit.lineEdit().setClearButtonEnabled(True)
         series_row.addWidget(self.series_edit, 1)
         self.save_series_button = QPushButton("Save Series")
         self.save_series_button.clicked.connect(self.save_series)
@@ -377,9 +380,32 @@ class VoiceCastPage(QWidget):
         return value if isinstance(value, dict) else {}
 
     def _series_name(self) -> str:
-        entered = str(self.series_edit.text() or "").strip() if hasattr(self, "series_edit") else ""
+        entered = str(self.series_edit.currentText() or "").strip() if hasattr(self, "series_edit") else ""
         project = getattr(self.window(), "project", None)
         return entered or str(getattr(project, "title", "") or "").strip()
+
+    def _refresh_series_options(self, selected: str = "") -> None:
+        if not hasattr(self, "series_edit"):
+            return
+        current = str(selected or self.series_edit.currentText() or "").strip()
+        try:
+            records = list_reusable_characters()
+        except Exception:
+            records = []
+        names = {str(row.get("series") or "").strip() for row in records
+                 if isinstance(row, dict) and str(row.get("series") or "").strip()}
+        project = getattr(self.window(), "project", None)
+        if project and str(getattr(project, "title", "") or "").strip():
+            names.add(str(getattr(project, "title")).strip())
+        if current:
+            names.add(current)
+        self.series_edit.blockSignals(True)
+        try:
+            self.series_edit.clear()
+            self.series_edit.addItems(sorted(names, key=str.casefold))
+            self.series_edit.setEditText(current)
+        finally:
+            self.series_edit.blockSignals(False)
 
     def save_series(self) -> None:
         folder = self._project_folder()
@@ -390,6 +416,7 @@ class VoiceCastPage(QWidget):
         state = load_state(folder)
         state["series_name"] = series
         save_state(folder, state)
+        self._refresh_series_options(series)
         self._sync_character_library()
         self.summary.setText(
             f"Series '{series}' saved. Characters added or analyzed in this book can now be reused across its volumes."
@@ -427,6 +454,7 @@ class VoiceCastPage(QWidget):
         if not folder:
             self.series_edit.clear()
             self.series_edit.blockSignals(False)
+            self._refresh_series_options("")
             self._refresh_labels()
             self.summary.setText("Open a book to analyze or edit its character cast.")
             return
@@ -439,8 +467,9 @@ class VoiceCastPage(QWidget):
             or getattr(getattr(self.window(), "project", None), "title", "")
             or ""
         ).strip()
-        self.series_edit.setText(series)
+        self.series_edit.setEditText(series)
         self.series_edit.blockSignals(False)
+        self._refresh_series_options(series)
         self._load_saved_cast()
         count = len([row for row in self.rows if row.get("name", "").casefold() != "narrator"])
         self.summary.setText(
@@ -608,6 +637,7 @@ class VoiceCastPage(QWidget):
             f"Dialogue cues: {row['dialogue_count']}<br>"
             f"Confidence: {confidence:.0%} • {confidence_band(confidence)}<br>"
             f"Aliases: {', '.join(aliases) if aliases else 'None'}<br>"
+            f"Series: {self._series_name() or 'Unassigned series'}<br>"
             f"Assigned voice: {assigned}"
         )
         if self.details.text() != details_text:
@@ -683,8 +713,8 @@ class VoiceCastPage(QWidget):
         self.summary.setText(f"Generating a real preview for {canonical} with {profile_name}…")
         worker.status.connect(self.summary.setText)
         worker.finished_ok.connect(self._play_test_voice)
-        worker.failed.connect(lambda error: self.summary.setText(f"Character voice preview failed: {error}"))
-        worker.cancelled.connect(lambda: self.summary.setText("Character voice preview cancelled."))
+        worker.failed.connect(self._test_voice_failed)
+        worker.cancelled.connect(self._test_voice_cancelled)
         worker.finished.connect(self._test_voice_finished)
         worker.start()
 
@@ -696,6 +726,12 @@ class VoiceCastPage(QWidget):
             self.summary.setText(f"Playing character voice preview • generated in {max(0.0, float(elapsed_seconds)):.1f}s.")
         except Exception as exc:
             self.summary.setText(f"The preview was generated but could not be played: {exc}")
+
+    def _test_voice_failed(self, error: str) -> None:
+        self.summary.setText(f"Character voice preview failed: {error}")
+
+    def _test_voice_cancelled(self) -> None:
+        self.summary.setText("Character voice preview cancelled.")
 
     def _test_voice_finished(self) -> None:
         self.test_voice_button.setEnabled(True)
