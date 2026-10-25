@@ -2832,6 +2832,10 @@ class PremiumV2Bridge(QObject):
             for c in analysis.characters:
                 prior = old.get(c.name.casefold(), {})
                 merged = merge_character_analysis_record(c, prior)
+                if prior.get("user_created"):
+                    merged["user_created"] = True
+                if prior.get("manual"):
+                    merged["manual"] = True
                 if str(prior.get("series") or "").strip():
                     merged["series"] = str(prior.get("series")).strip()
                     merged["scope"] = "Series · " + merged["series"]
