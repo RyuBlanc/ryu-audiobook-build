@@ -436,6 +436,16 @@ class UiStabilityRegressions(unittest.TestCase):
         app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
 
+    def test_voice_cast_profile_refresh_uses_shared_in_place_sync(self):
+        source = (ROOT / "app/ui/voice_cast_page.py").read_text(encoding="utf-8")
+        body = source.split("def refresh_profiles(self):", 1)[1].split(
+            "\n    def _visible_rows(", 1
+        )[0]
+
+        self.assertIn("sync_combo_items_in_place(self.profile, rows, current)", body)
+        self.assertNotIn("self.profile.clear()", body)
+        self.assertIn("self.show_details(self.list.currentRow())", body)
+
     def test_chapter_structural_actions_persist_pending_edits_before_mutation(self):
         source = (ROOT / "app/ui/chapter_editor.py").read_text(encoding="utf-8")
 

@@ -19,7 +19,7 @@ from app.core.state import load_state, save_state
 from app.core.character_library import sync_characters
 from app.core.character_identity import character_identity_key
 from app.ui.native_character_studio import NativeCharacterDialoguePanel, NativeCharacterRecordDialog
-from app.ui.stable_refresh import stable_view_refresh
+from app.ui.stable_refresh import stable_view_refresh, sync_combo_items_in_place
 
 
 class VoiceCastAnalysisWorker(QThread):
@@ -497,21 +497,17 @@ class VoiceCastPage(QWidget):
 
     @stable_view_refresh
     def refresh_profiles(self):
+        """Refresh saved casting profiles without blanking the active selector."""
         self.profiles = load_profiles()
         current = self.profile.currentData() if self.profile.count() else None
-        self.profile.blockSignals(True)
-        self.profile.clear()
-
-        for item in self.profiles:
-            provider = str(item.provider or "").replace("-", " ").title()
-            self.profile.addItem(f"{item.name}  ·  {provider}", item.name)
-
-        if current:
-            index = self.profile.findData(current)
-            if index >= 0:
-                self.profile.setCurrentIndex(index)
-        self.profile.blockSignals(False)
-
+        rows = [
+            (
+                f"{item.name}  ·  {str(item.provider or '').replace('-', ' ').title()}",
+                item.name,
+            )
+            for item in self.profiles
+        ]
+        sync_combo_items_in_place(self.profile, rows, current)
         self.show_details(self.list.currentRow())
 
     def _visible_rows(self) -> list[dict]:
