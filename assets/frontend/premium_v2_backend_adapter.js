@@ -6,6 +6,9 @@
   const RYU_UI_TEXT_SCALES = new Set([85, 90, 100, 110, 120, 130, 140]);
   function scaleUiFontTree(root, scale, inheritedBase = null) {
     if (!root || root.nodeType !== 1) return;
+    // Normal size is the native/default appearance. Avoid touching hundreds of
+    // elements at startup unless a non-default scale was actually selected.
+    if (scale === 100 && root.dataset.ryuFontScaled !== '1') return;
     const current = Number.parseFloat(getComputedStyle(root).fontSize) || 14;
     const parent = root.parentElement;
     const parentCurrent = parent ? Number.parseFloat(getComputedStyle(parent).fontSize) : NaN;
@@ -13,13 +16,33 @@
     const parentBase = parentBaseValue ? Number.parseFloat(parentBaseValue) : inheritedBase;
     let base = Number.parseFloat(root.dataset.ryuBaseFontPx);
     if (!Number.isFinite(base) || base <= 0) {
-      // If the node inherits its size, scale from the parent's unscaled base.
-      // An explicit child size remains its own base so heading hierarchy is kept.
+      // Inherited text follows the parent's original size. A differently sized
+      // child keeps its own base so heading/body hierarchy remains recognizable.
       base = Number.isFinite(parentBase) && Number.isFinite(parentCurrent) &&
         Math.abs(current - parentCurrent) < 0.25 ? parentBase : current;
       root.dataset.ryuBaseFontPx = String(base);
     }
+    if (scale === 100) {
+      if (root.dataset.ryuOriginalFontCaptured === '1') {
+        const original = root.dataset.ryuOriginalInlineFontSize || '';
+        const priority = root.dataset.ryuOriginalInlineFontPriority || '';
+        if (original) root.style.setProperty('font-size', original, priority);
+        else root.style.removeProperty('font-size');
+        delete root.dataset.ryuOriginalInlineFontSize;
+        delete root.dataset.ryuOriginalInlineFontPriority;
+        delete root.dataset.ryuOriginalFontCaptured;
+      }
+      delete root.dataset.ryuFontScaled;
+      for (const child of root.children) scaleUiFontTree(child, scale, base);
+      return;
+    }
+    if (root.dataset.ryuOriginalFontCaptured !== '1') {
+      root.dataset.ryuOriginalInlineFontSize = root.style.getPropertyValue('font-size');
+      root.dataset.ryuOriginalInlineFontPriority = root.style.getPropertyPriority('font-size');
+      root.dataset.ryuOriginalFontCaptured = '1';
+    }
     root.style.setProperty('font-size', (base * scale / 100) + 'px', 'important');
+    root.dataset.ryuFontScaled = '1';
     for (const child of root.children) scaleUiFontTree(child, scale, base);
   }
   function applyUiTextScale(value) {
