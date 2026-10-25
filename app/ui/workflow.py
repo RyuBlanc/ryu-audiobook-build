@@ -1857,6 +1857,7 @@ class ProjectWorkflow(QMainWindow):
     def closeEvent(self, event) -> None:
         """Stop optional character-preview workers before their Qt widgets are destroyed."""
         for page_name, label in (
+            ("voice", "Voice Studio"),
             ("voice_cast", "Character Studio"),
             ("character_library_page", "Character Library"),
         ):
