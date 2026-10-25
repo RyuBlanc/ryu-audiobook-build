@@ -743,12 +743,17 @@ def main() -> int:
     app.setApplicationName(APP_NAME)
     app.setProperty("_ryuDarkStylesheet", APP_STYLE)
     app.setStyleSheet(APP_STYLE)
-    saved_theme = str(QSettings("RyuBlanc", "Ryu's Audiobook").value("ui/theme", "dark")).lower()
-    from app.ui.settings_page import apply_application_theme
-    # Apply the saved theme, accent and interface scale on every launch,
-    # including dark mode. The preference helper reads the remaining values
-    # from the same local QSettings store.
-    apply_application_theme(app, saved_theme)
+    settings = QSettings("RyuBlanc", "Ryu's Audiobook")
+    saved_theme = str(settings.value("ui/theme", "dark")).lower()
+    from app.ui.settings_page import apply_application_theme, apply_window_geometry
+    # Apply theme, layout density, and text size on every launch. The native
+    # settings form persists these independently and never relies on browser zoom.
+    apply_application_theme(
+        app, saved_theme,
+        accent=str(settings.value("ui/accent", "crimson")),
+        scale=int(settings.value("ui/interface_scale", 100) or 100),
+        text_scale=int(settings.value("ui/text_scale", 100) or 100),
+    )
     # Small transparent four-winged crimson dragon cursor. The hotspot is
     # placed at the nose so clicking and text selection remain predictable.
     dragon_cursor_path = asset_path("dragon_cursor.png")
@@ -784,7 +789,12 @@ def main() -> int:
         window = ProjectWorkflow()
         window.setWindowTitle(f"{APP_NAME} • {full_version()}")
     window.setWindowIcon(app_icon)
-    window.showMaximized()
+    window_size = str(settings.value("ui/window_size", "maximized") or "maximized")
+    if isinstance(window, PremiumV2Window):
+        # Explicit developer opt-in still respects the same saved geometry.
+        window.apply_window_size(window_size)
+    else:
+        apply_window_geometry(window, window_size)
     return app.exec()
 
 
