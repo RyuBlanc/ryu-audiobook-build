@@ -1,5 +1,6 @@
 (() => {
   'use strict';
+  window.__ryuPremiumAdapterReady = false;
   const $ = id => document.getElementById(id);
   let ryuUiTextScale = 100;
   let ryuUiTextObserver = null;
@@ -6432,6 +6433,16 @@
     }
     message('Premium V2 local backend connected.');
   }
-  const start = () => wire().catch(e=>message(e.message,true));
+  const start = () => wire().then(() => {
+    window.__ryuPremiumAdapterReady = true;
+    window.__ryuEmitFrontendDiagnostic?.('frontend-ready', {message:'Premium V2 adapter initialized'});
+  }).catch(error => {
+    window.__ryuPremiumAdapterReady = false;
+    window.__ryuEmitFrontendDiagnostic?.('adapter-start-failed', {
+      message:String(error?.message || error || 'Adapter initialization failed'),
+      stack:String(error?.stack || '')
+    });
+    message(error?.message || String(error), true);
+  });
   if (window.ryuBackend?.invoke) start(); else window.addEventListener('ryu-backend-ready', start, {once:true});
 })();
