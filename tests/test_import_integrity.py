@@ -515,9 +515,16 @@ www.asianovel.com
                     with self.assertRaisesRegex(OSError, "simulated metadata write failure"):
                         create_project("Write Failure", source, [Chapter(1, "Chapter 1", "Text")])
 
-            self.assertTrue(root.exists())
-            self.assertEqual(list(root.iterdir()), [])
-            self.assertEqual(list_projects(), [])
+                self.assertTrue(root.exists())
+                self.assertEqual(list(root.iterdir()), [])
+                self.assertEqual(list_projects(), [])
+
+    def test_library_listing_returns_empty_when_library_root_is_missing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "not-created-yet"
+            with mock.patch("app.core.project.library_root", return_value=root):
+                self.assertEqual(list_projects(), [])
+            self.assertFalse(root.exists())
 
     def test_library_listing_hides_in_progress_import_staging_directories(self):
         with tempfile.TemporaryDirectory() as temp:

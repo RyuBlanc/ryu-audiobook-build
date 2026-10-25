@@ -149,6 +149,10 @@ def create_project(title: str, source_path: Path, chapters: list[Chapter]) -> Pr
 def list_projects() -> list[Project]:
     projects = []
     root = library_root()
+    # A fresh install may not have created the user library yet. Listing is a
+    # read operation and should return an empty library, not fail during startup.
+    if not root.is_dir():
+        return projects
     for folder in sorted(root.iterdir()):
         # Import staging folders may briefly contain verified JSON while the
         # import worker is preparing its atomic publish. Never expose them as
