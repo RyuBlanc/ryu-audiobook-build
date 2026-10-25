@@ -1024,6 +1024,29 @@ class ProjectWorkflow(QMainWindow):
         self._update_page_chrome(widget)
         self.stack.setCurrentWidget(widget)
 
+    def _schedule_visible_refresh(self, widget: QWidget, refresh, context: str) -> None:
+        """Refresh disk-backed page data only after its native page is visible."""
+        def run_refresh() -> None:
+            # A user may navigate away during the first-paint delay. Do not spend
+            # time scanning a screen that is no longer visible; its next visit
+            # will schedule a fresh read.
+            if self.stack.currentWidget() is not widget:
+                return
+            try:
+                refresh()
+            except Exception as exc:
+                self._log_ui_failure(context, exc)
+                message = f"{context} failed. Check Settings → Diagnostics for application.log."
+                for attribute in ("status", "status_detail", "result"):
+                    label = getattr(widget, attribute, None)
+                    if isinstance(label, QLabel):
+                        label.setText(message)
+                title = getattr(widget, "status_title", None)
+                if isinstance(title, QLabel):
+                    title.setText("Refresh needs attention")
+
+        QTimer.singleShot(75, run_refresh)
+
     def _sidebar_item_clicked(self, item: QListWidgetItem) -> None:
         """Recover navigation when the clicked row is already selected."""
         row = self.sidebar.row(item)
@@ -1377,10 +1400,15 @@ class ProjectWorkflow(QMainWindow):
         name = item.data(32)
 
         if name == "Dashboard":
-            self.dashboard.refresh()
             self._show_page(self.dashboard)
+            self._schedule_visible_refresh(
+                self.dashboard, self.dashboard.refresh, "Refresh Dashboard"
+            )
         elif name == "Library":
             self._show_page(self.library)
+            self._schedule_visible_refresh(
+                self.library, self.library.refresh, "Refresh Library"
+            )
         elif name == "Import":
             self._show_page(self.import_page)
         elif name == "Chapters":
@@ -1391,25 +1419,36 @@ class ProjectWorkflow(QMainWindow):
         elif name == "Voice & Narration":
             self._show_page(self.voice)
         elif name == "Voice Cast":
-            try:
-                self.voice_cast.refresh_profiles()
-                self.voice_cast.load_current_project()
-            except Exception as exc:
-                self._log_ui_failure("Refresh Voice Cast profiles", exc)
             self._show_page(self.voice_cast)
+            self._schedule_visible_refresh(
+                self.voice_cast,
+                lambda: (
+                    self.voice_cast.refresh_profiles(),
+                    self.voice_cast.load_current_project(),
+                ),
+                "Refresh Voice Cast",
+            )
         elif name == "Character Library":
-            self.character_library_page.refresh()
             self._show_page(self.character_library_page)
+            self._schedule_visible_refresh(
+                self.character_library_page,
+                self.character_library_page.refresh,
+                "Refresh Character Library",
+            )
         elif name == "Pronunciation":
             self._open_generation_feature("pronunciation")
         elif name == "Sound Design":
             self._open_generation_feature("sound")
         elif name == "Audiobooks":
-            self.audiobooks_page.refresh()
             self._show_page(self.audiobooks_page)
+            self._schedule_visible_refresh(
+                self.audiobooks_page, self.audiobooks_page.refresh, "Refresh Audiobooks"
+            )
         elif name == "History":
-            self.history_page.refresh()
             self._show_page(self.history_page)
+            self._schedule_visible_refresh(
+                self.history_page, self.history_page.refresh, "Refresh History"
+            )
         elif name == "Settings":
             self.settings_page.refresh()
             self._show_page(self.settings_page)
@@ -1488,8 +1527,14 @@ class ProjectWorkflow(QMainWindow):
                 )
         elif name == "Models":
             self._show_page(self.models_page)
+            self._schedule_visible_refresh(
+                self.models_page, self.models_page.refresh, "Refresh Models"
+            )
         elif name == "Hardware":
             self._show_page(self.hardware_page)
+            self._schedule_visible_refresh(
+                self.hardware_page, self.hardware_page.refresh, "Refresh Hardware"
+            )
 
     def _navigate_workflow_step(self, name: str) -> None:
         current = self.sidebar.currentItem()

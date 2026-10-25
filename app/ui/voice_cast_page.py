@@ -242,8 +242,7 @@ class VoiceCastPage(QWidget):
         self.view_tabs.addTab(self.dialogue_panel.ai_tab, "Analyze Book (AI)")
         root.addWidget(self.view_tabs, 1)
 
-        self.refresh_profiles()
-        self.load_current_project()
+        self.summary.setText("Saved voices and project cast load when you open Voice Cast.")
 
     def _project_folder(self):
         project = getattr(self.window(), "project", None)

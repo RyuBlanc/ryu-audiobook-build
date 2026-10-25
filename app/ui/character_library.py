@@ -130,8 +130,7 @@ class CharacterLibraryPage(QWidget):
         self.cards_layout.setSpacing(10)
         self.cards_scroll.setWidget(self.cards_content)
         self.view_stack.addWidget(self.cards_scroll)
-
-        self.refresh()
+        self.status.setText("Saved character records load when this screen opens.")
 
     def _set_view(self, mode: str) -> None:
         cards = mode == "cards"

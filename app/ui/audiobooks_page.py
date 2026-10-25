@@ -241,7 +241,7 @@ class AudiobooksPage(QWidget):
         body.addWidget(player_box, 4)
 
         root.addLayout(body, 1)
-        self.refresh()
+        self.summary.setText("Loading local audiobook outputs…")
 
     def _selected_item(self) -> QListWidgetItem | None:
         return self.items.currentItem()

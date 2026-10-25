@@ -73,10 +73,10 @@ class DashboardPage(QWidget):
 
         metrics = QHBoxLayout()
         metrics.setSpacing(12)
-        self.metric_total = self._metric("LOCAL PROJECTS", "0", "All imported books")
-        self.metric_completed = self._metric("COMPLETED", "0", "Validated audiobook output")
-        self.metric_active = self._metric("IN PROGRESS", "0", "Jobs marked as running")
-        self.metric_attention = self._metric("NEEDS ATTENTION", "0", "Failed or recoverable projects")
+        self.metric_total = self._metric("LOCAL PROJECTS", "—", "All imported books")
+        self.metric_completed = self._metric("COMPLETED", "—", "Validated audiobook output")
+        self.metric_active = self._metric("IN PROGRESS", "—", "Jobs marked as running")
+        self.metric_attention = self._metric("NEEDS ATTENTION", "—", "Failed or recoverable projects")
         for card in (
             self.metric_total, self.metric_completed, self.metric_active, self.metric_attention
         ):
@@ -129,6 +129,7 @@ class DashboardPage(QWidget):
         continue_details.addLayout(continue_actions)
         continue_layout.addLayout(continue_details, 1)
         root.addWidget(self.continue_card)
+        self.continue_card.setVisible(False)
 
         lower = QHBoxLayout()
         lower.setSpacing(14)
@@ -152,11 +153,11 @@ class DashboardPage(QWidget):
 
         attention_card = QGroupBox("Project status")
         attention_layout = QVBoxLayout(attention_card)
-        self.status_title = QLabel("Your library is ready")
+        self.status_title = QLabel("Loading your local workspace…")
         self.status_title.setObjectName("sectionTitle")
         self.status_detail = QLabel(
-            "Project status is read from your local project files. "
-            "No generation estimates are shown until real job data is available."
+            "Reading saved project state and output files. "
+            "Progress is shown only when supported by real records."
         )
         self.status_detail.setObjectName("muted")
         self.status_detail.setWordWrap(True)
@@ -169,16 +170,13 @@ class DashboardPage(QWidget):
         lower.addWidget(attention_card, 2)
         root.addLayout(lower, 1)
 
-        self.empty_note = QLabel(
-            "No local projects yet. Import a book to create your first audiobook project."
-        )
+        self.empty_note = QLabel("Loading your local projects…")
         self.empty_note.setObjectName("muted")
         self.empty_note.setWordWrap(True)
         root.addWidget(self.empty_note)
 
         scroll.setWidget(content)
         outer.addWidget(scroll, 1)
-        self.refresh()
 
     def _metric(self, label: str, value: str, detail: str) -> QWidget:
         card = QWidget()

@@ -137,8 +137,6 @@ class HistoryPage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
 
-        self.refresh()
-
     def _selected_project(self) -> Project | None:
         row = self.table.currentRow()
         if row < 0:

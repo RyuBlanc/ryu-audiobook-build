@@ -411,7 +411,7 @@ class ModelsPage(QWidget):
         self.reset_qwen_cache.clicked.connect(self.reset_qwen_voice_cache)
         self.install_audiobook_ai.clicked.connect(self.install_audiobook_ai_runtime)
         self.refresh_button.clicked.connect(self.refresh)
-        self.refresh()
+        self.status.setText("Model inventory loads when this screen opens.")
 
 
     def refresh(self) -> None:
@@ -492,6 +492,7 @@ class ModelsPage(QWidget):
             add_component("Audiobook AI — Not installed")
 
         self._update_uninstall_button()
+        self.status.setText("Model inventory refreshed from this PC.")
 
     def _update_uninstall_button(self, *_args) -> None:
         item = self.list.currentItem() if hasattr(self, "list") else None

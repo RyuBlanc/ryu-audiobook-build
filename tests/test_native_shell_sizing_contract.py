@@ -69,6 +69,55 @@ class NativeShellSizingContracts(unittest.TestCase):
             self.assertIn('min_height = max(1, min(620, int(available.height())))', source)
             self.assertIn('self.setMinimumSize(min_width, min_height)', source)
 
+    def test_catalog_backed_pages_defer_disk_scans_until_navigation(self):
+        page_specs = (
+            ("app/ui/dashboard_page.py", "DashboardPage", "self.refresh()"),
+            ("app/ui/library.py", "LibraryPage", "self.refresh()"),
+            ("app/ui/history_page.py", "HistoryPage", "self.refresh()"),
+            ("app/ui/models_page.py", "ModelsPage", "self.refresh()"),
+            ("app/ui/hardware_page.py", "HardwarePage", "self.refresh()"),
+            ("app/ui/character_library.py", "CharacterLibraryPage", "self.refresh()"),
+            ("app/ui/audiobooks_page.py", "AudiobooksPage", "self.refresh()"),
+            ("app/ui/voice_cast_page.py", "VoiceCastPage", "self.load_current_project()"),
+        )
+        for relative_path, class_name, forbidden in page_specs:
+            source = (ROOT / relative_path).read_text(encoding="utf-8")
+            class_start = source.index(f"class {class_name}")
+            class_end = source.find("\\nclass ", class_start + 1)
+            if class_end < 0:
+                class_end = len(source)
+            class_source = source[class_start:class_end]
+            init_start = class_source.index("    def __init__(")
+            init_end = class_source.find("\\n    def ", init_start + 1)
+            constructor = class_source[init_start:init_end if init_end >= 0 else None]
+            self.assertNotIn(forbidden, constructor, f"{relative_path} still scans during construction")
+            if class_name == "VoiceCastPage":
+                self.assertNotIn("self.refresh_profiles()", constructor)
+
+        hardware_source = (ROOT / "app/ui/hardware_page.py").read_text(encoding="utf-8")
+        hardware_start = hardware_source.index("class HardwarePage")
+        hardware_end = hardware_source.find("\\nclass ", hardware_start + 1)
+        hardware_class = hardware_source[hardware_start:hardware_end if hardware_end >= 0 else None]
+        hardware_init_start = hardware_class.index("    def __init__(")
+        hardware_init_end = hardware_class.index("\\n    def refresh(", hardware_init_start)
+        hardware_init = hardware_class[hardware_init_start:hardware_init_end]
+        self.assertNotIn("detect_hardware()", hardware_init)
+
+        workflow = (ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")
+        self.assertIn("def _schedule_visible_refresh(self, widget: QWidget, refresh, context: str)", workflow)
+        self.assertIn("QTimer.singleShot(75, run_refresh)", workflow)
+        self.assertIn("if self.stack.currentWidget() is not widget:", workflow)
+        for token in (
+            "self.dashboard, self.dashboard.refresh",
+            "self.library, self.library.refresh",
+            "self.character_library_page,",
+            "self.audiobooks_page, self.audiobooks_page.refresh",
+            "self.history_page, self.history_page.refresh",
+            "self.models_page, self.models_page.refresh",
+            "self.hardware_page, self.hardware_page.refresh",
+        ):
+            self.assertIn(token, workflow)
+
     def test_reduced_motion_is_a_saved_preference_and_disables_heavy_visual_effects(self):
         html = (ROOT / "assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")

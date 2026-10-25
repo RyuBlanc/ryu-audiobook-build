@@ -41,7 +41,7 @@ class HardwarePage(QWidget):
         layout = QVBoxLayout(content)
         layout.setContentsMargins(4, 6, 4, 12)
         layout.setSpacing(14)
-        self.profile = detect_hardware()
+        self.profile = None
 
         layout.addWidget(QLabel("<h2>Hardware & TTS Performance</h2>"))
         self.info = QLabel()
@@ -49,9 +49,6 @@ class HardwarePage(QWidget):
 
         self.backend_combo = QComboBox()
         self.backend_combo.addItem("Automatic", "automatic")
-        for backend in self.profile.backends:
-            if backend.available:
-                self.backend_combo.addItem(backend.name, backend.name)
         layout.addWidget(self.backend_combo)
 
         self.benchmark_button = QPushButton("Verify Local Backend (background)")
@@ -61,8 +58,7 @@ class HardwarePage(QWidget):
 
         self.result = QLabel("No benchmark run yet.")
         layout.addWidget(self.result)
-
-        self.refresh()
+        self.info.setText("Hardware details are detected when this screen opens.")
 
         scroll = QScrollArea(self)
         scroll.setObjectName("hardwareScroll")
@@ -76,18 +72,52 @@ class HardwarePage(QWidget):
         outer.addWidget(scroll)
 
     def refresh(self):
+        # Hardware probing may invoke external tools. Do it only after the user
+        # opens this screen and the native shell has had a chance to paint.
+        if self.profile is None:
+            selected_backend = self.backend_combo.currentData() or "automatic"
+            try:
+                profile = detect_hardware()
+            except Exception as exc:
+                self.info.setText(
+                    "Hardware detection is unavailable right now. "
+                    "Check Logs/application.log for details."
+                )
+                self.result.setText(f"Hardware detection failed: {type(exc).__name__}: {exc}")
+                return
+
+            self.profile = profile
+            blocked = self.backend_combo.blockSignals(True)
+            try:
+                self.backend_combo.clear()
+                self.backend_combo.addItem("Automatic", "automatic")
+                for backend in profile.backends:
+                    if backend.available:
+                        self.backend_combo.addItem(backend.name, backend.name)
+                restore_index = self.backend_combo.findData(selected_backend)
+                if restore_index >= 0:
+                    self.backend_combo.setCurrentIndex(restore_index)
+            finally:
+                self.backend_combo.blockSignals(blocked)
+
+        profile = self.profile
+        if profile is None:
+            return
         lines = [
-            f"CPU: {self.profile.cpu}",
-            f"Architecture: {self.profile.architecture}",
-            f"Recommended backend: {self.profile.recommended}",
+            f"CPU: {profile.cpu}",
+            f"Architecture: {profile.architecture}",
+            f"Recommended backend: {profile.recommended}",
             "",
         ]
-        for b in self.profile.backends:
-            state = "Available" if b.available else "Unavailable"
-            lines.append(f"{b.name}: {state}" + (f" — {b.device}" if b.device else ""))
+        for backend in profile.backends:
+            state = "Available" if backend.available else "Unavailable"
+            lines.append(
+                f"{backend.name}: {state}" + (f" — {backend.device}" if backend.device else "")
+            )
         recommendations = ["Provider recommendations from detected hardware:"]
         recommendations.extend(
-            f"{name}: {backend}" for name, backend in self.profile.provider_recommendations.items()
+            f"{name}: {backend}"
+            for name, backend in profile.provider_recommendations.items()
         )
         self.info.setText("\n".join(lines + [""] + recommendations))
 

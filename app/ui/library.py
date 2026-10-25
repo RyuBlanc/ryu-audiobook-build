@@ -231,8 +231,11 @@ class LibraryPage(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
-
-        self.refresh()
+        self.subtitle.setText("Loading local projects…")
+        self.total_label.setText("Local projects · —")
+        self.completed_label.setText("Completed · —")
+        self.in_progress_label.setText("In progress · —")
+        self.attention_label.setText("Needs attention · —")
 
     def _schedule_refresh(self, *_args) -> None:
         self._refresh_timer.start()
