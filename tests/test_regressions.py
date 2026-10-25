@@ -812,6 +812,29 @@ class RegressionTests(unittest.TestCase):
             page.close()
             page.deleteLater()
 
+    def test_voice_cast_persistence_and_counts_are_series_scoped(self):
+        source = Path("app/ui/voice_cast_page.py").read_text(encoding="utf-8")
+        create_start = source.index("    def create_character_record(")
+        count_start = source.index("    def _refresh_character_counts(", create_start)
+        analyze_start = source.index("    def _analysis_finished(", count_start)
+        load_start = source.index("    def _load_saved_cast(", source.index("    def unassign_voice("))
+        labels_start = source.index("    def _refresh_labels(")
+        save_start = source.index("    def _save_cast(", labels_start)
+        create = source[create_start:count_start]
+        counts = source[count_start:analyze_start]
+        loading = source[load_start:source.index("    def add_character(", load_start)]
+        labels = source[labels_start:save_start]
+        save = source[save_start:]
+        self.assertIn('and str(item.get("series") or self._series_name()).strip().casefold() == series.casefold()', create)
+        self.assertNotIn("Character name already used", create)
+        self.assertIn('assignment.get("series") or active_series', counts)
+        self.assertIn("character_identity_key(name, series)", loading)
+        self.assertIn("voice_cast_identity_assignments", save)
+        self.assertIn("character_identity_key(name, series)", save)
+        self.assertIn("len(name_series.get(name.casefold(), set())) == 1", save)
+        self.assertIn("Qt.ItemDataRole.UserRole + 1", labels)
+        self.assertIn("if len(series_by_name.get(name.casefold(), set())) > 1", labels)
+
     def test_cast_provider_keeps_same_named_series_voices_separate(self):
         from app.core.character_identity import character_identity_key
         from app.tts.cast_provider import CastAwareProvider

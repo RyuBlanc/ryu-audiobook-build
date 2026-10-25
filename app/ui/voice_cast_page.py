@@ -15,6 +15,7 @@ from app.documents.parser import extract_text
 from app.tts.voice_profile import load_profiles
 from app.core.state import load_state, save_state
 from app.core.character_library import sync_characters
+from app.core.character_identity import character_identity_key
 from app.ui.native_character_studio import NativeCharacterDialoguePanel, NativeCharacterRecordDialog
 
 
@@ -251,6 +252,46 @@ class VoiceCastPage(QWidget):
         value = load_state(folder).get("voice_cast", {})
         return value if isinstance(value, dict) else {}
 
+    def _saved_identity_assignments(self):
+        folder = self._project_folder()
+        if not folder:
+            return {}
+        value = load_state(folder).get("voice_cast_identity_assignments", {})
+        return value if isinstance(value, dict) else {}
+
+    def _saved_voice_for_identity(self, name: str, series: str, *, state=None, rows=None):
+        """Load a profile by (series, name); only use legacy name keys when unambiguous."""
+        folder = self._project_folder()
+        if state is None:
+            state = load_state(folder) if folder else {}
+        identity_assignments = state.get("voice_cast_identity_assignments", {})
+        if not isinstance(identity_assignments, dict):
+            identity_assignments = {}
+        key = character_identity_key(name, series)
+        if key in identity_assignments:
+            return str(identity_assignments.get(key) or "").strip() or None
+
+        legacy_assignments = state.get("voice_cast", {})
+        if not isinstance(legacy_assignments, dict):
+            legacy_assignments = {}
+        wanted = str(name or "").strip().casefold()
+        roster = state.get("voice_cast_character_roster", [])
+        roster = roster if isinstance(roster, list) else []
+        identity_rows = list(self.rows if rows is None else rows)
+        candidates = [*identity_rows, *[item for item in roster if isinstance(item, dict)]]
+        known_series = {
+            str(item.get("series") or self._series_name()).strip().casefold()
+            for item in candidates
+            if isinstance(item, dict)
+            and str(item.get("name") or "").strip().casefold() == wanted
+            and str(item.get("series") or self._series_name()).strip()
+        }
+        # Legacy projects keyed voices by name alone. Migrate that value only
+        # if it cannot refer to two distinct series identities.
+        if len(known_series) <= 1:
+            return str(legacy_assignments.get(wanted) or legacy_assignments.get(name) or "").strip() or None
+        return None
+
     def _series_name(self) -> str:
         entered = str(self.series_edit.text() or "").strip() if hasattr(self, "series_edit") else ""
         project = getattr(self.window(), "project", None)
@@ -276,12 +317,14 @@ class VoiceCastPage(QWidget):
         if not name or not series:
             QMessageBox.warning(self, "Character details required", "Enter a character name and series.")
             return None
-        row = next((item for item in self.rows
-                    if str(item.get("name") or "").strip().casefold() == name.casefold()), None)
-        if row and str(row.get("series") or self._series_name()).strip().casefold() != series.casefold():
-            QMessageBox.warning(self, "Character name already used",
-                f"'{name}' already exists in this project's cast under another series. Use one project-scoped identity; manage other-series identities in Character Library.")
-            return None
+
+        # Character identity is the name + series pair. The same display name
+        # is valid in another series and must never overwrite this series' row.
+        row = next((
+            item for item in self.rows
+            if str(item.get("name") or "").strip().casefold() == name.casefold()
+            and str(item.get("series") or self._series_name()).strip().casefold() == series.casefold()
+        ), None)
         if voice and not any(profile.name == voice for profile in self.profiles):
             self.refresh_profiles()
         if voice and not any(profile.name == voice for profile in self.profiles):
@@ -302,10 +345,12 @@ class VoiceCastPage(QWidget):
 
     def _refresh_character_counts(self) -> None:
         chapters = list(self.get_chapters() or [])
+        active_series = self._series_name().strip().casefold()
         for row in self.rows:
             name = str(row.get("name") or "").strip().casefold()
             names = {name, *(str(value).strip().casefold() for value in (row.get("aliases") or []))}
             names.discard("")
+            row_series = str(row.get("series") or self._series_name()).strip().casefold()
             if not names or name == "narrator":
                 continue
             count, samples = 0, []
@@ -313,6 +358,9 @@ class VoiceCastPage(QWidget):
                 source = str(getattr(chapter, "text", "") or "")
                 for assignment in list(getattr(chapter, "dialogue_assignments", []) or []):
                     if not isinstance(assignment, dict):
+                        continue
+                    assignment_series = str(assignment.get("series") or active_series).strip().casefold()
+                    if row_series and assignment_series and row_series != assignment_series:
                         continue
                     speakers = assignment.get("speakers") if isinstance(assignment.get("speakers"), list) else [assignment.get("speaker")]
                     if not any(str(value or "").strip().casefold() in names for value in speakers):
@@ -416,18 +464,22 @@ class VoiceCastPage(QWidget):
         if hasattr(self, "dialogue_panel"):
             self.dialogue_panel.refresh_project_data()
 
-    def select_character_name(self, name: str) -> None:
+    def select_character_name(self, name: str, series: str = "") -> None:
         query = str(name or "").strip()
         if not query:
             return
+        wanted_series = str(series or self._series_name()).strip().casefold()
         self.search.setText(query)
         visible = self._visible_rows()
-        index = next(
-            (i for i, row in enumerate(visible)
-             if str(row.get("name") or "").casefold() == query.casefold()
-             or query.casefold() in [str(alias).casefold() for alias in (row.get("aliases") or [])]),
-            -1,
-        )
+        matches = [
+            i for i, row in enumerate(visible)
+            if str(row.get("name") or "").casefold() == query.casefold()
+            or query.casefold() in [str(alias).casefold() for alias in (row.get("aliases") or [])]
+        ]
+        index = next((
+            i for i in matches
+            if str(visible[i].get("series") or self._series_name()).strip().casefold() == wanted_series
+        ), matches[0] if matches else -1)
         if index >= 0:
             self.list.setCurrentRow(index)
 
@@ -484,59 +536,82 @@ class VoiceCastPage(QWidget):
         self.analysis_worker.start()
 
     def _analysis_finished(self, chapters, analysis, source_used):
-        saved = {
-            str(k).casefold(): str(v)
-            for k, v in self._saved_assignments().items()
-            if v
+        folder = self._project_folder()
+        state = load_state(folder) if folder else {}
+        legacy_saved = state.get("voice_cast", {}) if isinstance(state, dict) else {}
+        if not isinstance(legacy_saved, dict):
+            legacy_saved = {}
+        active_series = self._series_name()
+        series_by_identity = {
+            character_identity_key(
+                str(row.get("name") or ""),
+                str(row.get("series") or active_series),
+            ): str(row.get("series") or active_series)
+            for row in self.rows if isinstance(row, dict) and row.get("name")
         }
-
         rows = [{
             "name": "Narrator",
             "role": "Audiobook Narrator",
             "dialogue_count": 0,
             "examples": [],
-            "voice": saved.get("narrator"),
+            "voice": legacy_saved.get("Narrator") or legacy_saved.get("narrator"),
             "confidence": 1.0,
             "aliases": [],
+            "series": active_series,
         }]
 
-        active_series = self._series_name()
-        known_series = {str(row.get("name") or "").casefold(): str(row.get("series") or active_series)
-                        for row in self.rows if isinstance(row, dict)}
         for character in analysis.characters:
+            character_series = series_by_identity.get(
+                character_identity_key(character.name, active_series), active_series
+            )
             rows.append({
                 "name": character.name, "role": character.role,
                 "dialogue_count": character.dialogue_count, "examples": character.examples,
-                "voice": saved.get(character.name.casefold()), "confidence": character.confidence,
-                "aliases": character.aliases,
-                "series": known_series.get(character.name.casefold(), active_series),
+                "voice": None, "confidence": character.confidence,
+                "aliases": character.aliases, "series": character_series,
             })
 
-        # Preserve user-created cast members that automated analysis cannot
-        # rediscover (for example, characters with no explicit speech tags).
-        roster = load_state(folder).get("voice_cast_character_roster", []) if folder else []
-        known = {row["name"].casefold() for row in rows}
-        for saved_row in roster if isinstance(roster, list) else []:
+        # Retain separately scoped rows that automatic analysis did not rediscover.
+        roster = state.get("voice_cast_character_roster", []) if isinstance(state, dict) else []
+        roster = roster if isinstance(roster, list) else []
+        known = {
+            character_identity_key(str(row.get("name") or ""), str(row.get("series") or active_series))
+            for row in rows if row.get("name")
+        }
+        for saved_row in roster:
             if not isinstance(saved_row, dict):
                 continue
             name = str(saved_row.get("name") or "").strip()
-            if not name or name.casefold() in known or name.casefold() == "narrator":
+            series = str(saved_row.get("series") or active_series).strip()
+            if not name or name.casefold() == "narrator":
+                continue
+            identity = character_identity_key(name, series)
+            if identity in known:
                 continue
             rows.append({
                 "name": name,
                 "role": str(saved_row.get("role") or "Manually Added Character"),
                 "dialogue_count": int(saved_row.get("dialogue_count") or 0),
                 "examples": list(saved_row.get("examples") or []),
-                "voice": saved.get(name.casefold()),
+                "voice": None,
                 "confidence": float(saved_row.get("confidence", 1.0)),
                 "aliases": list(saved_row.get("aliases") or []),
-                "series": str(saved_row.get("series") or self._series_name()),
+                "series": series,
             })
-            known.add(name.casefold())
+            known.add(identity)
 
         self.rows = rows
         for row in self.rows:
-            row.setdefault("series", self._series_name())
+            row.setdefault("series", active_series)
+            if str(row.get("name") or "").casefold() == "narrator":
+                row["voice"] = legacy_saved.get("Narrator") or legacy_saved.get("narrator")
+            else:
+                row["voice"] = self._saved_voice_for_identity(
+                    str(row.get("name") or ""),
+                    str(row.get("series") or active_series),
+                    state=state,
+                    rows=self.rows,
+                )
         self._refresh_character_counts()
         self._save_cast()
         if hasattr(self, "dialogue_panel"):
@@ -610,15 +685,6 @@ class VoiceCastPage(QWidget):
         self._save_cast(update_voice=True)
         self._refresh_labels()
 
-        new_index = next(
-            (
-                i for i, candidate in enumerate(self._visible_rows())
-                if candidate.get("name") == row.get("name")
-            ),
-            0,
-        )
-        self.list.setCurrentRow(new_index)
-
     def unassign_voice(self):
         row = self._row_for_visible_index(self.list.currentRow())
         if not row:
@@ -628,46 +694,48 @@ class VoiceCastPage(QWidget):
         self._save_cast(update_voice=True)
         self._refresh_labels()
 
-        visible = self._visible_rows()
-        if visible:
-            new_index = next(
-                (
-                    i for i, candidate in enumerate(visible)
-                    if candidate.get("name") == row.get("name")
-                ),
-                0,
-            )
-            self.list.setCurrentRow(new_index)
-
     def _load_saved_cast(self):
         folder = self._project_folder()
         state = load_state(folder) if folder else {}
-        saved = {
-            str(k).casefold(): str(v)
-            for k, v in self._saved_assignments().items()
-            if v and str(k).casefold() != "narrator"
-        }
         roster = state.get("voice_cast_character_roster", [])
-        if isinstance(roster, list):
-            existing = {str(row.get("name") or "").casefold() for row in self.rows}
-            for item in roster:
-                if not isinstance(item, dict):
-                    continue
-                name = str(item.get("name") or "").strip()
-                if not name or name.casefold() in existing or name.casefold() == "narrator":
-                    continue
-                self.rows.append({
-                    "name": name,
-                    "role": str(item.get("role") or "Manually Added Character"),
-                    "dialogue_count": int(item.get("dialogue_count") or 0),
-                    "examples": list(item.get("examples") or []),
-                    "voice": saved.get(name.casefold()),
-                    "confidence": float(item.get("confidence", 1.0)),
-                    "aliases": list(item.get("aliases") or []),
-                })
-                existing.add(name.casefold())
+        roster = roster if isinstance(roster, list) else []
+        active_series = self._series_name()
+        existing = {
+            character_identity_key(
+                str(row.get("name") or ""),
+                str(row.get("series") or active_series),
+            )
+            for row in self.rows if row.get("name")
+        }
+        for item in roster:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            series = str(item.get("series") or active_series).strip()
+            if not name or name.casefold() == "narrator":
+                continue
+            identity = character_identity_key(name, series)
+            if identity in existing:
+                continue
+            self.rows.append({
+                "name": name,
+                "role": str(item.get("role") or "Manually Added Character"),
+                "dialogue_count": int(item.get("dialogue_count") or 0),
+                "examples": list(item.get("examples") or []),
+                "voice": None,
+                "confidence": float(item.get("confidence", 1.0)),
+                "aliases": list(item.get("aliases") or []),
+                "series": series,
+            })
+            existing.add(identity)
         for row in self.rows:
-            row["voice"] = saved.get(row["name"].casefold())
+            row.setdefault("series", active_series)
+            row["voice"] = self._saved_voice_for_identity(
+                str(row.get("name") or ""),
+                str(row.get("series") or active_series),
+                state=state,
+                rows=self.rows,
+            )
         self._refresh_labels()
 
     def add_character(self):
@@ -700,11 +768,14 @@ class VoiceCastPage(QWidget):
         name = str(name or "").strip()
         if not ok or not name or name == old_name:
             return
+        row_series = str(row.get("series") or self._series_name()).strip().casefold()
         if name.casefold() == "narrator" or any(
-            item is not row and item["name"].casefold() == name.casefold()
+            item is not row
+            and str(item.get("name") or "").strip().casefold() == name.casefold()
+            and str(item.get("series") or self._series_name()).strip().casefold() == row_series
             for item in self.rows
         ):
-            self.summary.setText("That character name already exists or is reserved for the narrator.")
+            self.summary.setText("That character name already exists in this series or is reserved for the narrator.")
             return
         row["name"] = name
         aliases = list(row.get("aliases") or [])
@@ -714,11 +785,8 @@ class VoiceCastPage(QWidget):
         folder = self._project_folder()
         if folder:
             state = load_state(folder)
-            assignments = state.get("voice_cast", {})
-            if isinstance(assignments, dict) and old_name in assignments:
-                assignments = dict(assignments)
-                assignments[name] = assignments.pop(old_name)
-                state["voice_cast"] = assignments
+            # The series-scoped identity map is rebuilt by _save_cast below.
+            # Do not rename a legacy name-only key that may belong to another series.
             if state.get("voice_cast_narrating_character") == old_name:
                 state["voice_cast_narrating_character"] = name
             save_state(folder, state)
@@ -728,57 +796,67 @@ class VoiceCastPage(QWidget):
 
 
     def _refresh_labels(self):
-        # Retain the selected identity from the existing widget, not from the
-        # newly filtered data (the filter may already have changed).
         current_item = self.list.currentItem()
+        current_identity = ""
         current_name = ""
         if current_item is not None:
             current_name = str(
                 current_item.data(Qt.ItemDataRole.UserRole)
                 or current_item.text().split("  ·  ", 1)[0]
             ).strip()
+            current_identity = str(current_item.data(Qt.ItemDataRole.UserRole + 1) or "")
 
         visible = self._visible_rows()
-        desired_names = [str(row.get("name") or "") for row in visible]
+        identities = [
+            character_identity_key(
+                str(row.get("name") or ""),
+                str(row.get("series") or self._series_name()),
+            )
+            for row in visible
+        ]
+        names = [str(row.get("name") or "") for row in visible]
+        series_by_name = {}
+        for row in visible:
+            name_key = str(row.get("name") or "").strip().casefold()
+            series_by_name.setdefault(name_key, set()).add(
+                str(row.get("series") or self._series_name()).strip().casefold()
+            )
+
         desired_labels = []
         for row in visible:
+            name = str(row.get("name") or "")
+            series = str(row.get("series") or self._series_name())
+            label_name = f"{name}  ·  {series}" if len(series_by_name.get(name.casefold(), set())) > 1 else name
             assignment = "✓ assigned" if row.get("voice") else "· unassigned"
             confidence = float(row.get("confidence", 0.0))
             band = confidence_band(confidence)
             desired_labels.append(
-                f"{row['name']}  ·  {row['dialogue_count']} cues  ·  "
-                f"{band}  ·  {assignment}"
+                f"{label_name}  ·  {row['dialogue_count']} cues  ·  {band}  ·  {assignment}"
             )
 
-        current_names = [
-            str(
-                self.list.item(index).data(Qt.ItemDataRole.UserRole)
-                or self.list.item(index).text().split("  ·  ", 1)[0]
-            ).strip()
+        current_keys = [
+            str(self.list.item(index).data(Qt.ItemDataRole.UserRole + 1) or "")
             for index in range(self.list.count())
         ]
-        stable_order = current_names == desired_names
+        stable_order = current_keys == identities
         was_blocked = self.list.blockSignals(True)
         updates_were_enabled = self.list.updatesEnabled()
         if not stable_order and updates_were_enabled:
             self.list.setUpdatesEnabled(False)
         try:
             if stable_order:
-                # Typical assignment/analysis updates only change row metadata.
-                # Update the existing items without clearing the visible list.
-                for index, (name, label) in enumerate(zip(desired_names, desired_labels)):
+                for index, (name, identity, label) in enumerate(zip(names, identities, desired_labels)):
                     item = self.list.item(index)
                     if item.text() != label:
                         item.setText(label)
-                    if item.data(Qt.ItemDataRole.UserRole) != name:
-                        item.setData(Qt.ItemDataRole.UserRole, name)
+                    item.setData(Qt.ItemDataRole.UserRole, name)
+                    item.setData(Qt.ItemDataRole.UserRole + 1, identity)
             else:
-                # Rebuild only when filtering, renaming, adding or reordering
-                # actually changes which characters appear in the list.
                 self.list.clear()
-                for name, label in zip(desired_names, desired_labels):
+                for name, identity, label in zip(names, identities, desired_labels):
                     item = QListWidgetItem(label)
                     item.setData(Qt.ItemDataRole.UserRole, name)
+                    item.setData(Qt.ItemDataRole.UserRole + 1, identity)
                     self.list.addItem(item)
         finally:
             self.list.blockSignals(was_blocked)
@@ -787,17 +865,19 @@ class VoiceCastPage(QWidget):
                 self.list.viewport().update()
 
         if visible:
-            target = 0
-            if current_name:
-                target = next(
-                    (i for i, row in enumerate(visible) if row.get("name") == current_name),
-                    0,
-                )
+            target = next((i for i, identity in enumerate(identities) if identity == current_identity), -1)
+            if target < 0 and current_name:
+                active_series = self._series_name().strip().casefold()
+                target = next((
+                    i for i, row in enumerate(visible)
+                    if str(row.get("name") or "").casefold() == current_name.casefold()
+                    and str(row.get("series") or active_series).strip().casefold() == active_series
+                ), -1)
+            if target < 0:
+                target = 0
             if self.list.currentRow() != target:
                 self.list.setCurrentRow(target)
             else:
-                # Refresh side details after an in-place label change even if
-                # the selected row itself did not move.
                 self.show_details(target)
         else:
             empty_text = "No cast members match the current filter."
@@ -805,7 +885,82 @@ class VoiceCastPage(QWidget):
                 self.details.setText(empty_text)
             if self.examples.toPlainText():
                 self.examples.clear()
+
     def _save_cast(self, *, update_names: bool = False, update_voice: bool = False):
+        folder = self._project_folder()
+        if not folder:
+            return
+
+        state = load_state(folder)
+        default_series = self._series_name()
+        if default_series:
+            state["series_name"] = default_series
+        scoped_assignments = {}
+        name_series = {}
+        for row in self.rows:
+            name = str(row.get("name") or "").strip()
+            if not name or name.casefold() == "narrator":
+                continue
+            series = str(row.get("series") or default_series).strip() or default_series
+            row["series"] = series
+            identity = character_identity_key(name, series)
+            scoped_assignments[identity] = str(row.get("voice") or "").strip()
+            name_series.setdefault(name.casefold(), set()).add(series.casefold())
+
+        state["voice_cast_character_roster"] = [
+            {
+                "name": str(row["name"]),
+                "role": row.get("role") or "Possible Character",
+                "series": str(row.get("series") or default_series),
+                "dialogue_count": int(row.get("dialogue_count") or 0),
+                "examples": list(row.get("examples") or []),
+                "confidence": float(row.get("confidence", 0.0)),
+                "aliases": list(row.get("aliases") or []),
+            }
+            for row in self.rows if row.get("name") and row["name"].casefold() != "narrator"
+        ]
+        # Persist every identity, including explicit unassigned entries, so a
+        # profile from a same-named character in another series is never borrowed.
+        state["voice_cast_identity_assignments"] = scoped_assignments
+
+        legacy_assignments = {}
+        for row in self.rows:
+            name = str(row.get("name") or "").strip()
+            if not name or name.casefold() == "narrator" or not row.get("voice"):
+                continue
+            series = str(row.get("series") or default_series).strip().casefold()
+            if len(name_series.get(name.casefold(), set())) == 1:
+                legacy_assignments[name] = row["voice"]
+
+        previous_assignments = state.get("voice_cast", {})
+        previous_assignments = previous_assignments if isinstance(previous_assignments, dict) else {}
+        narrator_assignment = next(
+            (row.get("voice") for row in self.rows if str(row.get("name") or "").casefold() == "narrator" and row.get("voice")),
+            previous_assignments.get("Narrator") or previous_assignments.get("narrator"),
+        )
+        if narrator_assignment:
+            legacy_assignments["Narrator"] = narrator_assignment
+        state["voice_cast"] = legacy_assignments
+
+        narrating = next(
+            (
+                row["name"] for row in self.rows
+                if row.get("role") == "Narrating Character" and row.get("voice")
+            ),
+            None,
+        )
+        if narrating:
+            state["voice_cast_narrating_character"] = narrating
+        else:
+            state.pop("voice_cast_narrating_character", None)
+
+        save_state(folder, state)
+        self._sync_character_library(update_names=update_names, update_voice=update_voice)
+        if hasattr(self, "dialogue_panel"):
+            self.dialogue_panel.rows = list(self.rows)
+            self.dialogue_panel.refresh_project_data()
+
+
         folder = self._project_folder()
         if not folder:
             return
