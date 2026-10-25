@@ -269,6 +269,80 @@ class UiStabilityRegressions(unittest.TestCase):
         self.assertIn("self._refresh_readiness()", profiles)
         self.assertIn("self._update_overview()", profiles)
 
+    def test_native_character_studio_chapter_refresh_preserves_items_selection_and_scroll(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication, QListWidget, QListWidgetItem, QVBoxLayout, QWidget
+        from app.chapters.detector import Chapter
+        from app.ui.native_character_studio import NativeCharacterDialoguePanel
+
+        app = QApplication.instance()
+        if app is None:
+            self.__class__._qt_app = QApplication([])
+            app = self.__class__._qt_app
+        host = QWidget()
+        layout = QVBoxLayout(host)
+        widget = QListWidget()
+        layout.addWidget(widget)
+        chapters = [Chapter(index + 1, f"Chapter {index + 1}", "Sample text") for index in range(40)]
+        for chapter in chapters:
+            item = QListWidgetItem(f"Chapter {chapter.number} · Old title")
+            item.setData(Qt.ItemDataRole.UserRole, chapter.number)
+            widget.addItem(item)
+        widget.resize(240, 240)
+        host.show()
+        app.processEvents()
+        widget.setCurrentRow(30)
+        widget.item(30).setData(Qt.ItemDataRole.UserRole + 1, "keep-this-item")
+        widget.verticalScrollBar().setValue(min(30, widget.verticalScrollBar().maximum()))
+        previous_scroll = widget.verticalScrollBar().value()
+        chapters[30].title = "Updated character chapter"
+        harness = type("Harness", (), {"_rows_for_chapter": lambda _self, _number: []})()
+
+        NativeCharacterDialoguePanel._fill_chapter_list(harness, widget, chapters, 31)
+        app.processEvents()
+
+        self.assertEqual(widget.count(), 40)
+        self.assertEqual(widget.currentRow(), 30)
+        self.assertIn("Updated character chapter", widget.item(30).text())
+        self.assertEqual(widget.item(30).data(Qt.ItemDataRole.UserRole + 1), "keep-this-item")
+        self.assertEqual(widget.verticalScrollBar().value(), min(previous_scroll, widget.verticalScrollBar().maximum()))
+        self.assertTrue(widget.updatesEnabled())
+        self.assertFalse(widget.signalsBlocked())
+        host.close()
+
+    def test_native_character_story_renderer_skips_identical_html_and_keeps_same_chapter_scroll(self):
+        from PySide6.QtWidgets import QApplication, QTextBrowser
+        from app.ui.native_character_studio import NativeCharacterDialoguePanel
+
+        app = QApplication.instance()
+        if app is None:
+            self.__class__._qt_app = QApplication([])
+            app = self.__class__._qt_app
+
+        class CountingBrowser(QTextBrowser):
+            def __init__(self):
+                super().__init__()
+                self.html_write_count = 0
+
+            def setHtml(self, html):
+                self.html_write_count += 1
+                super().setHtml(html)
+
+        browser = CountingBrowser()
+        harness = type("Harness", (), {"_story_render_hashes": {}})()
+        long_html = "<html><body>" + ("story line<br>" * 300) + "</body></html>"
+        NativeCharacterDialoguePanel._set_story_html(harness, browser, False, long_html, 1)
+        browser.verticalScrollBar().setValue(min(40, browser.verticalScrollBar().maximum()))
+        previous_scroll = browser.verticalScrollBar().value()
+        NativeCharacterDialoguePanel._set_story_html(harness, browser, False, long_html, 1)
+        self.assertEqual(browser.html_write_count, 1, "identical story content should not reset the QTextBrowser document")
+        changed_html = "<html><body>" + ("revised story line<br>" * 300) + "</body></html>"
+        NativeCharacterDialoguePanel._set_story_html(harness, browser, False, changed_html, 1)
+        self.assertEqual(browser.html_write_count, 2)
+        self.assertEqual(browser.verticalScrollBar().value(), min(previous_scroll, browser.verticalScrollBar().maximum()))
+        browser.close()
+        app.processEvents()
+
     def test_page_navigation_avoids_opacity_effects_and_keeps_handlers(self):
         source = (ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")
         transition = source.split("def _show_page", 1)[1].split("def _sidebar_item_clicked", 1)[0]

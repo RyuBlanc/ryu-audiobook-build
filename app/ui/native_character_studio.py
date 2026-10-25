@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import hashlib
 from dataclasses import replace
 from html import escape
 from pathlib import Path
@@ -634,6 +635,7 @@ class NativeCharacterDialoguePanel(QWidget):
         self._preview_worker: VoicePreviewWorker | None = None
         self._preview_status_router: NativeCharacterPreviewCallbackRouter | None = None
         self._preview_dir: Path | None = None
+        self._story_render_hashes: dict[str, tuple[int | None, bytes]] = {}
 
         self._audio_output = QAudioOutput(self)
         self._audio_output.setVolume(0.78)
@@ -803,30 +805,66 @@ class NativeCharacterDialoguePanel(QWidget):
                 current = int(widget.currentItem().data(Qt.ItemDataRole.UserRole))
             except (TypeError, ValueError):
                 current = None
+
+        desired = []
+        for chapter in chapters:
+            number = int(getattr(chapter, "number", 0) or 0)
+            title = str(getattr(chapter, "title", "") or f"Chapter {number}")
+            unresolved = sum(
+                1 for row in self._rows_for_chapter(number)
+                if not row.get("assigned") and not row.get("skipped")
+            )
+            label = f"Chapter {number} · {title}"
+            if unresolved:
+                label += f"  ·  {unresolved} review"
+            desired.append((number, label))
+
+        previous_scroll = widget.verticalScrollBar().value()
         was_blocked = widget.blockSignals(True)
+        updates_were_enabled = widget.updatesEnabled()
+        if updates_were_enabled:
+            widget.setUpdatesEnabled(False)
         try:
-            widget.clear()
-            for chapter in chapters:
-                number = int(getattr(chapter, "number", 0) or 0)
-                title = str(getattr(chapter, "title", "") or f"Chapter {number}")
-                unresolved = sum(
-                    1 for row in self._rows_for_chapter(number)
-                    if not row.get("assigned") and not row.get("skipped")
-                )
-                label = f"Chapter {number} · {title}"
-                if unresolved:
-                    label += f"  ·  {unresolved} review"
-                item = QListWidgetItem(label)
-                item.setData(Qt.ItemDataRole.UserRole, number)
-                widget.addItem(item)
-                if current == number:
-                    widget.setCurrentItem(item)
-            if widget.currentRow() < 0 and widget.count():
-                widget.setCurrentRow(0)
+            existing_numbers = []
+            for index in range(widget.count()):
+                try:
+                    existing_numbers.append(int(widget.item(index).data(Qt.ItemDataRole.UserRole)))
+                except (TypeError, ValueError):
+                    existing_numbers.append(None)
+            desired_numbers = [number for number, _label in desired]
+
+            if existing_numbers == desired_numbers:
+                # The chapter identities/order did not change. Update only labels so
+                # selection, scroll, item metadata and the live QListWidgetItems survive.
+                for index, (number, label) in enumerate(desired):
+                    item = widget.item(index)
+                    if item.text() != label:
+                        item.setText(label)
+                    if item.data(Qt.ItemDataRole.UserRole) != number:
+                        item.setData(Qt.ItemDataRole.UserRole, number)
+            else:
+                widget.clear()
+                for number, label in desired:
+                    item = QListWidgetItem(label)
+                    item.setData(Qt.ItemDataRole.UserRole, number)
+                    widget.addItem(item)
+
+            target = next(
+                (index for index in range(widget.count())
+                 if widget.item(index).data(Qt.ItemDataRole.UserRole) == current),
+                0 if widget.count() else -1,
+            )
+            widget.setCurrentRow(target)
         finally:
             widget.blockSignals(was_blocked)
-        if widget.currentRow() < 0 and chapters:
-            widget.setCurrentRow(0)
+            if updates_were_enabled:
+                widget.setUpdatesEnabled(True)
+            widget.verticalScrollBar().setValue(
+                min(max(previous_scroll, widget.verticalScrollBar().minimum()),
+                    widget.verticalScrollBar().maximum())
+            )
+            if updates_were_enabled:
+                widget.viewport().update()
 
     def _rows_for_chapter(self, number: int) -> list[dict]:
         return [dict(row) for row in self._review_rows if int(row.get("chapter_number", 0)) == int(number)]
@@ -900,15 +938,46 @@ class NativeCharacterDialoguePanel(QWidget):
             rows.append(row)
         return sorted(rows, key=lambda row: (row["start"], row["end"]))
 
+    def _set_story_html(
+        self,
+        browser: QTextBrowser,
+        ai_mode: bool,
+        html: str,
+        chapter_number: int | None,
+    ) -> None:
+        """Skip unchanged story-document reloads and preserve same-chapter scroll."""
+        key = "ai" if ai_mode else "manual"
+        digest = hashlib.sha256(html.encode("utf-8")).digest()
+        previous = self._story_render_hashes.get(key)
+        signature = (chapter_number, digest)
+        if previous == signature:
+            return
+
+        same_chapter = previous is not None and previous[0] == chapter_number
+        vertical = browser.verticalScrollBar().value() if same_chapter else 0
+        horizontal = browser.horizontalScrollBar().value() if same_chapter else 0
+        browser.setHtml(html)
+        self._story_render_hashes[key] = signature
+        if same_chapter:
+            browser.verticalScrollBar().setValue(
+                min(vertical, browser.verticalScrollBar().maximum())
+            )
+            browser.horizontalScrollBar().setValue(
+                min(horizontal, browser.horizontalScrollBar().maximum())
+            )
+
     def _render_current_chapter(self, ai_mode: bool):
         chapters_widget = self.ai_chapters if ai_mode else self.manual_chapters
         browser = self.ai_story if ai_mode else self.manual_story
         item = chapters_widget.currentItem()
         chapter = self._chapter_by_number(int(item.data(Qt.ItemDataRole.UserRole))) if item else None
         if chapter is None:
-            browser.setHtml(
+            self._set_story_html(
+                browser,
+                ai_mode,
                 '<div style="color:#aeb6c5;padding:24px;">'
-                '<b>No project chapters found.</b><br>Open or import a local book to load live chapter text.</div>'
+                '<b>No project chapters found.</b><br>Open or import a local book to load live chapter text.</div>',
+                None,
             )
             return
         source = str(getattr(chapter, "text", "") or "")
@@ -943,7 +1012,7 @@ class NativeCharacterDialoguePanel(QWidget):
             )
             cursor = end
         pieces.append(escape(source[cursor:]).replace("\n", "<br>"))
-        browser.setHtml(
+        html = (
             '<html><body style="background:#0b0e14;color:#e9edf5;'
             'font-family:Segoe UI;font-size:12pt;line-height:1.65;padding:12px;">' +
             ("".join(pieces) if source.strip() else
@@ -951,6 +1020,7 @@ class NativeCharacterDialoguePanel(QWidget):
              'Load or save source text in Chapter Studio.</div>') +
             "</body></html>"
         )
+        self._set_story_html(browser, ai_mode, html, int(chapter.number))
         pending = sum(1 for row in rows if not row.get("assigned") and not row.get("skipped"))
         prefix = "AI review" if ai_mode else "Character assigning"
         message = f"{prefix} · Chapter {chapter.number} · {len(rows)} source passage(s) · {pending} awaiting review"
