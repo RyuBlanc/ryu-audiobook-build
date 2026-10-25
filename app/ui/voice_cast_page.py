@@ -9,12 +9,14 @@ from PySide6.QtWidgets import (
     QInputDialog,
 )
 
-from app.chapters.characters import analyze_book
+from app.chapters.characters import Character, analyze_book, _is_plausible_name
+from app.chapters.dialogue import dialogue_segments
+from app.chapters.character_learning import load_learning_examples, rank_speaker_suggestions
 from app.chapters.detector import detect_chapters
 from app.documents.parser import extract_text
 from app.tts.voice_profile import load_profiles
 from app.core.state import load_state, save_state
-from app.core.character_library import sync_characters
+from app.core.character_library import sync_characters, list_characters as list_reusable_characters
 
 
 class VoiceCastAnalysisWorker(QThread):
@@ -22,10 +24,130 @@ class VoiceCastAnalysisWorker(QThread):
     failed = Signal(str)
     progress = Signal(str)
 
-    def __init__(self, chapters, source_path=None):
+    def __init__(self, chapters, source_path=None, series_name: str = "", known_characters=None):
         super().__init__()
         self.chapters = list(chapters or [])
         self.source_path = source_path
+        self.series_name = str(series_name or "").strip()
+        self.known_characters = [dict(row) for row in (known_characters or []) if isinstance(row, dict)]
+
+    def _apply_series_learning(self, chapters, analysis):
+        """Blend explicit source evidence and saved corrections into the native cast view."""
+        feedback = load_learning_examples(self.series_name) if self.series_name else []
+        try:
+            shared = list_reusable_characters(self.series_name) if self.series_name else []
+        except Exception:
+            shared = []
+        rows = [*self.known_characters, *shared]
+        for item in analysis.characters:
+            rows.append({
+                "name": item.name, "aliases": list(item.aliases or []),
+                "role": item.role, "confidence": item.confidence,
+            })
+        for example in feedback:
+            rows.append({"name": example.get("speaker"), "aliases": example.get("aliases") or []})
+        cast_map = {}
+        for row in rows:
+            name = str(row.get("name") or row.get("primary_name") or "").strip()
+            if not name or not _is_plausible_name(name):
+                continue
+            aliases = row.get("aliases") or []
+            if isinstance(aliases, str):
+                aliases = [aliases]
+            aliases = list(dict.fromkeys(str(value).strip() for value in aliases
+                                         if str(value or "").strip()))
+            key = name.casefold()
+            existing = cast_map.get(key)
+            if existing is None:
+                cast_map[key] = {**row, "name": name, "aliases": aliases}
+            else:
+                existing["aliases"] = list(dict.fromkeys([*existing.get("aliases", []), *aliases]))
+        cast_rows = list(cast_map.values())
+        alias_lookup = {}
+        for row in cast_rows:
+            alias_lookup[row["name"].casefold()] = row["name"]
+            for alias in row.get("aliases", []):
+                alias_lookup.setdefault(str(alias).casefold(), row["name"])
+
+        counts, examples, confidences = {}, {}, {}
+        last_by_name = {}
+        for chapter in chapters:
+            source = str(chapter.text or "")
+            last_speaker = ""
+            assignments = [row for row in (getattr(chapter, "dialogue_assignments", []) or []) if isinstance(row, dict)]
+            try:
+                segments = dialogue_segments(chapter)
+            except Exception:
+                self.progress.emit(f"Learning pass skipped a malformed dialogue segment in Chapter {chapter.number}.")
+                continue
+            for segment in segments:
+                start, end = int(segment.start), int(segment.end)
+                if start < 0 or end <= start or end > len(source):
+                    continue
+                exact = source[start:end]
+                manual = next((row for row in assignments
+                    if int(row.get("start", -1)) == start and int(row.get("end", -1)) == end
+                    and source[start:end] == str(row.get("text") or exact)), None)
+                speakers = []
+                confidence = 0.0
+                evidence = ""
+                if manual:
+                    raw_speakers = manual.get("speakers") if isinstance(manual.get("speakers"), list) else (
+                        [manual.get("speaker")] if manual.get("speaker") else []
+                    )
+                    if len(raw_speakers) == 1:
+                        canonical = alias_lookup.get(str(raw_speakers[0]).strip().casefold(), str(raw_speakers[0]).strip())
+                        if canonical:
+                            speakers, confidence, evidence = [canonical], 1.0, "Explicit saved speaker assignment."
+                if not speakers:
+                    detected = [
+                        {"name": str(name), "confidence": float(score), "evidence": str(reason)}
+                        for name, score, reason in (segment.suggestions or [])
+                    ]
+                    ranked = rank_speaker_suggestions(
+                        chapter_text=source, start=start, end=end,
+                        detected=detected, known_characters=cast_rows,
+                        learning_examples=feedback, last_speaker=last_speaker,
+                    )
+                    if ranked and float(ranked[0].get("confidence") or 0.0) >= 0.78:
+                        best = ranked[0]
+                        speakers = [str(best.get("name") or "")]
+                        confidence = float(best.get("confidence") or 0.0)
+                        evidence = str(best.get("evidence") or "")
+                if not speakers or not speakers[0]:
+                    continue
+                name = alias_lookup.get(speakers[0].casefold(), speakers[0])
+                counts[name] = counts.get(name, 0) + 1
+                examples.setdefault(name, [])
+                if exact and exact not in examples[name] and len(examples[name]) < 8:
+                    examples[name].append(exact)
+                confidences[name] = max(confidences.get(name, 0.0), confidence)
+                if confidence >= 0.85:
+                    last_speaker = name
+                elif not last_speaker:
+                    last_speaker = ""
+        existing = {str(item.name).casefold(): item for item in analysis.characters}
+        for row in cast_rows:
+            name = row["name"]
+            key = name.casefold()
+            if key not in existing:
+                analysis.characters.append(Character(
+                    name=name, role=str(row.get("role") or "Series character"),
+                    dialogue_count=counts.get(name, 0), examples=examples.get(name, []),
+                    confidence=max(float(row.get("confidence") or 0.0), confidences.get(name, 0.0)),
+                    aliases=list(row.get("aliases") or []),
+                ))
+                existing[key] = analysis.characters[-1]
+        for item in analysis.characters:
+            name = alias_lookup.get(str(item.name).casefold(), item.name)
+            if name in counts:
+                item.dialogue_count = counts[name]
+                item.examples = examples.get(name, []) or item.examples
+                item.confidence = max(float(item.confidence or 0.0), confidences.get(name, 0.0))
+            canonical_row = cast_map.get(str(name).casefold())
+            if canonical_row:
+                item.aliases = list(dict.fromkeys([*(item.aliases or []), *(canonical_row.get("aliases") or [])]))
+        return analysis
 
     def run(self) -> None:
         try:
@@ -50,6 +172,9 @@ class VoiceCastAnalysisWorker(QThread):
 
             self.progress.emit("Analyzing characters and dialogue cues…")
             analysis = analyze_book(chapters)
+            if self.series_name:
+                self.progress.emit(f"Applying confirmed speaker corrections for {self.series_name}…")
+            analysis = self._apply_series_learning(chapters, analysis)
             self.finished_ok.emit(chapters, analysis, source_used)
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -370,7 +495,9 @@ class VoiceCastPage(QWidget):
 
         self.analyze_button.setEnabled(False)
         self.summary.setText("Preparing character analysis… The interface remains responsive.")
-        self.analysis_worker = VoiceCastAnalysisWorker(chapters, source)
+        self.analysis_worker = VoiceCastAnalysisWorker(
+            chapters, source, series_name=self._series_name(), known_characters=self.rows
+        )
         self.analysis_worker.progress.connect(self.summary.setText)
         self.analysis_worker.finished_ok.connect(self._analysis_finished)
         self.analysis_worker.failed.connect(self._analysis_failed)
