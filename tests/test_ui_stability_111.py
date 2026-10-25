@@ -204,6 +204,55 @@ class UiStabilityRegressions(unittest.TestCase):
         self.assertTrue(page.updatesEnabled())
         page.close()
 
+    def test_voice_profile_combo_refresh_preserves_rows_and_selection_without_clearing(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication, QComboBox
+        from app.ui.voice_page import _sync_combo_items_in_place
+
+        app = QApplication.instance() or QApplication([])
+        combo = QComboBox()
+        combo.addItem("Alpha • Local", "alpha")
+        combo.addItem("Beta • Qwen", "beta")
+        combo.setItemData(1, "preserve-extra-role", Qt.ItemDataRole.UserRole + 1)
+        combo.setCurrentIndex(1)
+
+        _sync_combo_items_in_place(
+            combo,
+            [("Alpha • Local", "alpha"), ("Beta • Qwen", "beta")],
+            "beta",
+        )
+
+        self.assertEqual(combo.count(), 2)
+        self.assertEqual(combo.currentData(), "beta")
+        self.assertEqual(
+            combo.itemData(1, Qt.ItemDataRole.UserRole + 1),
+            "preserve-extra-role",
+            "unchanged rows must not be destroyed/recreated during refresh",
+        )
+        self.assertFalse(combo.signalsBlocked())
+        self.assertTrue(combo.updatesEnabled())
+        combo.close()
+        app.processEvents()
+
+    def test_voice_profile_combo_refresh_restores_state_when_an_item_update_fails(self):
+        from PySide6.QtWidgets import QApplication, QComboBox
+        from app.ui.voice_page import _sync_combo_items_in_place
+
+        app = QApplication.instance() or QApplication([])
+        combo = QComboBox()
+        combo.addItem("Existing", "existing")
+        combo.show()
+        app.processEvents()
+
+        with self.assertRaises(TypeError):
+            _sync_combo_items_in_place(combo, [(object(), "existing")], "existing")
+
+        self.assertFalse(combo.signalsBlocked())
+        self.assertTrue(combo.updatesEnabled())
+        self.assertEqual(combo.count(), 1)
+        combo.close()
+        app.processEvents()
+
     def test_page_navigation_avoids_opacity_effects_and_keeps_handlers(self):
         source = (ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")
         transition = source.split("def _show_page", 1)[1].split("def _sidebar_item_clicked", 1)[0]
