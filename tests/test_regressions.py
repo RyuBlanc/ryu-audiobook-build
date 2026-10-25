@@ -266,14 +266,19 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn("qwen_design_preview_duration", source)
         self.assertNotIn("test_profile_button", source)
 
-    def test_qwen_design_preview_uses_stable_identity_base_model(self):
+    def test_qwen_design_preview_uses_one_pass_voice_design_model(self):
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
+        host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn('"design-preview"', provider)
-        self.assertIn('best_long_form_clone_kind()', provider)
-        self.assertIn("_generate_design_locked(", worker)
-        self.assertIn('_create_expression_anchors', worker)
-        self.assertIn('EXPRESSION_STYLES', worker)
+        self.assertIn('if self.qwen_mode in {"design", "design-preview"}:', provider)
+        self.assertIn("self.model_kind = best_voice_design_kind()", provider)
+        self.assertIn('elif active_task == "design-preview":', worker)
+        self.assertIn("_generate_design_preview(model, request, output)", worker)
+        self.assertIn('elif active_task == "design":', worker)
+        self.assertIn("_generate_design_locked(model, locked_clone_prompts, request, output)", worker)
+        self.assertIn('preview_profile.qwen_mode = "design-preview"', host)
+        self.assertIn("performance_target_met", host)
 
     def test_qwen_voice_consistency_uses_design_anchor_and_base_prompt(self):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
@@ -434,17 +439,19 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("recommended_batch_size", provider)
         self.assertIn('"texts":', provider)
 
-    def test_qwen_voicedesign_preview_and_audiobook_share_stable_identity(self):
+    def test_qwen_voicedesign_preview_is_fast_and_production_keeps_identity_lock(self):
         worker = Path("app/tts/qwen_character_worker.py").read_text(encoding="utf-8")
         provider = Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
+        host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         voice_page = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
-        self.assertIn('if active_task in {"design", "design-preview"}:', worker)
-        self.assertIn("_prepare_design_clone(", worker)
-        self.assertIn("_generate_design_locked(", worker)
+        self.assertIn('if active_task == "design":', worker)
+        self.assertIn('elif active_task == "design-preview":', worker)
+        self.assertIn("_generate_design_preview(model, request, output)", worker)
+        self.assertIn("_generate_design_locked(model, locked_clone_prompts, request, output)", worker)
         self.assertIn("_create_expression_anchors", worker)
-        self.assertIn('prompts[style] = clone_model.create_voice_clone_prompt', worker)
         self.assertIn('"outputs": [str(Path(str(path)).resolve()) for path in batch_outputs]', worker)
         self.assertIn('qwen_mode="design"', voice_page)
+        self.assertIn('preview_profile.qwen_mode = "design-preview"', host)
         self.assertIn('best_long_form_clone_kind()', provider)
         self.assertIn('"--clone-kind", clone_kind or best_clone_kind()', provider)
 
