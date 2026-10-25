@@ -436,6 +436,20 @@ class UiStabilityRegressions(unittest.TestCase):
         app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
 
+    def test_models_center_inventory_refresh_reuses_rows_and_preserves_component_selection(self):
+        source = (ROOT / "app/ui/models_page.py").read_text(encoding="utf-8")
+        refresh = source.split("def refresh(self) -> None:", 1)[1].split(
+            "\n    def _update_uninstall_button(", 1
+        )[0]
+
+        self.assertIn("desired_rows.append((label, component_id, tooltip))", refresh)
+        self.assertIn("selected_id = selected.data(Qt.ItemDataRole.UserRole)", refresh)
+        self.assertIn("self.list.setCurrentRow(target_row)", refresh)
+        self.assertIn("self.list.takeItem(self.list.count() - 1)", refresh)
+        self.assertNotIn("self.list.clear()", refresh)
+        self.assertIn("self.list.blockSignals(True)", refresh)
+        self.assertIn("self.list.setUpdatesEnabled(False)", refresh)
+
     def test_voice_cast_profile_refresh_uses_shared_in_place_sync(self):
         source = (ROOT / "app/ui/voice_cast_page.py").read_text(encoding="utf-8")
         body = source.split("def refresh_profiles(self):", 1)[1].split(

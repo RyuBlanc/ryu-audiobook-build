@@ -417,14 +417,19 @@ class ModelsPage(QWidget):
 
     @stable_view_refresh
     def refresh(self) -> None:
-        self.list.clear()
+        selected = self.list.currentItem()
+        selected_label = selected.text() if selected else None
+        selected_id = selected.data(Qt.ItemDataRole.UserRole) if selected else None
+        scroll = self.list.verticalScrollBar()
+        previous_scroll = scroll.value()
+        desired_rows: list[tuple[str, str | None, str]] = []
 
         def add_component(label: str, component_id: str | None = None) -> None:
-            item = QListWidgetItem(label)
-            item.setData(Qt.ItemDataRole.UserRole, component_id)
-            if component_id is None:
-                item.setToolTip("This item is bundled, not installed separately, or not currently removable.")
-            self.list.addItem(item)
+            tooltip = (
+                "This item is bundled, not installed separately, or not currently removable."
+                if component_id is None else ""
+            )
+            desired_rows.append((label, component_id, tooltip))
 
         piper_root = models_root() / "piper"
         user_voices = [
@@ -492,6 +497,50 @@ class ModelsPage(QWidget):
             add_component("Audiobook AI — runtime/model files installed", "audiobook-ai")
         else:
             add_component("Audiobook AI — Not installed")
+
+        was_blocked = self.list.blockSignals(True)
+        updates_were_enabled = self.list.updatesEnabled()
+        if updates_were_enabled:
+            self.list.setUpdatesEnabled(False)
+        try:
+            # Reuse existing rows in their current order. The previous clear/add
+            # cycle discarded selection and item data every time inventory refreshed.
+            for index, (label, component_id, tooltip) in enumerate(desired_rows):
+                if index < self.list.count():
+                    item = self.list.item(index)
+                    if item.text() != label:
+                        item.setText(label)
+                    if item.data(Qt.ItemDataRole.UserRole) != component_id:
+                        item.setData(Qt.ItemDataRole.UserRole, component_id)
+                    if item.toolTip() != tooltip:
+                        item.setToolTip(tooltip)
+                else:
+                    item = QListWidgetItem(label)
+                    item.setData(Qt.ItemDataRole.UserRole, component_id)
+                    item.setToolTip(tooltip)
+                    self.list.addItem(item)
+
+            while self.list.count() > len(desired_rows):
+                self.list.takeItem(self.list.count() - 1)
+
+            target_row = -1
+            for index, (label, component_id, _tooltip) in enumerate(desired_rows):
+                if selected_id is not None and component_id == selected_id:
+                    target_row = index
+                    break
+                if selected_id is None and selected_label == label and component_id is None:
+                    target_row = index
+                    break
+            self.list.setCurrentRow(target_row)
+        finally:
+            self.list.blockSignals(was_blocked)
+            if updates_were_enabled:
+                self.list.setUpdatesEnabled(True)
+            scroll.setValue(
+                min(max(previous_scroll, scroll.minimum()), scroll.maximum())
+            )
+            if updates_were_enabled:
+                self.list.viewport().update()
 
         self._update_uninstall_button()
         self.status.setText("Model inventory refreshed from this PC.")
