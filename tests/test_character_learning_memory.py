@@ -8,6 +8,7 @@ from app.chapters.character_learning import (
     rank_speaker_suggestions,
     record_assignment_feedback,
     remove_assignment_feedback,
+    source_grounded_speaker_for_continuity,
 )
 from app.chapters.characters import _is_plausible_name
 
@@ -92,6 +93,29 @@ class CharacterLearningMemoryTests(unittest.TestCase):
         self.assertTrue(ranked)
         self.assertEqual(ranked[0]["name"], "Souei")
         self.assertIn("Pronoun speech tag", ranked[0]["evidence"])
+
+    def test_unconfirmed_high_confidence_guess_does_not_become_speaker_anchor(self):
+        # Similarity/learning scores may be useful suggestions, but they are not
+        # explicit source proof and must not cascade into later pronoun guesses.
+        learned_match = [{
+            "name": "Souei", "confidence": 0.97,
+            "evidence": "Matches a confirmed example for Souei (context similarity 99%).",
+        }]
+        self.assertEqual(source_grounded_speaker_for_continuity(learned_match), "")
+
+        saved_cast_fallback = [{
+            "name": "Souei", "confidence": 0.90,
+            "evidence": "Saved character in this series; no strong local speech evidence yet.",
+        }]
+        self.assertEqual(source_grounded_speaker_for_continuity(saved_cast_fallback), "")
+
+    def test_direct_name_and_speech_tag_can_anchor_pronoun_continuity(self):
+        direct = [{
+            "name": "Souei", "confidence": 0.97,
+            "evidence": "Explicit character name and speech tag found next to this passage.",
+        }]
+        self.assertEqual(source_grounded_speaker_for_continuity(direct), "Souei")
+        self.assertEqual(source_grounded_speaker_for_continuity([]), "")
 
     def test_confirmed_examples_improve_later_context_ranking_and_are_removed_on_unassign(self):
         with tempfile.TemporaryDirectory() as folder:
