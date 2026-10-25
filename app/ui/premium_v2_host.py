@@ -2655,7 +2655,7 @@ class PremiumV2Bridge(QObject):
             "dialogue_sample": str(payload.get("dialogue_sample") or
                                    ((match.get("examples") or [""])[0] if match.get("examples") else "")),
         }
-        if "voice_profile" in payload:
+        if "voice_profile" in payload and profile_name:
             library_payload["voice_profile"] = profile_name
         saved_library = self._character_library_save(library_payload)
         # _character_library_save already wrote this character in the explicitly
@@ -3215,12 +3215,18 @@ class PremiumV2Bridge(QObject):
                 if isinstance(cast, list):
                     primary_key = str(record.get("primary_name") or name).casefold()
                     aliases_key = {str(value).casefold() for value in (record.get("aliases") or [])}
+                    active_series = self._project_series_name(active_project, state)
+                    record_series = str(record.get("series") or "").strip()
+                    # A same-named character from another series must never inherit
+                    # this profile by accident. Resolve project targets by series too.
                     target = next((item for item in cast if isinstance(item, dict) and (
                         str(item.get("name") or "").casefold() == primary_key
                         or str(item.get("name") or "").casefold() in aliases_key
+                    ) and (
+                        str(item.get("series") or "").casefold() == record_series.casefold()
+                        or (not str(item.get("series") or "").strip()
+                            and active_series.casefold() == record_series.casefold())
                     )), None)
-                    active_series = self._project_series_name(active_project, state)
-                    record_series = str(record.get("series") or "").strip()
                     # A primary character newly created from Voice Studio should also
                     # appear in Character Studio when its series is the active book's
                     # series. Do not insert characters from unrelated series into this cast.
