@@ -2768,9 +2768,65 @@ class PremiumV2Bridge(QObject):
 
     def _character_worker(self, job_id: str, project) -> None:
         try:
-            analysis = analyze_book(project.chapters)
             state = load_state(project.folder)
-            old = {str(c.get("name", "")).casefold(): c for c in (state.get("characters") or []) if isinstance(c, dict)}
+            series_name = self._project_series_name(project, state)
+            saved_rows = [dict(row) for row in (state.get("characters") or []) if isinstance(row, dict)]
+            library_rows = list_reusable_characters(series_name)
+            raw_text = "\n\n".join(str(chapter.text or "") for chapter in project.chapters)
+            from app.chapters.characters import NAME_STOPWORDS, _discover_explicit_speakers
+            from app.chapters.character_learning import load_learning_examples, rank_speaker_suggestions
+            explicit_names = {str(name).casefold() for name in _discover_explicit_speakers(raw_text)}
+            stopwords = {str(value).casefold() for value in NAME_STOPWORDS}
+            trusted_rows = []
+            trusted_keys = set()
+            for row in [*saved_rows, *library_rows]:
+                name = str(row.get("name") or row.get("primary_name") or "").strip()
+                aliases = row.get("aliases") or []
+                aliases = aliases if isinstance(aliases, (list, tuple)) else []
+                # Previously auto-detected labels are not automatically trusted.
+                # A saved voice, manual creation/edit, series-level registry entry,
+                # or prior confirmed dialogue assignment is user-backed evidence.
+                trusted = bool(
+                    row.get("user_created") or row.get("manual") or row.get("voice_profile")
+                    or row.get("voice_name") or row.get("short_description") or row.get("notes")
+                    or (row.get("series") and row.get("primary_name"))
+                )
+                if trusted and name:
+                    trusted_rows.append(row)
+                    trusted_keys.add(name.casefold())
+                    trusted_keys.update(str(alias).strip().casefold() for alias in aliases if str(alias or "").strip())
+            for chapter in project.chapters:
+                for assignment in (getattr(chapter, "dialogue_assignments", []) or []):
+                    if not isinstance(assignment, dict):
+                        continue
+                    raw_speakers = assignment.get("speakers")
+                    if not isinstance(raw_speakers, (list, tuple)):
+                        raw_speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
+                    for speaker in raw_speakers:
+                        clean_speaker = str(speaker or "").strip()
+                        if clean_speaker:
+                            trusted_keys.add(clean_speaker.casefold())
+                            trusted_rows.append({"name": clean_speaker, "aliases": []})
+
+            analysis = analyze_book(project.chapters)
+            # Filter ordinary capitalized words out of the cast unless the text
+            # supplies explicit attribution, the name is already trusted, or it
+            # appears repeatedly enough in narration to be a credible identity.
+            def credible_candidate(candidate) -> bool:
+                name = str(getattr(candidate, "name", "") or "").strip()
+                key = name.casefold()
+                if not name or key in stopwords:
+                    return False
+                if key in trusted_keys or key in explicit_names:
+                    return True
+                count = len(re.findall(r"(?<!\w)" + re.escape(name) + r"(?!\w)", raw_text, re.IGNORECASE))
+                if len(name.split()) > 1:
+                    return count >= 2
+                return count >= 4
+
+            analysis.characters = [candidate for candidate in analysis.characters if credible_candidate(candidate)]
+            old = {str(c.get("name", "")).casefold(): c for c in saved_rows}
+            learning_examples = load_learning_examples(series_name)
             items = []
             item_names = set()
             for c in analysis.characters:
@@ -2784,7 +2840,9 @@ class PremiumV2Bridge(QObject):
             # Analysis refreshes must not silently discard characters the user
             # manually created or imported from the reusable Character Library.
             for old_name, prior in old.items():
-                if old_name and old_name not in item_names:
+                if old_name and old_name not in item_names and (
+                    old_name in trusted_keys or bool(prior.get("user_created")) or bool(prior.get("voice_profile"))
+                ):
                     items.append(dict(prior))
                     item_names.add(old_name)
             # Store dialogue evidence and ranked, deterministic speaker suggestions with
@@ -2792,10 +2850,34 @@ class PremiumV2Bridge(QObject):
             from app.chapters.dialogue import dialogue_segments
             suggestions = []
             max_suggestions = 3000
+            known_cast = [*trusted_rows, *items]
+            # Deduplicate canonical names while preserving every saved alias.
+            dedup_known = {}
+            for row in known_cast:
+                if not isinstance(row, dict):
+                    continue
+                name = str(row.get("name") or row.get("primary_name") or "").strip()
+                if not name:
+                    continue
+                key = name.casefold()
+                current = dedup_known.get(key)
+                aliases = row.get("aliases") or []
+                aliases = list(aliases) if isinstance(aliases, (list, tuple)) else ([aliases] if aliases else [])
+                if current is None:
+                    dedup_known[key] = {**row, "name": name, "aliases": aliases}
+                else:
+                    current["aliases"] = list(dict.fromkeys([*(current.get("aliases") or []), *aliases]))
+            known_cast = list(dedup_known.values())
             for chapter in project.chapters:
                 if len(suggestions) >= max_suggestions:
                     break
-                for segment in dialogue_segments(chapter):
+                last_speaker = ""
+                segments = dialogue_segments(chapter)
+                saved_assignments = [
+                    row for row in (getattr(chapter, "dialogue_assignments", []) or [])
+                    if isinstance(row, dict)
+                ]
+                for segment in segments:
                     if len(suggestions) >= max_suggestions:
                         break
                     source = str(chapter.text or "")
@@ -2803,18 +2885,37 @@ class PremiumV2Bridge(QObject):
                     if start < 0 or end <= start or end > len(source):
                         continue
                     exact = source[start:end]
-                    candidates = [
+                    detected = [
                         {"name": str(name), "confidence": round(float(confidence), 4), "evidence": str(evidence)}
                         for name, confidence, evidence in (segment.suggestions or [])
                         if str(name).strip()
-                    ][:5]
+                    ]
+                    candidates = rank_speaker_suggestions(
+                        chapter_text=source, start=start, end=end, detected=detected,
+                        known_characters=known_cast, learning_examples=learning_examples,
+                        last_speaker=last_speaker,
+                    )
+                    assigned = next((row for row in saved_assignments
+                        if int(row.get("start", -1)) == start and int(row.get("end", -1)) == end
+                        and str(row.get("text") or exact) == exact), None)
+                    assigned_speakers = (
+                        list(assigned.get("speakers") or []) if assigned and isinstance(assigned.get("speakers"), list)
+                        else ([str(assigned.get("speaker"))] if assigned and assigned.get("speaker") else [])
+                    )
+                    if assigned_speakers:
+                        last_speaker = str(assigned_speakers[0])
+                    elif candidates and float(candidates[0].get("confidence") or 0.0) >= 0.88:
+                        last_speaker = str(candidates[0].get("name") or "")
+                    best = candidates[0] if candidates else {}
+                    best_confidence = float(best.get("confidence") or 0.0)
                     suggestions.append({
                         "id": f"dialogue-{int(chapter.number)}-{start}-{end}",
                         "chapter_number": int(chapter.number), "chapter_title": str(chapter.title or ""),
                         "start": start, "end": end, "source_text": exact, "text": exact,
-                        "suggested_speaker": str(segment.suggested_speaker or ""),
-                        "confidence": round(float(segment.confidence or 0.0), 4),
-                        "suggestions": candidates, "assigned_speakers": [], "assigned": False,
+                        "suggested_speaker": str(best.get("name") or "") if best_confidence >= 0.78 else "",
+                        "confidence": round(best_confidence, 4),
+                        "suggestions": candidates, "assigned_speakers": assigned_speakers,
+                        "assigned": bool(assigned_speakers),
                         "source": "local-dialogue-analysis",
                     })
             state["characters"] = items
