@@ -746,3 +746,29 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($semanticVersion)) { throw "Application version was not exported by the validated build step for release tagging." }
           $tag = "v$semanticVersion-build-${{ github.run_number }}"
           gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, the Obsidian/Ember dragon-tech interface, global Reduce Motion preference, a local-first audio catalogue with 26 real starter BGM tracks across calm, fantasy, adventure, comedy, action, sci-fi, emotional, mystery, horror and slice-of-life moods, plus six real book opening/page-turn/closing sound cues. Add licensed tracks through Generate > Real BGM catalogue / Real audiobook cue files. Includes Qwen VoiceDesign preset isolation, audiobook AI smoke validation, Chatterbox runtime validation, frozen EXE checks and installer verification. Starter-track source and license notes are included beside the local audio library." --target $env:GITHUB_SHA
+  # Run storage cleanup even when tests/package validation fails, so old
+  # failed/cancelled runs do not accumulate indefinitely. The cleanup script
+  # preserves the latest successful run whenever this run did not pass.
+  cleanup:
+    name: Clean stale Actions runs and storage
+    if: always()
+    needs: [tests, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Checkout cleanup script
+        uses: actions/checkout@v4
+      - name: Prune stale completed runs and attached storage
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+          CURRENT_WORKFLOW_NAME: ${{ github.workflow }}
+          PRUNE_CURRENT_WORKFLOW_TO_CURRENT: ${{ needs.build.result == 'success' }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./.github/scripts/cleanup_actions_storage.ps1
