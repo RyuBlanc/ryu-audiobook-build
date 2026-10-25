@@ -618,14 +618,47 @@ jobs:
           } finally { $masterBitmap.Dispose() }
           $bitmap = [System.Drawing.Bitmap]::FromFile($png)
           try {
-            $transparent = 0
-            $nonTransparent = 0
-            for ($y = 0; $y -lt $bitmap.Height; $y += 1) {
-              for ($x = 0; $x -lt $bitmap.Width; $x += 1) {
-                if ($bitmap.GetPixel($x, $y).A -eq 0) { $transparent += 1 } else { $nonTransparent += 1 }
+            # Scan pixels in native code instead of calling GDI+ GetPixel from
+            # PowerShell once per pixel (which can stall release builds for very
+            # large transparent logos).
+            Add-Type -TypeDefinition @'
+          using System;
+          using System.Drawing;
+          using System.Drawing.Imaging;
+          using System.Runtime.InteropServices;
+          public static class RyuLogoAlphaScanner {
+              public static long[] Count(Bitmap input) {
+                  using (Bitmap normalized = new Bitmap(input.Width, input.Height, PixelFormat.Format32bppArgb)) {
+                      using (Graphics graphics = Graphics.FromImage(normalized)) {
+                          graphics.DrawImage(input, new Rectangle(0, 0, input.Width, input.Height));
+                      }
+                      Rectangle rectangle = new Rectangle(0, 0, normalized.Width, normalized.Height);
+                      BitmapData data = normalized.LockBits(rectangle, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                      try {
+                          int stride = Math.Abs(data.Stride);
+                          byte[] row = new byte[stride];
+                          long transparent = 0;
+                          long nonTransparent = 0;
+                          for (int y = 0; y < normalized.Height; y++) {
+                              IntPtr rowPointer = IntPtr.Add(data.Scan0, y * data.Stride);
+                              Marshal.Copy(rowPointer, row, 0, stride);
+                              for (int x = 0; x < normalized.Width; x++) {
+                                  if (row[x * 4 + 3] == 0) transparent++;
+                                  else nonTransparent++;
+                              }
+                          }
+                          return new long[] { transparent, nonTransparent };
+                      } finally {
+                          normalized.UnlockBits(data);
+                      }
+                  }
               }
-            }
-            $total = $bitmap.Width * $bitmap.Height
+          }
+          '@
+            $alphaCounts = [RyuLogoAlphaScanner]::Count($bitmap)
+            $transparent = [long]$alphaCounts[0]
+            $nonTransparent = [long]$alphaCounts[1]
+            $total = [long]$bitmap.Width * [long]$bitmap.Height
             if ($bitmap.Width -lt 1200 -or $bitmap.Height -lt 1200 -or $transparent -lt 1 -or $nonTransparent -lt ($total * 0.1)) {
               throw "Logo alpha/content/resolution check failed: dimensions=$($bitmap.Width)x$($bitmap.Height), transparent=$transparent, nonTransparent=$nonTransparent"
             }

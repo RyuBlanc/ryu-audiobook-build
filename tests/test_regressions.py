@@ -812,6 +812,17 @@ class RegressionTests(unittest.TestCase):
             page.close()
             page.deleteLater()
 
+    def test_windows_release_logo_alpha_scan_uses_lockbits_for_large_assets(self):
+        source = Path(".github/workflows/build-windows.yml").read_text(encoding="utf-8")
+        start = source.index("- name: Verify original logo transparency and generate release hashes")
+        end = source.index("- name: Scan release executables with Microsoft Defender", start)
+        step = source[start:end]
+        self.assertIn("RyuLogoAlphaScanner", step)
+        self.assertIn("LockBits", step)
+        self.assertIn("Marshal.Copy", step)
+        self.assertIn("[RyuLogoAlphaScanner]::Count($bitmap)", step)
+        self.assertNotIn("$bitmap.GetPixel($x, $y)", step)
+
     def test_voice_cast_persistence_and_counts_are_series_scoped(self):
         source = Path("app/ui/voice_cast_page.py").read_text(encoding="utf-8")
         create_start = source.index("    def create_character_record(")
