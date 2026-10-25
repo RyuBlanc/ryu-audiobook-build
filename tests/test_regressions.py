@@ -879,7 +879,7 @@ class RegressionTests(unittest.TestCase):
                 "provider_from_profile",
                 side_effect=[(first, profile.voice_id), (second, changed.voice_id)],
             ) as factory:
-                with voice_page._QWEN_PREVIEW_LOCK:
+                with voice_page._VOICE_PREVIEW_LOCK:
                     provider_a, voice_a = voice_page._get_or_create_qwen_preview_provider(profile)
                     provider_b, voice_b = voice_page._get_or_create_qwen_preview_provider(profile)
                     self.assertIs(provider_a, provider_b)
@@ -890,6 +890,31 @@ class RegressionTests(unittest.TestCase):
                     self.assertEqual(voice_c, changed.voice_id)
                     self.assertEqual(first.closed, 1)
                     self.assertEqual(factory.call_count, 2)
+        finally:
+            voice_page._close_cached_qwen_preview_provider()
+            voice_page._QWEN_PREVIEW_PROVIDER = original_provider
+            voice_page._QWEN_PREVIEW_PROFILE_KEY = original_key
+
+    def test_non_qwen_preview_evicts_warmed_qwen_provider(self):
+        import app.ui.voice_page as voice_page
+
+        class FakeProvider:
+            def __init__(self):
+                self.closed = 0
+            def close(self):
+                self.closed += 1
+
+        cached = FakeProvider()
+        original_provider = voice_page._QWEN_PREVIEW_PROVIDER
+        original_key = voice_page._QWEN_PREVIEW_PROFILE_KEY
+        try:
+            voice_page._QWEN_PREVIEW_PROVIDER = cached
+            voice_page._QWEN_PREVIEW_PROFILE_KEY = "cached-profile"
+            with voice_page._VOICE_PREVIEW_LOCK:
+                voice_page._evict_cached_qwen_preview_provider_locked()
+            self.assertEqual(cached.closed, 1)
+            self.assertIsNone(voice_page._QWEN_PREVIEW_PROVIDER)
+            self.assertIsNone(voice_page._QWEN_PREVIEW_PROFILE_KEY)
         finally:
             voice_page._close_cached_qwen_preview_provider()
             voice_page._QWEN_PREVIEW_PROVIDER = original_provider
@@ -927,7 +952,7 @@ class RegressionTests(unittest.TestCase):
             voice_page._QWEN_PREVIEW_PROVIDER = provider
             voice_page._QWEN_PREVIEW_PROFILE_KEY = voice_page._qwen_preview_profile_key(profile)
             with patch.object(voice_page, "provider_from_profile") as factory:
-                with voice_page._QWEN_PREVIEW_LOCK:
+                with voice_page._VOICE_PREVIEW_LOCK:
                     actual, voice = voice_page._get_or_create_qwen_preview_provider(profile)
                 self.assertIs(actual, provider)
                 self.assertEqual(voice, profile.voice_id)

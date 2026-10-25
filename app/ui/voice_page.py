@@ -62,7 +62,7 @@ PREVIEW_DURATION_OPTIONS = (10, 30, 60, 90)
 # One warmed local Qwen worker is shared across the two preview surfaces.
 # Qwen's line-oriented subprocess accepts one request at a time, so guard it
 # with a process-wide lock to prevent interleaved requests across QThreads.
-_QWEN_PREVIEW_LOCK = threading.RLock()
+_VOICE_PREVIEW_LOCK = threading.RLock()
 _QWEN_PREVIEW_PROVIDER = None
 _QWEN_PREVIEW_PROFILE_KEY = None
 
@@ -123,13 +123,18 @@ def _get_or_create_qwen_preview_provider(profile: VoiceProfile):
     return provider, voice
 
 
-def _close_cached_qwen_preview_provider() -> None:
+def _evict_cached_qwen_preview_provider_locked() -> None:
+    """Release the cached Qwen process while the shared preview lock is held."""
     global _QWEN_PREVIEW_PROVIDER, _QWEN_PREVIEW_PROFILE_KEY
-    with _QWEN_PREVIEW_LOCK:
-        provider = _QWEN_PREVIEW_PROVIDER
-        _QWEN_PREVIEW_PROVIDER = None
-        _QWEN_PREVIEW_PROFILE_KEY = None
-        _close_provider_safely(provider)
+    provider = _QWEN_PREVIEW_PROVIDER
+    _QWEN_PREVIEW_PROVIDER = None
+    _QWEN_PREVIEW_PROFILE_KEY = None
+    _close_provider_safely(provider)
+
+
+def _close_cached_qwen_preview_provider() -> None:
+    with _VOICE_PREVIEW_LOCK:
+        _evict_cached_qwen_preview_provider_locked()
 
 
 atexit.register(_close_cached_qwen_preview_provider)
@@ -198,17 +203,23 @@ class VoicePreviewWorker(QThread):
         self._preview_started = preview_started
         self._progress_floor = 0
         uses_qwen_cache = self.profile.provider == "qwen-character"
-        qwen_lock_acquired = False
+        preview_lock_acquired = False
         reuse_cached_provider = False
         try:
+            # Preview synthesis shares local model/accelerator resources. Serialize
+            # workers so two pages cannot race a subprocess, compete for VRAM, or
+            # mutate the cached provider while another request is using it.
+            if not _VOICE_PREVIEW_LOCK.acquire(blocking=False):
+                self._status("Waiting for the previous voice preview to finish…")
+                _VOICE_PREVIEW_LOCK.acquire()
+            preview_lock_acquired = True
+
             if uses_qwen_cache:
-                if not _QWEN_PREVIEW_LOCK.acquire(blocking=False):
-                    self._status("Waiting for the previous Qwen preview to finish…")
-                    _QWEN_PREVIEW_LOCK.acquire()
-                qwen_lock_acquired = True
                 self.provider, voice = _get_or_create_qwen_preview_provider(self.profile)
                 reuse_cached_provider = True
             else:
+                # A non-Qwen preview no longer needs the warm Qwen model in VRAM.
+                _evict_cached_qwen_preview_provider_locked()
                 self.provider, voice = provider_from_profile(self.profile)
 
             self._emit_progress(5)
@@ -288,8 +299,8 @@ class VoicePreviewWorker(QThread):
             self.provider = None
             if not reuse_cached_provider:
                 _close_provider_safely(provider)
-            if qwen_lock_acquired:
-                _QWEN_PREVIEW_LOCK.release()
+            if preview_lock_acquired:
+                _VOICE_PREVIEW_LOCK.release()
 
     def cancel(self) -> None:
         self.cancel_requested = True
