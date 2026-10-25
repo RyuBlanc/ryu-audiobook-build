@@ -518,7 +518,10 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
     def test_character_library_series_scope_matches_default_filter(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("const selectedSeries = $('characterSeriesFilter')?.value || 'All series';", adapter)
-        self.assertIn("c?.series || (selectedSeries !== 'All series' ? selectedSeries : '')", adapter)
+        self.assertIn("populateEditCharacterSeriesOptions(selectedSeries)", adapter)
+        self.assertIn("function getEditCharacterSeriesValue()", adapter)
+        self.assertIn("const selectedSeries = c?.series || (activeSeries !== 'All series' ? activeSeries : activeCharacterProjectSeries());", adapter)
+        self.assertIn("Choose an existing series or create a new series before saving this character.", adapter)
         self.assertIn("const series = requestedSeries;", adapter)
         self.assertIn("librarySeriesName(c) === series", adapter)
         self.assertIn("return raw.replace(/^Series\\s*[·:-]\\s*/i, '').replace(/^Global character library$/i, '').trim();", adapter)
