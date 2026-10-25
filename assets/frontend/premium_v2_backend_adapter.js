@@ -2037,7 +2037,7 @@
         id:'dialogue-' + Number(chapter.number) + '-' + start + '-' + end,
         chapter_number:Number(chapter.number), chapter_title:String(chapter.title || ''),
         start, end, source_text:match[0], text:match[0], suggestions:[], suggested_speaker:'',
-        confidence:0, skipped:false, source:'quoted-source-span'
+        confidence:0, skipped:false, assignmentSeries:'', source:'quoted-source-span'
       });
     }
     const assignments = characterAssignmentsFor(chapter);
@@ -2077,6 +2077,7 @@
         speakers:rawSpeakers.map(value => String(value || '').trim()).filter(Boolean),
         assigned:Boolean(rawSpeakers.length),
         assignmentPresent:Boolean(assignment),
+        assignmentSeries:String(assignment?.series || ''),
         suggestions:suggestions.length ? suggestions : fallback
       });
     }
@@ -2535,8 +2536,11 @@
       return current;
     }
     if (!libraryCharacters.length) await refreshCharacterLibrary();
-    const saved = libraryCharacters.find(item => characterCanonical(item).toLowerCase() === canonical.toLowerCase() ||
-      characterAliases(item).some(alias => alias.toLowerCase() === canonical.toLowerCase()));
+    const matchesCharacter = item => characterCanonical(item).toLowerCase() === canonical.toLowerCase() ||
+      characterAliases(item).some(alias => alias.toLowerCase() === canonical.toLowerCase());
+    const saved = (requestedSeries
+      ? libraryCharacters.find(item => matchesCharacter(item) && librarySeriesName(item).toLowerCase() === requestedSeries.toLowerCase())
+      : null) || (requestedSeries ? null : libraryCharacters.find(matchesCharacter));
     const series = String(preferredSeries || librarySeriesName(saved || {}) || activeCharacterProjectSeries() || '').trim();
     const profileName = String(preferredProfile || saved?.voice_profile || saved?.voice || '').trim();
     const usableProfile = profileName && characterProfileByName(profileName) ? profileName : '';
@@ -2649,10 +2653,21 @@
         window.ryuPremiumPendingDialogueChapter = Number(row.chapter_number);
         window.ryuPremiumPendingDialogueStart = Number(row.start);
         window.ryuPremiumPendingDialogueEnd = Number(row.end);
+        const existingCast = characterRowForName(candidate.name);
+        const candidateSeries = String(candidate.series || '').trim();
+        if (existingCast && candidateSeries &&
+            characterSeries(existingCast).toLowerCase() !== candidateSeries.toLowerCase()) {
+          throw new Error('The AI suggestion "' + candidate.name + '" belongs to series "' + candidateSeries +
+            '", but the project character is in "' + characterSeries(existingCast) + '". Review the series before accepting this suggestion.');
+        }
+        const preferredSeries = candidateSeries || (existingCast ? characterSeries(existingCast) :
+          activeCharacterProjectSeries());
         const libraryCandidate = libraryCharacters.find(item =>
-          characterCanonical(item).toLowerCase() === String(candidate.name).toLowerCase());
+          (characterCanonical(item).toLowerCase() === String(candidate.name).toLowerCase() ||
+            characterAliases(item).some(alias => alias.toLowerCase() === String(candidate.name).toLowerCase())) &&
+          (!preferredSeries || librarySeriesName(item).toLowerCase() === preferredSeries.toLowerCase()));
         const castCandidate = await ensureCharacterInActiveProject(
-          candidate.name, librarySeriesName(libraryCandidate || {}) || activeCharacterProjectSeries());
+          candidate.name, preferredSeries || librarySeriesName(libraryCandidate || {}));
         await call('chapter.dialogue.assign', {
           dialogue_text:String(row.source_text || row.text), speakers:[characterCanonical(castCandidate)],
           series:characterSeries(castCandidate),
@@ -3755,25 +3770,34 @@
     const suggestions = Array.isArray(item.suggestions) ? item.suggestions.filter(c => c && c.name) : [];
     const candidateHtml = suggestions.length ? suggestions.map((candidate,index) => {
       const name = String(candidate.name || '').trim();
-      const linked = [...projectOptions,...libraryOptions].find(row => row.name.toLowerCase() === name.toLowerCase()
-        || row.aliases.some(alias => alias.toLowerCase() === name.toLowerCase()));
+      const matchesName = row => row.name.toLowerCase() === name.toLowerCase()
+        || row.aliases.some(alias => alias.toLowerCase() === name.toLowerCase());
+      const hintedSeries = String(candidate.series || '').trim();
+      const linked = (hintedSeries
+        ? [...projectOptions,...libraryOptions].find(row => matchesName(row) && row.series.toLowerCase() === hintedSeries.toLowerCase())
+        : null) || projectOptions.find(matchesName) ||
+        libraryOptions.find(row => matchesName(row) && row.series.toLowerCase() === activeCharacterProjectSeries().toLowerCase()) ||
+        libraryOptions.find(matchesName);
+      const candidateSeries = String(linked?.series || hintedSeries || activeCharacterProjectSeries());
       const probability = Number(candidate.confidence || 0);
-      const isActive = item.speakers?.some(s => String(s).toLowerCase() === name.toLowerCase()) ||
+      const isActive = item.speakers?.some(s => String(s).toLowerCase() === name.toLowerCase()) &&
+        (!item.assignmentSeries || candidateSeries.toLowerCase() === String(item.assignmentSeries).toLowerCase()) ||
         (!item.assigned && index === 0);
       const evidence = String(candidate.evidence || 'Local dialogue-context suggestion');
       return '<button type="button" class="prediction-option ryu-ai-option' + (isActive ? ' active' : '') +
-        '" data-prediction="' + esc(name) + '" data-series="' + esc(linked?.series || activeCharacterProjectSeries()) +
-        '" data-profile="' + esc(linked?.profile || '') + '" data-source="ai"><b>' + esc(name) + '</b><small>AI suggestion · ' +
-        Math.round(probability * 100) + '% · ' + esc(evidence) + '</small></button>';
+        '" data-prediction="' + esc(name) + '" data-series="' + esc(candidateSeries) +
+        '" data-profile="' + esc(linked?.profile || '') + '" data-source="ai"><b>' + esc(name) + '</b><small>' +
+        esc(candidateSeries) + ' · ' + Math.round(probability * 100) + '% · ' + esc(evidence) + '</small></button>';
     }).join('') : '<p class="muted">No ranked AI suggestion is available for this passage. Choose a saved character below or create a new one.</p>';
     const seen = new Set();
     const savedOptions = [...projectOptions,...libraryOptions].filter(row => {
-      const key = row.name.toLowerCase();
-      if (!key || seen.has(key)) return false;
+      const key = row.name.toLowerCase() + '::' + row.series.toLowerCase();
+      if (!row.name || seen.has(key)) return false;
       seen.add(key); return true;
     });
     const savedHtml = savedOptions.map((row,index) => {
-      const active = item.speakers?.some(s => String(s).toLowerCase() === row.name.toLowerCase());
+      const active = item.speakers?.some(s => String(s).toLowerCase() === row.name.toLowerCase()) &&
+        (!item.assignmentSeries || row.series.toLowerCase() === String(item.assignmentSeries).toLowerCase());
       return '<button type="button" class="prediction-option ryu-ai-option' + (active ? ' active' : '') +
         '" data-prediction="' + esc(row.name) + '" data-series="' + esc(row.series) + '" data-profile="' +
         esc(row.profile) + '" data-source="' + esc(row.source) + '"><b>' + esc(row.name) +
