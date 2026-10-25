@@ -830,12 +830,12 @@ class RegressionTests(unittest.TestCase):
             "name": "Kana",
             "series": "Silver Moon Saga",
             "role": "Student",
-            "aliases": ["K"],
+            "aliases": ["FrostWing"],
             "voice": "",
             "confidence": 0.5,
         }
         self.assertTrue(cast_row_matches(row, "All", "silver moon"))
-        self.assertTrue(cast_row_matches(row, "All", "alias k"))
+        self.assertTrue(cast_row_matches(row, "All", "frostwing"))
         self.assertFalse(cast_row_matches(row, "All", "different series"))
 
         source = Path("app/ui/voice_cast_page.py").read_text(encoding="utf-8")
