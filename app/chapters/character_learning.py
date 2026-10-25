@@ -268,14 +268,21 @@ def rank_speaker_suggestions(
     speech_verb = r"(?:" + _SPEECH_VERBS + r")"
     candidate_map: dict[str, dict[str, Any]] = {}
 
-    def add_candidate(name: str, aliases: list[str] | tuple[str, ...] = (), base_score: float = 0.0, evidence: str = "") -> None:
+    def add_candidate(
+        name: str,
+        aliases: list[str] | tuple[str, ...] = (),
+        base_score: float = 0.0,
+        evidence: str = "",
+        series: str = "",
+    ) -> None:
         canonical = str(name or "").strip()
         if not canonical or not _is_plausible_name(canonical):
             return
-        key = canonical.casefold()
+        series_name = re.sub(r"(?i)^\s*series\s*[·:-]\s*", "", str(series or "").strip())[:300]
+        key = canonical.casefold() + "\0" + _series_key(series_name)
         item = candidate_map.get(key)
         if item is None:
-            item = {"name": canonical, "aliases": [], "score": 0.0, "evidence": ""}
+            item = {"name": canonical, "series": series_name, "aliases": [], "score": 0.0, "evidence": ""}
             candidate_map[key] = item
         item["aliases"] = list(dict.fromkeys([
             *item["aliases"],
@@ -286,7 +293,7 @@ def rank_speaker_suggestions(
             item["evidence"] = str(evidence or "")
 
     known_names: set[str] = set()
-    canonical_by_name: dict[str, tuple[str, list[str]]] = {}
+    canonical_by_name: dict[str, tuple[str, list[str], str]] = {}
     for row in known_characters:
         if not isinstance(row, dict):
             continue
@@ -300,12 +307,16 @@ def rank_speaker_suggestions(
             str(alias).strip() for alias in aliases
             if str(alias or "").strip() and str(alias).strip().casefold() != name.casefold()
         )) if isinstance(aliases, (list, tuple)) else []
+        series = str(row.get("series") or "").strip()
+        if not series:
+            scope = str(row.get("scope") or "").strip()
+            series = re.sub(r"(?i)^\s*series\s*[·:-]\s*", "", scope).strip() if re.match(r"(?i)^\s*series\s*[·:-]", scope) else scope
         known_names.add(name.casefold())
-        canonical_by_name[name.casefold()] = (name, aliases)
+        canonical_by_name[name.casefold()] = (name, aliases, series)
         for alias in aliases:
             known_names.add(alias.casefold())
-            canonical_by_name.setdefault(alias.casefold(), (name, aliases))
-        add_candidate(name, aliases, 0.10, "Saved character in this series.")
+            canonical_by_name.setdefault(alias.casefold(), (name, aliases, series))
+        add_candidate(name, aliases, 0.10, "Saved character in this series.", series)
 
     for row in detected:
         if not isinstance(row, dict):
@@ -317,6 +328,7 @@ def rank_speaker_suggestions(
         matched = canonical_by_name.get(detected_name.casefold())
         canonical_name = matched[0] if matched else detected_name
         canonical_aliases = matched[1] if matched else []
+        canonical_series = matched[2] if matched else str(row.get("series") or "")
         is_known = matched is not None or detected_name.casefold() in known_names
         tag_names = list(dict.fromkeys([detected_name, canonical_name, *canonical_aliases]))
         escaped = "|".join(re.escape(value) for value in sorted(tag_names, key=len, reverse=True))
@@ -337,6 +349,7 @@ def rank_speaker_suggestions(
             canonical_name, canonical_aliases,
             max(0.52 if explicit_tag else 0.0, score * (1.0 if explicit_tag else 0.78)),
             evidence if is_known else (evidence or "Explicit speech attribution in source text."),
+            canonical_series,
         )
 
     # Score direct attribution on either side of a quote. This is stronger than
@@ -357,6 +370,10 @@ def rank_speaker_suggestions(
             continue
         for example in learning_examples:
             if not isinstance(example, dict) or str(example.get("speaker") or "").casefold() != item["name"].casefold():
+                continue
+            candidate_series = _series_key(str(item.get("series") or ""))
+            example_series = _series_key(str(example.get("series") or ""))
+            if candidate_series and example_series and candidate_series != example_series:
                 continue
             learned_dialogue = str(example.get("normalized_dialogue") or _normalize(str(example.get("dialogue_text") or "")))
             dialogue_match = learned_dialogue and learned_dialogue == _normalize(dialogue)
@@ -385,9 +402,9 @@ def rank_speaker_suggestions(
                     item["evidence"] = "Pronoun speech tag continues the previously confirmed speaker."
 
     rows = [
-        {"name": str(item["name"]), "confidence": round(float(item["score"]), 4),
-         "evidence": str(item["evidence"])}
+        {"name": str(item["name"]), "series": str(item.get("series") or ""),
+         "confidence": round(float(item["score"]), 4), "evidence": str(item["evidence"])}
         for item in candidate_map.values() if float(item["score"]) >= 0.52
     ]
-    rows.sort(key=lambda row: (-float(row["confidence"]), str(row["name"]).casefold()))
+    rows.sort(key=lambda row: (-float(row["confidence"]), str(row["name"]).casefold(), str(row.get("series") or "").casefold()))
     return rows[:5]
