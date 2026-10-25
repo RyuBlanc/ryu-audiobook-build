@@ -2774,7 +2774,10 @@ class PremiumV2Bridge(QObject):
             library_rows = list_reusable_characters(series_name)
             raw_text = "\n\n".join(str(chapter.text or "") for chapter in project.chapters)
             from app.chapters.characters import NAME_STOPWORDS, _discover_explicit_speakers
-            from app.chapters.character_learning import load_learning_examples, rank_speaker_suggestions
+            from app.chapters.character_learning import (
+                load_learning_examples, rank_speaker_suggestions,
+                source_grounded_speaker_for_continuity,
+            )
             explicit_names = {str(name).casefold() for name in _discover_explicit_speakers(raw_text)}
             stopwords = {str(value).casefold() for value in NAME_STOPWORDS}
             trusted_rows = []
@@ -2876,6 +2879,7 @@ class PremiumV2Bridge(QObject):
                 if len(suggestions) >= max_suggestions:
                     break
                 last_speaker = ""
+                last_speaker_end = -1
                 segments = dialogue_segments(chapter)
                 saved_assignments = [
                     row for row in (getattr(chapter, "dialogue_assignments", []) or [])
@@ -2894,10 +2898,15 @@ class PremiumV2Bridge(QObject):
                         for name, confidence, evidence in (segment.suggestions or [])
                         if str(name).strip()
                     ]
+                    # Pronoun continuity is local: never carry an old speaker anchor
+                    # indefinitely through unrelated dialogue in a long chapter.
+                    continuity_speaker = (
+                        last_speaker if last_speaker and 0 <= start - last_speaker_end <= 420 else ""
+                    )
                     candidates = rank_speaker_suggestions(
                         chapter_text=source, start=start, end=end, detected=detected,
                         known_characters=known_cast, learning_examples=learning_examples,
-                        last_speaker=last_speaker,
+                        last_speaker=continuity_speaker,
                     )
                     assigned = next((row for row in saved_assignments
                         if int(row.get("start", -1)) == start and int(row.get("end", -1)) == end
@@ -2907,9 +2916,18 @@ class PremiumV2Bridge(QObject):
                         else ([str(assigned.get("speaker"))] if assigned and assigned.get("speaker") else [])
                     )
                     if assigned_speakers:
+                        # Explicitly saved project assignments are the strongest
+                        # continuity signal, and already persisted as user feedback.
                         last_speaker = str(assigned_speakers[0])
-                    elif candidates and float(candidates[0].get("confidence") or 0.0) >= 0.88:
-                        last_speaker = str(candidates[0].get("name") or "")
+                        last_speaker_end = end
+                    else:
+                        # An unconfirmed model/rule guess must not become ground truth
+                        # for the next line's pronouns. Only a directly observed name +
+                        # speech-tag pattern may refresh this short-lived anchor.
+                        source_speaker = source_grounded_speaker_for_continuity(candidates)
+                        if source_speaker:
+                            last_speaker = source_speaker
+                            last_speaker_end = end
                     best = candidates[0] if candidates else {}
                     best_confidence = float(best.get("confidence") or 0.0)
                     suggestions.append({
