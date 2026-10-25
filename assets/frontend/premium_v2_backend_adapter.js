@@ -1,6 +1,73 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
+  let ryuUiTextScale = 100;
+  let ryuUiTextObserver = null;
+  const RYU_UI_TEXT_SCALES = new Set([85, 90, 100, 110, 120, 130, 140]);
+  function scaleUiFontTree(root, scale, inheritedBase = null) {
+    if (!root || root.nodeType !== 1) return;
+    const current = Number.parseFloat(getComputedStyle(root).fontSize) || 14;
+    const parent = root.parentElement;
+    const parentCurrent = parent ? Number.parseFloat(getComputedStyle(parent).fontSize) : NaN;
+    const parentBaseValue = parent?.dataset?.ryuBaseFontPx;
+    const parentBase = parentBaseValue ? Number.parseFloat(parentBaseValue) : inheritedBase;
+    let base = Number.parseFloat(root.dataset.ryuBaseFontPx);
+    if (!Number.isFinite(base) || base <= 0) {
+      // If the node inherits its size, scale from the parent's unscaled base.
+      // An explicit child size remains its own base so heading hierarchy is kept.
+      base = Number.isFinite(parentBase) && Number.isFinite(parentCurrent) &&
+        Math.abs(current - parentCurrent) < 0.25 ? parentBase : current;
+      root.dataset.ryuBaseFontPx = String(base);
+    }
+    root.style.setProperty('font-size', (base * scale / 100) + 'px', 'important');
+    for (const child of root.children) scaleUiFontTree(child, scale, base);
+  }
+  function applyUiTextScale(value) {
+    const parsed = Number(value);
+    ryuUiTextScale = RYU_UI_TEXT_SCALES.has(parsed) ? parsed : 100;
+    document.documentElement.dataset.ryuTextScale = String(ryuUiTextScale);
+    document.documentElement.style.setProperty('--ryu-ui-text-scale', String(ryuUiTextScale / 100));
+    if (document.documentElement) scaleUiFontTree(document.documentElement, ryuUiTextScale);
+    const select = $('uiTextScale');
+    if (select && select.value !== String(ryuUiTextScale)) select.value = String(ryuUiTextScale);
+  }
+  function installUiTextScaleRuntime() {
+    if (window.__ryuUiTextScaleInstalled) return;
+    window.__ryuUiTextScaleInstalled = true;
+    // Block Chromium's browser zoom shortcuts and Ctrl+mousewheel. Sizing is
+    // controlled through Settings, where it can be persisted and reproduced.
+    window.addEventListener('keydown', event => {
+      if (event.ctrlKey && ['+', '=', '-', '_', '0'].includes(String(event.key || ''))) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }, true);
+    window.addEventListener('wheel', event => {
+      if (event.ctrlKey) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }, {capture:true, passive:false});
+    if (typeof MutationObserver === 'function') {
+      ryuUiTextObserver = new MutationObserver(records => {
+        const added = [];
+        for (const record of records) for (const node of record.addedNodes) {
+          if (node && node.nodeType === 1) added.push(node);
+        }
+        // Batch newly rendered UI fragments; no full document reload or page zoom.
+        if (added.length) requestAnimationFrame(() => {
+          for (const node of added) if (node.isConnected) scaleUiFontTree(node, ryuUiTextScale);
+        });
+      });
+      ryuUiTextObserver.observe(document.documentElement, {childList:true, subtree:true});
+    }
+    applyUiTextScale(ryuUiTextScale);
+    const selector = $('uiTextScale');
+    if (selector && !selector.dataset.ryuTextScaleBound) {
+      selector.dataset.ryuTextScaleBound = '1';
+      selector.addEventListener('change', () => applyUiTextScale(selector.value));
+    }
+  }
   const call = async (command, payload = {}) => {
     if (!window.ryuBackend?.invoke) throw new Error('Local backend bridge is unavailable.');
     const response = await window.ryuBackend.invoke(command, payload);
@@ -4690,6 +4757,9 @@
     const settings = await call('settings.get');
     if ($('themeSelectAdvanced') && settings.theme) $('themeSelectAdvanced').value = settings.theme;
     if ($('effectsModeAdvanced') && settings.effects) $('effectsModeAdvanced').value = settings.effects;
+    if ($('uiTextScale')) $('uiTextScale').value = String(settings.text_scale || 100);
+    if ($('uiWindowSize')) $('uiWindowSize').value = String(settings.window_size || 'auto');
+    applyUiTextScale(Number(settings.text_scale || 100));
     return settings;
   }
   async function runDiagnostics() {
@@ -4726,6 +4796,7 @@
   }
 
   async function wire() {
+    installUiTextScaleRuntime();
     installCharacterStudioHandlers();
     // Remove the prototype's same-element click handlers synchronously, before
     // any asynchronous backend initialization or real handler registration.
@@ -5362,7 +5433,17 @@
       miniPlayerDismissed = true;
       $('miniPlayer')?.classList.add('hidden');
     };
-    if ($('saveSettingsAdvanced')) $('saveSettingsAdvanced').onclick=act(async()=>{await call('settings.save',{theme:$('themeSelectAdvanced')?.value||'dark',effects:$('effectsModeAdvanced')?.value||'high'});message('Settings saved to this PC.');});
+    if ($('saveSettingsAdvanced')) $('saveSettingsAdvanced').onclick=act(async()=>{
+      const payload = {
+        theme:$('themeSelectAdvanced')?.value||'dark',
+        effects:$('effectsModeAdvanced')?.value||'high',
+        text_scale:Number($('uiTextScale')?.value||100),
+        window_size:$('uiWindowSize')?.value||'auto'
+      };
+      await call('settings.save',payload);
+      applyUiTextScale(payload.text_scale);
+      message('Settings saved to this PC. Text size and native window sizing are applied without browser zoom.');
+    });
     document.addEventListener('input', e => {
       if (e.target?.id === 'librarySearch') {
         e.stopImmediatePropagation();
