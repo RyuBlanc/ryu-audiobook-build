@@ -1501,8 +1501,11 @@
           notes:character.notes||'',dialogue_sample:character.dialogue_sample||'',voice_profile:profile.name
         });
         const primaryName=assigned.character.primary_name||assigned.character.name;
-        if(characters.some(item=>String(item.name||'').toLowerCase()===String(primaryName).toLowerCase())){
-          await call('character.assign',{name:primaryName,profile_name:profile.name});
+        const projectCharacter = characters.find(item =>
+          String(item.name || '').toLowerCase() === String(primaryName).toLowerCase() &&
+          characterSeries(item).toLowerCase() === String(assigned.character.series || series).toLowerCase());
+        if (projectCharacter) {
+          await call('character.assign', {name:primaryName,series:characterSeries(projectCharacter),profile_name:profile.name});
           await refreshCharacters();
         }
         await refreshCharacterLibrary();await refreshVoices();await refreshAssignedCharacterForProfile({...profile,saved:true});
@@ -5493,7 +5496,12 @@
       message('Character removed from this book’s saved cast.');
     });
     if ($('assignCharacter')) $('assignCharacter').onclick=act(openVoiceCharacterAssignment);
-    if ($('editCharacterVoice')) $('editCharacterVoice').onchange=act(async()=>{if(!window.ryuPremiumSelectedCharacter)return;await call('character.assign',{name:window.ryuPremiumSelectedCharacter,profile_name:$('editCharacterVoice').value});await refreshCharacters();});
+    if ($('editCharacterVoice')) $('editCharacterVoice').onchange=act(async()=>{
+      const current = characterRowForName(window.ryuPremiumSelectedCharacter);
+      if (!current) throw new Error('Select a saved character before changing its voice profile.');
+      await call('character.assign',{name:characterCanonical(current),series:characterSeries(current),profile_name:$('editCharacterVoice').value});
+      await refreshCharacters();
+    });
     // Import buttons are handled once by the delegated Sound Design handler below.
     // Import buttons are handled once by the delegated Sound Design handler below.
     document.querySelectorAll('#cueSourceFilter [data-cue-source]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('#cueSourceFilter [data-cue-source]').forEach(x => x.classList.toggle('active', x === button)); refreshSoundCues().catch(e => message(e.message, true)); }));
@@ -6158,8 +6166,12 @@
           const selected = $('predictionList')?.querySelector('.prediction-option.active')?.dataset.prediction || '';
           const dialogueText = String(window.ryuPremiumPendingDialogueText || '');
           if (!selected || !dialogueText) throw new Error('Choose a saved character and dialogue passage before confirming.');
+          const selectedCast = characterRowForName(selected);
+          const selectedLibrary = libraryCharacters.find(item => characterCanonical(item).toLowerCase() === selected.toLowerCase());
           const result = await call('chapter.dialogue.assign', {
-            dialogue_text:dialogueText, speakers:[selected], chapter_number:window.ryuPremiumPendingDialogueChapter
+            dialogue_text:dialogueText, speakers:[selected],
+            series:characterSeries(selectedCast || selectedLibrary),
+            chapter_number:window.ryuPremiumPendingDialogueChapter
           });
           $('aiPredictionModal')?.classList.remove('show');
           window.ryuPremiumPendingDialogueText = '';
@@ -6397,8 +6409,12 @@
           const dialogueText = String(window.ryuPremiumPendingDialogueText || '').trim();
           const selected = button.dataset.assignCharacter || button.dataset.character || '';
           if (!dialogueText || !selected) throw new Error('Select an individual source dialogue passage and choose a saved character before assigning a speaker.');
+          const selectedCast = characterRowForName(selected);
+          const selectedLibrary = libraryCharacters.find(item => characterCanonical(item).toLowerCase() === selected.toLowerCase());
           const result = await call('chapter.dialogue.assign', {
-            dialogue_text:dialogueText, speakers:[selected], chapter_number:window.ryuPremiumPendingDialogueChapter
+            dialogue_text:dialogueText, speakers:[selected],
+            series:characterSeries(selectedCast || selectedLibrary),
+            chapter_number:window.ryuPremiumPendingDialogueChapter
           });
           window.ryuPremiumPendingDialogueText = '';
           window.ryuPremiumPendingDialogueChapter = null;
