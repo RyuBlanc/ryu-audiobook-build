@@ -131,6 +131,32 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("duration could not be measured", failed["message"])
         self.assertTrue(failed["recoverable"])
 
+
+    def test_saved_preview_duration_setting_uses_only_supported_durations(self):
+        class Settings:
+            def __init__(self):
+                self.values = {}
+            def setValue(self, key, value):
+                self.values[key] = value
+            def sync(self):
+                return None
+        settings = Settings()
+        bridge = SimpleNamespace(
+            settings=settings,
+            _settings_get=lambda _payload: {"preview_seconds": settings.values.get("audio/preview_seconds", 30)},
+            parent=lambda: None,
+        )
+        from types import SimpleNamespace
+        from app.ui.premium_v2_host import PremiumV2Bridge
+        for seconds in (10, 30, 60, 90):
+            with self.subTest(seconds=seconds):
+                result = PremiumV2Bridge._settings_save(bridge, {"preview_seconds": seconds})
+                self.assertEqual(result["preview_seconds"], seconds)
+        for seconds in (20, 45, 15):
+            with self.subTest(seconds=seconds):
+                with self.assertRaisesRegex(ValueError, "10, 30, 60, or 90"):
+                    PremiumV2Bridge._settings_save(bridge, {"preview_seconds": seconds})
+
     def test_frontend_does_not_mark_unplayable_or_unmeasured_preview_ready(self):
         adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
         source = adapter.read_text(encoding="utf-8")

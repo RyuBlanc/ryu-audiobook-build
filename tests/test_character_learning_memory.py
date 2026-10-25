@@ -5,6 +5,7 @@ import unittest
 
 from app.chapters.character_learning import (
     load_learning_examples,
+    prepare_learning_index,
     rank_speaker_suggestions,
     record_assignment_feedback,
     remove_assignment_feedback,
@@ -136,7 +137,7 @@ class CharacterLearningMemoryTests(unittest.TestCase):
             self.assertEqual(len(examples), 1)
             ranked = rank_speaker_suggestions(
                 chapter_text=source, start=start, end=end,
-                known_characters=[{"name": "Souei", "aliases": ["Shadow"]}],
+                known_characters=[{"name": "Souei", "aliases": ["Shadow"], "series": "Slime series"}],
                 learning_examples=examples,
             )
             self.assertEqual(ranked[0]["name"], "Souei")
@@ -186,6 +187,36 @@ class CharacterLearningMemoryTests(unittest.TestCase):
         self.assertTrue(ranked)
         self.assertEqual([row["series"] for row in ranked], ["Slime series"])
         self.assertIn("Pronoun speech tag", ranked[0]["evidence"])
+
+
+    def test_learning_index_is_keyed_by_series_and_canonical_speaker(self):
+        rows = [
+            {"series": "Slime series", "speaker": "Souei", "context": "slime example"},
+            {"series": "Other series", "speaker": "Souei", "context": "other example"},
+            {"series": "Slime series", "speaker": "Rimuru Tempest", "context": "rimuru example"},
+        ]
+        index = prepare_learning_index(rows)
+        self.assertEqual(index[("slime series", "souei")], [rows[0]])
+        self.assertEqual(index[("other series", "souei")], [rows[1]])
+        self.assertEqual(index[("slime series", "rimuru tempest")], [rows[2]])
+        self.assertNotIn(("unrelated series", "souei"), index)
+
+    def test_scoped_learning_index_does_not_promote_same_name_from_another_series(self):
+        source = '“The gate is closed.” He replied.'
+        start = source.index("“")
+        end = source.index("”", start) + 1
+        examples = [
+            {"series": "Slime series", "speaker": "Souei",
+             "normalized_dialogue": "the gate is closed",
+             "context": "Souei guarded the eastern gate. The gate is closed. He replied."}
+        ]
+        index = prepare_learning_index(examples)
+        ranked = rank_speaker_suggestions(
+            chapter_text=source, start=start, end=end,
+            known_characters=[{"name": "Souei", "series": "Other series"}],
+            learning_examples=index,
+        )
+        self.assertEqual(ranked, [])
 
     def test_sentence_initial_english_words_are_not_accepted_as_character_names(self):
         for word in ("Having", "Well", "Right", "Already", "Magic", "Speaking", "Feeling", "Let", "Two"):

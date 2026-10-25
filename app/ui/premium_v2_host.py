@@ -2834,7 +2834,7 @@ class PremiumV2Bridge(QObject):
             raw_text = "\n\n".join(str(chapter.text or "") for chapter in project.chapters)
             from app.chapters.characters import NAME_STOPWORDS, _discover_explicit_speakers
             from app.chapters.character_learning import (
-                load_learning_examples, rank_speaker_suggestions,
+                load_learning_examples, prepare_learning_index, rank_speaker_suggestions,
                 source_grounded_speaker_for_continuity,
             )
             explicit_names = {str(name).casefold() for name in _discover_explicit_speakers(raw_text)}
@@ -2961,6 +2961,7 @@ class PremiumV2Bridge(QObject):
             )
             for learning_series in sorted(learning_series_names, key=str.casefold):
                 learning_examples.extend(load_learning_examples(learning_series))
+            learning_index = prepare_learning_index(learning_examples)
             for chapter in project.chapters:
                 if len(suggestions) >= max_suggestions:
                     break
@@ -2992,7 +2993,7 @@ class PremiumV2Bridge(QObject):
                     continuity_series = last_speaker_series if continuity_is_local else ""
                     candidates = rank_speaker_suggestions(
                         chapter_text=source, start=start, end=end, detected=detected,
-                        known_characters=known_cast, learning_examples=learning_examples,
+                        known_characters=known_cast, learning_examples=learning_index,
                         last_speaker=continuity_speaker,
                         last_speaker_series=continuity_series,
                     )
@@ -4179,8 +4180,13 @@ class PremiumV2Bridge(QObject):
                 "auto", "1280x720", "1440x900", "1600x900", "1920x1080", "maximized"
             }:
                 raise ValueError("Choose a supported window size in Settings.")
-            if key == "preview_seconds" and int(value) not in {10, 20, 30, 45, 60, 90}:
-                raise ValueError("Preview duration must be 10, 20, 30, 45, 60, or 90 seconds.")
+            if key == "preview_seconds":
+                try:
+                    value = int(value)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError("Preview duration must be 10, 30, 60, or 90 seconds.") from exc
+                if value not in {10, 30, 60, 90}:
+                    raise ValueError("Preview duration must be 10, 30, 60, or 90 seconds.")
             if key == "bitrate" and not 128 <= int(value) <= 320:
                 raise ValueError("Bitrate must be from 128 to 320 kbps.")
             if key == "player_rate":
@@ -5528,6 +5534,10 @@ class PremiumV2Bridge(QObject):
             line = 0
         if kind == "frontend-ready":
             log.info("Premium V2 frontend initialized successfully")
+            window = self.parent()
+            reveal = getattr(window, "_on_frontend_ready", None)
+            if callable(reveal):
+                reveal()
             return True
         if kind in {"javascript-error", "unhandled-rejection", "adapter-start-failed"}:
             log.error("Premium V2 frontend %s: %s (source=%s, line=%s)%s",
@@ -5597,7 +5607,9 @@ class PremiumV2Window(QMainWindow):
         if not path.is_file():
             raise FileNotFoundError(f"Premium V2 frontend asset is missing: {path}")
         self.setWindowTitle(f"{APP_NAME} • {full_version()}")
-        self.setMinimumSize(960, 620)
+        # The minimum is tightened against the active display in apply_window_size().
+        # A fixed 960×620 minimum overflows some high-DPI laptop work areas.
+        self.setMinimumSize(640, 480)
         self.resize(1440, 900)
 
         self.web = StableQWebEngineView(self)
@@ -5620,18 +5632,39 @@ class PremiumV2Window(QMainWindow):
         self.web.loadFinished.connect(self._install_bridge)
         self.web.page().renderProcessTerminated.connect(self._handle_renderer_terminated)
 
-        # Keep a native error surface ready if WebEngine fails to load the UI or
-        # its renderer exits. A blank black window must not be the only feedback.
+        # Keep native startup and recovery surfaces visible until the actual UI
+        # plus its backend bridge are ready. Showing an empty WebEngine during load
+        # or retry looked like a black/frozen application to the user.
         self._web_stack = QStackedWidget(self)
+
+        self._loading_page = QWidget(self._web_stack)
+        self._loading_page.setStyleSheet("background:#080a10;color:#eef0f5;")
+        loading_layout = QVBoxLayout(self._loading_page)
+        loading_layout.setContentsMargins(36, 36, 36, 36)
+        loading_layout.addStretch(1)
+        self._loading_title = QLabel("Ryu’s Audiobook", self._loading_page)
+        self._loading_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self._loading_title.setStyleSheet("font-size:26px;font-weight:750;color:#f0f2f7;")
+        self._loading_status = QLabel("Starting the Windows interface…", self._loading_page)
+        self._loading_status.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self._loading_status.setWordWrap(True)
+        self._loading_status.setStyleSheet("font-size:14px;color:#aeb6c5;")
+        loading_layout.addWidget(self._loading_title)
+        loading_layout.addWidget(self._loading_status)
+        loading_layout.addStretch(1)
+        self._web_stack.addWidget(self._loading_page)
         self._web_stack.addWidget(self.web)
+
         self._web_error_page = QWidget(self._web_stack)
         self._web_error_page.setStyleSheet("background:#080a10;color:#eef0f5;")
         error_layout = QVBoxLayout(self._web_error_page)
         error_layout.setContentsMargins(32, 32, 32, 32)
         error_layout.addStretch(1)
         self._web_error_title = QLabel("Ryu’s Audiobook could not render the interface", self._web_error_page)
+        self._web_error_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self._web_error_title.setStyleSheet("font-size:22px;font-weight:700;color:#f0f2f7;")
         self._web_error_message = QLabel("The embedded UI renderer stopped. Your project data has not been deleted. Retry loading the interface; if it repeats, check the local application log.", self._web_error_page)
+        self._web_error_message.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self._web_error_message.setWordWrap(True)
         self._web_error_message.setStyleSheet("font-size:14px;color:#aeb6c5;max-width:760px;")
         self._web_error_retry = QPushButton("Retry interface", self._web_error_page)
@@ -5642,7 +5675,7 @@ class PremiumV2Window(QMainWindow):
         error_layout.addWidget(self._web_error_retry)
         error_layout.addStretch(1)
         self._web_stack.addWidget(self._web_error_page)
-        self._web_stack.setCurrentWidget(self.web)
+        self._web_stack.setCurrentWidget(self._loading_page)
         self.setCentralWidget(self._web_stack)
 
         self.web.load(QUrl.fromLocalFile(str(path.resolve())))
@@ -5653,6 +5686,12 @@ class PremiumV2Window(QMainWindow):
         choice = str(choice or "auto").strip().lower()
         screen = self.screen() or QApplication.primaryScreen()
         available = screen.availableGeometry() if screen is not None else None
+        if available is not None:
+            min_width = max(480, min(960, int(available.width())))
+            min_height = max(360, min(620, int(available.height())))
+        else:
+            min_width, min_height = 960, 620
+        self.setMinimumSize(min_width, min_height)
         if choice == "maximized":
             self.showMaximized()
             return
@@ -5661,17 +5700,17 @@ class PremiumV2Window(QMainWindow):
         if choice == "auto":
             width = int(available.width() * 0.90) if available is not None else 1440
             height = int(available.height() * 0.90) if available is not None else 900
-            width = min(1600, max(960, width))
-            height = min(1000, max(620, height))
+            width = min(1600, max(min_width, width))
+            height = min(1000, max(min_height, height))
         else:
             try:
                 width, height = (int(part) for part in choice.split("x", 1))
             except (TypeError, ValueError):
                 width, height = 1440, 900
         if available is not None:
-            width = min(width, max(640, available.width()))
-            height = min(height, max(480, available.height()))
-        self.resize(max(640, width), max(480, height))
+            width = min(width, available.width())
+            height = min(height, available.height())
+        self.resize(max(min_width, width), max(min_height, height))
         self.setZoomFactorForNativeSize()
 
     def setZoomFactorForNativeSize(self) -> None:
@@ -5687,14 +5726,37 @@ class PremiumV2Window(QMainWindow):
         if hasattr(self, "_web_stack") and hasattr(self, "_web_error_page"):
             self._web_stack.setCurrentWidget(self._web_error_page)
 
-    def _retry_web_renderer(self) -> None:
-        if hasattr(self, "_web_stack"):
+    def _set_loading_status(self, message: str) -> None:
+        if hasattr(self, "_loading_status"):
+            self._loading_status.setText(str(message or "Starting the Windows interface…"))
+
+    def _on_frontend_ready(self) -> None:
+        """Reveal the app only after the backend bridge and frontend wiring have finished."""
+        self._frontend_ready = True
+        self._renderer_restart_attempts = 0
+        if hasattr(self, "_web_stack") and hasattr(self, "web"):
             self._web_stack.setCurrentWidget(self.web)
+        log.info("Premium V2 frontend and native backend bridge are ready")
+
+    def _retry_web_renderer(self) -> None:
+        # Keep the native loading surface visible during reload. Switching to the
+        # WebEngine first exposes a blank frame until Chromium paints the page.
+        self._frontend_ready = False
+        self._frontend_generation += 1
+        generation = self._frontend_generation
+        self._set_loading_status("Retrying the interface and reconnecting local services…")
+        if hasattr(self, "_web_stack") and hasattr(self, "_loading_page"):
+            self._web_stack.setCurrentWidget(self._loading_page)
         self.web.reload()
+        QTimer.singleShot(30000, lambda: self._show_web_failure(
+            "The interface retry timed out. Your project data remains on disk. Check the local log and try again."
+        ) if generation == self._frontend_generation and not self._frontend_ready else None)
 
     def _handle_renderer_terminated(self, status, exit_code: int) -> None:
         message = f"Embedded UI renderer terminated (status={status}, exit code={exit_code})."
         log.error("%s", message)
+        self._frontend_ready = False
+        self._frontend_generation += 1
         self._show_web_failure(
             message + " The project data remains on disk. Retry the interface; diagnostics were written to the local log."
         )
@@ -5707,12 +5769,12 @@ class PremiumV2Window(QMainWindow):
             message = f"Premium V2 HTML failed to load from {frontend_path()}. Check that the application assets are intact, then retry."
             self._show_web_failure(message)
             return
-        self._renderer_restart_attempts = 0
         self._frontend_generation += 1
         self._frontend_ready = False
         generation = self._frontend_generation
-        if hasattr(self, "_web_stack"):
-            self._web_stack.setCurrentWidget(self.web)
+        self._set_loading_status("Connecting to the local backend and loading saved settings…")
+        if hasattr(self, "_web_stack") and hasattr(self, "_loading_page"):
+            self._web_stack.setCurrentWidget(self._loading_page)
         # Install error handlers before the adapter executes. A page load may
         # succeed while a JavaScript exception leaves the visible interface blank.
         script = r"""
@@ -5824,7 +5886,7 @@ class PremiumV2Window(QMainWindow):
         if generation != self._frontend_generation or self._frontend_ready:
             return
         if isinstance(result, dict) and result.get("adapter") and result.get("body"):
-            self._frontend_ready = True
+            self._on_frontend_ready()
             return
         log.error(
             "Premium V2 frontend failed its initialization watchdog (adapter_ready=%s, body_present=%s, generation=%s)",

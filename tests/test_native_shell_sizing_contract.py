@@ -33,6 +33,24 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertIn('"text_scale": "ui/text_scale"', host)
         self.assertIn('"window_size": "ui/window_size"', host)
 
+
+    def test_native_loading_surface_stays_visible_until_backend_frontend_ready(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn('self._web_stack.setCurrentWidget(self._loading_page)', host)
+        self.assertIn('def _on_frontend_ready(self)', host)
+        self.assertIn('reveal = getattr(window, "_on_frontend_ready", None)', host)
+        self.assertIn('def _set_loading_status(self, message: str)', host)
+        self.assertIn('Retrying the interface and reconnecting local services', host)
+        self.assertIn('await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters]);', adapter)
+        self.assertNotIn('self._web_stack.setCurrentWidget(self.web)\n        self.web.reload()', host)
+
+    def test_window_minimum_size_is_bounded_by_the_available_screen(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn('min_width = max(480, min(960, int(available.width())))', host)
+        self.assertIn('min_height = max(360, min(620, int(available.height())))', host)
+        self.assertIn('self.setMinimumSize(min_width, min_height)', host)
+
     def test_reduced_motion_is_a_saved_preference_and_disables_heavy_visual_effects(self):
         html = (ROOT / "assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")

@@ -111,6 +111,28 @@ def load_learning_examples(series: str, path: Path | None = None) -> list[dict[s
     return rows
 
 
+def prepare_learning_index(
+    examples: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    """Index feedback once by normalized (series, canonical speaker) for fast ranking.
+
+    A book can contain thousands of quotations and a series can accumulate thousands
+    of confirmed examples. Scanning the entire memory for every candidate on every
+    quotation made analysis cost grow as quotations × cast × all saved examples.
+    The index keeps ranking local to the selected speaker and series.
+    """
+    index: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in examples:
+        if not isinstance(row, dict):
+            continue
+        speaker = str(row.get("speaker") or "").strip().casefold()
+        if not speaker:
+            continue
+        key = (_series_key(str(row.get("series") or "")), speaker)
+        index.setdefault(key, []).append(row)
+    return index
+
+
 def record_assignment_feedback(
     *,
     series: str,
@@ -244,7 +266,7 @@ def rank_speaker_suggestions(
     end: int,
     detected: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
     known_characters: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
-    learning_examples: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+    learning_examples: list[dict[str, Any]] | tuple[dict[str, Any], ...] | dict[tuple[str, str], list[dict[str, Any]]] = (),
     last_speaker: str = "",
     last_speaker_series: str = "",
 ) -> list[dict[str, Any]]:
@@ -266,6 +288,10 @@ def rank_speaker_suggestions(
     before = source[max(0, start - 500):start]
     after = source[end:min(len(source), end + 500)]
     nearby = before + "\n" + dialogue + "\n" + after
+    learning_index = (
+        learning_examples if isinstance(learning_examples, dict)
+        else prepare_learning_index(learning_examples)
+    )
     speech_verb = r"(?:" + _SPEECH_VERBS + r")"
     candidate_map: dict[str, dict[str, Any]] = {}
 
@@ -372,12 +398,17 @@ def rank_speaker_suggestions(
             item["score"] = max(float(item["score"]), 0.97)
             item["evidence"] = "Explicit character name and speech tag found next to this passage."
             continue
-        for example in learning_examples:
-            if not isinstance(example, dict) or str(example.get("speaker") or "").casefold() != item["name"].casefold():
+        candidate_series = _series_key(str(item.get("series") or ""))
+        # Only the same canonical speaker in the same explicit series can teach
+        # this candidate. An unscoped candidate must not inherit series feedback.
+        matching_examples = learning_index.get(
+            (candidate_series, item["name"].casefold()), ()
+        )
+        for example in matching_examples:
+            if not isinstance(example, dict):
                 continue
-            candidate_series = _series_key(str(item.get("series") or ""))
             example_series = _series_key(str(example.get("series") or ""))
-            if candidate_series and example_series and candidate_series != example_series:
+            if candidate_series != example_series:
                 continue
             learned_dialogue = str(example.get("normalized_dialogue") or _normalize(str(example.get("dialogue_text") or "")))
             dialogue_match = learned_dialogue and learned_dialogue == _normalize(dialogue)

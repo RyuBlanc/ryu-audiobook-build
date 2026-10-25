@@ -6542,21 +6542,25 @@
     bindMiniPlayerNavigation();
     syncMiniPlayer();
 
-    const hydrateInitialState = async () => {
-      const phases = [
-        [refreshProjects, refreshVoices, refreshChapters, loadSettings],
-        [refreshCharacters, refreshCharacterLibrary, refreshTerms],
-        [refreshSounds, refreshSoundCues, refreshChapterBgm],
-        [refreshJobs, refreshHistory, refreshModels]
-      ];
-      for (const phase of phases) {
-        for (const refresh of phase) {
-          try { await refresh(); } catch (error) { console.warn('[Ryu hydration]', error); }
-          await new Promise(resolve => setTimeout(resolve, 0));
-        }
+    const hydratePhase = async phase => {
+      for (const refresh of phase) {
+        try { await refresh(); }
+        catch (error) { console.warn('[Ryu hydration]', error); }
+        // Give Chromium a paint/dispatch opportunity between backend reads.
+        await new Promise(resolve => setTimeout(resolve, 0));
       }
     };
-    void hydrateInitialState();
+    // Do not reveal the app with default font sizing and empty project widgets
+    // while persisted Settings are still loading. PremiumV2Window keeps a native
+    // loading surface visible until wire() finishes this essential phase.
+    await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters]);
+    // Secondary panels remain asynchronous and are isolated: a slow optional
+    // sound/model subsystem cannot hold the main interface hostage.
+    void (async () => {
+      await hydratePhase([refreshCharacters, refreshCharacterLibrary, refreshTerms]);
+      await hydratePhase([refreshSounds, refreshSoundCues, refreshChapterBgm]);
+      await hydratePhase([refreshJobs, refreshHistory, refreshModels]);
+    })();
     applyUnavailableControlStates();
     // The prototype action controls were replaced before any async work above;
     // only backend-owned Voice Studio actions remain active here.
