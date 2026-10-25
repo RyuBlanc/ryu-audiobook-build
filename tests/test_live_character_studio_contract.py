@@ -41,7 +41,13 @@ class LiveCharacterStudioContracts(unittest.TestCase):
         ):
             self.assertIn(command, host)
         self.assertIn('state["character_dialogue_suggestions"] = suggestions', host)
-        self.assertIn('state["character_dialogue_skips"] = []', host)
+        worker_start = host.index("    def _character_worker(self, job_id: str, project) -> None:")
+        worker_end = host.index("\n    def ", worker_start + 1)
+        worker = host[worker_start:worker_end]
+        self.assertIn('previous_dialogue_suggestions = state.get("character_dialogue_suggestions") or []', worker)
+        self.assertIn('previous_dialogue_skips = state.get("character_dialogue_skips") or []', worker)
+        self.assertIn('state["character_dialogue_skips"] = retain_current_dialogue_skips(', worker)
+        self.assertNotIn('state["character_dialogue_skips"] = []', worker)
         self.assertIn("if exact_text != dialogue_text", host)
         self.assertIn('item["start"] < end and item["end"] > start', host)
         self.assertIn('"series": series', host)
