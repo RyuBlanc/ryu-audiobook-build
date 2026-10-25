@@ -67,6 +67,32 @@ class CharacterLearningMemoryTests(unittest.TestCase):
         self.assertTrue(ranked_after)
         self.assertEqual(ranked_after[0]["name"], "Souei")
 
+    def test_detected_alias_is_returned_as_canonical_saved_character(self):
+        source = 'Rimuru said, “We should leave before sunrise.”'
+        start = source.index("“")
+        end = source.index("”", start) + 1
+        ranked = rank_speaker_suggestions(
+            chapter_text=source, start=start, end=end,
+            detected=[{"name": "Rimuru", "confidence": 0.96, "evidence": "Detected name"}],
+            known_characters=[{"name": "Rimuru Tempest", "aliases": ["Rimuru", "Great Rimuru"]}],
+        )
+        self.assertTrue(ranked)
+        self.assertEqual(ranked[0]["name"], "Rimuru Tempest")
+        self.assertGreaterEqual(ranked[0]["confidence"], 0.90)
+
+    def test_pronoun_speech_tag_continues_the_last_confirmed_speaker(self):
+        source = '“The gate is closed.” He replied.'
+        start = source.index("“")
+        end = source.index("”", start) + 1
+        ranked = rank_speaker_suggestions(
+            chapter_text=source, start=start, end=end,
+            known_characters=[{"name": "Souei", "aliases": ["Shadow"]}],
+            last_speaker="Souei",
+        )
+        self.assertTrue(ranked)
+        self.assertEqual(ranked[0]["name"], "Souei")
+        self.assertIn("Pronoun speech tag", ranked[0]["evidence"])
+
     def test_confirmed_examples_improve_later_context_ranking_and_are_removed_on_unassign(self):
         with tempfile.TemporaryDirectory() as folder:
             store = Path(folder) / "learning.json"
