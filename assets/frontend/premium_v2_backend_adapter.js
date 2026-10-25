@@ -6,68 +6,97 @@
   let ryuUiTextObserver = null;
   const ryuUiScalePendingRoots = new Set();
   let ryuUiScaleFramePending = false;
+  let ryuUiTextBaselinesReady = false;
   const RYU_UI_TEXT_SCALES = new Set([85, 90, 100, 110, 120, 130, 140]);
-  function scaleUiFontTree(root, scale, inheritedBase = null) {
-    if (!root || root.nodeType !== 1) return;
-    // Normal size is the native/default appearance. Avoid touching hundreds of
-    // elements at startup unless a non-default scale was actually selected.
-    if (scale === 100 && root.dataset.ryuFontScaled !== '1') return;
-    // MutationObserver may report both a newly inserted card and its descendants
-    // in the same frame. Never walk an unchanged subtree twice for one scale.
-    if (scale !== 100 && root.dataset.ryuFontScaled === '1' &&
-        Number(root.dataset.ryuScaleApplied) === scale) return;
-    const current = Number.parseFloat(getComputedStyle(root).fontSize) || 14;
-    const parent = root.parentElement;
-    const parentCurrent = parent ? Number.parseFloat(getComputedStyle(parent).fontSize) : NaN;
-    const parentBaseValue = parent?.dataset?.ryuBaseFontPx;
-    const parentBase = parentBaseValue ? Number.parseFloat(parentBaseValue) : inheritedBase;
-    let base = Number.parseFloat(root.dataset.ryuBaseFontPx);
-    if (!Number.isFinite(base) || base <= 0) {
-      // Inherited text follows the parent's original size. A differently sized
-      // child keeps its own base so heading/body hierarchy remains recognizable.
-      base = Number.isFinite(parentBase) && Number.isFinite(parentCurrent) &&
-        Math.abs(current - parentCurrent) < 0.25 ? parentBase : current;
-      root.dataset.ryuBaseFontPx = String(base);
-    }
-    if (scale === 100) {
-      if (root.dataset.ryuOriginalFontCaptured === '1') {
-        const original = root.dataset.ryuOriginalInlineFontSize || '';
-        const priority = root.dataset.ryuOriginalInlineFontPriority || '';
-        if (original) root.style.setProperty('font-size', original, priority);
-        else root.style.removeProperty('font-size');
-        delete root.dataset.ryuOriginalInlineFontSize;
-        delete root.dataset.ryuOriginalInlineFontPriority;
-        delete root.dataset.ryuOriginalFontCaptured;
-      }
-      delete root.dataset.ryuFontScaled;
-      delete root.dataset.ryuScaleApplied;
-      for (const child of root.children) scaleUiFontTree(child, scale, base);
-      return;
-    }
-    if (root.dataset.ryuOriginalFontCaptured !== '1') {
-      root.dataset.ryuOriginalInlineFontSize = root.style.getPropertyValue('font-size');
-      root.dataset.ryuOriginalInlineFontPriority = root.style.getPropertyPriority('font-size');
-      root.dataset.ryuOriginalFontCaptured = '1';
-    }
-    root.style.setProperty('font-size', (base * scale / 100) + 'px', 'important');
-    root.dataset.ryuFontScaled = '1';
-    root.dataset.ryuScaleApplied = String(scale);
-    for (const child of root.children) scaleUiFontTree(child, scale, base);
+
+  function ensureUiTextScaleStyles() {
+    if ($('ryuUiTextScaleStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'ryuUiTextScaleStyles';
+    style.textContent = [
+      'html[data-ryu-text-scale-active="1"][data-ryu-font-scaled="1"],',
+      'html[data-ryu-text-scale-active="1"] [data-ryu-font-scaled="1"] {',
+      'font-size: calc(var(--ryu-base-font-px, 14px) * var(--ryu-ui-text-scale, 1)) !important;',
+      '}'
+    ].join('\n');
+    (document.head || document.documentElement).appendChild(style);
   }
+
+  function captureUiFontBaselines(root) {
+    if (!root || root.nodeType !== 1) return;
+    // Read computed sizes first and write baseline variables afterwards. Interleaving
+    // getComputedStyle() with per-node font-size writes forces repeated style/layout
+    // recalculation and was a source of pauses on larger Character Studio chapters.
+    const rows = [];
+    const visit = (node, parentBase = null, parentCurrent = NaN) => {
+      if (!node || node.nodeType !== 1) return;
+      const current = Number.parseFloat(getComputedStyle(node).fontSize) || 14;
+      const stored = Number.parseFloat(node.style.getPropertyValue('--ryu-base-font-px'));
+      let base = Number.isFinite(stored) && stored > 0 ? stored : NaN;
+      if (!Number.isFinite(base)) {
+        const inherits = Number.isFinite(parentBase) && Number.isFinite(parentCurrent) &&
+          Math.abs(current - parentCurrent) < 0.25;
+        base = inherits ? parentBase : current;
+      }
+      rows.push({node, base});
+      for (const child of node.children) visit(child, base, current);
+    };
+    visit(root);
+    for (const row of rows) {
+      row.node.style.setProperty('--ryu-base-font-px', String(row.base) + 'px');
+      row.node.dataset.ryuFontScaled = '1';
+    }
+  }
+
+  function queueUiTextScaleBaselineCapture(node) {
+    if (!node || node.nodeType !== 1) return;
+    // Coalesce nested insertions. A chapter render often adds a panel and all of
+    // its descendants in one mutation batch; measure it once as a subtree.
+    for (const existing of ryuUiScalePendingRoots) {
+      if (existing === node || existing.contains(node)) return;
+    }
+    for (const existing of Array.from(ryuUiScalePendingRoots)) {
+      if (node.contains(existing)) ryuUiScalePendingRoots.delete(existing);
+    }
+    ryuUiScalePendingRoots.add(node);
+    if (ryuUiScaleFramePending) return;
+    ryuUiScaleFramePending = true;
+    requestAnimationFrame(() => {
+      ryuUiScaleFramePending = false;
+      const roots = Array.from(ryuUiScalePendingRoots);
+      ryuUiScalePendingRoots.clear();
+      // Baseline capture uses a read phase followed by a write phase. The text
+      // scale is a single CSS variable, not hundreds of inline font mutations.
+      for (const pendingRoot of roots) {
+        if (pendingRoot.isConnected) captureUiFontBaselines(pendingRoot);
+      }
+    });
+  }
+
   function applyUiTextScale(value) {
     const parsed = Number(value);
     ryuUiTextScale = RYU_UI_TEXT_SCALES.has(parsed) ? parsed : 100;
-    document.documentElement.dataset.ryuTextScale = String(ryuUiTextScale);
-    document.documentElement.style.setProperty('--ryu-ui-text-scale', String(ryuUiTextScale / 100));
-    if (document.documentElement) scaleUiFontTree(document.documentElement, ryuUiTextScale);
+    const root = document.documentElement;
+    if (!root) return;
+    ensureUiTextScaleStyles();
+    if (ryuUiTextScale !== 100 && !ryuUiTextBaselinesReady) {
+      captureUiFontBaselines(root);
+      ryuUiTextBaselinesReady = true;
+    }
+    root.dataset.ryuTextScale = String(ryuUiTextScale);
+    root.style.setProperty('--ryu-ui-text-scale', String(ryuUiTextScale / 100));
+    if (ryuUiTextScale === 100) delete root.dataset.ryuTextScaleActive;
+    else root.dataset.ryuTextScaleActive = '1';
     const select = $('uiTextScale');
     if (select && select.value !== String(ryuUiTextScale)) select.value = String(ryuUiTextScale);
   }
+
   function installUiTextScaleRuntime() {
     if (window.__ryuUiTextScaleInstalled) return;
     window.__ryuUiTextScaleInstalled = true;
-    // Block Chromium's browser zoom shortcuts and Ctrl+mousewheel. Sizing is
-    // controlled through Settings, where it can be persisted and reproduced.
+    ensureUiTextScaleStyles();
+    // Block Chromium/browser zoom shortcuts and Ctrl+mousewheel. The app's text
+    // size and window resolution are controlled only through Settings.
     window.addEventListener('keydown', event => {
       if (event.ctrlKey && ['+', '=', '-', '_', '0'].includes(String(event.key || ''))) {
         event.preventDefault();
@@ -82,33 +111,8 @@
     }, {capture:true, passive:false});
     if (typeof MutationObserver === 'function') {
       ryuUiTextObserver = new MutationObserver(records => {
-        for (const record of records) for (const node of record.addedNodes) {
-          if (!node || node.nodeType !== 1) continue;
-          // Prefer the highest newly-added ancestor. A project/chapter render
-          // often inserts a parent and several children in the same mutation
-          // batch; scaling each child as well repeats costly style recalculation.
-          let covered = false;
-          for (const existing of ryuUiScalePendingRoots) {
-            if (existing === node || existing.contains(node)) { covered = true; break; }
-          }
-          if (covered) continue;
-          for (const existing of Array.from(ryuUiScalePendingRoots)) {
-            if (node.contains(existing)) ryuUiScalePendingRoots.delete(existing);
-          }
-          ryuUiScalePendingRoots.add(node);
-        }
-        // Perform one deduplicated scale pass per paint; no full document reload,
-        // browser zoom, or repeated recursive walk of the same inserted subtree.
-        if (ryuUiScalePendingRoots.size && !ryuUiScaleFramePending) {
-          ryuUiScaleFramePending = true;
-          requestAnimationFrame(() => {
-            ryuUiScaleFramePending = false;
-            const roots = Array.from(ryuUiScalePendingRoots);
-            ryuUiScalePendingRoots.clear();
-            for (const node of roots) {
-              if (node.isConnected) scaleUiFontTree(node, ryuUiTextScale);
-            }
-          });
+        for (const record of records) {
+          for (const node of record.addedNodes) queueUiTextScaleBaselineCapture(node);
         }
       });
       ryuUiTextObserver.observe(document.documentElement, {childList:true, subtree:true});
