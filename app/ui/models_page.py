@@ -28,6 +28,7 @@ from app.tts.qwen_character_runtime import (
     install_runtime as install_qwen_runtime,
     install_model as install_qwen_model,
     model_installed as qwen_model_installed,
+    runtime_ready as qwen_runtime_ready,
     best_custom_kind,
     best_clone_kind,
     best_voice_design_kind,
@@ -40,11 +41,20 @@ from app.tts.qwen_character_runtime import (
     INSTALLER_PATH as QWEN_INSTALLER_PATH,
     INSTALLER_LOG as QWEN_INSTALLER_LOG,
 )
-from app.ai.model_runtime import brain_root, install_runtime as install_audiobook_ai, recommended_model, installed as audiobook_ai_installed, self_test as test_audiobook_ai
+from app.ai.model_runtime import brain_root, install_runtime as install_audiobook_ai, recommended_model, self_test as test_audiobook_ai
 
 
 KOKORO_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.onnx"
 KOKORO_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin"
+
+def _file_ready(path: Path) -> bool:
+    """Cheap integrity check for large local assets; never opens or loads the model."""
+    try:
+        return path.is_file() and path.stat().st_size >= 1024
+    except OSError:
+        return False
+
+
 from app.ui.stable_refresh import stable_view_refresh
 
 
@@ -462,15 +472,31 @@ class ModelsPage(QWidget):
         # Kokoro pack ships inside the application and must not offer an uninstall
         # button that appears to succeed but cannot remove the bundled assets.
         local_kokoro_root = models_root() / "kokoro"
-        local_kokoro_installed = (
-            local_kokoro_root.exists()
-            and any(path.is_file() for path in local_kokoro_root.rglob("*"))
+        try:
+            local_kokoro_present = (
+                local_kokoro_root.is_dir()
+                and any(path.is_file() for path in local_kokoro_root.iterdir())
+            )
+        except OSError:
+            local_kokoro_present = True
+        local_kokoro_models = [
+            path for path in local_kokoro_root.glob("*.onnx")
+        ] if local_kokoro_root.is_dir() else []
+        local_kokoro_voicepacks = [
+            local_kokoro_root / "voices-v1.0.bin",
+            local_kokoro_root / "voices.bin",
+        ]
+        local_kokoro_ready = (
+            any(_file_ready(path) for path in local_kokoro_models)
+            and any(_file_ready(path) for path in local_kokoro_voicepacks)
         )
-        if local_kokoro_installed:
+        if local_kokoro_ready:
             add_component(
                 f"Kokoro 82M — User-installed • {len(KokoroProvider().voices())} voices available",
                 "kokoro",
             )
+        elif local_kokoro_present:
+            add_component("Kokoro 82M — Incomplete • retry download or remove partial files", "kokoro")
         elif KokoroProvider.assets_available():
             add_component("Kokoro 82M — Bundled with application (not individually removable)")
         else:
@@ -500,14 +526,38 @@ class ModelsPage(QWidget):
         if not any_qwen_model:
             add_component("Qwen3-TTS Voice Studio — no model installed")
 
-        if QWEN_VENV_ROOT.exists() or QWEN_PYTHON_ROOT.exists():
-            add_component("Qwen3-TTS Python runtime — Installed", "qwen-runtime")
+        qwen_runtime_present = any(
+            path.exists()
+            for path in (
+                QWEN_RUNTIME_ROOT, QWEN_VENV_ROOT, QWEN_PYTHON_ROOT,
+                QWEN_MARKER, QWEN_INSTALLER_PATH, QWEN_INSTALLER_LOG,
+            )
+        )
+        if qwen_runtime_ready():
+            add_component("Qwen3-TTS Python runtime — Ready", "qwen-runtime")
+        elif qwen_runtime_present:
+            add_component("Qwen3-TTS Python runtime — Incomplete • repair required", "qwen-runtime")
         else:
             add_component("Qwen3-TTS Python runtime — Not installed")
 
+        # Use cheap filesystem checks here. audiobook_ai_installed() invokes
+        # recommended_model(), which can launch nvidia-smi; that must not run
+        # from the Qt refresh path because a missing/slow driver can freeze UI.
         ai_root = models_root() / "audiobook-ai"
-        if ai_root.exists() and any(ai_root.iterdir()):
-            add_component("Audiobook AI — runtime/model files installed", "audiobook-ai")
+        try:
+            ai_root_present = ai_root.is_dir() and any(ai_root.iterdir())
+        except OSError:
+            ai_root_present = True
+        ai_server = ai_root / "llama-server.exe"
+        ai_models = (
+            ai_root / "Qwen3-1.7B-Q5_K_M.gguf",
+            ai_root / "Qwen3-4B-Q4_K_M.gguf",
+        )
+        ai_ready = _file_ready(ai_server) and any(_file_ready(path) for path in ai_models)
+        if ai_ready:
+            add_component("Audiobook AI — Ready (local runtime and model files present)", "audiobook-ai")
+        elif ai_root_present:
+            add_component("Audiobook AI — Incomplete • install/repair required", "audiobook-ai")
         else:
             add_component("Audiobook AI — Not installed")
 

@@ -135,7 +135,7 @@
 - [ ] Voice Studio safety: verify provider/runtime readiness and permission/API-key gates against real state; reject fake preview/candidate success and preserve the previous narrator after errors.
 - [ ] Characters: use fixtures with quoted dialogue, speaker tags, and em-dash dialogue; verify nonzero characters when names/speaker cues are present, and verify manual override.
 - [ ] Empty chapters: valid chapter + empty chapter + valid chapter; verify the user gets a clear warning and the chosen skip/repair policy is applied without silently discarding valid chapters.
-- [ ] Preview duration: test 10/20/30/45/60 seconds for at least one local provider and one custom voice; record requested vs actual durations.
+- [ ] Preview duration: test the supported 10/30/60/90-second targets for at least one local provider and one custom voice; record requested vs actual durations.
 - [ ] UI responsiveness: test model startup and long preview/generation; no blocking popup or false “not responding” condition from main-thread work.
 - [ ] Progress: test successful, failed, cancelled, paused/resumed, and resumed-from-partial jobs.
 - [ ] Sound cues: test opening/page-turn/scene/closing independently with BGM on and off.

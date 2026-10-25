@@ -18,7 +18,7 @@
 - [ ] Voice cast assignments persist per project and route the assigned profile to the matching dialogue during actual generation.
 - [ ] Mixed books skip empty chapters safely; all-empty books are blocked with a clear repair message.
 - [ ] Generate navigation always opens the real production screen and remains usable if optional panels fail.
-- [ ] Preview durations (10, 20, 30, 45, 60 seconds) use the selected target, report actual output duration, and never silently substitute a shorter preview.
+- [ ] Supported preview durations (10, 30, 60, 90 seconds) use the selected target, report actual output duration, and never silently substitute a shorter preview.
 - [ ] Preview and generation keep expensive inference off the UI thread; Play/Pause/Stop/Cancel work in-app and the window remains responsive.
 - [ ] Progress, elapsed time, ETA, error states, cancellation and resume reflect real work rather than timer-only or guessed completion.
 

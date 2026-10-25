@@ -197,6 +197,37 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             self.assertTrue((preserve / "config.json").is_file())
             self.assertIn("other model folders", message)
 
+    def test_models_center_file_readiness_rejects_partial_assets_without_loading_them(self):
+        from tempfile import TemporaryDirectory
+        from app.ui.models_page import _file_ready
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            partial = root / "partial.gguf"
+            complete = root / "complete.gguf"
+            partial.write_bytes(b"partial")
+            complete.write_bytes(b"x" * 1024)
+
+            self.assertFalse(_file_ready(partial))
+            self.assertTrue(_file_ready(complete))
+            self.assertFalse(_file_ready(root / "missing.gguf"))
+
+    def test_models_center_inventory_distinguishes_incomplete_local_runtimes(self):
+        source = (Path(__file__).resolve().parents[1] / "app" / "ui" / "models_page.py").read_text(encoding="utf-8")
+        refresh = source.split("def refresh(self) -> None:", 1)[1].split(
+            "\n    def _update_operation_controls(", 1
+        )[0]
+
+        self.assertIn("if qwen_runtime_ready():", refresh)
+        self.assertIn("Qwen3-TTS Python runtime — Incomplete", refresh)
+        self.assertIn('ai_server = ai_root / "llama-server.exe"', refresh)
+        self.assertIn("ai_ready = _file_ready(ai_server) and any(_file_ready(path) for path in ai_models)", refresh)
+        self.assertIn("Audiobook AI — Incomplete", refresh)
+        self.assertIn("Kokoro 82M — Incomplete", refresh)
+        self.assertNotIn("audiobook_ai_installed()", refresh)
+        self.assertIn('"qwen-runtime")', refresh)
+        self.assertIn('"audiobook-ai")', refresh)
+
     def test_active_model_lifecycle_blocks_preview_analysis_and_generation(self):
         bridge = self.make_bridge()
         bridge._jobs["active-model-job"] = {

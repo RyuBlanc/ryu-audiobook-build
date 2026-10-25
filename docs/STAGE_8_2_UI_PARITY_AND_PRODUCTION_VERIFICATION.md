@@ -142,6 +142,10 @@ The remaining implementation is frozen to six packages. Defects found during a p
 5. **Package 5 / Stage 8.2.11 — Windows release validation.** Build installer and portable packages from the same candidate; verify bundled assets, launch, local playback, and compact-window behavior. CI packaging is not manual runtime acceptance.
 6. **Package 6 / Stage 8.2.12 — Final acceptance/release.** Run full regression and packaging workflows, compare UI parity to approved HTML, capture artifact names/sizes/checksums, resolve release blockers, and provide the final verified application.
 
+## Current preview-duration contract clarification — October 25, 2026
+
+The active native Voice Studio selector, desktop preview bridge, persisted Settings validation, HTML adapter, and current preview contract tests support **10, 30, 60, and 90 seconds**. Requests for 20 or 45 seconds are rejected before a worker starts. Older Stage 8.2 build notes below document an earlier planned target set and should be read as historical evidence, not as the current runtime contract.
+
 ## Stage 8.2.8 — Sound Design implementation notes
 
 - Added persistent sound.chapter_bgm.get and sound.chapter_bgm.save bridge commands. The strategy (same or custom) and per-chapter rules (default, custom, none) are stored in the active project's state and validated against real local/bundled catalogue paths.
