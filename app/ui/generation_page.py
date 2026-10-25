@@ -29,6 +29,7 @@ from app.tts.pronunciation_suggester import (
 from app.documents.parser import extract_text
 from app.documents.cover_art import persist_project_cover
 from app.core.state import load_state, save_state
+from app.core.character_identity import parse_character_identity_key
 from app.core.project import list_projects
 from app.ui.metadata_widgets import HistoryComboBox, GenrePicker
 from app.ui.motion import SmoothProgressBar
@@ -1686,11 +1687,26 @@ class GenerationPage(QWidget):
         if not self.project_folder:
             return
         state = load_state(self.project_folder)
-        cast = state.get("voice_cast", {})
-        if not cast:
+        legacy_cast = state.get("voice_cast", {})
+        legacy_cast = legacy_cast if isinstance(legacy_cast, dict) else {}
+        identity_cast = state.get("voice_cast_identity_assignments", {})
+        lines = []
+        if isinstance(identity_cast, dict) and identity_cast:
+            for identity, voice in identity_cast.items():
+                parsed = parse_character_identity_key(identity)
+                if not parsed or not str(voice or "").strip():
+                    continue
+                series, name = parsed
+                lines.append(f"{name} [{series}] → {voice}")
+            # Narrator remains a legacy, project-wide fallback assignment.
+            narrator = legacy_cast.get("Narrator") or legacy_cast.get("narrator")
+            if narrator:
+                lines.append(f"Narrator → {narrator}")
+        else:
+            lines = [f"{name} → {voice}" for name, voice in legacy_cast.items() if voice]
+        if not lines:
             self.cast_summary.setText("No character-specific voice assignments saved. Narrator voice will be used.")
             return
-        lines = [f"{name} → {voice}" for name, voice in cast.items()]
         self.cast_summary.setText(
             "Saved voice cast assignments:\n" + "\n".join(lines) +
             "\n\nThese assignments are stored with this book and are ready for the cast-aware narration engine."
@@ -2669,6 +2685,15 @@ class GenerationPage(QWidget):
         provider_name = profile.provider if profile else None
         state = load_state(self.project_folder) if self.project_folder else {}
         assignments = state.get("voice_cast", {}) if isinstance(state, dict) else {}
+        assignments = dict(assignments) if isinstance(assignments, dict) else {}
+        identity_assignments = state.get("voice_cast_identity_assignments", {}) if isinstance(state, dict) else {}
+        if isinstance(identity_assignments, dict) and identity_assignments:
+            # Readiness counts the series-scoped assignments instead of losing
+            # duplicate names through the legacy name-keyed dictionary.
+            assignments = {key: value for key, value in identity_assignments.items() if str(value or "").strip()}
+            narrator = (state.get("voice_cast", {}) or {}).get("Narrator") if isinstance(state.get("voice_cast", {}), dict) else None
+            if narrator:
+                assignments["narrator"] = narrator
         qwen_models_ready = True
         qwen_model_detail = "Required local Qwen model files are present."
         if profile and profile.provider == "qwen-character":
