@@ -928,7 +928,6 @@ class VoiceCastPage(QWidget):
             name = str(row.get("name") or "").strip()
             if not name or name.casefold() == "narrator" or not row.get("voice"):
                 continue
-            series = str(row.get("series") or default_series).strip().casefold()
             if len(name_series.get(name.casefold(), set())) == 1:
                 legacy_assignments[name] = row["voice"]
 
@@ -946,53 +945,6 @@ class VoiceCastPage(QWidget):
             (
                 row["name"] for row in self.rows
                 if row.get("role") == "Narrating Character" and row.get("voice")
-            ),
-            None,
-        )
-        if narrating:
-            state["voice_cast_narrating_character"] = narrating
-        else:
-            state.pop("voice_cast_narrating_character", None)
-
-        save_state(folder, state)
-        self._sync_character_library(update_names=update_names, update_voice=update_voice)
-        if hasattr(self, "dialogue_panel"):
-            self.dialogue_panel.rows = list(self.rows)
-            self.dialogue_panel.refresh_project_data()
-
-
-        folder = self._project_folder()
-        if not folder:
-            return
-
-        state = load_state(folder)
-        series = self._series_name()
-        if series:
-            state["series_name"] = series
-        # Keep the full cast roster, including manually added characters
-        # without an assigned voice, so it survives restarts and re-analysis.
-        state["voice_cast_character_roster"] = [
-            {
-                "name": row["name"], "role": row.get("role") or "Possible Character",
-                "series": str(row.get("series") or series),
-                "dialogue_count": int(row.get("dialogue_count") or 0),
-                "examples": list(row.get("examples") or []),
-                "confidence": float(row.get("confidence", 0.0)),
-                "aliases": list(row.get("aliases") or []),
-            }
-            for row in self.rows if row.get("name") and row["name"].casefold() != "narrator"
-        ]
-        narrator_assignment = state.get("voice_cast", {}).get("Narrator") if isinstance(state.get("voice_cast"), dict) else None
-        state["voice_cast"] = {
-            row["name"]: row["voice"] for row in self.rows if row.get("voice")
-        }
-        if narrator_assignment:
-            state["voice_cast"]["Narrator"] = narrator_assignment
-
-        narrating = next(
-            (
-                row["name"] for row in self.rows
-                if row["role"] == "Narrating Character" and row.get("voice")
             ),
             None,
         )
