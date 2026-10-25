@@ -116,27 +116,88 @@ def install_runtime(progress=None) -> Path:
     server = root / "llama-server.exe"
     if not server.exists():
         vram = detect_nvidia_vram_gb()
-        url = LLAMA_CUDA12_URL if vram > 0 else LLAMA_CPU_URL
-        with tempfile.TemporaryDirectory(prefix="ryu-llama-") as temp_dir:
-            archive = Path(temp_dir) / "llama.zip"
-            if progress:
-                progress("Downloading local AI runtime…")
-            download(url, archive, "llama.cpp runtime", progress)
-            with zipfile.ZipFile(archive) as zf:
-                candidates = [n for n in zf.namelist() if n.lower().endswith("/llama-server.exe") or n.lower() == "llama-server.exe"]
-                if not candidates:
-                    raise BrainRuntimeError("The llama.cpp runtime did not contain llama-server.exe.")
-                selected = candidates[0]
+        # Prefer the CUDA build where an NVIDIA GPU is detected, but do not
+        # make that detection a single point of failure. Unsupported drivers,
+        # unavailable CUDA release assets, or a damaged archive must not leave
+        # local Audiobook AI unusable when the CPU runtime is still available.
+        runtime_candidates = (
+            [(LLAMA_CUDA12_URL, "CUDA")]
+            if vram > 0
+            else []
+        )
+        runtime_candidates.append((LLAMA_CPU_URL, "CPU"))
+        failures = []
+        installed = False
+
+        for index, (url, runtime_label) in enumerate(runtime_candidates):
+            with tempfile.TemporaryDirectory(prefix="ryu-llama-") as temp_dir:
+                archive = Path(temp_dir) / "llama.zip"
                 extracted = Path(temp_dir) / "extracted"
-                zf.extractall(extracted)
-                src = extracted / selected
-                if not src.exists():
-                    src = next(extracted.rglob("llama-server.exe"))
-                shutil.copy2(src, server)
-                for dll in extracted.rglob("*.dll"):
-                    destination = root / dll.name
-                    if not destination.exists():
-                        shutil.copy2(dll, destination)
+                staged_root = Path(temp_dir) / "staged"
+                try:
+                    if progress:
+                        progress(f"Downloading local AI runtime ({runtime_label})…")
+                    download(url, archive, f"llama.cpp {runtime_label} runtime", progress)
+                    with zipfile.ZipFile(archive) as zf:
+                        candidates = [
+                            name for name in zf.namelist()
+                            if name.lower().endswith("/llama-server.exe")
+                            or name.lower() == "llama-server.exe"
+                        ]
+                        if not candidates:
+                            raise BrainRuntimeError(
+                                f"The llama.cpp {runtime_label} runtime archive "
+                                "did not contain llama-server.exe."
+                            )
+                        zf.extractall(extracted)
+                    selected = candidates[0]
+                    server_source = extracted / selected
+                    if not server_source.is_file():
+                        server_source = next(
+                            path for path in extracted.rglob("*")
+                            if path.is_file() and path.name.lower() == "llama-server.exe"
+                        )
+
+                    # Stage every runtime file before replacing the active
+                    # executable/DLLs. A failed download or archive validation
+                    # cannot leave a half-written server that looks installed.
+                    staged_root.mkdir(parents=True, exist_ok=True)
+                    sources = [(server_source, server)]
+                    sources.extend(
+                        (dll, root / dll.name)
+                        for dll in extracted.rglob("*.dll")
+                        if dll.is_file()
+                    )
+                    staged_targets = []
+                    for item_number, (source_path, destination) in enumerate(sources):
+                        staged_path = staged_root / f"{item_number}-{destination.name}"
+                        shutil.copy2(source_path, staged_path)
+                        staged_targets.append((staged_path, destination))
+                except Exception as exc:
+                    failures.append(f"{runtime_label}: {exc}")
+                    if index < len(runtime_candidates) - 1 and progress:
+                        progress(
+                            "CUDA AI runtime could not be downloaded or validated; "
+                            "retrying with the CPU runtime…"
+                        )
+                    continue
+
+                for staged_path, destination in staged_targets:
+                    staged_path.replace(destination)
+                installed = True
+                if runtime_label == "CPU" and vram > 0 and progress:
+                    progress(
+                        "CPU fallback runtime installed. Audiobook AI can run without "
+                        "CUDA acceleration on this configuration."
+                    )
+                break
+
+        if not installed:
+            details = " | ".join(failures[-2:])
+            raise BrainRuntimeError(
+                "Could not install a usable local Audiobook AI runtime. "
+                f"Tried CUDA when available and the CPU fallback. {details}"
+            )
 
     model_id, filename, _size = recommended_model()
     target = root / filename
