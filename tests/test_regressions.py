@@ -1211,6 +1211,18 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("apply_application_theme(app, saved_theme)", source)
         self.assertNotIn('if saved_theme == "light":', source)
 
+    def test_reduce_motion_updates_existing_widgets_even_before_generate_page_exists(self):
+        workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
+        motion = Path("app/ui/motion.py").read_text(encoding="utf-8")
+        handler_start = workflow.index("    def _settings_saved(")
+        handler_end = workflow.index("    def resizeEvent(", handler_start)
+        handler = workflow[handler_start:handler_end]
+        self.assertIn("if not applied_by_generation:", handler)
+        self.assertIn("QApplication.allWidgets()", handler)
+        self.assertIn("isinstance(widget, SmoothProgressBar)", handler)
+        self.assertIn("widget.set_reduced_motion(bool(reduce_motion))", handler)
+        self.assertIn("def set_reduced_motion(self, enabled: bool)", motion)
+
     def test_settings_accent_and_interface_scale_are_applied(self):
         settings = Path("app/ui/settings_page.py").read_text(encoding="utf-8")
         self.assertIn('self.settings.setValue("ui/accent"', settings)

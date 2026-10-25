@@ -825,11 +825,21 @@ class ProjectWorkflow(QMainWindow):
         self.resize(max(min_width, width), max(min_height, height))
 
     def _settings_saved(self, reduce_motion: bool) -> None:
-        """Apply saved UI preferences to an already-open native generation page."""
+        """Apply saved motion preferences to all live widgets, even before Generate is opened."""
+        applied_by_generation = False
         if self.generation is not None and self.stack.indexOf(self.generation) >= 0:
             setter = getattr(self.generation, "_set_reduce_motion", None)
             if callable(setter):
                 setter(bool(reduce_motion))
+                applied_by_generation = True
+        if not applied_by_generation:
+            # Settings can be changed before the Generate page has ever been
+            # constructed. Update existing progress bars immediately rather
+            # than waiting for a later screen to happen to initialize.
+            from app.ui.motion import SmoothProgressBar
+            for widget in QApplication.allWidgets():
+                if isinstance(widget, SmoothProgressBar):
+                    widget.set_reduced_motion(bool(reduce_motion))
         self.apply_window_size(str(QSettings("RyuBlanc", "Ryu's Audiobook").value("ui/window_size", "auto")))
 
     def resizeEvent(self, event) -> None:
