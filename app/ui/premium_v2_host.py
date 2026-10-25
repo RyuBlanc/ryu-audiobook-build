@@ -987,6 +987,31 @@ class PremiumV2Bridge(QObject):
         project_state = load_state(project.folder)
         project_state["modified_at"] = self._now()
         save_state(project.folder, project_state)
+        # A saved speaker choice is explicit user feedback. Store it locally under
+        # the active series so later volumes can learn from this confirmed example.
+        if len(speakers) == 1:
+            try:
+                from app.chapters.character_learning import record_assignment_feedback
+                saved_number = int(result["chapter_number"])
+                saved_start, saved_end = int(result["start"]), int(result["end"])
+                saved_chapter = next((item for item in project.chapters if item.number == saved_number), None)
+                saved_character = next((item for item in (project_state.get("characters") or [])
+                                         if isinstance(item, dict)
+                                         and str(item.get("name") or "").casefold() == speakers[0].casefold()), {})
+                if saved_chapter is not None:
+                    record_assignment_feedback(
+                        series=self._project_series_name(project, project_state),
+                        speaker=speakers[0],
+                        aliases=list(saved_character.get("aliases") or []),
+                        chapter_text=str(saved_chapter.text or ""),
+                        start=saved_start, end=saved_end,
+                        source_text=str(result.get("text") or dialogue_text),
+                        chapter_title=str(saved_chapter.title or ""),
+                    )
+            except Exception:
+                # The assignment itself has already been saved successfully. A
+                # learning-cache failure must be logged, never roll it back.
+                log.exception("Could not persist confirmed dialogue-learning feedback")
         return result
 
     def _chapter_dialogue_unassign(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1009,6 +1034,16 @@ class PremiumV2Bridge(QObject):
         project_state = load_state(project.folder)
         project_state["modified_at"] = self._now()
         save_state(project.folder, project_state)
+        try:
+            from app.chapters.character_learning import remove_assignment_feedback
+            remove_assignment_feedback(
+                series=self._project_series_name(project, project_state),
+                chapter_text=str(next((item.text for item in project.chapters
+                                       if item.number == chapter_number), "") or ""),
+                start=start, end=end, source_text=str(payload.get("dialogue_text") or ""),
+            )
+        except Exception:
+            log.exception("Could not remove unassigned passage from dialogue-learning feedback")
         return result
 
     def _chapter_review(self, payload: dict[str, Any]) -> dict[str, Any]:
