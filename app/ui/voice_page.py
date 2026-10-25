@@ -66,7 +66,15 @@ class VoicePreviewWorker(QThread):
 
     def __init__(self, profile: VoiceProfile, text: str, output: Path, target_seconds: int = 30):
         super().__init__()
-        self.profile = profile
+        # Every VoicePreviewWorker is an audition path, including previews
+        # opened from Character Library and Character Studio. Keep it on the
+        # same VoiceDesign model/prompt/seed but avoid building the long-form
+        # Base identity-anchor bank just to test a saved profile.
+        self.profile = (
+            replace(profile, qwen_mode="design-preview")
+            if profile.provider == "qwen-character" and profile.qwen_mode == "design"
+            else profile
+        )
         self.text = text
         self.output = output
         self.target_seconds = max(1, int(target_seconds))
@@ -2838,8 +2846,10 @@ class VoicePage(QWidget):
                 return
 
             if profile.qwen_mode == "design":
-                # Preview and audiobook use the same stable Design -> Base
-                # identity pipeline so the selected voice is trustworthy.
+                # Voice audition uses the same VoiceDesign model, prompt and seed
+                # but does not build the five-reference identity bank or swap to
+                # Base. That long-form identity lock remains unchanged for final
+                # audiobook synthesis; this keeps first-time previews lightweight.
                 kind = best_voice_design_kind()
                 if not model_installed(kind):
                     QMessageBox.warning(
@@ -2848,23 +2858,12 @@ class VoicePage(QWidget):
                         "Install the Qwen VoiceDesign model from Models first.",
                     )
                     return
-                # This check must remain instant on the UI thread. Actual
-                # model choice is recalculated in the Qwen worker using VRAM.
-                base_kind = best_long_form_clone_kind(vram_gb=0.0)
-                if not qwen_model_installed(base_kind):
-                    QMessageBox.warning(
-                        self,
-                        "Qwen Stable Voice Model Not Ready",
-                        f"VoiceDesign preview and audiobook require the local Qwen Base model ({base_kind}) "
-                        "for consistent character identity. Open Models and install that Base phase.",
-                    )
-                    return
                 preview_profile = replace(
                     profile,
-                    qwen_mode="design",
+                    qwen_mode="design-preview",
                     model_id=kind,
                 )
-                preview_model = f"{kind} • VoiceDesign • stable identity preview"
+                preview_model = f"{kind} • VoiceDesign • one-pass audition"
             elif profile.qwen_mode == "clone":
                 kind = best_clone_kind(vram_gb=0.0)
                 if not model_installed(kind):
