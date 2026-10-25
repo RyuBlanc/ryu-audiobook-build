@@ -216,6 +216,27 @@ def remove_assignment_feedback(
     return {"removed": bool(removed), "count": removed}
 
 
+def source_grounded_speaker_for_continuity(
+    suggestions: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+) -> str:
+    """Return a continuity anchor only for an explicit name + speech-tag source match.
+
+    A high confidence score based on remembered examples is not enough to make a
+    new speaker the next line's pronoun anchor. Otherwise one mistaken guess can
+    cascade across many later dialogue lines.
+    """
+    if not suggestions:
+        return ""
+    best = suggestions[0]
+    if not isinstance(best, dict):
+        return ""
+    evidence = str(best.get("evidence") or "").strip()
+    name = str(best.get("name") or "").strip()
+    if evidence != "Explicit character name and speech tag found next to this passage.":
+        return ""
+    return name if _is_plausible_name(name) else ""
+
+
 def rank_speaker_suggestions(
     *,
     chapter_text: str,
