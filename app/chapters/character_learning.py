@@ -299,11 +299,11 @@ def rank_speaker_suggestions(
         is_known = matched is not None or detected_name.casefold() in known_names
         tag_names = list(dict.fromkeys([detected_name, canonical_name, *canonical_aliases]))
         escaped = "|".join(re.escape(value) for value in sorted(tag_names, key=len, reverse=True))
-        nearby_context = before + "\\n" + after
+        nearby_context = before + "\n" + after
         explicit_tag = bool(
-            re.search(r"(?i)(?:" + escaped + r")\\s*(?:,\\s*)?" + speech_verb + r"\\b", nearby_context)
-            or re.search(r"(?i)" + speech_verb + r"\\s+(?:" + escaped + r")\\b", nearby_context)
-            or re.search(r"(?m)^\\s*(?:" + escaped + r")\\s*[:：—–-]\\s*$", before)
+            re.search(r"(?i)(?:" + escaped + r")\s*(?:,\s*)?" + speech_verb + r"\b", nearby_context)
+            or re.search(r"(?i)" + speech_verb + r"\s+(?:" + escaped + r")\b", nearby_context)
+            or re.search(r"(?m)^\s*(?:" + escaped + r")\s*[:：—–-]\s*$", before)
         )
         # Unknown detector labels are not accepted merely because they are
         # capitalized. They require a source-grounded speaker tag or saved cast.
