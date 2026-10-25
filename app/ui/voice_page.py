@@ -1476,29 +1476,17 @@ class VoicePage(QWidget):
     def _set_filter_values(self, profiles: list[VoiceProfile]) -> None:
         current_lang = self.language_filter.currentData()
         current_region = self.accent_filter.currentData()
-        self.language_filter.blockSignals(True)
-        self.accent_filter.blockSignals(True)
-        self.language_filter.clear()
-        self.language_filter.addItem("All languages", "")
-        languages = sorted({(p.language or "en").split("-")[0] for p in profiles})
-        for lang in languages:
-            self.language_filter.addItem(self._language_name(lang), lang)
-        self.accent_filter.clear()
-        self.accent_filter.addItem("All regions", "")
+        languages = sorted({(profile.language or "en").split("-")[0] for profile in profiles})
         regions = sorted({
-            p.voice_id.split("-", 1)[0] if "-" in p.voice_id else (p.language or "en")
-            for p in profiles
+            profile.voice_id.split("-", 1)[0] if "-" in profile.voice_id else (profile.language or "en")
+            for profile in profiles
         })
-        for region in regions:
-            self.accent_filter.addItem(region, region)
-        if current_lang:
-            i = self.language_filter.findData(current_lang)
-            self.language_filter.setCurrentIndex(i if i >= 0 else 0)
-        if current_region:
-            i = self.accent_filter.findData(current_region)
-            self.accent_filter.setCurrentIndex(i if i >= 0 else 0)
-        self.language_filter.blockSignals(False)
-        self.accent_filter.blockSignals(False)
+        language_rows = [("All languages", "")]
+        language_rows.extend((self._language_name(language), language) for language in languages)
+        region_rows = [("All regions", "")]
+        region_rows.extend((region, region) for region in regions)
+        sync_combo_items_in_place(self.language_filter, language_rows, current_lang)
+        sync_combo_items_in_place(self.accent_filter, region_rows, current_region)
 
     def _qwen_design_preset_changed(self) -> None:
         value = str(self.qwen_design_preset.currentData() or "")
@@ -1798,66 +1786,41 @@ class VoicePage(QWidget):
     def _set_filter_values_premium(self) -> None:
         current_lang = self.language_filter.currentData()
         current_region = self.accent_filter.currentData()
-        self.language_filter.blockSignals(True)
-        self.accent_filter.blockSignals(True)
-        self.language_filter.clear()
-        self.language_filter.addItem("All languages", "")
         languages = sorted({
-            str(v.get("language") or "en").split("-", 1)[0]
-            for v in self.premium_voices
+            str(voice.get("language") or "en").split("-", 1)[0]
+            for voice in self.premium_voices
         })
-        for lang in languages:
-            self.language_filter.addItem(self._language_name(lang), lang)
-        self.accent_filter.clear()
-        self.accent_filter.addItem("All accents", "")
-        for accent in sorted({
-            str(v.get("accent") or "")
-            for v in self.premium_voices if v.get("accent")
-        }):
-            self.accent_filter.addItem(accent, accent)
-        if current_lang:
-            i = self.language_filter.findData(current_lang)
-            self.language_filter.setCurrentIndex(i if i >= 0 else 0)
-        if current_region:
-            i = self.accent_filter.findData(current_region)
-            self.accent_filter.setCurrentIndex(i if i >= 0 else 0)
-        self.language_filter.blockSignals(False)
-        self.accent_filter.blockSignals(False)
+        accents = sorted({
+            str(voice.get("accent") or "")
+            for voice in self.premium_voices if voice.get("accent")
+        })
+        language_rows = [("All languages", "")]
+        language_rows.extend((self._language_name(language), language) for language in languages)
+        accent_rows = [("All accents", "")]
+        accent_rows.extend((accent, accent) for accent in accents)
+        sync_combo_items_in_place(self.language_filter, language_rows, current_lang)
+        sync_combo_items_in_place(self.accent_filter, accent_rows, current_region)
 
     def _set_filter_values_edge(self) -> None:
         current_lang = self.language_filter.currentData()
         current_region = self.accent_filter.currentData()
-        self.language_filter.blockSignals(True)
-        self.accent_filter.blockSignals(True)
-        self.language_filter.clear()
-        self.language_filter.addItem("All languages", "")
-        for lang in sorted({
-            str(v.get("locale", "")).split("-", 1)[0]
-            for v in self.edge_voices if v.get("locale")
-        }):
-            self.language_filter.addItem(self._language_name(lang), lang)
-        self.accent_filter.clear()
-        self.accent_filter.addItem("All regions", "")
-        for region in sorted({
-            str(v.get("locale", "")) for v in self.edge_voices if v.get("locale")
-        }):
-            self.accent_filter.addItem(region, region)
-        if current_lang:
-            i = self.language_filter.findData(current_lang)
-            self.language_filter.setCurrentIndex(i if i >= 0 else 0)
-        if current_region:
-            i = self.accent_filter.findData(current_region)
-            self.accent_filter.setCurrentIndex(i if i >= 0 else 0)
-        self.language_filter.blockSignals(False)
-        self.accent_filter.blockSignals(False)
+        languages = sorted({
+            str(voice.get("locale", "")).split("-", 1)[0]
+            for voice in self.edge_voices if voice.get("locale")
+        })
+        regions = sorted({
+            str(voice.get("locale", ""))
+            for voice in self.edge_voices if voice.get("locale")
+        })
+        language_rows = [("All languages", "")]
+        language_rows.extend((self._language_name(language), language) for language in languages)
+        region_rows = [("All regions", "")]
+        region_rows.extend((region, region) for region in regions)
+        sync_combo_items_in_place(self.language_filter, language_rows, current_lang)
+        sync_combo_items_in_place(self.accent_filter, region_rows, current_region)
 
     def _set_voice_combo_items(self, rows: list[tuple[str, object]]) -> bool:
-        """Only rebuild the voice dropdown when visible text/data actually changed.
-
-        Preserve the selected voice when it remains in the filtered catalogue. This
-        prevents unnecessary clear/reinsert flashes and avoids silently switching
-        profiles to the first row during an ordinary catalogue refresh.
-        """
+        """Update changed voice rows in place without clearing the active selector."""
         combo = self.neural_voice
         wanted = [(str(label), value) for label, value in rows]
         current = [
@@ -1867,18 +1830,11 @@ class VoicePage(QWidget):
         if current == wanted:
             return False
 
+        # Keep a selected voice by its stable provider ID while labels/items are
+        # synchronized. A partial catalogue change must not flash blank or select
+        # a different voice just because the server added/updated another row.
         selected_data = combo.currentData()
-        was_blocked = combo.blockSignals(True)
-        try:
-            combo.clear()
-            for label, value in wanted:
-                combo.addItem(label, value)
-            selected_index = combo.findData(selected_data) if selected_data is not None else -1
-            if selected_index < 0:
-                selected_index = 0 if combo.count() else -1
-            combo.setCurrentIndex(selected_index)
-        finally:
-            combo.blockSignals(was_blocked)
+        sync_combo_items_in_place(combo, wanted, selected_data)
         return True
 
     def _refresh_voice_list(self) -> None:

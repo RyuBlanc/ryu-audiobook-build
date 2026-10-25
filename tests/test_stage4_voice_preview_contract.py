@@ -397,7 +397,21 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn('tempfile.mkdtemp(prefix="ryu_audiobook_voice_preview_")', source)
         self.assertIn("self._discard_preview_output(path)", source)
 
-    def test_voice_combo_refresh_does_not_rebuild_identical_rows_and_preserves_selection(self):
+    def test_native_voice_catalogue_filters_update_in_place_without_clear(self):
+        source = (Path(__file__).resolve().parents[1] / "app" / "ui" / "voice_page.py").read_text(encoding="utf-8")
+        methods = (
+            ("def _set_filter_values(self,", "def _qwen_design_preset_changed("),
+            ("def _set_filter_values_premium(self)", "def _set_filter_values_edge("),
+            ("def _set_filter_values_edge(self)", "def _set_voice_combo_items("),
+        )
+        for start, end in methods:
+            body = source.split(start, 1)[1].split(end, 1)[0]
+            self.assertIn("sync_combo_items_in_place(", body)
+            self.assertNotIn(".clear()", body)
+            self.assertIn("current_lang", body)
+            self.assertIn("current_region", body)
+
+    def test_voice_combo_refresh_updates_rows_in_place_and_preserves_selection(self):
         from types import SimpleNamespace
         from app.ui.voice_page import VoicePage
 
@@ -406,6 +420,7 @@ class VoicePreviewContractTests(unittest.TestCase):
                 self.items = list(items)
                 self.index = index
                 self.blocked = False
+                self._updates_enabled = True
                 self.rebuilds = 0
 
             def count(self):
@@ -425,10 +440,25 @@ class VoicePreviewContractTests(unittest.TestCase):
                 self.blocked = blocked
                 return previous
 
-            def clear(self):
-                self.rebuilds += 1
-                self.items.clear()
-                self.index = -1
+            def updatesEnabled(self):
+                return self._updates_enabled
+
+            def setUpdatesEnabled(self, enabled):
+                self._updates_enabled = enabled
+
+            def update(self):
+                return None
+
+            def setItemText(self, index, label):
+                self.items[index] = (label, self.items[index][1])
+
+            def setItemData(self, index, data):
+                self.items[index] = (self.items[index][0], data)
+
+            def removeItem(self, index):
+                self.items.pop(index)
+                if self.index >= len(self.items):
+                    self.index = len(self.items) - 1
 
             def addItem(self, label, data):
                 self.items.append((label, data))
@@ -452,6 +482,10 @@ class VoicePreviewContractTests(unittest.TestCase):
         ))
         self.assertEqual(combo.currentData(), "b")
         self.assertEqual(combo.items[0][0], "Voice A updated")
+        self.assertEqual(combo.rebuilds, 0, "changed catalog rows must update in place rather than clear/recreate")
+        self.assertFalse(combo.blocked)
+        self.assertTrue(combo.updatesEnabled())
+
 
     def test_native_saved_profile_restores_qwen_language_and_saved_name(self):
         voice_page = Path(__file__).resolve().parents[1] / "app" / "ui" / "voice_page.py"
