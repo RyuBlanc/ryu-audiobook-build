@@ -980,7 +980,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("if (requestToken !== soundListEpoch) return sounds;", sound)
         self.assertIn("grid.dataset.soundListSignature !== signature", sound)
 
-    def test_character_refresh_does_not_replace_cast_dom_for_identical_records(self):
+    def test_character_refresh_renders_live_project_data_without_demo_cast_values(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
             encoding="utf-8"
         )
@@ -989,8 +989,11 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         block = adapter[start:end]
         self.assertIn("const requestToken = ++characterListEpoch;", block)
         self.assertIn("if (requestToken !== characterListEpoch) return characters;", block)
-        self.assertIn("list.dataset.characterListSignature !== signature", block)
-        self.assertIn("if ($('charFoundMetric'))", block)
+        self.assertIn("renderCharacterStudioLive();", block)
+        self.assertNotIn("list.dataset.characterListSignature !== signature", block)
+        self.assertIn("function renderCharacterStudioLive()", adapter)
+        self.assertIn("No Characters Found", adapter)
+        self.assertIn("character.dialogue.suggestions.list", adapter)
 
     def test_chapter_switch_flushes_debounced_draft_before_changing_selection(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
