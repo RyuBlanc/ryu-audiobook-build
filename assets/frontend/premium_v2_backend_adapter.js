@@ -3,12 +3,18 @@
   const $ = id => document.getElementById(id);
   let ryuUiTextScale = 100;
   let ryuUiTextObserver = null;
+  const ryuUiScalePendingRoots = new Set();
+  let ryuUiScaleFramePending = false;
   const RYU_UI_TEXT_SCALES = new Set([85, 90, 100, 110, 120, 130, 140]);
   function scaleUiFontTree(root, scale, inheritedBase = null) {
     if (!root || root.nodeType !== 1) return;
     // Normal size is the native/default appearance. Avoid touching hundreds of
     // elements at startup unless a non-default scale was actually selected.
     if (scale === 100 && root.dataset.ryuFontScaled !== '1') return;
+    // MutationObserver may report both a newly inserted card and its descendants
+    // in the same frame. Never walk an unchanged subtree twice for one scale.
+    if (scale !== 100 && root.dataset.ryuFontScaled === '1' &&
+        Number(root.dataset.ryuScaleApplied) === scale) return;
     const current = Number.parseFloat(getComputedStyle(root).fontSize) || 14;
     const parent = root.parentElement;
     const parentCurrent = parent ? Number.parseFloat(getComputedStyle(parent).fontSize) : NaN;
@@ -33,6 +39,7 @@
         delete root.dataset.ryuOriginalFontCaptured;
       }
       delete root.dataset.ryuFontScaled;
+      delete root.dataset.ryuScaleApplied;
       for (const child of root.children) scaleUiFontTree(child, scale, base);
       return;
     }
@@ -43,6 +50,7 @@
     }
     root.style.setProperty('font-size', (base * scale / 100) + 'px', 'important');
     root.dataset.ryuFontScaled = '1';
+    root.dataset.ryuScaleApplied = String(scale);
     for (const child of root.children) scaleUiFontTree(child, scale, base);
   }
   function applyUiTextScale(value) {
@@ -73,14 +81,34 @@
     }, {capture:true, passive:false});
     if (typeof MutationObserver === 'function') {
       ryuUiTextObserver = new MutationObserver(records => {
-        const added = [];
         for (const record of records) for (const node of record.addedNodes) {
-          if (node && node.nodeType === 1) added.push(node);
+          if (!node || node.nodeType !== 1) continue;
+          // Prefer the highest newly-added ancestor. A project/chapter render
+          // often inserts a parent and several children in the same mutation
+          // batch; scaling each child as well repeats costly style recalculation.
+          let covered = false;
+          for (const existing of ryuUiScalePendingRoots) {
+            if (existing === node || existing.contains(node)) { covered = true; break; }
+          }
+          if (covered) continue;
+          for (const existing of Array.from(ryuUiScalePendingRoots)) {
+            if (node.contains(existing)) ryuUiScalePendingRoots.delete(existing);
+          }
+          ryuUiScalePendingRoots.add(node);
         }
-        // Batch newly rendered UI fragments; no full document reload or page zoom.
-        if (added.length) requestAnimationFrame(() => {
-          for (const node of added) if (node.isConnected) scaleUiFontTree(node, ryuUiTextScale);
-        });
+        // Perform one deduplicated scale pass per paint; no full document reload,
+        // browser zoom, or repeated recursive walk of the same inserted subtree.
+        if (ryuUiScalePendingRoots.size && !ryuUiScaleFramePending) {
+          ryuUiScaleFramePending = true;
+          requestAnimationFrame(() => {
+            ryuUiScaleFramePending = false;
+            const roots = Array.from(ryuUiScalePendingRoots);
+            ryuUiScalePendingRoots.clear();
+            for (const node of roots) {
+              if (node.isConnected) scaleUiFontTree(node, ryuUiTextScale);
+            }
+          });
+        }
       });
       ryuUiTextObserver.observe(document.documentElement, {childList:true, subtree:true});
     }
