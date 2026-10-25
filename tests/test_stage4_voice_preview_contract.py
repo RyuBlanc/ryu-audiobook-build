@@ -14,7 +14,7 @@ class VoicePreviewContractTests(unittest.TestCase):
     def test_preview_handler_preserves_selected_profile_and_all_supported_durations(self):
         profile = SimpleNamespace(name="Saved Narrator")
         project = SimpleNamespace(folder=Path("unused"), chapters=[])
-        for seconds in (10, 20, 30, 45, 60, 90):
+        for seconds in (10, 30, 60, 90):
             with self.subTest(seconds=seconds):
                 thread = Mock()
                 bridge = SimpleNamespace(
@@ -44,23 +44,26 @@ class VoicePreviewContractTests(unittest.TestCase):
     def test_preview_handler_rejects_unsupported_duration_before_starting_worker(self):
         profile = SimpleNamespace(name="Saved Narrator")
         project = SimpleNamespace(folder=Path("unused"), chapters=[])
-        bridge = SimpleNamespace(
-            _active_project=lambda: project,
-            _assert_no_active_model_lifecycle=lambda _activity: None,
-            _find_profile=lambda _name: profile,
-            _new_job=Mock(),
-            _job_update=Mock(),
-            _now=premium_v2_host.PremiumV2Bridge._now,
-        )
-        with patch.object(premium_v2_host, "load_state", return_value={}), \
-             patch.object(premium_v2_host.threading, "Thread") as thread_factory:
-            with self.assertRaisesRegex(ValueError, "10, 20, 30, 45, 60, or 90"):
-                premium_v2_host.PremiumV2Bridge._voice_preview(
-                    bridge, {"profile_name": profile.name, "text": "A preview passage.",
-                             "duration_seconds": 15}
+        for seconds in (15, 20, 45):
+            with self.subTest(seconds=seconds):
+                bridge = SimpleNamespace(
+                    _active_project=lambda: project,
+                    _assert_no_active_model_lifecycle=lambda _activity: None,
+                    _find_profile=lambda _name: profile,
+                    _new_job=Mock(),
+                    _job_update=Mock(),
+                    _now=premium_v2_host.PremiumV2Bridge._now,
                 )
-        thread_factory.assert_not_called()
-        bridge._new_job.assert_not_called()
+                with patch.object(premium_v2_host, "load_state", return_value={}), \
+                     patch.object(premium_v2_host.PremiumV2Bridge, "_preview_profile_from_payload", return_value=profile), \
+                     patch.object(premium_v2_host.threading, "Thread") as thread_factory:
+                    with self.assertRaisesRegex(ValueError, "10, 30, 60, or 90"):
+                        premium_v2_host.PremiumV2Bridge._voice_preview(
+                            bridge, {"profile_name": profile.name, "text": "A preview passage.",
+                                     "duration_seconds": seconds}
+                        )
+                thread_factory.assert_not_called()
+                bridge._new_job.assert_not_called()
 
     def test_preview_worker_reports_requested_and_measured_duration(self):
         profile = SimpleNamespace(name="Saved Narrator")

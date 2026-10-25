@@ -2253,8 +2253,8 @@ class PremiumV2Bridge(QObject):
                 raise ValueError("Select a chapter that contains narration text.")
             text_value = chapter.text
         seconds = int(payload.get("duration_seconds") or payload.get("duration") or 30)
-        if seconds not in {10, 20, 30, 45, 60, 90}:
-            raise ValueError("Preview duration must be 10, 20, 30, 45, 60, or 90 seconds.")
+        if seconds not in {10, 30, 60, 90}:
+            raise ValueError("Preview duration must be 10, 30, 60, or 90 seconds.")
         include_sound_design = bool(payload.get("include_sound_design"))
         if include_sound_design:
             state["_include_sound_design_preview"] = True

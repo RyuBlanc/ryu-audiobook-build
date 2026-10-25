@@ -68,7 +68,7 @@ class TestPreviewDurationAcceptance(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as temp:
-            for requested_seconds in (10, 20, 30, 45, 60, 90):
+            for requested_seconds in (10, 30, 60, 90):
                 with self.subTest(requested_seconds=requested_seconds):
                     output = Path(temp) / f"preview-{requested_seconds}-seconds.wav"
                     provider = FastLocalProvider()
