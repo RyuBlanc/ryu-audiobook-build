@@ -914,23 +914,36 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Choose a saved character before confirming the assignment.")
         state = load_state(project.folder)
         characters = [item for item in (state.get("characters") or []) if isinstance(item, dict)]
+        requested_series = str(payload.get("series") or "").strip()
         canonical_by_name: dict[str, str] = {}
+        ambiguous_keys: set[str] = set()
+        default_series = self._project_series_name(project, state)
         for item in characters:
+            item_series = str(item.get("series") or default_series).strip()
+            if requested_series and item_series.casefold() != requested_series.casefold():
+                continue
             name = str(item.get("name") or "").strip()
-            if name:
-                canonical_by_name[name.casefold()] = name
-            aliases = item.get("aliases") or []
-            if isinstance(aliases, list):
-                for alias in aliases:
-                    alias = str(alias).strip()
-                    if alias:
-                        canonical_by_name[alias.casefold()] = name
+            if not name:
+                continue
+            keys = [name, *(item.get("aliases") or [])] if isinstance(item.get("aliases") or [], list) else [name]
+            for raw_key in keys:
+                key = str(raw_key or "").strip().casefold()
+                if not key:
+                    continue
+                prior_name = canonical_by_name.get(key)
+                if prior_name and prior_name.casefold() != name.casefold():
+                    ambiguous_keys.add(key)
+                else:
+                    canonical_by_name[key] = name
         speakers = []
         for raw_name in raw_speakers:
             name = str(raw_name or "").strip()
-            canonical = canonical_by_name.get(name.casefold())
+            key = name.casefold()
+            if key in ambiguous_keys:
+                raise ValueError(f"'{name}' matches more than one saved character. Select the character in the correct series first.")
+            canonical = canonical_by_name.get(key)
             if not canonical:
-                raise ValueError(f"'{name or 'Unknown'}' is not in the saved character list. Run book analysis or select a saved character.")
+                raise ValueError(f"'{name or 'Unknown'}' is not in the saved character list for the selected series. Run analysis or select a saved character.")
             if canonical not in speakers:
                 speakers.append(canonical)
         if not speakers:
@@ -1036,8 +1049,8 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Dialogue offsets must be valid integer positions.")
         chapter_before = next((item for item in project.chapters if item.number == chapter_number), None)
         assignment_before = next((row for row in (getattr(chapter_before, "dialogue_assignments", []) or [])
-                                   if isinstance(row, dict) and int(row.get("start", -1)) == start
-                                   and int(row.get("end", -1)) == end), None)
+                                   if isinstance(row, dict) and row.get("start") == start
+                                   and row.get("end") == end), None)
         assigned_before = (
             list(assignment_before.get("speakers") or [])
             if assignment_before and isinstance(assignment_before.get("speakers"), list)
@@ -2731,14 +2744,25 @@ class PremiumV2Bridge(QObject):
         if profile_name and self._find_profile(profile_name) is None:
             raise ValueError("Choose a voice profile from the saved Voice Studio catalogue.")
         state = load_state(project.folder)
+        prior_project_series = self._project_series_name(project, state)
         if str(payload.get("series") or "").strip():
-            # The user's explicit series choice defines the selected book's
-            # cast/learning scope, rather than relying only on its filename.
+            # Keep the selected series available as the default for legacy calls;
+            # every character row still stores its own explicit series identity.
             state["series_name"] = series
         characters = [dict(row) for row in (state.get("characters") or []) if isinstance(row, dict)]
         match = next((row for row in characters if
                       str(row.get("name") or "").casefold() == name.casefold()
                       or name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])}), None)
+        if match is not None:
+            match_series = str(match.get("series") or "").strip()
+            if not match_series:
+                scope = str(match.get("scope") or "").strip()
+                match_series = re.sub(r"(?i)^series\s*[·:-]\s*", "", scope).strip() if re.match(r"(?i)^series\s*[·:-]", scope) else prior_project_series
+            if match_series and match_series.casefold() != series.casefold():
+                raise ValueError(
+                    f"{name} already exists in this project under the series “{match_series}”. "
+                    f"Choose that series or use a distinct character name for “{series}”."
+                )
         if match is None:
             match = {
                 "name": name, "role": str(payload.get("role") or "Character")[:160],
