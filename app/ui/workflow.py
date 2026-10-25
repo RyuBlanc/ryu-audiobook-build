@@ -841,7 +841,6 @@ class ProjectWorkflow(QMainWindow):
             for widget in QApplication.allWidgets():
                 if isinstance(widget, SmoothProgressBar):
                     widget.set_reduced_motion(bool(reduce_motion))
-        self.apply_window_size(str(QSettings("RyuBlanc", "Ryu's Audiobook").value("ui/window_size", "auto")))
 
     def resizeEvent(self, event) -> None:
         """Keep the header, mini-player, and loading overlay responsive on resize."""
