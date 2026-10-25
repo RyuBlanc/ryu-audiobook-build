@@ -445,7 +445,8 @@ class UiStabilityRegressions(unittest.TestCase):
         design = voice.split("elif mode == \"qwen-design\":", 1)[1].split(
             "elif mode == \"qwen-clone\":", 1
         )[0]
-        route = workflow.split('elif name == "Voice & Narration":', 1)[1].split(
+        sidebar = workflow.split("def _sidebar_changed(", 1)[1]
+        route = sidebar.split('elif name == "Voice & Narration":', 1)[1].split(
             'elif name == "Voice Cast":', 1
         )[0]
 
