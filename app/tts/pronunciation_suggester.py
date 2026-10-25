@@ -60,6 +60,51 @@ def is_common_english_phrase(text: str) -> bool:
     words = [word for word in words if word]
     return bool(words) and all(word in COMMON_ENGLISH_WORDS for word in words)
 
+def is_likely_character_name_candidate(
+    text: str,
+    *,
+    known_names: set[str] | list[str] | tuple[str, ...] = (),
+    script: str | None = None,
+) -> bool:
+    """Conservative guard for automatic pronunciation suggestions.
+
+    Confirmed project character names are allowed even when they contain common
+    words. Without that evidence, Latin-script suggestions must look like a
+    plausible multi-word name; arbitrary capitalized prose words are not
+    automatically treated as Japanese phonetics. Native-script terms may be
+    suggested as one token, but not as a whole sentence.
+    """
+    value = re.sub(r"\s+", " ", str(text or "").strip(" \t\r\n.,!?;:()[]{}\"'“”‘’"))
+    if not value:
+        return False
+    key = value.casefold()
+    known = {
+        re.sub(r"\s+", " ", str(name or "").strip()).casefold()
+        for name in known_names if str(name or "").strip()
+    }
+    if key in known:
+        return True
+
+    # Keep proper nouns in scripts that cannot be judged by English capitalization.
+    has_native_script = bool(re.search(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]", value))
+    if has_native_script:
+        return len(value) >= 2 and not re.search(r"[。！？!?;:，,。…]", value) and len(value.split()) <= 3
+
+    try:
+        from app.chapters.characters import _is_plausible_name
+        plausible = bool(_is_plausible_name(value))
+    except Exception:
+        words = value.split()
+        plausible = 1 <= len(words) <= 3 and all(word[:1].isupper() for word in words)
+    if not plausible or is_common_english_phrase(value):
+        return False
+    # Arbitrary capitalized single words are usually sentence starts ("Right",
+    # "Having", "Oath"), not character names. Confirmed names are whitelisted above.
+    if len(value.split()) == 1 and key not in _KNOWN:
+        return False
+    return True
+
+
 def nativeish_pronunciation(name: str, language: str | None = None) -> str:
     """Create a TTS-friendly native-ish phonetic spelling for common romanized names.
 
@@ -147,17 +192,27 @@ def _suggest_word(word: str) -> str:
     return nativeish_pronunciation(word, "japanese")
 
 def suggest_names_from_text(text: str) -> list[str]:
+    """Extract conservative multi-word name candidates, not arbitrary capitalized prose."""
     candidates: set[str] = set()
-    patterns = [
-        r"\b([A-Z][a-z]+(?:[-'][A-Z][a-z]+)?(?:\s+[A-Z][a-z]+(?:[-'][A-Z][a-z]+)?){1,2})\b",
-        r"\b([A-Z][a-z]{2,})\b",
-    ]
-    for pattern in patterns:
-        for match in re.finditer(pattern, text):
-            value = match.group(1).strip()
-            if len(value) > 2 and value.casefold() not in COMMON_ENGLISH_WORDS:
-                candidates.add(value)
+    source = str(text or "")
+    pattern = r"\b([A-Z][a-z]+(?:[-'][A-Z][a-z]+)?(?:\s+[A-Z][a-z]+(?:[-'][A-Z][a-z]+)?){1,2})\b"
+    for match in re.finditer(pattern, source):
+        value = match.group(1).strip()
+        if is_likely_character_name_candidate(value):
+            candidates.add(value)
+
+    # Preserve a few known one-token character names only when they occur as
+    # complete words in source text. Other single capitalized words are usually
+    # sentence starts rather than a name.
+    for known in _KNOWN:
+        display = " ".join(part.capitalize() for part in known.split())
+        if re.search(r"(?i)(?<![\w])" + re.escape(known) + r"(?![\w])", source):
+            candidates.add(display)
+
     return sorted(
         candidates,
-        key=lambda x: (-len(re.findall(r"\b" + re.escape(x) + r"\b", text)), x.casefold()),
+        key=lambda value: (
+            -len(re.findall(r"(?i)(?<![\w])" + re.escape(value) + r"(?![\w])", source)),
+            value.casefold(),
+        ),
     )
