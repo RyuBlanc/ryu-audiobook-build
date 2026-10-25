@@ -55,9 +55,11 @@ class NativeShellSizingContracts(unittest.TestCase):
 
     def test_window_minimum_size_is_bounded_by_the_available_screen(self):
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
-        self.assertIn('min_width = max(480, min(960, int(available.width())))', host)
-        self.assertIn('min_height = max(360, min(620, int(available.height())))', host)
-        self.assertIn('self.setMinimumSize(min_width, min_height)', host)
+        native = (ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")
+        for source in (host, native):
+            self.assertIn('min_width = max(1, min(960, int(available.width())))', source)
+            self.assertIn('min_height = max(1, min(620, int(available.height())))', source)
+            self.assertIn('self.setMinimumSize(min_width, min_height)', source)
 
     def test_reduced_motion_is_a_saved_preference_and_disables_heavy_visual_effects(self):
         html = (ROOT / "assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
