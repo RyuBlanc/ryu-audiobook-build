@@ -238,6 +238,39 @@ def remove_assignment_feedback(
     return {"removed": bool(removed), "count": removed}
 
 
+def rename_speaker_feedback(
+    *, series: str, old_speaker: str, new_speaker: str, path: Path | None = None,
+) -> dict[str, Any]:
+    """Move confirmed feedback to a renamed character while retaining the old name as an alias."""
+    series_name = str(series or "").strip()
+    old_name = str(old_speaker or "").strip()
+    new_name = str(new_speaker or "").strip()
+    if not series_name or not old_name or not new_name:
+        raise ValueError("Learning feedback rename needs a series and both character names.")
+    if old_name.casefold() == new_name.casefold():
+        return {"renamed": False, "count": 0}
+
+    store = _load_store(path)
+    renamed = 0
+    for row in store["examples"]:
+        if _series_key(str(row.get("series") or "")) != _series_key(series_name):
+            continue
+        if str(row.get("speaker") or "").strip().casefold() != old_name.casefold():
+            continue
+        row["speaker"] = new_name[:160]
+        aliases = [
+            str(value).strip() for value in (row.get("aliases") or [])
+            if str(value or "").strip()
+            and str(value).strip().casefold() not in {old_name.casefold(), new_name.casefold()}
+        ]
+        aliases.insert(0, old_name[:160])
+        row["aliases"] = list(dict.fromkeys(aliases))[:12]
+        renamed += 1
+    if renamed:
+        _write_store(store, path)
+    return {"renamed": bool(renamed), "count": renamed, "series": series_name}
+
+
 def source_grounded_speaker_for_continuity(
     suggestions: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
 ) -> str:

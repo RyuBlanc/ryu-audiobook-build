@@ -555,6 +555,7 @@ class ProjectWorkflow(QMainWindow):
         self.voice_cast = VoiceCastPage(
             lambda: self.project.chapters if self.project else [],
             lambda: self.project.source_path if self.project else None,
+            get_project=lambda: self.project,
         )
         self.stack.addWidget(self.voice_cast)
         self.character_library_page = CharacterLibraryPage(

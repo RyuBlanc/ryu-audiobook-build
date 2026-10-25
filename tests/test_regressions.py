@@ -823,6 +823,52 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("[RyuLogoAlphaScanner]::Count($bitmap)", step)
         self.assertNotIn("$bitmap.GetPixel($x, $y)", step)
 
+    def test_rename_speaker_feedback_preserves_series_and_old_name_as_alias(self):
+        from app.chapters.character_learning import load_learning_examples, record_assignment_feedback, rename_speaker_feedback
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "character-learning.json"
+            source = "Rias Gremory said, “I know.”"
+            selected = "“I know.”"
+            start = source.index(selected)
+            record_assignment_feedback(
+                series="Silver Moon Saga",
+                speaker="Rias Gremory",
+                aliases=["Rias"],
+                chapter_text=source,
+                start=start,
+                end=start + len(selected),
+                source_text=selected,
+                path=path,
+            )
+            result = rename_speaker_feedback(
+                series="Silver Moon Saga",
+                old_speaker="Rias Gremory",
+                new_speaker="Rias Gremory Valen",
+                path=path,
+            )
+            examples = load_learning_examples("Silver Moon Saga", path)
+            self.assertTrue(result["renamed"])
+            self.assertEqual(result["count"], 1)
+            self.assertEqual(examples[0]["speaker"], "Rias Gremory Valen")
+            self.assertIn("Rias Gremory", examples[0]["aliases"])
+            self.assertEqual(load_learning_examples("Another Saga", path), [])
+
+    def test_character_rename_updates_series_scoped_dialogue_and_feedback(self):
+        source = Path("app/ui/voice_cast_page.py").read_text(encoding="utf-8")
+        workflow = Path("app/ui/workflow.py").read_text(encoding="utf-8")
+        start = source.index("    def rename_character(")
+        end = source.index("    def _refresh_labels(", start)
+        rename = source[start:end]
+        self.assertIn("project = self.get_project()", rename)
+        self.assertIn("assignment_speakers(item)", rename)
+        self.assertIn("normalize_assignment(", rename)
+        self.assertIn("assignment_series != row_series", rename)
+        self.assertIn("project.save()", rename)
+        self.assertIn("chapter.dialogue_assignments = original", rename)
+        self.assertIn("rename_speaker_feedback(", rename)
+        self.assertIn("get_project=lambda: self.project", workflow)
+
     def test_voice_cast_search_includes_series_and_keeps_active_series_after_creation_or_rename(self):
         from app.ui.voice_cast_page import cast_row_matches
 

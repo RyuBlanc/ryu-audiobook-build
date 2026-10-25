@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.chapters.characters import analyze_book
+from app.chapters.assignment_utils import assignment_speakers, normalize_assignment
+from app.chapters.character_learning import rename_speaker_feedback
 from app.chapters.detector import detect_chapters
 from app.documents.parser import extract_text
 from app.tts.voice_profile import load_profiles
@@ -93,10 +95,11 @@ def cast_row_matches(row: dict, filter_mode: str, query: str) -> bool:
 class VoiceCastPage(QWidget):
     """Book-wide character casting review."""
 
-    def __init__(self, get_chapters, get_source=None, parent=None):
+    def __init__(self, get_chapters, get_source=None, parent=None, get_project=None):
         super().__init__(parent)
         self.get_chapters = get_chapters
         self.get_source = get_source or (lambda: None)
+        self.get_project = get_project or (lambda: None)
         self.rows: list[dict] = []
         self.profiles = []
         self.analysis_worker: VoiceCastAnalysisWorker | None = None
@@ -767,42 +770,124 @@ class VoiceCastPage(QWidget):
         if not row:
             self.summary.setText("Select a character to rename.")
             return
-        if row["name"].casefold() == "narrator":
+        if str(row.get("name") or "").casefold() == "narrator":
             self.summary.setText("The audiobook narrator cannot be renamed as a story character.")
             return
-        old_name = row["name"]
-        name, ok = QInputDialog.getText(
+
+        old_name = str(row.get("name") or "").strip()
+        new_name, ok = QInputDialog.getText(
             self, "Rename Character", "New character name:", text=old_name
         )
-        name = str(name or "").strip()
-        if not ok or not name or name == old_name:
+        new_name = str(new_name or "").strip()
+        if not ok or not new_name or new_name.casefold() == old_name.casefold():
             return
-        row_series = str(row.get("series") or self._series_name()).strip().casefold()
-        if name.casefold() == "narrator" or any(
+
+        series_display = str(row.get("series") or self._series_name()).strip()
+        row_series = series_display.casefold()
+        if new_name.casefold() == "narrator" or any(
             item is not row
-            and str(item.get("name") or "").strip().casefold() == name.casefold()
+            and str(item.get("name") or "").strip().casefold() == new_name.casefold()
             and str(item.get("series") or self._series_name()).strip().casefold() == row_series
             for item in self.rows
         ):
             self.summary.setText("That character name already exists in this series or is reserved for the narrator.")
             return
-        row["name"] = name
-        aliases = list(row.get("aliases") or [])
-        if old_name not in aliases:
-            aliases.append(old_name)
-        row["aliases"] = aliases
+
+        old_aliases = list(row.get("aliases") or [])
+        updated_aliases = list(old_aliases)
+        if old_name.casefold() not in {
+            str(alias or "").strip().casefold() for alias in updated_aliases
+        }:
+            updated_aliases.append(old_name)
+
+        # Rename speaker labels in the live project as well as the cast row. A
+        # cast-only rename would leave confirmed dialogue attached to the old
+        # name and generation would fall back to the narrator voice.
+        project = self.get_project()
+        changed_chapters = []
+        if project is not None:
+            active_series = self._series_name().strip().casefold()
+            for chapter in list(getattr(project, "chapters", []) or []):
+                original = list(getattr(chapter, "dialogue_assignments", []) or [])
+                updated = []
+                changed = False
+                for item in original:
+                    if not isinstance(item, dict):
+                        updated.append(item)
+                        continue
+                    explicit_series = str(item.get("series") or "").strip()
+                    assignment_series = (explicit_series or active_series).casefold()
+                    if assignment_series != row_series:
+                        updated.append(item)
+                        continue
+                    speakers = assignment_speakers(item)
+                    if not any(speaker.casefold() == old_name.casefold() for speaker in speakers):
+                        updated.append(item)
+                        continue
+                    renamed_speakers = [
+                        new_name if speaker.casefold() == old_name.casefold() else speaker
+                        for speaker in speakers
+                    ]
+                    normalized = normalize_assignment(
+                        dict(item),
+                        renamed_speakers,
+                        str(item.get("multi_speaker_mode") or "chorus"),
+                    )
+                    if not explicit_series:
+                        normalized["series"] = series_display
+                    updated.append(normalized)
+                    changed = True
+                if changed:
+                    changed_chapters.append((chapter, original))
+                    chapter.dialogue_assignments = updated
+
+        row["name"] = new_name
+        row["aliases"] = updated_aliases
+        if changed_chapters and project is not None:
+            try:
+                project.save()
+            except Exception as exc:
+                for chapter, original in changed_chapters:
+                    chapter.dialogue_assignments = original
+                row["name"] = old_name
+                row["aliases"] = old_aliases
+                self._refresh_labels()
+                QMessageBox.critical(
+                    self,
+                    "Rename could not be saved",
+                    f"The character and dialogue assignments were restored because project saving failed:\\n{exc}",
+                )
+                return
+
         folder = self._project_folder()
         if folder:
             state = load_state(folder)
             # The series-scoped identity map is rebuilt by _save_cast below.
             # Do not rename a legacy name-only key that may belong to another series.
             if state.get("voice_cast_narrating_character") == old_name:
-                state["voice_cast_narrating_character"] = name
+                state["voice_cast_narrating_character"] = new_name
             save_state(folder, state)
+
         self._save_cast(update_names=True)
+        try:
+            rename_speaker_feedback(
+                series=series_display,
+                old_speaker=old_name,
+                new_speaker=new_name,
+            )
+        except Exception as exc:
+            # The character/project rename is already saved. Do not roll back the
+            # confirmed dialogue because optional learning-store migration failed.
+            self.summary.setText(
+                f"Renamed '{old_name}' to '{new_name}', but learning memory could not be updated: {exc}"
+            )
+            self._refresh_labels()
+            self.select_character_name(new_name, series_display)
+            return
+
         self._refresh_labels()
-        self.select_character_name(name, row_series)
-        self.summary.setText(f"Renamed '{old_name}' to '{name}'.")
+        self.select_character_name(new_name, series_display)
+        self.summary.setText(f"Renamed '{old_name}' to '{new_name}' and updated saved dialogue assignments.")
 
 
     def _refresh_labels(self):
