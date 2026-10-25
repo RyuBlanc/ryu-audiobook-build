@@ -140,6 +140,70 @@ class UiStabilityRegressions(unittest.TestCase):
                 f"{relative_path}.{method} is missing the stable-view guard",
             )
 
+    def test_chapter_refresh_updates_rows_in_place_and_preserves_selection_and_scroll(self):
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QApplication
+        from app.chapters.detector import Chapter
+        from app.ui.chapter_editor import ChapterEditorPage
+
+        app = QApplication.instance()
+        self.assertIsNotNone(app)
+        chapters = [
+            Chapter(index + 1, f"Chapter {index + 1}", f"Text for chapter {index + 1}")
+            for index in range(30)
+        ]
+        page = ChapterEditorPage(chapters)
+        page.resize(520, 260)
+        page.show()
+        app.processEvents()
+
+        page.list.setCurrentRow(12)
+        app.processEvents()
+        item = page.list.item(12)
+        item.setData(Qt.ItemDataRole.UserRole + 1, "retain-this-row")
+        scroll = page.list.verticalScrollBar()
+        scroll.setValue(min(32, scroll.maximum()))
+        previous_scroll = scroll.value()
+
+        page.editor.chapters[12].title = "Renamed Chapter 13"
+        page.refresh()
+        app.processEvents()
+
+        self.assertEqual(page.list.currentRow(), 12)
+        self.assertEqual(
+            page.list.item(12).data(Qt.ItemDataRole.UserRole + 1),
+            "retain-this-row",
+            "refresh should update existing row items instead of clearing the list",
+        )
+        self.assertIn("Renamed Chapter 13", page.list.item(12).text())
+        self.assertEqual(scroll.value(), min(previous_scroll, scroll.maximum()))
+        page.close()
+
+    def test_chapter_refresh_restores_signals_and_paint_state_after_bad_record(self):
+        from PySide6.QtWidgets import QApplication
+        from app.chapters.detector import Chapter
+        from app.ui.chapter_editor import ChapterEditorPage
+
+        class BrokenChapter:
+            @property
+            def number(self):
+                raise RuntimeError("invalid chapter record")
+
+        app = QApplication.instance()
+        self.assertIsNotNone(app)
+        page = ChapterEditorPage([Chapter(1, "Valid", "Valid chapter text")])
+        page.show()
+        app.processEvents()
+        page.editor.chapters = [BrokenChapter()]
+
+        with self.assertRaisesRegex(RuntimeError, "invalid chapter record"):
+            page.refresh()
+
+        self.assertTrue(page.list.updatesEnabled())
+        self.assertFalse(page.list.signalsBlocked())
+        self.assertTrue(page.updatesEnabled())
+        page.close()
+
     def test_page_navigation_avoids_opacity_effects_and_keeps_handlers(self):
         source = (ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")
         transition = source.split("def _show_page", 1)[1].split("def _sidebar_item_clicked", 1)[0]
