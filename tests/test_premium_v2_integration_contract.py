@@ -1160,16 +1160,21 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         end = adapter.index("async function wire()", start)
         guard = adapter[start:end]
         for selector in (
-            "#acceptHighConfidence", "#skipAiSuggestion", "#aiUseLibrary",
-            "#aiCreateNew", "#createCharacterQuick",
-            "[data-ai-line]:not([data-dialogue-id])",
+            "#aiQueue [data-ai-line]:not([data-dialogue-id])",
             "#settings button", "$('runBenchmark')",
         ):
             self.assertIn(selector, guard)
         self.assertIn("element.disabled = true", guard)
         self.assertIn("element.setAttribute('aria-disabled', 'true')", guard)
         self.assertIn("element.title = reason", guard)
-        self.assertIn("Bulk AI predictions are not verified against source passages", guard)
+        self.assertNotIn("#acceptHighConfidence", guard)
+        self.assertNotIn("#skipAiSuggestion", guard)
+        self.assertNotIn("#aiUseLibrary", guard)
+        self.assertNotIn("#aiCreateNew", guard)
+        self.assertNotIn("#createCharacterQuick", guard)
+        self.assertIn("async function acceptHighConfidenceDialogues()", adapter)
+        self.assertIn("async function skipCurrentDialogueSuggestion()", adapter)
+        self.assertIn("character.dialogue.suggestion.skip", host)
         self.assertIn("Changing the application storage root is not implemented", guard)
         self.assertIn("performance is intentionally marked Not tested", guard)
         self.assertNotIn("[data-model-repair]", guard)
