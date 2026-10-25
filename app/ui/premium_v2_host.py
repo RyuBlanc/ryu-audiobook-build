@@ -46,6 +46,7 @@ from app.documents.parser import (
 )
 from app.chapters.detector import detect_chapters
 from app.chapters.characters import analyze_book, merge_character_analysis_record
+from app.chapters.dialogue_review import retain_current_dialogue_skips
 from app.tts.manager import GenerationManager
 from app.tts.preview import build_voice_preview
 from app.tts.profile_provider import provider_from_profile
@@ -2828,6 +2829,11 @@ class PremiumV2Bridge(QObject):
     def _character_worker(self, job_id: str, project) -> None:
         try:
             state = load_state(project.folder)
+            # Re-analysis rebuilds recommendations, but the user’s skip decisions
+            # belong to the exact source passages already reviewed. Keep the
+            # previous rows and skip IDs so we can retain only still-identical items.
+            previous_dialogue_suggestions = state.get("character_dialogue_suggestions") or []
+            previous_dialogue_skips = state.get("character_dialogue_skips") or []
             series_name = self._project_series_name(project, state)
             saved_rows = [dict(row) for row in (state.get("characters") or []) if isinstance(row, dict)]
             library_rows = list_reusable_characters(series_name)
@@ -3047,7 +3053,11 @@ class PremiumV2Bridge(QObject):
                     })
             state["characters"] = items
             state["character_dialogue_suggestions"] = suggestions
-            state["character_dialogue_skips"] = []
+            state["character_dialogue_skips"] = retain_current_dialogue_skips(
+                previous_dialogue_skips,
+                previous_dialogue_suggestions,
+                suggestions,
+            )
             state["character_analysis"] = {"dialogue_total": analysis.dialogue_total,
                                            "unassigned_dialogue": analysis.unassigned_dialogue,
                                            "suggestion_count": len(suggestions),
