@@ -895,7 +895,7 @@ class RegressionTests(unittest.TestCase):
         rename_start = source.index("    def rename_character(")
         refresh_start = source.index("    def _refresh_labels(", rename_start)
         rename = source[rename_start:refresh_start]
-        self.assertIn("self.select_character_name(name, row_series)", rename)
+        self.assertIn("self.select_character_name(new_name, series_display)", rename)
         self.assertIn("Search character, series, role or alias", source)
 
     def test_voice_cast_persistence_and_counts_are_series_scoped(self):
