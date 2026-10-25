@@ -34,6 +34,7 @@ from app.core.character_identity import parse_character_identity_key
 from app.core.project import list_projects
 from app.ui.metadata_widgets import HistoryComboBox, GenrePicker
 from app.ui.motion import SmoothProgressBar
+from app.ui.stable_refresh import sync_combo_items_in_place
 from app.ui.audio_visualizer import AudioVisualizer
 from app.tts.manager import GenerationManager, GenerationSummary
 from app.tts.profile_provider import provider_from_profile
@@ -1714,21 +1715,23 @@ class GenerationPage(QWidget):
         )
 
     def _load_profiles(self, keep_name: str | None = None) -> None:
-        self.voice_profile.clear()
-        for profile in self.profiles:
-            self.voice_profile.addItem(profile.name, profile)
-        if not self.profiles:
-            self.voice_profile.addItem("No saved voice profiles", None)
-            return
-        if keep_name:
-            index = self.voice_profile.findText(keep_name)
-            if index >= 0:
-                self.voice_profile.setCurrentIndex(index)
+        current = keep_name if keep_name is not None else self.voice_profile.currentText()
+        if self.profiles:
+            rows = [(profile.name, profile) for profile in self.profiles]
+            selected = next((profile for profile in self.profiles if profile.name == current), None)
+        else:
+            rows = [("No saved voice profiles", None)]
+            selected = None
+        sync_combo_items_in_place(self.voice_profile, rows, selected)
 
     def _refresh_voice_profiles(self) -> None:
         current = self.voice_profile.currentText()
         self.profiles = load_profiles()
         self._load_profiles(current)
+        # Signals are intentionally blocked during the in-place update, so refresh
+        # dependent readiness and duration estimates once from the final selection.
+        self._update_overview()
+        self._refresh_readiness()
         self.status.setText("Voice profiles refreshed.")
 
     def _metadata_history(self, key: str, defaults: list[str] | None = None) -> list[str]:
@@ -1758,27 +1761,14 @@ class GenerationPage(QWidget):
         return result[:40]
 
     def refresh_chapter_sources(self) -> None:
-        """Refresh chapter-dependent UI from the current ProjectWorkflow list."""
-        selected_number = self.preview_chapter.currentData() if hasattr(self, "preview_chapter") else None
-        self.preview_chapter.blockSignals(True)
-        self.preview_chapter.clear()
-        for chapter in self.chapters:
-            self.preview_chapter.addItem(
-                f"Chapter {chapter.number}: {chapter.title}",
-                chapter.number,
-            )
-        self.preview_chapter.blockSignals(False)
-        if self.chapters:
-            target_index = 0
-            if selected_number is not None:
-                for index, chapter in enumerate(self.chapters):
-                    if chapter.number == selected_number:
-                        target_index = index
-                        break
-            self.preview_chapter.setCurrentIndex(min(target_index, len(self.chapters) - 1))
-            self.preview_chapter.setEnabled(True)
-        else:
-            self.preview_chapter.setEnabled(False)
+        """Refresh chapter-dependent UI without clearing the visible selector."""
+        selected_number = self.preview_chapter.currentData()
+        rows = [
+            (f"Chapter {chapter.number}: {chapter.title}", chapter.number)
+            for chapter in self.chapters
+        ]
+        sync_combo_items_in_place(self.preview_chapter, rows, selected_number)
+        self.preview_chapter.setEnabled(bool(self.chapters))
         self._update_overview()
         self._refresh_readiness()
         self._refresh_resume_state()

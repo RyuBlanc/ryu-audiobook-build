@@ -33,6 +33,7 @@ class PassiveScrollComboBox(QComboBox):
             event.ignore()
 
 from app.ui.motion import SmoothProgressBar
+from app.ui.stable_refresh import sync_combo_items_in_place
 from app.core.state import load_state, save_state
 from app.core.character_library import sync_characters
 from app.tts.profile_provider import provider_from_profile
@@ -54,40 +55,6 @@ from app.tts.voice_profile import (
 )
 from app.tts.providers.edge_tts import EdgeTTSProvider
 from app.tts.providers.elevenlabs import ElevenLabsProvider
-
-
-def _sync_combo_items_in_place(
-    combo: QComboBox,
-    rows: list[tuple[str, object]],
-    selected_data: object = None,
-) -> None:
-    """Synchronize a dropdown without clearing unchanged rows or flashing blank."""
-    was_blocked = combo.blockSignals(True)
-    updates_were_enabled = combo.updatesEnabled()
-    if updates_were_enabled:
-        combo.setUpdatesEnabled(False)
-    try:
-        for index, (label, data) in enumerate(rows):
-            if index < combo.count():
-                if combo.itemText(index) != label:
-                    combo.setItemText(index, label)
-                if combo.itemData(index) != data:
-                    combo.setItemData(index, data)
-            else:
-                combo.addItem(label, data)
-
-        while combo.count() > len(rows):
-            combo.removeItem(combo.count() - 1)
-
-        selected_index = combo.findData(selected_data) if selected_data is not None else -1
-        if selected_index < 0 and rows:
-            selected_index = 0
-        combo.setCurrentIndex(selected_index)
-    finally:
-        combo.blockSignals(was_blocked)
-        if updates_were_enabled:
-            combo.setUpdatesEnabled(True)
-            combo.update()
 
 
 # Keep native and HTML Voice Studio duration controls aligned; 30 seconds remains the default.
@@ -2243,7 +2210,7 @@ class VoicePage(QWidget):
             (f"{profile.name}  ·  {self._provider_label(profile)}", profile.name)
             for profile in matches
         ]
-        _sync_combo_items_in_place(self.saved_profiles, rows, current)
+        sync_combo_items_in_place(self.saved_profiles, rows, current)
         self._saved_profile_changed()
 
     def _saved_profile_changed(self) -> None:

@@ -207,7 +207,7 @@ class UiStabilityRegressions(unittest.TestCase):
     def test_voice_profile_combo_refresh_preserves_rows_and_selection_without_clearing(self):
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QApplication, QComboBox
-        from app.ui.voice_page import _sync_combo_items_in_place
+        from app.ui.stable_refresh import sync_combo_items_in_place
 
         app = QApplication.instance() or QApplication([])
         combo = QComboBox()
@@ -216,7 +216,7 @@ class UiStabilityRegressions(unittest.TestCase):
         combo.setItemData(1, "preserve-extra-role", Qt.ItemDataRole.UserRole + 1)
         combo.setCurrentIndex(1)
 
-        _sync_combo_items_in_place(
+        sync_combo_items_in_place(
             combo,
             [("Alpha • Local", "alpha"), ("Beta • Qwen", "beta")],
             "beta",
@@ -236,7 +236,7 @@ class UiStabilityRegressions(unittest.TestCase):
 
     def test_voice_profile_combo_refresh_restores_state_when_an_item_update_fails(self):
         from PySide6.QtWidgets import QApplication, QComboBox
-        from app.ui.voice_page import _sync_combo_items_in_place
+        from app.ui.stable_refresh import sync_combo_items_in_place
 
         app = QApplication.instance() or QApplication([])
         combo = QComboBox()
@@ -245,13 +245,29 @@ class UiStabilityRegressions(unittest.TestCase):
         app.processEvents()
 
         with self.assertRaises(TypeError):
-            _sync_combo_items_in_place(combo, [(object(), "existing")], "existing")
+            sync_combo_items_in_place(combo, [(object(), "existing")], "existing")
 
         self.assertFalse(combo.signalsBlocked())
         self.assertTrue(combo.updatesEnabled())
         self.assertEqual(combo.count(), 1)
         combo.close()
         app.processEvents()
+
+    def test_generation_dropdown_refreshes_avoid_clear_and_use_shared_sync(self):
+        generation = (ROOT / "app/ui/generation_page.py").read_text(encoding="utf-8")
+        profiles = generation.split("def _load_profiles(", 1)[1].split(
+            "def _metadata_history(", 1
+        )[0]
+        chapters = generation.split("def refresh_chapter_sources(", 1)[1].split(
+            "def _update_overview(", 1
+        )[0]
+
+        self.assertIn("sync_combo_items_in_place(self.voice_profile", profiles)
+        self.assertIn("sync_combo_items_in_place(self.preview_chapter", chapters)
+        self.assertNotIn("self.voice_profile.clear()", profiles)
+        self.assertNotIn("self.preview_chapter.clear()", chapters)
+        self.assertIn("self._refresh_readiness()", profiles)
+        self.assertIn("self._update_overview()", profiles)
 
     def test_page_navigation_avoids_opacity_effects_and_keeps_handlers(self):
         source = (ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")
