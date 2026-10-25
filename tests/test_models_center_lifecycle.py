@@ -333,5 +333,43 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             self.assertFalse(target.with_suffix(".bin.part").exists())
 
 
+    def test_qwen_bootstrap_download_rejects_truncated_http_body_and_preserves_existing_installer(self):
+        from app.tts import qwen_character_runtime as qwen_runtime
+
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "python-installer.exe"
+            target.write_bytes(b"existing-valid-installer")
+            response = _FakeResponse(b"x" * 5_000_128)
+            response.headers = {"Content-Length": str(8_000_000)}
+
+            with patch("app.tts.qwen_character_runtime.urllib.request.urlopen", return_value=response):
+                with self.assertRaisesRegex(RuntimeError, "expected bytes"):
+                    qwen_runtime._download_file(
+                        "https://example.invalid/python-installer.exe",
+                        target,
+                    )
+
+            self.assertEqual(target.read_bytes(), b"existing-valid-installer")
+            self.assertFalse(target.with_suffix(".exe.part").exists())
+
+    def test_qwen_bootstrap_download_rejects_short_file_without_content_length(self):
+        from app.tts import qwen_character_runtime as qwen_runtime
+
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "python-installer.exe"
+            response = _FakeResponse(b"x" * 1024)
+            response.headers = {}
+
+            with patch("app.tts.qwen_character_runtime.urllib.request.urlopen", return_value=response):
+                with self.assertRaisesRegex(RuntimeError, "only"):
+                    qwen_runtime._download_file(
+                        "https://example.invalid/python-installer.exe",
+                        target,
+                    )
+
+            self.assertFalse(target.exists())
+            self.assertFalse(target.with_suffix(".exe.part").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

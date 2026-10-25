@@ -118,8 +118,17 @@ def _download_file(url: str, target: Path, progress=None) -> None:
                     progress(
                         f"Downloading Python runtime… {received * 100 // total}%"
                     )
-        if not temp.exists() or temp.stat().st_size < 5_000_000:
-            raise RuntimeError("The downloaded Python runtime installer is incomplete.")
+        size = temp.stat().st_size if temp.is_file() else 0
+        if total > 0 and received != total:
+            raise RuntimeError(
+                "The downloaded Python runtime installer is incomplete: "
+                f"received {received:,} of {total:,} expected bytes."
+            )
+        if size < 5_000_000:
+            raise RuntimeError(
+                "The downloaded Python runtime installer is incomplete: "
+                f"received only {size:,} bytes."
+            )
         temp.replace(target)
     finally:
         temp.unlink(missing_ok=True)
