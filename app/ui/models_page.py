@@ -540,7 +540,7 @@ class ModelsPage(QWidget):
         else:
             add_component("Qwen3-TTS Python runtime — Not installed")
 
-        # Use cheap filesystem checks here. audiobook_ai_installed() invokes
+        # Use cheap filesystem checks here. The full readiness helper invokes
         # recommended_model(), which can launch nvidia-smi; that must not run
         # from the Qt refresh path because a missing/slow driver can freeze UI.
         ai_root = models_root() / "audiobook-ai"

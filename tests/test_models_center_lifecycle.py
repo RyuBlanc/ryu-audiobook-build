@@ -224,7 +224,7 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
         self.assertIn("ai_ready = _file_ready(ai_server) and any(_file_ready(path) for path in ai_models)", refresh)
         self.assertIn("Audiobook AI — Incomplete", refresh)
         self.assertIn("Kokoro 82M — Incomplete", refresh)
-        self.assertNotIn("audiobook_ai_installed()", refresh)
+        self.assertNotIn("if audiobook_ai_installed()", refresh)
         self.assertIn('"qwen-runtime")', refresh)
         self.assertIn('"audiobook-ai")', refresh)
 

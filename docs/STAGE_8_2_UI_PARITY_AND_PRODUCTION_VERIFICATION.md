@@ -144,7 +144,7 @@ The remaining implementation is frozen to six packages. Defects found during a p
 
 ## Current preview-duration contract clarification — October 25, 2026
 
-The active native Voice Studio selector, desktop preview bridge, persisted Settings validation, HTML adapter, and current preview contract tests support **10, 30, 60, and 90 seconds**. Requests for 20 or 45 seconds are rejected before a worker starts. Older Stage 8.2 build notes below document an earlier planned target set and should be read as historical evidence, not as the current runtime contract.
+The active native Voice Studio selector, desktop preview bridge, persisted Settings validation, HTML adapter, and current preview contract tests support **10, 30, 60, and 90 seconds**. Requests for 20 or 45 seconds are rejected before a worker starts. Older Stage 8.2 build notes above document an earlier planned target set and should be read as historical evidence, not as the current runtime contract.
 
 ## Stage 8.2.8 — Sound Design implementation notes
 
