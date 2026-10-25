@@ -3027,15 +3027,26 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Character names must be 160 characters or fewer.")
         state = load_state(project.folder)
         characters = list(state.get("characters") or [])
-        item = next((c for c in characters
-                     if isinstance(c, dict) and str(c.get("name", "")).casefold() == original_name.casefold()), None)
+        default_series = self._project_series_name(project, state)
+        def series_key(value: Any) -> str:
+            return re.sub(r"(?i)^\\s*series\\s*[·:-]\\s*", "", str(value or "").strip()).casefold()
+        original_series = str(payload.get("original_series") or "").strip()
+        same_name_rows = [c for c in characters if isinstance(c, dict)
+                          and str(c.get("name", "")).casefold() == original_name.casefold()]
+        if original_series:
+            item = next((c for c in same_name_rows
+                         if series_key(c.get("series") or default_series) == series_key(original_series)), None)
+        elif len(same_name_rows) == 1:
+            item = same_name_rows[0]
+        else:
+            item = None
         if item is None:
-            raise ValueError("The selected character is no longer in the saved cast. Refresh and try again.")
+            raise ValueError("The selected character could not be identified uniquely by name and series. Refresh Character Studio and select it again.")
         duplicate = next((c for c in characters
                           if isinstance(c, dict) and c is not item
                           and str(c.get("name", "")).casefold() == name.casefold()), None)
         if duplicate is not None:
-            raise ValueError("Another character already uses that name.")
+            raise ValueError("Another project character already uses that name. Rename it before changing series or creating a duplicate.")
         # Partial updates must not erase saved cast metadata merely because a
         # caller omitted a field. Explicit empty values still allow the UI to
         # clear optional fields intentionally.
@@ -3064,7 +3075,7 @@ class PremiumV2Bridge(QObject):
         description_value = payload.get("short_description") if "short_description" in payload else item.get("short_description", "")
         notes_value = payload.get("notes") if "notes" in payload else item.get("notes", "")
         scope_value = payload.get("scope") if "scope" in payload else item.get("scope", "Current book only")
-        current_series = str(item.get("series") or "")
+        current_series = str(item.get("series") or default_series)
         series_value = payload.get("series") if "series" in payload else item.get("series", "")
         if isinstance(series_value, str):
             series_value = series_value.strip()[:300]
@@ -3091,6 +3102,7 @@ class PremiumV2Bridge(QObject):
                 library_row = next((row for row in registry_rows
                     if str(row.get("source_project_folder") or "") and
                        str(Path(str(row.get("source_project_folder"))).resolve()) == active_folder and
+                       series_key(row.get("series")) == series_key(current_series) and
                        str(row.get("primary_name") or row.get("name") or "").casefold() in
                        {original_name.casefold(), name.casefold()}), None)
                 if library_row is None:
@@ -3100,7 +3112,7 @@ class PremiumV2Bridge(QObject):
                              or name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])})), None)
                 if library_row is None:
                     library_row = next((row for row in registry_rows
-                        if str(row.get("series") or "").casefold() == old_series
+                        if series_key(row.get("series")) == series_key(current_series)
                         and (str(row.get("primary_name") or row.get("name") or "").casefold() == original_name.casefold()
                              or original_name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])})), None)
                 self._character_library_save({
