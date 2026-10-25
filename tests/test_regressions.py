@@ -1539,7 +1539,9 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("QWEN_VENV_ROOT", source)
         self.assertIn('local_kokoro_root = models_root() / "kokoro"', source)
         self.assertIn("Kokoro 82M — Bundled with application (not individually removable)", source)
-        self.assertIn("local_kokoro_installed", source)
+        self.assertIn("local_kokoro_present", source)
+        self.assertIn("local_kokoro_ready", source)
+        self.assertIn("Kokoro 82M — Incomplete", source)
 
     def test_generation_surfaces_provider_device_status(self):
         manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
