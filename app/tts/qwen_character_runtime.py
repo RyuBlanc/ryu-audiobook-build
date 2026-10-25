@@ -216,10 +216,16 @@ def _install_runtime_packages(python: Path, progress=None) -> None:
     if code != 0:
         raise RuntimeError(f"Qwen runtime pip bootstrap failed: {detail[-2500:]}")
 
+    # Prefer CUDA wheels on NVIDIA systems, but never make NVIDIA detection
+    # a hard prerequisite for a usable runtime. A detected GPU can still have
+    # an unsupported driver, CUDA wheel resolution failure, or limited network
+    # access to the CUDA index. In that case, fall back to the CPU wheel so
+    # Qwen remains usable instead of leaving the user with a broken install.
     if _has_nvidia_gpu():
         torch_indexes = (
             "https://download.pytorch.org/whl/cu128",
             "https://download.pytorch.org/whl/cu126",
+            "https://download.pytorch.org/whl/cpu",
         )
     else:
         torch_indexes = ("https://download.pytorch.org/whl/cpu",)
@@ -247,7 +253,8 @@ def _install_runtime_packages(python: Path, progress=None) -> None:
 
     if torch_error:
         raise RuntimeError(
-            "PyTorch installation failed for the offline character engine. "
+            "PyTorch installation failed for the offline character engine "
+            "after trying the available CUDA options and CPU fallback. "
             f"Last error: {torch_error[-3500:]}"
         )
 

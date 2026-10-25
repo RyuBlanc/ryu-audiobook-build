@@ -28,6 +28,69 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             )
         self.assertIn("download stage", progress)
 
+    def test_gpu_cuda_install_failure_falls_back_to_cpu_pytorch(self):
+        from pathlib import Path
+        from unittest.mock import call, patch
+        from app.tts import qwen_character_runtime as runtime
+
+        results = [
+            (0, "pip bootstrap ready"),
+            (1, "CUDA 12.8 wheel unavailable"),
+            (1, "CUDA 12.6 wheel unavailable"),
+            (0, "CPU torch installed"),
+            (0, "qwen-tts installed"),
+            (0, "torch=2.9.1 cuda=False"),
+        ]
+        progress = []
+        with (
+            patch.object(runtime, "_has_nvidia_gpu", return_value=True),
+            patch.object(runtime, "_run_capture", side_effect=results) as runner,
+        ):
+            runtime._install_runtime_packages(Path("python.exe"), progress.append)
+
+        commands = [entry.args[0] for entry in runner.call_args_list]
+        index_urls = [
+            commands[index][commands[index].index("--index-url") + 1]
+            for index in range(len(commands))
+            if "--index-url" in commands[index]
+        ]
+        self.assertEqual(
+            index_urls,
+            [
+                "https://download.pytorch.org/whl/cu128",
+                "https://download.pytorch.org/whl/cu126",
+                "https://download.pytorch.org/whl/cpu",
+            ],
+        )
+        self.assertTrue(any("(CPU)…" in message for message in progress))
+        self.assertEqual(runner.call_count, 6)
+
+    def test_cpu_only_pc_attempts_cpu_pytorch_directly(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        from app.tts import qwen_character_runtime as runtime
+
+        results = [
+            (0, "pip bootstrap ready"),
+            (0, "CPU torch installed"),
+            (0, "qwen-tts installed"),
+            (0, "torch=2.9.1 cuda=False"),
+        ]
+        with (
+            patch.object(runtime, "_has_nvidia_gpu", return_value=False),
+            patch.object(runtime, "_run_capture", side_effect=results) as runner,
+        ):
+            runtime._install_runtime_packages(Path("python.exe"))
+
+        commands = [entry.args[0] for entry in runner.call_args_list]
+        index_urls = [
+            commands[index][commands[index].index("--index-url") + 1]
+            for index in range(len(commands))
+            if "--index-url" in commands[index]
+        ]
+        self.assertEqual(index_urls, ["https://download.pytorch.org/whl/cpu"])
+        self.assertEqual(runner.call_count, 4)
+
 
 if __name__ == "__main__":
     unittest.main()
