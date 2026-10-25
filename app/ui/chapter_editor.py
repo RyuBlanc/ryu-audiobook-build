@@ -336,9 +336,10 @@ class ChapterEditorPage(QWidget):
         QToolTip.hideText()
 
     def _assignment_color(self, speaker: str) -> QColor:
-        key = str(speaker or "speaker").casefold().strip()
-        stable_index = sum((position + 1) * ord(char) for position, char in enumerate(key))
-        return QColor(self._assignment_palette[stable_index % len(self._assignment_palette)])
+        # Saved character assignments use a consistent soft green. Amber is
+        # reserved for unconfirmed analysis suggestions; native assignment
+        # highlights should not look like AI-review warnings.
+        return QColor("#29B773")
 
     def _refresh_assignment_visuals(self) -> None:
         if not hasattr(self, "text"):
