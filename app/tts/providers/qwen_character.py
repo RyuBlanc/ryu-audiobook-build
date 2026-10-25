@@ -21,6 +21,7 @@ from ..qwen_character_runtime import (
     runtime_ready,
     verify_runtime,
     worker_script,
+    _detected_vram_gb,
 )
 from ..expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT, classify_expression
 
@@ -111,9 +112,21 @@ class QwenCharacterProvider(TTSProvider):
 
     @property
     def recommended_batch_size(self) -> int:
-        """Generate one Qwen segment at a time for responsive checkpoints."""
+        """Keep long-form chapter generation checkpoint-friendly."""
         return 1
 
+    @property
+    def recommended_preview_batch_size(self) -> int:
+        """Batch short VoiceDesign previews only on GPUs with comfortable VRAM."""
+        if self.qwen_mode != "design-preview":
+            return 1
+        try:
+            # VoiceDesign is a 1.7B model. Prefer serial inference on 4 GB
+            # GPUs / CPU; two sentences can share a call on 8 GB-class GPUs.
+            # The preview caller falls back if the device reports CUDA OOM.
+            return 2 if _detected_vram_gb() >= 7.0 else 1
+        except Exception:
+            return 1
 
     def _request_timeout(self, text_chars: int) -> float:
         # One 2.4k-character Qwen chunk can legitimately take many minutes on

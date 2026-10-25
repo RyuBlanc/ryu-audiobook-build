@@ -50,6 +50,99 @@ def _concat_wavs(paths: list[Path], destination: Path) -> None:
 
 
 class TestPreviewDurationAcceptance(unittest.TestCase):
+    def test_qwen_voice_design_preview_batches_two_sentences_and_keeps_target_duration(self):
+        class BatchedQwenPreviewProvider:
+            qwen_mode = "design-preview"
+            recommended_preview_batch_size = 2
+            handles_narration_controls = False
+
+            def __init__(self):
+                self.batch_calls = []
+                self.single_calls = []
+
+            def synthesize_batch(self, items):
+                self.batch_calls.append([text for text, _path in items])
+                for _text, path in items:
+                    _write_tone(Path(path), 0.30)
+                return [Path(path) for _text, path in items]
+
+            def synthesize(self, text, output_path, voice=None):
+                self.single_calls.append(text)
+                _write_tone(Path(output_path), 0.30)
+
+        source_text = (
+            "Rias opened the door and smiled at the visitor. "
+            "Akeno followed her and spoke in a calm voice. "
+            "The hallway became quiet as they waited."
+        )
+        provider = BatchedQwenPreviewProvider()
+
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "qwen-batched-preview.wav"
+            with patch("app.tts.preview._normalize", side_effect=_copy_normalized), patch(
+                "app.tts.preview._concat", side_effect=_concat_wavs
+            ):
+                result = build_voice_preview(
+                    source_text, provider, "design-preview", output,
+                    narration_speed=1.0, pacing_profile="off",
+                    max_chars=1400, target_seconds=0.60,
+                )
+            with wave.open(str(result.output_path), "rb") as wav:
+                actual_seconds = wav.getnframes() / float(wav.getframerate())
+
+        self.assertEqual(len(provider.batch_calls), 1)
+        self.assertEqual(len(provider.batch_calls[0]), 2)
+        self.assertEqual(provider.single_calls, [])
+        self.assertEqual(result.segments, 2)
+        self.assertEqual(result.source_text.splitlines(), provider.batch_calls[0])
+        self.assertGreaterEqual(actual_seconds, 0.60)
+        self.assertLess(actual_seconds, 0.61)
+
+    def test_qwen_voice_design_preview_batch_oom_falls_back_to_serial_synthesis(self):
+        class OomQwenPreviewProvider:
+            qwen_mode = "design-preview"
+            recommended_preview_batch_size = 2
+            handles_narration_controls = False
+
+            def __init__(self):
+                self.batch_calls = 0
+                self.single_calls = []
+
+            def synthesize_batch(self, items):
+                self.batch_calls += 1
+                raise RuntimeError("Qwen batch exceeded available GPU memory.")
+
+            def synthesize(self, text, output_path, voice=None):
+                self.single_calls.append(text)
+                _write_tone(Path(output_path), 0.30)
+
+        source_text = (
+            "Rias opened the door and smiled at the visitor. "
+            "Akeno followed her and spoke in a calm voice. "
+            "The hallway became quiet as they waited."
+        )
+        provider = OomQwenPreviewProvider()
+
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "qwen-oom-fallback-preview.wav"
+            with patch("app.tts.preview._normalize", side_effect=_copy_normalized), patch(
+                "app.tts.preview._concat", side_effect=_concat_wavs
+            ):
+                result = build_voice_preview(
+                    source_text, provider, "design-preview", output,
+                    narration_speed=1.0, pacing_profile="off",
+                    max_chars=1400, target_seconds=0.60,
+                )
+            with wave.open(str(result.output_path), "rb") as wav:
+                actual_seconds = wav.getnframes() / float(wav.getframerate())
+
+        self.assertEqual(provider.batch_calls, 1)
+        self.assertEqual(len(provider.single_calls), 2)
+        self.assertEqual(result.segments, 2)
+        self.assertEqual(result.source_text.splitlines(), provider.single_calls)
+        self.assertGreaterEqual(actual_seconds, 0.60)
+        self.assertLess(actual_seconds, 0.61)
+
     def test_supported_preview_durations_meet_requested_audio_budget(self):
         class FastLocalProvider:
             def __init__(self):

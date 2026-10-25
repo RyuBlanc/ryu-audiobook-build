@@ -607,41 +607,81 @@ def server(args) -> int:
                 if any(not value for value in texts):
                     raise RuntimeError("Qwen batch contains empty narration text.")
 
-                print(json.dumps({"progress": f"Generating {len(texts)} Qwen segments with natural expression…"}), flush=True)
                 requested_styles = request.get("styles") or [None] * len(texts)
                 styles = [
                     str(style) if style else classify_expression(text)
                     for text, style in zip(texts, requested_styles)
                 ]
                 import soundfile as sf
-                for style in dict.fromkeys(styles):
-                    indexes = [i for i, item_style in enumerate(styles) if item_style == style]
-                    selected_texts = [texts[i] for i in indexes]
-                    temperature = expression_temperature(style)
-                    batch_request = {
-                        **request,
-                        "text": max(selected_texts, key=len) if selected_texts else "",
-                        "temperature": temperature,
-                        "subtalker_temperature": temperature,
-                    }
-                    prompt_style = reference_style(style)
-                    prompt = locked_clone_prompts.get(prompt_style) or locked_clone_prompts.get("neutral")
-                    if prompt is None:
-                        raise RuntimeError(f"No Qwen expression prompt is available for style '{style}'.")
-                    wavs, sr = model.generate_voice_clone(
-                        text=selected_texts,
-                        language=[str(request.get("language") or "English")] * len(selected_texts),
-                        voice_clone_prompt=prompt,
-                        **_generation_kwargs(batch_request),
+                if active_task == "design-preview":
+                    # Preview batches remain on the VoiceDesign model; do not
+                    # swap to the production Base voice-clone identity workflow.
+                    print(
+                        json.dumps({"progress": f"Generating {len(texts)} VoiceDesign preview segments…"}),
+                        flush=True,
                     )
-                    if len(wavs) != len(indexes):
-                        raise RuntimeError(
-                            f"Qwen returned {len(wavs)} outputs for {len(indexes)} {style} batch items."
+                    for style in dict.fromkeys(styles):
+                        indexes = [i for i, item_style in enumerate(styles) if item_style == style]
+                        selected_texts = [texts[i] for i in indexes]
+                        longest_text = max(selected_texts, key=len) if selected_texts else ""
+                        batch_request = {
+                            **request,
+                            "text": longest_text,
+                            "max_new_tokens": min(_recommended_max_new_tokens(longest_text), 1024),
+                        }
+                        design_instructions = [
+                            _voice_design_instruct({**request, "text": texts[index]}, style)
+                            for index in indexes
+                        ]
+                        _set_seed(request.get("seed"))
+                        wavs, sr = model.generate_voice_design(
+                            text=selected_texts,
+                            language=[str(request.get("language") or "English")] * len(selected_texts),
+                            instruct=design_instructions,
+                            **_generation_kwargs(batch_request),
                         )
-                    for index, wav in zip(indexes, wavs):
-                        destination = Path(str(batch_outputs[index]))
-                        destination.parent.mkdir(parents=True, exist_ok=True)
-                        sf.write(str(destination), wav, sr)
+                        if len(wavs) != len(indexes):
+                            raise RuntimeError(
+                                f"Qwen VoiceDesign returned {len(wavs)} outputs for "
+                                f"{len(indexes)} {style} preview items."
+                            )
+                        for index, wav in zip(indexes, wavs):
+                            destination = Path(str(batch_outputs[index]))
+                            destination.parent.mkdir(parents=True, exist_ok=True)
+                            sf.write(str(destination), wav, sr)
+                else:
+                    print(
+                        json.dumps({"progress": f"Generating {len(texts)} Qwen segments with locked character expression…"}),
+                        flush=True,
+                    )
+                    for style in dict.fromkeys(styles):
+                        indexes = [i for i, item_style in enumerate(styles) if item_style == style]
+                        selected_texts = [texts[i] for i in indexes]
+                        temperature = expression_temperature(style)
+                        batch_request = {
+                            **request,
+                            "text": max(selected_texts, key=len) if selected_texts else "",
+                            "temperature": temperature,
+                            "subtalker_temperature": temperature,
+                        }
+                        prompt_style = reference_style(style)
+                        prompt = locked_clone_prompts.get(prompt_style) or locked_clone_prompts.get("neutral")
+                        if prompt is None:
+                            raise RuntimeError(f"No Qwen expression prompt is available for style '{style}'.")
+                        wavs, sr = model.generate_voice_clone(
+                            text=selected_texts,
+                            language=[str(request.get("language") or "English")] * len(selected_texts),
+                            voice_clone_prompt=prompt,
+                            **_generation_kwargs(batch_request),
+                        )
+                        if len(wavs) != len(indexes):
+                            raise RuntimeError(
+                                f"Qwen returned {len(wavs)} outputs for {len(indexes)} {style} batch items."
+                            )
+                        for index, wav in zip(indexes, wavs):
+                            destination = Path(str(batch_outputs[index]))
+                            destination.parent.mkdir(parents=True, exist_ok=True)
+                            sf.write(str(destination), wav, sr)
 
                 print(
                     json.dumps(
@@ -701,6 +741,11 @@ def server(args) -> int:
         except Exception as exc:
             # A CUDA OOM should not destroy a long audiobook.
             if _is_cuda_oom(exc) and device.startswith("cuda") and isinstance(batch_texts, list):
+                try:
+                    import torch
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
                 print(json.dumps({
                     "ok": False,
                     "batch_oom": True,

@@ -215,12 +215,70 @@ def build_voice_preview(
 
         generated_segments = 0
         generated_text: list[str] = []
+        qwen_mode = str(getattr(provider, "qwen_mode", "") or "").casefold()
+        batch_synthesizer = getattr(provider, "synthesize_batch", None)
+        try:
+            preview_batch_size = int(getattr(provider, "recommended_preview_batch_size", 1) or 1)
+        except (TypeError, ValueError):
+            preview_batch_size = 1
+        # Batch only short, same-voice Qwen VoiceDesign previews on a device
+        # whose provider explicitly advertises capacity. Other providers,
+        # long-form generation and multi-speaker passages retain serial behavior.
+        can_batch_qwen_preview = (
+            target > 0
+            and qwen_mode == "design-preview"
+            and callable(batch_synthesizer)
+            and preview_batch_size >= 2
+            and len(units) > 1
+            and all(
+                not isinstance(unit_voice, list)
+                and (not unit_voice or not voice or str(unit_voice) == str(voice))
+                for _unit, unit_voice in units
+            )
+        )
+        batch_raw_paths: dict[int, Path] = {}
         for index, (unit, unit_voice) in enumerate(units):
             check_cancelled()
             report("synthesizing", index, total_units)
             raw_path = root / f"{index:03d}.wav"
             normalized_path = root / f"{index:03d}-normalized.wav"
-            if isinstance(unit_voice, list):
+            if can_batch_qwen_preview and index not in batch_raw_paths:
+                batch_end = min(index + preview_batch_size, total_units)
+                batch_items = [
+                    (units[batch_index][0], root / f"{batch_index:03d}.wav")
+                    for batch_index in range(index, batch_end)
+                ]
+                # Do not start a one-item batch at the tail.
+                if len(batch_items) > 1:
+                    check_cancelled()
+                    try:
+                        batch_synthesizer(batch_items)
+                        batch_raw_paths.update({
+                            batch_index: path
+                            for batch_index, (_text, path) in zip(
+                                range(index, batch_end), batch_items
+                            )
+                        })
+                    except RuntimeError as exc:
+                        # A batch may exceed CUDA memory even when each sentence
+                        # fits by itself. Retry serially only for explicit OOM;
+                        # unrelated synthesis errors must remain visible.
+                        if "qwen batch exceeded available gpu memory" not in str(exc).casefold():
+                            raise
+                        for batch_index, (batch_text, batch_path) in zip(
+                            range(index, batch_end), batch_items
+                        ):
+                            check_cancelled()
+                            provider.synthesize(batch_text, batch_path, units[batch_index][1])
+                            batch_raw_paths[batch_index] = batch_path
+                    check_cancelled()
+                if index in batch_raw_paths:
+                    raw_path = batch_raw_paths[index]
+                else:
+                    provider.synthesize(unit, raw_path, unit_voice)
+            elif index in batch_raw_paths:
+                raw_path = batch_raw_paths[index]
+            elif isinstance(unit_voice, list):
                 synthesize_voice_set(provider, unit, unit_voice, raw_path)
             else:
                 provider.synthesize(unit, raw_path, unit_voice)
