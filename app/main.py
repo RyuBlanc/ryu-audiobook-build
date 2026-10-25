@@ -795,6 +795,9 @@ def main() -> int:
         window.apply_window_size(window_size)
     else:
         apply_window_geometry(window, window_size)
+    # apply_window_size("auto") changes geometry but intentionally does not
+    # force visibility; always show the selected native top-level window here.
+    window.show()
     return app.exec()
 
 
