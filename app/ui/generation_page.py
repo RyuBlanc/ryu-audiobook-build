@@ -1278,9 +1278,6 @@ class GenerationPage(QWidget):
                 name = str(getattr(character, "name", "") or "").strip()
                 if name:
                     candidate_names.append(name)
-                aliases = getattr(character, "aliases", []) or []
-                if isinstance(aliases, (list, tuple)):
-                    candidate_names.extend(str(alias).strip() for alias in aliases if str(alias or "").strip())
             all_names = set(candidate_names)
             source_text = "\n".join(ch.text or "" for ch in self.chapters)
             added = 0
