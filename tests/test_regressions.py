@@ -914,6 +914,31 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(provider.split_for_cast(text_value, "Narrator", series_b), [("I know.", "Voice B")])
         provider.close()
 
+    def test_cast_provider_excludes_ambiguous_legacy_name_from_unscoped_speaker_inference(self):
+        from app.core.character_identity import character_identity_key
+        from app.tts.cast_provider import CastAwareProvider
+        from types import SimpleNamespace
+
+        class FakeProvider:
+            def voices(self):
+                return ["Narrator"]
+            def close(self):
+                pass
+
+        profiles = {"Voice A": SimpleNamespace(name="Voice A", provider="piper")}
+        provider = CastAwareProvider(
+            FakeProvider(), "Narrator", profiles,
+            {"Rias Gremory": "Voice A"},
+            identity_assignments={
+                character_identity_key("Rias Gremory", "Series A"): "Voice A",
+                character_identity_key("Rias Gremory", "Series B"): "",
+            },
+        )
+        quoted = "Rias Gremory stepped back. “I know.”"
+        start = quoted.index("“")
+        self.assertIsNone(provider._speaker_for(quoted, start, len(quoted), None))
+        provider.close()
+
     def test_cast_provider_does_not_fallback_to_another_series_legacy_voice(self):
         from app.core.character_identity import character_identity_key
         from app.tts.cast_provider import CastAwareProvider

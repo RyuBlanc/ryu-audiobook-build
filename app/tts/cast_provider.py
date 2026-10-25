@@ -264,9 +264,13 @@ class CastAwareProvider(TTSProvider):
 
     def _speaker_for(self, text: str, start: int, end: int, last_speaker: str | None) -> str | None:
         candidate_names = set(self.assignments.keys())
-        # Names present in multiple series are excluded from unscoped inference.
+        # Remove ambiguous names even when a legacy name-only assignment still
+        # exists in an older project. Otherwise that stale key bypasses the
+        # series-aware candidate guard and may select the wrong character.
         for name, series_names in self._identity_series_by_name.items():
-            if len(series_names) == 1:
+            if len(series_names) > 1:
+                candidate_names.discard(name)
+            else:
                 candidate_names.add(name)
         return infer_speaker_for_quote(
             text,
