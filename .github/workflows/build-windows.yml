@@ -31,7 +31,9 @@ permissions:
 concurrency:
   # A push on a separate review branch must not cancel another branch's validation run.
   group: ryu-audiobook-windows-build-${{ github.ref }}
-  cancel-in-progress: true
+  # Do not kill an active Windows test/package job on every small follow-up
+  # commit. Keep the current build running and let the newest pending revision run next.
+  cancel-in-progress: false
 
 jobs:
   tests:
