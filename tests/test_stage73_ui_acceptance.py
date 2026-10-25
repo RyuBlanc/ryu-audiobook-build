@@ -288,10 +288,20 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
 
     def test_hardware_benchmark_runs_off_ui_thread_and_reports_missing_voice(self):
         page = (ROOT / "app" / "ui" / "hardware_page.py").read_text(encoding="utf-8")
+        hardware_start = page.index("class HardwarePage")
+        refresh_start = page.index("    def refresh(", hardware_start)
+        run_start = page.index("    def run_benchmark(", refresh_start)
+        hardware_init = page[page.index("    def __init__(", hardware_start):refresh_start]
+        refresh = page[refresh_start:run_start]
+        self.assertIn("self.profile = None", hardware_init)
+        self.assertNotIn("detect_hardware()", hardware_init)
         for required in (
-            'self.profile = detect_hardware()',
-            'for backend in self.profile.backends:',
-            'if backend.available:',
+            "profile = detect_hardware()",
+            "for backend in profile.backends:",
+            "if backend.available:",
+        ):
+            self.assertIn(required, refresh)
+        for required in (
             'self.benchmark_button.clicked.connect(self.run_benchmark)',
             'self.benchmark_thread = _BenchmarkThread(provider_backend, voices[0].stem)',
             'self.benchmark_thread.finished_result.connect(self._benchmark_finished)',
