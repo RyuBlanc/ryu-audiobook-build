@@ -21,11 +21,11 @@ import wave
 from datetime import datetime, timezone
 from typing import Any
 
-from PySide6.QtCore import QObject, QSettings, QUrl, Slot
+from PySide6.QtCore import QObject, QSettings, QTimer, QUrl, Slot
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMainWindow, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget
 from PySide6.QtGui import QDesktopServices
 
 from app.core.paths import app_root, audiobooks_root, ensure_roots, library_root, settings_root
@@ -5226,19 +5226,67 @@ class PremiumV2Window(QMainWindow):
         self.channel = QWebChannel(self.web.page())
         self.channel.registerObject("ryuBackend", self.bridge)
         self.web.page().setWebChannel(self.channel)
+        self._renderer_restart_attempts = 0
         self.web.loadFinished.connect(self._install_bridge)
+        self.web.page().renderProcessTerminated.connect(self._handle_renderer_terminated)
+
+        # Keep a native error surface ready if WebEngine fails to load the UI or
+        # its renderer exits. A blank black window must not be the only feedback.
+        self._web_stack = QStackedWidget(self)
+        self._web_stack.addWidget(self.web)
+        self._web_error_page = QWidget(self._web_stack)
+        self._web_error_page.setStyleSheet("background:#080a10;color:#eef0f5;")
+        error_layout = QVBoxLayout(self._web_error_page)
+        error_layout.setContentsMargins(32, 32, 32, 32)
+        error_layout.addStretch(1)
+        self._web_error_title = QLabel("Ryu’s Audiobook could not render the interface", self._web_error_page)
+        self._web_error_title.setStyleSheet("font-size:22px;font-weight:700;color:#f0f2f7;")
+        self._web_error_message = QLabel("The embedded UI renderer stopped. Your project data has not been deleted. Retry loading the interface; if it repeats, check the local application log.", self._web_error_page)
+        self._web_error_message.setWordWrap(True)
+        self._web_error_message.setStyleSheet("font-size:14px;color:#aeb6c5;max-width:760px;")
+        self._web_error_retry = QPushButton("Retry interface", self._web_error_page)
+        self._web_error_retry.setStyleSheet("QPushButton{background:#bd234d;color:white;border:0;border-radius:8px;padding:11px 20px;font-weight:700;} QPushButton:hover{background:#d32a5a;}")
+        self._web_error_retry.clicked.connect(self._retry_web_renderer)
+        error_layout.addWidget(self._web_error_title)
+        error_layout.addWidget(self._web_error_message)
+        error_layout.addWidget(self._web_error_retry)
+        error_layout.addStretch(1)
+        self._web_stack.addWidget(self._web_error_page)
+        self._web_stack.setCurrentWidget(self.web)
+        self.setCentralWidget(self._web_stack)
+
         self.web.load(QUrl.fromLocalFile(str(path.resolve())))
 
-        root = QWidget(self)
-        layout = QVBoxLayout(root)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self.web)
-        self.setCentralWidget(root)
+    def _show_web_failure(self, message: str) -> None:
+        log.error("Premium V2 renderer recovery surface shown: %s", message)
+        if hasattr(self, "_web_error_message"):
+            self._web_error_message.setText(str(message))
+        if hasattr(self, "_web_stack") and hasattr(self, "_web_error_page"):
+            self._web_stack.setCurrentWidget(self._web_error_page)
+
+    def _retry_web_renderer(self) -> None:
+        if hasattr(self, "_web_stack"):
+            self._web_stack.setCurrentWidget(self.web)
+        self.web.reload()
+
+    def _handle_renderer_terminated(self, status, exit_code: int) -> None:
+        message = f"Embedded UI renderer terminated (status={status}, exit code={exit_code})."
+        log.error("%s", message)
+        self._show_web_failure(
+            message + " The project data remains on disk. Retry the interface; diagnostics were written to the local log."
+        )
+        if self._renderer_restart_attempts < 1:
+            self._renderer_restart_attempts += 1
+            QTimer.singleShot(500, self._retry_web_renderer)
 
     def _install_bridge(self, ok: bool) -> None:
         if not ok:
-            log.error("Premium V2 HTML failed to load from %s", frontend_path())
+            message = f"Premium V2 HTML failed to load from {frontend_path()}. Check that the application assets are intact, then retry."
+            self._show_web_failure(message)
             return
+        self._renderer_restart_attempts = 0
+        if hasattr(self, "_web_stack"):
+            self._web_stack.setCurrentWidget(self.web)
         # The bridge is injected without altering the supplied HTML/CSS rendering.
         script = r"""
         (() => {
