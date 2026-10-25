@@ -597,7 +597,6 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          Add-Type -AssemblyName System.Drawing
           $masterLogo = Join-Path (Get-Location) 'assets\ryu_audiobook_logo_master.png'
           $png = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.png'
           $ico = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.ico'
@@ -610,81 +609,63 @@ jobs:
           foreach ($path in @($masterLogo, $png, $ico, $logoBmp, $panel, $panelBmp, $coreInstaller, $installer, $exe)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required release asset missing: $path" }
           }
-          $masterBitmap = [System.Drawing.Bitmap]::FromFile($masterLogo)
-          try {
-            if ($masterBitmap.GetPixel(0,0).A -ne 0 -or $masterBitmap.GetPixel($masterBitmap.Width-1,0).A -ne 0 -or $masterBitmap.GetPixel(0,$masterBitmap.Height-1).A -ne 0 -or $masterBitmap.GetPixel($masterBitmap.Width-1,$masterBitmap.Height-1).A -ne 0) {
-              throw 'Approved master logo must remain transparent at all canvas corners.'
-            }
-          } finally { $masterBitmap.Dispose() }
-          $bitmap = [System.Drawing.Bitmap]::FromFile($png)
-          try {
-            # Scan pixels in native code instead of calling GDI+ GetPixel from
-            # PowerShell once per pixel (which can stall release builds for very
-            # large transparent logos).
-            # PowerShell 7 forwards Bitmap to System.Drawing.Common; make
-            # the runtime drawing assemblies explicit C# compilation references.
-            $drawingAssemblies = @(
-              [System.Drawing.Bitmap].Assembly.Location,
-              [System.Drawing.Rectangle].Assembly.Location
-            ) | Select-Object -Unique
-            Add-Type -ReferencedAssemblies $drawingAssemblies -TypeDefinition @'
-          using System;
-          using System.Drawing;
-          using System.Drawing.Imaging;
-          using System.Runtime.InteropServices;
-          public static class RyuLogoAlphaScanner {
-              public static long[] Count(Bitmap input) {
-                  using (Bitmap normalized = new Bitmap(input.Width, input.Height, PixelFormat.Format32bppArgb)) {
-                      using (Graphics graphics = Graphics.FromImage(normalized)) {
-                          graphics.DrawImage(input, new Rectangle(0, 0, input.Width, input.Height));
-                      }
-                      Rectangle rectangle = new Rectangle(0, 0, normalized.Width, normalized.Height);
-                      BitmapData data = normalized.LockBits(rectangle, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-                      try {
-                          int stride = Math.Abs(data.Stride);
-                          byte[] row = new byte[stride];
-                          long transparent = 0;
-                          long nonTransparent = 0;
-                          for (int y = 0; y < normalized.Height; y++) {
-                              IntPtr rowPointer = IntPtr.Add(data.Scan0, y * data.Stride);
-                              Marshal.Copy(rowPointer, row, 0, stride);
-                              for (int x = 0; x < normalized.Width; x++) {
-                                  if (row[x * 4 + 3] == 0) transparent++;
-                                  else nonTransparent++;
-                              }
-                          }
-                          return new long[] { transparent, nonTransparent };
-                      } finally {
-                          normalized.UnlockBits(data);
-                      }
-                  }
-              }
+
+          # Pillow is pinned by requirements.txt and is already used by the logo
+          # builder. Use the same portable pixel checks here instead of an inline
+          # C# System.Drawing scanner whose forwarded assemblies vary across PS7.
+          $pythonExe = [string]$env:RYU_CI_PYTHON_EXE
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
           }
+          if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) { throw "Python for release logo validation was not found: $pythonExe" }
+          $logoValidationScript = @'
+          from pathlib import Path
+          import sys
+          from PIL import Image
+
+          master_path, png_path, logo_bmp_path, panel_bmp_path = map(Path, sys.argv[1:5])
+
+          def transparent_corners(image, label):
+              rgba = image.convert("RGBA")
+              corners = (
+                  rgba.getpixel((0, 0))[3],
+                  rgba.getpixel((rgba.width - 1, 0))[3],
+                  rgba.getpixel((0, rgba.height - 1))[3],
+                  rgba.getpixel((rgba.width - 1, rgba.height - 1))[3],
+              )
+              if any(alpha != 0 for alpha in corners):
+                  raise SystemExit(f"{label} must keep all four canvas corners fully transparent; alpha={corners}")
+
+          with Image.open(master_path) as master:
+              transparent_corners(master, "Approved master logo")
+
+          with Image.open(png_path) as opened:
+              rgba = opened.convert("RGBA")
+              width, height = rgba.size
+              alpha_counts = rgba.getchannel("A").histogram()
+              transparent = int(alpha_counts[0])
+              non_transparent = int(sum(alpha_counts[1:]))
+              total = int(width) * int(height)
+              if width < 1200 or height < 1200 or transparent < 1 or non_transparent < total * 0.1:
+                  raise SystemExit(
+                      f"Logo alpha/content/resolution check failed: dimensions={width}x{height}, "
+                      f"transparent={transparent}, nonTransparent={non_transparent}"
+                  )
+              transparent_corners(rgba, "Application logo PNG")
+              print(f"Logo resolution and transparency verified: {width}x{height}, transparent pixels={transparent}.")
+
+          for path, label in (
+              (logo_bmp_path, "Installer logo BMP"),
+              (panel_bmp_path, "Installer panel BMP"),
+          ):
+              with Image.open(path) as opened:
+                  corner = opened.convert("RGB").getpixel((0, 0))
+                  if corner != (5, 6, 10):
+                      raise SystemExit(f"{label} has the wrong matte: {corner[0]}, {corner[1]}, {corner[2]}")
+              print(f"{label} matte verified: RGB(5, 6, 10).")
           '@
-            $alphaCounts = [RyuLogoAlphaScanner]::Count($bitmap)
-            $transparent = [long]$alphaCounts[0]
-            $nonTransparent = [long]$alphaCounts[1]
-            $total = [long]$bitmap.Width * [long]$bitmap.Height
-            if ($bitmap.Width -lt 1200 -or $bitmap.Height -lt 1200 -or $transparent -lt 1 -or $nonTransparent -lt ($total * 0.1)) {
-              throw "Logo alpha/content/resolution check failed: dimensions=$($bitmap.Width)x$($bitmap.Height), transparent=$transparent, nonTransparent=$nonTransparent"
-            }
-            if ($bitmap.GetPixel(0,0).A -ne 0 -or $bitmap.GetPixel($bitmap.Width-1,0).A -ne 0 -or $bitmap.GetPixel(0,$bitmap.Height-1).A -ne 0 -or $bitmap.GetPixel($bitmap.Width-1,$bitmap.Height-1).A -ne 0) {
-              throw 'Original logo canvas corners must remain fully transparent; do not add a background.'
-            }
-            Write-Host "Logo resolution and transparency verified: $($bitmap.Width)x$($bitmap.Height), transparent pixels=$transparent."
-          } finally {
-            $bitmap.Dispose()
-          }
-          $logoBitmap = [System.Drawing.Bitmap]::FromFile($logoBmp)
-          try {
-            $corner = $logoBitmap.GetPixel(0,0)
-            if ($corner.R -ne 5 -or $corner.G -ne 6 -or $corner.B -ne 10) { throw "Installer logo BMP has the wrong matte: $($corner.R),$($corner.G),$($corner.B)" }
-          } finally { $logoBitmap.Dispose() }
-          $panelBitmap = [System.Drawing.Bitmap]::FromFile($panelBmp)
-          try {
-            $corner = $panelBitmap.GetPixel(0,0)
-            if ($corner.R -ne 5 -or $corner.G -ne 6 -or $corner.B -ne 10) { throw "Installer panel BMP has the wrong matte: $($corner.R),$($corner.G),$($corner.B)" }
-          } finally { $panelBitmap.Dispose() }
+          & $pythonExe -B -c $logoValidationScript $masterLogo $png $logoBmp $panelBmp
+          if ($LASTEXITCODE -ne 0) { throw "Logo transparency/matte validation failed with exit code $LASTEXITCODE." }
           if ((Get-Item -LiteralPath $ico).Length -lt 1024) { throw 'Generated Windows ICO is unexpectedly small.' }
           Write-Host "Generated Windows ICO exists and is non-trivial in size: $((Get-Item -LiteralPath $ico).Length) bytes."
           $manifest = @()
