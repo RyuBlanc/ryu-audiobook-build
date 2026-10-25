@@ -22,7 +22,10 @@ from PySide6.QtWidgets import (
 from app.chapters.detector import Chapter, detect_chapters
 from app.chapters.characters import analyze_book
 from app.ai.brain import _numeric_score
-from app.tts.pronunciation_suggester import suggest_pronunciation, suggest_names_from_text, COMMON_ENGLISH_WORDS, is_common_english_phrase, nativeish_pronunciation
+from app.tts.pronunciation_suggester import (
+    suggest_pronunciation, suggest_names_from_text, COMMON_ENGLISH_WORDS,
+    is_common_english_phrase, is_likely_character_name_candidate, nativeish_pronunciation,
+)
 from app.documents.parser import extract_text
 from app.documents.cover_art import persist_project_cover
 from app.core.state import load_state, save_state
@@ -1266,15 +1269,25 @@ class GenerationPage(QWidget):
                 for row in range(self.pronunciation_table.rowCount())
                 if self.pronunciation_table.item(row, 0)
             }
+            # Do not scrape every capitalized sentence-initial word from prose.
+            # Use names returned by the same source-grounded character analyzer
+            # as Character Studio, and only suggest readings for those entities.
+            detected = analyze_book(self.chapters)
+            candidate_names = []
+            for character in detected.characters:
+                name = str(getattr(character, "name", "") or "").strip()
+                if name:
+                    candidate_names.append(name)
+                aliases = getattr(character, "aliases", []) or []
+                if isinstance(aliases, (list, tuple)):
+                    candidate_names.extend(str(alias).strip() for alias in aliases if str(alias or "").strip())
+            all_names = set(candidate_names)
+            source_text = "\n".join(ch.text or "" for ch in self.chapters)
             added = 0
-            for name in suggest_names_from_text("\n".join(ch.text or "" for ch in self.chapters)):
-                clean = name.strip()
-                if (
-                    not clean
-                    or clean.casefold() in existing
-                    or clean.casefold() in COMMON_ENGLISH_WORDS
-                    or all(part.casefold() in COMMON_ENGLISH_WORDS for part in clean.split())
-                ):
+            for clean in dict.fromkeys(candidate_names):
+                if clean.casefold() in existing or clean.casefold() not in source_text.casefold():
+                    continue
+                if not is_likely_character_name_candidate(clean, known_names=all_names):
                     continue
                 spoken = suggest_pronunciation(clean)
                 if not spoken or spoken.casefold() == clean.casefold():
@@ -1323,10 +1336,12 @@ class GenerationPage(QWidget):
                 return False
             if spoken.casefold() == folded:
                 return False
-            # Never import ordinary English vocabulary merely because the AI
-            # assigned it a non-English language. Preserve English words only
-            # when they are also a confirmed character name.
-            if is_common_english_phrase(written) and folded not in character_names:
+            # Do not trust the model's language label alone: "Having" or "The Oath"
+            # must not become a Japanese reading just because the model tagged it
+            # as Japanese. Character names from the book bible are explicitly allowed.
+            if not is_likely_character_name_candidate(
+                written, known_names=character_names, script=script
+            ):
                 return False
 
             # For English/unknown-language suggestions, require stronger evidence:
