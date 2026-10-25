@@ -2838,8 +2838,10 @@ class VoicePage(QWidget):
                 return
 
             if profile.qwen_mode == "design":
-                # Preview and audiobook use the same stable Design -> Base
-                # identity pipeline so the selected voice is trustworthy.
+                # Audition the selected VoiceDesign prompt in a one-pass preview.
+                # Building the long-form Design→Base anchor bank belongs to
+                # production narration, not every short audition. Keep the same
+                # VoiceDesign model/prompt/seed and all quality settings.
                 kind = best_voice_design_kind()
                 if not model_installed(kind):
                     QMessageBox.warning(
@@ -2848,23 +2850,12 @@ class VoicePage(QWidget):
                         "Install the Qwen VoiceDesign model from Models first.",
                     )
                     return
-                # This check must remain instant on the UI thread. Actual
-                # model choice is recalculated in the Qwen worker using VRAM.
-                base_kind = best_long_form_clone_kind(vram_gb=0.0)
-                if not qwen_model_installed(base_kind):
-                    QMessageBox.warning(
-                        self,
-                        "Qwen Stable Voice Model Not Ready",
-                        f"VoiceDesign preview and audiobook require the local Qwen Base model ({base_kind}) "
-                        "for consistent character identity. Open Models and install that Base phase.",
-                    )
-                    return
                 preview_profile = replace(
                     profile,
-                    qwen_mode="design",
+                    qwen_mode="design-preview",
                     model_id=kind,
                 )
-                preview_model = f"{kind} • VoiceDesign • stable identity preview"
+                preview_model = f"{kind} • VoiceDesign • one-pass preview"
             elif profile.qwen_mode == "clone":
                 kind = best_clone_kind(vram_gb=0.0)
                 if not model_installed(kind):

@@ -79,6 +79,24 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertNotIn("root.style.setProperty('font-size', (base * scale / 100)", adapter)
         self.assertIn("browser zoom shortcuts and Ctrl+mousewheel", adapter)
 
+    def test_native_settings_controls_text_size_and_window_resolution(self):
+        settings = (ROOT / "app/ui/settings_page.py").read_text(encoding="utf-8")
+        workflow = (ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")
+        main = (ROOT / "app/main.py").read_text(encoding="utf-8")
+        self.assertIn('self.text_scale = QComboBox()', settings)
+        self.assertIn('self.settings.setValue("ui/text_scale"', settings)
+        self.assertIn('self.settings.setValue("ui/window_size"', settings)
+        self.assertIn('text_scale=text_scale', settings)
+        self.assertIn('def apply_window_size(self, choice: str)', workflow)
+        self.assertIn('ui/window_size', workflow)
+        self.assertIn('saved_window_size', main)
+
+    def test_native_voice_design_preview_does_not_initialize_long_form_anchor_bank(self):
+        voice = (ROOT / "app/ui/voice_page.py").read_text(encoding="utf-8")
+        self.assertIn('qwen_mode="design-preview"', voice)
+        self.assertIn('one-pass preview', voice)
+        self.assertNotIn('VoiceDesign preview and audiobook require the local Qwen Base model', voice)
+
     def test_character_studio_static_samples_are_removed_and_empty_states_are_real(self):
         html = (ROOT / "assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")

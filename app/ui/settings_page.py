@@ -78,7 +78,7 @@ _LIGHT_COLOURS = {
 }
 
 
-def apply_application_theme(app, theme: str, accent: str | None = None, scale: int | None = None) -> None:
+def apply_application_theme(app, theme: str, accent: str | None = None, scale: int | None = None, text_scale: int | None = None) -> None:
     """Apply theme, crimson-family accent and accessible interface scaling."""
     settings = QSettings("RyuBlanc", "Ryu's Audiobook")
     accent = str(accent or settings.value("ui/accent", "crimson")).casefold()
@@ -86,6 +86,12 @@ def apply_application_theme(app, theme: str, accent: str | None = None, scale: i
         scale = max(80, min(150, int(scale if scale is not None else settings.value("ui/interface_scale", 100))))
     except (TypeError, ValueError):
         scale = 100
+    try:
+        text_scale = int(text_scale if text_scale is not None else settings.value("ui/text_scale", 100))
+    except (TypeError, ValueError, OverflowError):
+        text_scale = 100
+    if text_scale not in {85, 90, 100, 110, 120, 130, 140}:
+        text_scale = 100
 
     base = app.property("_ryuDarkStylesheet")
     if not isinstance(base, str) or not base:
@@ -120,6 +126,17 @@ def apply_application_theme(app, theme: str, accent: str | None = None, scale: i
             return match.group(1) + re.sub(r"(\d+(?:\.\d+)?)px", scale_px, match.group(2))
 
         style = scalable.sub(scale_declaration, style)
+
+    if text_scale != 100:
+        # Text-only scaling keeps widget geometry stable.
+        text_factor = text_scale / 100.0
+        text_size = re.compile(r"(font-size\s*:\s*)(-?\d+(?:\.\d+)?)(px|pt)\b", re.IGNORECASE)
+
+        def scale_text_size(match):
+            value = float(match.group(2)) * text_factor
+            return match.group(1) + f"{value:g}" + match.group(3)
+
+        style = text_size.sub(scale_text_size, style)
 
     if str(theme).lower() == "light":
         style = re.sub(
@@ -182,6 +199,25 @@ class SettingsPage(QWidget):
         stored_scale = int(self.settings.value("ui/interface_scale", 100) or 100)
         self.interface_scale.setCurrentIndex(max(0, self.interface_scale.findData(stored_scale)))
         appearance_layout.addRow("Interface scale", self.interface_scale)
+        self.text_scale = QComboBox()
+        for text_scale_value in (85, 90, 100, 110, 120, 130, 140):
+            self.text_scale.addItem(f"{text_scale_value}% · text only", text_scale_value)
+        stored_text_scale = int(self.settings.value("ui/text_scale", 100) or 100)
+        self.text_scale.setCurrentIndex(max(0, self.text_scale.findData(stored_text_scale)))
+        appearance_layout.addRow("Text size", self.text_scale)
+        self.window_size = QComboBox()
+        for label, size_value in (
+            ("Automatic · fit this screen", "auto"),
+            ("1280 × 720", "1280x720"),
+            ("1440 × 900", "1440x900"),
+            ("1600 × 900", "1600x900"),
+            ("1920 × 1080", "1920x1080"),
+            ("Maximized", "maximized"),
+        ):
+            self.window_size.addItem(label, size_value)
+        stored_window_size = str(self.settings.value("ui/window_size", "auto"))
+        self.window_size.setCurrentIndex(max(0, self.window_size.findData(stored_window_size)))
+        appearance_layout.addRow("Window size / resolution", self.window_size)
         self.reduce_motion = QCheckBox("Reduce page and waveform motion")
         self.reduce_motion.setChecked(self.settings.value("ui/reduce_motion", False, type=bool))
         appearance_layout.addRow("Motion", self.reduce_motion)
@@ -276,6 +312,8 @@ class SettingsPage(QWidget):
         self.reduce_motion.setChecked(self.settings.value("ui/reduce_motion", False, type=bool))
         self.accent.setCurrentIndex(max(0, self.accent.findData(str(self.settings.value("ui/accent", "crimson")).lower())))
         self.interface_scale.setCurrentIndex(max(0, self.interface_scale.findData(int(self.settings.value("ui/interface_scale", 100) or 100))))
+        self.text_scale.setCurrentIndex(max(0, self.text_scale.findData(int(self.settings.value("ui/text_scale", 100) or 100))))
+        self.window_size.setCurrentIndex(max(0, self.window_size.findData(str(self.settings.value("ui/window_size", "auto")))))
         self.default_bitrate.setCurrentIndex(max(0, self.default_bitrate.findData(int(self.settings.value("audio/default_bitrate", 256) or 256))))
 
     def save_settings(self) -> None:
@@ -283,20 +321,32 @@ class SettingsPage(QWidget):
         self.settings.setValue("ui/theme", theme)
         self.settings.setValue("ui/accent", str(self.accent.currentData() or "crimson"))
         self.settings.setValue("ui/interface_scale", int(self.interface_scale.currentData() or 100))
+        self.settings.setValue("ui/text_scale", int(self.text_scale.currentData() or 100))
+        window_size = str(self.window_size.currentData() or "auto")
+        self.settings.setValue("ui/window_size", window_size)
         self.settings.setValue("audio/default_bitrate", int(self.default_bitrate.currentData() or 256))
         self.settings.setValue("ui/reduce_motion", self.reduce_motion.isChecked())
         self.settings.sync()
         app = QApplication.instance()
         if app is not None:
-            apply_application_theme(app, theme)
+            apply_application_theme(
+                app, theme,
+                accent=str(self.accent.currentData() or "crimson"),
+                scale=int(self.interface_scale.currentData() or 100),
+                text_scale=int(self.text_scale.currentData() or 100),
+            )
         if self.on_saved:
             try:
                 self.on_saved(self.reduce_motion.isChecked())
             except Exception as exc:
                 self.status.setText(f"Settings saved, but one live preference could not refresh: {exc}")
                 return
+        desktop_window = self.window()
+        apply_size = getattr(desktop_window, "apply_window_size", None)
+        if callable(apply_size):
+            apply_size(window_size)
         self.status.setText(
-            "Settings saved locally. Theme, accent and interface scale preferences are recorded; "
+            "Settings saved locally. Theme, accent, interface scale, text size and window size preferences are recorded; "
             "default bitrate is used for new books unless a book already has its own saved quality."
         )
 

@@ -793,12 +793,38 @@ class ProjectWorkflow(QMainWindow):
         except Exception:
             return []
 
+    def apply_window_size(self, choice: str) -> None:
+        """Apply the saved native window size without changing display/browser zoom."""
+        choice = str(choice or "auto").strip().lower()
+        screen = self.screen() or QApplication.primaryScreen()
+        available = screen.availableGeometry() if screen is not None else None
+        if choice == "maximized":
+            self.showMaximized()
+            return
+        if self.isMaximized():
+            self.showNormal()
+        if choice == "auto":
+            width = int(available.width() * 0.90) if available is not None else 1440
+            height = int(available.height() * 0.90) if available is not None else 900
+            width = min(1600, max(960, width))
+            height = min(1000, max(620, height))
+        else:
+            try:
+                width, height = (int(part) for part in choice.split("x", 1))
+            except (TypeError, ValueError):
+                width, height = 1440, 900
+        if available is not None:
+            width = min(width, max(640, available.width()))
+            height = min(height, max(480, available.height()))
+        self.resize(max(640, width), max(480, height))
+
     def _settings_saved(self, reduce_motion: bool) -> None:
-        """Apply saved UI preferences to an already-open generation page."""
+        """Apply saved UI preferences to an already-open native generation page."""
         if self.generation is not None and self.stack.indexOf(self.generation) >= 0:
             setter = getattr(self.generation, "_set_reduce_motion", None)
             if callable(setter):
                 setter(bool(reduce_motion))
+        self.apply_window_size(str(QSettings("RyuBlanc", "Ryu's Audiobook").value("ui/window_size", "auto")))
 
     def resizeEvent(self, event) -> None:
         """Keep the header, mini-player, and loading overlay responsive on resize."""
