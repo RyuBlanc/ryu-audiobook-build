@@ -569,4 +569,13 @@ def merge_character_analysis_record(candidate: Character, prior: dict | None = N
         value = prior.get(key)
         if isinstance(value, str) and value.strip():
             item[key] = value.strip()[:limit]
+    # Explicitly created cast entries stay explicitly created after re-analysis;
+    # otherwise a user-authored identity without a voice profile may be dropped
+    # by the conservative detector on a later analysis pass.
+    if prior.get("user_created"):
+        item["user_created"] = True
+    if prior.get("manual"):
+        item["manual"] = True
+    if str(prior.get("series") or "").strip():
+        item["series"] = str(prior["series"]).strip()
     return item
