@@ -3021,8 +3021,14 @@ class PremiumV2Bridge(QObject):
                         # speech-tag pattern may refresh this short-lived anchor.
                         source_speaker = source_grounded_speaker_for_continuity(candidates)
                         if source_speaker:
-                            source_candidate = next((row for row in candidates
-                                if str(row.get("name") or "").casefold() == source_speaker.casefold()), {})
+                            matching_source_candidates = [
+                                row for row in candidates
+                                if str(row.get("name") or "").casefold() == source_speaker.casefold()
+                            ]
+                            source_candidate = next((
+                                row for row in matching_source_candidates
+                                if str(row.get("series") or "").casefold() == series_name.casefold()
+                            ), matching_source_candidates[0] if matching_source_candidates else {})
                             last_speaker = source_speaker
                             last_speaker_series = str(source_candidate.get("series") or series_name)
                             last_speaker_end = end
