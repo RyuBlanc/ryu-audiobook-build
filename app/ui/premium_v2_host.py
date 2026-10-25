@@ -2981,14 +2981,26 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Choose a voice from the saved Voice Studio catalogue.")
         state = load_state(project.folder)
         characters = list(state.get("characters") or [])
-        item = next((c for c in characters if str(c.get("name", "")).casefold() == name.casefold()), None)
+        default_series = self._project_series_name(project, state)
+        requested_series = str(payload.get("series") or "").strip()
+        def series_key(value: Any) -> str:
+            return re.sub(r"(?i)^\\s*series\\s*[·:-]\\s*", "", str(value or "").strip()).casefold()
+        target_series = series_key(requested_series or default_series)
+        same_name_rows = [c for c in characters if isinstance(c, dict)
+                          and str(c.get("name", "")).casefold() == name.casefold()]
+        item = next((c for c in same_name_rows
+                     if series_key(c.get("series") or default_series) == target_series), None)
+        if item is None and same_name_rows:
+            raise ValueError(
+                f"Character '{name}' exists in a different series. Select that character's series before changing its audio profile."
+            )
         if item is None:
-            raise ValueError("That character is not in saved analysis. Run analysis again.")
+            raise ValueError("That character is not in the selected project's saved cast. Refresh and choose a character first.")
+        series = str(item.get("series") or default_series).strip()
         item["voice_profile"] = profile_name or None
         state["characters"] = characters
         state["modified_at"] = self._now()
         save_state(project.folder, state)
-        series = str(item.get("series") or self._project_series_name(project, state)).strip()
         registry_rows = list_reusable_characters()
         matched_registry = next((row for row in registry_rows
             if str(row.get("series") or "").casefold() == series.casefold()
