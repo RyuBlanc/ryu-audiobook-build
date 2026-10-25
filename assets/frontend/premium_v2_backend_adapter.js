@@ -752,6 +752,7 @@
       chapters = [];
       characters = [];
       characterDialogueSuggestions = [];
+      characterAnalysisStatus = {analyzed:false, updated_at:null, dialogue_total:0, unassigned_dialogue:0, suggestion_count:0};
       characterStudioSelectedChapter = null;
       characterStudioSelectedSeries = '';
       window.ryuPremiumSelectedCharacter = '';
