@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import atexit
 import tempfile
 import hashlib
-from dataclasses import replace
+import json
+import threading
+from dataclasses import asdict, replace
 import re
 from pathlib import Path
 import webbrowser
@@ -55,6 +58,81 @@ from app.tts.providers.elevenlabs import ElevenLabsProvider
 
 # Keep native and HTML Voice Studio duration controls aligned; 30 seconds remains the default.
 PREVIEW_DURATION_OPTIONS = (10, 30, 60, 90)
+
+# One warmed local Qwen worker is shared across the two preview surfaces.
+# Qwen's line-oriented subprocess accepts one request at a time, so guard it
+# with a process-wide lock to prevent interleaved requests across QThreads.
+_QWEN_PREVIEW_LOCK = threading.RLock()
+_QWEN_PREVIEW_PROVIDER = None
+_QWEN_PREVIEW_PROFILE_KEY = None
+
+
+def _qwen_preview_profile_key(profile: VoiceProfile) -> str:
+    """Build a complete cache key without rereading large audio references."""
+    payload = asdict(profile)
+    for field in ("sample_path", "qwen_anchor_path"):
+        raw_path = payload.get(field)
+        if not raw_path:
+            payload[field + "_file_signature"] = None
+            continue
+        try:
+            path = Path(str(raw_path)).expanduser().resolve()
+            stat = path.stat()
+            payload[field + "_file_signature"] = (
+                str(path), stat.st_size, stat.st_mtime_ns
+            ) if path.is_file() else (str(path), "not-a-file")
+        except (OSError, TypeError, ValueError):
+            payload[field + "_file_signature"] = (str(raw_path), "unavailable")
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _close_provider_safely(provider) -> None:
+    close = getattr(provider, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            # Preview cleanup must never hide the actual synthesis result/error.
+            pass
+
+
+def _get_or_create_qwen_preview_provider(profile: VoiceProfile):
+    """Return the warm provider for this exact profile, replacing stale identities."""
+    global _QWEN_PREVIEW_PROVIDER, _QWEN_PREVIEW_PROFILE_KEY
+    key = _qwen_preview_profile_key(profile)
+    cached = _QWEN_PREVIEW_PROVIDER
+    if cached is not None and _QWEN_PREVIEW_PROFILE_KEY == key:
+        worker = getattr(cached, "_worker", None)
+        if worker is not None:
+            try:
+                dead = worker.poll() is not None
+            except Exception:
+                dead = True
+            if dead:
+                # close() also releases the previous process/log handles; the
+                # same provider object can safely start a fresh worker next.
+                _close_provider_safely(cached)
+        return cached, profile.voice_id
+
+    if cached is not None:
+        _close_provider_safely(cached)
+    provider, voice = provider_from_profile(profile)
+    _QWEN_PREVIEW_PROVIDER = provider
+    _QWEN_PREVIEW_PROFILE_KEY = key
+    return provider, voice
+
+
+def _close_cached_qwen_preview_provider() -> None:
+    global _QWEN_PREVIEW_PROVIDER, _QWEN_PREVIEW_PROFILE_KEY
+    with _QWEN_PREVIEW_LOCK:
+        provider = _QWEN_PREVIEW_PROVIDER
+        _QWEN_PREVIEW_PROVIDER = None
+        _QWEN_PREVIEW_PROFILE_KEY = None
+        _close_provider_safely(provider)
+
+
+atexit.register(_close_cached_qwen_preview_provider)
 
 
 class VoicePreviewWorker(QThread):
@@ -114,18 +192,30 @@ class VoicePreviewWorker(QThread):
         self.status.emit(value)
 
     def run(self) -> None:
-        # Measure from worker entry so model startup and provider initialization
-        # are included in the final "time taken" displayed to the user.
+        # Measure from worker entry so queueing, model initialization and
+        # synthesis are included in the elapsed-time result.
         preview_started = time.monotonic()
         self._preview_started = preview_started
         self._progress_floor = 0
+        uses_qwen_cache = self.profile.provider == "qwen-character"
+        qwen_lock_acquired = False
+        reuse_cached_provider = False
         try:
+            if uses_qwen_cache:
+                if not _QWEN_PREVIEW_LOCK.acquire(blocking=False):
+                    self._status("Waiting for the previous Qwen preview to finish…")
+                    _QWEN_PREVIEW_LOCK.acquire()
+                qwen_lock_acquired = True
+                self.provider, voice = _get_or_create_qwen_preview_provider(self.profile)
+                reuse_cached_provider = True
+            else:
+                self.provider, voice = provider_from_profile(self.profile)
+
             self._emit_progress(5)
             self._status(
                 f"[5%] Preparing preview • {self.profile.provider} • "
-                f"{self.profile.qwen_mode if self.profile.provider == 'qwen-character' else self.profile.backend}"
+                f"{self.profile.qwen_mode if uses_qwen_cache else self.profile.backend}"
             )
-            self.provider, voice = provider_from_profile(self.profile)
             callback = getattr(self.provider, "set_status_callback", None)
             if callable(callback):
                 callback(self._status)
@@ -196,12 +286,10 @@ class VoicePreviewWorker(QThread):
         finally:
             provider = self.provider
             self.provider = None
-            close = getattr(provider, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except Exception:
-                    pass
+            if not reuse_cached_provider:
+                _close_provider_safely(provider)
+            if qwen_lock_acquired:
+                _QWEN_PREVIEW_LOCK.release()
 
     def cancel(self) -> None:
         self.cancel_requested = True

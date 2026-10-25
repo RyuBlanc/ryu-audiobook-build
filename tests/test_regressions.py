@@ -812,6 +812,109 @@ class RegressionTests(unittest.TestCase):
             page.close()
             page.deleteLater()
 
+    def test_qwen_voice_preview_reuses_warm_provider_and_replaces_changed_profile(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        import app.ui.voice_page as voice_page
+        from app.tts.voice_profile import VoiceProfile
+
+        class FakeProvider:
+            def __init__(self):
+                self.closed = 0
+                self._worker = None
+            def close(self):
+                self.closed += 1
+                self._worker = None
+
+        first = FakeProvider()
+        second = FakeProvider()
+        profile = VoiceProfile(
+            name="Warm Qwen Preview",
+            provider="qwen-character",
+            voice_id="design-warm",
+            model_id="design-1.7b",
+            backend="automatic",
+            qwen_mode="design-preview",
+            qwen_prompt="Warm, mid-low male narration.",
+            qwen_seed=17,
+            qwen_profile_id="warm-profile",
+        )
+        changed = VoiceProfile(
+            name=profile.name, provider=profile.provider, voice_id=profile.voice_id,
+            model_id=profile.model_id, backend=profile.backend, language=profile.language,
+            qwen_mode=profile.qwen_mode, qwen_prompt="Older, warmer mid-low male narration.",
+            qwen_seed=profile.qwen_seed, qwen_profile_id=profile.qwen_profile_id,
+        )
+        original_provider = voice_page._QWEN_PREVIEW_PROVIDER
+        original_key = voice_page._QWEN_PREVIEW_PROFILE_KEY
+        try:
+            voice_page._QWEN_PREVIEW_PROVIDER = None
+            voice_page._QWEN_PREVIEW_PROFILE_KEY = None
+            with patch.object(
+                voice_page,
+                "provider_from_profile",
+                side_effect=[(first, profile.voice_id), (second, changed.voice_id)],
+            ) as factory:
+                with voice_page._QWEN_PREVIEW_LOCK:
+                    provider_a, voice_a = voice_page._get_or_create_qwen_preview_provider(profile)
+                    provider_b, voice_b = voice_page._get_or_create_qwen_preview_provider(profile)
+                    self.assertIs(provider_a, provider_b)
+                    self.assertEqual((voice_a, voice_b), (profile.voice_id, profile.voice_id))
+                    self.assertEqual(factory.call_count, 1)
+                    provider_c, voice_c = voice_page._get_or_create_qwen_preview_provider(changed)
+                    self.assertIs(provider_c, second)
+                    self.assertEqual(voice_c, changed.voice_id)
+                    self.assertEqual(first.closed, 1)
+                    self.assertEqual(factory.call_count, 2)
+        finally:
+            voice_page._close_cached_qwen_preview_provider()
+            voice_page._QWEN_PREVIEW_PROVIDER = original_provider
+            voice_page._QWEN_PREVIEW_PROFILE_KEY = original_key
+
+    def test_qwen_voice_preview_restarts_a_dead_cached_worker(self):
+        from unittest.mock import patch
+        import app.ui.voice_page as voice_page
+        from app.tts.voice_profile import VoiceProfile
+
+        class DeadWorker:
+            def poll(self):
+                return 7
+
+        class FakeProvider:
+            def __init__(self):
+                self.closed = 0
+                self._worker = DeadWorker()
+            def close(self):
+                self.closed += 1
+                self._worker = None
+
+        provider = FakeProvider()
+        profile = VoiceProfile(
+            name="Recover Qwen Preview",
+            provider="qwen-character",
+            voice_id="design-recover",
+            model_id="design-1.7b",
+            qwen_mode="design-preview",
+            qwen_profile_id="recover-profile",
+        )
+        original_provider = voice_page._QWEN_PREVIEW_PROVIDER
+        original_key = voice_page._QWEN_PREVIEW_PROFILE_KEY
+        try:
+            voice_page._QWEN_PREVIEW_PROVIDER = provider
+            voice_page._QWEN_PREVIEW_PROFILE_KEY = voice_page._qwen_preview_profile_key(profile)
+            with patch.object(voice_page, "provider_from_profile") as factory:
+                with voice_page._QWEN_PREVIEW_LOCK:
+                    actual, voice = voice_page._get_or_create_qwen_preview_provider(profile)
+                self.assertIs(actual, provider)
+                self.assertEqual(voice, profile.voice_id)
+                self.assertEqual(provider.closed, 1)
+                self.assertIsNone(provider._worker)
+                factory.assert_not_called()
+        finally:
+            voice_page._close_cached_qwen_preview_provider()
+            voice_page._QWEN_PREVIEW_PROVIDER = original_provider
+            voice_page._QWEN_PREVIEW_PROFILE_KEY = original_key
+
     def test_voice_preview_is_invalidated_when_target_settings_change(self):
         from app.ui.voice_page import VoicePage
 
