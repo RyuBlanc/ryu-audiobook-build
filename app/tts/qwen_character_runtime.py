@@ -368,7 +368,14 @@ def _model_weight_file_ready(path: Path) -> bool:
 def model_installed(kind: str) -> bool:
     """Return true only when the local model's config and required weights are present."""
     root = MODEL_DIRS[kind]
-    if not (root / "config.json").is_file():
+    config_path = root / "config.json"
+    try:
+        if not config_path.is_file():
+            return False
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        if not isinstance(config, dict):
+            return False
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return False
 
     index_path = root / "model.safetensors.index.json"
@@ -395,7 +402,12 @@ def model_installed(kind: str) -> bool:
             except (TypeError, ValueError):
                 expected_size = 0
             actual_size = sum(path.stat().st_size for path in shards)
-            if expected_size > 0 and actual_size < int(expected_size * 0.95):
+            # SafeTensors headers add bytes beyond tensor payload size, so a
+            # complete set should meet or exceed the index's declared tensor
+            # payload size. Do not accept a percentage tolerance: it can label
+            # a truncated shard as ready when the missing bytes are a small
+            # fraction of a large model.
+            if expected_size > 0 and actual_size < expected_size:
                 return False
             return True
         except (OSError, ValueError, TypeError, json.JSONDecodeError):

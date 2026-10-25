@@ -23,7 +23,13 @@ from app.core.paths import models_root, ensure_roots
 from app.tts.chatterbox_runtime import install_runtime, runtime_status, RUNTIME_DIR as CHATTERBOX_RUNTIME_DIR
 from app.tts.model_registry import BUILTIN_CATALOG, installed_models, mark_installed
 from app.tts.providers.piper import PiperProvider
-from app.tts.providers.kokoro import KokoroProvider
+from app.tts.providers.kokoro import (
+    KokoroProvider,
+    KOKORO_MODEL_MIN_BYTES,
+    KOKORO_VOICES_MIN_BYTES,
+    kokoro_model_file_ready,
+    kokoro_voices_file_ready,
+)
 from app.tts.qwen_character_runtime import (
     install_runtime as install_qwen_runtime,
     install_model as install_qwen_model,
@@ -47,10 +53,10 @@ from app.ai.model_runtime import brain_root, install_runtime as install_audioboo
 KOKORO_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.onnx"
 KOKORO_VOICES_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin"
 
-def _file_ready(path: Path) -> bool:
-    """Cheap integrity check for large local assets; never opens or loads the model."""
+def _file_ready(path: Path, minimum_bytes: int = 1024) -> bool:
+    """Cheap filesystem integrity check; never opens or loads model assets."""
     try:
-        return path.is_file() and path.stat().st_size >= 1024
+        return path.is_file() and path.stat().st_size >= minimum_bytes
     except OSError:
         return False
 
@@ -101,7 +107,13 @@ class KokoroDownloadWorker(QThread):
     failed = Signal(str)
     progress = Signal(str)
 
-    def _download(self, url: str, target: Path, label: str) -> None:
+    def _download(
+        self,
+        url: str,
+        target: Path,
+        label: str,
+        minimum_bytes: int = 1024,
+    ) -> None:
         temp = target.with_suffix(target.suffix + ".part")
         try:
             self.progress.emit(f"Downloading {label}…")
@@ -132,8 +144,17 @@ class KokoroDownloadWorker(QThread):
                     received += len(block)
                     if total:
                         self.progress.emit(f"Downloading {label}… {received * 100 // total}%")
-            if not temp.exists() or temp.stat().st_size < 1024:
-                raise RuntimeError(f"Downloaded {label} is incomplete.")
+            size = temp.stat().st_size if temp.is_file() else 0
+            if total > 0 and received != total:
+                raise RuntimeError(
+                    f"Downloaded {label} is incomplete: received {received:,} "
+                    f"of {total:,} expected bytes."
+                )
+            if size < minimum_bytes:
+                raise RuntimeError(
+                    f"Downloaded {label} is incomplete: {size:,} bytes; "
+                    f"at least {minimum_bytes:,} bytes are required."
+                )
             temp.replace(target)
         finally:
             if temp.exists():
@@ -143,8 +164,25 @@ class KokoroDownloadWorker(QThread):
         try:
             target = models_root() / "kokoro"
             target.mkdir(parents=True, exist_ok=True)
-            self._download(KOKORO_MODEL_URL, target / "kokoro-v1.0.onnx", "Kokoro model (~326 MB)")
-            self._download(KOKORO_VOICES_URL, target / "voices-v1.0.bin", "Kokoro voice pack (~28 MB)")
+            self._download(
+                KOKORO_MODEL_URL,
+                target / "kokoro-v1.0.onnx",
+                "Kokoro model (~326 MB)",
+                minimum_bytes=KOKORO_MODEL_MIN_BYTES,
+            )
+            self._download(
+                KOKORO_VOICES_URL,
+                target / "voices-v1.0.bin",
+                "Kokoro voice pack (~28 MB)",
+                minimum_bytes=KOKORO_VOICES_MIN_BYTES,
+            )
+            if not (
+                kokoro_model_file_ready(target / "kokoro-v1.0.onnx")
+                and kokoro_voices_file_ready(target / "voices-v1.0.bin")
+            ):
+                raise RuntimeError(
+                    "Kokoro download finished but the model and voice pack did not pass integrity checks."
+                )
             mark_installed("kokoro", True)
             self.finished_ok.emit()
         except Exception as exc:
@@ -497,8 +535,8 @@ class ModelsPage(QWidget):
             local_kokoro_root / "voices.bin",
         ]
         local_kokoro_ready = (
-            any(_file_ready(path) for path in local_kokoro_models)
-            and any(_file_ready(path) for path in local_kokoro_voicepacks)
+            any(kokoro_model_file_ready(path) for path in local_kokoro_models)
+            and any(kokoro_voices_file_ready(path) for path in local_kokoro_voicepacks)
         )
         if local_kokoro_ready:
             add_component(

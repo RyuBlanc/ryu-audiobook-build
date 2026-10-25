@@ -35,6 +35,40 @@ KOKORO_VOICES = (
 )
 
 
+# The pinned Kokoro v1.1 release has a ~326 MB default model and ~28 MB voice pack.
+# Smaller published quantized variants are supported with a separate lower bound.
+KOKORO_MODEL_MIN_BYTES = 100 * 1024 * 1024
+KOKORO_QUANTIZED_MODEL_MIN_BYTES = 25 * 1024 * 1024
+KOKORO_VOICES_MIN_BYTES = 5 * 1024 * 1024
+_QUANTIZED_MODEL_NAMES = frozenset((
+    "kokoro-v1.0.int8.onnx",
+    "model_q8f16.onnx",
+    "model_quantized.onnx",
+))
+
+
+def _asset_file_ready(path: Path | None, minimum_bytes: int) -> bool:
+    if path is None:
+        return False
+    try:
+        return path.is_file() and path.stat().st_size >= minimum_bytes
+    except OSError:
+        return False
+
+
+def kokoro_model_file_ready(path: Path | None) -> bool:
+    minimum = (
+        KOKORO_QUANTIZED_MODEL_MIN_BYTES
+        if path is not None and path.name in _QUANTIZED_MODEL_NAMES
+        else KOKORO_MODEL_MIN_BYTES
+    )
+    return _asset_file_ready(path, minimum)
+
+
+def kokoro_voices_file_ready(path: Path | None) -> bool:
+    return _asset_file_ready(path, KOKORO_VOICES_MIN_BYTES)
+
+
 class KokoroProvider(TTSProvider):
     """Offline Kokoro-ONNX provider.
 
@@ -72,7 +106,7 @@ class KokoroProvider(TTSProvider):
         for root in cls._candidate_roots():
             for name in names:
                 path = root / name
-                if path.exists():
+                if kokoro_model_file_ready(path):
                     return path
         return None
 
@@ -82,7 +116,7 @@ class KokoroProvider(TTSProvider):
         for root in cls._candidate_roots():
             for name in names:
                 path = root / name
-                if path.exists():
+                if kokoro_voices_file_ready(path):
                     return path
         return None
 
@@ -96,10 +130,11 @@ class KokoroProvider(TTSProvider):
     def _load_runtime(self):
         if self._runtime is not None:
             return self._runtime
-        if self.model_path is None or self.voices_path is None:
+        if not kokoro_model_file_ready(self.model_path) or not kokoro_voices_file_ready(self.voices_path):
             raise RuntimeError(
-                "Kokoro voice assets are not installed. Add kokoro-v1.0.onnx "
-                "and voices-v1.0.bin to the app's Models\\kokoro folder."
+                "Kokoro voice assets are not installed or are incomplete. "
+                "Repair Natural Voices or replace kokoro-v1.0.onnx and "
+                "voices-v1.0.bin in the app's Models\\kokoro folder."
             )
         try:
             from kokoro_onnx import EspeakConfig, Kokoro

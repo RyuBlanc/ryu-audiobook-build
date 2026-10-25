@@ -256,5 +256,82 @@ class ModelsCenterLifecycleTests(unittest.TestCase):
             bridge._models_start_operation("repair", "qwen-runtime", {})
 
 
+    def test_qwen_model_readiness_rejects_small_shard_shortfalls_and_malformed_config(self):
+        from app.tts.qwen_character_runtime import model_installed
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "custom-0.6b"
+            root.mkdir(parents=True)
+            config_path = root / "config.json"
+            config_path.write_text("{}", encoding="utf-8")
+            index_path = root / "model.safetensors.index.json"
+            index_path.write_text(json.dumps({
+                "metadata": {"total_size": 4096},
+                "weight_map": {
+                    "layer_a.weight": "model-00001-of-00002.safetensors",
+                    "layer_b.weight": "model-00002-of-00002.safetensors",
+                },
+            }), encoding="utf-8")
+            first = root / "model-00001-of-00002.safetensors"
+            second = root / "model-00002-of-00002.safetensors"
+            first.write_bytes(b"a" * 2048)
+
+            with patch("app.tts.qwen_character_runtime.MODEL_DIRS", {"custom-0.6b": root}):
+                second.write_bytes(b"b" * 1900)
+                self.assertFalse(
+                    model_installed("custom-0.6b"),
+                    "a small aggregate weight shortfall must not pass a 95% tolerance",
+                )
+                second.write_bytes(b"b" * 2048)
+                self.assertTrue(model_installed("custom-0.6b"))
+                config_path.write_text("{invalid json", encoding="utf-8")
+                self.assertFalse(
+                    model_installed("custom-0.6b"),
+                    "malformed model config must not be marked installed",
+                )
+
+    def test_kokoro_download_rejects_truncated_http_body_and_preserves_existing_target(self):
+        from app.ui.models_page import KokoroDownloadWorker
+
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "kokoro.bin"
+            target.write_bytes(b"existing-valid-target")
+            partial = _FakeResponse(b"x" * 1024)
+            partial.headers = {"Content-Length": "2048"}
+            worker = KokoroDownloadWorker()
+
+            with patch("urllib.request.urlopen", return_value=partial):
+                with self.assertRaisesRegex(RuntimeError, "expected bytes"):
+                    worker._download(
+                        "https://example.invalid/asset",
+                        target,
+                        "test asset",
+                        minimum_bytes=512,
+                    )
+
+            self.assertEqual(target.read_bytes(), b"existing-valid-target")
+            self.assertFalse(target.with_suffix(".bin.part").exists())
+
+    def test_kokoro_download_rejects_too_small_asset_even_when_transfer_is_complete(self):
+        from app.ui.models_page import KokoroDownloadWorker
+
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "voices.bin"
+            response = _FakeResponse(b"x" * 1024)
+            worker = KokoroDownloadWorker()
+
+            with patch("urllib.request.urlopen", return_value=response):
+                with self.assertRaisesRegex(RuntimeError, "at least"):
+                    worker._download(
+                        "https://example.invalid/asset",
+                        target,
+                        "test asset",
+                        minimum_bytes=2048,
+                    )
+
+            self.assertFalse(target.exists())
+            self.assertFalse(target.with_suffix(".bin.part").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
