@@ -436,6 +436,46 @@ class UiStabilityRegressions(unittest.TestCase):
         app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
 
+    def test_models_center_guards_all_model_mutations_with_a_single_operation_slot(self):
+        source = (ROOT / "app/ui/models_page.py").read_text(encoding="utf-8")
+        helpers = source.split("def _update_operation_controls(", 1)[1].split(
+            "\n    def uninstall_selected_component(", 1
+        )[0]
+        self.assertIn("if self._active_operation is not None:", helpers)
+        self.assertIn("self._active_operation = label", helpers)
+        self.assertIn("self._active_operation = None", helpers)
+        self.assertIn("self.list.setEnabled(not busy)", helpers)
+
+        operations = (
+            ("def uninstall_selected_component(", "self.uninstall_worker = UninstallComponentWorker("),
+            ("def download_kokoro(", "self.kokoro_worker = KokoroDownloadWorker("),
+            ("def download_piper(", "self.worker = PiperDownloadWorker("),
+            ("def install_qwen_character_runtime(", "self.qwen_character_worker = QwenCharacterInstallWorker("),
+            ("def reset_qwen_voice_cache(", "self.qwen_cache_worker = QwenCacheResetWorker("),
+            ("def repair_qwen_runtime(", "self.qwen_repair_worker = QwenRepairWorker("),
+            ("def install_audiobook_ai_runtime(", "self.audiobook_ai_worker = AudiobookAIInstallWorker("),
+            ("def install_chatterbox_runtime(", "self.chatterbox_worker = ChatterboxInstallWorker("),
+        )
+        for method, worker in operations:
+            body = source.split(method, 1)[1].split("\n    def ", 1)[0]
+            guard = body.find("if not self._begin_operation(")
+            start = body.find(worker)
+            self.assertGreaterEqual(guard, 0, f"{method} must acquire the lifecycle lock")
+            self.assertGreaterEqual(start, 0, f"{method} must retain its worker")
+            self.assertLess(guard, start, f"{method} must reject overlapping installs/removals")
+            self.assertIn("self." + worker.split("self.", 1)[1].split(" = ", 1)[0] + ".finished.connect(self._end_operation)", body)
+
+        for method in (
+            "def _kokoro_ok(", "def _kokoro_failed(",
+            "def _download_ok(", "def _download_failed(",
+            "def _qwen_character_ok(", "def _qwen_character_failed(",
+            "def _qwen_repair_ok(", "def _qwen_repair_failed(",
+            "def _audiobook_ai_ok(", "def _audiobook_ai_failed(",
+            "def _chatterbox_ok(", "def _chatterbox_failed(",
+        ):
+            body = source.split(method, 1)[1].split("\n    def ", 1)[0]
+            self.assertNotIn(".setEnabled(True)", body, f"{method} must not unlock controls before the worker exits")
+
     def test_models_center_inventory_refresh_reuses_rows_and_preserves_component_selection(self):
         source = (ROOT / "app/ui/models_page.py").read_text(encoding="utf-8")
         refresh = source.split("def refresh(self) -> None:", 1)[1].split(

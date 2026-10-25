@@ -331,6 +331,8 @@ class ModelsPage(QWidget):
         self.qwen_cache_worker: QwenCacheResetWorker | None = None
         self.audiobook_ai_worker: AudiobookAIInstallWorker | None = None
         self.uninstall_worker: UninstallComponentWorker | None = None
+        self._active_operation: str | None = None
+        self._operation_buttons: tuple[QPushButton, ...] = ()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 16, 18, 14)
@@ -412,6 +414,17 @@ class ModelsPage(QWidget):
         self.reset_qwen_cache.clicked.connect(self.reset_qwen_voice_cache)
         self.install_audiobook_ai.clicked.connect(self.install_audiobook_ai_runtime)
         self.refresh_button.clicked.connect(self.refresh)
+        self._operation_buttons = (
+            self.install_kokoro,
+            self.install_piper,
+            self.install_chatterbox,
+            self.install_qwen_character,
+            self.repair_qwen,
+            self.reset_qwen_cache,
+            self.install_audiobook_ai,
+            self.refresh_button,
+        )
+        self._update_operation_controls()
         self.status.setText("Model inventory loads when this screen opens.")
 
 
@@ -545,12 +558,41 @@ class ModelsPage(QWidget):
         self._update_uninstall_button()
         self.status.setText("Model inventory refreshed from this PC.")
 
+    def _update_operation_controls(self) -> None:
+        """Allow only one model/runtime mutation at a time in the desktop UI."""
+        busy = self._active_operation is not None
+        for button in self._operation_buttons:
+            button.setEnabled(not busy)
+        if hasattr(self, "list"):
+            self.list.setEnabled(not busy)
+        self._update_uninstall_button()
+
+    def _begin_operation(self, label: str) -> bool:
+        """Acquire the single-flight model operation slot before starting a worker."""
+        if self._active_operation is not None:
+            self.status.setText(
+                f"Cannot start {label}: {self._active_operation} is still running. "
+                "Wait for it to finish, then retry."
+            )
+            return False
+        self._active_operation = label
+        self._update_operation_controls()
+        return True
+
+    def _end_operation(self, *_args) -> None:
+        """Release the model operation slot after a worker fully exits."""
+        if self._active_operation is None:
+            return
+        self._active_operation = None
+        self._update_operation_controls()
+
     def _update_uninstall_button(self, *_args) -> None:
         item = self.list.currentItem() if hasattr(self, "list") else None
         component_id = item.data(Qt.ItemDataRole.UserRole) if item else None
         running = bool(self.uninstall_worker and self.uninstall_worker.isRunning())
+        busy = getattr(self, "_active_operation", None) is not None
         if hasattr(self, "uninstall_button"):
-            self.uninstall_button.setEnabled(bool(component_id) and not running)
+            self.uninstall_button.setEnabled(bool(component_id) and not running and not busy)
 
     def uninstall_selected_component(self) -> None:
         item = self.list.currentItem()
@@ -568,9 +610,11 @@ class ModelsPage(QWidget):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self.uninstall_button.setEnabled(False)
+        if not self._begin_operation(f"Uninstall {item.text()}"):
+            return
         self.status.setText(f"Uninstalling {item.text()}…")
         self.uninstall_worker = UninstallComponentWorker(str(component_id))
+        self.uninstall_worker.finished.connect(self._end_operation)
         self.uninstall_worker.finished_ok.connect(self._uninstall_component_ok)
         self.uninstall_worker.failed.connect(self._uninstall_component_failed)
         self.uninstall_worker.finished.connect(self._update_uninstall_button)
@@ -598,21 +642,21 @@ class ModelsPage(QWidget):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self.install_kokoro.setEnabled(False)
+        if not self._begin_operation("download Kokoro natural voices"):
+            return
         self.status.setText("Preparing Kokoro natural voices…")
         self.kokoro_worker = KokoroDownloadWorker()
+        self.kokoro_worker.finished.connect(self._end_operation)
         self.kokoro_worker.finished_ok.connect(self._kokoro_ok)
         self.kokoro_worker.failed.connect(self._kokoro_failed)
         self.kokoro_worker.progress.connect(self.status.setText)
         self.kokoro_worker.start()
 
     def _kokoro_ok(self) -> None:
-        self.install_kokoro.setEnabled(True)
         self.status.setText("Kokoro natural offline voices installed.")
         self.refresh()
 
     def _kokoro_failed(self, message: str) -> None:
-        self.install_kokoro.setEnabled(True)
         self.status.setText("Kokoro download failed")
         detail = str(message)
         if "CERTIFICATE_VERIFY_FAILED" in detail or "CERTIFICATE_VERIFY_FAILED".casefold() in detail.casefold():
@@ -634,20 +678,20 @@ class ModelsPage(QWidget):
         if not ok or not voice.strip():
             return
 
-        self.install_piper.setEnabled(False)
+        if not self._begin_operation(f"download Piper voice {voice.strip()}"):
+            return
         self.status.setText(f"Downloading {voice.strip()}...")
         self.worker = PiperDownloadWorker(voice.strip())
+        self.worker.finished.connect(self._end_operation)
         self.worker.finished_ok.connect(self._download_ok)
         self.worker.failed.connect(self._download_failed)
         self.worker.start()
 
     def _download_ok(self, voice: str) -> None:
-        self.install_piper.setEnabled(True)
         self.status.setText(f"Installed Piper voice: {voice}")
         self.refresh()
 
     def _download_failed(self, message: str) -> None:
-        self.install_piper.setEnabled(True)
         self.status.setText("Download failed")
         QMessageBox.warning(self, "Piper Download Failed", message)
 
@@ -668,16 +712,17 @@ class ModelsPage(QWidget):
         )
         if not ok:
             return
-        self.install_qwen_character.setEnabled(False)
+        if not self._begin_operation(f"install Qwen {selection}"):
+            return
         self.status.setText(f"Preparing Qwen {selection}…")
         self.qwen_character_worker = QwenCharacterInstallWorker(selection)
+        self.qwen_character_worker.finished.connect(self._end_operation)
         self.qwen_character_worker.finished_ok.connect(self._qwen_character_ok)
         self.qwen_character_worker.failed.connect(self._qwen_character_failed)
         self.qwen_character_worker.progress.connect(self.status.setText)
         self.qwen_character_worker.start()
 
     def _qwen_character_ok(self, detail: str) -> None:
-        self.install_qwen_character.setEnabled(True)
         parts = detail.split("|", 1)
         selection = parts[0]
         models = parts[1] if len(parts) > 1 else ""
@@ -688,7 +733,6 @@ class ModelsPage(QWidget):
         self.refresh()
 
     def _qwen_character_failed(self, message: str) -> None:
-        self.install_qwen_character.setEnabled(True)
         self.status.setText("Offline character voice installation failed.")
         QMessageBox.warning(self, "Offline Character Voice Installation Failed", message)
 
@@ -701,21 +745,21 @@ class ModelsPage(QWidget):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self.reset_qwen_cache.setEnabled(False)
+        if not self._begin_operation("reset Qwen voice cache"):
+            return
         self.status.setText("Resetting generated Qwen voice cache…")
         self.qwen_cache_worker = QwenCacheResetWorker()
+        self.qwen_cache_worker.finished.connect(self._end_operation)
         self.qwen_cache_worker.progress.connect(self.status.setText)
         self.qwen_cache_worker.finished_ok.connect(self._qwen_cache_reset_ok)
         self.qwen_cache_worker.failed.connect(self._qwen_cache_reset_failed)
         self.qwen_cache_worker.start()
 
     def _qwen_cache_reset_ok(self, count: int) -> None:
-        self.reset_qwen_cache.setEnabled(True)
         self.status.setText(f"Qwen voice cache reset • removed {count} generated reference file(s).")
         self.refresh()
 
     def _qwen_cache_reset_failed(self, message: str) -> None:
-        self.reset_qwen_cache.setEnabled(True)
         self.status.setText("Qwen voice cache reset failed; saved profiles and downloaded models were kept.")
         QMessageBox.warning(self, "Qwen Voice Cache Reset Failed", message)
 
@@ -729,24 +773,21 @@ class ModelsPage(QWidget):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self.repair_qwen.setEnabled(False)
-        self.install_qwen_character.setEnabled(False)
+        if not self._begin_operation("repair Qwen3-TTS runtime"):
+            return
         self.status.setText("Repairing Qwen3-TTS runtime…")
         self.qwen_repair_worker = QwenRepairWorker()
+        self.qwen_repair_worker.finished.connect(self._end_operation)
         self.qwen_repair_worker.finished_ok.connect(self._qwen_repair_ok)
         self.qwen_repair_worker.failed.connect(self._qwen_repair_failed)
         self.qwen_repair_worker.progress.connect(self.status.setText)
         self.qwen_repair_worker.start()
 
     def _qwen_repair_ok(self, detail: str) -> None:
-        self.repair_qwen.setEnabled(True)
-        self.install_qwen_character.setEnabled(True)
         self.status.setText(f"Qwen3-TTS runtime repaired and verified • {detail}")
         self.refresh()
 
     def _qwen_repair_failed(self, message: str) -> None:
-        self.repair_qwen.setEnabled(True)
-        self.install_qwen_character.setEnabled(True)
         self.status.setText("Qwen3-TTS runtime repair failed.")
         QMessageBox.warning(self, "Qwen3-TTS Runtime Repair Failed", message)
 
@@ -762,23 +803,23 @@ class ModelsPage(QWidget):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self.install_audiobook_ai.setEnabled(False)
+        if not self._begin_operation("install Audiobook AI"):
+            return
         self.status.setText("Installing local Audiobook AI…")
         self.audiobook_ai_worker = AudiobookAIInstallWorker()
+        self.audiobook_ai_worker.finished.connect(self._end_operation)
         self.audiobook_ai_worker.finished_ok.connect(self._audiobook_ai_ok)
         self.audiobook_ai_worker.failed.connect(self._audiobook_ai_failed)
         self.audiobook_ai_worker.progress.connect(self.status.setText)
         self.audiobook_ai_worker.start()
 
     def _audiobook_ai_ok(self, detail: str) -> None:
-        self.install_audiobook_ai.setEnabled(True)
         parts = detail.split("|", 3)
         result = parts[3] if len(parts) > 3 else "ready"
         self.status.setText(f"Audiobook AI installed and self-tested successfully • {result}")
         self.refresh()
 
     def _audiobook_ai_failed(self, message: str) -> None:
-        self.install_audiobook_ai.setEnabled(True)
         self.status.setText("Audiobook AI installation failed.")
         QMessageBox.warning(self, "Audiobook AI Installation Failed", message)
 
@@ -792,20 +833,20 @@ class ModelsPage(QWidget):
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
-        self.install_chatterbox.setEnabled(False)
+        if not self._begin_operation("install Chatterbox custom voice engine"):
+            return
         self.status.setText("Installing Chatterbox custom voice engine…")
         self.chatterbox_worker = ChatterboxInstallWorker()
+        self.chatterbox_worker.finished.connect(self._end_operation)
         self.chatterbox_worker.finished_ok.connect(self._chatterbox_ok)
         self.chatterbox_worker.failed.connect(self._chatterbox_failed)
         self.chatterbox_worker.progress.connect(self.status.setText)
         self.chatterbox_worker.start()
 
     def _chatterbox_ok(self, name: str) -> None:
-        self.install_chatterbox.setEnabled(True)
         self.status.setText("Custom voice engine installed. Its model will download when first used.")
         self.refresh()
 
     def _chatterbox_failed(self, message: str) -> None:
-        self.install_chatterbox.setEnabled(True)
         QMessageBox.warning(self, "Custom Voice Engine Installation Failed", message)
         self.status.setText("Custom voice engine installation failed.")
