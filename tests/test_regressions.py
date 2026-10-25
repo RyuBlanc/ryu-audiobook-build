@@ -1024,7 +1024,10 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('self.settings.setValue("ui/interface_scale"', settings)
         self.assertIn('if accent == "velvet":', settings)
         self.assertIn("factor = scale / 100.0", settings)
-        self.assertIn("apply_application_theme(app, theme)", settings)
+        self.assertIn("apply_application_theme(", settings)
+        self.assertIn('accent=str(self.accent.currentData() or "crimson")', settings)
+        self.assertIn('scale=int(self.interface_scale.currentData() or 100)', settings)
+        self.assertIn('text_scale=int(self.text_scale.currentData() or 100)', settings)
 
     def test_metadata_dropdowns_and_multiselect_genres_exist(self):
         widgets = Path("app/ui/metadata_widgets.py").read_text(encoding="utf-8")
