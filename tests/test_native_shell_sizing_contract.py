@@ -38,7 +38,7 @@ class NativeShellSizingContracts(unittest.TestCase):
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn('id="reduceMotionAdvanced"', html)
-        self.assertIn('reduce_motion:Boolean($\'(reduceMotionAdvanced)\'?.checked)', adapter)
+        self.assertIn("reduce_motion:Boolean($('reduceMotionAdvanced')?.checked)", adapter)
         self.assertIn("function applyVisualStabilityPreferences(settings = {})", adapter)
         self.assertIn("backdrop-filter:none!important;", adapter)
         self.assertIn("transition-duration:0.01ms!important;", adapter)
