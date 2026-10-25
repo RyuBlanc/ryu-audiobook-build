@@ -128,7 +128,8 @@ class VoicePreviewWorker(QThread):
             if self.project_folder:
                 state = load_state(self.project_folder)
                 assignments = state.get('voice_cast', {}) if isinstance(state, dict) else {}
-                if assignments:
+                identity_assignments = state.get("voice_cast_identity_assignments", {}) if isinstance(state, dict) else {}
+                if assignments or identity_assignments:
                     from app.tts.cast_provider import CastAwareProvider
                     self._provider = CastAwareProvider(
                         provider, voice,
@@ -136,6 +137,7 @@ class VoicePreviewWorker(QThread):
                         assignments,
                         narrating_character=state.get('voice_cast_narrating_character'),
                         backend_override=self.backend,
+                        identity_assignments=identity_assignments,
                     )
                     wrapper_status = getattr(self._provider, "set_status_callback", None)
                     if callable(wrapper_status):
@@ -2333,7 +2335,8 @@ class GenerationPage(QWidget):
             return narrator_provider, narrator_voice
         state = load_state(self.project_folder)
         assignments = state.get("voice_cast", {})
-        if not assignments:
+        identity_assignments = state.get("voice_cast_identity_assignments", {})
+        if not assignments and not identity_assignments:
             return narrator_provider, narrator_voice
         from app.tts.cast_provider import CastAwareProvider
         profiles = {profile.name: profile for profile in self._current_profiles()}
@@ -2345,6 +2348,7 @@ class GenerationPage(QWidget):
             assignments,
             narrating_character=narrating_character,
             backend_override=self.backend.currentData() or "automatic",
+            identity_assignments=identity_assignments,
         ), narrator_voice
 
     def _provider(self):

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from app.chapters.characters import infer_speaker_for_quote, _all_dialogue_spans
 from app.chapters.assignment_utils import assignment_speakers
+from app.core.character_identity import character_identity_key, parse_character_identity_key
 from app.tts.base import TTSProvider
 from app.tts.profile_provider import provider_from_profile
 from app.tts.voice_profile import VoiceProfile
@@ -32,12 +33,26 @@ class CastAwareProvider(TTSProvider):
         narrating_character: str | None = None,
         backend_override: str = "automatic",
         narrator_profile: VoiceProfile | None = None,
+        identity_assignments: dict[str, str] | None = None,
     ):
         self.narrator_provider = narrator_provider
         self.narrator_voice = narrator_voice
         self.narrator_profile = narrator_profile
         self.profiles = {k.casefold(): v for k, v in profiles.items()}
         self.assignments = {k.casefold(): v for k, v in assignments.items() if v}
+        # Keep scoped keys even when a character is intentionally unassigned.
+        # An empty identity must not fall through to another series' name map.
+        self.identity_assignments = {
+            str(k).casefold(): str(v or "").strip()
+            for k, v in (identity_assignments or {}).items()
+            if parse_character_identity_key(str(k)) is not None
+        }
+        self._identity_series_by_name: dict[str, set[str]] = {}
+        for key in self.identity_assignments:
+            parsed = parse_character_identity_key(key)
+            if parsed:
+                series, name = parsed
+                self._identity_series_by_name.setdefault(name, set()).add(series)
         self.narrating_character = (narrating_character or "").casefold()
         self.backend_override = backend_override or "automatic"
         self._providers: dict[str, tuple[TTSProvider, str]] = {}
@@ -76,7 +91,7 @@ class CastAwareProvider(TTSProvider):
             if profile.provider in {"edge-tts", "chatterbox"}:
                 if profile.name.casefold() in self.assignments or any(
                     value.casefold() == profile.name.casefold()
-                    for value in self.assignments.values()
+                    for value in [*self.assignments.values(), *self.identity_assignments.values()]
                 ):
                     return True
         return False
@@ -171,10 +186,11 @@ class CastAwareProvider(TTSProvider):
             "narrator_profile": self._profile_signature(self.narrator_profile),
             "narrator_engine": narrator_engine,
             "assignments": sorted(self.assignments.items()),
+            "identity_assignments": sorted(self.identity_assignments.items()),
             "profiles": sorted(
                 (
                     self._profile_signature(self.profiles.get(name.casefold()))
-                    for name in set(self.assignments.values())
+                    for name in set([*self.assignments.values(), *self.identity_assignments.values()]) if name
                 ),
                 key=lambda item: str((item or {}).get("name", "")).casefold(),
             ),
@@ -232,22 +248,31 @@ class CastAwareProvider(TTSProvider):
         end: int,
         last_speaker: str | None,
         dialogue_assignments=None,
-    ) -> tuple[list[str], str | None]:
+    ) -> tuple[list[str], str | None, str]:
         manual = self._assignment_for_span(text, start, end, dialogue_assignments)
         if manual:
             speakers = assignment_speakers(manual)
             if speakers:
-                return speakers, (str(manual.get("multi_speaker_mode") or "chorus").strip().lower())
+                return (
+                    speakers,
+                    (str(manual.get("multi_speaker_mode") or "chorus").strip().lower()),
+                    str(manual.get("series") or "").strip(),
+                )
 
         speaker = self._speaker_for(text, start, end, last_speaker)
-        return ([speaker] if speaker else []), None
+        return ([speaker] if speaker else []), None, ""
 
     def _speaker_for(self, text: str, start: int, end: int, last_speaker: str | None) -> str | None:
+        candidate_names = set(self.assignments.keys())
+        # Names present in multiple series are excluded from unscoped inference.
+        for name, series_names in self._identity_series_by_name.items():
+            if len(series_names) == 1:
+                candidate_names.add(name)
         return infer_speaker_for_quote(
             text,
             start,
             end,
-            list(self.assignments.keys()),
+            sorted(candidate_names),
             narrator_name=self.narrating_character or None,
             last_speaker=last_speaker,
         )
@@ -267,18 +292,26 @@ class CastAwareProvider(TTSProvider):
             if start > cursor:
                 parts.append((text[cursor:start], fallback_voice))
 
-            speakers, multi_mode = self._speakers_for(
+            speakers, multi_mode, assignment_series = self._speakers_for(
                 text,
                 start,
                 end,
                 last_speaker,
                 dialogue_assignments=dialogue_assignments,
             )
-            assigned_voices = [
-                self.assignments.get(speaker.casefold())
-                for speaker in speakers
-                if self.assignments.get(speaker.casefold())
-            ]
+            assigned_voices = []
+            for speaker in speakers:
+                name_key = str(speaker or "").strip().casefold()
+                identity_key = character_identity_key(speaker, assignment_series) if assignment_series else ""
+                if identity_key and identity_key in self.identity_assignments:
+                    # Explicitly saved empty value means this identity is unassigned.
+                    profile_name = self.identity_assignments[identity_key]
+                elif len(self._identity_series_by_name.get(name_key, set())) > 1:
+                    profile_name = ""
+                else:
+                    profile_name = self.assignments.get(name_key, "")
+                if profile_name:
+                    assigned_voices.append(profile_name)
             if assigned_voices:
                 if len(assigned_voices) > 1 and multi_mode == "alternating":
                     # Alternate one configured voice per dialogue span; do not

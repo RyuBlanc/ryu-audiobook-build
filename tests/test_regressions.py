@@ -812,6 +812,52 @@ class RegressionTests(unittest.TestCase):
             page.close()
             page.deleteLater()
 
+    def test_cast_provider_keeps_same_named_series_voices_separate(self):
+        from app.core.character_identity import character_identity_key
+        from app.tts.cast_provider import CastAwareProvider
+        from types import SimpleNamespace
+
+        class FakeProvider:
+            def __init__(self, voice):
+                self.voice = voice
+            def voices(self):
+                return [self.voice]
+            def synthesize(self, text, output_path, voice=None):
+                return output_path
+            def close(self):
+                pass
+
+        text_value = "“I know.”"
+        profiles = {
+            "Voice A": SimpleNamespace(name="Voice A", provider="piper"),
+            "Voice B": SimpleNamespace(name="Voice B", provider="piper"),
+        }
+        provider = CastAwareProvider(
+            FakeProvider("Narrator"), "Narrator", profiles, {},
+            identity_assignments={
+                character_identity_key("Rias Gremory", "Series A"): "Voice A",
+                character_identity_key("Rias Gremory", "Series B"): "Voice B",
+            },
+        )
+        series_a = [{
+            "start": 0, "end": len(text_value), "text": text_value,
+            "speakers": ["Rias Gremory"], "series": "Series A",
+        }]
+        series_b = [{
+            "start": 0, "end": len(text_value), "text": text_value,
+            "speakers": ["Rias Gremory"], "series": "Series B",
+        }]
+        self.assertEqual(provider.split_for_cast(text_value, "Narrator", series_a), [("I know.", "Voice A")])
+        self.assertEqual(provider.split_for_cast(text_value, "Narrator", series_b), [("I know.", "Voice B")])
+        provider.close()
+
+    def test_character_identity_key_is_stable_and_unambiguous(self):
+        from app.core.character_identity import character_identity_key, parse_character_identity_key
+        key = character_identity_key(" Rias Gremory ", " Series A ")
+        self.assertEqual(parse_character_identity_key(key), ("series a", "rias gremory"))
+        self.assertNotEqual(key, character_identity_key("Rias Gremory", "Series B"))
+        self.assertIsNone(parse_character_identity_key("not-an-identity-key"))
+
     def test_native_speaker_continuity_is_chapter_local_and_distance_limited(self):
         source = Path("app/ui/native_character_studio.py").read_text(encoding="utf-8")
         worker_start = source.index("class NativeDialogueAnalysisWorker")
