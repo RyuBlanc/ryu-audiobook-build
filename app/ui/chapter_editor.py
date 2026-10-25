@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 
 from PySide6.QtCore import QEvent, QItemSelectionModel, QTimer, QThread, Signal, Qt, QPoint, QSize
 from PySide6.QtGui import QColor, QIcon, QTextCharFormat, QTextCursor
@@ -35,7 +36,11 @@ from app.ui.dialogue_assignment import DialogueAssignmentDialog
 from app.ui.dialogue_manager import DialogueAssignmentManagerDialog
 from app.chapters.dialogue import dialogue_segment_for_selection
 from app.chapters.assignment_utils import build_book_character_registry, normalize_assignment, format_character_registry_entry
+from app.core.state import load_state
 from app.ai.brain import AudiobookBrain, _numeric_score
+
+log = logging.getLogger(__name__)
+
 
 
 
@@ -445,6 +450,107 @@ class ChapterEditorPage(QWidget):
         y = min(max(3, rect.top()), max(3, self.text.viewport().height() - button.height() - 4))
         button.move(x, y)
 
+    def _learning_series_and_aliases(self, speaker: str) -> tuple[str, list[str]]:
+        """Resolve the active series and canonical saved aliases for explicit feedback."""
+        if not self.project_folder:
+            return self.project_title, []
+        try:
+            state = load_state(self.project_folder)
+        except Exception:
+            log.exception("Could not load project state for dialogue-learning feedback")
+            return self.project_title, []
+        metadata = state.get("metadata") if isinstance(state.get("metadata"), dict) else {}
+        series = str(
+            state.get("series_name") or state.get("series") or metadata.get("series")
+            or self.project_title or ""
+        ).strip()
+        roster = state.get("voice_cast_character_roster") or []
+        if not isinstance(roster, list):
+            roster = []
+        key = str(speaker or "").strip().casefold()
+        row = next((item for item in roster if isinstance(item, dict) and (
+            str(item.get("name") or "").strip().casefold() == key
+            or key in {str(alias).strip().casefold() for alias in (item.get("aliases") or [])}
+        )), None)
+        aliases = row.get("aliases") or [] if isinstance(row, dict) else []
+        if isinstance(aliases, str):
+            aliases = [aliases]
+        return series, [str(value).strip() for value in aliases if str(value or "").strip()] if isinstance(aliases, (list, tuple)) else []
+
+    def _record_native_assignment_feedback(self, chapter, assignment: dict) -> None:
+        """Learn from a saved manual single-speaker assignment, never an AI guess."""
+        if not self.project_folder or not isinstance(assignment, dict):
+            return
+        if str(assignment.get("source") or "").casefold() not in {"manual", "user", "explicit"}:
+            return
+        speakers = self._assignment_speakers(assignment)
+        if len(speakers) != 1:
+            return
+        try:
+            start, end = int(assignment.get("start", -1)), int(assignment.get("end", -1))
+        except (TypeError, ValueError):
+            return
+        source = str(chapter.text or "")
+        if start < 0 or end <= start or end > len(source):
+            return
+        series, aliases = self._learning_series_and_aliases(speakers[0])
+        if not series:
+            return
+        try:
+            from app.chapters.character_learning import record_assignment_feedback
+            record_assignment_feedback(
+                series=series, speaker=speakers[0], aliases=aliases,
+                chapter_text=source, start=start, end=end, source_text=source[start:end],
+                chapter_title=str(chapter.title or ""),
+            )
+        except Exception:
+            # The chapter assignment is already saved; a learning cache failure
+            # must be visible in logs without undoing the user's assignment.
+            log.exception("Could not record native Chapter Studio speaker-learning feedback")
+
+    def _remove_native_assignment_feedback(self, chapter, assignment: dict) -> None:
+        if not self.project_folder or not isinstance(assignment, dict):
+            return
+        if str(assignment.get("source") or "").casefold() not in {"manual", "user", "explicit"}:
+            return
+        try:
+            start, end = int(assignment.get("start", -1)), int(assignment.get("end", -1))
+        except (TypeError, ValueError):
+            return
+        source = str(chapter.text or "")
+        if start < 0 or end <= start or end > len(source):
+            return
+        series, _aliases = self._learning_series_and_aliases(
+            (self._assignment_speakers(assignment) or [""])[0]
+        )
+        if not series:
+            return
+        try:
+            from app.chapters.character_learning import remove_assignment_feedback
+            remove_assignment_feedback(
+                series=series, chapter_text=source, start=start, end=end,
+                source_text=source[start:end],
+            )
+        except Exception:
+            log.exception("Could not remove native Chapter Studio speaker-learning feedback")
+
+    def _sync_native_learning_changes(self, before: dict[tuple[int, int], dict], chapter) -> None:
+        """Apply feedback only to changed manual spans after the chapter save succeeds."""
+        after_rows = {
+            (int(row.get("start", -1)), int(row.get("end", -1))): dict(row)
+            for row in (getattr(chapter, "dialogue_assignments", []) or [])
+            if isinstance(row, dict)
+        }
+        for span, prior in before.items():
+            current = after_rows.get(span)
+            if current is None:
+                self._remove_native_assignment_feedback(chapter, prior)
+            elif current != prior:
+                self._record_native_assignment_feedback(chapter, current)
+        for span, current in after_rows.items():
+            if span not in before:
+                self._record_native_assignment_feedback(chapter, current)
+
     def _open_inline_assignment_dialog(self) -> None:
         chapter_index = self.list.currentRow()
         if chapter_index < 0:
@@ -457,6 +563,11 @@ class ChapterEditorPage(QWidget):
         cursor.setPosition(end, QTextCursor.MoveMode.KeepAnchor)
         self.text.setTextCursor(cursor)
         chapter = self.editor.chapters[chapter_index]
+        before = {
+            (int(item.get("start", -1)), int(item.get("end", -1))): dict(item)
+            for item in (getattr(chapter, "dialogue_assignments", []) or [])
+            if isinstance(item, dict)
+        }
         dialog = DialogueAssignmentDialog(
             chapter=chapter,
             start=start,
@@ -466,7 +577,8 @@ class ChapterEditorPage(QWidget):
             parent=self,
         )
         if dialog.exec() == dialog.DialogCode.Accepted and dialog.assigned:
-            self._save_silently()
+            if self._save_silently():
+                self._sync_native_learning_changes(before, chapter)
             self._refresh_assignment_visuals()
             self.save_status.setText("✓ Speaker assignment saved for selected sentence")
     def _schedule_autosave(self) -> None:
@@ -739,6 +851,13 @@ class ChapterEditorPage(QWidget):
 
     def open_dialogue_manager(self) -> None:
         self.commit_current()
+        before = {}
+        for chapter in self.editor.chapters:
+            before[int(chapter.number)] = {
+                (int(item.get("start", -1)), int(item.get("end", -1))): dict(item)
+                for item in (getattr(chapter, "dialogue_assignments", []) or [])
+                if isinstance(item, dict)
+            }
         dialog = DialogueAssignmentManagerDialog(
             self.editor.chapters,
             project_folder=self.project_folder,
@@ -746,6 +865,12 @@ class ChapterEditorPage(QWidget):
             parent=self,
         )
         dialog.exec()
+        # Reconcile confirmed assignments/unassignments against the pre-dialog
+        # snapshot only after the real project save has succeeded.
+        saved = bool(self.on_save(self.editor.chapters)) if self.on_save else True
+        if saved:
+            for chapter in self.editor.chapters:
+                self._sync_native_learning_changes(before.get(int(chapter.number), {}), chapter)
         self.refresh(self.list.currentRow())
         self.load_selected(self.list.currentRow())
 
@@ -763,8 +888,14 @@ class ChapterEditorPage(QWidget):
             )
             return
         start, end = cursor.selectionStart(), cursor.selectionEnd()
+        chapter = self.editor.chapters[index]
+        before = {
+            (int(item.get("start", -1)), int(item.get("end", -1))): dict(item)
+            for item in (getattr(chapter, "dialogue_assignments", []) or [])
+            if isinstance(item, dict)
+        }
         dialog = DialogueAssignmentDialog(
-            self.editor.chapters[index],
+            chapter,
             start,
             end,
             book_chapters=self.editor.chapters,
@@ -778,7 +909,8 @@ class ChapterEditorPage(QWidget):
                 self.text.setPlainText(self.editor.chapters[index].text)
             finally:
                 self._loading_fields = False
-            self._save_silently()
+            if self._save_silently():
+                self._sync_native_learning_changes(before, self.editor.chapters[index])
             cursor = self.text.textCursor()
             cursor.setPosition(min(start, len(self.editor.chapters[index].text)))
             cursor.setPosition(min(end, len(self.editor.chapters[index].text)), cursor.MoveMode.KeepAnchor)
