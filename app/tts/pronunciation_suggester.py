@@ -181,15 +181,24 @@ def nativeish_pronunciation(name: str, language: str | None = None) -> str:
 
     return suggest_pronunciation(name)
 
-def suggest_pronunciation(name: str) -> str:
-    key = re.sub(r"\s+", " ", name.strip()).casefold()
+def suggest_pronunciation(name: str, language: str | None = None) -> str:
+    """Draft a reading without silently assuming Japanese for unknown Latin text."""
+    original = re.sub(r"\s+", " ", str(name or "").strip())
+    if not original:
+        return ""
+    key = original.casefold()
     if key in _KNOWN:
         return _KNOWN[key]
-    words = [w for w in key.split() if w]
-    return " ".join(_suggest_word(word) for word in words)
-
-def _suggest_word(word: str) -> str:
-    return nativeish_pronunciation(word, "japanese")
+    lang = re.sub(r"[^a-z]", "", str(language or "").casefold())
+    languages = {
+        "japanese": "Japanese", "ja": "Japanese", "jpn": "Japanese",
+        "korean": "Korean", "ko": "Korean", "kor": "Korean",
+        "chinese": "Chinese", "mandarin": "Chinese", "zh": "Chinese", "cmn": "Chinese",
+    }
+    selected_language = languages.get(lang)
+    if not selected_language:
+        return original
+    return " ".join(nativeish_pronunciation(word, selected_language) for word in original.split())
 
 def suggest_names_from_text(text: str) -> list[str]:
     """Extract conservative multi-word name candidates, not arbitrary capitalized prose."""
