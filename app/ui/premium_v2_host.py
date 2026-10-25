@@ -2297,6 +2297,9 @@ class PremiumV2Bridge(QObject):
         preview_succeeded = False
         heartbeat_stop = threading.Event()
         heartbeat_thread = None
+        request_started_at = time.monotonic()
+        provider_setup_seconds = None
+        synthesis_finished_at = None
         try:
             if cancel_event is not None and cancel_event.is_set():
                 raise PreviewCancelledError("Preview cancelled by user.")
@@ -2401,6 +2404,7 @@ class PremiumV2Bridge(QObject):
             folder.mkdir(parents=True, exist_ok=True)
             output = folder / f"preview_{job_id}.wav"
             preview_started = time.monotonic()
+            provider_setup_seconds = round(max(0.0, preview_started - request_started_at), 3)
 
             def progress(stage: str, current: int, total: int) -> None:
                 elapsed = max(0, int(time.monotonic() - preview_started))
@@ -2449,6 +2453,7 @@ class PremiumV2Bridge(QObject):
                 target_seconds=seconds,
                 cancel_check=cancel_event.is_set if cancel_event is not None else None,
             )
+            synthesis_finished_at = time.monotonic()
             if cancel_event is not None and cancel_event.is_set():
                 raise PreviewCancelledError("Preview cancelled by user.")
             preview_path = Path(result.output_path)
@@ -2474,11 +2479,32 @@ class PremiumV2Bridge(QObject):
             rule_counts = getattr(result, "applied_rule_counts", {}) or {}
             replacements = sum(rule_counts.values())
             count_message = f" Pronunciation applied {replacements} replacement(s) across {len(rule_counts)} rule(s)."
+            total_seconds = round(max(0.0, time.monotonic() - request_started_at), 3)
+            synthesis_seconds = round(max(0.0, (synthesis_finished_at or time.monotonic()) - preview_started), 3)
+            real_time_factor = round(synthesis_seconds / max(0.01, float(duration)), 3)
+            performance_summary = (
+                f"Preview: {float(duration):.1f}s audio in {total_seconds:.1f}s "
+                f"(synthesis {synthesis_seconds:.1f}s; {real_time_factor:.2f}× real time)."
+            )
+            if int(seconds) == 30 and total_seconds > 60:
+                performance_summary += " The 30-second/60-second performance target was exceeded; timing has been recorded for diagnosis."
+            log.info(
+                "Voice preview performance profile=%s provider=%s requested_s=%s actual_s=%.2f "
+                "provider_setup_s=%.3f synthesis_s=%.3f total_s=%.3f realtime_factor=%.3f",
+                str(getattr(profile, "name", "unknown")), str(getattr(profile, "provider", "unknown")),
+                seconds, float(duration), float(provider_setup_seconds or 0.0),
+                synthesis_seconds, total_seconds, real_time_factor,
+            )
             self._job_update(job_id, state="completed", stage="Preview ready", progress=100,
-                             message=("Sound Design mix preview ready." if state.get("_include_sound_design_preview") else "Audio preview generated.") + count_message,
+                             message=performance_summary + count_message,
                              output_path=str(preview_path), result={
                                  "output_path": str(preview_path), "file_url": preview_path.resolve().as_uri(),
                                  "requested_duration_seconds": seconds, "actual_duration_seconds": duration,
+                                 "provider_setup_seconds": provider_setup_seconds,
+                                 "synthesis_seconds": synthesis_seconds,
+                                 "total_seconds": total_seconds,
+                                 "real_time_factor": real_time_factor,
+                                 "performance_target_met": bool(int(seconds) != 30 or total_seconds <= 60),
                                  "voices_used": list(result.voices_used), "segments": result.segments,
                                  "selected_profile": profile.name,
                                  "selected_provider": str(getattr(profile, "provider", "") or ""),
