@@ -31,6 +31,7 @@ from app.documents.parser import (
     reflow_source_text,
 )
 from app.ui.character_review import CharacterReviewDialog
+from app.ui.stable_refresh import stable_view_refresh
 from app.ui.dialogue_assignment import DialogueAssignmentDialog
 from app.ui.dialogue_manager import DialogueAssignmentManagerDialog
 from app.chapters.dialogue import dialogue_segment_for_selection
@@ -236,16 +237,54 @@ class ChapterEditorPage(QWidget):
         self.text.textChanged.connect(self._schedule_autosave)
         self.refresh()
 
+    @stable_view_refresh
     def refresh(self, selected: int | None = None) -> None:
-        self.list.blockSignals(True)
-        self.list.clear()
-        for chapter in self.editor.chapters:
-            assigned = len(getattr(chapter, "dialogue_assignments", []))
-            suffix = f" · {assigned} assigned" if assigned else ""
-            self.list.addItem(QListWidgetItem(f"{chapter.number}. {chapter.title}{suffix}"))
-        self.list.blockSignals(False)
-        if self.editor.chapters:
-            self.list.setCurrentRow(max(0, min(selected if selected is not None else 0, len(self.editor.chapters) - 1)))
+        """Refresh chapter rows without clearing the live list or losing the view state."""
+        chapters = list(self.editor.chapters)
+        previous_row = self.list.currentRow()
+        target_row = selected if selected is not None else previous_row
+        if target_row < 0 and chapters:
+            target_row = 0
+
+        was_blocked = self.list.blockSignals(True)
+        updates_were_enabled = self.list.updatesEnabled()
+        if updates_were_enabled:
+            self.list.setUpdatesEnabled(False)
+        try:
+            # Reuse existing rows whenever possible. Clearing and repopulating this
+            # list on each refresh caused visible flashes and discarded row metadata.
+            for index, chapter in enumerate(chapters):
+                assigned = len(getattr(chapter, "dialogue_assignments", []))
+                suffix = f" · {assigned} assigned" if assigned else ""
+                label = f"{chapter.number}. {chapter.title}{suffix}"
+                if index < self.list.count():
+                    item = self.list.item(index)
+                    if item.text() != label:
+                        item.setText(label)
+                else:
+                    self.list.addItem(QListWidgetItem(label))
+
+            while self.list.count() > len(chapters):
+                self.list.takeItem(self.list.count() - 1)
+        finally:
+            # Never leave chapter navigation signal-blocked or visually frozen
+            # if a malformed chapter record prevents a full refresh.
+            self.list.blockSignals(was_blocked)
+            if updates_were_enabled:
+                self.list.setUpdatesEnabled(True)
+                self.list.viewport().update()
+
+        if chapters:
+            target_row = max(0, min(target_row, len(chapters) - 1))
+            if self.list.currentRow() != target_row:
+                self.list.setCurrentRow(target_row)
+            else:
+                # setCurrentRow emits no signal when the row is unchanged, but
+                # refresh still needs to reload its latest saved title and text.
+                self.load_selected(target_row)
+        else:
+            self.list.setCurrentRow(-1)
+            self.load_selected(-1)
 
     def load_selected(self, index: int) -> None:
         self._loading_fields = True
