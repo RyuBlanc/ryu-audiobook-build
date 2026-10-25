@@ -1075,7 +1075,10 @@ class RegressionTests(unittest.TestCase):
         publish_start = workflow.index("name: Publish verified installer release")
         self.assertGreater(inline_start, publish_start)
         self.assertIn("continue-on-error: true", workflow[inline_start:inline_start + 400])
-        cleanup_job_start = workflow.index("\\n  cleanup:\\n")
+        workflow_lines = workflow.splitlines()
+        cleanup_job_start = workflow_lines.index("  cleanup:")
+        cleanup_steps_start = workflow_lines.index("    steps:", cleanup_job_start)
+        cleanup_job_header = "\n".join(workflow_lines[cleanup_job_start:cleanup_steps_start])
         cleanup_steps_start = workflow.index("    steps:", cleanup_job_start)
         cleanup_job_header = workflow[cleanup_job_start:cleanup_steps_start]
         self.assertIn("    continue-on-error: true", cleanup_job_header)
