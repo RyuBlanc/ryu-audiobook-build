@@ -1130,6 +1130,9 @@ class VoicePage(QWidget):
         threading.Thread(target=release, name="RyuPreviewProviderCleanup", daemon=True).start()
 
     def _expire_native_preview_provider_cache(self) -> None:
+        timer = getattr(self, "_native_preview_cache_timer", None)
+        if timer is not None and timer.isActive():
+            timer.stop()
         provider = self._native_preview_provider
         self._native_preview_provider = None
         self._native_preview_voice = None
@@ -1160,14 +1163,19 @@ class VoicePage(QWidget):
         self._native_preview_cache_timer.start(90_000)
 
     def shutdown(self) -> None:
-        """Release preview resources without blocking the Qt main window."""
+        """Stop preview work and release the idle model worker during app shutdown."""
         try:
             self.player.stop()
+            self.player.setSource(QUrl())
         except Exception:
             pass
         worker = getattr(self, "preview_worker", None)
         if worker is not None and worker.isRunning():
             worker.cancel()
+            # Cancellation is cooperative. A short bounded wait prevents Qt
+            # from destroying the page while its QThread is unwinding, without
+            # blocking normal app interactions or waiting indefinitely on a model.
+            worker.wait(2000)
         self._expire_native_preview_provider_cache()
 
     def _preview_request_is_current(self, request_id: int | None = None) -> bool:
