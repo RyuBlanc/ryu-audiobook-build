@@ -3397,6 +3397,345 @@
 
 
 
+  function characterPassageFromButton(button) {
+    const id = String(button?.dataset?.dialogueId || '');
+    const existing = (window.ryuPremiumDialogueReviewItems || []).find(item => String(item.id) === id);
+    if (existing) return existing;
+    const number = Number(button?.dataset?.chapterNumber);
+    const start = Number(button?.dataset?.start), end = Number(button?.dataset?.end);
+    const chapter = chapters.find(item => Number(item.number) === number);
+    if (!chapter || !Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start) return null;
+    const text = String(chapter.text || '').slice(start, end);
+    if (!text) return null;
+    return {id:id || ('dialogue-' + number + '-' + start + '-' + end), chapter_number:number,
+      chapter_title:chapter.title, start, end, text, source_text:text, speakers:[],
+      assigned:false, assignmentPresent:false, skipped:false, suggestions:[]};
+  }
+  async function openAiCharacterReview(item) {
+    if (!item || !item.text) throw new Error('This source passage is no longer available. Refresh the chapter and select it again.');
+    await refreshCharacterLibrary().catch(error => console.warn('[Ryu AI review library]', error));
+    window.ryuPremiumSelectedDialogueId = String(item.id || '');
+    window.ryuPremiumAiChapterNumber = Number(item.chapter_number);
+    window.ryuPremiumPendingDialogueText = String(item.text);
+    window.ryuPremiumPendingDialogueChapter = Number(item.chapter_number);
+    window.ryuPremiumPendingDialogueStart = Number(item.start);
+    window.ryuPremiumPendingDialogueEnd = Number(item.end);
+    window.ryuPremiumPendingDialogueId = String(item.id || '');
+    if ($('aiSelectedSentence')) $('aiSelectedSentence').textContent = String(item.text);
+    const projectOptions = characters.map(c => ({
+      name:characterCanonical(c), series:characterSeries(c), profile:String(c.voice_profile || ''),
+      aliases:characterAliases(c), source:'project'
+    }));
+    const libraryOptions = libraryCharacters.map(c => ({
+      name:characterCanonical(c), series:characterSeries(c), profile:String(c.voice_profile || c.voice || ''),
+      aliases:characterAliases(c), source:'library'
+    }));
+    const suggestions = Array.isArray(item.suggestions) ? item.suggestions.filter(c => c && c.name) : [];
+    const candidateHtml = suggestions.length ? suggestions.map((candidate,index) => {
+      const name = String(candidate.name || '').trim();
+      const linked = [...projectOptions,...libraryOptions].find(row => row.name.toLowerCase() === name.toLowerCase()
+        || row.aliases.some(alias => alias.toLowerCase() === name.toLowerCase()));
+      const probability = Number(candidate.confidence || 0);
+      const isActive = item.speakers?.some(s => String(s).toLowerCase() === name.toLowerCase()) ||
+        (!item.assigned && index === 0);
+      const evidence = String(candidate.evidence || 'Local dialogue-context suggestion');
+      return '<button type="button" class="prediction-option ryu-ai-option' + (isActive ? ' active' : '') +
+        '" data-prediction="' + esc(name) + '" data-series="' + esc(linked?.series || activeCharacterProjectSeries()) +
+        '" data-profile="' + esc(linked?.profile || '') + '" data-source="ai"><b>' + esc(name) + '</b><small>AI suggestion · ' +
+        Math.round(probability * 100) + '% · ' + esc(evidence) + '</small></button>';
+    }).join('') : '<p class="muted">No ranked AI suggestion is available for this passage. Choose a saved character below or create a new one.</p>';
+    const seen = new Set();
+    const savedOptions = [...projectOptions,...libraryOptions].filter(row => {
+      const key = row.name.toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key); return true;
+    });
+    const savedHtml = savedOptions.map((row,index) => {
+      const active = item.speakers?.some(s => String(s).toLowerCase() === row.name.toLowerCase());
+      return '<button type="button" class="prediction-option ryu-ai-option' + (active ? ' active' : '') +
+        '" data-prediction="' + esc(row.name) + '" data-series="' + esc(row.series) + '" data-profile="' +
+        esc(row.profile) + '" data-source="' + esc(row.source) + '"><b>' + esc(row.name) +
+        '</b><small>' + esc(row.series) + ' · ' + esc(row.profile || 'No audio profile assigned') +
+        (row.source === 'library' ? ' · Character Library' : ' · This project') + '</small></button>';
+    }).join('') || '<p class="muted">No saved characters exist yet. Use New character to create one in a series.</p>';
+    if ($('predictionList')) $('predictionList').innerHTML =
+      '<div class="ryu-character-subsection">AI suggestions</div>' + candidateHtml +
+      '<div class="ryu-character-subsection">Saved / manually created characters</div>' + savedHtml;
+    if ($('confirmAiCharacter')) $('confirmAiCharacter').disabled = !(suggestions.length || savedOptions.length);
+    const removeButton = ensureDialogueUnassignButton();
+    if (removeButton) removeButton.hidden = !(item.assignmentPresent || item.assigned);
+    $('aiPredictionModal')?.classList.add('show');
+    renderAiChapterDocument();
+    renderCharacterStudioLive();
+  }
+  function openCharacterEditorForSelected() {
+    const selected = characterRowForName(window.ryuPremiumSelectedCharacter);
+    if (!selected) throw new Error('Select a real character from this project before editing.');
+    libraryEditorActive = false;
+    ensureCharacterSeriesField();
+    if ($('characterEditorTitle')) $('characterEditorTitle').textContent = 'Edit character';
+    if ($('editCharacterName')) $('editCharacterName').value = selected.name || '';
+    if ($('editCharacterShort')) $('editCharacterShort').value = selected.short_description || selected.short || '';
+    if ($('editCharacterAliases')) $('editCharacterAliases').value = characterAliases(selected).join(', ');
+    if ($('editCharacterVoice')) {
+      const saved = characterSavedProfiles();
+      $('editCharacterVoice').innerHTML = '<option value="">Unassigned</option>' + saved.map(profile =>
+        '<option value="' + esc(profile.name) + '">' + esc(profile.name) + ' · ' + esc(profile.provider || 'Voice') + '</option>'
+      ).join('');
+      $('editCharacterVoice').value = selected.voice_profile || '';
+      $('editCharacterVoice').disabled = true;
+    }
+    if ($('editCharacterScope')) $('editCharacterScope').value = selected.scope || 'Current book only';
+    if ($('editCharacterSeries')) $('editCharacterSeries').value = characterSeries(selected);
+    if ($('editCharacterNotes')) $('editCharacterNotes').value = selected.notes || '';
+    if ($('deleteCharacter')) $('deleteCharacter').style.visibility = 'visible';
+    $('characterEditorModal')?.classList.add('show');
+  }
+  async function saveCharacterEditorForProject() {
+    const original = String(window.ryuPremiumSelectedCharacter || '');
+    const current = characterRowForName(original);
+    const name = String($('editCharacterName')?.value || '').trim();
+    const series = String($('editCharacterSeries')?.value || '').trim();
+    if (!current || !name) throw new Error('Select a saved project character and enter its canonical name.');
+    const result = await call('character.update', {
+      original_name:characterCanonical(current), name,
+      short_description:$('editCharacterShort')?.value || '',
+      aliases:$('editCharacterAliases')?.value || '',
+      voice_profile:String(current.voice_profile || ''),
+      series, scope:series ? 'Series · ' + series : 'Current book only',
+      notes:$('editCharacterNotes')?.value || ''
+    });
+    window.ryuPremiumSelectedCharacter = name;
+    $('characterEditorModal')?.classList.remove('show');
+    await refreshCharacters();
+    await refreshCharacterLibrary();
+    message('Character details and series saved to the project and Character Library.');
+    return result;
+  }
+  async function deleteSelectedProjectCharacter() {
+    const current = characterRowForName(window.ryuPremiumSelectedCharacter);
+    if (!current) throw new Error('Select a real project character before deleting.');
+    const name = characterCanonical(current);
+    if (!window.confirm('Remove "' + name + '" from this project cast? Reusable Character Library data is retained.')) return;
+    await call('character.delete', {name});
+    window.ryuPremiumSelectedCharacter = '';
+    $('characterEditorModal')?.classList.remove('show');
+    await refreshCharacters(); await refreshCharacterLibrary();
+    message('Removed ' + name + ' from this project cast.');
+  }
+  async function testSelectedCharacterVoice() {
+    const current = characterRowForName(window.ryuPremiumSelectedCharacter);
+    if (!current) throw new Error('Select a character from the active project cast first.');
+    const selectedProfileName = String($('assignedAudioProfile')?.value || current.voice_profile || '').trim();
+    const profile = characterProfileByName(selectedProfileName);
+    if (!profile) throw new Error('Choose a saved audio profile first.');
+    const savedPassages = characterVoiceAssignments(current.name).passages;
+    const sample = String(savedPassages[0]?.text || (current.examples || [])[0] || current.dialogue_sample || '').trim();
+    if (!sample) throw new Error('This character has no assigned sentence yet. Assign a source passage before testing the voice.');
+    await previewSavedProfile(profile, sample, current.name);
+  }
+  function installCharacterStudioHandlers() {
+    if (characterStudioCaptureBound) return;
+    characterStudioCaptureBound = true;
+    document.addEventListener('input', event => {
+      const target = event.target;
+      if (!target || !['manualChapterSearch','assignedSearch','assignCharacterSearch'].includes(target.id)) return;
+      event.stopImmediatePropagation();
+      if (target.id === 'manualChapterSearch' || target.id === 'assignedSearch') renderCharacterStudioLive();
+      if (target.id === 'assignCharacterSearch') renderManualCharacterChoices();
+    }, true);
+    document.addEventListener('click', event => {
+      const button = event.target?.closest?.('button');
+      if (!button) return;
+      const handle = fn => { event.preventDefault(); event.stopImmediatePropagation(); void Promise.resolve().then(fn).catch(error => message(error?.message || String(error), true)); };
+      const mode = button.closest('#characters [data-char-mode]');
+      if (mode) { handle(() => setCharacterStudioMode(mode.dataset.charMode)); return; }
+      const filter = button.closest('#characters [data-ch-filter]');
+      if (filter) {
+        handle(() => {
+          document.querySelectorAll('#characters [data-ch-filter]').forEach(item => item.classList.toggle('active', item === filter));
+          renderCharacterStudioLive();
+        });
+        return;
+      }
+      if (button.id === 'openCharacterLibrary' || button.id === 'chooseFromLibrary') {
+        handle(async () => {
+          closeCharacterAssignmentPopover();
+          document.querySelector('[data-page="library"]')?.click();
+          setTimeout(() => $('characterLibraryZone')?.scrollIntoView({behavior:'smooth',block:'start'}), 180);
+        });
+        return;
+      }
+      if (button.id === 'analyzeCharacters' || button.id === 'runAiAnalysis') {
+        handle(async () => { setCharacterStudioMode('ai'); await runCharacterAnalysis(); });
+        return;
+      }
+      if (button.id === 'manualPreviousIssue' || button.id === 'manualNextIssue') {
+        handle(() => {
+          const chapter = chapters.find(item => Number(item.number) === Number(characterStudioSelectedChapter));
+          const rows = characterDialogueRowsForChapter(chapter).filter(row => !row.assigned && !row.skipped);
+          if (!rows.length) { message('This chapter has no unassigned dialogue passages.'); return; }
+          const currentId = String(window.ryuPremiumSelectedDialogueId || '');
+          let index = rows.findIndex(row => row.id === currentId);
+          if (button.id === 'manualPreviousIssue') index = index <= 0 ? rows.length - 1 : index - 1;
+          else index = index < 0 || index >= rows.length - 1 ? 0 : index + 1;
+          const row = rows[index];
+          openCharacterAssignmentPopover(row, window.innerWidth * 0.55, window.innerHeight * 0.5);
+        });
+        return;
+      }
+      if (button.id === 'selectionPlus') {
+        handle(() => openCharacterAssignmentPopover({
+          id:window.ryuPremiumPendingDialogueId,
+          chapter_number:window.ryuPremiumPendingDialogueChapter,
+          start:window.ryuPremiumPendingDialogueStart,end:window.ryuPremiumPendingDialogueEnd,
+          text:window.ryuPremiumPendingDialogueText
+        }, event.clientX, event.clientY));
+        return;
+      }
+      if (button.hasAttribute('data-manual-dialogue')) {
+        const item = characterPassageFromButton(button);
+        if (!item) { handle(() => { throw new Error('This passage is no longer in the selected chapter. Refresh and try again.'); }); return; }
+        handle(() => openCharacterAssignmentPopover(item, event.clientX, event.clientY));
+        return;
+      }
+      if (button.matches('#quickCharacterList [data-live-character]')) {
+        handle(async () => {
+          const name = button.dataset.liveCharacter;
+          const candidate = [...characters,...libraryCharacters].find(item =>
+            characterCanonical(item).toLowerCase() === String(name).toLowerCase());
+          if (!candidate) throw new Error('That character is no longer in the live project or Character Library.');
+          await assignPassageToCharacter(name, button.dataset.liveSeries || characterSeries(candidate),
+            String($('ryuManualNewProfile')?.value || ''));
+        });
+        return;
+      }
+      if (button.id === 'createCharacterQuick') {
+        handle(() => {
+          populateCharacterCreateFields();
+          if ($('ryuManualNewName')) $('ryuManualNewName').value = '';
+          if ($('ryuManualNewAliases')) $('ryuManualNewAliases').value = '';
+          if ($('ryuManualNewProfile')) $('ryuManualNewProfile').value = '';
+          $('ryuManualNewName')?.focus();
+        });
+        return;
+      }
+      if (button.id === 'saveManualCharacterCreate') { handle(() => saveManualCharacterAndAssign()); return; }
+      if (button.id === 'cancelManualCharacterCreate' || button.hasAttribute('data-close-popover')) {
+        handle(() => closeCharacterAssignmentPopover());
+        return;
+      }
+      if (button.id === 'assignCharactersEmpty') {
+        handle(async () => {
+          setCharacterStudioMode('manual');
+          const chapter = chapters.find(item => String(item.text || '').trim()) || chapters[0];
+          if (!chapter) throw new Error('Open a local project and load chapters first.');
+          characterStudioSelectedChapter = Number(chapter.number);
+          const row = characterDialogueRowsForChapter(chapter)[0];
+          if (!row) throw new Error('This project has no quoted dialogue yet. Select a sentence directly from the chapter text to assign it.');
+          await openCharacterAssignmentPopover(row, window.innerWidth * 0.55, window.innerHeight * 0.5);
+        });
+        return;
+      }
+      if (button.matches('#characters #assignedCharacterList [data-character-name]')) {
+        handle(() => {
+          window.ryuPremiumSelectedCharacter = button.dataset.characterName;
+          document.querySelectorAll('#assignedCharacterList [data-character-name]').forEach(item => item.classList.toggle('active', item === button));
+          renderCharacterInspector();
+        });
+        return;
+      }
+      if (button.id === 'testAssignedVoice') { handle(() => testSelectedCharacterVoice()); return; }
+      if (button.id === 'editAssignedCharacter') { handle(() => openCharacterEditorForSelected()); return; }
+      if (button.id === 'saveCharacterProfile' && !libraryEditorActive) { handle(() => saveCharacterEditorForProject()); return; }
+      if (button.id === 'deleteCharacter' && !libraryEditorActive) { handle(() => deleteSelectedProjectCharacter()); return; }
+      if (button.id === 'closeCharacterEditor' || button.hasAttribute('data-close-character-editor')) {
+        handle(() => $('characterEditorModal')?.classList.remove('show'));
+        return;
+      }
+      if (button.matches('#aiQueue [data-dialogue-id]')) {
+        const row = characterPassageFromButton(button);
+        if (!row) { handle(() => { throw new Error('That queue item no longer matches saved source text. Refresh or re-run analysis.'); }); return; }
+        handle(() => {
+          window.ryuPremiumSelectedDialogueId = row.id;
+          window.ryuPremiumAiChapterNumber = Number(row.chapter_number);
+          characterStudioSelectedChapter = Number(row.chapter_number);
+          renderCharacterStudioLive(); renderDialogueReview();
+          const target = [...document.querySelectorAll('#characters .ai-document [data-dialogue-id]')].find(item => item.dataset.dialogueId === row.id);
+          target?.scrollIntoView({block:'nearest',behavior:'smooth'});
+        });
+        return;
+      }
+      if (button.matches('#characters .ai-document [data-ai-sentence][data-dialogue-id]')) {
+        const row = characterPassageFromButton(button);
+        if (!row) { handle(() => { throw new Error('The selected dialogue no longer matches the source chapter. Re-run analysis.'); }); return; }
+        handle(() => openAiCharacterReview(row));
+        return;
+      }
+      if (button.matches('#predictionList .prediction-option')) {
+        handle(() => {
+          document.querySelectorAll('#predictionList .prediction-option').forEach(item => item.classList.toggle('active', item === button));
+          if ($('confirmAiCharacter')) $('confirmAiCharacter').disabled = false;
+        });
+        return;
+      }
+      if (button.id === 'confirmAiCharacter') {
+        handle(async () => {
+          const selected = $('predictionList')?.querySelector('.prediction-option.active');
+          const name = String(selected?.dataset.prediction || '').trim();
+          if (!name) throw new Error('Select an AI suggestion or a saved character first.');
+          await assignPassageToCharacter(name, String(selected.dataset.series || activeCharacterProjectSeries()),
+            String(selected.dataset.profile || ''));
+          $('aiPredictionModal')?.classList.remove('show');
+          window.ryuPremiumSelectedDialogueId = '';
+        });
+        return;
+      }
+      if (button.id === 'removeAiCharacterAssignment') {
+        handle(async () => {
+          const text = String(window.ryuPremiumPendingDialogueText || '');
+          const chapterNumber = Number(window.ryuPremiumPendingDialogueChapter);
+          const start = Number(window.ryuPremiumPendingDialogueStart), end = Number(window.ryuPremiumPendingDialogueEnd);
+          if (!text || !Number.isInteger(chapterNumber) || !Number.isInteger(start) || !Number.isInteger(end)) throw new Error('Select a saved source dialogue assignment first.');
+          await call('chapter.dialogue.unassign',{chapter_number:chapterNumber,start,end,dialogue_text:text});
+          $('aiPredictionModal')?.classList.remove('show');
+          await refreshChapters(); await refreshCharacters();
+          message('Removed the speaker assignment from the selected source passage.');
+        });
+        return;
+      }
+      if (button.id === 'aiUseLibrary') {
+        handle(async () => {
+          await refreshCharacterLibrary();
+          const firstSaved = [...document.querySelectorAll('#predictionList .prediction-option')].find(item => item.dataset.source === 'library');
+          if (firstSaved) {
+            document.querySelectorAll('#predictionList .prediction-option').forEach(item => item.classList.toggle('active', item === firstSaved));
+            firstSaved.scrollIntoView({block:'nearest',behavior:'smooth'});
+            if ($('confirmAiCharacter')) $('confirmAiCharacter').disabled = false;
+          } else message('No saved Character Library entries exist yet. Use New character to create one.');
+        });
+        return;
+      }
+      if (button.id === 'aiCreateNew') {
+        handle(async () => {
+          const item = (window.ryuPremiumDialogueReviewItems || []).find(row => row.id === window.ryuPremiumSelectedDialogueId);
+          if (!item) throw new Error('Select the dialogue passage again before creating a character.');
+          $('aiPredictionModal')?.classList.remove('show');
+          await openCharacterAssignmentPopover(item, window.innerWidth * 0.55, window.innerHeight * 0.45);
+          populateCharacterCreateFields();
+          if ($('ryuManualNewName')) $('ryuManualNewName').value = String(item.suggestions?.[0]?.name || '');
+        });
+        return;
+      }
+      if (button.id === 'acceptHighConfidence') { handle(() => acceptHighConfidenceDialogues()); return; }
+      if (button.id === 'skipAiSuggestion') { handle(() => skipCurrentDialogueSuggestion()); return; }
+      if (button.hasAttribute('data-close-ai-modal')) {
+        handle(() => $('aiPredictionModal')?.classList.remove('show'));
+        return;
+      }
+    }, true);
+  }
+
   function suppressLegacyVoicePreviewHandlers() {
     // The approved HTML is a visual prototype and attaches simulated actions
     // to several Voice Studio controls. A bubbling guard added after those
