@@ -3953,8 +3953,11 @@ class PremiumV2Bridge(QObject):
         output_text = str(payload.get("output_path") or state.get("output_path") or state.get("generation_target_path") or "").strip()
         if output_text:
             output = Path(output_text).expanduser().resolve()
-            if output.suffix.lower() not in {".m4b", ".m4a", ".mp3"}:
-                raise ValueError("Output must end in .m4b, .m4a, or .mp3.")
+            if output.suffix.lower() != ".m4b":
+                raise ValueError(
+                    "This build exports chaptered audiobooks as .m4b only. "
+                    "M4A/MP3 export is not implemented yet; choose an .m4b output path."
+                )
         else:
             safe = re.sub(r'[<>:"/\\|?*]+', "_", project.title).strip() or "Audiobook"
             output = audiobooks_root() / (safe + ".m4b")
