@@ -823,6 +823,35 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("[RyuLogoAlphaScanner]::Count($bitmap)", step)
         self.assertNotIn("$bitmap.GetPixel($x, $y)", step)
 
+    def test_voice_cast_search_includes_series_and_keeps_active_series_after_creation_or_rename(self):
+        from app.ui.voice_cast_page import cast_row_matches
+
+        row = {
+            "name": "Kana",
+            "series": "Silver Moon Saga",
+            "role": "Student",
+            "aliases": ["K"],
+            "voice": "",
+            "confidence": 0.5,
+        }
+        self.assertTrue(cast_row_matches(row, "All", "silver moon"))
+        self.assertTrue(cast_row_matches(row, "All", "alias k"))
+        self.assertFalse(cast_row_matches(row, "All", "different series"))
+
+        source = Path("app/ui/voice_cast_page.py").read_text(encoding="utf-8")
+        create_start = source.index("    def create_character_record(")
+        count_start = source.index("    def _refresh_character_counts(", create_start)
+        create = source[create_start:count_start]
+        self.assertIn("self.series_edit.setText(series)", create)
+        self.assertLess(create.index("self.series_edit.setText(series)"), create.index("self._save_cast("))
+        self.assertIn("self.select_character_name(name, series)", create)
+
+        rename_start = source.index("    def rename_character(")
+        refresh_start = source.index("    def _refresh_labels(", rename_start)
+        rename = source[rename_start:refresh_start]
+        self.assertIn("self.select_character_name(name, row_series)", rename)
+        self.assertIn("Search character, series, role or alias", source)
+
     def test_voice_cast_persistence_and_counts_are_series_scoped(self):
         source = Path("app/ui/voice_cast_page.py").read_text(encoding="utf-8")
         create_start = source.index("    def create_character_record(")
@@ -960,16 +989,22 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("worker.finished.connect(", source)
         self.assertIn("shiboken6.isValid(widget)", source)
 
-    def test_actions_storage_cleanup_preserves_last_success_until_current_run_completes(self):
+        def test_actions_storage_cleanup_prunes_prior_success_only_after_validated_build(self):
         script = Path(".github/scripts/cleanup_actions_storage.ps1").read_text(encoding="utf-8")
+        workflow = Path(".github/workflows/build-windows.yml").read_text(encoding="utf-8")
         self.assertIn("$currentRun = $allRuns | Where-Object { $_.id -eq $currentRunId }", script)
-        self.assertIn("$currentRunIsCompleted = ($currentRun -and $currentRun.status -eq 'completed')", script)
+        self.assertIn("$currentRunIsEligibleForReplacement = ($currentRun -and $pruneCurrentWorkflowToCurrent)", script)
         self.assertIn(
-            "if (-not ($isCurrentWorkflow -and $pruneCurrentWorkflowToCurrent -and $currentRunIsCompleted))",
+            "if (-not ($isCurrentWorkflow -and $currentRunIsEligibleForReplacement))",
             script,
         )
+        self.assertNotIn("$currentRunIsCompleted", script)
         self.assertIn("$keepIds['39933305387'] = $true", script)
-        self.assertIn("$_.status -eq 'completed'", script)
+        inline_start = workflow.index("name: Clean old Actions runs and storage after verified Windows build")
+        publish_start = workflow.index("name: Publish verified installer release")
+        self.assertGreater(inline_start, publish_start)
+        self.assertIn("continue-on-error: true", workflow[workflow.index("name: Prune stale completed runs"):])
+
 
     def test_qwen_voice_preview_reuses_warm_provider_and_replaces_changed_profile(self):
         from types import SimpleNamespace

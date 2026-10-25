@@ -71,6 +71,7 @@ def cast_row_matches(row: dict, filter_mode: str, query: str) -> bool:
     searchable = " ".join(
         [
             str(row.get("name") or ""),
+            str(row.get("series") or ""),
             str(row.get("role") or ""),
             " ".join(str(value) for value in (row.get("aliases") or [])),
         ]
@@ -184,7 +185,7 @@ class VoiceCastPage(QWidget):
         filters.addWidget(self.filter)
 
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Search character, role or alias…")
+        self.search.setPlaceholderText("Search character, series, role or alias")
         self.search.textChanged.connect(self._refresh_labels)
         filters.addWidget(self.search, 1)
         left.addLayout(filters)
@@ -339,8 +340,15 @@ class VoiceCastPage(QWidget):
             row.update({"name":name,"series":series,"aliases":aliases or list(row.get("aliases") or [])})
             if "voice_profile" in payload:
                 row["voice"] = voice or None
+        if hasattr(self, "series_edit"):
+            was_blocked = self.series_edit.blockSignals(True)
+            try:
+                self.series_edit.setText(series)
+            finally:
+                self.series_edit.blockSignals(was_blocked)
         self._save_cast(update_names=True, update_voice=("voice_profile" in payload))
         self._refresh_labels()
+        self.select_character_name(name, series)
         return row
 
     def _refresh_character_counts(self) -> None:
@@ -793,6 +801,7 @@ class VoiceCastPage(QWidget):
             save_state(folder, state)
         self._save_cast(update_names=True)
         self._refresh_labels()
+        self.select_character_name(name, row_series)
         self.summary.setText(f"Renamed '{old_name}' to '{name}'.")
 
 

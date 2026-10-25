@@ -49,14 +49,13 @@ foreach ($group in $groups) {
     $sorted = @($group.Group | Sort-Object -Property created_at -Descending)
     $isCurrentWorkflow = ($group.Name -eq $currentWorkflowName)
 
-    # A build invokes this script before the Actions run itself reaches "completed".
-    # Retain the previous successful run as a fallback until the current run is fully
-    # completed; otherwise a late failure could leave no recent successful build.
-    # Once the current run is completed and validated, retain it instead of an older success.
-    # Standalone/daily cleanup retains one latest successful run for each workflow.
+    # The caller enables this only after the current build and artifact validation succeed.
+    # GitHub keeps a workflow in-progress while its own cleanup step runs, so requiring
+    # status=='completed' here would permanently preserve older successes.
+    # Standalone/daily cleanup keeps the latest successful run for every workflow.
     $currentRun = $allRuns | Where-Object { $_.id -eq $currentRunId } | Select-Object -First 1
-    $currentRunIsCompleted = ($currentRun -and $currentRun.status -eq 'completed')
-    if (-not ($isCurrentWorkflow -and $pruneCurrentWorkflowToCurrent -and $currentRunIsCompleted)) {
+    $currentRunIsEligibleForReplacement = ($currentRun -and $pruneCurrentWorkflowToCurrent)
+    if (-not ($isCurrentWorkflow -and $currentRunIsEligibleForReplacement)) {
         $latestSuccess = $sorted | Where-Object { $_.conclusion -eq 'success' } | Select-Object -First 1
         if ($latestSuccess) { $keepIds[[string]$latestSuccess.id] = $true }
     }

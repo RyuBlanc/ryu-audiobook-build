@@ -756,6 +756,16 @@ jobs:
           compression-level: 0
           retention-days: 30
 
+      - name: Publish verified installer release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $semanticVersion = $env:RYU_APP_VERSION
+          if ([string]::IsNullOrWhiteSpace($semanticVersion)) { throw "Application version was not exported by the validated build step for release tagging." }
+          $tag = "v$semanticVersion-build-${{ github.run_number }}"
+          gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, the Obsidian/Ember dragon-tech interface, global Reduce Motion preference, a local-first audio catalogue with 26 real starter BGM tracks across calm, fantasy, adventure, comedy, action, sci-fi, emotional, mystery, horror and slice-of-life moods, plus six real book opening/page-turn/closing sound cues. Add licensed tracks through Generate > Real BGM catalogue / Real audiobook cue files. Includes Qwen VoiceDesign preset isolation, audiobook AI smoke validation, Chatterbox runtime validation, frozen EXE checks and installer verification. Starter-track source and license notes are included beside the local audio library." --target $env:GITHUB_SHA
       - name: Clean old Actions runs and storage after verified Windows build
         if: success()
         continue-on-error: true
@@ -769,16 +779,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           ./.github/scripts/cleanup_actions_storage.ps1
-      - name: Publish verified installer release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $semanticVersion = $env:RYU_APP_VERSION
-          if ([string]::IsNullOrWhiteSpace($semanticVersion)) { throw "Application version was not exported by the validated build step for release tagging." }
-          $tag = "v$semanticVersion-build-${{ github.run_number }}"
-          gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, the Obsidian/Ember dragon-tech interface, global Reduce Motion preference, a local-first audio catalogue with 26 real starter BGM tracks across calm, fantasy, adventure, comedy, action, sci-fi, emotional, mystery, horror and slice-of-life moods, plus six real book opening/page-turn/closing sound cues. Add licensed tracks through Generate > Real BGM catalogue / Real audiobook cue files. Includes Qwen VoiceDesign preset isolation, audiobook AI smoke validation, Chatterbox runtime validation, frozen EXE checks and installer verification. Starter-track source and license notes are included beside the local audio library." --target $env:GITHUB_SHA
+
   # Run storage cleanup even when tests/package validation fails, so old
   # failed/cancelled runs do not accumulate indefinitely. The cleanup script
   # preserves the latest successful run whenever this run did not pass.
@@ -795,6 +796,7 @@ jobs:
       - name: Checkout cleanup script
         uses: actions/checkout@v4
       - name: Prune stale completed runs and attached storage
+        continue-on-error: true
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
