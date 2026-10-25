@@ -3173,9 +3173,11 @@
     // when open, preserve row nodes and update only changing fields/progress.
     const panelVisible = Boolean($('backgroundJobsModal')?.classList.contains('show'));
     if (box && panelVisible) {
+      // Keep the structural signature independent of progress text. Message
+      // and error contents are updated in place below; rebuilding every row
+      // when a worker first emits a message flashes the entire job panel.
       const signature = jobs.map(j => [
-        j.job_id, j.state, j.type, j.title, Boolean(j.recoverable),
-        Boolean(j.message), Boolean(j.error?.message)
+        j.job_id, j.state, j.type, j.title, Boolean(j.recoverable)
       ].join('\u001f')).join('\u001e');
       if (box.dataset.backendJobsSignature !== signature) {
         box.innerHTML = jobs.map(j => {
