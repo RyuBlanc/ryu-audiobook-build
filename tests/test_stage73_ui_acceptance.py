@@ -263,12 +263,19 @@ class Stage73UIAcceptanceTests(unittest.TestCase):
             'self.reduce_motion = QCheckBox("Reduce page and waveform motion")',
             'for kbps in (128, 160, 192, 224, 256, 288, 320):',
             'self.save_button.clicked.connect(self.save_settings)',
-            '("Open Audiobook Library", library_root())',
+            '"Project Library (new imports)"',
+            '"Audio Assets (new exports)"',
             '("Open Voice Profiles", voices_root())',
             '("Open Audio Library", audio_library_root())',
             '("Open Models Folder", models_root())',
             '("Open Logs Folder", app_root() / "Logs")',
-            "Books, voice profiles, models, audio and logs remain on this PC.",
+            '"All content stays local."',
+            'self.settings.setValue("storage/library_root"',
+            'self.settings.setValue("storage/audio_assets_root"',
+            "QFileDialog.getExistingDirectory",
+            "shutil.disk_usage",
+            "_storage_root_write_error",
+            "existing projects remain visible in their original folders.",
         ):
             self.assertIn(required, page)
 

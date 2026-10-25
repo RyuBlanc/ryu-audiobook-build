@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.chapters.detector import Chapter, detect_chapters
+from app.core.paths import audiobooks_root
 from app.chapters.characters import analyze_book
 from app.ai.brain import _numeric_score
 from app.tts.pronunciation_suggester import (
@@ -1865,8 +1866,13 @@ class GenerationPage(QWidget):
     def _default_output(self) -> Path | None:
         if not self.project_folder:
             return None
-        folder = self.project_folder / "Audiobook"
-        folder.mkdir(parents=True, exist_ok=True)
+        # New exports use the configured audio-assets location, grouped by this
+        # unique project folder so similarly titled books cannot overwrite each other.
+        project_label = "".join(
+            c if c not in '<>:"/\\|?*' else "_"
+            for c in self.project_folder.name
+        ).strip() or "Project"
+        folder = audiobooks_root() / project_label
         title = self.title.text().strip() or self.project_folder.name
         safe = "".join(c if c not in '<>:"/\\|?*' else "_" for c in title).strip() or "Audiobook"
         return folder / f"{safe}.m4b"
@@ -1874,10 +1880,13 @@ class GenerationPage(QWidget):
     def _set_default_output(self) -> None:
         default = self._default_output()
         state = load_state(self.project_folder) if self.project_folder else {}
-        saved = Path(state["output_path"]) if state.get("output_path") else None
-        # Old versions used Downloads. New projects always default to the
-        # project's Audiobook folder unless the saved path is already there.
-        if saved and self.project_folder and saved.parent == self.project_folder / "Audiobook":
+        saved = Path(state["output_path"]).expanduser() if state.get("output_path") else None
+        if saved and not saved.is_absolute() and self.project_folder:
+            saved = self.project_folder / saved
+        # Always honour a book's explicitly saved output path, including a path
+        # the user selected on another drive. Only a book without a saved path
+        # receives the configured default audio-assets destination.
+        if saved:
             self.output.setText(str(saved))
         elif default:
             self.output.setText(str(default))

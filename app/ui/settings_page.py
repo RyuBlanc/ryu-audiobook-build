@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import shutil
+import tempfile
 
 from PySide6.QtCore import QSettings, Qt, QUrl
 from PySide6.QtGui import QDesktopServices
@@ -9,6 +11,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -20,8 +23,41 @@ from PySide6.QtWidgets import (
     QScrollArea,
 )
 
-from app.core.paths import app_root, audio_library_root, library_root, models_root, voices_root
+from app.core.paths import (
+    app_root, audio_library_root, audiobooks_root, default_audiobooks_root,
+    default_library_root, library_root, models_root, voices_root,
+)
 from app.version import full_version
+
+
+def _storage_space_summary(folder: Path) -> str:
+    """Show real free/total capacity for the filesystem containing this folder."""
+    path = Path(folder).expanduser()
+    if not path.is_dir():
+        return "Unavailable — folder missing or drive disconnected"
+    try:
+        usage = shutil.disk_usage(str(path))
+    except OSError as exc:
+        return f"Unavailable — {exc}"
+    gib = 1024 ** 3
+    return f"{usage.free / gib:.1f} GB free of {usage.total / gib:.1f} GB"
+
+
+def _storage_root_write_error(folder: Path) -> str:
+    """Validate the chosen existing folder with a harmless temporary write probe."""
+    path = Path(folder).expanduser()
+    if not path.is_dir():
+        return "The folder does not exist or its drive is not connected."
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix=".ryu-storage-write-test-",
+            dir=str(path),
+            delete=True,
+        ):
+            pass
+    except OSError as exc:
+        return f"The folder is not writable: {exc}"
+    return ""
 
 
 _LIGHT_COLOURS = {
@@ -154,6 +190,10 @@ class SettingsPage(QWidget):
         super().__init__()
         self.on_saved = on_saved
         self.settings = QSettings("RyuBlanc", "Ryu's Audiobook")
+        self._selected_library_root = library_root()
+        self._selected_audio_assets_root = audiobooks_root()
+        self._storage_path_labels = {}
+        self._storage_space_labels = {}
 
         content = QWidget()
         root = QVBoxLayout(content)
@@ -239,13 +279,23 @@ class SettingsPage(QWidget):
 
         storage = QGroupBox("Local storage")
         storage_layout = QVBoxLayout(storage)
-        note = QLabel("Books, voice profiles, models, audio and logs remain on this PC. No cloud storage is used by these settings.")
+        note = QLabel(
+            "All content stays local. Project Library controls where new imports are stored; "
+            "existing projects remain visible in their original folders. Audio Assets controls "
+            "the default destination for new audiobook exports. Free space is read from the "
+            "selected folder's actual filesystem."
+        )
         note.setObjectName("muted")
         note.setWordWrap(True)
         storage_layout.addWidget(note)
+        self._add_storage_root_row(
+            storage_layout, "Project Library (new imports)", "library", self._selected_library_root
+        )
+        self._add_storage_root_row(
+            storage_layout, "Audio Assets (new exports)", "audio_assets", self._selected_audio_assets_root
+        )
         for label, folder in (
             ("Open Application Data", app_root()),
-            ("Open Audiobook Library", library_root()),
             ("Open Voice Profiles", voices_root()),
             ("Open Audio Library", audio_library_root()),
             ("Open Models Folder", models_root()),
@@ -306,7 +356,82 @@ class SettingsPage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
 
+    def _root_for_kind(self, kind: str) -> Path:
+        if kind == "library":
+            return self._selected_library_root
+        if kind == "audio_assets":
+            return self._selected_audio_assets_root
+        raise ValueError(f"Unknown storage root: {kind}")
+
+    def _set_root_for_kind(self, kind: str, path: Path) -> None:
+        if kind == "library":
+            self._selected_library_root = path
+        elif kind == "audio_assets":
+            self._selected_audio_assets_root = path
+        else:
+            raise ValueError(f"Unknown storage root: {kind}")
+
+    def _add_storage_root_row(self, layout, label: str, kind: str, folder: Path) -> None:
+        row = QHBoxLayout()
+        detail = QLabel(label)
+        detail.setMinimumWidth(205)
+        path_label = QLabel(str(folder))
+        path_label.setObjectName("muted")
+        path_label.setWordWrap(True)
+        space_label = QLabel(_storage_space_summary(folder))
+        space_label.setObjectName("muted")
+        change = QPushButton("Choose…")
+        change.clicked.connect(
+            lambda _checked=False, root_kind=kind: self._choose_storage_root(root_kind)
+        )
+        use_default = QPushButton("Use default")
+        use_default.clicked.connect(
+            lambda _checked=False, root_kind=kind: self._use_default_storage_root(root_kind)
+        )
+        open_button = QPushButton("Open")
+        open_button.clicked.connect(
+            lambda _checked=False, root_kind=kind: self.open_folder(self._root_for_kind(root_kind))
+        )
+        self._storage_path_labels[kind] = path_label
+        self._storage_space_labels[kind] = space_label
+        row.addWidget(detail)
+        row.addWidget(path_label, 1)
+        row.addWidget(space_label)
+        row.addWidget(change)
+        row.addWidget(use_default)
+        row.addWidget(open_button)
+        layout.addLayout(row)
+
+    def _refresh_storage_root_labels(self) -> None:
+        for kind in ("library", "audio_assets"):
+            folder = self._root_for_kind(kind)
+            self._storage_path_labels[kind].setText(str(folder))
+            self._storage_space_labels[kind].setText(_storage_space_summary(folder))
+
+    def _choose_storage_root(self, kind: str) -> None:
+        current = self._root_for_kind(kind)
+        caption = "Choose Project Library Folder" if kind == "library" else "Choose Audio Assets Folder"
+        selected = QFileDialog.getExistingDirectory(self, caption, str(current))
+        if not selected:
+            return
+        candidate = Path(selected).expanduser()
+        error = _storage_root_write_error(candidate)
+        if error:
+            QMessageBox.warning(self, "Storage Location Unavailable", f"{candidate}\n\n{error}")
+            self.status.setText("Storage location was not changed because the selected folder is unavailable.")
+            return
+        self._set_root_for_kind(kind, candidate)
+        self._refresh_storage_root_labels()
+        self.status.setText("Storage location selected. Press Save Settings to apply it.")
+
+    def _use_default_storage_root(self, kind: str) -> None:
+        default = default_library_root() if kind == "library" else default_audiobooks_root()
+        self._set_root_for_kind(kind, default)
+        self._refresh_storage_root_labels()
+        self.status.setText("Default storage location selected. Press Save Settings to apply it.")
+
     def refresh(self) -> None:
+        self._refresh_storage_root_labels()
         stored_theme = str(self.settings.value("ui/theme", "dark")).lower()
         self.theme.setCurrentIndex(max(0, self.theme.findData(stored_theme)))
         self.reduce_motion.setChecked(self.settings.value("ui/reduce_motion", False, type=bool))
@@ -317,6 +442,18 @@ class SettingsPage(QWidget):
         self.default_bitrate.setCurrentIndex(max(0, self.default_bitrate.findData(int(self.settings.value("audio/default_bitrate", 256) or 256))))
 
     def save_settings(self) -> None:
+        selected_roots = (
+            ("Project Library", self._selected_library_root),
+            ("Audio Assets", self._selected_audio_assets_root),
+        )
+        for label, folder in selected_roots:
+            error = _storage_root_write_error(folder)
+            if error:
+                message = f"{label} cannot be used at {folder}\n\n{error}"
+                self.status.setText(message)
+                QMessageBox.warning(self, "Storage Location Not Saved", message)
+                return
+
         theme = str(self.theme.currentData() or "dark")
         self.settings.setValue("ui/theme", theme)
         self.settings.setValue("ui/accent", str(self.accent.currentData() or "crimson"))
@@ -326,7 +463,23 @@ class SettingsPage(QWidget):
         self.settings.setValue("ui/window_size", window_size)
         self.settings.setValue("audio/default_bitrate", int(self.default_bitrate.currentData() or 256))
         self.settings.setValue("ui/reduce_motion", self.reduce_motion.isChecked())
+        self.settings.setValue("storage/library_root", str(self._selected_library_root))
+        self.settings.setValue("storage/audio_assets_root", str(self._selected_audio_assets_root))
         self.settings.sync()
+        roots_persisted = (
+            str(self.settings.value("storage/library_root", "") or "") == str(self._selected_library_root)
+            and str(self.settings.value("storage/audio_assets_root", "") or "") == str(self._selected_audio_assets_root)
+        )
+        if self.settings.status() != QSettings.Status.NoError or not roots_persisted:
+            self.status.setText("Settings could not be verified on disk; storage locations were not applied.")
+            QMessageBox.warning(
+                self, "Settings Not Saved",
+                "Windows did not confirm the settings write. Check permissions and try again."
+            )
+            return
+        self._selected_library_root = library_root()
+        self._selected_audio_assets_root = audiobooks_root()
+        self._refresh_storage_root_labels()
         app = QApplication.instance()
         if app is not None:
             apply_application_theme(
@@ -346,8 +499,8 @@ class SettingsPage(QWidget):
         if callable(apply_size):
             apply_size(window_size)
         self.status.setText(
-            "Settings saved locally. Theme, accent, interface scale, text size and window size preferences are recorded; "
-            "default bitrate is used for new books unless a book already has its own saved quality."
+            "Settings saved locally. New imports use the selected Project Library and new exports use Audio Assets; "
+            "existing projects and saved output destinations stay in place. UI preferences and default audio quality are also saved."
         )
 
     @staticmethod

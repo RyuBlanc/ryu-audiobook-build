@@ -8,7 +8,7 @@ import os
 import tempfile
 
 from app.chapters.detector import Chapter
-from app.core.paths import library_root
+from app.core.paths import library_root, project_library_roots
 
 class Project:
     def __init__(self, title: str, folder: Path, source_path: Path | None = None, chapters: list[Chapter] | None = None):
@@ -147,23 +147,37 @@ def create_project(title: str, source_path: Path, chapters: list[Chapter]) -> Pr
         raise
 
 def list_projects() -> list[Project]:
-    projects = []
-    root = library_root()
-    # A fresh install may not have created the user library yet. Listing is a
-    # read operation and should return an empty library, not fail during startup.
-    if not root.is_dir():
-        return projects
-    for folder in sorted(root.iterdir()):
-        # Import staging folders may briefly contain verified JSON while the
-        # import worker is preparing its atomic publish. Never expose them as
-        # user projects before the final directory rename.
-        if folder.name.startswith(".import-staging-"):
+    projects: list[Project] = []
+    seen_folders: set[str] = set()
+    # Scan the chosen root first, then the original root. Existing projects are
+    # not moved or hidden just because the user changes the destination for new imports.
+    for root in project_library_roots():
+        if not root.is_dir():
             continue
-        if folder.is_dir() and (folder / "project.json").exists():
+        try:
+            folders = sorted(root.iterdir())
+        except OSError:
+            # An external library drive can be disconnected while the app is open.
+            continue
+        for folder in folders:
+            # Import staging folders may briefly contain verified JSON while the
+            # import worker is preparing its atomic publish. Never expose these.
+            if folder.name.startswith(".import-staging-"):
+                continue
+            if not folder.is_dir() or not (folder / "project.json").exists():
+                continue
             try:
-                projects.append(Project.load(folder))
+                key = str(folder.resolve()).casefold()
+            except OSError:
+                key = str(folder.absolute()).casefold()
+            if key in seen_folders:
+                continue
+            try:
+                project = Project.load(folder)
             except (OSError, ValueError, KeyError, json.JSONDecodeError):
                 continue
+            projects.append(project)
+            seen_folders.add(key)
     return projects
 
 
@@ -219,14 +233,19 @@ def delete_project(project: Project) -> None:
     Character Library and global pronunciation dictionary live outside the project
     folder and are retained.
     """
-    from app.core.paths import library_root
+    from app.core.paths import project_library_roots
     from app.core.state import load_state
     from app.core.character_library import sync_characters
     from app.core.project_history import record_project_deletion, update_project_deletion
 
-    root = library_root().resolve()
     folder = project.folder.resolve()
-    if folder == root or root not in folder.parents:
+    allowed_roots = []
+    for root_path in project_library_roots():
+        try:
+            allowed_roots.append(root_path.resolve())
+        except OSError:
+            continue
+    if not any(folder != root and root in folder.parents for root in allowed_roots):
         raise ValueError("Refusing to delete a folder outside the audiobook library.")
     if not folder.exists():
         return
