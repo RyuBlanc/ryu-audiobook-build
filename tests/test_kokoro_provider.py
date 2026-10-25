@@ -74,6 +74,23 @@ class KokoroProviderTests(unittest.TestCase):
             ):
                 self.assertTrue(KokoroProvider.assets_available())
 
+    def test_fp16_model_variant_uses_its_lower_size_threshold(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "kokoro"
+            root.mkdir()
+            model = root / "kokoro-v1.0.fp16.onnx"
+            voices = root / "voices-v1.0.bin"
+            model.write_bytes(b"m" * 1500)
+            voices.write_bytes(b"v" * 1500)
+
+            with (
+                patch("app.tts.providers.kokoro.models_root", return_value=Path(tmp)),
+                patch.object(kokoro_module, "KOKORO_MODEL_MIN_BYTES", 2000),
+                patch.object(kokoro_module, "KOKORO_FP16_MODEL_MIN_BYTES", 1000),
+                patch.object(kokoro_module, "KOKORO_VOICES_MIN_BYTES", 1000),
+            ):
+                self.assertTrue(KokoroProvider.assets_available())
+
     def test_direct_provider_rejects_partial_asset_paths(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -84,6 +101,7 @@ class KokoroProviderTests(unittest.TestCase):
             provider = KokoroProvider(model_path=model, voices_path=voices)
             with (
                 patch.object(kokoro_module, "KOKORO_MODEL_MIN_BYTES", 2000),
+                patch.object(kokoro_module, "KOKORO_QUANTIZED_MODEL_MIN_BYTES", 2000),
                 patch.object(kokoro_module, "KOKORO_VOICES_MIN_BYTES", 2000),
             ):
                 with self.assertRaisesRegex(RuntimeError, "incomplete"):

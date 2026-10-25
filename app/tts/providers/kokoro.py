@@ -35,15 +35,20 @@ KOKORO_VOICES = (
 )
 
 
-# The pinned Kokoro v1.1 release has a ~326 MB default model and ~28 MB voice pack.
-# Smaller published quantized variants are supported with a separate lower bound.
-KOKORO_MODEL_MIN_BYTES = 100 * 1024 * 1024
-KOKORO_QUANTIZED_MODEL_MIN_BYTES = 25 * 1024 * 1024
-KOKORO_VOICES_MIN_BYTES = 5 * 1024 * 1024
+# Minimum sizes are set against the pinned v1.1 release asset lengths:
+# default 325,505,369 B; fp16 163,527,961 B; int8 114,119,327 B;
+# voices-v1.0.bin 28,214,398 B. Lower bounds leave modest format overhead
+# tolerance while rejecting most old/truncated files without loading the model.
+KOKORO_MODEL_MIN_BYTES = 295 * 1024 * 1024
+KOKORO_FP16_MODEL_MIN_BYTES = 148 * 1024 * 1024
+KOKORO_QUANTIZED_MODEL_MIN_BYTES = 103 * 1024 * 1024
+KOKORO_VOICES_MIN_BYTES = 25 * 1024 * 1024
+_FP16_MODEL_NAMES = frozenset(("kokoro-v1.0.fp16.onnx",))
 _QUANTIZED_MODEL_NAMES = frozenset((
     "kokoro-v1.0.int8.onnx",
     "model_q8f16.onnx",
     "model_quantized.onnx",
+    "model.onnx",
 ))
 
 
@@ -57,11 +62,12 @@ def _asset_file_ready(path: Path | None, minimum_bytes: int) -> bool:
 
 
 def kokoro_model_file_ready(path: Path | None) -> bool:
-    minimum = (
-        KOKORO_QUANTIZED_MODEL_MIN_BYTES
-        if path is not None and path.name in _QUANTIZED_MODEL_NAMES
-        else KOKORO_MODEL_MIN_BYTES
-    )
+    if path is not None and path.name in _FP16_MODEL_NAMES:
+        minimum = KOKORO_FP16_MODEL_MIN_BYTES
+    elif path is not None and path.name in _QUANTIZED_MODEL_NAMES:
+        minimum = KOKORO_QUANTIZED_MODEL_MIN_BYTES
+    else:
+        minimum = KOKORO_MODEL_MIN_BYTES
     return _asset_file_ready(path, minimum)
 
 
