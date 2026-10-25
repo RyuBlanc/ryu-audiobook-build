@@ -1065,13 +1065,13 @@ class PremiumV2Bridge(QObject):
         state_before = load_state(project.folder)
         project_state_characters = [item for item in (state_before.get("characters") or []) if isinstance(item, dict)]
         saved_assignment_series = str((assignment_before or {}).get("series") or "").strip()
-        learning_character = next((item for item in project_state_characters if any(
-            str(candidate or "").casefold() == speaker.casefold()
-            for candidate in [item.get("name"), *(item.get("aliases") or [])]
-        ) and (not saved_assignment_series
-               or str(item.get("series") or self._project_series_name(project, state_before)).casefold()
-                  == saved_assignment_series.casefold())
-        for speaker in assigned_before), {})
+        assigned_keys = {str(speaker or "").casefold() for speaker in assigned_before}
+        learning_character = next((item for item in project_state_characters
+            if any(str(candidate or "").casefold() in assigned_keys
+                   for candidate in [item.get("name"), *(item.get("aliases") or [])])
+            and (not saved_assignment_series
+                 or str(item.get("series") or self._project_series_name(project, state_before)).casefold()
+                    == saved_assignment_series.casefold())), {})
         learning_series = str(saved_assignment_series or learning_character.get("series") or "").strip()
         if not learning_series:
             learning_series = self._project_series_name(project, state_before)
