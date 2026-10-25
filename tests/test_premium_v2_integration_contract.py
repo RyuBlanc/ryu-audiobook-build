@@ -595,7 +595,11 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("character_library_path as reusable_character_library_path", host)
         self.assertIn("return reusable_character_library_path()", host)
         self.assertIn("migration_path.replace(path)", host)
-        self.assertIn("temporary.replace(path)", host)
+        persistence_start = host.index("def _persist_json_rows(")
+        persistence_end = host.index("def _persist_jobs(", persistence_start)
+        persistence = host[persistence_start:persistence_end]
+        self.assertIn("Path(temp_name).replace(path)", persistence)
+        self.assertIn("os.fsync(handle.fileno())", persistence)
         self.assertIn("call('character_library.list')", adapter)
         self.assertIn("call('character_library.save'", adapter)
         self.assertIn("call('character_library.delete'", adapter)
