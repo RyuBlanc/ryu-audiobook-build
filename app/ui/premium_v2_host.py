@@ -987,8 +987,9 @@ class PremiumV2Bridge(QObject):
         project_state = load_state(project.folder)
         project_state["modified_at"] = self._now()
         save_state(project.folder, project_state)
-        # A saved speaker choice is explicit user feedback. Store it locally under
-        # the active series so later volumes can learn from this confirmed example.
+        # A saved speaker choice is explicit user feedback. Store it in that
+        # character's selected series so similarly named characters in different
+        # series never share training examples by accident.
         if len(speakers) == 1:
             try:
                 from app.chapters.character_learning import record_assignment_feedback
@@ -997,10 +998,16 @@ class PremiumV2Bridge(QObject):
                 saved_chapter = next((item for item in project.chapters if item.number == saved_number), None)
                 saved_character = next((item for item in (project_state.get("characters") or [])
                                          if isinstance(item, dict)
-                                         and str(item.get("name") or "").casefold() == speakers[0].casefold()), {})
+                                         and (str(item.get("name") or "").casefold() == speakers[0].casefold()
+                                              or speakers[0].casefold() in {
+                                                  str(alias).casefold() for alias in (item.get("aliases") or [])
+                                              })), {})
+                learning_series = str(saved_character.get("series") or "").strip()
+                if not learning_series:
+                    learning_series = self._project_series_name(project, project_state)
                 if saved_chapter is not None:
                     record_assignment_feedback(
-                        series=self._project_series_name(project, project_state),
+                        series=learning_series,
                         speaker=speakers[0],
                         aliases=list(saved_character.get("aliases") or []),
                         chapter_text=str(saved_chapter.text or ""),
@@ -1027,6 +1034,24 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Refresh the dialogue review and select a valid saved passage.")
         if any(isinstance(payload.get(key), bool) for key in ("chapter_number", "start", "end")):
             raise ValueError("Dialogue offsets must be valid integer positions.")
+        chapter_before = next((item for item in project.chapters if item.number == chapter_number), None)
+        assignment_before = next((row for row in (getattr(chapter_before, "dialogue_assignments", []) or [])
+                                   if isinstance(row, dict) and int(row.get("start", -1)) == start
+                                   and int(row.get("end", -1)) == end), None)
+        assigned_before = (
+            list(assignment_before.get("speakers") or [])
+            if assignment_before and isinstance(assignment_before.get("speakers"), list)
+            else ([str(assignment_before.get("speaker"))] if assignment_before and assignment_before.get("speaker") else [])
+        )
+        state_before = load_state(project.folder)
+        project_state_characters = [item for item in (state_before.get("characters") or []) if isinstance(item, dict)]
+        learning_character = next((item for item in project_state_characters if any(
+            str(candidate or "").casefold() == speaker.casefold()
+            for candidate in [item.get("name"), *(item.get("aliases") or [])]
+        ) for speaker in assigned_before), {})
+        learning_series = str(learning_character.get("series") or "").strip()
+        if not learning_series:
+            learning_series = self._project_series_name(project, state_before)
         result = unassign_dialogue_from_chapters(
             project.chapters, chapter_number, start, end, str(payload.get("dialogue_text") or "")
         )
@@ -1037,7 +1062,7 @@ class PremiumV2Bridge(QObject):
         try:
             from app.chapters.character_learning import remove_assignment_feedback
             remove_assignment_feedback(
-                series=self._project_series_name(project, project_state),
+                series=learning_series,
                 chapter_text=str(next((item.text for item in project.chapters
                                        if item.number == chapter_number), "") or ""),
                 start=start, end=end, source_text=str(payload.get("dialogue_text") or ""),
