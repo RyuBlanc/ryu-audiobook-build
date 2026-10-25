@@ -800,8 +800,8 @@ class ProjectWorkflow(QMainWindow):
         screen = self.screen() or QApplication.primaryScreen()
         available = screen.availableGeometry() if screen is not None else None
         if available is not None:
-            min_width = max(480, min(960, int(available.width())))
-            min_height = max(360, min(620, int(available.height())))
+            min_width = max(1, min(960, int(available.width())))
+            min_height = max(1, min(620, int(available.height())))
         else:
             min_width, min_height = 960, 620
         self.setMinimumSize(min_width, min_height)
