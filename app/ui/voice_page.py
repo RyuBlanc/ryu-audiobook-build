@@ -1010,6 +1010,18 @@ class VoicePage(QWidget):
         except (ImportError, RuntimeError, TypeError):
             return False
 
+    def _set_status_text(self, message: str) -> None:
+        """Update the optional status label only while its Qt object is alive."""
+        status = getattr(self, "status", None)
+        if self._is_live_qt_object(status):
+            status.setText(str(message))
+
+    def _set_preview_engine_status_text(self, message: str) -> None:
+        """Update preview feedback safely when a child widget is being torn down."""
+        status = getattr(self, "preview_engine_status", None)
+        if self._is_live_qt_object(status):
+            status.setText(str(message))
+
     def _invalidate_preview(self, *_args) -> None:
         """Invalidate a preview when its voice settings, text, or target changes."""
         if getattr(self, "_invalidating_preview", False):
@@ -2937,21 +2949,24 @@ class VoicePage(QWidget):
     def _preview_start_watchdog(self, worker: VoicePreviewWorker) -> None:
         if self.preview_worker is not worker or not worker.isRunning():
             return
-        current = self.preview_engine_status.text().strip()
+        engine_status = getattr(self, "preview_engine_status", None)
+        if not self._is_live_qt_object(engine_status):
+            return
+        current = engine_status.text().strip()
         if current.startswith("Queued •"):
             message = (
                 "Preview worker is running but has not reported its startup phase. "
                 "Check Settings\\qwen_character_worker.log for Qwen VoiceDesign errors; "
                 "generation has not been cancelled."
             )
-            self.preview_engine_status.setText(message)
-            self.status.setText(message)
+            self._set_preview_engine_status_text(message)
+            self._set_status_text(message)
 
     def _preview_worker_status(self, message: str, request_id: int | None = None) -> None:
         if not self._preview_request_is_current(request_id):
             return
-        self.preview_engine_status.setText(message)
-        self.status.setText(message)
+        self._set_preview_engine_status_text(message)
+        self._set_status_text(message)
 
     def _preview_worker_ok(
         self, path: str, elapsed_seconds: float = 0.0, request_id: int | None = None
@@ -3000,15 +3015,15 @@ class VoicePage(QWidget):
         )
         if actual_seconds is not None and target:
             qualifier = "target reached" if actual_seconds + 0.25 >= target else "shorter than target"
-            self.preview_engine_status.setText(
+            self._set_preview_engine_status_text(
                 f"100% • Ready • {actual_seconds:.1f}s / {int(target)}s • {qualifier} "
                 f"• {elapsed_label}{rtf_label} • press Play"
             )
         else:
-            self.preview_engine_status.setText(
+            self._set_preview_engine_status_text(
                 f"100% • Preview ready • {elapsed_label}{rtf_label} • press Play"
             )
-        self.status.setText(
+        self._set_status_text(
             f"Preview ready • {self.preview_provider.text()} • {self.preview_voice.text()}"
         )
 
@@ -3021,8 +3036,8 @@ class VoicePage(QWidget):
         self._discard_preview_output(output_path)
         self.preview_percent_bar.setValue(0)
         self.preview_activity_bar.setVisible(False)
-        self.preview_engine_status.setText(f"0% • Preview failed • {message}")
-        self.status.setText(f"Preview failed: {message}")
+        self._set_preview_engine_status_text(f"0% • Preview failed • {message}")
+        self._set_status_text(f"Preview failed: {message}")
         self.preview_button.setEnabled(True)
         self.play_button.setEnabled(False)
         if hasattr(self, "save_preview_button"):
@@ -3041,8 +3056,8 @@ class VoicePage(QWidget):
         self._preview_profile_signature = None
         self.preview_percent_bar.setValue(0)
         self.preview_activity_bar.setVisible(False)
-        self.preview_engine_status.setText("0% • Preview cancelled")
-        self.status.setText("Voice preview cancelled.")
+        self._set_preview_engine_status_text("0% • Preview cancelled")
+        self._set_status_text("Voice preview cancelled.")
         self.preview_button.setEnabled(True)
         self.play_button.setEnabled(False)
         if hasattr(self, "save_preview_button"):
@@ -3257,7 +3272,7 @@ class VoicePage(QWidget):
 
     def _player_error(self, _error, error_string):
         if error_string:
-            self.status.setText(f"Preview playback error: {error_string}")
+            self._set_status_text(f"Preview playback error: {error_string}")
             button = getattr(self, "play_button", None)
             if self._is_live_qt_object(button):
                 button.setText("▶  Play")

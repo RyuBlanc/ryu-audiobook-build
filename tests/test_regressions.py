@@ -845,12 +845,20 @@ class RegressionTests(unittest.TestCase):
             # Closing stacked pages can destroy a child widget before its
             # preview-setting signals are disconnected. The callback must
             # tolerate a surviving Python wrapper with a deleted Qt object.
-            shiboken6.delete(page.status)
+            status = page.status
+            parent = status.parentWidget()
+            if parent is not None:
+                layout = parent.layout()
+                if layout is not None:
+                    layout.removeWidget(status)
+                status.setParent(None)
+            shiboken6.delete(status)
             page._invalidate_preview()
             self.assertIsNone(page.last_preview)
         finally:
-            page.close()
-            page.deleteLater()
+            if shiboken6.isValid(page):
+                page.close()
+                page.deleteLater()
 
     def test_qwen_clone_draft_identity_is_stable_before_profile_save(self):
         from types import SimpleNamespace

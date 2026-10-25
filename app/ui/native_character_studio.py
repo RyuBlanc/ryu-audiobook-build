@@ -177,6 +177,127 @@ class NativeDialogueAnalysisWorker(QThread):
             self.failed.emit(f"{exc}\n{traceback.format_exc(limit=6)}")
 
 
+class NativeCharacterRecordDialog(QDialog):
+    """Native form for creating a reusable, series-scoped character record."""
+
+    def __init__(
+        self,
+        parent=None,
+        *,
+        series_names=None,
+        profiles=None,
+        default_series: str = "",
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Add Character")
+        self.setMinimumWidth(500)
+        self.setModal(True)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 20, 22, 20)
+        root.setSpacing(12)
+
+        heading = QLabel("Add character to your library")
+        heading.setObjectName("pageHeading")
+        root.addWidget(heading)
+        intro = QLabel(
+            "Save a reusable character identity for this series. Aliases help speaker "
+            "analysis recognize alternate names; an audio profile can be assigned now or later."
+        )
+        intro.setObjectName("muted")
+        intro.setWordWrap(True)
+        root.addWidget(intro)
+
+        form = QFormLayout()
+        form.setSpacing(10)
+        self.name_edit = QLineEdit()
+        self.name_edit.setObjectName("characterRecordName")
+        self.name_edit.setPlaceholderText("Canonical character name")
+        self.name_edit.setClearButtonEnabled(True)
+
+        self.series_combo = QComboBox()
+        self.series_combo.setObjectName("characterRecordSeries")
+        self.series_combo.setEditable(True)
+        self.series_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        seen_series: set[str] = set()
+        for raw in list(series_names or []) + [default_series]:
+            value = str(raw or "").strip()
+            key = value.casefold()
+            if value and key not in seen_series:
+                seen_series.add(key)
+                self.series_combo.addItem(value, value)
+        self.series_combo.setCurrentText(str(default_series or "").strip())
+        self.series_combo.setToolTip(
+            "Choose an existing series or enter a new name. Keep this name consistent across volumes."
+        )
+
+        self.aliases_edit = QLineEdit()
+        self.aliases_edit.setObjectName("characterRecordAliases")
+        self.aliases_edit.setPlaceholderText("Optional aliases, separated by commas")
+        self.aliases_edit.setClearButtonEnabled(True)
+
+        self.profile_combo = QComboBox()
+        self.profile_combo.setObjectName("characterRecordVoiceProfile")
+        self.profile_combo.addItem("Unassigned", "")
+        for profile in list(profiles or []):
+            profile_name = str(getattr(profile, "name", "") or "").strip()
+            if not profile_name:
+                continue
+            provider = str(getattr(profile, "provider", "") or "Voice").replace("-", " ").title()
+            self.profile_combo.addItem(f"{profile_name}  ·  {provider}", profile_name)
+
+        form.addRow("Character name", self.name_edit)
+        form.addRow("Series", self.series_combo)
+        form.addRow("Aliases", self.aliases_edit)
+        form.addRow("Audio profile", self.profile_combo)
+        root.addLayout(form)
+
+        self.status = QLabel("A character name and series are required.")
+        self.status.setObjectName("muted")
+        self.status.setWordWrap(True)
+        root.addWidget(self.status)
+
+        actions = QHBoxLayout()
+        actions.addStretch(1)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        actions.addWidget(cancel)
+        self.save_button = QPushButton("Save Character")
+        self.save_button.setObjectName("primary")
+        self.save_button.clicked.connect(self._accept_if_valid)
+        actions.addWidget(self.save_button)
+        root.addLayout(actions)
+
+    def _accept_if_valid(self) -> None:
+        name = self.name_edit.text().strip()
+        series = self.series_combo.currentText().strip()
+        if not name:
+            self.status.setText("Enter a character name before saving.")
+            self.name_edit.setFocus()
+            return
+        if not series:
+            self.status.setText("Choose an existing series or enter a new series name.")
+            self.series_combo.setFocus()
+            return
+        self.accept()
+
+    def values(self) -> dict[str, Any]:
+        name = self.name_edit.text().strip()
+        aliases = []
+        seen_aliases = {name.casefold()}
+        for raw in re.split(r"[,;]", self.aliases_edit.text()):
+            alias = raw.strip()
+            if alias and alias.casefold() not in seen_aliases:
+                seen_aliases.add(alias.casefold())
+                aliases.append(alias)
+        return {
+            "name": name,
+            "series": self.series_combo.currentText().strip(),
+            "aliases": aliases[:5],
+            "voice_profile": str(self.profile_combo.currentData() or "").strip(),
+        }
+
+
 class NativeCharacterAssignmentDialog(QDialog):
     """Native source-passage confirmation dialog; no HTML/WebEngine controls."""
 
