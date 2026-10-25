@@ -516,14 +516,18 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             self.assertIn(token, adapter)
 
     def test_character_library_series_scope_matches_default_filter(self):
-        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
-        self.assertIn("const selectedSeries = $('characterSeriesFilter')?.value || 'All series';", adapter)
-        self.assertIn("populateEditCharacterSeriesOptions(selectedSeries)", adapter)
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        # The series options are rebuilt from the persistent library; the old
+        # hard-coded selectedSeries prototype path must not be required.
+        self.assertIn("const seriesFilter = $('characterSeriesFilter');", adapter)
+        self.assertIn("const previousSeries = seriesFilter?.value || 'All series';", adapter)
+        self.assertIn("libraryCharacters.map(librarySeriesName).filter(Boolean)", adapter)
+        self.assertIn("seriesFilter.value = seriesNames.includes(previousSeries) ? previousSeries : 'All series';", adapter)
         self.assertIn("function getEditCharacterSeriesValue()", adapter)
-        self.assertIn("const selectedSeries = c?.series || (activeSeries !== 'All series' ? activeSeries : activeCharacterProjectSeries());", adapter)
-        self.assertIn("Choose an existing series or create a new series before saving this character.", adapter)
+        self.assertIn("function populateEditCharacterSeriesOptions(preferred = '')", adapter)
         self.assertIn("const series = requestedSeries;", adapter)
         self.assertIn("librarySeriesName(c) === series", adapter)
+        self.assertIn("Choose an existing series or create a new series before saving this character.", adapter)
         self.assertIn("return raw.replace(/^Series\\s*[·:-]\\s*/i, '').replace(/^Global character library$/i, '').trim();", adapter)
 
     def test_reusable_character_library_is_persisted_and_connected(self):
