@@ -2868,7 +2868,8 @@ class PremiumV2Bridge(QObject):
                         clean_speaker = str(speaker or "").strip()
                         if clean_speaker:
                             trusted_keys.add(clean_speaker.casefold())
-                            trusted_rows.append({"name": clean_speaker, "aliases": []})
+                            trusted_rows.append({"name": clean_speaker, "aliases": [],
+                                                 "series": str(assignment.get("series") or series_name)})
 
             analysis = analyze_book(project.chapters)
             # Filter ordinary capitalized words out of the cast unless the text
@@ -2888,7 +2889,7 @@ class PremiumV2Bridge(QObject):
 
             analysis.characters = [candidate for candidate in analysis.characters if credible_candidate(candidate)]
             old = {str(c.get("name", "")).casefold(): c for c in saved_rows}
-            learning_examples = load_learning_examples(series_name)
+            learning_examples = []
             items = []
             item_names = set()
             for c in analysis.characters:
@@ -2898,9 +2899,15 @@ class PremiumV2Bridge(QObject):
                     merged["user_created"] = True
                 if prior.get("manual"):
                     merged["manual"] = True
-                if str(prior.get("series") or "").strip():
-                    merged["series"] = str(prior.get("series")).strip()
-                    merged["scope"] = "Series · " + merged["series"]
+                inherited_series = str(merged.get("series") or "").strip()
+                if not inherited_series:
+                    scope = str(merged.get("scope") or "").strip()
+                    inherited_series = (
+                        re.sub(r"(?i)^\s*series\s*[·:-]\s*", "", scope).strip()
+                        if re.match(r"(?i)^\s*series\s*[·:-]", scope) else ""
+                    )
+                merged["series"] = inherited_series or series_name
+                merged["scope"] = "Series · " + merged["series"]
                 items.append(merged)
                 item_names.add(str(merged.get("name") or c.name).casefold())
             # Analysis refreshes must not silently discard characters the user
@@ -2909,7 +2916,13 @@ class PremiumV2Bridge(QObject):
                 if old_name and old_name not in item_names and (
                     old_name in trusted_keys or bool(prior.get("user_created")) or bool(prior.get("voice_profile"))
                 ):
-                    items.append(dict(prior))
+                    retained = dict(prior)
+                    retained_series = str(retained.get("series") or "").strip()
+                    if not retained_series:
+                        retained_series = series_name
+                        retained["series"] = retained_series
+                    retained["scope"] = "Series · " + retained_series
+                    items.append(retained)
                     item_names.add(old_name)
             # Store dialogue evidence and ranked, deterministic speaker suggestions with
             # exact source offsets. The UI may recommend a name, but never auto-assigns it.
@@ -2925,19 +2938,34 @@ class PremiumV2Bridge(QObject):
                 name = str(row.get("name") or row.get("primary_name") or "").strip()
                 if not name:
                     continue
-                key = name.casefold()
+                series = str(row.get("series") or "").strip()
+                if not series:
+                    scope = str(row.get("scope") or "").strip()
+                    series = (
+                        re.sub(r"(?i)^\s*series\s*[·:-]\s*", "", scope).strip()
+                        if re.match(r"(?i)^\s*series\s*[·:-]", scope) else ""
+                    ) or series_name
+                key = name.casefold() + "::" + series.casefold()
                 current = dedup_known.get(key)
                 aliases = row.get("aliases") or []
                 aliases = list(aliases) if isinstance(aliases, (list, tuple)) else ([aliases] if aliases else [])
                 if current is None:
-                    dedup_known[key] = {**row, "name": name, "aliases": aliases}
+                    dedup_known[key] = {**row, "name": name, "series": series, "aliases": aliases}
                 else:
                     current["aliases"] = list(dict.fromkeys([*(current.get("aliases") or []), *aliases]))
             known_cast = list(dedup_known.values())
+            learning_series_names = {series_name}
+            learning_series_names.update(
+                str(row.get("series") or "").strip()
+                for row in known_cast if str(row.get("series") or "").strip()
+            )
+            for learning_series in sorted(learning_series_names, key=str.casefold):
+                learning_examples.extend(load_learning_examples(learning_series))
             for chapter in project.chapters:
                 if len(suggestions) >= max_suggestions:
                     break
                 last_speaker = ""
+                last_speaker_series = ""
                 last_speaker_end = -1
                 segments = dialogue_segments(chapter)
                 saved_assignments = [
@@ -2959,13 +2987,14 @@ class PremiumV2Bridge(QObject):
                     ]
                     # Pronoun continuity is local: never carry an old speaker anchor
                     # indefinitely through unrelated dialogue in a long chapter.
-                    continuity_speaker = (
-                        last_speaker if last_speaker and 0 <= start - last_speaker_end <= 420 else ""
-                    )
+                    continuity_is_local = bool(last_speaker and 0 <= start - last_speaker_end <= 420)
+                    continuity_speaker = last_speaker if continuity_is_local else ""
+                    continuity_series = last_speaker_series if continuity_is_local else ""
                     candidates = rank_speaker_suggestions(
                         chapter_text=source, start=start, end=end, detected=detected,
                         known_characters=known_cast, learning_examples=learning_examples,
                         last_speaker=continuity_speaker,
+                        last_speaker_series=continuity_series,
                     )
                     assigned = next((row for row in saved_assignments
                         if int(row.get("start", -1)) == start and int(row.get("end", -1)) == end
@@ -2978,6 +3007,13 @@ class PremiumV2Bridge(QObject):
                         # Explicitly saved project assignments are the strongest
                         # continuity signal, and already persisted as user feedback.
                         last_speaker = str(assigned_speakers[0])
+                        assigned_series = str(assigned.get("series") or "").strip()
+                        assigned_cast = next((row for row in saved_rows if
+                            str(row.get("name") or "").casefold() == last_speaker.casefold()
+                            or last_speaker.casefold() in {
+                                str(alias).casefold() for alias in (row.get("aliases") or [])
+                            }), {})
+                        last_speaker_series = assigned_series or str(assigned_cast.get("series") or series_name)
                         last_speaker_end = end
                     else:
                         # An unconfirmed model/rule guess must not become ground truth
@@ -2985,7 +3021,10 @@ class PremiumV2Bridge(QObject):
                         # speech-tag pattern may refresh this short-lived anchor.
                         source_speaker = source_grounded_speaker_for_continuity(candidates)
                         if source_speaker:
+                            source_candidate = next((row for row in candidates
+                                if str(row.get("name") or "").casefold() == source_speaker.casefold()), {})
                             last_speaker = source_speaker
+                            last_speaker_series = str(source_candidate.get("series") or series_name)
                             last_speaker_end = end
                     best = candidates[0] if candidates else {}
                     best_confidence = float(best.get("confidence") or 0.0)
