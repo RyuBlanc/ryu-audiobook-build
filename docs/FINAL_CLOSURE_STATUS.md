@@ -24,6 +24,7 @@
 - Saved manual character/dialogue assignment is source-validated and integrated into the synthesis routing path; automatic bulk AI line-level acceptance remains guarded.
 - Player position saving and restore on metadata load are implemented in source. This still needs real-app restart acceptance.
 - Model inventory and supported install/verify/repair/uninstall work via guarded background jobs. Refresh is local catalogue refresh, not a remote updater.
+- Configured project-library and audio-output roots are supported in the existing settings/root path; legacy library locations remain visible, and storage reporting uses actual filesystem capacity.
 - Project Trash/restore/purge handlers exist. Project-file writing is transactional/atomic.
 - UI hardening includes stale-response guards, serialized job polling, stable rendering for unchanged sections, and progress-panel flicker remediation. Application-wide visual stability cannot be certified by static tests.
 
@@ -38,7 +39,7 @@ These must not be described as completed unless a separate implementation and te
 5. **Model actions:** remote model-update checking, universal default selection, and generic model test-generation are not implemented.
 6. **Character AI:** bulk automated speaker suggestion acceptance remains prototype-only/guarded; manual source-backed assignment is available.
 7. **Pronunciation:** the full per-profile test-result matrix, dictionary import/export, conflict tracking, and invalidation of already-generated audio require more work.
-8. **Storage and secrets:** custom project-library/audio/model/cache roots are not fully implemented; provider credentials are app-local/environment-backed, not in Windows Credential Manager.
+8. **Storage and secrets:** project-library and audio-output root selection exist, but model/cache root customization and related external-drive recovery acceptance are incomplete. Provider credentials are app-local/environment-backed, not in Windows Credential Manager.
 9. **Database:** SQLite is a target/documented schema, not a deployed migration; existing project/job data uses file storage, JSON and QSettings.
 10. **Diagnostics:** log redaction is best-effort, not a security guarantee.
 
