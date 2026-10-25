@@ -72,6 +72,31 @@ class DialogueReviewSkipPersistenceTests(unittest.TestCase):
             [],
         )
 
+    def test_dialogue_skip_and_analysis_commit_share_a_state_lock(self):
+        source = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        init_start = source.index("    def __init__(self, parent: QObject | None = None) -> None:")
+        init_end = source.index("    @Slot(str, str, result=str)", init_start)
+        self.assertIn("self._character_review_state_lock = threading.RLock()", source[init_start:init_end])
+
+        skip_start = source.index("    def _character_dialogue_suggestion_skip(")
+        skip_end = source.index("    def _character_create(", skip_start)
+        skip_handler = source[skip_start:skip_end]
+        self.assertIn("with self._character_review_state_lock:", skip_handler)
+        self.assertRegex(skip_handler, r"with self\._character_review_state_lock:\s+state = load_state\(project\.folder\)")
+        self.assertIn("save_state(project.folder, state)", skip_handler)
+
+        worker_start = source.index("    def _character_worker(self, job_id: str, project) -> None:")
+        worker_end = source.index("\n    def ", worker_start + 1)
+        worker = source[worker_start:worker_end]
+        final_start = worker.index("with self._character_review_state_lock:", worker.index('suggestions.append({'))
+        final_end = worker.index("self._sync_saved_cast(", final_start)
+        final_commit = worker[final_start:final_end]
+        self.assertIn("latest_state = load_state(project.folder)", final_commit)
+        self.assertIn('latest_state.get("character_dialogue_skips")', final_commit)
+        self.assertIn('latest_state.get("character_dialogue_suggestions")', final_commit)
+        self.assertIn("retain_current_dialogue_skips(", final_commit)
+        self.assertIn("save_state(project.folder, latest_state)", final_commit)
+
     def test_character_worker_reconciles_skips_instead_of_clearing_them(self):
         source = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         worker_start = source.index("    def _character_worker(self, job_id: str, project) -> None:")

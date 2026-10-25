@@ -304,6 +304,9 @@ class PremiumV2Bridge(QObject):
         ensure_roots()
         self.settings = QSettings("RyuBlanc", "Ryu's Audiobook")
         self._jobs_lock = threading.RLock()
+        # Serialize review-skip writes with the character-analysis worker's final
+        # reconciliation so a click during a long analysis cannot be overwritten.
+        self._character_review_state_lock = threading.RLock()
         self._jobs: dict[str, dict[str, Any]] = {}
         self._generators: dict[str, GenerationManager] = {}
         self._import_cancel_events: dict[str, threading.Event] = {}
@@ -2721,16 +2724,20 @@ class PremiumV2Bridge(QObject):
         suggestion_id = str(payload.get("id") or "").strip()
         if not suggestion_id or len(suggestion_id) > 300:
             raise ValueError("Select a dialogue suggestion to skip.")
-        state = load_state(project.folder)
-        rows = state.get("character_dialogue_suggestions") or []
-        if not any(isinstance(row, dict) and str(row.get("id") or "") == suggestion_id for row in rows):
-            raise ValueError("This dialogue suggestion is no longer available. Re-run analysis and try again.")
-        skipped = list(dict.fromkeys(str(value) for value in (state.get("character_dialogue_skips") or []) if str(value)))
-        if suggestion_id not in skipped:
-            skipped.append(suggestion_id)
-        state["character_dialogue_skips"] = skipped
-        state["modified_at"] = self._now()
-        save_state(project.folder, state)
+        # The analysis worker uses this same lock when it re-reads and commits the
+        # newly generated suggestions. Whichever operation obtains the lock first,
+        # the other will see its latest persisted state before writing.
+        with self._character_review_state_lock:
+            state = load_state(project.folder)
+            rows = state.get("character_dialogue_suggestions") or []
+            if not any(isinstance(row, dict) and str(row.get("id") or "") == suggestion_id for row in rows):
+                raise ValueError("This dialogue suggestion is no longer available. Re-run analysis and try again.")
+            skipped = list(dict.fromkeys(str(value) for value in (state.get("character_dialogue_skips") or []) if str(value)))
+            if suggestion_id not in skipped:
+                skipped.append(suggestion_id)
+            state["character_dialogue_skips"] = skipped
+            state["modified_at"] = self._now()
+            save_state(project.folder, state)
         return {"id": suggestion_id, "skipped": True}
 
     def _character_create(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -3051,19 +3058,34 @@ class PremiumV2Bridge(QObject):
                         "assigned": bool(assigned_speakers),
                         "source": "local-dialogue-analysis",
                     })
-            state["characters"] = items
-            state["character_dialogue_suggestions"] = suggestions
-            state["character_dialogue_skips"] = retain_current_dialogue_skips(
-                previous_dialogue_skips,
-                previous_dialogue_suggestions,
-                suggestions,
-            )
-            state["character_analysis"] = {"dialogue_total": analysis.dialogue_total,
-                                           "unassigned_dialogue": analysis.unassigned_dialogue,
-                                           "suggestion_count": len(suggestions),
-                                           "updated_at": self._now()}
-            state["modified_at"] = self._now()
-            save_state(project.folder, state)
+            with self._character_review_state_lock:
+                # Use the last persisted state, not the snapshot captured before the
+                # expensive analysis. A user may have skipped a passage or changed a
+                # setting while this worker was running.
+                latest_state = load_state(project.folder)
+                latest_dialogue_suggestions = latest_state.get("character_dialogue_suggestions")
+                if not isinstance(latest_dialogue_suggestions, list):
+                    latest_dialogue_suggestions = previous_dialogue_suggestions
+                latest_dialogue_skips = latest_state.get("character_dialogue_skips")
+                if not isinstance(latest_dialogue_skips, list):
+                    latest_dialogue_skips = previous_dialogue_skips
+
+                # Keep unrelated latest state keys intact while replacing analysis-owned
+                # outputs with results calculated from the source snapshot.
+                latest_state["characters"] = items
+                latest_state["character_dialogue_suggestions"] = suggestions
+                latest_state["character_dialogue_skips"] = retain_current_dialogue_skips(
+                    latest_dialogue_skips,
+                    latest_dialogue_suggestions,
+                    suggestions,
+                )
+                latest_state["character_analysis"] = {"dialogue_total": analysis.dialogue_total,
+                                                      "unassigned_dialogue": analysis.unassigned_dialogue,
+                                                      "suggestion_count": len(suggestions),
+                                                      "updated_at": self._now()}
+                latest_state["modified_at"] = self._now()
+                save_state(project.folder, latest_state)
+                state = latest_state
             self._sync_saved_cast(project, items, state, update_names=False, update_voice=False)
             self._job_update(job_id, state="completed", stage="Analysis complete", progress=100,
                              message=f"Detected {len(items)} character candidate(s) from saved chapter text",
