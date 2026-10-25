@@ -2428,34 +2428,87 @@
     message('Skipped this analysis suggestion. The source text and character assignments were not changed.');
   }
 
+  function getEditCharacterSeriesValue() {
+    const selected = String($('editCharacterSeries')?.value || '').trim();
+    if (selected === '__new_series__') return String($('editCharacterNewSeries')?.value || '').trim();
+    return selected;
+  }
+  function populateEditCharacterSeriesOptions(preferred = '') {
+    const select = $('editCharacterSeries');
+    if (!select) return;
+    const current = String(preferred || select.value || '').trim();
+    const names = [...new Set([
+      ...libraryCharacters.map(librarySeriesName),
+      ...characters.map(characterSeries),
+      activeCharacterProjectSeries(),
+      characterStudioSelectedSeries,
+      current
+    ].map(value => String(value || '').trim()).filter(value =>
+      value && !['All series','Unassigned series','Global character library','__new_series__'].includes(value)
+    ))].sort((a,b) => a.localeCompare(b));
+    select.innerHTML = '<option value="">Choose a series</option>' +
+      names.map(value => '<option value="' + esc(value) + '">' + esc(value) + '</option>').join('') +
+      '<option value="__new_series__">＋ Create a new series…</option>';
+    select.value = current === '__new_series__' ? current : (names.includes(current) ? current : '');
+    const newLabel = $('editCharacterNewSeriesLabel');
+    if (newLabel) newLabel.hidden = select.value !== '__new_series__';
+    const newInput = $('editCharacterNewSeries');
+    if (newInput && select.value !== '__new_series__') newInput.value = '';
+  }
   function ensureCharacterSeriesField() {
     const modal = $('characterEditorModal');
     if (!modal) return;
     const legacyScope = $('editCharacterScope');
     const legacyGroup = legacyScope?.closest('.form-group, .form-row, .field') || legacyScope?.parentElement;
     if (legacyGroup) legacyGroup.style.display = 'none';
-    let input = $('editCharacterSeries');
-    if (!input) {
+    let select = $('editCharacterSeries');
+    if (!select || select.tagName !== 'SELECT') {
       const wrap = document.createElement('div');
       wrap.className = 'form-group';
+      wrap.id = 'editCharacterSeriesGroup';
       wrap.style.cssText = 'display:flex;flex-direction:column;gap:7px;margin-top:12px;';
       const label = document.createElement('label');
       label.htmlFor = 'editCharacterSeries';
       label.textContent = 'Series';
       label.style.cssText = 'font-size:13px;font-weight:700;color:#e6e9f0;';
-      input = document.createElement('input');
-      input.id = 'editCharacterSeries';
-      input.type = 'text';
-      input.maxLength = 300;
-      input.placeholder = 'e.g. That Time I Got Reincarnated as a Slime';
-      input.autocomplete = 'off';
-      input.style.cssText = 'width:100%;box-sizing:border-box;padding:10px 12px;border-radius:10px;border:1px solid #343b49;background:#0d1119;color:#f4f5f8;font:inherit;';
-      wrap.append(label, input);
+      select = document.createElement('select');
+      select.id = 'editCharacterSeries';
+      select.style.cssText = 'width:100%;box-sizing:border-box;padding:10px 12px;border-radius:10px;border:1px solid #343b49;background:#0d1119;color:#f4f5f8;font:inherit;';
+      const newLabel = document.createElement('label');
+      newLabel.id = 'editCharacterNewSeriesLabel';
+      newLabel.htmlFor = 'editCharacterNewSeries';
+      newLabel.textContent = 'New series name';
+      newLabel.style.cssText = label.style.cssText;
+      const newInput = document.createElement('input');
+      newInput.id = 'editCharacterNewSeries';
+      newInput.type = 'text';
+      newInput.maxLength = 300;
+      newInput.placeholder = 'Series or novel title';
+      newInput.autocomplete = 'off';
+      newInput.style.cssText = 'width:100%;box-sizing:border-box;padding:10px 12px;border-radius:10px;border:1px solid #343b49;background:#0d1119;color:#f4f5f8;font:inherit;';
+      newLabel.appendChild(newInput);
+      newLabel.hidden = true;
+      wrap.append(label, select, newLabel);
       const name = $('editCharacterName');
       const anchor = name?.closest('.form-group, .form-row, .field') || name?.parentElement;
       if (anchor?.parentElement) anchor.parentElement.insertBefore(wrap, anchor.nextSibling);
       else (modal.querySelector('.modal-body') || modal).appendChild(wrap);
+    } else {
+      const newLabel = $('editCharacterNewSeriesLabel');
+      if (newLabel) newLabel.hidden = select.value !== '__new_series__';
     }
+    if (!select.dataset.seriesBound) {
+      select.dataset.seriesBound = 'true';
+      select.addEventListener('change', () => {
+        const createNew = select.value === '__new_series__';
+        if ($('editCharacterNewSeriesLabel')) $('editCharacterNewSeriesLabel').hidden = !createNew;
+        if (createNew) $('editCharacterNewSeries')?.focus();
+      });
+      $('editCharacterNewSeries')?.addEventListener('input', () => {
+        if ($('editCharacterSeries')?.value === '__new_series__') characterStudioSelectedSeries = String($('editCharacterNewSeries')?.value || '').trim();
+      });
+    }
+    populateEditCharacterSeriesOptions(select.value);
   }
   function ensureCharacterDialogueSampleField() {
     const modal = $('characterEditorModal');
@@ -2629,8 +2682,10 @@
     if ($('editCharacterScope')) $('editCharacterScope').value = c?.scope || defaultScope;
     if ($('editCharacterNotes')) $('editCharacterNotes').value = c?.notes || '';
     ensureCharacterSeriesField();
-    const selectedSeries = $('characterSeriesFilter')?.value || 'All series';
-    if ($('editCharacterSeries')) $('editCharacterSeries').value = c?.series || (selectedSeries !== 'All series' ? selectedSeries : '');
+    const selectedSeries = c?.series || (activeSeries !== 'All series' ? activeSeries : activeCharacterProjectSeries());
+    populateEditCharacterSeriesOptions(selectedSeries);
+    if ($('editCharacterSeries')) $('editCharacterSeries').value = selectedSeries || '';
+    if ($('editCharacterNewSeriesLabel')) $('editCharacterNewSeriesLabel').hidden = $('editCharacterSeries')?.value !== '__new_series__';
     ensureCharacterDialogueSampleField();
     if ($('editCharacterDialogueSample')) $('editCharacterDialogueSample').value = c?.dialogue_sample || '';
     if ($('deleteCharacter')) $('deleteCharacter').style.visibility = c ? 'visible' : 'hidden';
@@ -2639,8 +2694,9 @@
   }
   async function saveLibraryEditor() {
     const name = $('editCharacterName')?.value.trim() || ''; if (!name) throw new Error('Enter a character name before saving it to the Character Library.');
-    const requestedSeries = $('editCharacterSeries')?.value.trim() || '';
-    const scope = requestedSeries ? 'Series · ' + requestedSeries : 'Global character library';
+    const requestedSeries = getEditCharacterSeriesValue();
+    if (!requestedSeries) throw new Error('Choose an existing series or create a new series before saving this character.');
+    const scope = 'Series · ' + requestedSeries;
     const series = requestedSeries;
     const result = await call('character_library.save', {id:libraryEditorId||'',name,short:$('editCharacterShort')?.value||'',aliases:$('editCharacterAliases')?.value||'',scope,series,notes:$('editCharacterNotes')?.value||'',dialogue_sample:$('editCharacterDialogueSample')?.value||''});
     libraryEditorId = result.character.id; libraryEditorActive = false; $('characterEditorModal')?.classList.remove('show'); await refreshCharacterLibrary(); message('Character saved to the reusable local Character Library.');
@@ -3492,6 +3548,7 @@
       $('editCharacterVoice').disabled = true;
     }
     if ($('editCharacterScope')) $('editCharacterScope').value = selected.scope || 'Current book only';
+    populateEditCharacterSeriesOptions(characterSeries(selected));
     if ($('editCharacterSeries')) $('editCharacterSeries').value = characterSeries(selected);
     if ($('editCharacterNotes')) $('editCharacterNotes').value = selected.notes || '';
     if ($('deleteCharacter')) $('deleteCharacter').style.visibility = 'visible';
@@ -3501,8 +3558,9 @@
     const original = String(window.ryuPremiumSelectedCharacter || '');
     const current = characterRowForName(original);
     const name = String($('editCharacterName')?.value || '').trim();
-    const series = String($('editCharacterSeries')?.value || '').trim();
+    const series = getEditCharacterSeriesValue();
     if (!current || !name) throw new Error('Select a saved project character and enter its canonical name.');
+    if (!series) throw new Error('Choose an existing series or create a new series before saving this character.');
     const result = await call('character.update', {
       original_name:characterCanonical(current), name,
       short_description:$('editCharacterShort')?.value || '',
