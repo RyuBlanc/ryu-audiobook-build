@@ -868,7 +868,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         wire_start = adapter.index("async function wire()")
         core_hydration = adapter.index("await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters]);", wire_start)
         first_handler = adapter.index("document.addEventListener('click', e => {", wire_start)
-        settings_loaded = adapter.index("async function loadSettings()", wire_start)
+        settings_loaded = adapter.index("async function loadSettings()")
         optional_hydration = adapter.index("void (async () => {", core_hydration)
         timer_start = adapter.index("if (!window.__ryuBackendJobTimer)", optional_hydration)
         self.assertLess(first_handler, core_hydration)
