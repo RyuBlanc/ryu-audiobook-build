@@ -21,7 +21,7 @@ import wave
 from datetime import datetime, timezone
 from typing import Any
 
-from PySide6.QtCore import QObject, QSettings, QTimer, QUrl, Slot
+from PySide6.QtCore import QObject, QSettings, QTimer, QUrl, Slot, Qt
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -3880,6 +3880,7 @@ class PremiumV2Bridge(QObject):
 
     def _settings_save(self, payload: dict[str, Any]) -> dict[str, Any]:
         allowed = {"theme": "ui/theme", "accent": "ui/accent", "interface_scale": "ui/interface_scale",
+                   "text_scale": "ui/text_scale", "window_size": "ui/window_size",
                    "effects": "ui/effects", "reduce_motion": "ui/reduce_motion",
                    "preview_seconds": "audio/preview_seconds", "bitrate": "production/bitrate",
                    "concurrency": "production/concurrency", "local_first": "privacy/local_first",
@@ -3892,6 +3893,17 @@ class PremiumV2Bridge(QObject):
             value = payload[key]
             if key == "theme" and value not in {"dark", "light"}:
                 raise ValueError("Theme must be dark or light.")
+            if key == "text_scale":
+                try:
+                    value = int(value)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError("UI text size must be one of the supported percentages.") from exc
+                if value not in {85, 90, 100, 110, 120, 130, 140}:
+                    raise ValueError("UI text size must be 85, 90, 100, 110, 120, 130, or 140 percent.")
+            if key == "window_size" and str(value) not in {
+                "auto", "1280x720", "1440x900", "1600x900", "1920x1080", "maximized"
+            }:
+                raise ValueError("Choose a supported window size in Settings.")
             if key == "preview_seconds" and int(value) not in {10, 20, 30, 45, 60, 90}:
                 raise ValueError("Preview duration must be 10, 20, 30, 45, 60, or 90 seconds.")
             if key == "bitrate" and not 128 <= int(value) <= 320:
@@ -3916,6 +3928,11 @@ class PremiumV2Bridge(QObject):
                 value = str(folder)
             self.settings.setValue(setting, value)
         self.settings.sync()
+        if "window_size" in payload:
+            window = self.parent()
+            apply_size = getattr(window, "apply_window_size", None)
+            if callable(apply_size):
+                apply_size(str(payload["window_size"]))
         return self._settings_get({})
 
     def _assert_no_active_model_lifecycle(self, activity: str) -> None:
@@ -5223,13 +5240,36 @@ class PremiumV2Bridge(QObject):
             "effects": self.settings.value("ui/effects", "high"),
             "accent": self.settings.value("ui/accent", "crimson"),
             "interface_scale": self.settings.value("ui/interface_scale", 100),
+            "text_scale": self.settings.value("ui/text_scale", 100),
+            "window_size": self.settings.value("ui/window_size", "auto"),
             "storage_root": str(app_root()),
             "library_root": str(library_root()),
         }
 
 
+class StableQWebEngineView(QWebEngineView):
+    """WebEngine surface that blocks browser-style zoom shortcuts and Ctrl-wheel."""
+
+    _ZOOM_KEYS = {
+        Qt.Key.Key_Plus, Qt.Key.Key_Equal, Qt.Key.Key_Minus,
+        Qt.Key.Key_Underscore, Qt.Key.Key_0,
+    }
+
+    def keyPressEvent(self, event) -> None:
+        if (event.modifiers() & Qt.KeyboardModifier.ControlModifier) and event.key() in self._ZOOM_KEYS:
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def wheelEvent(self, event) -> None:
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+
 class PremiumV2Window(QMainWindow):
-    """Embedded desktop host for the approved HTML; no external browser or dev server."""
+    """Desktop host for the approved interface, with native window controls and stable sizing."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -5237,9 +5277,11 @@ class PremiumV2Window(QMainWindow):
         if not path.is_file():
             raise FileNotFoundError(f"Premium V2 frontend asset is missing: {path}")
         self.setWindowTitle(f"{APP_NAME} • {full_version()}")
+        self.setMinimumSize(960, 620)
         self.resize(1440, 900)
 
-        self.web = QWebEngineView(self)
+        self.web = StableQWebEngineView(self)
+        self.web.setZoomFactor(1.0)
         self.web.settings().setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows, False)
         self.web.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, False)
         self.web.settings().setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
@@ -5281,6 +5323,39 @@ class PremiumV2Window(QMainWindow):
         self.setCentralWidget(self._web_stack)
 
         self.web.load(QUrl.fromLocalFile(str(path.resolve())))
+        self.apply_window_size(str(QSettings("RyuBlanc", "Ryu's Audiobook").value("ui/window_size", "auto")))
+
+    def apply_window_size(self, choice: str) -> None:
+        """Apply a persisted native window size; never change WebEngine zoom."""
+        choice = str(choice or "auto").strip().lower()
+        screen = self.screen() or QApplication.primaryScreen()
+        available = screen.availableGeometry() if screen is not None else None
+        if choice == "maximized":
+            self.showMaximized()
+            return
+        if self.isMaximized():
+            self.showNormal()
+        if choice == "auto":
+            width = int(available.width() * 0.90) if available is not None else 1440
+            height = int(available.height() * 0.90) if available is not None else 900
+            width = min(1600, max(960, width))
+            height = min(1000, max(620, height))
+        else:
+            try:
+                width, height = (int(part) for part in choice.split("x", 1))
+            except (TypeError, ValueError):
+                width, height = 1440, 900
+        if available is not None:
+            width = min(width, max(640, available.width()))
+            height = min(height, max(480, available.height()))
+        self.resize(max(640, width), max(480, height))
+        self.setZoomFactorForNativeSize()
+
+    def setZoomFactorForNativeSize(self) -> None:
+        # Defensive invariant: all sizing is native window geometry or the
+        # explicit text-size preference, never Chromium's browser zoom factor.
+        if abs(self.web.zoomFactor() - 1.0) > 0.001:
+            self.web.setZoomFactor(1.0)
 
     def _show_web_failure(self, message: str) -> None:
         log.error("Premium V2 renderer recovery surface shown: %s", message)
