@@ -709,6 +709,7 @@
     let active = null;
     try { active = await call('project.get_active'); }
     catch (_) { return null; } // Do not erase the last confirmed UI state on a transient bridge error.
+    if (active) window.ryuPremiumActiveProject = active;
     const card = document.querySelector('.project-mini');
     const titleNode = card?.querySelector('.pm-body b');
     const crumb = document.querySelector('.topbar .crumb span');
@@ -1961,6 +1962,15 @@
     const selected = characterRowForName(window.ryuPremiumSelectedCharacter);
     const inspector = document.querySelector('#characters .assigned-inspector');
     if (!inspector) return;
+    let summary = inspector.querySelector('.assigned-summary');
+    if (summary && !$('assignedSeriesName')) {
+      const seriesBox = document.createElement('div');
+      seriesBox.className = 'ryu-assigned-series';
+      seriesBox.innerHTML = '<b id="assignedSeriesName">—</b><span>Series</span>';
+      const voiceCard = $('assignedVoiceName')?.closest('.assigned-summary > div');
+      summary.insertBefore(seriesBox, voiceCard || summary.firstChild);
+    }
+    ensureAssignedAudioProfileControls();
     const nameNode = $('assignedInspectorName');
     const aliasesNode = $('assignedAliases');
     const voiceNode = $('assignedVoiceName');
@@ -2125,13 +2135,17 @@
     }
     const castList = $('assignedCharacterList');
     if (castList) {
-      const signature = JSON.stringify(characters.map(item => [item.name,item.series,item.voice_profile,item.aliases,item.examples,item.dialogue_count,item.confidence]));
+      const assignedQuery = String($('assignedSearch')?.value || '').trim().toLowerCase();
+      const visibleCharacters = characters.filter(item => [characterCanonical(item),characterSeries(item),item.voice_profile,item.role,...characterAliases(item)].join(' ').toLowerCase().includes(assignedQuery));
+      const signature = JSON.stringify([assignedQuery,visibleCharacters.map(item => [item.name,item.series,item.voice_profile,item.aliases,item.examples,item.dialogue_count,item.confidence])]);
       if (castList.dataset.liveSignature !== signature) {
-        castList.innerHTML = characters.map(item => {
+        castList.innerHTML = visibleCharacters.map(item => {
           const name = characterCanonical(item), assignments = characterVoiceAssignments(name);
           return '<button type="button" class="assigned-character" data-character-name="' + esc(name) + '">' +
             '<span><b>' + esc(name) + '</b><small>' + esc(characterSeries(item)) + ' · ' + assignments.passages.length + ' assigned line(s) · ' + esc(item.voice_profile || 'Unassigned voice') + '</small></span></button>';
-        }).join('') || '<div class="ryu-character-empty"><b>No Characters Found</b>Assign Characters from the selected project text to build this cast.<button type="button" class="btn small" id="assignCharactersEmpty">Assign Characters</button></div>';
+        }).join('') || (characters.length
+          ? '<div class="ryu-character-empty">No characters match this search.</div>'
+          : '<div class="ryu-character-empty"><b>No Characters Found</b>Assign Characters from the selected project text to build this cast.<button type="button" class="btn small" id="assignCharactersEmpty">Assign Characters</button></div>');
         castList.dataset.liveSignature = signature;
       }
       if (!castList.dataset.liveBound) {
@@ -4213,8 +4227,10 @@
       const label = (element.getAttribute('aria-label') || element.textContent || element.id || 'Control').trim();
       element.setAttribute('aria-label', label + '. Unavailable: ' + reason);
     };
-    const dialogueReason = 'Bulk AI predictions are not verified against source passages in this build. Select an individual source-backed dialogue passage to assign a saved character.';
-    document.querySelectorAll('#acceptHighConfidence, #skipAiSuggestion, #aiUseLibrary, #aiCreateNew, #createCharacterQuick, [data-ai-line]:not([data-dialogue-id])')
+    // Character Studio actions are now bound to source-backed project data.
+    // Only prototype queue buttons without exact source identity remain unavailable.
+    const dialogueReason = 'This item is not linked to an exact source dialogue passage. Refresh the chapter and choose a real passage.';
+    document.querySelectorAll('#aiQueue [data-ai-line]:not([data-dialogue-id])')
       .forEach(element => disable(element, dialogueReason));
     // Model Center lifecycle actions are backed by models.install/repair/uninstall/verify.
     document.querySelectorAll('#settings button').forEach(element => {
@@ -4226,6 +4242,7 @@
   }
 
   async function wire() {
+    installCharacterStudioHandlers();
     // Remove the prototype's same-element click handlers synchronously, before
     // any asynchronous backend initialization or real handler registration.
     suppressLegacyVoicePreviewHandlers();
