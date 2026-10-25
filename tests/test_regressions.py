@@ -1806,7 +1806,9 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('state["voice_cast_character_roster"] = [', source)
         self.assertIn('state.get("voice_cast_character_roster", [])', source)
         self.assertIn("Preserve user-created cast members", source)
-        self.assertIn("assignments[name] = assignments.pop(old_name)", source)
+        self.assertIn('state["voice_cast_identity_assignments"] = scoped_assignments', source)
+        self.assertIn("character_identity_key(name, series)", source)
+        self.assertIn("Do not rename a legacy name-only key that may belong to another series.", source)
         self.assertIn("Manually Added Character", source)
 
     def test_voice_cast_manual_roster_does_not_require_a_detected_speaker(self):

@@ -571,7 +571,8 @@ class VoiceCastPage(QWidget):
                 "aliases": character.aliases, "series": character_series,
             })
 
-        # Retain separately scoped rows that automatic analysis did not rediscover.
+        # Preserve user-created cast members that automatic analysis did not rediscover.
+        # The roster is merged by the series-scoped (series, name) identity.
         roster = state.get("voice_cast_character_roster", []) if isinstance(state, dict) else []
         roster = roster if isinstance(roster, list) else []
         known = {

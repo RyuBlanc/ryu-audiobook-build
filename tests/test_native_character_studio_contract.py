@@ -33,7 +33,7 @@ class NativeCharacterStudioContractTests(unittest.TestCase):
         self.assertIn("Audio profile", panel)
         self.assertIn("series_names", panel)
         self.assertIn("grouped.setdefault(series, []).append(row)", cast)
-        self.assertIn('"series": str(row.get("series") or series)', cast)
+        self.assertIn('"series": str(row.get("series") or default_series)', cast)
         self.assertIn("Test assigned sentence", cast)
         self.assertIn("VoicePreviewWorker(preview_profile, sample_text, output, 10)", panel)
 
