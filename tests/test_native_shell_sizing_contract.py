@@ -1,0 +1,51 @@
+"""Desktop shell and user-controlled text/window sizing contracts."""
+from pathlib import Path
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class NativeShellSizingContracts(unittest.TestCase):
+    def test_embedded_window_blocks_chromium_zoom_and_uses_native_geometry(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("class StableQWebEngineView(QWebEngineView)", host)
+        self.assertIn("def keyPressEvent(self, event)", host)
+        self.assertIn("def wheelEvent(self, event)", host)
+        self.assertIn("event.modifiers() & Qt.KeyboardModifier.ControlModifier", host)
+        self.assertIn("self.web.setZoomFactor(1.0)", host)
+        self.assertIn("def apply_window_size(self, choice: str)", host)
+        self.assertIn("self.resize(max(640, width), max(480, height))", host)
+        self.assertIn('"window_size": self.settings.value("ui/window_size", "auto")', host)
+        self.assertIn('"text_scale": self.settings.value("ui/text_scale", 100)', host)
+
+    def test_settings_exposes_persisted_text_scale_and_window_size_not_browser_zoom(self):
+        html = (ROOT / "assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        for token in ('id="uiTextScale"', 'id="uiWindowSize"', "UI text size", "Window size"):
+            self.assertIn(token, html)
+        self.assertIn("function applyUiTextScale(value)", adapter)
+        self.assertIn("function installUiTextScaleRuntime()", adapter)
+        self.assertIn("event.ctrlKey", adapter)
+        self.assertIn("text_scale:Number($('uiTextScale')?.value||100)", adapter)
+        self.assertIn("window_size:$('uiWindowSize')?.value||'auto'", adapter)
+        self.assertIn('"text_scale": "ui/text_scale"', host)
+        self.assertIn('"window_size": "ui/window_size"', host)
+
+    def test_character_studio_static_samples_are_removed_and_empty_states_are_real(self):
+        html = (ROOT / "assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        for sample in ("Rimuru Tempest", "18 of 23 reviewed", "The eastern route is clear…", "324</b>"):
+            self.assertNotIn(sample, html)
+        self.assertIn("No Characters Found", html)
+        self.assertIn("Loading the selected project", html)
+        self.assertIn("function renderCharacterStudioLive()", adapter)
+        self.assertIn("function renderDialogueReview()", adapter)
+        self.assertIn("call('character.list')", adapter)
+        self.assertIn("call('chapter.list')", adapter)
+        self.assertIn("call('character.dialogue.suggestions.list')", adapter)
+
+
+if __name__ == "__main__":
+    unittest.main()
