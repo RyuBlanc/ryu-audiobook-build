@@ -113,70 +113,102 @@
     const progressBar = $('aiProgressBar');
     const progressLabel = $('aiProgressText')?.parentElement?.querySelector('span');
     const pendingBadge = $('aiQueue')?.closest('.ai-queue-panel')?.querySelector('.badge.warn');
-    const quotePattern = /“[^”]{2,}”|「[^」]{2,}」|『[^』]{2,}』|"[^"\n]{2,}"/g;
-    const normalize = value => String(value || '').replace(/[^\p{L}\p{N}]+/gu, ' ').toLocaleLowerCase().trim();
     const items = [];
     for (const chapter of chapters) {
-      const source = String(chapter.text || '');
-      quotePattern.lastIndex = 0;
-      let match;
-      while ((match = quotePattern.exec(source)) && items.length < 250) {
-        const text = match[0].trim();
-        if (text.length < 4) continue;
-        const assignment = (chapter.dialogue_assignments || []).find(item =>
-          item && typeof item === 'object' &&
-          Number.isInteger(item.start) && Number.isInteger(item.end) &&
-          item.start === match.index && item.end === match.index + match[0].length &&
-          source.slice(item.start, item.end) === String(item.text || '')
-        );
-        const names = assignment
-          ? (Array.isArray(assignment.speakers) && assignment.speakers.length
-              ? assignment.speakers : [assignment.speaker]).filter(Boolean)
-          : [];
-        items.push({
-          id: 'dialogue-' + chapter.number + '-' + match.index,
-          chapterNumber: Number(chapter.number),
-          chapterTitle: String(chapter.title || ('Chapter ' + chapter.number)),
-          text, start: match.index, end: match.index + match[0].length,
-          speakers: names, assigned: Boolean(names.length), assignmentPresent: Boolean(assignment)
-        });
+      for (const row of characterDialogueRowsForChapter(chapter)) {
+        items.push({...row, chapter_number:Number(chapter.number), chapter_title:String(chapter.title || '')});
       }
     }
-    const renderSignature = JSON.stringify(items.map(item => [item.id,item.text,item.speakers,item.assigned,item.assignmentPresent]));
+    const renderSignature = JSON.stringify(items.map(item => [
+      item.id,item.chapter_number,item.start,item.end,item.text,item.speakers,item.assigned,
+      item.skipped,(item.suggestions||[]).map(candidate=>[candidate.name,candidate.confidence,candidate.evidence])
+    ]));
     window.ryuPremiumDialogueReviewItems = items;
-    // Preserve list nodes while source data is unchanged; rebuilding these trees
-    // on every background refresh causes flicker and can steal focus.
-    if (window.__ryuDialogueReviewRenderSignature === renderSignature) return;
-    window.__ryuDialogueReviewRenderSignature = renderSignature;
-    const assignedCount = items.filter(item => item.assigned).length;
-    const remaining = Math.max(0, items.length - assignedCount);
-    const percent = items.length ? Math.round(assignedCount / items.length * 100) : 0;
-    if (progressText) progressText.textContent = assignedCount + ' of ' + items.length + ' dialogue passages assigned';
-    if (progressBar) progressBar.style.width = percent + '%';
-    if (progressLabel) progressLabel.textContent = percent + '% assigned';
-    if (pendingBadge) pendingBadge.textContent = remaining + ' left';
-    if (title) title.textContent = items.length
-      ? 'Chapter ' + items[0].chapterNumber + ' · ' + items[0].chapterTitle
-      : 'Dialogue review';
-    if (subtitle) subtitle.textContent = items.length
-      ? 'Select a real dialogue passage from the imported chapters to assign or change its saved speaker.'
-      : 'Import a book with quoted dialogue to review source-backed speaker assignments.';
-    if (queue) queue.innerHTML = items.slice(0, 40).map(item => {
-      const preview = item.text.length > 62 ? item.text.slice(0, 59) + '…' : item.text;
-      const status = item.assigned ? 'Saved: ' + item.speakers.join(', ') : 'Needs speaker assignment';
-      return '<button class="ai-queue-item" data-ai-line="' + esc(item.id) + '" data-dialogue-id="' + esc(item.id) + '">' +
-        '<span>Chapter ' + item.chapterNumber + '</span><b>' + esc(preview) + '</b><small>' +
-        esc(status) + '</small></button>';
-    }).join('') || '<p class="muted">No quoted dialogue passages found in the saved chapters.</p>';
-    if (storyDocument) {
-      storyDocument.innerHTML = items.slice(0, 120).map(item => {
-        const speakerLabel = item.assigned ? item.speakers.join(' + ') + ' · saved' : 'Unassigned · select to assign';
-        const classes = 'ai-sentence ' + (item.assigned ? 'confirmed' : 'review');
-        return '<button class="' + classes + '" data-ai-sentence="source-backed" data-dialogue-id="' + esc(item.id) +
-          '" data-chapter-number="' + item.chapterNumber + '"><span class="ai-speaker">' + esc(speakerLabel) +
-          '</span>' + esc(item.text) + '</button>';
-      }).join('') || '<p class="muted">No quoted dialogue passages found in the saved chapters.</p>';
+    if (window.__ryuDialogueReviewRenderSignature === renderSignature) {
+      renderAiChapterDocument();
+      return;
     }
+    window.__ryuDialogueReviewRenderSignature = renderSignature;
+    const counted = items.filter(item => !item.skipped);
+    const assignedCount = counted.filter(item => item.assigned).length;
+    const remaining = Math.max(0, counted.length - assignedCount);
+    const percent = counted.length ? Math.round(assignedCount / counted.length * 100) : 0;
+    if (progressText) progressText.textContent = counted.length
+      ? assignedCount + ' of ' + counted.length + ' dialogue passages assigned'
+      : 'No quoted dialogue passages found';
+    if (progressBar) progressBar.style.width = percent + '%';
+    if (progressLabel) progressLabel.textContent = counted.length ? percent + '% assigned' : 'Waiting for chapter text';
+    if (pendingBadge) pendingBadge.textContent = remaining + ' left';
+    const selectedNumber = Number(window.ryuPremiumAiChapterNumber || characterStudioSelectedChapter || window.ryuPremiumSelectedChapter || chapters[0]?.number || 0);
+    const selectedChapter = chapters.find(chapter => Number(chapter.number) === selectedNumber) || chapters[0] || null;
+    if (title) title.textContent = selectedChapter
+      ? 'Chapter ' + selectedChapter.number + ' · ' + String(selectedChapter.title || 'Untitled chapter')
+      : 'Dialogue review';
+    if (subtitle) subtitle.textContent = selectedChapter
+      ? 'Green passages are saved assignments; orange passages have real analysis suggestions; plain passages need manual review.'
+      : 'Open a local project to review its source text and dialogue assignments.';
+    if (queue) {
+      const pending = items.filter(item => !item.assigned && !item.skipped);
+      queue.innerHTML = pending.slice(0, 120).map(item => {
+        const preview = item.text.length > 75 ? item.text.slice(0, 72) + '…' : item.text;
+        const candidate = item.suggestions?.[0];
+        const note = candidate
+          ? 'Suggested: ' + candidate.name + ' · ' + Math.round(Number(candidate.confidence || 0) * 100) + '%'
+          : 'No supported candidate yet · manual review';
+        return '<button type="button" class="ai-queue-item' + (window.ryuPremiumSelectedDialogueId === item.id ? ' active' : '') +
+          '" data-ai-line="' + esc(item.id) + '" data-dialogue-id="' + esc(item.id) + '">' +
+          '<span>Chapter ' + Number(item.chapter_number) + ' · ' + esc(item.chapter_title) + '</span><b>' + esc(preview) +
+          '</b><small>' + esc(note) + '</small></button>';
+      }).join('') || '<div class="ryu-character-empty"><b>Review queue is clear</b>All source-backed passages are assigned or skipped. Run analysis again to refresh suggestions.</div>';
+    }
+    renderAiChapterDocument();
+  }
+  function renderAiChapterDocument() {
+    const storyDocument = documentRef();
+    if (!storyDocument) return;
+    const selectedNumber = Number(window.ryuPremiumAiChapterNumber || characterStudioSelectedChapter || window.ryuPremiumSelectedChapter || chapters[0]?.number || 0);
+    const chapter = chapters.find(item => Number(item.number) === selectedNumber) || chapters[0] || null;
+    const heading = storyDocument.closest('.ai-story')?.querySelector('.story-head h2');
+    const subheading = storyDocument.closest('.ai-story')?.querySelector('.story-head p');
+    if (heading) heading.textContent = chapter ? 'Chapter ' + chapter.number + ' · ' + String(chapter.title || 'Untitled chapter') : 'No project selected';
+    if (subheading) subheading.textContent = 'Green = saved character assignment · orange = analysis suggestion · plain text = no saved assignment or supported prediction.';
+    if (!chapter || !String(chapter.text || '').trim()) {
+      storyDocument.innerHTML = '<div class="ryu-character-empty"><b>No chapter text to analyze</b>Open a project with imported chapters, then run Analyze book.</div>';
+      return;
+    }
+    const source = String(chapter.text || '');
+    const rows = characterDialogueRowsForChapter(chapter);
+    const signature = JSON.stringify([chapter.number,source,rows.map(row=>[row.start,row.end,row.speakers,row.skipped,row.suggestions])]);
+    if (storyDocument.dataset.liveSignature === signature) return;
+    let html = '', cursor = 0;
+    for (const row of rows) {
+      if (row.start < cursor) continue;
+      html += esc(source.slice(cursor,row.start)).replace(/\n/g,'<br>');
+      let klass = 'ai-sentence';
+      let label = '';
+      if (row.assigned) {
+        klass += ' confirmed';
+        label = 'Assigned: ' + row.speakers.join(' + ');
+      } else if (!row.skipped && row.suggestions?.length) {
+        klass += ' review';
+        const candidate = row.suggestions[0];
+        label = 'Suggested: ' + candidate.name + ' · ' + Math.round(Number(candidate.confidence || 0) * 100) + '% · Review';
+      } else if (row.skipped) {
+        klass += ' unassigned';
+        label = 'Skipped for this analysis';
+      } else {
+        klass += ' unassigned';
+        label = 'Unassigned · select to review';
+      }
+      const active = window.ryuPremiumSelectedDialogueId === row.id ? ' active' : '';
+      html += '<button type="button" class="' + klass + active + '" data-ai-sentence="source-backed" data-dialogue-id="' + esc(row.id) +
+        '" data-chapter-number="' + Number(chapter.number) + '" data-start="' + row.start + '" data-end="' + row.end +
+        '" title="' + esc(label) + '"><span class="ai-speaker">' + esc(label) + '</span>' + esc(row.text) + '</button>';
+      cursor = row.end;
+    }
+    html += esc(source.slice(cursor)).replace(/\n/g,'<br>');
+    storyDocument.innerHTML = html;
+    storyDocument.dataset.liveSignature = signature;
   }
   function documentRef() {
     return document.querySelector('.char-view[data-char-view="ai"] .ai-document') ||
@@ -1663,7 +1695,8 @@
       }
     }
     window.ryuPremiumChapters = chapters;
-    if (!chapters.length) { renderDialogueReview(); return chapters; }
+    await refreshCharacterDialogueSuggestions();
+    if (!chapters.length) { renderDialogueReview(); renderCharacterStudioLive(); return chapters; }
     if (!chapters.some(c => Number(c.number) === Number(window.ryuPremiumSelectedChapter))) window.ryuPremiumSelectedChapter = chapters[0].number;
     const current = selectedChapter(), list = $('chapterList'), editor = $('chapterEditor'), title = $('chapterTitle');
     if (list) {
@@ -1724,6 +1757,7 @@
       if (chapterHistoryGroupTimer) { clearTimeout(chapterHistoryGroupTimer); chapterHistoryGroupTimer = null; }
     }
     renderDialogueReview();
+    renderCharacterStudioLive();
     renderLiveChapterInsights();
     return chapters;
   }
