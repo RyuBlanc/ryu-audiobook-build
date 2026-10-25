@@ -812,6 +812,17 @@ class RegressionTests(unittest.TestCase):
             page.close()
             page.deleteLater()
 
+    def test_actions_storage_cleanup_preserves_last_success_until_current_run_completes(self):
+        script = Path(".github/scripts/cleanup_actions_storage.ps1").read_text(encoding="utf-8")
+        self.assertIn("$currentRun = $allRuns | Where-Object { $_.id -eq $currentRunId }", script)
+        self.assertIn("$currentRunIsCompleted = ($currentRun -and $currentRun.status -eq 'completed')", script)
+        self.assertIn(
+            "if (-not ($isCurrentWorkflow -and $pruneCurrentWorkflowToCurrent -and $currentRunIsCompleted))",
+            script,
+        )
+        self.assertIn("$keepIds['39933305387'] = $true", script)
+        self.assertIn("$_.status -eq 'completed'", script)
+
     def test_qwen_voice_preview_reuses_warm_provider_and_replaces_changed_profile(self):
         from types import SimpleNamespace
         from unittest.mock import patch

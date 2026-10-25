@@ -49,10 +49,14 @@ foreach ($group in $groups) {
     $sorted = @($group.Group | Sort-Object -Property created_at -Descending)
     $isCurrentWorkflow = ($group.Name -eq $currentWorkflowName)
 
-    # The Windows build invokes this script after its validated artifacts were uploaded.
-    # Retain that current build instead of an older success from the same workflow.
+    # A build invokes this script before the Actions run itself reaches "completed".
+    # Retain the previous successful run as a fallback until the current run is fully
+    # completed; otherwise a late failure could leave no recent successful build.
+    # Once the current run is completed and validated, retain it instead of an older success.
     # Standalone/daily cleanup retains one latest successful run for each workflow.
-    if (-not ($isCurrentWorkflow -and $pruneCurrentWorkflowToCurrent)) {
+    $currentRun = $allRuns | Where-Object { $_.id -eq $currentRunId } | Select-Object -First 1
+    $currentRunIsCompleted = ($currentRun -and $currentRun.status -eq 'completed')
+    if (-not ($isCurrentWorkflow -and $pruneCurrentWorkflowToCurrent -and $currentRunIsCompleted)) {
         $latestSuccess = $sorted | Where-Object { $_.conclusion -eq 'success' } | Select-Object -First 1
         if ($latestSuccess) { $keepIds[[string]$latestSuccess.id] = $true }
     }
