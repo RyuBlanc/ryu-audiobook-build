@@ -50,6 +50,9 @@
 
   function queueUiTextScaleBaselineCapture(node) {
     if (!node || node.nodeType !== 1) return;
+    // At the default size there is nothing to scale. Do not walk newly-rendered
+    // chapters, cards or dialogs until the user has actually enabled text scaling.
+    if (ryuUiTextScale === 100 && !ryuUiTextBaselinesReady) return;
     // Coalesce nested insertions. A chapter render often adds a panel and all of
     // its descendants in one mutation batch; measure it once as a subtree.
     for (const existing of ryuUiScalePendingRoots) {
