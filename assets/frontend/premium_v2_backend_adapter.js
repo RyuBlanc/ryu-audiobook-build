@@ -726,6 +726,30 @@
     }
     const changedProject = folder !== activeProjectCardFolder;
     const renamed = !changedProject && previousTitle && previousTitle !== title;
+    if (changedProject) {
+      // Do not let old-project chapter selections, casts or queued suggestions
+      // remain visible while the newly opened project is being hydrated.
+      chapterListEpoch++;
+      chapterSelectionEpoch++;
+      characterListEpoch++;
+      characterSuggestionsEpoch++;
+      chapters = [];
+      characters = [];
+      characterDialogueSuggestions = [];
+      characterStudioSelectedChapter = null;
+      characterStudioSelectedSeries = '';
+      window.ryuPremiumSelectedCharacter = '';
+      window.ryuPremiumSelectedChapter = null;
+      window.ryuPremiumSelectedDialogueId = '';
+      window.ryuPremiumAiChapterNumber = null;
+      window.ryuPremiumDialogueReviewItems = [];
+      const manualStory = $('manualStory');
+      if (manualStory) manualStory.dataset.liveSignature = '';
+      const aiStory = document.querySelector('#characters .ai-document');
+      if (aiStory) aiStory.dataset.liveSignature = '';
+      renderCharacterStudioLive();
+      renderDialogueReview();
+    }
     activeProjectCardFolder = folder;
     if (titleNode && titleNode.textContent !== title) titleNode.textContent = title;
     if (titleNode) {
