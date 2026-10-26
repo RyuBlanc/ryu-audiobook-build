@@ -20,8 +20,12 @@ class PremiumV2LibraryRecoveryWiringTests(unittest.TestCase):
     def test_audiobook_library_card_delete_is_connected_to_recoverable_backend(self) -> None:
         self.assertIn("data-delete-project", self.adapter)
         self.assertIn("data-select-project", self.adapter)
-        self.assertIn("Delete Selected (", self.adapter)
+        # Premium V2 exposes recoverable Trash separately from confirmed permanent deletion.
+        self.assertIn("Move to Trash (", self.adapter)
         self.assertIn("call('project.trash'", self.adapter)
+        self.assertIn("async function deleteSelectedProjectsPermanently()", self.adapter)
+        self.assertIn("call('project.delete', {folder: project.folder})", self.adapter)
+        self.assertIn('"project.delete": self._project_delete', self.host)
         self.assertIn("Deleted Books / Recover", self.adapter)
         self.assertIn("call('project.trash.list')", self.adapter)
         self.assertIn("call('project.trash.restore'", self.adapter)
