@@ -770,9 +770,10 @@ def main() -> int:
                 app_icon = candidate_icon
                 break
     app.setWindowIcon(app_icon)
-    # Restore the native Qt workflow as the installed default while Premium V2
-    # parity work is completed. Premium V2 remains available for explicit testing.
-    ui_mode = os.environ.get("RYU_UI_MODE", "native").strip().casefold()
+    # Premium V2 is the approved Dragon Studio interface and must be the
+    # installed default. Keep the native Qt shell available as a compatibility
+    # option by explicitly setting RYU_UI_MODE=native.
+    ui_mode = os.environ.get("RYU_UI_MODE", "premium-v2").strip().casefold()
     if ui_mode in {"premium-v2", "html", "web"}:
         from app.ui.premium_v2_host import PremiumV2Window, frontend_path
         if frontend_path().is_file():
