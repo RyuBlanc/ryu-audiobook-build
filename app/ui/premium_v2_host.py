@@ -329,6 +329,7 @@ class PremiumV2Bridge(QObject):
                 "app.get_info": self._app_info,
                 "app.get_capabilities": self._capabilities,
                 "project.list": self._project_list,
+                "project.delete": self._project_delete,
                 "project.trash": self._project_trash,
                 "project.trash.list": self._project_trash_list,
                 "project.trash.restore": self._project_trash_restore,
@@ -455,6 +456,7 @@ class PremiumV2Bridge(QObject):
             "app.get_capabilities": True,
             "project.create": False,
             "project.list": True,
+            "project.delete": True,
             "project.trash": True,
             "project.trash.list": True,
             "project.trash.restore": True,
@@ -791,6 +793,45 @@ class PremiumV2Bridge(QObject):
             manifest = {}
         return {"id": str(manifest.get("id") or entry.name), "title": project.title,
                 "trashed": True, "deleted_at": manifest.get("deleted_at")}
+
+    def _project_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Permanently remove a local project while preserving its History record."""
+        from app.core.project import delete_project
+
+        requested = str(payload.get("folder") or "").strip()
+        if not requested:
+            raise ValueError("Choose a saved project before permanently deleting it.")
+        try:
+            target = Path(requested).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ValueError("The selected project path is invalid.") from exc
+        project = next(
+            (item for item in list_projects() if Path(item.folder).resolve() == target),
+            None,
+        )
+        if project is None:
+            raise ValueError("That project is no longer present in the active Library.")
+        active_folder_value = str(self.settings.value("project/active_folder") or "").strip()
+        active_folder = Path(active_folder_value).expanduser().resolve() if active_folder_value else None
+        active_states = {"queued", "running", "paused", "cancelling"}
+        if active_folder == target:
+            with self._jobs_lock:
+                has_active_job = any(
+                    str(job.get("state") or "").casefold() in active_states
+                    for job in self._jobs.values()
+                )
+            if has_active_job:
+                raise ValueError(
+                    "This project has an active background job. Cancel or finish it before permanently deleting the book."
+                )
+        # delete_project validates the managed-library path, records a standalone
+        # History entry first, preserves shared Character Library/pronunciation
+        # data, and removes only the project's saved output file and project tree.
+        delete_project(project)
+        if active_folder == target:
+            self.settings.remove("project/active_folder")
+            self.settings.sync()
+        return {"deleted": True, "folder": str(target), "title": project.title}
 
     def _project_trash_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         from app.core.project_trash import list_trashed_projects

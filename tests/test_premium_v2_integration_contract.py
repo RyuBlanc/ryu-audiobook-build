@@ -129,7 +129,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertTrue(adapter.is_file())
         script = adapter.read_text(encoding="utf-8")
         for command in (
-            "project.list", "project.open", "import.choose_file", "import.start", "chapter.update",
+            "project.list", "project.delete", "project.open", "import.choose_file", "import.start", "chapter.update",
             "voice.list", "voice.save", "voice.import_reference", "voice.preview",
             "character.analyze", "character.assign", "character.update", "character.delete", "pronunciation.list",
             "pronunciation.save", "pronunciation.analyze", "production.preview",
@@ -159,6 +159,21 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("call('character.delete'", script)
         self.assertIn("voices.map(v=>'<option value=", script)
         self.assertIn("window.confirm('Remove", script)
+
+    def test_library_permanent_delete_is_backend_connected_and_preserves_history(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        project = (ROOT / "app" / "core" / "project.py").read_text(encoding="utf-8")
+        self.assertIn('"project.delete": self._project_delete', host)
+        self.assertIn('"project.delete": True', host)
+        self.assertIn("def _project_delete(", host)
+        self.assertIn("from app.core.project import delete_project", host)
+        self.assertIn("call('project.delete', {folder: project.folder})", adapter)
+        self.assertIn("async function deleteSelectedProjectsPermanently()", adapter)
+        self.assertIn("Permanently Delete (", adapter)
+        self.assertIn("record_project_deletion(", project)
+        self.assertIn("update_project_deletion(", project)
+        self.assertIn("shared Character Library data will be retained", adapter)
 
     def test_preview_ui_reports_requested_vs_actual_duration(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")

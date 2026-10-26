@@ -753,14 +753,23 @@
     }
   }
   function updateProjectDeleteButton() {
-    const button = $('deleteSelectedProjects');
-    if (!button) return;
     const count = selectedProjectFolders.size;
-    button.textContent = 'Delete Selected (' + count + ')';
-    button.disabled = count === 0;
-    button.title = count ? 'Move ' + count + ' selected book(s) to Deleted Books' : 'Select one or more books first';
-    button.style.opacity = count ? '1' : '.55';
+    const trashButton = $('deleteSelectedProjects');
+    if (trashButton) {
+      trashButton.textContent = 'Move to Trash (' + count + ')';
+      trashButton.disabled = count === 0;
+      trashButton.title = count ? 'Move ' + count + ' selected book(s) to recoverable Deleted Books' : 'Select one or more books first';
+      trashButton.style.opacity = count ? '1' : '.55';
+    }
+    const permanentButton = $('permanentlyDeleteSelectedProjects');
+    if (permanentButton) {
+      permanentButton.textContent = 'Permanently Delete (' + count + ')';
+      permanentButton.disabled = count === 0;
+      permanentButton.title = count ? 'Permanently delete ' + count + ' selected book(s); History and shared Character Library data are retained' : 'Select one or more books first';
+      permanentButton.style.opacity = count ? '1' : '.55';
+    }
   }
+
   async function deleteSelectedProjects() {
     const selected = projects.filter(project => selectedProjectFolders.has(String(project.folder)));
     if (!selected.length) {
@@ -792,6 +801,43 @@
       message('Moved ' + moved + ' book(s) to Deleted Books. Their saved work is recoverable until permanently purged.');
     }
   }
+  async function deleteSelectedProjectsPermanently() {
+    const selected = projects.filter(project => selectedProjectFolders.has(String(project.folder)));
+    if (!selected.length) {
+      selectedProjectFolders.clear();
+      updateProjectDeleteButton();
+      return;
+    }
+    const titles = selected.slice(0, 8).map(project => '• ' + (project.title || 'Untitled')).join('\\n');
+    const remaining = selected.length > 8 ? '\\n• … and ' + (selected.length - 8) + ' more' : '';
+    const confirmed = window.confirm(
+      'Permanently delete ' + selected.length + ' selected book(s)? This cannot be undone.\\n\\n' +
+      titles + remaining +
+      '\\n\\nProject/source files and saved generated output will be removed. History records and shared Character Library data will be retained.'
+    );
+    if (!confirmed) return;
+    const button = $('permanentlyDeleteSelectedProjects');
+    if (button) button.disabled = true;
+    let deleted = 0;
+    const failures = [];
+    for (const project of selected) {
+      try {
+        await call('project.delete', {folder: project.folder});
+        selectedProjectFolders.delete(String(project.folder));
+        deleted += 1;
+      } catch (error) {
+        failures.push((project.title || 'Untitled') + ': ' + (error?.message || String(error)));
+      }
+    }
+    await refreshProjects();
+    updateProjectDeleteButton();
+    if (failures.length) {
+      message('Permanently deleted ' + deleted + ' book(s). Not deleted: ' + failures.join(' | '), true);
+    } else {
+      message('Permanently deleted ' + deleted + ' book(s). History records and shared Character Library data were retained.');
+    }
+  }
+
   function ensureProjectTrashControl() {
     const root = $('library');
     if (!root) return;
@@ -803,11 +849,22 @@
       deleteButton.id = 'deleteSelectedProjects';
       deleteButton.type = 'button';
       deleteButton.className = 'btn small ghost library-delete';
-      deleteButton.textContent = 'Delete Selected (0)';
+      deleteButton.textContent = 'Move to Trash (0)';
       deleteButton.title = 'Select one or more books first';
       deleteButton.style.cssText = 'margin-left:8px;white-space:nowrap;';
       deleteButton.addEventListener('click', () => deleteSelectedProjects().catch(err => message(err?.message || String(err), true)));
       parent.appendChild(deleteButton);
+    }
+    if (!$('permanentlyDeleteSelectedProjects')) {
+      const permanentButton = document.createElement('button');
+      permanentButton.id = 'permanentlyDeleteSelectedProjects';
+      permanentButton.type = 'button';
+      permanentButton.className = 'btn small danger library-delete';
+      permanentButton.textContent = 'Permanently Delete (0)';
+      permanentButton.title = 'Select one or more books first';
+      permanentButton.style.cssText = 'margin-left:8px;white-space:nowrap;';
+      permanentButton.addEventListener('click', () => deleteSelectedProjectsPermanently().catch(err => message(err?.message || String(err), true)));
+      parent.appendChild(permanentButton);
     }
     if (!$('openProjectTrashBin')) {
       const button = document.createElement('button');
