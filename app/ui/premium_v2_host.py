@@ -814,16 +814,24 @@ class PremiumV2Bridge(QObject):
         active_folder_value = str(self.settings.value("project/active_folder") or "").strip()
         active_folder = Path(active_folder_value).expanduser().resolve() if active_folder_value else None
         active_states = {"queued", "running", "paused", "cancelling"}
-        if active_folder == target:
-            with self._jobs_lock:
-                has_active_job = any(
-                    str(job.get("state") or "").casefold() in active_states
-                    for job in self._jobs.values()
-                )
-            if has_active_job:
-                raise ValueError(
-                    "This project has an active background job. Cancel or finish it before permanently deleting the book."
-                )
+
+        def job_targets_project(job: dict[str, Any]) -> bool:
+            if str(job.get("state") or "").casefold() not in active_states:
+                return False
+            job_folder_value = str(job.get("project_folder") or "").strip()
+            if not job_folder_value:
+                return active_folder == target
+            try:
+                return Path(job_folder_value).expanduser().resolve() == target
+            except (OSError, RuntimeError, ValueError):
+                return False
+
+        with self._jobs_lock:
+            has_active_job = any(job_targets_project(job) for job in self._jobs.values())
+        if has_active_job:
+            raise ValueError(
+                "This project has an active background job. Cancel or finish it before permanently deleting the book."
+            )
         # delete_project validates the managed-library path, records a standalone
         # History entry first, preserves shared Character Library/pronunciation
         # data, and removes only the project's saved output file and project tree.

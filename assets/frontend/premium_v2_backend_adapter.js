@@ -808,12 +808,12 @@
       updateProjectDeleteButton();
       return;
     }
-    const titles = selected.slice(0, 8).map(project => '• ' + (project.title || 'Untitled')).join('\\n');
-    const remaining = selected.length > 8 ? '\\n• … and ' + (selected.length - 8) + ' more' : '';
+    const titles = selected.slice(0, 8).map(project => '• ' + (project.title || 'Untitled')).join('\n');
+    const remaining = selected.length > 8 ? '\n• … and ' + (selected.length - 8) + ' more' : '';
     const confirmed = window.confirm(
-      'Permanently delete ' + selected.length + ' selected book(s)? This cannot be undone.\\n\\n' +
+      'Permanently delete ' + selected.length + ' selected book(s)? This cannot be undone.\n\n' +
       titles + remaining +
-      '\\n\\nProject/source files and saved generated output will be removed. History records and shared Character Library data will be retained.'
+      '\n\nProject/source files and saved generated output will be removed. History records and shared Character Library data will be retained.'
     );
     if (!confirmed) return;
     const button = $('permanentlyDeleteSelectedProjects');

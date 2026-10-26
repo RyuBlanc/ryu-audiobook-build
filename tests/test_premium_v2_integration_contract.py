@@ -174,6 +174,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("record_project_deletion(", project)
         self.assertIn("update_project_deletion(", project)
         self.assertIn("shared Character Library data will be retained", adapter)
+        self.assertIn("def job_targets_project(job: dict[str, Any]) -> bool:", host)
+        self.assertIn('job.get("project_folder")', host)
 
     def test_preview_ui_reports_requested_vs_actual_duration(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
