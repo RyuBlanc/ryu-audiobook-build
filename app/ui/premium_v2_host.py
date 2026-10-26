@@ -813,7 +813,7 @@ class PremiumV2Bridge(QObject):
             raise ValueError("That project is no longer present in the active Library.")
         active_folder_value = str(self.settings.value("project/active_folder") or "").strip()
         active_folder = Path(active_folder_value).expanduser().resolve() if active_folder_value else None
-        active_states = {"queued", "running", "paused", "cancelling"}
+        active_states = {"queued", "running", "paused", "pause_requested", "cancel_requested", "cancelling"}
 
         def job_targets_project(job: dict[str, Any]) -> bool:
             if str(job.get("state") or "").casefold() not in active_states:

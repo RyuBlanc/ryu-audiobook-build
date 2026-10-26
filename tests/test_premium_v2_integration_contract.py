@@ -175,6 +175,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("update_project_deletion(", project)
         self.assertIn("shared Character Library data will be retained", adapter)
         self.assertIn("def job_targets_project(job: dict[str, Any]) -> bool:", host)
+        self.assertIn('active_states = {"queued", "running", "paused", "pause_requested", "cancel_requested", "cancelling"}', host)
         self.assertIn('job.get("project_folder")', host)
 
     def test_preview_ui_reports_requested_vs_actual_duration(self):
