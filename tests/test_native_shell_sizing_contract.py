@@ -20,11 +20,11 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertIn('"text_scale": self.settings.value("ui/text_scale", 100)', host)
 
 
-    def test_native_qt_is_default_and_premium_v2_remains_explicitly_available(self):
+    def test_premium_v2_is_default_and_native_shell_is_explicit_compatibility_mode(self):
         main = (ROOT / "app/main.py").read_text(encoding="utf-8")
         before_main = main[:main.index("def main()")]
         self.assertNotIn("from app.ui.premium_v2_host import", before_main)
-        self.assertIn('os.environ.get("RYU_UI_MODE", "native")', main)
+        self.assertIn('os.environ.get("RYU_UI_MODE", "premium-v2")', main)
         self.assertIn('if ui_mode in {"premium-v2", "html", "web"}:', main)
         self.assertIn("window = PremiumV2Window()", main)
         self.assertIn("window = ProjectWorkflow()", main)
