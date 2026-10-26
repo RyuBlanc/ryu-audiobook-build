@@ -366,12 +366,14 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertTrue(commands, "Expected frontend adapter to call backend commands")
         self.assertEqual(commands - registered, set(), "Adapter commands without backend handlers: " + repr(sorted(commands - registered)))
 
-    def test_native_qt_workflow_is_default_and_premium_v2_is_opt_in(self):
+    def test_premium_v2_is_default_and_native_qt_is_compatibility_mode(self):
         self.assertIn("ryu_audiobook_premium_v2.html", self.build)
         self.assertIn("ProjectWorkflow", self.main)
-        self.assertIn('ui_mode = os.environ.get("RYU_UI_MODE", "native").strip().casefold()', self.main)
+        self.assertIn('ui_mode = os.environ.get("RYU_UI_MODE", "premium-v2").strip().casefold()', self.main)
         self.assertIn('if ui_mode in {"premium-v2", "html", "web"}:', self.main)
         self.assertIn("from app.ui.premium_v2_host import PremiumV2Window, frontend_path", self.main)
+        self.assertIn("window = PremiumV2Window()", self.main)
+        self.assertIn("window = ProjectWorkflow()", self.main)
         self.assertNotIn("from app.ui.premium_v2_host import", self.main[:self.main.index("def main()")])
 
     def test_production_skips_empty_chapters_and_rejects_all_empty_books(self):
