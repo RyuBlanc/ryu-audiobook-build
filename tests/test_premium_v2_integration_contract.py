@@ -1375,3 +1375,27 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Stage2ImportCancellationContractTests(unittest.TestCase):
+    """Guard the user-visible import cancellation workflow end to end."""
+
+    def test_import_studio_exposes_cancel_for_the_active_import_only(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = HOST.read_text(encoding="utf-8")
+        self.assertIn("function ensureImportCancelControl()", adapter)
+        self.assertIn('button.id = "cancelImportJob"', adapter)
+        self.assertIn("setImportCancelControl(result.job_id, true)", adapter)
+        self.assertIn("call('job.cancel', {job_id: jobId})", adapter)
+        self.assertIn("async job => {", adapter)
+        self.assertIn("if (job.state === 'cancelled'", adapter)
+        self.assertIn('"job.cancel": self._job_cancel', host)
+        self.assertIn("import_cancel.set()", host)
+        self.assertIn("the source file will be preserved", host.lower())
+
+    def test_import_cancel_contract_is_distinct_from_generation_cancel(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("activeImportJobId", adapter)
+        self.assertIn("Cancellation requested. The source file will be preserved.", adapter)
+        # The existing top-bar cancel action remains generation-only.
+        self.assertIn("activeJobType!=='audiobook-generation'", adapter)
