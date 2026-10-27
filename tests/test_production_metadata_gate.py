@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 
-from app.ui.premium_v2_host import PremiumV2Bridge
+from PySide6.QtGui import QImage
+from app.ui.premium_v2_host import PremiumV2Bridge, _production_cover_is_readable
 
 
 class _MetadataGateHarness:
@@ -16,6 +17,13 @@ class _MetadataGateHarness:
 
 
 class ProductionMetadataGateTests(unittest.TestCase):
+    @staticmethod
+    def write_valid_cover(path: Path) -> None:
+        image = QImage(2, 2, QImage.Format.Format_RGB32)
+        image.fill(0xFFB21F3F)
+        if not image.save(str(path)):
+            raise AssertionError(f"Could not write valid image fixture: {path}")
+
     def complete_state(self, cover_path):
         return {
             "book_title": "The Saved Book",
@@ -33,7 +41,7 @@ class ProductionMetadataGateTests(unittest.TestCase):
     def test_complete_saved_metadata_and_real_narrator_pass_gate(self):
         with tempfile.TemporaryDirectory() as temp:
             cover = Path(temp) / "cover.jpg"
-            cover.write_bytes(b"image fixture")
+            self.write_valid_cover(cover)
             state = self.complete_state(cover)
             harness = _MetadataGateHarness({"narrator voice": SimpleNamespace(name="Narrator Voice")})
             self.assertEqual(PremiumV2Bridge._production_metadata_missing(harness, state), [])
@@ -54,12 +62,24 @@ class ProductionMetadataGateTests(unittest.TestCase):
     def test_legacy_series_number_is_recognized_as_saved_series_volume(self):
         with tempfile.TemporaryDirectory() as temp:
             cover = Path(temp) / "cover.png"
-            cover.write_bytes(b"image fixture")
+            self.write_valid_cover(cover)
             state = self.complete_state(cover)
             state.pop("series_volume")
             state["series_number"] = "3"
             harness = _MetadataGateHarness({"narrator voice": SimpleNamespace(name="Narrator Voice")})
             self.assertEqual(PremiumV2Bridge._production_metadata_missing(harness, state), [])
+
+    def test_corrupt_file_with_supported_extension_is_not_a_valid_cover(self):
+        with tempfile.TemporaryDirectory() as temp:
+            corrupt_cover = Path(temp) / "corrupt.jpg"
+            corrupt_cover.write_bytes(b"not a readable image")
+            self.assertFalse(_production_cover_is_readable(corrupt_cover))
+            state = self.complete_state(corrupt_cover)
+            harness = _MetadataGateHarness({"narrator voice": SimpleNamespace(name="Narrator Voice")})
+            self.assertEqual(
+                PremiumV2Bridge._production_metadata_missing(harness, state),
+                ["Cover Image"],
+            )
 
     def test_cover_must_exist_and_use_a_supported_image_extension(self):
         with tempfile.TemporaryDirectory() as temp:

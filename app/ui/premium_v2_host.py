@@ -61,6 +61,23 @@ FRONTEND_RELATIVE_PATH = Path("assets") / "frontend" / "ryu_audiobook_premium_v2
 PRODUCTION_COVER_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
 
+def _production_cover_is_readable(value: str | Path | None) -> bool:
+    """Return whether a saved cover is a real, readable image supported by M4B output."""
+    if value is None or not str(value).strip():
+        return False
+    try:
+        path = Path(value).expanduser()
+        if (
+            not path.is_file()
+            or path.stat().st_size <= 0
+            or path.suffix.casefold() not in PRODUCTION_COVER_EXTENSIONS
+        ):
+            return False
+        return bool(QImageReader(str(path)).canRead())
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return False
+
+
 def frontend_path() -> Path:
     """Resolve the same self-contained HTML in source and PyInstaller builds."""
     root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
@@ -785,16 +802,7 @@ class PremiumV2Bridge(QObject):
 
         cover_value = str(state.get("cover_path") or "").strip()
         cover = Path(cover_value).expanduser() if cover_value else None
-        try:
-            cover_ready = bool(
-                cover
-                and cover.is_file()
-                and cover.stat().st_size > 0
-                and cover.suffix.casefold() in PRODUCTION_COVER_EXTENSIONS
-            )
-        except OSError:
-            cover_ready = False
-        if not cover_ready:
+        if not _production_cover_is_readable(cover):
             missing.append("Cover Image")
         return missing
 
@@ -806,7 +814,7 @@ class PremiumV2Bridge(QObject):
         cover_value = str(state.get("cover_path") or "").strip()
         cover = Path(cover_value).expanduser() if cover_value else None
         try:
-            if not cover or not cover.is_file() or cover.stat().st_size <= 0 or cover.suffix.casefold() not in PRODUCTION_COVER_EXTENSIONS:
+            if not _production_cover_is_readable(cover):
                 cover_value = ""
             else:
                 cover_value = str(cover.resolve())
