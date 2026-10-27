@@ -48,7 +48,7 @@ class ProductionMetadataGateTests(unittest.TestCase):
             harness = _MetadataGateHarness({})
             self.assertEqual(
                 PremiumV2Bridge._production_metadata_missing(harness, state),
-                ["Book title", "Publisher", "Series Volume", "Narrator", "Cover Image"],
+                ["Book title", "Narrator", "Publisher", "Series Volume", "Cover Image"],
             )
 
     def test_legacy_series_number_is_recognized_as_saved_series_volume(self):

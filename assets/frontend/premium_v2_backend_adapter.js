@@ -5393,7 +5393,7 @@
       coverInput.name = 'cover_path';
       coverInput.readOnly = true;
       coverInput.value = String(values.cover_path || '');
-      coverInput.placeholder = 'Choose a cover image (JPG, PNG, WebP, GIF, BMP or TIFF)';
+      coverInput.placeholder = 'Choose a cover image (JPG or PNG)';
       coverInput.title = coverInput.value;
       const coverBrowse = document.createElement('button');
       coverBrowse.type = 'button';
@@ -5422,7 +5422,7 @@
       coverField.appendChild(coverRow);
       const coverNote = document.createElement('p');
       coverNote.className = 'metadata-note';
-      coverNote.textContent = 'The chosen image is copied into the project so it remains available after the original file is moved.';
+      coverNote.textContent = 'Choose a valid JPG or PNG. The image is copied into the project so it remains available after the original file is moved.';
       coverField.appendChild(coverNote);
       grid.appendChild(coverField);
 

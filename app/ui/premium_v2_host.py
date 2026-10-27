@@ -26,7 +26,7 @@ from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QImageReader
 
 from app.core.paths import app_root, audiobooks_root, ensure_roots, library_root, settings_root
 from app.core.project import create_project, list_projects
@@ -58,6 +58,7 @@ from app.version import APP_NAME, full_version
 log = logging.getLogger(__name__)
 
 FRONTEND_RELATIVE_PATH = Path("assets") / "frontend" / "ryu_audiobook_premium_v2.html"
+PRODUCTION_COVER_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 
 
 def frontend_path() -> Path:
@@ -756,28 +757,31 @@ class PremiumV2Bridge(QObject):
 
     def _production_metadata_missing(self, state: dict[str, Any]) -> list[str]:
         """Return required production metadata missing from persisted project state."""
-        required = (
-            ("book_title", "Book title"),
-            ("author", "Author"),
-            ("publisher", "Publisher"),
-            ("series", "Series"),
-            ("series_volume", "Series Volume"),
-            ("language", "Language"),
-            ("year", "Release Year"),
-            ("genre", "Genre"),
+        missing: list[str] = []
+        required_before_narrator = (
+            ("book_title", "Book title", None),
+            ("author", "Author", None),
         )
-        missing = [
-            label for key, label in required
-            if not str(state.get(key) or (
-                state.get("series_number") if key == "series_volume"
-                else state.get("release_year") if key == "year"
-                else ""
-            ) or "").strip()
-        ]
+        required_after_narrator = (
+            ("publisher", "Publisher", None),
+            ("series", "Series", None),
+            ("series_volume", "Series Volume", "series_number"),
+            ("language", "Language", None),
+            ("year", "Release Year", "release_year"),
+            ("genre", "Genre", None),
+        )
+        for key, label, alias in required_before_narrator:
+            if not str(state.get(key) or "").strip():
+                missing.append(label)
 
         narrator_name = str(state.get("voice_profile") or "").strip()
         if not narrator_name or self._find_profile(narrator_name) is None:
             missing.append("Narrator")
+
+        for key, label, alias in required_after_narrator:
+            value = state.get(key) or (state.get(alias) if alias else "")
+            if not str(value or "").strip():
+                missing.append(label)
 
         cover_value = str(state.get("cover_path") or "").strip()
         cover = Path(cover_value).expanduser() if cover_value else None
@@ -786,7 +790,7 @@ class PremiumV2Bridge(QObject):
                 cover
                 and cover.is_file()
                 and cover.stat().st_size > 0
-                and cover.suffix.casefold() in COVER_IMAGE_EXTENSIONS
+                and cover.suffix.casefold() in PRODUCTION_COVER_EXTENSIONS
             )
         except OSError:
             cover_ready = False
@@ -802,7 +806,7 @@ class PremiumV2Bridge(QObject):
         cover_value = str(state.get("cover_path") or "").strip()
         cover = Path(cover_value).expanduser() if cover_value else None
         try:
-            if not cover or not cover.is_file() or cover.stat().st_size <= 0 or cover.suffix.casefold() not in COVER_IMAGE_EXTENSIONS:
+            if not cover or not cover.is_file() or cover.stat().st_size <= 0 or cover.suffix.casefold() not in PRODUCTION_COVER_EXTENSIONS:
                 cover_value = ""
             else:
                 cover_value = str(cover.resolve())
@@ -868,7 +872,7 @@ class PremiumV2Bridge(QObject):
 
     def _production_metadata_choose_cover(self, _payload: dict[str, Any]) -> dict[str, Any]:
         """Use a native file picker for supported local cover image formats."""
-        patterns = " ".join("*" + extension for extension in sorted(COVER_IMAGE_EXTENSIONS))
+        patterns = "*.jpg *.jpeg *.png"
         path, _filter = QFileDialog.getOpenFileName(
             None,
             "Choose audiobook cover",
@@ -919,8 +923,11 @@ class PremiumV2Bridge(QObject):
             cover_source = Path(cover_input).expanduser().resolve()
             if not cover_source.is_file():
                 raise FileNotFoundError("The selected cover image was not found. Choose it again.")
-            if cover_source.suffix.casefold() not in COVER_IMAGE_EXTENSIONS:
-                raise ValueError("Choose a supported cover image (JPG, PNG, WebP, GIF, BMP, or TIFF).")
+            if cover_source.suffix.casefold() not in PRODUCTION_COVER_EXTENSIONS:
+                raise ValueError("Choose a JPG or PNG cover image so it can be embedded in the final M4B.")
+            reader = QImageReader(str(cover_source))
+            if not reader.canRead():
+                raise ValueError("The selected cover file is not a valid readable image. Choose a JPG or PNG image.")
             cover = persist_project_cover(cover_source, project.folder)
             if not cover.is_file() or cover.stat().st_size <= 0:
                 raise IOError("The selected cover image could not be saved with this project.")
@@ -931,7 +938,7 @@ class PremiumV2Bridge(QObject):
             previous = str(state.get("cover_path") or "").strip()
             candidate = Path(previous).expanduser() if previous else None
             try:
-                if not candidate or not candidate.is_file() or candidate.suffix.casefold() not in COVER_IMAGE_EXTENSIONS:
+                if not candidate or not candidate.is_file() or candidate.suffix.casefold() not in PRODUCTION_COVER_EXTENSIONS:
                     state.pop("cover_path", None)
             except OSError:
                 state.pop("cover_path", None)
