@@ -71,8 +71,19 @@ jobs:
           $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
           $env:PYTHONPATH = (Get-Location).Path
           $env:PYTHONDONTWRITEBYTECODE = '1'
-          & $pythonExe -B -m unittest discover -s tests -v
-          if ($LASTEXITCODE -ne 0) { throw "Regression tests failed with exit code $LASTEXITCODE." }
+          & $pythonExe -B '.github\scripts\run_ci_tests.py'
+          if ($LASTEXITCODE -ne 0) { throw "Regression tests failed with exit code $LASTEXITCODE. Evidence was written to test-evidence when the runner completed." }
+      - name: Upload regression test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Audiobook-Test-Evidence-${{ github.run_number }}
+          path: |
+            test-evidence/stage1-test-results.json
+            test-evidence/stage1-test-results.txt
+            test-evidence/stage1-acceptance-matrix.md
+          if-no-files-found: warn
+          retention-days: 30
 
   build:
     if: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.event.head_commit.message, '[artifact-checkpoint]'))) || (github.event_name == 'workflow_dispatch' && inputs.build_artifacts == true) }}
