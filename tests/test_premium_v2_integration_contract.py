@@ -248,7 +248,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('removed_leading = len(current_original) - len(current_text)', host)
         self.assertIn('shifted["start"] = max(0, shifted["start"] - removed_leading) + assignment_offset', host)
         self.assertIn('shifted["end"] = max(0, shifted["end"] - removed_leading) + assignment_offset', host)
-        self.assertIn('await persistChapterSnapshot(number,', adapter)
+        self.assertIn("const openChapterNumber = Number(window.ryuPremiumSelectedChapter || 0)", adapter)
         self.assertIn("await chapterSavePromise.catch(() => {});", adapter)
 
     def test_chapter_operations_missing_from_visual_controls_are_reachable_contextually(self):
@@ -333,7 +333,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("changeChapterHistory(key === 'z' && !event.shiftKey ? 'undo' : 'redo')", adapter)
         self.assertIn("chapterHistoryLimit = 10", adapter)
         self.assertIn("Undo/redo is limited to chapters of 1,000,000 characters", adapter)
-        self.assertIn("Type one: add, rename, delete, up, down, merge, review, skip, find, replace, undo, redo", adapter)
+        self.assertIn("Type one: add, rename, delete, up, down, merge, redetect, review, skip, find, replace, undo, redo", adapter)
 
     def test_chapter_split_is_persisted_and_connected_to_visible_control(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
@@ -718,10 +718,15 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("skip_for_generation: bool = False", detector)
         self.assertIn("chapters = [Chapter(**item) for item in chapter_data]", project)
 
-    def test_import_has_no_re_detection_command_that_can_replace_manual_edits(self):
+    def test_import_and_redetection_use_separate_safe_paths(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
-        self.assertNotIn('"chapter.redetect":', host)
-        self.assertNotIn("def _chapter_redetect(", host)
+        helper = (ROOT / "app" / "chapters" / "redetect.py").read_text(encoding="utf-8")
+        self.assertIn('"chapter.redetect": self._chapter_redetect', host)
+        self.assertIn('def _chapter_redetect(', host)
+        self.assertIn("redetect_chapters_preserving_edits", host)
+        self.assertIn("source_text.find(candidate_text, source_cursor)", helper)
+        self.assertIn("No changes were saved.", helper)
+        self.assertIn("manual chapter boundaries", helper)
         worker = host[host.index("def _import_worker("):host.index("def _chapter_clean(", host.index("def _import_worker("))]
         self.assertIn("chapters = detect_chapters(text)", worker)
         self.assertIn("project = create_project(title, path, chapters)", worker)
@@ -927,7 +932,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("const lengthGroup = [...document.querySelectorAll('#voices .toolbar')]", adapter)
         self.assertIn("const duration = lengthGroup?.querySelector('.seg button.active')?.textContent.match(/\\d+/)?.[0] || '30'", adapter)
         # Chapter context actions and track selection have source-backed host calls.
-        self.assertIn("Type one: add, rename, delete, up, down, merge, review, skip, find, replace, undo, redo", adapter)
+        self.assertIn("Type one: add, rename, delete, up, down, merge, redetect, review, skip, find, replace, undo, redo", adapter)
         for command in ("chapter.add", "chapter.delete", "chapter.reorder", "chapter.merge", "sound.catalog", "sound.assign", "sound.save_manifest"):
             self.assertIn("call('" + command + "'", adapter)
         self.assertIn("call('player.get_active', {folder})", adapter)
