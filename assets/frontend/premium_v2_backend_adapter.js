@@ -3747,15 +3747,76 @@
     return result;
   }
 
+  let activeImportJobId = null;
+  let importCancelControl = null;
+
+  function ensureImportCancelControl() {
+    const status = $('importStatus');
+    if (!status) return null;
+    if (importCancelControl?.isConnected) return importCancelControl;
+    const button = document.createElement('button');
+    button.id = 'cancelImportJob';
+    button.type = 'button';
+    button.className = 'btn small ghost';
+    button.textContent = 'Cancel import';
+    button.hidden = true;
+    button.setAttribute('aria-label', 'Cancel the active book import');
+    button.style.marginInlineStart = '8px';
+    button.addEventListener('click', async () => {
+      const jobId = activeImportJobId;
+      if (!jobId || button.disabled) return;
+      button.disabled = true;
+      button.textContent = 'Cancelling…';
+      try {
+        const result = await call('job.cancel', {job_id: jobId});
+        button.textContent = 'Cancellation requested…';
+        if (status) status.textContent = result?.message || 'Cancellation requested. The source file will be preserved.';
+        await refreshJobs();
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = 'Cancel import';
+        message(error?.message || String(error), true);
+      }
+    });
+    status.insertAdjacentElement('afterend', button);
+    importCancelControl = button;
+    return button;
+  }
+
+  function setImportCancelControl(jobId, busy) {
+    const button = ensureImportCancelControl();
+    activeImportJobId = busy ? String(jobId || '') : null;
+    if (!button) return;
+    button.hidden = !busy;
+    button.disabled = false;
+    button.textContent = 'Cancel import';
+    if (busy) button.setAttribute('aria-live', 'polite');
+    else button.removeAttribute('aria-live');
+  }
+
   async function startImportPayload(payload, displayName) {
     if ($('importStatus')) $('importStatus').textContent = 'Importing ' + displayName + '…';
     if ($('importBar')) $('importBar').style.width = '5%';
     const result = await call('import.start', payload);
-    if (result.job_id) await monitorJob(result.job_id, async () => {
+    if (result.job_id) {
+      setImportCancelControl(result.job_id, true);
+      try {
+        await monitorJob(result.job_id, async () => {
+          await refreshProjects(); await refreshChapters();
+          if (typeof window.go === 'function') window.go('chapters');
+        }, async job => {
+          if (activeImportJobId === String(result.job_id)) setImportCancelControl(null, false);
+          if (job.state === 'cancelled' && $('importStatus')) {
+            $('importStatus').textContent = job.message || 'Import cancelled. The original source file was preserved.';
+          }
+        });
+      } finally {
+        if (activeImportJobId === String(result.job_id)) setImportCancelControl(null, false);
+      }
+    } else {
       await refreshProjects(); await refreshChapters();
-      if (typeof window.go === 'function') window.go('chapters');
-    });
-    else { await refreshProjects(); await refreshChapters(); message('Book imported into the local library.'); }
+      message('Book imported into the local library.');
+    }
   }
   async function importBook() {
     const chosen = await call('import.choose_file');
