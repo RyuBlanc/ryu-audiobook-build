@@ -382,6 +382,9 @@ class PremiumV2Bridge(QObject):
                 "pronunciation.save": self._pronunciation_save,
                 "pronunciation.delete": self._pronunciation_delete,
                 "pronunciation.analyze": self._pronunciation_analyze,
+                "production.details.get": self._production_details_get,
+                "production.details.save": self._production_details_save,
+                "production.details.cover.choose": self._production_details_choose_cover,
                 "production.generate_book": self._production_generate_book,
                 "production.preview": self._production_preview,
                 "sound.preview_book": self._sound_preview_book,
@@ -509,6 +512,9 @@ class PremiumV2Bridge(QObject):
             "pronunciation.save": True,
             "pronunciation.delete": True,
             "pronunciation.analyze": True,
+            "production.details.get": True,
+            "production.details.save": True,
+            "production.details.cover.choose": True,
             "production.generate_book": True,
             "production.preview": True,
             "sound.preview_book": True,
@@ -714,6 +720,14 @@ class PremiumV2Bridge(QObject):
 
         return {
             "title": project.title,
+            "book_title": str(state.get("book_title") or project.title),
+            "author": str(state.get("author") or ""),
+            "publisher": str(state.get("publisher") or ""),
+            "series": str(state.get("series") or self._project_series_name(project, state)),
+            "series_volume": str(state.get("series_volume") or state.get("series_number") or ""),
+            "language": str(state.get("language") or ""),
+            "year": str(state.get("year") or state.get("release_year") or ""),
+            "genre": str(state.get("genre") or ""),
             "series_name": self._project_series_name(project, state),
             "folder": str(project.folder.resolve()),
             "source_path": str(project.source_path) if project.source_path else None,
@@ -739,6 +753,203 @@ class PremiumV2Bridge(QObject):
             "sound_design_configured": sound_design_ready,
             "modified_at": modified_at,
         }
+
+    def _production_metadata_missing(self, state: dict[str, Any]) -> list[str]:
+        """Return required production metadata missing from persisted project state."""
+        required = (
+            ("book_title", "Book title"),
+            ("author", "Author"),
+            ("publisher", "Publisher"),
+            ("series", "Series"),
+            ("series_volume", "Series Volume"),
+            ("language", "Language"),
+            ("year", "Release Year"),
+            ("genre", "Genre"),
+        )
+        missing = [
+            label for key, label in required
+            if not str(state.get(key) or (
+                state.get("series_number") if key == "series_volume"
+                else state.get("release_year") if key == "year"
+                else ""
+            ) or "").strip()
+        ]
+
+        narrator_name = str(state.get("voice_profile") or "").strip()
+        if not narrator_name or self._find_profile(narrator_name) is None:
+            missing.append("Narrator")
+
+        cover_value = str(state.get("cover_path") or "").strip()
+        cover = Path(cover_value).expanduser() if cover_value else None
+        try:
+            cover_ready = bool(
+                cover
+                and cover.is_file()
+                and cover.stat().st_size > 0
+                and cover.suffix.casefold() in COVER_IMAGE_EXTENSIONS
+            )
+        except OSError:
+            cover_ready = False
+        if not cover_ready:
+            missing.append("Cover Image")
+        return missing
+
+    def _production_metadata_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Read saved metadata and real historical values for the active project."""
+        project = self._active_project()
+        state = load_state(project.folder)
+        profile = self._find_profile(str(state.get("voice_profile") or "").strip())
+        cover_value = str(state.get("cover_path") or "").strip()
+        cover = Path(cover_value).expanduser() if cover_value else None
+        try:
+            if not cover or not cover.is_file() or cover.stat().st_size <= 0 or cover.suffix.casefold() not in COVER_IMAGE_EXTENSIONS:
+                cover_value = ""
+            else:
+                cover_value = str(cover.resolve())
+        except OSError:
+            cover_value = ""
+
+        series_default = self._project_series_name(project, state)
+        values = {
+            "book_title": str(state.get("book_title") or project.title),
+            "author": str(state.get("author") or ""),
+            "narrator": str(profile.name if profile is not None else ""),
+            "publisher": str(state.get("publisher") or ""),
+            "series": str(state.get("series") or series_default or ""),
+            "series_volume": str(state.get("series_volume") or state.get("series_number") or ""),
+            "language": str(state.get("language") or ""),
+            "year": str(state.get("year") or state.get("release_year") or ""),
+            "genre": str(state.get("genre") or ""),
+            "cover_path": cover_value,
+        }
+
+        history_keys = {
+            "book_title": ("book_title",),
+            "author": ("author",),
+            "publisher": ("publisher",),
+            "series": ("series", "series_name", "series_title", "novel_series"),
+            "series_volume": ("series_volume", "series_number"),
+            "language": ("language",),
+            "year": ("year", "release_year"),
+            "genre": ("genre",),
+        }
+        history: dict[str, list[str]] = {key: [] for key in history_keys}
+        history_seen: dict[str, set[str]] = {key: set() for key in history_keys}
+        for saved_project in list_projects():
+            try:
+                saved_state = load_state(saved_project.folder)
+            except (OSError, ValueError, TypeError):
+                continue
+            for key, source_keys in history_keys.items():
+                candidate = ""
+                if key == "book_title":
+                    candidate = str(saved_state.get("book_title") or saved_project.title or "").strip()
+                else:
+                    candidate = next(
+                        (str(saved_state.get(source_key) or "").strip() for source_key in source_keys
+                         if str(saved_state.get(source_key) or "").strip()),
+                        "",
+                    )
+                    if key == "series" and not candidate:
+                        candidate = self._project_series_name(saved_project, saved_state)
+                folded = candidate.casefold()
+                if candidate and folded not in history_seen[key]:
+                    history_seen[key].add(folded)
+                    history[key].append(candidate)
+        history = {key: values[-40:] for key, values in history.items()}
+        missing = self._production_metadata_missing(state)
+        return {
+            "project_title": project.title,
+            "values": values,
+            "history": history,
+            "missing_fields": missing,
+            "complete": not missing,
+        }
+
+    def _production_metadata_choose_cover(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Use a native file picker for supported local cover image formats."""
+        patterns = " ".join("*" + extension for extension in sorted(COVER_IMAGE_EXTENSIONS))
+        path, _filter = QFileDialog.getOpenFileName(
+            None,
+            "Choose audiobook cover",
+            str(Path.home()),
+            f"Cover images ({patterns});;All files (*.*)",
+        )
+        return {"cancelled": not bool(path), "path": path or None}
+
+    def _production_metadata_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist editable metadata against the active project, not the transient form."""
+        project = self._active_project()
+        state = load_state(project.folder)
+        fields = {
+            "book_title": ("Book title", 300),
+            "author": ("Author", 300),
+            "publisher": ("Publisher", 300),
+            "series": ("Series", 300),
+            "series_volume": ("Series Volume", 100),
+            "language": ("Language", 100),
+            "year": ("Release Year", 4),
+            "genre": ("Genre", 300),
+        }
+        values: dict[str, str] = {}
+        for key, (label, limit) in fields.items():
+            raw = payload.get(key, "")
+            if raw is None:
+                raw = ""
+            if not isinstance(raw, str):
+                raise ValueError(f"{label} must be text.")
+            value = unicodedata.normalize("NFC", raw).strip()
+            if len(value) > limit:
+                raise ValueError(f"{label} must be {limit} characters or fewer.")
+            if any(ord(char) < 32 or ord(char) == 127 for char in value):
+                raise ValueError(f"{label} cannot contain control characters.")
+            values[key] = value
+
+        if values["year"] and not re.fullmatch(r"\d{4}", values["year"]):
+            raise ValueError("Release Year must contain exactly four digits (YYYY).")
+
+        # Do not accept a narrator value from the form. Narrator identity must
+        # come from the currently saved Voice Studio profile.
+        profile = self._find_profile(str(state.get("voice_profile") or "").strip())
+        if profile is not None:
+            state["narrator"] = profile.name
+
+        cover_input = str(payload.get("cover_path") or "").strip()
+        if cover_input:
+            cover_source = Path(cover_input).expanduser().resolve()
+            if not cover_source.is_file():
+                raise FileNotFoundError("The selected cover image was not found. Choose it again.")
+            if cover_source.suffix.casefold() not in COVER_IMAGE_EXTENSIONS:
+                raise ValueError("Choose a supported cover image (JPG, PNG, WebP, GIF, BMP, or TIFF).")
+            cover = persist_project_cover(cover_source, project.folder)
+            if not cover.is_file() or cover.stat().st_size <= 0:
+                raise IOError("The selected cover image could not be saved with this project.")
+            state["cover_path"] = str(cover.resolve())
+        elif "cover_path" in payload:
+            # An invalid stale path returned as empty must not remain in saved
+            # state and make the metadata gate appear complete.
+            previous = str(state.get("cover_path") or "").strip()
+            candidate = Path(previous).expanduser() if previous else None
+            try:
+                if not candidate or not candidate.is_file() or candidate.suffix.casefold() not in COVER_IMAGE_EXTENSIONS:
+                    state.pop("cover_path", None)
+            except OSError:
+                state.pop("cover_path", None)
+
+        state.update(values)
+        # Keep the tag used by the existing M4B assembler synchronized with the UI field.
+        state["series_number"] = values["series_volume"]
+        save_state(project.folder, state)
+        verified = load_state(project.folder)
+        for key, value in values.items():
+            persisted = verified.get(key)
+            if key == "series_volume" and not persisted:
+                persisted = verified.get("series_number")
+            if str(persisted or "") != value:
+                raise IOError(f"Saved {fields[key][0]} could not be verified.")
+        result = self._production_metadata_get({})
+        result["saved"] = True
+        return result
 
     def _mark_project_edited(self, project, chapter_number: int | None = None) -> None:
         """Persist real edit timestamps used by Dashboard ordering and last-edited labels."""
@@ -3943,9 +4154,6 @@ class PremiumV2Bridge(QObject):
         check_active = getattr(self, "_assert_no_active_audio_synthesis", None)
         if callable(check_active):
             check_active("start audiobook generation")
-        close_cache = getattr(self, "close_preview_provider_cache", None)
-        if callable(close_cache):
-            close_cache()
         project = self._active_project()
         chapters = [c for c in project.chapters if not getattr(c, "skip_for_generation", False) and (c.text or "").strip()]
         skipped = len(project.chapters) - len(chapters)
@@ -3954,12 +4162,23 @@ class PremiumV2Bridge(QObject):
         if not chapters:
             raise ValueError("No chapters are eligible for generation. Restore chapter text or re-include a skipped chapter.")
         state = load_state(project.folder)
+        metadata_missing = self._production_metadata_missing(state)
+        if metadata_missing:
+            raise ValueError(
+                "Full-book generation is blocked until project metadata is complete. "
+                "Missing: " + ", ".join(metadata_missing) +
+                ". Open Input Project Details, save the listed fields, and assign a valid narrator in Voice Studio."
+            )
         from app.audio.library import validate_saved_audio_paths
         validate_saved_audio_paths(state)
-        profile_name = str(payload.get("profile_name") or state.get("voice_profile") or "").strip()
+        # Generation must use the saved narrator; transient unsaved form state is not authoritative.
+        profile_name = str(state.get("voice_profile") or "").strip()
         profile = self._find_profile(profile_name)
         if profile is None:
             raise ValueError("No narrator is saved. Open Voice Studio, select an installed voice, and save it as narrator.")
+        close_cache = getattr(self, "close_preview_provider_cache", None)
+        if callable(close_cache):
+            close_cache()
         provider, voice = provider_from_profile(profile)
         # Include the full selected narrator profile in resumable chunk identity
         # even when this book has no character-specific voice assignments.
@@ -4027,11 +4246,17 @@ class PremiumV2Bridge(QObject):
                       "generation_started_at": self._now(), "empty_chapters_skipped": empty_skipped,
                       "excluded_chapters_skipped": excluded_skipped, "chapters_skipped_for_generation": skipped})
         save_state(project.folder, state)
-        metadata = {"title": str(payload.get("title") or project.title),
-                    "author": str(payload.get("author") or state.get("author") or ""),
-                    "narrator": profile.name, "publisher": str(state.get("publisher") or ""),
-                    "series": str(state.get("series") or ""), "language": str(state.get("language") or ""),
-                    "year": str(state.get("year") or ""), "genre": str(state.get("genre") or "")}
+        metadata = {
+            "title": str(state.get("book_title") or "").strip(),
+            "author": str(state.get("author") or "").strip(),
+            "narrator": profile.name,
+            "publisher": str(state.get("publisher") or "").strip(),
+            "series": str(state.get("series") or "").strip(),
+            "series_number": str(state.get("series_volume") or state.get("series_number") or "").strip(),
+            "language": str(state.get("language") or "").strip(),
+            "year": str(state.get("year") or state.get("release_year") or "").strip(),
+            "genre": str(state.get("genre") or "").strip(),
+        }
         manager = GenerationManager(
             provider, voice, chapters, project.folder / "working_audio",
             on_progress=lambda *args: self._generation_progress(job_id, *args),

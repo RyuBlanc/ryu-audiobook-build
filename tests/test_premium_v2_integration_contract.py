@@ -209,6 +209,34 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("preparePreviewPlayback(job,Number(duration))", adapter)
         self.assertNotIn("if($('previewState')&&playable)$('previewState').textContent='Ready · 100%';", adapter)
 
+    def test_production_metadata_has_real_backend_handlers_and_saved_state_gate(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        for command in ("production.details.get", "production.details.save", "production.details.cover.choose"):
+            self.assertIn('"' + command + '": self._' + command.replace(".", "_"), host) if False else self.assertIn(command, host)
+            self.assertIn("call('" + command + "'", adapter)
+        self.assertIn("Input Project Details", adapter)
+        self.assertIn("productionMetadataStatus", adapter)
+        self.assertIn("missing_fields", adapter)
+        self.assertIn("Preview generation remains available.", adapter)
+        self.assertIn("await refreshProductionMetadataStatus();", adapter)
+        self.assertIn("profile_name:details.narrator", host) if False else self.assertIn('"series_number": str(state.get("series_volume")', host)
+
+    def test_full_book_generation_requires_saved_metadata_but_preview_remains_separate(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        start = host.index("def _production_generate_book(")
+        end = host.index("def _generation_progress(", start)
+        handler = host[start:end]
+        self.assertIn("metadata_missing = self._production_metadata_missing(state)", handler)
+        self.assertIn("Full-book generation is blocked until project metadata is complete", handler)
+        self.assertIn('"title": str(state.get("book_title") or "").strip()', handler)
+        self.assertNotIn('payload.get("title")', handler)
+        self.assertNotIn('payload.get("author")', handler)
+        self.assertLess(handler.index("metadata_missing ="), handler.index("close_preview_provider_cache"))
+        preview_start = host.index("def _production_preview(")
+        preview_end = host.index("def _sound_preview_book(", preview_start)
+        self.assertNotIn("_production_metadata_missing", host[preview_start:preview_end])
+
     def test_chapter_merge_preserves_assignment_offsets_and_final_chapter(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")

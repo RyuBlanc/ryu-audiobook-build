@@ -5180,6 +5180,315 @@
     disable($('runBenchmark'), 'Live hardware telemetry and repeatable benchmark execution are not implemented in this build; performance is intentionally marked Not tested.');
   }
 
+  const productionMetadataFieldSpecs = [
+    {key:'book_title',label:'Book title',limit:300},
+    {key:'author',label:'Author',limit:300},
+    {key:'publisher',label:'Publisher',limit:300},
+    {key:'series',label:'Series',limit:300},
+    {key:'series_volume',label:'Series Volume',limit:100},
+    {key:'language',label:'Language',limit:100},
+    {key:'year',label:'Release Year',limit:4},
+    {key:'genre',label:'Genre',limit:300}
+  ];
+
+  function ensureProductionMetadataStatus(details = null) {
+    const page = $('generate');
+    if (!page) return null;
+    let status = $('productionMetadataStatus');
+    if (!status) {
+      status = document.createElement('section');
+      status.id = 'productionMetadataStatus';
+      status.className = 'card';
+      status.setAttribute('role','status');
+      status.setAttribute('aria-live','polite');
+      status.style.cssText = 'margin:0 0 14px;padding:12px 14px;border-left:4px solid var(--border);min-width:0;overflow-wrap:anywhere';
+      const head = page.querySelector('.page-head');
+      if (head && head.parentNode) head.insertAdjacentElement('afterend',status);
+      else page.prepend(status);
+    }
+    if (details) updateProductionMetadataStatus(details);
+    return status;
+  }
+
+  function updateProductionMetadataStatus(details) {
+    const status = ensureProductionMetadataStatus();
+    if (!status || !details) return;
+    const missing = Array.isArray(details.missing_fields) ? details.missing_fields : [];
+    if (details.complete && missing.length === 0) {
+      status.style.borderLeftColor = '#2f9d67';
+      status.style.background = 'rgba(47,157,103,.10)';
+      status.style.color = 'var(--text)';
+      status.textContent = 'Metadata complete. Saved book details and narrator are ready for full-book generation.';
+    } else {
+      status.style.borderLeftColor = '#d5a321';
+      status.style.background = 'rgba(213,163,33,.10)';
+      status.style.color = 'var(--text)';
+      status.textContent = 'Metadata incomplete — full-book generation is blocked. Missing or invalid saved details: ' +
+        (missing.length ? missing.join(', ') : 'Refresh the active project details and save again.') +
+        '. Preview generation remains available.';
+    }
+    const button = $('inputProjectDetailsBtn');
+    if (button) button.title = details.complete
+      ? 'Edit saved book metadata'
+      : 'Complete required details before full-book generation: ' + missing.join(', ');
+  }
+
+  async function refreshProductionMetadataStatus() {
+    try {
+      const details = await call('production.details.get',{});
+      updateProductionMetadataStatus(details);
+      return details;
+    } catch (error) {
+      const status = ensureProductionMetadataStatus();
+      if (status) {
+        status.style.borderLeftColor = '#d5a321';
+        status.style.background = 'rgba(213,163,33,.10)';
+        status.textContent = 'Saved metadata status is unavailable. Open Input Project Details to retry. ' +
+          String(error?.message || error || '');
+      }
+      return null;
+    }
+  }
+
+  function ensureProductionDetailsButton() {
+    const page = $('generate');
+    const actions = page?.querySelector('.page-head .actions');
+    if (actions && !$('inputProjectDetailsBtn')) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn secondary';
+      button.id = 'inputProjectDetailsBtn';
+      button.textContent = 'Input Project Details';
+      button.title = 'Edit saved book title, publication metadata and cover art.';
+      const outputButton = [...actions.querySelectorAll('button')].find(node =>
+        /open output folder/i.test(String(node.textContent || '').trim())
+      );
+      if (outputButton) actions.insertBefore(button, outputButton);
+      else actions.appendChild(button);
+      button.addEventListener('click', async event => {
+        event.preventDefault();
+        try {
+          const details = await call('production.details.get',{});
+          updateProductionMetadataStatus(details);
+          await openProductionMetadataDialog(details);
+        } catch (error) {
+          message(error?.message || String(error),true);
+        }
+      });
+    }
+    ensureProductionMetadataStatus();
+    const pageObserver = $('generate');
+    if (pageObserver && pageObserver.dataset.metadataStatusObserver !== 'true') {
+      pageObserver.dataset.metadataStatusObserver = 'true';
+      const observer = new MutationObserver(() => {
+        if (pageObserver.classList.contains('active')) void refreshProductionMetadataStatus();
+      });
+      observer.observe(pageObserver,{attributes:true,attributeFilter:['class']});
+    }
+  }
+
+  function openProductionMetadataDialog(details = null) {
+    return (async () => {
+      if (!details) details = await call('production.details.get',{});
+      const values = details.values || {};
+      const history = details.history || {};
+      let dialog = $('productionMetadataDialog');
+      if (!dialog) {
+        dialog = document.createElement('dialog');
+        dialog.id = 'productionMetadataDialog';
+        dialog.className = 'card';
+        dialog.setAttribute('aria-labelledby','productionMetadataTitle');
+        dialog.style.cssText = 'width:min(900px,calc(100vw - 32px));max-width:900px;max-height:90vh;overflow:auto;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:16px;padding:0;box-shadow:0 24px 80px rgba(0,0,0,.45)';
+        const style = document.createElement('style');
+        style.textContent = '#productionMetadataDialog::backdrop{background:rgba(0,0,0,.68);backdrop-filter:blur(4px)} #productionMetadataDialog input{box-sizing:border-box;width:100%;min-width:0;background:var(--input,var(--card));color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px 11px;min-height:40px} #productionMetadataDialog label{display:block;font-size:13px;font-weight:650;margin-bottom:6px} #productionMetadataDialog .metadata-field{min-width:0} #productionMetadataDialog .metadata-note{font-size:12px;color:var(--muted);line-height:1.45;margin:5px 0 0}';
+        dialog.appendChild(style);
+        document.body.appendChild(dialog);
+      }
+      // Rebuild safe static structure, then assign all saved values as properties
+      // so book metadata is never interpolated into executable HTML.
+      let form = dialog.querySelector('#productionMetadataForm');
+      if (!form) {
+        form = document.createElement('form');
+        form.id = 'productionMetadataForm';
+        form.method = 'dialog';
+        form.style.cssText = 'padding:22px;display:flex;flex-direction:column;gap:14px';
+        dialog.appendChild(form);
+      } else form.replaceChildren();
+      const heading = document.createElement('div');
+      heading.innerHTML = '<div style="font-size:11px;letter-spacing:.12em;color:var(--muted);font-weight:750">PRODUCTION STUDIO</div><h2 id="productionMetadataTitle" style="margin:5px 0 0;font-size:22px">Input Project Details</h2><p style="margin:6px 0 0;color:var(--muted)">Save the publication details against this project. Full-book generation stays blocked until all required fields and a valid narrator are saved; previews remain available.</p>';
+      form.appendChild(heading);
+      const state = document.createElement('div');
+      state.id = 'productionMetadataDialogStatus';
+      state.setAttribute('role','status');
+      state.setAttribute('aria-live','polite');
+      state.style.cssText = 'padding:10px 12px;border-radius:8px;background:rgba(213,163,33,.10);border-left:4px solid #d5a321;font-size:13px;line-height:1.45;overflow-wrap:anywhere';
+      form.appendChild(state);
+      const grid = document.createElement('div');
+      grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:14px';
+      form.appendChild(grid);
+
+      for (const spec of productionMetadataFieldSpecs) {
+        const field = document.createElement('div');
+        field.className = 'metadata-field';
+        const label = document.createElement('label');
+        label.htmlFor = 'productionMetadata_' + spec.key;
+        label.textContent = spec.label;
+        field.appendChild(label);
+        const input = document.createElement('input');
+        input.id = label.htmlFor;
+        input.name = spec.key;
+        input.maxLength = spec.limit;
+        input.autocomplete = 'off';
+        input.value = String(values[spec.key] || '');
+        if (spec.key === 'year') { input.inputMode = 'numeric'; input.placeholder = 'YYYY'; }
+        if (spec.key === 'book_title') input.placeholder = String(details.project_title || 'Book title');
+        const datalistId = 'productionMetadataHistory_' + spec.key;
+        const suggestions = Array.isArray(history[spec.key]) ? history[spec.key] : [];
+        if (suggestions.length) {
+          input.setAttribute('list',datalistId);
+          const datalist = document.createElement('datalist');
+          datalist.id = datalistId;
+          for (const suggestion of suggestions) {
+            const option = document.createElement('option');
+            option.value = String(suggestion);
+            datalist.appendChild(option);
+          }
+          field.appendChild(datalist);
+        }
+        field.appendChild(input);
+        grid.appendChild(field);
+      }
+
+      const narratorField = document.createElement('div');
+      narratorField.className = 'metadata-field';
+      const narratorLabel = document.createElement('label');
+      narratorLabel.htmlFor = 'productionMetadata_narrator';
+      narratorLabel.textContent = 'Narrator (saved Voice Studio profile)';
+      narratorField.appendChild(narratorLabel);
+      const narratorInput = document.createElement('input');
+      narratorInput.id = 'productionMetadata_narrator';
+      narratorInput.value = String(values.narrator || '');
+      narratorInput.readOnly = true;
+      narratorInput.setAttribute('aria-readonly','true');
+      narratorInput.title = 'Set the narrator by saving a voice profile in Voice Studio.';
+      narratorField.appendChild(narratorInput);
+      const narratorNote = document.createElement('p');
+      narratorNote.className = 'metadata-note';
+      narratorNote.textContent = values.narrator
+        ? 'Fetched from the currently saved narrator profile. It is not editable here.'
+        : 'No valid saved narrator profile was found. Save and assign a narrator in Voice Studio.';
+      narratorField.appendChild(narratorNote);
+      grid.appendChild(narratorField);
+
+      const coverField = document.createElement('div');
+      coverField.className = 'metadata-field';
+      const coverLabel = document.createElement('label');
+      coverLabel.htmlFor = 'productionMetadata_cover_path';
+      coverLabel.textContent = 'Cover Image';
+      coverField.appendChild(coverLabel);
+      const coverRow = document.createElement('div');
+      coverRow.style.cssText = 'display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px';
+      const coverInput = document.createElement('input');
+      coverInput.id = 'productionMetadata_cover_path';
+      coverInput.name = 'cover_path';
+      coverInput.readOnly = true;
+      coverInput.value = String(values.cover_path || '');
+      coverInput.placeholder = 'Choose a cover image (JPG, PNG, WebP, GIF, BMP or TIFF)';
+      coverInput.title = coverInput.value;
+      const coverBrowse = document.createElement('button');
+      coverBrowse.type = 'button';
+      coverBrowse.className = 'btn secondary';
+      coverBrowse.textContent = 'Browse…';
+      coverBrowse.addEventListener('click',async()=>{
+        coverBrowse.disabled = true;
+        try {
+          const chosen = await call('production.details.cover.choose',{});
+          if (!chosen.cancelled && chosen.path) {
+            coverInput.value = String(chosen.path);
+            coverInput.title = coverInput.value;
+            const dialogState = dialog.querySelector('#productionMetadataDialogStatus');
+            if (dialogState) {
+              dialogState.style.borderLeftColor = '#d5a321';
+              dialogState.textContent = 'Cover selected. Save Details to copy it into this project and verify the saved path.';
+            }
+          }
+        } catch (error) {
+          message(error?.message || String(error),true);
+        } finally {
+          coverBrowse.disabled = false;
+        }
+      });
+      coverRow.append(coverInput,coverBrowse);
+      coverField.appendChild(coverRow);
+      const coverNote = document.createElement('p');
+      coverNote.className = 'metadata-note';
+      coverNote.textContent = 'The chosen image is copied into the project so it remains available after the original file is moved.';
+      coverField.appendChild(coverNote);
+      grid.appendChild(coverField);
+
+      const actions = document.createElement('div');
+      actions.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;padding-top:8px;border-top:1px solid var(--border)';
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'btn secondary';
+      cancel.textContent = 'Close';
+      cancel.addEventListener('click',()=>dialog.close());
+      const save = document.createElement('button');
+      save.type = 'button';
+      save.className = 'btn primary';
+      save.textContent = 'Save Details';
+      save.addEventListener('click',async()=>{
+        const payload = {};
+        for (const spec of productionMetadataFieldSpecs) {
+          payload[spec.key] = String(form.querySelector('[name="' + spec.key + '"]')?.value || '');
+        }
+        payload.cover_path = String(coverInput.value || '');
+        save.disabled = true;
+        save.textContent = 'Saving…';
+        try {
+          const result = await call('production.details.save',payload);
+          updateProductionMetadataStatus(result);
+          if (state) {
+            state.style.borderLeftColor = result.complete ? '#2f9d67' : '#d5a321';
+            state.style.background = result.complete ? 'rgba(47,157,103,.10)' : 'rgba(213,163,33,.10)';
+            state.textContent = result.complete
+              ? 'Saved and verified. All required details and the saved narrator are ready for full-book generation.'
+              : 'Details were saved and verified. Full-book generation remains blocked. Missing: ' +
+                ((result.missing_fields || []).join(', ') || 'Refresh metadata and save again.');
+          }
+          await refreshProductionMetadataStatus();
+          if (typeof refreshCurrentProjectCard === 'function') await refreshCurrentProjectCard();
+          dialog.close();
+          message(result.complete
+            ? 'Project metadata saved and verified. Full-book generation is ready for its remaining checks.'
+            : 'Project metadata saved and verified. Full-book generation remains blocked until these items are completed: ' +
+              ((result.missing_fields || []).join(', ') || 'Refresh the metadata status.'));
+        } catch (error) {
+          if (state) {
+            state.style.borderLeftColor = '#be3155';
+            state.textContent = 'Save failed. ' + String(error?.message || error);
+          }
+          message(error?.message || String(error),true);
+        } finally {
+          save.disabled = false;
+          save.textContent = 'Save Details';
+        }
+      });
+      actions.append(cancel,save);
+      form.appendChild(actions);
+
+      if (dialog.open) dialog.close();
+      const missing = Array.isArray(details.missing_fields) ? details.missing_fields : [];
+      state.style.borderLeftColor = missing.length ? '#d5a321' : '#2f9d67';
+      state.style.background = missing.length ? 'rgba(213,163,33,.10)' : 'rgba(47,157,103,.10)';
+      state.textContent = missing.length
+        ? 'Full-book generation is blocked until the following saved details are complete: ' + missing.join(', ') + '. Preview remains available.'
+        : 'All required metadata and the saved narrator are ready.';
+      if (typeof dialog.showModal === 'function') dialog.showModal();
+      else dialog.setAttribute('open','open');
+    })();
+  }
+
   async function wire() {
     installUiTextScaleRuntime();
     installCharacterStudioHandlers();
@@ -5194,6 +5503,7 @@
     // to these buttons. Replace those DOM nodes before attaching real playback,
     // so the demo timer can never masquerade as audiobook audio.
     ensureStableStudioLayout();
+    ensureProductionDetailsButton();
     ensureVoiceStudioRuntimeControls();
     ensurePreviewDurationOptions();
     for (const id of ['mainPlay','miniPlay']) {
@@ -5736,7 +6046,17 @@
       if(result.cancelled){message('Preview save cancelled.');return;}
       message('Voice preview saved to '+result.path);
     });
-    if ($('startGenerate')) $('startGenerate').onclick=act(async()=>{const data=await call('production.generate_book',{profile_name:selectedVoice||$('profileName')?.value,bitrate:256});await monitorJob(data.job_id);});
+    if ($('startGenerate')) $('startGenerate').onclick=act(async()=>{
+      const details = await call('production.details.get',{});
+      updateProductionMetadataStatus(details);
+      if (!details.complete) {
+        await openProductionMetadataDialog(details);
+        message('Full-book generation is blocked. Complete and save the missing project details and narrator first.',true);
+        return;
+      }
+      const data = await call('production.generate_book',{bitrate:256});
+      await monitorJob(data.job_id);
+    });
     if ($('pauseGenerate')) $('pauseGenerate').onclick=act(async()=>{if(!activeJob||activeJobType!=='audiobook-generation')throw new Error('There is no active audiobook generation job to pause.');await call('job.pause',{job_id:activeJob});await refreshJobs();});
     if ($('cancelJob')) $('cancelJob').onclick=act(async()=>{if(!activeJob||activeJobType!=='audiobook-generation')throw new Error('There is no active audiobook generation job to cancel.');await call('job.cancel',{job_id:activeJob});await refreshJobs();});
     ['analyzeCharacters','runAiAnalysis'].forEach(id=>{if($(id))$(id).onclick=act(async()=>{const data=await call('character.analyze');await monitorJob(data.job_id,refreshCharacters);});});
@@ -6762,6 +7082,7 @@
     // while persisted Settings are still loading. PremiumV2Window keeps a native
     // loading surface visible until wire() finishes this essential phase.
     await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters]);
+    await refreshProductionMetadataStatus();
     // Secondary panels remain asynchronous and are isolated: a slow optional
     // sound/model subsystem cannot hold the main interface hostage.
     void (async () => {
