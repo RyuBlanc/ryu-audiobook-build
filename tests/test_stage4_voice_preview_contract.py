@@ -159,10 +159,13 @@ class VoicePreviewContractTests(unittest.TestCase):
     def test_frontend_does_not_mark_unplayable_or_unmeasured_preview_ready(self):
         adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
         source = adapter.read_text(encoding="utf-8")
-        self.assertIn("!Number.isFinite(actual)||actual<=0", source)
+        self.assertIn("async function preparePreviewPlayback(job, requestedSeconds)", source)
+        self.assertIn("!Number.isFinite(actual) || actual <= 0", source)
         self.assertIn("return false;", source)
-        self.assertIn("const playable=preparePreviewPlayback(job,Number(duration));", source)
-        self.assertIn("if($('previewState')&&playable)$('previewState').textContent='Ready · 100%';", source)
+        self.assertIn("const playable = await preparePreviewPlayback(job,Number(duration));", source)
+        self.assertNotIn("if($('previewState')&&playable)$('previewState').textContent='Ready · 100%';", source)
+        self.assertIn("await mediaReadiness", source)
+        self.assertIn("audio.oncanplay", source)
         self.assertIn("Preview job completed without a valid measured audio duration", source)
 
 
@@ -181,11 +184,13 @@ class VoicePreviewContractTests(unittest.TestCase):
         source = adapter.read_text(encoding="utf-8")
         self.assertIn("if(!previewAudio||!voicePreviewValid)", source)
         self.assertIn("if($('playPreview'))$('playPreview').disabled=!voicePreviewValid;", source)
-        self.assertIn("previewAudio.volume=previewVolume", source)
-        self.assertIn("previewAudio.ontimeupdate=syncPreviewPlaybackTime", source)
+        self.assertIn("audio.volume = previewVolume;", source)
+        self.assertIn("audio.ontimeupdate = () =>", source)
+        self.assertIn("syncPreviewPlaybackTime()", source)
         self.assertIn("voice.preview.save", source)
         self.assertIn("Synthesizing preview · ", source)
-        self.assertIn("lastVoicePreviewPath=String(job?.result?.output_path||'')", source)
+        self.assertIn("lastVoicePreviewPath = outputPath;", source)
+        self.assertIn("audio.onerror = () => settleReadiness(false", source)
 
     def test_provider_catalog_has_normalized_facets_and_optional_category_filter(self):
         adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"

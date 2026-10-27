@@ -246,9 +246,13 @@ class DashboardLiveDataTests(unittest.TestCase):
             bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
             bridge.settings = mock.Mock()
             bridge.settings.value.side_effect = lambda _key, default=None: default
-            with mock.patch("app.ui.premium_v2_host.list_projects", return_value=[first, second]):
-                with mock.patch("app.ui.premium_v2_host.load_state", side_effect=lambda folder: states[str(folder)]):
-                    selected = bridge._player_get_active({"folder": str(second.folder)})
+            with mock.patch(
+                "app.audio.assembler.validate_playable_audio",
+                side_effect=lambda path: Path(path).resolve(),
+            ):
+                with mock.patch("app.ui.premium_v2_host.list_projects", return_value=[first, second]):
+                    with mock.patch("app.ui.premium_v2_host.load_state", side_effect=lambda folder: states[str(folder)]):
+                        selected = bridge._player_get_active({"folder": str(second.folder)})
 
             self.assertEqual(selected["title"], "Book B")
             self.assertEqual(selected["output_path"], str(output_b.resolve()))

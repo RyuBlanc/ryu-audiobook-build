@@ -33,9 +33,13 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         start = html.index("Release stability: reduce repeated whole-view paints")
         end = html.index("</style>", start)
+        head_end = html.lower().index("</head>")
         guard = html[start:end]
+        self.assertLess(start, head_end)
+        self.assertGreaterEqual(start, html.rfind("<style>", 0, head_end))
         self.assertIn(".page.active", guard)
         self.assertIn("#voices>.content", guard)
+        self.assertIn("#voices .panel.active", guard)
         self.assertIn(".char-view.active", guard)
         self.assertIn(".sound-view.active", guard)
         self.assertIn("animation:none!important", guard)
