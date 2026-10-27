@@ -1357,9 +1357,6 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             adapter,
         )
 
-if __name__ == "__main__":
-    unittest.main()
-
     def test_reduce_motion_is_an_explicit_accessibility_preference_not_a_stability_prerequisite(self):
         """Default motion settings must not silently force reduced motion to hide flicker."""
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
@@ -1373,5 +1370,8 @@ if __name__ == "__main__":
         styles_end = adapter.index("\n  function applyVisualStabilityPreferences(", styles_start)
         styles = adapter[styles_start:styles_end]
         self.assertIn('html[data-ryu-reduce-motion="1"] *', styles)
-        self.assertNotIn("data-ryu-reduce-motion=\\\"1\\\"] * {", styles)
+        self.assertIn("backdrop-filter:none!important;", styles)
 
+
+if __name__ == "__main__":
+    unittest.main()
