@@ -4242,6 +4242,16 @@ class PremiumV2Bridge(QObject):
         output = Path(output_value).expanduser() if output_value else None
         if not output or not output.is_file() or output.stat().st_size <= 0:
             raise FileNotFoundError("This project does not have a validated generated audiobook yet.")
+        try:
+            from app.audio.assembler import validate_playable_audio
+
+            validate_playable_audio(output)
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise ValueError(
+                f"The audiobook file exists but is not playable: {output.name}. "
+                "Regenerate the audiobook or verify the output file. "
+                f"Details: {exc}"
+            ) from exc
         summary = self._project_summary(project)
         actual_chapters = _read_audio_chapter_metadata(output)
         chapters = actual_chapters or [

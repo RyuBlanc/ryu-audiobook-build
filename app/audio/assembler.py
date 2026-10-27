@@ -65,6 +65,37 @@ def ffmpeg_path() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
+def validate_playable_audio(path: Path) -> Path:
+    """Fail closed unless FFmpeg can decode the file's first audio stream."""
+    candidate = Path(path).expanduser()
+    if not candidate.is_file() or candidate.stat().st_size <= 0:
+        raise FileNotFoundError(f"Audiobook audio file is missing or empty: {candidate}")
+
+    try:
+        result = subprocess.run(
+            [
+                ffmpeg_path(), "-v", "error", "-xerror", "-i", str(candidate),
+                "-map", "0:a:0", "-t", "0.25", "-f", "null", "-",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(
+            f"Could not validate audiobook audio for {candidate.name}: {exc}"
+        ) from exc
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()[-2000:]
+        suffix = f" Details: {detail}" if detail else ""
+        raise ValueError(
+            f"Audiobook file does not contain decodable audio ({candidate.name}).{suffix}"
+        )
+    return candidate.resolve()
+
+
 def _run(args: list[str]) -> None:
     result = subprocess.run(
         [ffmpeg_path(), "-y", *args],

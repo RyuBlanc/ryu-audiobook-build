@@ -3784,43 +3784,167 @@
   }
   function formatPlaybackTime(value){const seconds=Math.max(0,Math.floor(Number(value)||0));return String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');}
   function syncPreviewPlaybackTime(){const node=$('previewPlaybackTime');if(!node)return;node.textContent=formatPlaybackTime(previewAudio?.currentTime||0)+' / '+formatPlaybackTime(previewAudio?.duration||0);}
-  function preparePreviewPlayback(job, requestedSeconds) {
-    const url=job?.result?.file_url,actual=Number(job?.result?.actual_duration_seconds),requested=Number(requestedSeconds||job?.result?.requested_duration_seconds||0),play=$('playPreview');
+  async function preparePreviewPlayback(job, requestedSeconds) {
+    const url = job?.result?.file_url;
+    const outputPath = String(job?.result?.output_path || '').trim();
+    const actual = Number(job?.result?.actual_duration_seconds);
+    const requested = Number(requestedSeconds || job?.result?.requested_duration_seconds || 0);
+    const play = $('playPreview');
     const totalElapsed = Number(job?.result?.total_seconds);
     const synthesisElapsed = Number(job?.result?.synthesis_seconds);
     const realTimeFactor = Number(job?.result?.real_time_factor);
     const performanceTargetMet = job?.result?.performance_target_met;
-    if(!url||!Number.isFinite(actual)||actual<=0){
-      voicePreviewValid=false;lastVoicePreviewPath=null;if(play)play.disabled=true;if($('downloadPreview'))$('downloadPreview').disabled=true;
-      if($('previewState'))$('previewState').textContent='Failed';
-      if($('validation'))$('validation').textContent=!url?'Preview job completed without a playable local audio file. Check the job details and retry.':'Preview job completed without a valid measured audio duration. The result cannot be marked ready.';
-      updateVoiceActionButtons();return false;
+
+    if (!url || !outputPath || !Number.isFinite(actual) || actual <= 0) {
+      voicePreviewValid = false;
+      lastVoicePreviewPath = null;
+      if (play) play.disabled = true;
+      if ($('downloadPreview')) $('downloadPreview').disabled = true;
+      if ($('previewState')) $('previewState').textContent = 'Failed';
+      if ($('validation')) {
+        $('validation').textContent = !url
+          ? 'Preview job completed without a playable local audio URL. Check the job details and retry.'
+          : !outputPath
+            ? 'Preview job completed without a local output path. The result cannot be played or downloaded.'
+            : 'Preview job completed without a valid measured audio duration. The result cannot be marked ready.';
+      }
+      updateVoiceActionButtons();
+      return false;
     }
-    if(previewAudio){previewAudio.pause();previewAudio=null;}
-    previewAudio=new Audio(url);previewAudio.preload='auto';previewAudio.volume=previewVolume;
-    lastVoicePreviewPath=String(job?.result?.output_path||'');lastVoicePreviewProfileName=currentVoiceName();voicePreviewValid=Boolean(lastVoicePreviewPath);
-    previewAudio.ontimeupdate=syncPreviewPlaybackTime;previewAudio.onloadedmetadata=syncPreviewPlaybackTime;
-    previewAudio.onplay=()=>{if(play)play.textContent='Ⅱ Pause';if($('wave'))$('wave').classList.add('playing');syncPreviewPlaybackTime();};
-    previewAudio.onpause=()=>{if(play)play.textContent='▶ Play';if($('wave'))$('wave').classList.remove('playing');syncPreviewPlaybackTime();};
-    previewAudio.onended=()=>{if(play)play.textContent='▶ Play';if($('wave'))$('wave').classList.remove('playing');syncPreviewPlaybackTime();};
-    previewAudio.onerror=()=>{voicePreviewValid=false;if(play)play.disabled=true;if($('downloadPreview'))$('downloadPreview').disabled=true;if($('previewState'))$('previewState').textContent='Playback error';if($('validation'))$('validation').textContent='The preview file exists but the embedded player could not open it. Generate another preview and check the local audio runtime.';updateVoiceActionButtons();};
-    if(play)play.disabled=false;if($('downloadPreview'))$('downloadPreview').disabled=false;
-    if($('previewState'))$('previewState').textContent='Ready · 100%';if($('previewProgress'))$('previewProgress').style.width='100%';
+
+    // Detach the old player's listeners before stopping it. A delayed error from an
+    // earlier source must never invalidate or overwrite the newly selected preview.
+    const previousAudio = previewAudio;
+    previewAudio = null;
+    if (previousAudio) {
+      previousAudio.oncanplay = null;
+      previousAudio.onerror = null;
+      previousAudio.onloadedmetadata = null;
+      previousAudio.ontimeupdate = null;
+      previousAudio.onplay = null;
+      previousAudio.onpause = null;
+      previousAudio.onended = null;
+      previousAudio.pause();
+    }
+
+    const audio = new Audio();
+    previewAudio = audio;
+    audio.preload = 'auto';
+    audio.volume = previewVolume;
+    lastVoicePreviewPath = outputPath;
+    lastVoicePreviewProfileName = currentVoiceName();
+    voicePreviewValid = false;
+    if (play) { play.disabled = true; play.textContent = '▶ Play'; }
+    if ($('downloadPreview')) $('downloadPreview').disabled = true;
+    if ($('previewState')) $('previewState').textContent = 'Loading audio…';
+    if ($('previewProgress')) $('previewProgress').style.width = '100%';
+    if ($('validation')) $('validation').textContent =
+      'Generation finished. Loading the audio and checking playback before enabling Play or Download.';
+
     const timingNote = Number.isFinite(totalElapsed) && totalElapsed >= 0
       ? ' · generated in ' + totalElapsed.toFixed(1) + 's' +
         (Number.isFinite(synthesisElapsed) ? ' synthesis ' + synthesisElapsed.toFixed(1) + 's' : '') +
         (Number.isFinite(realTimeFactor) ? ' (' + realTimeFactor.toFixed(2) + '× real time)' : '') +
         (requested === 30 && performanceTargetMet === false ? ' · exceeds 30s preview target (<60s generation)' : '')
       : '';
-    if($('validation'))$('validation').textContent=requested>0&&actual+1.5<requested
-      ?'Preview shorter than requested · '+actual.toFixed(1)+'s of '+requested.toFixed(0)+'s. The source text or voice provider produced less audio than requested; try a longer passage and check the selected voice.'+timingNote
-      :'Preview ready · '+actual.toFixed(1)+' seconds'+(requested>0?' (requested '+requested.toFixed(0)+'s)':'')+timingNote;
-    syncPreviewPlaybackTime();
-    updateVoiceSummary({name:currentVoiceName(),provider:selectedVoiceProvider||({offline:'piper',sapi:'windows-sapi',customvoice:'qwen-character',voicedesign:'qwen-character',qwenclone:'qwen-character',customref:'chatterbox',edge:'edge-tts',eleven:'elevenlabs'}[document.querySelector('#voices .provider.active')?.dataset.provider]||'piper'),qwen_mode:document.querySelector('#voices .provider.active')?.dataset.provider==='voicedesign'?'design':'custom'},
-      {saved:Boolean(selectedVoice),previewReady:true,assignment: $('sumAssign')?.textContent || ''});
-    updateVoiceActionButtons();return voicePreviewValid;
-  }
+    const durationNote = requested > 0 && actual + 1.5 < requested
+      ? 'Preview shorter than requested · ' + actual.toFixed(1) + 's of ' + requested.toFixed(0) +
+        's. The source text or voice provider produced less audio than requested; try a longer passage and check the selected voice.'
+      : 'Preview ready · ' + actual.toFixed(1) + ' seconds' +
+        (requested > 0 ? ' (requested ' + requested.toFixed(0) + 's)' : '');
 
+    let resolveReadiness;
+    const mediaReadiness = new Promise(resolve => { resolveReadiness = resolve; });
+    let readinessSettled = false;
+    let readinessTimer = null;
+    const settleReadiness = (ready, reason = '') => {
+      if (readinessSettled) return;
+      readinessSettled = true;
+      if (readinessTimer !== null) clearTimeout(readinessTimer);
+      resolveReadiness({ready, reason});
+    };
+    const isCurrentAudio = () => previewAudio === audio;
+    audio.ontimeupdate = () => {
+      if (isCurrentAudio()) syncPreviewPlaybackTime();
+    };
+    audio.onloadedmetadata = () => {
+      if (isCurrentAudio()) syncPreviewPlaybackTime();
+    };
+    audio.oncanplay = () => {
+      if (!isCurrentAudio()) { settleReadiness(false, 'stale'); return; }
+      const mediaDuration = Number(audio.duration);
+      if (audio.readyState >= 2 && Number.isFinite(mediaDuration) && mediaDuration > 0) {
+        settleReadiness(true);
+      }
+    };
+    audio.onplay = () => {
+      if (!isCurrentAudio()) return;
+      if (play) play.textContent = 'Ⅱ Pause';
+      if ($('wave')) $('wave').classList.add('playing');
+      syncPreviewPlaybackTime();
+    };
+    audio.onpause = () => {
+      if (!isCurrentAudio()) return;
+      if (play) play.textContent = '▶ Play';
+      if ($('wave')) $('wave').classList.remove('playing');
+      syncPreviewPlaybackTime();
+    };
+    audio.onended = () => {
+      if (!isCurrentAudio()) return;
+      if (play) play.textContent = '▶ Play';
+      if ($('wave')) $('wave').classList.remove('playing');
+      syncPreviewPlaybackTime();
+    };
+    audio.onerror = () => settleReadiness(false, isCurrentAudio() ? 'error' : 'stale');
+    readinessTimer = setTimeout(() => settleReadiness(false, 'timeout'), 20000);
+    audio.src = String(url);
+    audio.load();
+
+    const mediaResult = await mediaReadiness;
+    if (!isCurrentAudio()) return false;
+    if (!mediaResult.ready) {
+      voicePreviewValid = false;
+      if (play) { play.disabled = true; play.textContent = '▶ Play'; }
+      if ($('downloadPreview')) $('downloadPreview').disabled = true;
+      if ($('previewState')) $('previewState').textContent =
+        mediaResult.reason === 'timeout' ? 'Playback timed out' : 'Playback error';
+      if ($('validation')) $('validation').textContent =
+        mediaResult.reason === 'timeout'
+          ? 'The generated preview did not become playable within 20 seconds. Play and Download remain disabled; retry the preview and check the local audio runtime.'
+          : 'The generated preview file exists, but the embedded player could not decode it. Play and Download remain disabled; regenerate the preview and check the local audio runtime.';
+      if ($('wave')) $('wave').classList.remove('playing');
+      updateVoiceActionButtons();
+      return false;
+    }
+
+    voicePreviewValid = Boolean(lastVoicePreviewPath);
+    if (!voicePreviewValid) {
+      if (play) play.disabled = true;
+      if ($('downloadPreview')) $('downloadPreview').disabled = true;
+      if ($('previewState')) $('previewState').textContent = 'Failed';
+      if ($('validation')) $('validation').textContent = 'The preview audio loaded, but its saved output path is missing. Play and Download remain disabled.';
+      updateVoiceActionButtons();
+      return false;
+    }
+
+    if (play) play.disabled = false;
+    if ($('downloadPreview')) $('downloadPreview').disabled = false;
+    if ($('previewState')) $('previewState').textContent = 'Ready · 100%';
+    if ($('previewProgress')) $('previewProgress').style.width = '100%';
+    if ($('validation')) $('validation').textContent = durationNote + timingNote;
+    updateVoiceSummary({
+      name: currentVoiceName(),
+      provider: selectedVoiceProvider || ({
+        offline: 'piper', sapi: 'windows-sapi', customvoice: 'qwen-character',
+        voicedesign: 'qwen-character', qwenclone: 'qwen-character', customref: 'chatterbox',
+        edge: 'edge-tts', eleven: 'elevenlabs'
+      }[document.querySelector('#voices .provider.active')?.dataset.provider] || 'piper'),
+      qwen_mode: document.querySelector('#voices .provider.active')?.dataset.provider === 'voicedesign' ? 'design' : 'custom'
+    }, {saved:Boolean(selectedVoice), previewReady:true, assignment:$('sumAssign')?.textContent || ''});
+    updateVoiceActionButtons();
+    syncPreviewPlaybackTime();
+    return true;
+  }
 
 
   function characterPassageFromButton(button) {
@@ -4345,8 +4469,7 @@
     if(previewToken!==voicePreviewEpoch)return;
     await monitorJob(data.job_id,async job=>{
       if(previewToken!==voicePreviewEpoch)return true;
-      const playable=preparePreviewPlayback(job,Number(duration));
-      if($('previewState')&&playable)$('previewState').textContent='Ready · 100%';
+      const playable = await preparePreviewPlayback(job,Number(duration));
       return playable;
     });
   }

@@ -11,12 +11,13 @@ import subprocess
 import tempfile
 import unittest
 import wave
+from unittest.mock import patch
 import zlib
 from pathlib import Path
 
 import imageio_ffmpeg
 
-from app.audio.assembler import assemble_m4b, _probe_audio_bitrate_kbps
+from app.audio.assembler import assemble_m4b, _probe_audio_bitrate_kbps, validate_playable_audio
 
 
 def write_test_wav(path: Path, seconds: float = 0.8) -> None:
@@ -87,6 +88,7 @@ class Stage743OutputValidationTests(unittest.TestCase):
 
             self.assertTrue(output.is_file())
             self.assertGreater(output.stat().st_size, 1024)
+            self.assertEqual(validate_playable_audio(output), output.resolve())
             # Production acceptance includes a measured encoded stream bitrate,
             # not merely the requested encoder setting.
             self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
@@ -122,6 +124,33 @@ class Stage743OutputValidationTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(decode.returncode, 0, decode.stderr)
+
+
+    def test_playability_validator_rejects_corrupt_audio_files(self):
+        with tempfile.TemporaryDirectory() as temp:
+            candidate = Path(temp) / "corrupt.m4b"
+            candidate.write_bytes(b"this is not an audiobook")
+            completed = subprocess.CompletedProcess(
+                args=["ffmpeg"], returncode=1, stdout="",
+                stderr="Invalid data found when processing input",
+            )
+            with patch("app.audio.assembler.subprocess.run", return_value=completed) as run:
+                with self.assertRaisesRegex(ValueError, "does not contain decodable audio"):
+                    validate_playable_audio(candidate)
+            command = run.call_args.args[0]
+            self.assertIn("-map", command)
+            self.assertIn("0:a:0", command)
+            self.assertIn("-xerror", command)
+            self.assertIn("-t", command)
+            self.assertIn("0.25", command)
+
+    def test_playability_validator_rejects_missing_files_before_probing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            candidate = Path(temp) / "missing.m4b"
+            with patch("app.audio.assembler.subprocess.run") as run:
+                with self.assertRaises(FileNotFoundError):
+                    validate_playable_audio(candidate)
+            run.assert_not_called()
 
 
 if __name__ == "__main__":

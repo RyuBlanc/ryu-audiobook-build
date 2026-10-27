@@ -185,6 +185,30 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("requested_duration_seconds", adapter)
         self.assertIn("preparePreviewPlayback(job,Number(duration))", adapter)
 
+    def test_player_validates_audio_before_advertising_playable_file_url(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        start = host.index("def _player_get_active(")
+        end = host.index("def _player_position_save(", start)
+        player_handler = host[start:end]
+        self.assertIn("validate_playable_audio(output)", player_handler)
+        self.assertIn('"file_url": output.resolve().as_uri()', player_handler)
+        self.assertIn("exists but is not playable", player_handler.lower())
+
+    def test_voice_preview_waits_for_decodable_media_before_enabling_actions(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("async function preparePreviewPlayback(job, requestedSeconds)")
+        end = adapter.index("function characterPassageFromButton(button)", start)
+        preview = adapter[start:end]
+        self.assertIn("audio.oncanplay", preview)
+        self.assertIn("audio.readyState >= 2", preview)
+        self.assertIn("await mediaReadiness", preview)
+        self.assertIn("voicePreviewValid = false", preview)
+        self.assertIn("play.disabled = true", preview)
+        self.assertIn("Loading audio…", preview)
+        self.assertIn("Ready · 100%", preview)
+        self.assertIn("preparePreviewPlayback(job,Number(duration))", adapter)
+        self.assertNotIn("if($('previewState')&&playable)$('previewState').textContent='Ready · 100%';", adapter)
+
     def test_chapter_merge_preserves_assignment_offsets_and_final_chapter(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
