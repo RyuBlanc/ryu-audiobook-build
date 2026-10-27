@@ -47,6 +47,12 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("backdrop-filter:blur(10px) saturate(125%)!important", guard)
         self.assertIn("backdrop-filter:blur(6px) saturate(115%)!important", guard)
         self.assertIn("backdrop-filter:blur(12px) saturate(125%)!important", guard)
+        self.assertIn(".production-flow{", guard)
+        self.assertIn("backdrop-filter:none!important", guard)
+        self.assertIn("@media(min-width:1181px) and (max-width:1366px)", guard)
+        self.assertIn(".flow-track{", guard)
+        self.assertIn("overflow-x:auto!important", guard)
+        self.assertIn(".flow-stage{flex:0 0 132px!important}", guard)
 
 
 
