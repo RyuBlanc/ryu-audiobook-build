@@ -401,6 +401,27 @@ html[data-effects='high'] .sidebar{
   backdrop-filter:blur(12px) saturate(125%)!important;
 }
 
+/* High effects must not leave the remaining 15–28px blur layers unbounded.
+   Keep a restrained glass treatment without forcing the accessibility toggle on. */
+html[data-effects='high'] .workflow,
+html[data-effects='high'] .loader-glass {
+  -webkit-backdrop-filter:blur(8px) saturate(120%)!important;
+  backdrop-filter:blur(8px) saturate(120%)!important;
+}
+html[data-effects='normal'] .workflow {
+  -webkit-backdrop-filter:blur(5px) saturate(110%)!important;
+  backdrop-filter:blur(5px) saturate(110%)!important;
+}
+html[data-effects='normal'] .loader-glass {
+  -webkit-backdrop-filter:blur(4px) saturate(110%)!important;
+  backdrop-filter:blur(4px) saturate(110%)!important;
+}
+html[data-effects='high'] .loader-glass,
+html[data-effects='normal'] .loader-glass {
+  animation:none!important;
+  transform:none!important;
+}
+
 /* Keep the sticky workflow strip opaque, and use a horizontally scrollable layout
    at laptop widths where the full seven-stage grid would overflow the workspace. */
 .production-flow{

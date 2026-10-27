@@ -47,6 +47,17 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("backdrop-filter:blur(10px) saturate(125%)!important", guard)
         self.assertIn("backdrop-filter:blur(6px) saturate(115%)!important", guard)
         self.assertIn("backdrop-filter:blur(12px) saturate(125%)!important", guard)
+        # High-effects mode also caps the unbounded workflow/loader blur layers;
+        # users must not need to enable the Reduce Motion accessibility option.
+        self.assertIn("html[data-effects='high'] .workflow,", guard)
+        self.assertIn("html[data-effects='high'] .loader-glass", guard)
+        self.assertIn("backdrop-filter:blur(8px) saturate(120%)!important", guard)
+        self.assertIn("html[data-effects='normal'] .workflow", guard)
+        self.assertIn("backdrop-filter:blur(5px) saturate(110%)!important", guard)
+        self.assertIn("html[data-effects='normal'] .loader-glass", guard)
+        self.assertIn("backdrop-filter:blur(4px) saturate(110%)!important", guard)
+        self.assertIn("animation:none!important", guard)
+        self.assertIn("transform:none!important", guard)
         self.assertIn(".production-flow{", guard)
         self.assertIn("backdrop-filter:none!important", guard)
         self.assertIn("@media(min-width:1181px) and (max-width:1366px)", guard)
