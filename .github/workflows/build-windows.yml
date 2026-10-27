@@ -28,7 +28,7 @@ on:
         type: boolean
         default: false
 
-# Ordinary work-branch pushes run tests only. Main pushes and explicit artifact-checkpoint dispatches build packages.
+# Work-branch pushes run tests only unless the commit message opts into a checkpoint artifact. Main pushes still package and publish.
 
 permissions:
   contents: write
@@ -75,7 +75,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Regression tests failed with exit code $LASTEXITCODE." }
 
   build:
-    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.build_artifacts == true) }}
+    if: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.event.head_commit.message, '[artifact-checkpoint]'))) || (github.event_name == 'workflow_dispatch' && inputs.build_artifacts == true) }}
     needs: tests
     runs-on: windows-latest
     timeout-minutes: 120

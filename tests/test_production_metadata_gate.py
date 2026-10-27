@@ -3,6 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from PySide6.QtGui import QImage
 from app.ui.premium_v2_host import PremiumV2Bridge, _production_cover_is_readable
@@ -78,6 +79,54 @@ class ProductionMetadataGateTests(unittest.TestCase):
             harness = _MetadataGateHarness({"narrator voice": SimpleNamespace(name="Narrator Voice")})
             self.assertEqual(
                 PremiumV2Bridge._production_metadata_missing(harness, state),
+                ["Cover Image"],
+            )
+
+    def test_saving_empty_cover_clears_a_corrupt_legacy_cover_path(self):
+        with tempfile.TemporaryDirectory() as temp:
+            corrupt_cover = Path(temp) / "corrupt.jpg"
+            corrupt_cover.write_bytes(b"not a readable image")
+            state = self.complete_state(corrupt_cover)
+            state_store = dict(state)
+            project = SimpleNamespace(folder=Path(temp), title="The Saved Book")
+
+            class SaveHarness(_MetadataGateHarness):
+                def _active_project(self):
+                    return project
+
+                def _production_metadata_get(self, _payload):
+                    return {}
+
+            harness = SaveHarness({"narrator voice": SimpleNamespace(name="Narrator Voice")})
+
+            def fake_load_state(_folder):
+                return dict(state_store)
+
+            def fake_save_state(_folder, replacement):
+                state_store.clear()
+                state_store.update(replacement)
+
+            payload = {
+                "book_title": "The Saved Book",
+                "author": "Author Name",
+                "publisher": "Publisher Name",
+                "series": "Series Name",
+                "series_volume": "2",
+                "language": "English",
+                "year": "2026",
+                "genre": "Fantasy",
+                "cover_path": "",
+            }
+            with (
+                patch("app.ui.premium_v2_host.load_state", side_effect=fake_load_state),
+                patch("app.ui.premium_v2_host.save_state", side_effect=fake_save_state),
+            ):
+                result = PremiumV2Bridge._production_metadata_save(harness, payload)
+
+            self.assertTrue(result["saved"])
+            self.assertNotIn("cover_path", state_store)
+            self.assertEqual(
+                PremiumV2Bridge._production_metadata_missing(harness, state_store),
                 ["Cover Image"],
             )
 

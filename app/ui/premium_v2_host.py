@@ -946,7 +946,7 @@ class PremiumV2Bridge(QObject):
             previous = str(state.get("cover_path") or "").strip()
             candidate = Path(previous).expanduser() if previous else None
             try:
-                if not candidate or not candidate.is_file() or candidate.suffix.casefold() not in PRODUCTION_COVER_EXTENSIONS:
+                if not _production_cover_is_readable(candidate):
                     state.pop("cover_path", None)
             except OSError:
                 state.pop("cover_path", None)
