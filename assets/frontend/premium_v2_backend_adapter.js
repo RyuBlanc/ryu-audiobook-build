@@ -5925,8 +5925,8 @@
         if (!selected) return;
         const action = window.prompt(
           'Chapter actions for "' + selected.title + '"\n' +
-          'Type one: add, rename, delete, up, down, merge, review, skip, find, replace, undo, redo\n' +
-          'Merge combines this chapter into the previous chapter. Review toggles review status; Skip excludes it from generation. Find/replace and undo/redo apply to the open chapter text.',
+          'Type one: add, rename, delete, up, down, merge, redetect, review, skip, find, replace, undo, redo\n' +
+          'Merge combines this chapter into the previous chapter. Redetect recalculates boundaries from saved edited text and stops if any text would change or disappear. Review toggles review status; Skip excludes it from generation. Find/replace and undo/redo apply to the open chapter text.',
           'rename'
         );
         if (!action) return;
@@ -5936,10 +5936,40 @@
           if (chapterSaveTimer) { clearTimeout(chapterSaveTimer); chapterSaveTimer = null; }
           await chapterSavePromise.catch(() => {});
           const editor = $('chapterEditor');
-          if (editor && window.ryuPremiumSelectedChapter === number) {
-            await persistChapterSnapshot(number, $('chapterTitle')?.textContent || selected.title, editor.value, false);
+          const openChapterNumber = Number(window.ryuPremiumSelectedChapter || 0);
+          const openChapter = chapters.find(item => Number(item.number) === openChapterNumber);
+          if (editor && openChapter) {
+            await persistChapterSnapshot(
+              openChapterNumber,
+              $('chapterTitle')?.textContent || openChapter.title,
+              editor.value,
+              false
+            );
           }
-          if (choice === 'add') {
+          if (choice === 'redetect') {
+            const approved = window.confirm(
+              'Re-detect chapter boundaries from the currently saved and edited chapter text? ' +
+              'The app will preserve saved text exactly and will stop without saving if detection would change or remove any text. ' +
+              'Affected chapters return to Needs Review. Any chapter containing text previously excluded from generation remains excluded.'
+            );
+            if (!approved) return;
+            const selectedBefore = Number(window.ryuPremiumSelectedChapter || number || 1);
+            const result = await call('chapter.redetect', {selected_number:selectedBefore});
+            const loaded = await call('chapter.list');
+            chapters = Array.isArray(loaded) ? loaded : [];
+            const next = chapters.find(item => Number(item.number) === selectedBefore) ||
+              chapters[Math.max(0, Math.min(selectedBefore - 1, chapters.length - 1))] || chapters[0];
+            if (next) window.ryuPremiumSelectedChapter = Number(next.number);
+            await refreshChapters();
+            const dropped = Number(result.dropped_dialogue_assignment_count || 0);
+            message(
+              'Re-detection saved ' + Number(result.chapter_count || chapters.length) + ' chapter(s). ' +
+              Number(result.review_reset_count || 0) + ' chapter(s) need review; ' +
+              Number(result.skipped_chapter_count || 0) + ' remain excluded from generation. ' +
+              Number(result.preserved_dialogue_assignment_count || 0) + ' dialogue assignment(s) were preserved.' +
+              (dropped ? ' ' + dropped + ' stale or cross-boundary assignment(s) were removed to avoid incorrect speaker routing.' : '')
+            );
+          } else if (choice === 'add') {
             const title = window.prompt('New chapter title:', 'Chapter ' + (chapters.length + 1));
             if (title === null) return;
             const created = await call('chapter.add', {title: title.trim() || 'Chapter ' + (chapters.length + 1), text: ''});

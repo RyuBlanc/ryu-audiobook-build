@@ -355,6 +355,7 @@ class PremiumV2Bridge(QObject):
                 "project.open": self._project_open,
                 "project.get_active": self._project_get_active,
                 "chapter.list": self._chapter_list,
+                "chapter.redetect": self._chapter_redetect,
                 "chapter.update": self._chapter_update,
                 "chapter.dialogue.assign": self._chapter_dialogue_assign,
                 "chapter.dialogue.unassign": self._chapter_dialogue_unassign,
@@ -485,6 +486,7 @@ class PremiumV2Bridge(QObject):
             "project.open": True,
             "project.get_active": True,
             "chapter.list": True,
+            "chapter.redetect": True,
             "chapter.update": True,
             "chapter.dialogue.assign": True,
             "chapter.dialogue.unassign": True,
@@ -1156,6 +1158,27 @@ class PremiumV2Bridge(QObject):
                  "review_status": getattr(c, "review_status", "needs_review"),
                  "skip_for_generation": getattr(c, "skip_for_generation", False)}
                 for c in project.chapters]
+
+    def _chapter_redetect(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Re-detect boundaries from saved, edited chapter text without silent text loss."""
+        from app.chapters.redetect import redetect_chapters_preserving_edits
+
+        project = self._active_project()
+        previous_chapters = project.chapters
+        updated_chapters, result = redetect_chapters_preserving_edits(previous_chapters)
+        try:
+            project.chapters = updated_chapters
+            project.save()
+        except Exception:
+            # Keep the in-memory editor state aligned with the last known-good disk state.
+            project.chapters = previous_chapters
+            raise
+        try:
+            selected_number = int(payload.get("selected_number") or 1)
+        except (TypeError, ValueError):
+            selected_number = 1
+        self._mark_project_edited(project, min(max(1, selected_number), len(project.chapters)))
+        return {**result, "saved": True, "chapter_count": len(project.chapters)}
 
     def _chapter_update(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()

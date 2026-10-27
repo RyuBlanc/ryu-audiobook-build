@@ -1399,3 +1399,20 @@ class Stage2ImportCancellationContractTests(unittest.TestCase):
         self.assertIn("Cancellation requested. The source file will be preserved.", adapter)
         # The existing top-bar cancel action remains generation-only.
         self.assertIn("activeJobType!=='audiobook-generation'", adapter)
+
+
+class Stage2ChapterRedetectionContractTests(unittest.TestCase):
+    """Guard the safe re-detection command, UI action and advertised capability."""
+
+    def test_redetection_is_connected_and_explicitly_guarded(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = HOST.read_text(encoding="utf-8")
+        redetect_source = (ROOT / "app" / "chapters" / "redetect.py").read_text(encoding="utf-8")
+        self.assertIn('"chapter.redetect": self._chapter_redetect', host)
+        self.assertIn('"chapter.redetect": True', host)
+        self.assertIn("def _chapter_redetect(", host)
+        self.assertIn("redetect_chapters_preserving_edits", host)
+        self.assertIn("Type one: add, rename, delete, up, down, merge, redetect", adapter)
+        self.assertIn("await call('chapter.redetect', {selected_number:selectedBefore})", adapter)
+        self.assertIn("stop without saving if detection would change or remove any text", adapter)
+        self.assertIn("review_status=review_status", redetect_source)
