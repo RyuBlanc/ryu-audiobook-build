@@ -234,7 +234,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertNotIn('payload.get("author")', handler)
         self.assertLess(handler.index("metadata_missing ="), handler.index("close_preview_provider_cache"))
         preview_start = host.index("def _production_preview(")
-        preview_end = host.index("def _sound_preview_book(", preview_start)
+        preview_end = host.find("\n    def ", preview_start + len("def _production_preview("))
+        if preview_end < 0:
+            preview_end = len(host)
         self.assertNotIn("_production_metadata_missing", host[preview_start:preview_end])
 
     def test_chapter_merge_preserves_assignment_offsets_and_final_chapter(self):
