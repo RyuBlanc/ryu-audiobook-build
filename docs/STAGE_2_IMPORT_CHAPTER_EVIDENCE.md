@@ -15,9 +15,26 @@ This batch follows the repository's Import + Chapter Studio roadmap. It does not
 - Dialogue assignment offsets are remapped from absolute source spans. Assignments that no longer map exactly to one chapter are dropped rather than left with stale offsets, and the user is told the count.
 - Added dedicated regression tests for re-detection text preservation, manual title/review/skip persistence, assignment remapping, empty chapters, and failure-without-mutation.
 
-## Automated test evidence
+## Automated test and artifact evidence — successful checkpoint
 
-Final counts, run URL, commit SHA, and artifact identifiers will be recorded here after the artifact-checkpoint run completes. An ordinary CI test pass is not treated as manual Windows acceptance.
+- **Actions run:** [Build Windows App #1464](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40548201450) — completed successfully on 27 October 2026.
+- **Tested commit:** `579c378ae81ab9c06e7c68feae5485574f3f02cc`
+- **Regression tests:** 732 total, 732 passed, 0 failed, 0 errors, 0 skipped; 28.745 seconds. The uploaded evidence JSON records this exact commit SHA, run number, and run ID.
+- **Build validation:** JavaScript syntax, application preparation/frozen build, bundled voice assets/critical modules, core installer payload, functional HTML installer, logo transparency and SHA-256 generation, and Microsoft Defender scanning all passed.
+- **Release artifacts (available in the Actions run for 30 days, through 26 November 2026):**
+
+| Artifact | Artifact ID | Size | Artifact digest |
+|---|---:|---:|---|
+| `Ryu-Audiobook-Test-Evidence-1464` | `12753478505` | 46,619 bytes | `c9af4bc1704c31bdd505d57afa7bae9d62c02caa97b1ecb2e2262a5b98cfa2af` |
+| `Ryu-Audiobook-Installer-1464` | `12754079470` | 878,046,356 bytes (about 878 MB) | `bac0af904ad9a30504e9931e2ea0e03d0e0c834d1b725cb63acfb3ae460ff35b` |
+| `Ryu-Audiobook-Portable-1464` | `12753879857` | 1,349,451,876 bytes (about 1.35 GB) | `d5f5463909d790315c2ca3529b4bb8a35b90847ca6443774c7ec1ccba8f72180` |
+| `Ryu-Audiobook-Release-SHA256-1464` | `12754439163` | 776 bytes | `4479bd93ab1b754deb520cc39901e9b97f5da3fdf7e78b99f35105f0bffe881a` |
+
+The release manifest's SHA-256 for the installer executable is `aa3d0a5c56528115f59d5bbda2a4a859a2efef174f2d80874fefe4ee3cc85dd3` (878,046,192 bytes). The portable artifact digest above is GitHub's artifact archive digest; the build's manifest lists the executable and logo assets inside the package separately.
+
+The repository workflow skipped public-release publishing because this is a working branch. The installer, portable app, manifest, and test evidence are uploaded as Actions artifacts in the run linked above. The automated evidence ZIP retains the workflow's shared test-evidence filename/title; its metadata verifies the Stage 2 commit and run identity.
+
+**Acceptance boundary:** automated CI/package validation passed; manual interactive acceptance of the exact installer on a target Windows PC remains open. Do not treat this checkpoint as proof of every UI interaction, import format, chapter edit path, or cancel timing on the user's machine.
 
 ## Packaged-Windows acceptance checklist
 
