@@ -1384,7 +1384,7 @@ class Stage2ImportCancellationContractTests(unittest.TestCase):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         host = HOST.read_text(encoding="utf-8")
         self.assertIn("function ensureImportCancelControl()", adapter)
-        self.assertIn('button.id = "cancelImportJob"', adapter)
+        self.assertIn("button.id = \'cancelImportJob\'", adapter)
         self.assertIn("setImportCancelControl(result.job_id, true)", adapter)
         self.assertIn("call('job.cancel', {job_id: jobId})", adapter)
         self.assertIn("async job => {", adapter)
