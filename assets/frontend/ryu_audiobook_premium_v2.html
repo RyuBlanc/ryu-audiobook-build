@@ -422,6 +422,35 @@ html[data-effects='normal'] .loader-glass {
   transform:none!important;
 }
 
+/* Keep status notifications clear of the persistent mini-player.
+   Bound long messages to prevent covering the working page or key controls. */
+#toasts.toast-wrap {
+  right:16px;
+  bottom:92px;
+  width:min(400px,calc(100vw - 32px));
+  max-height:min(42vh,320px);
+  overflow-x:hidden;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  overflow-wrap:anywhere;
+  pointer-events:none;
+  z-index:100;
+}
+#toasts.toast-wrap > * {
+  min-width:0;
+  max-width:100%;
+  overflow-wrap:anywhere;
+  pointer-events:auto;
+}
+@media(max-width:800px) {
+  #toasts.toast-wrap {
+    right:12px;
+    bottom:86px;
+    width:calc(100vw - 24px);
+    max-height:min(38vh,280px);
+  }
+}
+
 /* Keep the sticky workflow strip opaque, and use a horizontally scrollable layout
    at laptop widths where the full seven-stage grid would overflow the workspace. */
 .production-flow{

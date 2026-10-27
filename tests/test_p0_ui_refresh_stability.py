@@ -66,6 +66,28 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn(".flow-stage{flex:0 0 132px!important}", guard)
 
 
+    def test_notifications_are_bounded_and_do_not_overlap_the_mini_player(self):
+        html = (
+            ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"
+        ).read_text(encoding="utf-8")
+        start = html.index("Keep status notifications clear of the persistent mini-player")
+        end = html.index("</style>", start)
+        rules = html[start:end]
+        for required in (
+            "#toasts.toast-wrap",
+            "bottom:92px",
+            "bottom:86px",
+            "max-height:min(42vh,320px)",
+            "max-height:min(38vh,280px)",
+            "overflow-wrap:anywhere",
+            "pointer-events:none",
+            "pointer-events:auto",
+            "width:calc(100vw - 24px)",
+        ):
+            self.assertIn(required, rules)
+
+
+
 
 if __name__ == "__main__":
     unittest.main()
