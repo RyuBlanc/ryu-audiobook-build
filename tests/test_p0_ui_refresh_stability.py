@@ -27,5 +27,24 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("if (progress) progress.style.width = pct + '%';", refresh)
 
 
+    def test_premium_effects_bound_blur_and_disable_whole_view_entry_animations(self):
+        html = (
+            ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"
+        ).read_text(encoding="utf-8")
+        start = html.index("Release stability: reduce repeated whole-view paints")
+        end = html.index("</style>", start)
+        guard = html[start:end]
+        self.assertIn(".page.active", guard)
+        self.assertIn("#voices>.content", guard)
+        self.assertIn(".char-view.active", guard)
+        self.assertIn(".sound-view.active", guard)
+        self.assertIn("animation:none!important", guard)
+        self.assertIn("transform:none!important", guard)
+        self.assertIn("backdrop-filter:blur(10px) saturate(125%)!important", guard)
+        self.assertIn("backdrop-filter:blur(6px) saturate(115%)!important", guard)
+        self.assertIn("backdrop-filter:blur(12px) saturate(125%)!important", guard)
+
+
+
 if __name__ == "__main__":
     unittest.main()
