@@ -726,7 +726,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("redetect_chapters_preserving_edits", host)
         self.assertIn("source_text.find(candidate_text, source_cursor)", helper)
         self.assertIn("No changes were saved.", helper)
-        self.assertIn("manual chapter boundaries", helper)
+        self.assertIn("collapse your manual", helper)
         worker = host[host.index("def _import_worker("):host.index("def _chapter_clean(", host.index("def _import_worker("))]
         self.assertIn("chapters = detect_chapters(text)", worker)
         self.assertIn("project = create_project(title, path, chapters)", worker)
