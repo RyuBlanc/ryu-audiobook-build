@@ -14,17 +14,19 @@ The prior conversation recorded the Stage 1 artifact checkpoint as successful:
 
 This is the baseline for continuity. Stage 1 implementation work is not being restarted. The older Actions run is no longer available through the current GitHub Actions API (it returns 404 after workflow-run cleanup), so this report preserves the checkpoint details from the prior conversation rather than claiming to have re-read its deleted logs.
 
-## Latest accessible automated evidence
+## Latest verified automated evidence and artifact checkpoint
 
-- **Build Windows App #1457:** [View workflow](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40537584156)
-- Commit: `860914e80c8a36841a9fd3880296b03aa0436b18`
-- Result: **PASS**
-- Test cases recorded: **723 passed, 0 failed, 0 errors, 0 skipped**
-- Evidence artifact: [Ryu-Audiobook-Test-Evidence-1457](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40537584156)
-- Artifact contents: `stage1-test-results.json`, `stage1-test-results.txt`, `stage1-acceptance-matrix.md`
-- Evidence artifact retention expires 2026-11-26 unless downloaded earlier.
+- **Build Windows App #1458:** [View workflow](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40538858884)
+- Commit: `ab4a24b700106e17f149931c7da3d6d2dbff040d`
+- Result: **PASS** — tests, Windows build/package validation, and post-build cleanup all succeeded.
+- Test cases recorded: **723 passed, 0 failed, 0 errors, 0 skipped** in 42.149 seconds.
+- Test evidence: [Ryu-Audiobook-Test-Evidence-1458](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40538858884)
+- Windows installer artifact: [Ryu-Audiobook-Installer-1458](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40538858884) — reported artifact size 878,077,602 bytes.
+- Portable Windows artifact: [Ryu-Audiobook-Portable-1458](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40538858884) — reported artifact size 1,349,440,190 bytes.
+- SHA-256 manifest: [Ryu-Audiobook-Release-SHA256-1458](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40538858884).
+- These Actions artifacts expire 2026-11-26 unless downloaded earlier.
 
-Run #1457 was a tests-only work-branch run; its Windows packaging job was skipped by workflow policy. The next artifact-checkpoint run is required to produce a fresh installer and portable package for the same accepted code line. The workflow's required regression-test gate will execute as part of that package checkpoint; this is release-gate verification, not a restart of implementation.
+Run #1458 is a successful artifact checkpoint, not a new implementation phase. The installer and portable packages were generated and uploaded from the same passing commit. The build did not publish a new public release because this is a work branch; download the candidate artifacts from the Actions run.
 
 ## Stage 1 automated/source status
 
