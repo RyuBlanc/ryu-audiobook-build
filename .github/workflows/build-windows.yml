@@ -21,8 +21,14 @@ on:
       - fix/dashboard-live-data-project-covers-player
       - fix/html-installer-transparent-logo
   workflow_dispatch:
+    inputs:
+      build_artifacts:
+        description: 'Build the Windows installer and portable app after tests pass'
+        required: true
+        type: boolean
+        default: false
 
-# Build artifacts are produced and verified on every main build.
+# Ordinary work-branch pushes run tests only. Main pushes and explicit artifact-checkpoint dispatches build packages.
 
 permissions:
   contents: write
@@ -69,6 +75,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Regression tests failed with exit code $LASTEXITCODE." }
 
   build:
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.build_artifacts == true) }}
     needs: tests
     runs-on: windows-latest
     timeout-minutes: 120
