@@ -2,6 +2,37 @@
   'use strict';
   window.__ryuPremiumAdapterReady = false;
   const $ = id => document.getElementById(id);
+
+  // Frequent background polling must not rewrite identical text or styles.
+  // Repeated no-op DOM writes can still trigger style/layout work in WebEngine.
+  function setTextIfChanged(node, value) {
+    if (!node) return false;
+    const next = String(value ?? '');
+    if (node.textContent === next) return false;
+    node.textContent = next;
+    return true;
+  }
+  function setStyleIfChanged(node, property, value) {
+    if (!node?.style) return false;
+    const next = String(value ?? '');
+    if (node.style[property] === next) return false;
+    node.style[property] = next;
+    return true;
+  }
+  function setAttributeIfChanged(node, name, value) {
+    if (!node?.getAttribute || !node?.setAttribute) return false;
+    const next = String(value ?? '');
+    if (node.getAttribute(name) === next) return false;
+    node.setAttribute(name, next);
+    return true;
+  }
+  function setHiddenIfChanged(node, hidden) {
+    if (!node) return false;
+    const next = Boolean(hidden);
+    if (node.hidden === next) return false;
+    node.hidden = next;
+    return true;
+  }
   let ryuUiTextScale = 100;
   let ryuUiTextObserver = null;
   const ryuUiScalePendingRoots = new Set();
@@ -673,7 +704,7 @@
     for (let depth = 0; depth < 4 && node.parentElement; depth++) {
       const parent = node.parentElement;
       const siblings = [...parent.children].filter(child => child !== node && dashboardText(child.textContent) !== dashboardText(label));
-      if (siblings.length) { siblings[siblings.length - 1].textContent = value; return; }
+      if (siblings.length) { setTextIfChanged(siblings[siblings.length - 1], value); return; }
       node = parent;
     }
   }
@@ -706,10 +737,12 @@
         ? (selectedProject.completed && selectedProject.output_path ? 'Audiobook ready' :
           ('Setup checkpoint · ' + (savedResumeStage(selectedProject) || routeForResume(selectedProject))))
         : 'No active generation job');
-      if (percentLabel) percentLabel.textContent = '';
-      if (etaLabel) etaLabel.textContent = '';
-      if (fill) { fill.style.width = '0%'; fill.setAttribute('aria-valuenow','0'); if (fill.tagName === 'PROGRESS') fill.value = 0; }
-      if (track) track.style.visibility = 'hidden';
+      setTextIfChanged(percentLabel, '');
+      setTextIfChanged(etaLabel, '');
+      setStyleIfChanged(fill, 'width', '0%');
+      setAttributeIfChanged(fill, 'aria-valuenow', '0');
+      if (fill?.tagName === 'PROGRESS' && fill.value !== 0) fill.value = 0;
+      setStyleIfChanged(track, 'visibility', 'hidden');
       if (view) { view.disabled = true; delete view.dataset.dashboardJobId; }
       if (control) { control.disabled = true; delete control.dataset.dashboardJobId; delete control.dataset.dashboardGenerationAction; }
       return;
@@ -720,11 +753,13 @@
     setDashboardRow(card, 'current chapter', current > 0 ? current + ' of ' + (total || '—') : (total ? '0 of ' + total : '—'));
     setDashboardRow(card, 'processing stage', job.stage || job.message || 'Working');
     const percent = Math.max(0, Math.min(100, Math.round(Number(job.progress || 0))));
-    if (percentLabel) percentLabel.textContent = percent + '% complete';
+    setTextIfChanged(percentLabel, percent + '% complete');
     const eta = Number(job.eta_seconds);
-    if (etaLabel) etaLabel.textContent = Number.isFinite(eta) && eta > 0 ? Math.floor(eta/60) + 'm ' + String(Math.floor(eta%60)).padStart(2,'0') + 's remaining' : '';
-    if (track) track.style.visibility = '';
-    if (fill) { fill.style.width = percent + '%'; fill.setAttribute('aria-valuenow',String(percent)); if (fill.tagName === 'PROGRESS') fill.value = percent; }
+    setTextIfChanged(etaLabel, Number.isFinite(eta) && eta > 0 ? Math.floor(eta/60) + 'm ' + String(Math.floor(eta%60)).padStart(2,'0') + 's remaining' : '');
+    setStyleIfChanged(track, 'visibility', '');
+    setStyleIfChanged(fill, 'width', percent + '%');
+    setAttributeIfChanged(fill, 'aria-valuenow', String(percent));
+    if (fill?.tagName === 'PROGRESS' && fill.value !== percent) fill.value = percent;
     if (view) { view.disabled = false; view.dataset.dashboardJobId = job.job_id || ''; }
     if (control) {
       const paused = ['paused','pause_requested'].includes(String(job.state || '').toLowerCase());
@@ -3305,21 +3340,21 @@
           const state = row.querySelector('[data-job-state]');
           const messageNode = row.querySelector('[data-job-message]');
           const errorNode = row.querySelector('[data-job-error]');
-          if (stage) stage.textContent = j.stage || j.message || j.state || 'unknown';
-          if (progress) progress.style.width = pct + '%';
-          if (state) state.textContent = String(j.state || 'unknown') + ' · ' + Math.round(pct) + '%';
-          if (messageNode) messageNode.textContent = j.message || '';
-          if (messageNode) messageNode.hidden = !j.message;
-          if (errorNode) errorNode.textContent = j.error?.message || '';
-          if (errorNode) errorNode.hidden = !j.error?.message;
+          setTextIfChanged(stage, j.stage || j.message || j.state || 'unknown');
+          setStyleIfChanged(progress, 'width', pct + '%');
+          setTextIfChanged(state, String(j.state || 'unknown') + ' · ' + Math.round(pct) + '%');
+          setTextIfChanged(messageNode, j.message || '');
+          setHiddenIfChanged(messageNode, !j.message);
+          setTextIfChanged(errorNode, j.error?.message || '');
+          setHiddenIfChanged(errorNode, !j.error?.message);
         });
       }
       box.dataset.backendJobsRendered = '1';
     }
-    if ($('jobsRunningCount')) $('jobsRunningCount').textContent = allJobs.filter(j => ['running','pause_requested','cancel_requested'].includes(j.state)).length;
-    if ($('jobsQueuedCount')) $('jobsQueuedCount').textContent = allJobs.filter(j => j.state === 'queued').length;
-    if ($('jobsCompletedCount')) $('jobsCompletedCount').textContent = allJobs.filter(j => j.state === 'completed').length;
-    if ($('backgroundJobCount')) $('backgroundJobCount').textContent = allJobs.filter(j => !['completed','failed','cancelled'].includes(j.state)).length + ' background jobs';
+    setTextIfChanged($('jobsRunningCount'), allJobs.filter(j => ['running','pause_requested','cancel_requested'].includes(j.state)).length);
+    setTextIfChanged($('jobsQueuedCount'), allJobs.filter(j => j.state === 'queued').length);
+    setTextIfChanged($('jobsCompletedCount'), allJobs.filter(j => j.state === 'completed').length);
+    setTextIfChanged($('backgroundJobCount'), allJobs.filter(j => !['completed','failed','cancelled'].includes(j.state)).length + ' background jobs');
     return allJobs;
   }
   async function monitorJob(jobId, done, terminal) {

@@ -24,8 +24,36 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("if (box && panelVisible)", refresh)
         self.assertIn("messageNode.textContent = j.message || ''", refresh)
         self.assertIn("errorNode.textContent = j.error?.message || ''", refresh)
-        self.assertIn("if (progress) progress.style.width = pct + '%';", refresh)
+        self.assertIn("setStyleIfChanged(progress, 'width', pct + '%')", refresh)
+        self.assertIn("setTextIfChanged(messageNode, j.message || '')", refresh)
+        self.assertIn("setHiddenIfChanged(errorNode, !j.error?.message)", refresh)
 
+
+
+    def test_repeated_dashboard_poll_skips_unchanged_text_and_progress_writes(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        helper_start = adapter.index("function setTextIfChanged(node, value)")
+        helper_end = adapter.index("function setStyleIfChanged(node, property, value)", helper_start)
+        text_helper = adapter[helper_start:helper_end]
+        self.assertIn("if (node.textContent === next) return false;", text_helper)
+
+        dashboard_start = adapter.index("function refreshDashboardGeneration(")
+        dashboard_end = adapter.index("function audiobookPageActive()", dashboard_start)
+        dashboard = adapter[dashboard_start:dashboard_end]
+        self.assertIn("setTextIfChanged(percentLabel, percent + '% complete')", dashboard)
+        self.assertIn("setStyleIfChanged(fill, 'width', percent + '%')", dashboard)
+        self.assertNotIn("percentLabel.textContent =", dashboard)
+        self.assertNotIn("fill.style.width =", dashboard)
+
+        jobs_start = adapter.index("async function refreshJobsImpl()")
+        jobs_end = adapter.index("async function monitorJob(", jobs_start)
+        jobs = adapter[jobs_start:jobs_end]
+        self.assertIn("setTextIfChanged(stage, j.stage || j.message || j.state || 'unknown')", jobs)
+        self.assertIn("setStyleIfChanged(progress, 'width', pct + '%')", jobs)
+        self.assertNotIn("if (stage) stage.textContent =", jobs)
+        self.assertNotIn("if (progress) progress.style.width =", jobs)
 
     def test_premium_effects_bound_blur_and_disable_whole_view_entry_animations(self):
         html = (
