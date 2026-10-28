@@ -99,3 +99,25 @@ Do not close Stage 3 from CI alone. Packaged Windows interaction and actual audi
 - Run #1495 passed **431 tests in 24.661 seconds**: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40638532775. Packaging/security/artifact steps were skipped as intended for a fix commit.
 - This commit is the follow-up `[artifact-checkpoint]`: it reruns the complete suite and, if green, executes frozen-app validation, asset/module checks, installer build, SHA-256 generation, Microsoft Defender scanning, and artifact uploads.
 - Manual target-PC gates remain open: selected-profile audio actually plays through the chosen provider; saved profiles and assignments survive app restart/navigation; packaged Character Studio assignments are shown correctly; generation uses assigned character voices and narrator for surrounding narration; provider failures are actionable. Stage 1 hardware stability and Stage 2 import/edit/reopen acceptance remain separate open gates.
+
+
+## Current-head verification and artifact checkpoint — 2026-10-28
+
+### Latest source and test evidence before checkpoint
+
+- Current branch: `stage-3/voice-studio-character-assignment`.
+- Source commit tested: `565744d2cd05b2361d7718f15300999ac0fa1c2d`.
+- Test-only run #1497: **435 tests passed in 24.016 seconds**; result `OK`: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40640437723.
+- Run #1497 validated the named chapter-heading change in `app/chapters/detector.py`, including `tests/test_stage2_chapter_fixtures.py`, and the saved/recreated Voice Cast UI state in `tests/test_stage3_voice_cast_ui_persistence.py`.
+- Run #1497 completed successfully but deliberately skipped frozen-app packaging and artifact upload because it was a test-only commit.
+- The preceding artifact checkpoint #1496 passed its suite and created installer, portable, and SHA-256 manifest artifacts on parent commit `3715657fce3bde0ede23856cfb3f94ed31a85cf9`. It does not contain the newer changes validated in #1497.
+
+### Closure decision
+
+- Previously completed Stage 3 automated substages listed above remain closed; do not reopen them absent a regression or a dependency-driven change.
+- The current-head 435-test result is accepted as automated evidence for the new source changes, but it is not a packaged-app checkpoint because #1497 produced no release artifacts.
+- The next explicitly marked artifact-checkpoint commit must rerun the complete regression suite on the checkpoint tree and then run frozen-app checks, bundled asset/module checks, Inno Setup, SHA-256 manifest generation, Microsoft Defender scans and installer/portable uploads. Release publication must remain skipped.
+- The checkpoint must be tied to the exact successful source commit and all generated artifacts must be verified against that run.
+- Do not treat Stage 3 as fully accepted solely from CI. Packaged Windows runtime checks remain open for actual selected-profile audio, profile/assignment persistence across navigation and restart, Voice Cast behavior, selected character voice routing, and actionable provider errors. Physical target-PC testing is not performed by CI.
+- Stage 1 target-PC hardware stability and Stage 2 target-PC import/edit/reopen checks remain separate open gates and must not be silently marked complete when Stage 3 moves forward.
+- Stage 3 exit criteria: successful matching-head artifact checkpoint plus recorded target-PC acceptance or explicitly open acceptance items. No existing completed fix is to be repeated just to increase the build number.
