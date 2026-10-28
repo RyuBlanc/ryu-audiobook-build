@@ -56,7 +56,7 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
         install_start = host.index("def _install_bridge(self, ok: bool)")
         install_end = host.index("def _check_frontend_ready(", install_start)
         install = host[install_start:install_end]
-        self.assertIn("self._web_stack.setCurrentWidget(self.web)", install)
+        self.assertIn("self.web if self._uses_html_startup_loader else self._loading_page", install)
         self.assertIn("self.web.setHtml(", host)
         self.assertIn("prepare_native_host_html(", host)
 
