@@ -1309,6 +1309,46 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertNotIn("progress.style.width = pct + '%'", refresh_jobs)
 
 
+
+    def test_empty_chapter_state_clears_prototype_sample_text(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("async function refreshChapters()")
+        end = adapter.index("async function refreshCharacters()", start)
+        refresh = adapter[start:end]
+        empty_start = refresh.index("if (!chapters.length) {")
+        empty_end = refresh.index("if (!chapters.some(c =>", empty_start)
+        empty = refresh[empty_start:empty_end]
+        self.assertIn("data-chapter-empty-state", empty)
+        self.assertIn("window.ryuPremiumSelectedChapter = null", empty)
+        self.assertIn("editor.value = ''", empty)
+        self.assertIn("editor.disabled = true", empty)
+        self.assertIn("setTextIfChanged($('wordCount'), '0')", empty)
+        self.assertIn("button.disabled = true", empty)
+        self.assertIn("editor.disabled = false", refresh[empty_end:])
+
+    def test_project_switch_flushes_draft_and_clears_stale_active_project(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("async function openProjectAndRefresh(folder)")
+        end = adapter.index("async function wire()", start)
+        opener = adapter[start:end]
+        self.assertLess(opener.index("await flushChapterDraftBeforeSwitch()"), opener.index("call('project.open'"))
+        self.assertIn("await refreshCurrentProjectCard()", opener)
+        self.assertIn("await refreshChapters()", opener)
+        self.assertIn("openProjectAndRefresh(folder)", adapter)
+        self.assertIn("openProjectAndRefresh(button.dataset.openProject)", adapter)
+        active_start = adapter.index("async function refreshCurrentProjectCard(")
+        active_end = adapter.index("function installProjectCardStatusObserver()", active_start)
+        self.assertIn("window.ryuPremiumActiveProject = null", adapter[active_start:active_end])
+
+    def test_performance_metrics_refresh_on_navigation_instead_of_leaving_sample_values(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("async function wire()")
+        end = adapter.index("function install...", start) if "function install..." in adapter[start:] else len(adapter)
+        wire = adapter[start:end]
+        self.assertIn("window.__ryuPerformanceRefreshBound = true", wire)
+        self.assertIn(".nav-btn[data-page=\"performance\"]", wire)
+        self.assertIn("refreshPerformance().catch(error => message", wire)
+
     def test_only_unimplemented_prototype_actions_are_disabled(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")

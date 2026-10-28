@@ -1033,6 +1033,9 @@
     const folder = String(active?.folder || '');
     const title = String(active?.title || '').trim();
     if (!active || !folder || !title) {
+      // A missing active project must not leave the previous project's identity
+      // available to other screens after a Library/project switch.
+      window.ryuPremiumActiveProject = null;
       activeProjectCardFolder = null;
       if (titleNode && titleNode.textContent !== 'No project selected') titleNode.textContent = 'No project selected';
       if (titleNode) titleNode.title = 'Open a project from Library to begin';
@@ -2030,6 +2033,7 @@
       text: editorBeforeRefresh.value,
       title: String(titleBeforeRefresh?.textContent || '')
     } : null;
+    const chaptersBeforeRefresh = chapters;
     const loaded = await call('chapter.list');
     if (requestToken !== chapterListEpoch) return chapters;
     chapters = Array.isArray(loaded) ? loaded : [];
@@ -2043,9 +2047,59 @@
     }
     window.ryuPremiumChapters = chapters;
     await refreshCharacterDialogueSuggestions();
-    if (!chapters.length) { renderDialogueReview(); renderCharacterStudioLive(); return chapters; }
+    if (!chapters.length && draft && chaptersBeforeRefresh.some(c => Number(c.number) === draft.number)) {
+      // A live refresh that unexpectedly returns an empty list must not erase a
+      // draft from a previously visible chapter. Keep the editor/list visible and
+      // fail closed until the project state can be reconciled.
+      chapters = chaptersBeforeRefresh;
+      window.ryuPremiumChapters = chapters;
+      message('The chapter refresh returned no saved chapters while edits were pending. The visible chapter draft was preserved; save it successfully before retrying the project refresh.', true);
+      renderDialogueReview();
+      renderCharacterStudioLive();
+      renderLiveChapterInsights();
+      return chapters;
+    }
+    if (!chapters.length) {
+      const list = $('chapterList'), editor = $('chapterEditor'), title = $('chapterTitle');
+      const activeProject = window.ryuPremiumActiveProject;
+      const hasActiveProject = Boolean(activeProject && activeProject.folder);
+      const emptyMessage = hasActiveProject
+        ? 'No saved chapters yet. Add a chapter or re-import the source book.'
+        : 'No project selected. Import a book or open one from Library to begin.';
+      const emptySignature = 'empty:' + String(activeProject?.folder || 'none');
+      if (list && list.dataset.chapterListSignature !== emptySignature) {
+        list.innerHTML = '<p class="muted" data-chapter-empty-state="1">' + esc(emptyMessage) + '</p>';
+        list.dataset.chapterListSignature = emptySignature;
+      }
+      window.ryuPremiumSelectedChapter = null;
+      window.ryuPremiumSelectedDialogueId = '';
+      if (editor) {
+        if (editor.value !== '') editor.value = '';
+        editor.disabled = true;
+        editor.placeholder = hasActiveProject ? 'Add a chapter before editing text.' : 'Import or open a project before editing chapters.';
+      }
+      if (title) setTextIfChanged(title, hasActiveProject ? 'No chapter selected' : 'No project selected');
+      setTextIfChanged($('wordCount'), '0');
+      setTextIfChanged($('saveState'), hasActiveProject ? 'No chapter selected' : 'Import or open a project to begin');
+      const search = $('chapterSearch');
+      if (search) search.disabled = true;
+      for (const id of ['saveChapter', 'cleanText']) {
+        const button = $(id);
+        if (button) button.disabled = true;
+      }
+      chapterHistoryGroupOpen = false;
+      if (chapterHistoryGroupTimer) { clearTimeout(chapterHistoryGroupTimer); chapterHistoryGroupTimer = null; }
+      renderDialogueReview();
+      renderCharacterStudioLive();
+      renderLiveChapterInsights();
+      return chapters;
+    }
     if (!chapters.some(c => Number(c.number) === Number(window.ryuPremiumSelectedChapter))) window.ryuPremiumSelectedChapter = chapters[0].number;
     const current = selectedChapter(), list = $('chapterList'), editor = $('chapterEditor'), title = $('chapterTitle');
+    if (editor) { editor.disabled = false; editor.removeAttribute('placeholder'); }
+    if ($('chapterSearch')) $('chapterSearch').disabled = false;
+    if ($('saveChapter')) $('saveChapter').disabled = false;
+    if ($('cleanText')) $('cleanText').disabled = false;
     if (list) {
       ensureChapterDeleteControls(list);
       list.style.maxHeight = 'calc(100vh - 270px)';
@@ -5630,6 +5684,26 @@
     })();
   }
 
+  async function openProjectAndRefresh(folder) {
+    const targetFolder = String(folder || '').trim();
+    if (!targetFolder) throw new Error('Choose a local project before opening it.');
+    // Save the outgoing project's active chapter before changing the backend's
+    // current-project pointer. A failed save must prevent the switch.
+    await flushChapterDraftBeforeSwitch();
+    const opened = await call('project.open', {folder:targetFolder});
+    const active = await refreshCurrentProjectCard();
+    if (!active || String(active.folder || '') !== targetFolder ||
+        String(window.ryuPremiumActiveProject?.folder || '') !== targetFolder) {
+      throw new Error('The project-open result could not be verified against the active project. Reopen Library and retry; the chapter view has not been refreshed.');
+    }
+    await refreshProjects();
+    await refreshChapters();
+    await refreshCharacters();
+    if (typeof window.go === 'function') window.go('chapters');
+    message('Opened local project: ' + (opened.title || opened.folder || 'project'));
+    return opened;
+  }
+
   async function wire() {
     installUiTextScaleRuntime();
     installCharacterStudioHandlers();
@@ -5673,6 +5747,21 @@
     }
     clearAudiobookPlayerDisplay();
     applyUnavailableControlStates();
+    // Performance metrics are sample content in the approved visual HTML until
+    // replaced. Refresh as soon as that page is opened so sample hardware figures
+    // cannot remain visible as if they were measured on this machine.
+    if (!window.__ryuPerformanceRefreshBound) {
+      window.__ryuPerformanceRefreshBound = true;
+      document.addEventListener('click', event => {
+        if (!event.target.closest('.nav-btn[data-page="performance"],[data-page="performance"]')) return;
+        setTimeout(() => {
+          const page = $('performance');
+          if (page && page.classList.contains('active')) {
+            refreshPerformance().catch(error => message(error?.message || String(error), true));
+          }
+        }, 0);
+      }, true);
+    }
     // Register navigation and action handlers before hydration. A slow local model,
     // history, or sound-library query must not delay the first interactive frame.
     document.addEventListener('click', e => {
@@ -5890,12 +5979,7 @@
       const folder = card.dataset.projectFolder;
       if (!folder) { message('This dashboard card has no local project folder.', true); return; }
       try {
-        const opened = await call('project.open', {folder});
-        await refreshProjects();
-        await refreshChapters();
-        await refreshCharacters();
-        if (typeof window.go === 'function') window.go('chapters');
-        message('Opened local project: ' + (opened.title || opened.folder || 'project'));
+        await openProjectAndRefresh(folder);
       } catch (err) {
         message(err?.message || String(err), true);
       }
@@ -5923,7 +6007,7 @@
       }
       const button = e.target.closest('[data-open-project]'); if (!button) return;
       button.disabled = true;
-      try { const opened = await call('project.open', {folder:button.dataset.openProject}); await refreshProjects(); await refreshChapters(); await refreshCharacters(); if (typeof window.go === 'function') window.go('chapters'); message('Opened local project: ' + (opened.title || opened.folder || 'project')); }
+      try { await openProjectAndRefresh(button.dataset.openProject); }
       catch (err) { message(err?.message || String(err), true); }
       finally { button.disabled = false; }
     });
