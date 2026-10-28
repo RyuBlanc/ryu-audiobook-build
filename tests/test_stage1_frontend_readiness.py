@@ -50,7 +50,8 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
             install.index("self._show_web_failure(message)"),
             install.index("self.web.page().runJavaScript(script)"),
         )
-        self.assertIn("The application will not continue in a partially connected state.", install)
+        self.assertIn('"The application will not continue in a "', install)
+        self.assertIn('"partially connected state. Repair or reinstall the application.', install)
         self.assertIn("QTimer.singleShot(15000", install)
 
 if __name__ == "__main__":

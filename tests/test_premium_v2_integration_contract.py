@@ -139,7 +139,10 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         ):
             self.assertIn(command, script)
         self.assertIn('adapter_path = frontend_path().with_name("premium_v2_backend_adapter.js")', self.host)
-        self.assertIn('adapter_path.read_text(encoding="utf-8")', self.host)
+        self.assertIn("load_premium_v2_adapter(adapter_path)", self.host)
+        asset_loader = (ROOT / "app" / "ui" / "frontend_assets.py").read_text(encoding="utf-8")
+        self.assertIn("def load_premium_v2_adapter(path: Path) -> str:", asset_loader)
+        self.assertIn('target.read_text(encoding="utf-8")', asset_loader)
         self.assertIn("premium_v2_backend_adapter.js", self.build)
         self.assertIn("function preparePreviewPlayback(job, requestedSeconds)", script)
         self.assertIn("previewAudio.play()", script)
