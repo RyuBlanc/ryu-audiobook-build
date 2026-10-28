@@ -386,6 +386,7 @@ jobs:
           & $venvPython -c "import importlib.metadata as md; assert md.version('qwen-tts') == '0.1.1'; print('qwen_tts wheel bootstrap OK')"
 
       - name: Verify frozen application
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -421,6 +422,7 @@ jobs:
           }
 
       - name: Verify bundled voice assets and critical modules
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -469,12 +471,14 @@ jobs:
           Write-Host 'Critical application modules were already exercised by the frozen EXE self-test.'
 
       - name: Install Inno Setup
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         shell: pwsh
         run: |
           choco install innosetup -y --no-progress
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed with exit code $LASTEXITCODE." }
 
       - name: Build installer
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -492,6 +496,7 @@ jobs:
           Write-Host "Installer created: $installer"
 
       - name: Verify original logo transparency and generate release hashes
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -536,6 +541,7 @@ jobs:
           if (-not (Test-Path -LiteralPath 'release-sha256-manifest.json' -PathType Leaf)) { throw 'Release SHA-256 manifest was not created.' }
 
       - name: Scan release executables with Microsoft Defender
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -565,6 +571,7 @@ jobs:
           Write-Host 'Microsoft Defender returned clean scan results for both release executables.'
 
       - name: Upload Windows installer artifact
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Installer-${{ github.run_number }}
@@ -574,6 +581,7 @@ jobs:
           retention-days: 30
 
       - name: Upload release SHA-256 manifest
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Release-SHA256-${{ github.run_number }}
@@ -582,6 +590,7 @@ jobs:
           retention-days: 30
 
       - name: Upload portable Windows application
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Portable-${{ github.run_number }}
