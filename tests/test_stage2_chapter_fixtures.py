@@ -41,6 +41,52 @@ class ChapterDetectionFixtureTests(unittest.TestCase):
         self.assertEqual(chapters[0].text, "A new story starts.")
         self.assertEqual(chapters[1].text, "The journey continues.")
 
+    def test_named_section_and_part_heading_combine_without_leaking_titles_into_body(self):
+        source = (
+            "BLACK DOG/BIRTH\n"
+            "Part 1\n"
+            "The first section begins here.\n\n"
+            "Part 2\n"
+            "BLACK DOG/RETURN\n"
+            "The second section begins here."
+        )
+        chapters = detect_chapters(source)
+
+        self.assertEqual(
+            [chapter.title for chapter in chapters],
+            ["BLACK DOG/BIRTH — Part 1", "BLACK DOG/RETURN — Part 2"],
+        )
+        self.assertEqual(chapters[0].text, "The first section begins here.")
+        self.assertEqual(chapters[1].text, "The second section begins here.")
+        self.assertNotIn("Part 1", chapters[0].text)
+        self.assertNotIn("BLACK DOG/RETURN", chapters[0].text)
+
+    def test_part_headings_are_detected_without_a_chapter_prefix(self):
+        source = (
+            "Part I: Arrival\n"
+            "The first part remains intact.\n\n"
+            "Part II: Departure\n"
+            "The second part remains intact."
+        )
+        chapters = detect_chapters(source)
+        self.assertEqual([chapter.title for chapter in chapters], [
+            "Part I: Arrival", "Part II: Departure"
+        ])
+        self.assertEqual(chapters[0].text, "The first part remains intact.")
+        self.assertEqual(chapters[1].text, "The second part remains intact.")
+
+    def test_embedded_named_text_and_url_paths_are_not_chapter_headings(self):
+        source = (
+            "The speaker discussed BLACK DOG/BIRTH before turning away.\n"
+            "Read the source at https://example.com/BLACK/DOG for context.\n"
+            "The paragraph continues without a structural heading."
+        )
+        chapters = detect_chapters(source)
+        self.assertEqual(len(chapters), 1)
+        self.assertEqual(chapters[0].title, "Full Book")
+        self.assertIn("BLACK DOG/BIRTH", chapters[0].text)
+        self.assertIn("https://example.com/BLACK/DOG", chapters[0].text)
+
     def test_saved_chapter_edits_and_metadata_survive_project_reload(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory) / "project"
