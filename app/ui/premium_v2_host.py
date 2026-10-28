@@ -29,6 +29,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMainWindow, QP
 from PySide6.QtGui import QDesktopServices
 
 from app.core.paths import app_root, audiobooks_root, ensure_roots, library_root, settings_root
+from app.ui.frontend_assets import FrontendAssetError, load_premium_v2_adapter
 from app.core.project import create_project, list_projects
 from app.core.character_library import (
     character_library_path as reusable_character_library_path,
@@ -6018,13 +6019,19 @@ class PremiumV2Window(QMainWindow):
         })();
         """
         adapter_path = frontend_path().with_name("premium_v2_backend_adapter.js")
-        if adapter_path.is_file():
-            try:
-                script += "\n" + adapter_path.read_text(encoding="utf-8")
-            except OSError:
-                log.exception("Could not load Premium V2 backend adapter from %s", adapter_path)
-        else:
-            log.error("Premium V2 backend adapter is missing: %s", adapter_path)
+        try:
+            adapter_source = load_premium_v2_adapter(adapter_path)
+        except FrontendAssetError as exc:
+            message = (
+                "The Premium V2 interface loaded, but its local backend adapter "
+                "could not be read. The application will not continue in a "
+                "partially connected state. Repair or reinstall the application.\n\n"
+                f"{exc}"
+            )
+            log.error("%s", message)
+            self._show_web_failure(message)
+            return
+        script += "\n" + adapter_source
         self.web.page().runJavaScript(script)
         # Check for a UI that loaded at the HTML level but never finished
         # initializing the backend adapter. This gives the user a native

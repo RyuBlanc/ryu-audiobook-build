@@ -52,6 +52,22 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertIn('"window_size": "ui/window_size"', host)
 
 
+
+    def test_native_host_rejects_missing_or_empty_adapter_before_injection(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        helper = (ROOT / "app/ui/frontend_assets.py").read_text(encoding="utf-8")
+        start = host.index("    def _install_bridge(self, ok: bool)")
+        end = host.index("    def _check_frontend_ready(", start)
+        install = host[start:end]
+        self.assertIn("load_premium_v2_adapter(adapter_path)", install)
+        self.assertIn("except FrontendAssetError as exc:", install)
+        self.assertIn("self._show_web_failure(message)", install)
+        self.assertIn("script += \"\\n\" + adapter_source", install)
+        self.assertLess(install.index("return", install.index("except FrontendAssetError")), install.index("self.web.page().runJavaScript(script)"))
+        self.assertIn("if not target.is_file():", helper)
+        self.assertIn("if not source.strip():", helper)
+        self.assertIn("except (OSError, UnicodeError) as exc:", helper)
+
     def test_native_loading_surface_stays_visible_until_backend_frontend_ready(self):
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
