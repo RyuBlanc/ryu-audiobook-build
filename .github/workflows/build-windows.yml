@@ -12,8 +12,9 @@ permissions:
   actions: write
 
 concurrency:
-  group: ryu-audiobook-windows-build
-  cancel-in-progress: true
+  # Isolate per-branch workflow runs and never cancel regression evidence.
+  group: ryu-audiobook-windows-build-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -308,7 +309,7 @@ jobs:
             installer/installer-output/Ryu's Audiobook Setup.exe
             dist/Ryu's Audiobook/Ryu's Audiobook.exe
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 90
 
       - name: Publish verified installer release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
