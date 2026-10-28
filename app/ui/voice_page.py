@@ -145,7 +145,10 @@ def _same_profile_ui_settings(saved: VoiceProfile, draft: VoiceProfile) -> bool:
         return True
 
     if provider in {"edge-tts", "elevenlabs", "piper", "kokoro"}:
-        return (saved.language or "") == (draft.language or "")
+        # Language/metadata is supplied by the selected provider catalogue and
+        # is not independently editable in this panel. Keep the exact saved
+        # profile when its provider and voice ID are still selected.
+        return True
 
     return True
 
