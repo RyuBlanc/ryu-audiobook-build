@@ -60,3 +60,11 @@ The remaining automated closure work is being addressed before the checkpoint bu
 - Expand character-detection fixtures for first-person self-identification, short-name aliases, and attributed dialogue.
 - Change the Windows workflow so ordinary commits run the full unittest suite only; frozen-app/package/security/artifact gates run only on an explicit `[artifact-checkpoint]` commit.
 - These items remain open until the test-only CI run passes. Packaged Windows UI/audio acceptance remains a separate manual gate.
+
+
+## Test-only CI result and correction — 2026-10-28
+
+- Run #1491 on commit `82433cac383d6ad0fb3e773ba600329d5e44d78c` ran 424 tests and failed one new regression: a capitalized first-person introduction ("My name is ...") was not classified as the narrating character.
+- The root cause is case-sensitive matching in `_detect_first_person_narrator`; the follow-up makes introductory phrase matching case-insensitive while retaining name plausibility validation.
+- Add chapter reorder and merge offset-integrity tests alongside the split migration tests.
+- Run #1491 did not package or upload artifacts. Continue test-only CI until the full suite passes; checkpoint packaging remains deferred.

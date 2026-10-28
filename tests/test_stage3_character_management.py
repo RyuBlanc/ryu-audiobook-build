@@ -193,6 +193,64 @@ class Stage3ChapterAssignmentOffsetTests(unittest.TestCase):
             self.assertEqual(right.text[moved["start"]:moved["end"]], moved["text"])
             self.assertEqual(moved["text"], "Wait here.")
 
+    def test_reorder_keeps_assignments_attached_to_their_chapter(self):
+        with tempfile.TemporaryDirectory() as temp:
+            first_text = "Mira says, “Wait here.”"
+            second_text = "Ren says, “Come along.”"
+            project = Project("Reorder test", Path(temp), chapters=[
+                Chapter(1, "First", first_text, dialogue_assignments=[{
+                    "start": first_text.index("Wait here."),
+                    "end": first_text.index("Wait here.") + len("Wait here."),
+                    "text": "Wait here.", "speaker": "Mira",
+                }]),
+                Chapter(2, "Second", second_text, dialogue_assignments=[{
+                    "start": second_text.index("Come along."),
+                    "end": second_text.index("Come along.") + len("Come along."),
+                    "text": "Come along.", "speaker": "Ren",
+                }]),
+            ])
+            project.save()
+            bridge = _BridgeHarness(project)
+
+            PremiumV2Bridge._chapter_reorder(bridge, {"number": 1, "new_number": 2})
+
+            reloaded = Project.load(Path(temp))
+            self.assertEqual(reloaded.chapters[0].title, "Second")
+            self.assertEqual(reloaded.chapters[1].title, "First")
+            for chapter in reloaded.chapters:
+                assignment = chapter.dialogue_assignments[0]
+                self.assertEqual(
+                    chapter.text[assignment["start"]:assignment["end"]],
+                    assignment["text"],
+                )
+
+    def test_merge_shifts_assignments_into_the_combined_source_text(self):
+        with tempfile.TemporaryDirectory() as temp:
+            first_text = "Opening line."
+            second_text = "Mira said, “Wait here.”"
+            start = second_text.index("Wait here.")
+            project = Project("Merge test", Path(temp), chapters=[
+                Chapter(1, "First", first_text),
+                Chapter(2, "Second", second_text, dialogue_assignments=[{
+                    "start": start, "end": start + len("Wait here."),
+                    "text": "Wait here.", "speaker": "Mira",
+                }]),
+            ])
+            project.save()
+            bridge = _BridgeHarness(project)
+
+            PremiumV2Bridge._chapter_merge(bridge, {"number": 2})
+
+            reloaded = Project.load(Path(temp))
+            self.assertEqual(len(reloaded.chapters), 1)
+            merged = reloaded.chapters[0]
+            assignment = merged.dialogue_assignments[0]
+            self.assertEqual(
+                merged.text[assignment["start"]:assignment["end"]],
+                assignment["text"],
+            )
+            self.assertEqual(assignment["text"], "Wait here.")
+
     def test_split_invalidates_offsets_when_editor_text_differs_from_saved_source(self):
         with tempfile.TemporaryDirectory() as temp:
             text = "Opening line.\n\nClosing line."
@@ -201,9 +259,10 @@ class Stage3ChapterAssignmentOffsetTests(unittest.TestCase):
             ])
             bridge = _BridgeHarness(project)
 
+            changed_text = "Changed opening.\n\nClosing line."
             PremiumV2Bridge._chapter_split(bridge, {
-                "number": 1, "split_at": text.index("Closing"),
-                "text": "Changed opening.\n\nClosing line."
+                "number": 1, "split_at": changed_text.index("Closing"),
+                "text": changed_text
             })
 
             reloaded = Project.load(Path(temp))

@@ -181,7 +181,10 @@ def _detect_first_person_narrator(text: str) -> str | None:
         r"\b(?:I['’]m|I am|this is)\s+([A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30}(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30})?)\b",
     )
     for pattern in patterns:
-        match = re.search(pattern, text)
+        # Book openings commonly capitalize the first word ("My name is ...").
+        # Treat introductory phrases case-insensitively while still validating
+        # the captured name against the normal stopword/plausibility rules.
+        match = re.search(pattern, text, flags=re.IGNORECASE)
         if match and _is_plausible_name(match.group(1)):
             return _clean_name(match.group(1))
     return None
