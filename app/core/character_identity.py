@@ -22,3 +22,38 @@ def parse_character_identity_key(value: str) -> tuple[str, str] | None:
     if not series or not name:
         return None
     return series, name
+
+def set_character_voice_assignment(
+    state: dict,
+    name: str,
+    series: str,
+    profile_name: str,
+) -> dict:
+    """Return state with both scoped and legacy voice mappings updated.
+
+    The series-scoped key is authoritative during cast routing. Updating only
+    the legacy name map can leave a stale or explicitly empty scoped assignment
+    in place, making the UI claim an assignment that generation does not use.
+    """
+    if not isinstance(state, dict):
+        raise TypeError("Project state must be a dictionary.")
+
+    character_name = str(name or "").strip()
+    voice_name = str(profile_name or "").strip()
+    if not character_name:
+        raise ValueError("A character name is required.")
+    if not voice_name:
+        raise ValueError("A saved voice profile name is required.")
+
+    updated = dict(state)
+    identity_assignments = updated.get("voice_cast_identity_assignments", {})
+    identity_assignments = dict(identity_assignments) if isinstance(identity_assignments, dict) else {}
+    identity_assignments[character_identity_key(character_name, series)] = voice_name
+    updated["voice_cast_identity_assignments"] = identity_assignments
+
+    legacy_assignments = updated.get("voice_cast", {})
+    legacy_assignments = dict(legacy_assignments) if isinstance(legacy_assignments, dict) else {}
+    legacy_assignments[character_name] = voice_name
+    updated["voice_cast"] = legacy_assignments
+    return updated
+
