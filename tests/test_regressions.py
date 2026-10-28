@@ -1120,6 +1120,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("github.event.workflow_run.conclusion == 'success'", storage_workflow)
         self.assertIn("hasCompleteSplitPackage", storage_workflow)
         self.assertIn("if (!hasLegacyPackage && !hasCompleteSplitPackage)", storage_workflow)
+        self.assertIn("const deletableTypes = hasCompleteSplitPackage", storage_workflow)
+        self.assertIn("if (!deletableTypes.has(category)) continue;", storage_workflow)
         self.assertIn("new Set([1441, 1536])", storage_workflow)
         self.assertIn("Ryu-Audiobook-Installer", storage_workflow)
         self.assertIn("Ryu-Audiobook-Portable", storage_workflow)
