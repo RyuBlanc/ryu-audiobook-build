@@ -46,7 +46,7 @@ The repository workflow skipped public-release publishing because this is a work
 
 ## Consolidated checkpoint candidate
 
-The current working branch includes additional regression coverage for editor structural operations, Unicode-safe Find/Replace, non-mutating before/after re-detection preview with stale-fingerprint rejection, and import duplicate/cancellation/failure paths. The next `[artifact-checkpoint]` workflow run is the validation source of truth for these changes; counts and package artifacts are recorded only after that run finishes successfully.
+The current working branch includes regression coverage for editor structural operations, Unicode-safe Find/Replace, non-mutating before/after re-detection preview with stale-fingerprint rejection, and import duplicate/cancellation/retry/failure paths. Run #1477 reached 749/750 tests; the single failure was an outdated re-detection contract assertion. The runner then hit a separate CP1252 Unicode encoding error while printing the report. Both are corrected in the current candidate, and the next `[artifact-checkpoint]` run is the validation source of truth. Final counts and package artifacts are recorded only after that run finishes successfully.
 
 ## Packaged-Windows acceptance checklist
 
