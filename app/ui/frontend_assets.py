@@ -39,8 +39,8 @@ def premium_v2_logo_candidates(frontend_file: Path) -> tuple[Path, ...]:
         assets_directory / name
         for name in (
             "ryu_audiobook_logo.png",
-            "ryu_audiobook_logo_master.png",
             "ryu_audiobook_logo.svg",
             "ryu_audiobook_logo.jpg",
+            "ryu_audiobook_logo_master.png",
         )
     )

@@ -99,6 +99,8 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
         frontend_html = ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"
         candidates = premium_v2_logo_candidates(frontend_html)
         self.assertEqual(candidates[0].name, "ryu_audiobook_logo.png")
+        self.assertEqual(candidates[1].name, "ryu_audiobook_logo.svg")
+        self.assertEqual(candidates[-1].name, "ryu_audiobook_logo_master.png")
         self.assertTrue(
             any(path.is_file() and path.stat().st_size > 0 for path in candidates),
             f"No real application logo asset found in: {candidates}",
