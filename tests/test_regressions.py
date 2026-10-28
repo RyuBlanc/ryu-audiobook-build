@@ -1102,20 +1102,28 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("worker.finished.connect(", source)
         self.assertIn("shiboken6.isValid(widget)", source)
 
-    def test_actions_storage_cleanup_is_disabled_until_release_review(self):
+    def test_actions_cleanup_prunes_only_old_package_artifacts_after_verified_checkpoint(self):
         script = Path(".github/scripts/cleanup_actions_storage.ps1").read_text(encoding="utf-8")
         workflow = Path(".github/workflows/build-windows.yml").read_text(encoding="utf-8")
         storage_workflow = Path(".github/workflows/actions-storage-cleanup.yml").read_text(encoding="utf-8")
 
-        self.assertIn("Automatic Actions run/artifact deletion is disabled pending Version 1.2.0 acceptance.", script)
+        # The legacy script must not delete runs or logs. The new workflow removes
+        # only superseded package ZIPs after a complete replacement checkpoint is present.
+        self.assertIn("intentionally non-destructive", script)
         self.assertNotIn("gh api --method DELETE", script)
         self.assertNotIn("Clean old Actions runs and storage", workflow)
         self.assertNotIn("cleanup_actions_storage.ps1", workflow)
         self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn("retention-days: 90", workflow)
-        self.assertNotIn("cleanup_actions_storage.ps1", storage_workflow)
-        self.assertNotIn("gh api --method DELETE", storage_workflow)
-        self.assertIn("Automatic workflow-run and artifact deletion is disabled.", storage_workflow)
+        self.assertIn('workflows: ["Build Windows App"]', storage_workflow)
+        self.assertIn("types: [completed]", storage_workflow)
+        self.assertIn("startsWith(github.event.workflow_run.head_commit.message, '[artifact-checkpoint]')", storage_workflow)
+        self.assertIn("new Set([1441])", storage_workflow)
+        self.assertIn("Ryu-Audiobook-Installer", storage_workflow)
+        self.assertIn("Ryu-Audiobook-Portable", storage_workflow)
+        self.assertIn("Ryu-Audiobook-Release-SHA256", storage_workflow)
+        self.assertIn("All Ryu-Audiobook-Test-Evidence-* artifacts and workflow-run logs are intentionally retained.", storage_workflow)
+        self.assertNotIn("/actions/runs/", storage_workflow)
 
 
     def test_qwen_voice_preview_reuses_warm_provider_and_replaces_changed_profile(self):
