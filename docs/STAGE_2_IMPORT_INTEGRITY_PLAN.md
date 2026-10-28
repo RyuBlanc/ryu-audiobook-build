@@ -29,6 +29,21 @@
 - [ ] On a target Windows install, import one fixture in each supported format, edit and save chapters, restart/reopen, and compare text and chapter counts.
 - [ ] Record any Windows-only acceptance that cannot be performed in cloud CI as an explicit release gate.
 
+## Current validation on `fix/native-ui-font-scale-learning-ai`
+
+- Run #1464 passed on tested code commit `579c378ae81ab9c06e7c68feae5485574f3f02cc`: 732/732 tests passed, with installer, portable app, SHA-256 manifest, Defender scan, and test evidence uploaded. See [Stage 2 evidence](STAGE_2_IMPORT_CHAPTER_EVIDENCE.md).
+- Follow-up commit `a2666867425ab0c0710b5fd34417ae608280fb62` clears number-keyed chapter undo/redo stacks after structural edits so old snapshots cannot be applied to a different chapter after renumbering.
+- Follow-up commit `9d983356522b272cbbf1d12b948769d4a836d0e3` adds six chapter-operation regressions for rename/edit assignment integrity, delete renumbering, reorder metadata, merge/split offsets, invalid split safety, and adapter history invalidation. Its Windows CI run is pending/in progress; do not count these tests as passed until the run concludes successfully.
+- Structural history invalidation is a safety guard, not full cross-structure undo. Undo/redo remains scoped to the active chapter's text-edit history.
+
+## Remaining Stage 2 gates
+
+- [ ] Latest checkpoint CI run passes on the current branch head, including all regression tests and (for the artifact-checkpoint commit) Windows packaging.
+- [ ] Extend automated/packaged acceptance for import cancellation timing, duplicate import, unsupported/empty/damaged files, retry/error states, and cleanup on failure.
+- [ ] Exercise chapter add/delete/move/merge/split/clean/find-replace/undo-redo through the packaged UI; core operation tests alone do not prove the UI interaction contract.
+- [ ] On the target Windows install, import TXT, EPUB, searchable PDF, and DOCX; edit/save/reopen, compare source/body text and chapter counts, and capture exceptions/logs.
+- [ ] Record real-book outcomes and any limitations; do not claim zero-defect or full interactive acceptance from CI alone.
+
 ## Work started in this branch
 
 1. Added transactional project creation: copy and write into a private staging folder, reload-verify the project, then publish the completed folder by rename. On errors, staging is removed.
