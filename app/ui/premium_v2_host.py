@@ -5827,6 +5827,11 @@ class PremiumV2Window(QMainWindow):
         self._frontend_watchdog.timeout.connect(
             lambda: self._check_frontend_ready(self._frontend_generation)
         )
+        # A separate short watchdog covers the bridge handshake specifically.
+        # It is stopped only after the native transport reports progress 26.
+        self._bridge_watchdog = QTimer(self)
+        self._bridge_watchdog.setSingleShot(True)
+        self._bridge_watchdog.timeout.connect(self._bridge_connect_timeout)
         self.web.loadFinished.connect(self._install_bridge)
         self.web.page().renderProcessTerminated.connect(self._handle_renderer_terminated)
 
@@ -5995,10 +6000,22 @@ class PremiumV2Window(QMainWindow):
         if abs(self.web.zoomFactor() - 1.0) > 0.001:
             self.web.setZoomFactor(1.0)
 
+    def _bridge_connect_timeout(self) -> None:
+        if self._frontend_ready or self._frontend_failure_shown:
+            return
+        self._show_web_failure(
+            "The local desktop bridge did not connect within 20 seconds. "
+            "The HTML page opened, but Qt WebChannel did not become ready. "
+            "Your local project files have not been deleted; retry the interface "
+            "and send the local application log if the problem repeats."
+        )
+
     def _show_web_failure(self, message: str) -> None:
         self._frontend_failure_shown = True
         if hasattr(self, "_frontend_watchdog"):
             self._frontend_watchdog.stop()
+        if hasattr(self, "_bridge_watchdog"):
+            self._bridge_watchdog.stop()
         self._write_startup_smoke_marker("failed", str(message or "Frontend startup failed."))
         log.error("Premium V2 renderer recovery surface shown: %s", message)
         if hasattr(self, "_web_error_message"):
@@ -6051,6 +6068,8 @@ class PremiumV2Window(QMainWindow):
         # Ignore stale/out-of-order status callbacks so the visible meter never
         # moves backwards during one startup attempt.
         self._startup_progress_value = max(self._startup_progress_value, value)
+        if value >= 26 and hasattr(self, "_bridge_watchdog"):
+            self._bridge_watchdog.stop()
         if hasattr(self, "_loading_progress"):
             self._loading_progress.setRange(0, 100)
             self._loading_progress.setValue(self._startup_progress_value)
@@ -6065,6 +6084,8 @@ class PremiumV2Window(QMainWindow):
         self._frontend_failure_shown = False
         if hasattr(self, "_frontend_watchdog"):
             self._frontend_watchdog.stop()
+        if hasattr(self, "_bridge_watchdog"):
+            self._bridge_watchdog.stop()
         self._renderer_restart_attempts = 0
         if hasattr(self, "_web_stack") and hasattr(self, "web"):
             self._web_stack.setCurrentWidget(self.web)
@@ -6272,6 +6293,9 @@ class PremiumV2Window(QMainWindow):
         script += "\n" + adapter_source
         self._update_startup_progress("Preparing the local backend bridge…", 22)
         self.web.page().runJavaScript(script)
+        # Catch a missing Qt transport quickly. A later, confirmed progress
+        # milestone disarms this watchdog and returns to the hydration watchdog.
+        self._bridge_watchdog.start(20000)
         # Check for a UI that loaded at the HTML level but never finished
         # initializing the backend adapter. This gives the user a native
         # recovery surface instead of an indefinitely blank black window.
