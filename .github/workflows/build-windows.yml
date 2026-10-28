@@ -20,6 +20,7 @@ on:
       - fix/installer-live-controls-space-and-logo
       - fix/dashboard-live-data-project-covers-player
       - fix/html-installer-transparent-logo
+      - recovery/build-1441-baseline
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.
@@ -98,7 +99,7 @@ jobs:
         timeout-minutes: 60
         shell: pwsh
         env:
-          RYU_BUILD_NUMBER: ${{ github.run_number }}
+          RYU_BUILD_NUMBER: ${{ startsWith(github.ref, 'refs/heads/recovery/build-1441-baseline') && '1441-recovered' || github.run_number }}
         run: |
           $ErrorActionPreference = 'Stop'
           $env:PYTHONDONTWRITEBYTECODE = '1'
