@@ -60,6 +60,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed with exit code $LASTEXITCODE." }
           & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 -r requirements.txt
           if ($LASTEXITCODE -ne 0) { throw "Test dependency installation failed with exit code $LASTEXITCODE." }
+      - name: Validate frontend JavaScript syntax
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+          if ([string]::IsNullOrWhiteSpace($nodeExe) -or -not (Test-Path -LiteralPath $nodeExe -PathType Leaf)) {
+            throw 'Node.js is required to validate the Premium V2 frontend and installer scripts.'
+          }
+          & $nodeExe --check 'assets\frontend\premium_v2_backend_adapter.js'
+          if ($LASTEXITCODE -ne 0) { throw "Premium V2 backend adapter JavaScript syntax validation failed with exit code $LASTEXITCODE." }
+          & $nodeExe --check 'installer\ryu_installer.js'
+          if ($LASTEXITCODE -ne 0) { throw "Installer JavaScript syntax validation failed with exit code $LASTEXITCODE." }
+
       - name: Run regression tests
         shell: pwsh
         run: |
