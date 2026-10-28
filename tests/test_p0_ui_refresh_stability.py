@@ -96,6 +96,43 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("setTextIfChanged($('importStatus'), job.message || job.stage || job.state)", adapter)
         self.assertIn("setTextIfChanged($('validation'), 'Synthesizing preview", adapter)
 
+
+    def test_chapter_refresh_treats_explicit_no_active_project_as_empty_state(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("async function refreshChapters()")
+        end = adapter.index("async function refreshCharacters()", start)
+        refresh = adapter[start:end]
+        self.assertIn("let loaded;", refresh)
+        self.assertIn("loaded = await call('chapter.list')", refresh)
+        self.assertIn(
+            "/open a local project from the Library first|active project is no longer available in the local library/i.test(detail)",
+            refresh,
+        )
+        self.assertIn("loaded = [];", refresh)
+        self.assertIn("data-chapter-empty-state", refresh)
+        self.assertIn("No project selected. Import a book or open one from Library to begin.", refresh)
+        self.assertIn("Other bridge/storage errors remain errors", refresh)
+
+    def test_responsive_workflow_and_notifications_have_bounded_layout_guards(self):
+        html = (
+            ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"
+        ).read_text(encoding="utf-8")
+        start = html.index("Keep status notifications clear of the persistent mini-player")
+        end = html.index("</style>", start)
+        guard = html[start:end]
+        self.assertIn("#toasts.toast-wrap", guard)
+        self.assertIn("bottom:92px", guard)
+        self.assertIn("max-height:min(42vh,320px)", guard)
+        self.assertIn("@media(max-width:800px)", guard)
+        self.assertIn("bottom:86px", guard)
+        self.assertIn("@media(min-width:1181px) and (max-width:1366px)", guard)
+        self.assertIn(".flow-track{", guard)
+        self.assertIn("overflow-x:auto!important", guard)
+        self.assertIn(".flow-stage{flex:0 0 132px!important}", guard)
+        self.assertIn(".flow-summary{display:none!important}", guard)
+
     def test_premium_effects_bound_blur_and_disable_whole_view_entry_animations(self):
         html = (
             ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"

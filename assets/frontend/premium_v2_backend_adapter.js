@@ -2042,7 +2042,21 @@
       title: String(titleBeforeRefresh?.textContent || '')
     } : null;
     const chaptersBeforeRefresh = chapters;
-    const loaded = await call('chapter.list');
+    let loaded;
+    try {
+      loaded = await call('chapter.list');
+    } catch (error) {
+      if (requestToken !== chapterListEpoch) return chapters;
+      const detail = String(error?.message || error || '');
+      // The host deliberately rejects chapter.list when no local project is
+      // active. Treat that explicit state as an empty Library/Chapter Studio
+      // context so prototype sample text cannot survive first launch. Other
+      // bridge/storage errors remain errors and preserve the last known UI.
+      if (!/open a local project from the Library first|active project is no longer available in the local library/i.test(detail)) {
+        throw error;
+      }
+      loaded = [];
+    }
     if (requestToken !== chapterListEpoch) return chapters;
     chapters = Array.isArray(loaded) ? loaded : [];
     if (draft) {
