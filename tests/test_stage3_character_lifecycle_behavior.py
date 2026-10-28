@@ -180,5 +180,64 @@ class Stage3CharacterLifecycleBehaviorTests(unittest.TestCase):
         self.assertEqual(status["suggestion_count"], 0)
 
 
+    def test_bridge_split_moves_dialogue_assignments_with_their_exact_text(self):
+        text = 'Mira said, “Hello.”\n\nRen replied, “Goodbye.”'
+        mira_text = '“Hello.”'
+        ren_text = '“Goodbye.”'
+        chapter = Chapter(1, "Combined", text, dialogue_assignments=[
+            {"start": text.index(mira_text), "end": text.index(mira_text) + len(mira_text),
+             "text": mira_text, "speaker": "Mira", "source": "manual"},
+            {"start": text.index(ren_text), "end": text.index(ren_text) + len(ren_text),
+             "text": ren_text, "speaker": "Ren", "source": "manual"},
+        ])
+        self.project.chapters = [chapter]
+        self.project.save = Mock()
+        self.bridge._mark_project_edited = Mock()
+
+        self.bridge._chapter_split({
+            "number": 1, "split_at": text.index("Ren replied"),
+            "text": text, "title": "First", "new_title": "Second",
+        })
+
+        self.assertEqual(len(self.project.chapters), 2)
+        first, second = self.project.chapters
+        self.assertEqual([item["speaker"] for item in first.dialogue_assignments], ["Mira"])
+        self.assertEqual([item["speaker"] for item in second.dialogue_assignments], ["Ren"])
+        for result_chapter in self.project.chapters:
+            for item in result_chapter.dialogue_assignments:
+                self.assertEqual(
+                    result_chapter.text[item["start"]:item["end"]],
+                    item["text"],
+                )
+        self.project.save.assert_called_once()
+
+    def test_bridge_merge_remaps_dialogue_assignments_after_whitespace_trim(self):
+        left_text = '  Mira said, “Hello.”'
+        right_text = '  Ren replied, “Goodbye.”'
+        mira_text = '“Hello.”'
+        ren_text = '“Goodbye.”'
+        first = Chapter(1, "First", left_text, dialogue_assignments=[{
+            "start": left_text.index(mira_text), "end": left_text.index(mira_text) + len(mira_text),
+            "text": mira_text, "speaker": "Mira", "source": "manual",
+        }])
+        second = Chapter(2, "Second", right_text, dialogue_assignments=[{
+            "start": right_text.index(ren_text), "end": right_text.index(ren_text) + len(ren_text),
+            "text": ren_text, "speaker": "Ren", "source": "manual",
+        }])
+        self.project.chapters = [first, second]
+        self.project.save = Mock()
+        self.bridge._mark_project_edited = Mock()
+
+        self.bridge._chapter_merge({"number": 2})
+
+        self.assertEqual(len(self.project.chapters), 1)
+        merged = self.project.chapters[0]
+        self.assertEqual([item["speaker"] for item in merged.dialogue_assignments], ["Mira", "Ren"])
+        for item in merged.dialogue_assignments:
+            self.assertEqual(merged.text[item["start"]:item["end"]], item["text"])
+        self.project.save.assert_called_once()
+
+
+
 if __name__ == "__main__":
     unittest.main()

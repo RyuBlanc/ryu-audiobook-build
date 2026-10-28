@@ -1899,6 +1899,8 @@ class PremiumV2Bridge(QObject):
 
     def _chapter_merge(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Merge the selected chapter into the immediately preceding chapter."""
+        from app.chapters.editor import _remap_assignments
+
         project = self._active_project()
         try:
             number = int(payload.get("number"))
@@ -1908,20 +1910,44 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Choose a chapter after the first; it will be merged into the previous chapter.")
         current = project.chapters[number - 1]
         previous = project.chapters[number - 2]
-        previous_text = previous.text.rstrip()
+        previous_text = (previous.text or "").rstrip()
         current_original = current.text or ""
         current_text = current_original.lstrip()
         removed_leading = len(current_original) - len(current_text)
         separator = "\n\n" if previous_text and current_text else ""
-        assignment_offset = len(previous_text + separator)
-        previous.text = (previous_text + separator + current_text).strip()
-        for assignment in current.dialogue_assignments or []:
+        merged_raw = previous_text + separator + current_text
+        leading_trim = len(merged_raw) - len(merged_raw.lstrip())
+        merged_text = merged_raw.strip()
+
+        # Trim-aware offsets are only a first pass. Re-map every assignment by its
+        # exact saved passage afterwards, and discard entries that cannot be proven
+        # to belong to the merged source text.
+        assignments = []
+        for assignment in getattr(previous, "dialogue_assignments", []) or []:
+            if not isinstance(assignment, dict):
+                continue
             shifted = dict(assignment)
-            if isinstance(shifted.get("start"), int):
-                shifted["start"] = max(0, shifted["start"] - removed_leading) + assignment_offset
-            if isinstance(shifted.get("end"), int):
-                shifted["end"] = max(0, shifted["end"] - removed_leading) + assignment_offset
-            previous.dialogue_assignments.append(shifted)
+            try:
+                shifted["start"] = int(assignment.get("start", 0) or 0) - leading_trim
+                shifted["end"] = int(assignment.get("end", 0) or 0) - leading_trim
+            except (TypeError, ValueError):
+                pass
+            assignments.append(shifted)
+
+        right_offset = len(previous_text + separator) - leading_trim - removed_leading
+        for assignment in getattr(current, "dialogue_assignments", []) or []:
+            if not isinstance(assignment, dict):
+                continue
+            shifted = dict(assignment)
+            try:
+                shifted["start"] = int(assignment.get("start", 0) or 0) + right_offset
+                shifted["end"] = int(assignment.get("end", 0) or 0) + right_offset
+            except (TypeError, ValueError):
+                pass
+            assignments.append(shifted)
+
+        previous.text = merged_text
+        previous.dialogue_assignments = _remap_assignments(merged_text, assignments)
         del project.chapters[number - 1]
         for index, chapter in enumerate(project.chapters, 1):
             chapter.number = index
@@ -1932,6 +1958,7 @@ class PremiumV2Bridge(QObject):
     def _chapter_split(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Persist current editor text and split one chapter at the selected cursor."""
         from app.chapters.detector import Chapter
+        from app.chapters.editor import _remap_assignments
 
         project = self._active_project()
         try:
@@ -1950,16 +1977,45 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Chapter text is too large to split in one operation.")
         if split_at <= 0 or split_at >= len(text_value):
             raise ValueError("Place the cursor inside the chapter text, not at the beginning or end.")
-        left, right = text_value[:split_at].rstrip(), text_value[split_at:].lstrip()
+        left_raw, right_raw = text_value[:split_at], text_value[split_at:]
+        left, right = left_raw.rstrip(), right_raw.lstrip()
         if not left or not right:
             raise ValueError("Both sides of a split must contain text. Move the cursor between two passages.")
         title_value = str(payload.get("title") or chapter.title or f"Chapter {number}").strip()[:500]
         if not title_value:
             raise ValueError("Chapter title cannot be empty.")
+        new_title = str(payload.get("new_title") or f"{title_value} (continued)").strip()[:500]
+
+        right_trim = len(right_raw) - len(right)
+        left_assignments = []
+        right_assignments = []
+        # Reconcile spans against the exact editor text before partitioning. An
+        # assignment crossing the split boundary is invalidated rather than left
+        # attached to the wrong chapter or allowed to retain stale offsets.
+        source_assignments = _remap_assignments(text_value, list(getattr(chapter, "dialogue_assignments", []) or []))
+        for assignment in source_assignments:
+            try:
+                start = int(assignment.get("start", -1))
+                end = int(assignment.get("end", -1))
+            except (TypeError, ValueError):
+                continue
+            if start < 0 or end <= start:
+                continue
+            if end <= split_at:
+                left_assignments.append(dict(assignment))
+            elif start >= split_at:
+                shifted = dict(assignment)
+                shifted["start"] = start - split_at - right_trim
+                shifted["end"] = end - split_at - right_trim
+                right_assignments.append(shifted)
+            # A passage spanning split_at is deliberately dropped as unsafe.
+
+        left_assignments = _remap_assignments(left, left_assignments)
+        right_assignments = _remap_assignments(right, right_assignments)
         chapter.title = title_value
         chapter.text = left
-        new_title = str(payload.get("new_title") or f"{title_value} (continued)").strip()[:500]
-        new_chapter = Chapter(number + 1, new_title, right)
+        chapter.dialogue_assignments = left_assignments
+        new_chapter = Chapter(number + 1, new_title, right, dialogue_assignments=right_assignments)
         project.chapters.insert(index + 1, new_chapter)
         for i, item in enumerate(project.chapters, 1):
             item.number = i
