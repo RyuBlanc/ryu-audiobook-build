@@ -4750,6 +4750,8 @@ class PremiumV2Bridge(QObject):
             value = payload[key]
             if key == "theme" and value not in {"dark", "light"}:
                 raise ValueError("Theme must be dark or light.")
+            if key == "effects" and value not in {"high", "normal"}:
+                raise ValueError("Visual effects must be High Glass or Normal Smooth Blur.")
             if key == "reduce_motion" and not isinstance(value, bool):
                 raise ValueError("Reduce motion must be a boolean preference.")
             if key == "text_scale":

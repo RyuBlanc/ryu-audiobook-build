@@ -157,9 +157,38 @@
 
   function applyVisualStabilityPreferences(settings = {}) {
     installReducedMotionStyles();
+    const root = document.documentElement;
+
+    // The HTML shell starts in dark/high mode. Applying the values to the
+    // controls alone does not activate the saved CSS variables after restart.
+    const themeRaw = String(
+      settings.theme ?? $('themeSelectAdvanced')?.value ?? root?.dataset.theme ?? 'dark'
+    ).toLowerCase();
+    const theme = themeRaw === 'light' ? 'light' : 'dark';
+    const effectsRaw = String(
+      settings.effects ?? $('effectsModeAdvanced')?.value ?? root?.dataset.effects ?? 'high'
+    ).toLowerCase();
+    const effects = effectsRaw === 'normal' ? 'normal' : 'high';
+
+    if (root) {
+      root.dataset.theme = theme;
+      root.dataset.effects = effects;
+    }
+    const themeControl = $('themeSelectAdvanced');
+    if (themeControl && themeControl.value !== theme) themeControl.value = theme;
+    const effectsControl = $('effectsModeAdvanced');
+    if (effectsControl && effectsControl.value !== effects) effectsControl.value = effects;
+    const legacyTheme = $('themeSelect');
+    if (legacyTheme && legacyTheme.value !== theme) legacyTheme.value = theme;
+    const legacyEffects = $('effectsMode');
+    if (legacyEffects && legacyEffects.value !== effects) legacyEffects.value = effects;
+    const effectsLabel = $('aboutEffects');
+    if (effectsLabel) {
+      effectsLabel.textContent = effects === 'high' ? 'High Glass' : 'Normal Smooth Blur';
+    }
+
     const raw = settings.reduce_motion;
     const reduce = typeof raw === 'boolean' ? raw : Boolean($('reduceMotionAdvanced')?.checked);
-    const root = document.documentElement;
     if (root) root.dataset.ryuReduceMotion = reduce ? '1' : '0';
     const checkbox = $('reduceMotionAdvanced');
     if (checkbox && checkbox.checked !== reduce) checkbox.checked = reduce;

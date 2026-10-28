@@ -436,6 +436,27 @@ class UiStabilityRegressions(unittest.TestCase):
         app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         app.processEvents()
 
+    def test_saved_visual_preferences_apply_to_live_dom_on_load_and_save(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+
+        apply_start = adapter.index("function applyVisualStabilityPreferences(settings = {})")
+        apply_end = adapter.index("\n  const call =", apply_start)
+        apply = adapter[apply_start:apply_end]
+        self.assertIn("root.dataset.theme = theme", apply)
+        self.assertIn("root.dataset.effects = effects", apply)
+        self.assertIn("root.dataset.ryuReduceMotion = reduce ? '1' : '0'", apply)
+        self.assertIn("effects === 'high' ? 'High Glass' : 'Normal Smooth Blur'", apply)
+
+        load_start = adapter.index("async function loadSettings()")
+        load_end = adapter.index("\n  async function runDiagnostics()", load_start)
+        self.assertIn("applyVisualStabilityPreferences(settings)", adapter[load_start:load_end])
+
+        save_start = adapter.index("if ($('saveSettingsAdvanced'))")
+        save_end = adapter.index("document.addEventListener('input'", save_start)
+        self.assertIn("applyVisualStabilityPreferences(payload)", adapter[save_start:save_end])
+        self.assertIn('if key == "effects" and value not in {"high", "normal"}:', host)
+
     def test_voice_studio_refreshes_provider_availability_on_reentry_and_requires_qwen_base_for_design(self):
         voice = (ROOT / "app/ui/voice_page.py").read_text(encoding="utf-8")
         workflow = (ROOT / "app/ui/workflow.py").read_text(encoding="utf-8")
