@@ -183,7 +183,7 @@ class NativeShellSizingContracts(unittest.TestCase):
         start = host.index("def report_frontend_diagnostic(")
         end = host.index("def _settings_get(", start)
         diagnostic = host[start:end]
-        self.assertIn('if kind == "adapter-start-failed":', diagnostic)
+        self.assertIn('if kind in {"backend-bridge-failed", "adapter-start-failed"}:', diagnostic)
         self.assertIn('show_failure = getattr(window, "_show_web_failure", None)', diagnostic)
         self.assertIn("show_failure(", diagnostic)
         self.assertIn('if callable(show_failure) and not getattr(window, "_frontend_ready", False):', diagnostic)
