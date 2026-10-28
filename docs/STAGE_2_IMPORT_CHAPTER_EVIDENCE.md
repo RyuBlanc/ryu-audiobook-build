@@ -40,6 +40,10 @@ The repository workflow skipped public-release publishing because this is a work
 
 **Acceptance boundary:** automated CI/package validation passed; manual interactive acceptance of the exact installer on a target Windows PC remains open. Do not treat this checkpoint as proof of every UI interaction, import format, chapter edit path, or cancel timing on the user's machine.
 
+- Stage 2 editor-operation coverage now includes model-level rename/edit, delete-renumber, move payload retention, merge/split assignment offset integrity, invalid split safety, Unicode-safe Find/Replace offsets, and invalidation of stale number-keyed undo/redo history after structural edits.
+- Chapter re-detection now presents before/after chapter title and text-snippet summaries without saving. Apply requires the SHA-256 fingerprint from the current preview; missing or stale fingerprints are rejected. Added tests for preview-only behavior, no-mutation rejection paths, successful apply, and matching UI adapter flow.
+- Import edge-case tests now cover exact duplicate guidance for Browse imports, temporary-file cleanup for duplicate drag/drop imports, empty/unsupported files, cancellation after extraction/detection before publication, and recoverable failure status with original source preservation.
+
 ## Packaged-Windows acceptance checklist
 
 - [ ] Start a TXT import and cancel mid-extraction / chapter detection; verify the job becomes cancelled and no incomplete project is published.
