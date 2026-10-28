@@ -38,6 +38,40 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
             valid.write_text(expected, encoding="utf-8")
             self.assertEqual(load_premium_v2_adapter(valid), expected)
 
+
+    def test_required_startup_hydration_fails_closed_without_blocking_optional_panels(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        helper_start = adapter.index("const hydratePhase = async (phase, options = {})")
+        helper_end = adapter.index("await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters]", helper_start)
+        helper = adapter[helper_start:helper_end]
+        self.assertIn("const required = options.required === true", helper)
+        self.assertIn("if (required)", helper)
+        self.assertIn("Required Premium V2 startup hydration failed in", helper)
+        self.assertIn("await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters], {required:true})", adapter)
+        self.assertIn("await hydratePhase([refreshCharacters, refreshCharacterLibrary, refreshTerms])", adapter)
+        self.assertIn("await hydratePhase([refreshSounds, refreshSoundCues, refreshChapterBgm])", adapter)
+        self.assertIn("await hydratePhase([refreshJobs, refreshHistory, refreshModels])", adapter)
+        self.assertIn("window.__ryuPremiumAdapterFailure = String(", adapter)
+        self.assertLess(
+            adapter.index("await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters], {required:true})"),
+            adapter.index("window.__ryuPremiumAdapterReady = true;"),
+        )
+
+    def test_startup_watchdog_shows_the_required_hydration_failure_detail(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        check_start = host.index("def _check_frontend_ready(")
+        check_end = host.index("def _finish_frontend_health_check(", check_start)
+        check = host[check_start:check_end]
+        self.assertIn("error:String(window.__ryuPremiumAdapterFailure || '').slice(0,1000)", check)
+        finish_start = host.index("def _finish_frontend_health_check(")
+        finish = host[finish_start:]
+        self.assertIn('startup_error = (', finish)
+        self.assertIn('if startup_error:', finish)
+        self.assertIn("Your local project files have not been deleted. Details: ", finish)
+        self.assertIn("self._show_web_failure(", finish)
+
     def test_native_host_fails_before_javascript_injection_when_adapter_cannot_load(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         start = host.index("    def _install_bridge(self, ok: bool)")

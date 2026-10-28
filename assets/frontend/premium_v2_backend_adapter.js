@@ -1,6 +1,7 @@
 (() => {
   'use strict';
   window.__ryuPremiumAdapterReady = false;
+  window.__ryuPremiumAdapterFailure = '';
   const $ = id => document.getElementById(id);
 
   // Job polling runs every 1.5 seconds. Avoid writing the same values back to
@@ -6911,10 +6912,20 @@
     bindMiniPlayerNavigation();
     syncMiniPlayer();
 
-    const hydratePhase = async phase => {
+    const hydratePhase = async (phase, options = {}) => {
+      const required = options.required === true;
       for (const refresh of phase) {
         try { await refresh(); }
-        catch (error) { console.warn('[Ryu hydration]', error); }
+        catch (error) {
+          console.warn('[Ryu hydration]', error);
+          if (required) {
+            const step = String(refresh?.name || 'required data refresh');
+            throw new Error(
+              'Required Premium V2 startup hydration failed in ' + step + ': ' +
+              String(error?.message || error || 'Unknown startup error')
+            );
+          }
+        }
         // Give Chromium a paint/dispatch opportunity between backend reads.
         await new Promise(resolve => setTimeout(resolve, 0));
       }
@@ -6922,7 +6933,7 @@
     // Do not reveal the app with default font sizing and empty project widgets
     // while persisted Settings are still loading. PremiumV2Window keeps a native
     // loading surface visible until wire() finishes this essential phase.
-    await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters]);
+    await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters], {required:true});
     // Secondary panels remain asynchronous and are isolated: a slow optional
     // sound/model subsystem cannot hold the main interface hostage.
     void (async () => {
@@ -6951,11 +6962,14 @@
     window.__ryuEmitFrontendDiagnostic?.('frontend-ready', {message:'Premium V2 adapter initialized'});
   }).catch(error => {
     window.__ryuPremiumAdapterReady = false;
+    window.__ryuPremiumAdapterFailure = String(
+      error?.message || error || 'Adapter initialization failed'
+    ).slice(0, 1000);
     window.__ryuEmitFrontendDiagnostic?.('adapter-start-failed', {
-      message:String(error?.message || error || 'Adapter initialization failed'),
+      message:window.__ryuPremiumAdapterFailure,
       stack:String(error?.stack || '')
     });
-    message(error?.message || String(error), true);
+    message(window.__ryuPremiumAdapterFailure, true);
   });
   if (window.ryuBackend?.invoke) start(); else window.addEventListener('ryu-backend-ready', start, {once:true});
 })();

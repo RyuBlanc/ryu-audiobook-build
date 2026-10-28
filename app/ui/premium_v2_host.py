@@ -6043,7 +6043,8 @@ class PremiumV2Window(QMainWindow):
             return
         self.web.page().runJavaScript(
             "({adapter:window.__ryuPremiumAdapterReady===true, body:!!document.body && "
-            "document.body.innerText.trim().length>20})",
+            "document.body.innerText.trim().length>20, "
+            "error:String(window.__ryuPremiumAdapterFailure || '').slice(0,1000)})",
             lambda result: self._finish_frontend_health_check(generation, result),
         )
 
@@ -6052,6 +6053,17 @@ class PremiumV2Window(QMainWindow):
             return
         if isinstance(result, dict) and result.get("adapter") and result.get("body"):
             self._on_frontend_ready()
+            return
+        startup_error = (
+            str(result.get("error") or "").strip()[:1000]
+            if isinstance(result, dict) else ""
+        )
+        if startup_error:
+            log.error("Premium V2 required startup hydration failed: %s", startup_error)
+            self._show_web_failure(
+                "Ryu's Audiobook could not load its required startup data. "
+                "Your local project files have not been deleted. Details: " + startup_error
+            )
             return
         log.error(
             "Premium V2 frontend failed its initialization watchdog (adapter_ready=%s, body_present=%s, generation=%s)",

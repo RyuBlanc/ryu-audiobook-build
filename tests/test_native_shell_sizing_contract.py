@@ -68,6 +68,18 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertIn("if not source.strip():", helper)
         self.assertIn("except (OSError, UnicodeError) as exc:", helper)
 
+
+    def test_frontend_watchdog_reads_adapter_failure_details(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        check_start = host.index("def _check_frontend_ready(")
+        check_end = host.index("def _finish_frontend_health_check(", check_start)
+        check = host[check_start:check_end]
+        self.assertIn("error:String(window.__ryuPremiumAdapterFailure || '').slice(0,1000)", check)
+        finish = host[check_end:]
+        self.assertIn("startup_error = (", finish)
+        self.assertIn("if startup_error:", finish)
+        self.assertIn("Your local project files have not been deleted. Details: ", finish)
+
     def test_native_loading_surface_stays_visible_until_backend_frontend_ready(self):
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
