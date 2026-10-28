@@ -5961,10 +5961,10 @@
             const formatPreview = rows => {
               const visible = (Array.isArray(rows) ? rows : []).slice(0, 6).map(row =>
                 '• ' + Number(row.number || 0) + '. ' + String(row.title || 'Untitled chapter') +
-                '\\n  ' + String(row.text_preview || '(empty text)')
-              ).join('\\n');
+                '\n  ' + String(row.text_preview || '(empty text)')
+              ).join('\n');
               const omitted = Math.max(0, (Array.isArray(rows) ? rows.length : 0) - 6);
-              return visible + (omitted ? '\\n… plus ' + omitted + ' more chapter(s)' : '');
+              return visible + (omitted ? '\n… plus ' + omitted + ' more chapter(s)' : '');
             };
             const reviewMessage = [
               'CHAPTER RE-DETECTION PREVIEW — nothing has been saved yet.',
@@ -5982,7 +5982,7 @@
               '',
               'The backend will save only if all saved text maps exactly and this preview is still current.',
               'Press OK to apply this preview. Cancel leaves the project unchanged.'
-            ].join('\\n');
+            ].join('\n');
             if (!window.confirm(reviewMessage)) { message('Chapter re-detection cancelled; no changes were saved.'); return; }
             const result = await call('chapter.redetect', {
               selected_number:selectedBefore,
