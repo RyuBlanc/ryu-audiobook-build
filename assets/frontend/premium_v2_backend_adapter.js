@@ -5956,14 +5956,38 @@
             );
           }
           if (choice === 'redetect') {
-            const approved = window.confirm(
-              'Re-detect chapter boundaries from the currently saved and edited chapter text? ' +
-              'The app will preserve saved text exactly and will stop without saving if detection would change or remove any text. ' +
-              'Affected chapters return to Needs Review. Any chapter containing text previously excluded from generation remains excluded.'
-            );
-            if (!approved) return;
             const selectedBefore = Number(window.ryuPremiumSelectedChapter || number || 1);
-            const result = await call('chapter.redetect', {selected_number:selectedBefore});
+            const preview = await call('chapter.redetect', {selected_number:selectedBefore, preview:true});
+            const formatPreview = rows => {
+              const visible = (Array.isArray(rows) ? rows : []).slice(0, 6).map(row =>
+                '• ' + Number(row.number || 0) + '. ' + String(row.title || 'Untitled chapter') +
+                '\\n  ' + String(row.text_preview || '(empty text)')
+              ).join('\\n');
+              const omitted = Math.max(0, (Array.isArray(rows) ? rows.length : 0) - 6);
+              return visible + (omitted ? '\\n… plus ' + omitted + ' more chapter(s)' : '');
+            };
+            const reviewMessage = [
+              'CHAPTER RE-DETECTION PREVIEW — nothing has been saved yet.',
+              '',
+              'BEFORE (' + Number(preview.old_chapter_count || (preview.before || []).length) + ' chapters)',
+              formatPreview(preview.before),
+              '',
+              'AFTER (' + Number(preview.new_chapter_count || (preview.after || []).length) + ' chapters)',
+              formatPreview(preview.after),
+              '',
+              'Dialogue assignments: ' + Number(preview.preserved_dialogue_assignment_count || 0) + ' preserved; ' +
+                Number(preview.dropped_dialogue_assignment_count || 0) + ' may be removed if their text spans no longer map safely.',
+              Number(preview.review_reset_count || 0) + ' chapter(s) will need review. ' +
+                Number(preview.skipped_chapter_count || 0) + ' chapter(s) will remain excluded from generation.',
+              '',
+              'The backend will save only if all saved text maps exactly and this preview is still current.',
+              'Press OK to apply this preview. Cancel leaves the project unchanged.'
+            ].join('\\n');
+            if (!window.confirm(reviewMessage)) { message('Chapter re-detection cancelled; no changes were saved.'); return; }
+            const result = await call('chapter.redetect', {
+              selected_number:selectedBefore,
+              expected_source_fingerprint:preview.source_fingerprint
+            });
             clearChapterHistory();
             const loaded = await call('chapter.list');
             chapters = Array.isArray(loaded) ? loaded : [];
