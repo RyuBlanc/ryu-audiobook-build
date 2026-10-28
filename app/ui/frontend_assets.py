@@ -5,6 +5,7 @@ can be regression-tested without launching a WebEngine window.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -31,7 +32,6 @@ def load_premium_v2_adapter(path: Path) -> str:
     return source
 
 
-
 def premium_v2_logo_candidates(frontend_file: Path) -> tuple[Path, ...]:
     """Return packaged logo paths in the application's existing icon priority order."""
     assets_directory = Path(frontend_file).parent.parent
@@ -44,3 +44,41 @@ def premium_v2_logo_candidates(frontend_file: Path) -> tuple[Path, ...]:
             "ryu_audiobook_logo_master.png",
         )
     )
+
+
+def prepare_native_host_html(source: str) -> str:
+    """Keep the approved HTML loader visible until the native bridge is ready.
+
+    Browser/prototype runs retain the existing timed loader dismissal. The
+    packaged desktop host sets a marker before the HTML executes and guards the
+    timer, letting the original HTML loader remain visible while Qt WebChannel
+    connects and required local workspace data hydrates.
+    """
+    if not isinstance(source, str) or not source.strip():
+        raise FrontendAssetError("Premium V2 HTML is empty or unreadable.")
+
+    source, timer_count = re.subn(
+        r"setTimeout\s*\(\s*finish\s*,\s*1700\s*\)",
+        "if (!window.__ryuNativeHost) setTimeout(finish,1700)",
+        source,
+        count=1,
+    )
+    if timer_count != 1:
+        raise FrontendAssetError(
+            "The approved HTML loader auto-dismiss contract was not found; "
+            "the native host will not silently substitute a different loading UI."
+        )
+
+    source, head_count = re.subn(
+        r"(<head\b[^>]*>)",
+        r"\1\n<script>window.__ryuNativeHost = true;</script>",
+        source,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    if head_count != 1:
+        raise FrontendAssetError(
+            "The Premium V2 HTML does not contain a head element for native startup setup."
+        )
+
+    return source
