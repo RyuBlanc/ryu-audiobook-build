@@ -1160,12 +1160,60 @@ class PremiumV2Bridge(QObject):
                 for c in project.chapters]
 
     def _chapter_redetect(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Re-detect boundaries from saved, edited chapter text without silent text loss."""
+        """Preview or atomically apply safe re-detection of the saved, edited chapter text.
+
+        Applying changes requires the fingerprint from a prior preview. This ensures
+        that a prompt shown to the user cannot authorize a stale snapshot if the project
+        changes between the preview and apply calls.
+        """
         from app.chapters.redetect import redetect_chapters_preserving_edits
 
         project = self._active_project()
         previous_chapters = project.chapters
         updated_chapters, result = redetect_chapters_preserving_edits(previous_chapters)
+
+        def snapshot(chapter: Any) -> dict[str, Any]:
+            return {
+                "number": int(getattr(chapter, "number", 0) or 0),
+                "title": str(getattr(chapter, "title", "") or ""),
+                "text": str(getattr(chapter, "text", "") or ""),
+                "dialogue_assignments": list(getattr(chapter, "dialogue_assignments", []) or []),
+                "review_status": str(getattr(chapter, "review_status", "needs_review") or "needs_review"),
+                "skip_for_generation": bool(getattr(chapter, "skip_for_generation", False)),
+            }
+
+        before = [snapshot(chapter) for chapter in previous_chapters]
+        fingerprint = hashlib.sha256(
+            json.dumps(before, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str)
+            .encode("utf-8")
+        ).hexdigest()
+
+        def preview_row(row: dict[str, Any]) -> dict[str, Any]:
+            source_text = str(row.get("text") or "")
+            compact_text = " ".join(source_text.split())
+            return {
+                "number": row["number"],
+                "title": row["title"],
+                "text_preview": compact_text[:180] + ("…" if len(compact_text) > 180 else ""),
+                "character_count": len(source_text),
+            }
+
+        if payload.get("preview") is True:
+            return {
+                **result,
+                "saved": False,
+                "preview_only": True,
+                "source_fingerprint": fingerprint,
+                "before": [preview_row(row) for row in before],
+                "after": [preview_row(snapshot(chapter)) for chapter in updated_chapters],
+            }
+
+        expected_fingerprint = str(payload.get("expected_source_fingerprint") or "").strip()
+        if not expected_fingerprint:
+            raise ValueError("Review the before/after preview before applying re-detection. No changes were saved.")
+        if expected_fingerprint != fingerprint:
+            raise ValueError("Saved chapter data changed after the preview. No changes were saved; preview again before applying.")
+
         try:
             project.chapters = updated_chapters
             project.save()
@@ -1179,7 +1227,6 @@ class PremiumV2Bridge(QObject):
             selected_number = 1
         self._mark_project_edited(project, min(max(1, selected_number), len(project.chapters)))
         return {**result, "saved": True, "chapter_count": len(project.chapters)}
-
     def _chapter_update(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
         try:
