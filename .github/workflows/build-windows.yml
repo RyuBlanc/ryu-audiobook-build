@@ -493,6 +493,7 @@ jobs:
           Remove-Item -Force $marker -ErrorAction SilentlyContinue
           Write-Host 'Frozen EXE offline synthesis self-test PASSED.'
 
+          $env:RYU_UI_MODE = 'premium-v2'
           $proc = Start-Process -FilePath $exe -PassThru
           try {
             Start-Sleep -Seconds 12
@@ -514,6 +515,34 @@ jobs:
           # EXE or under _internal. Accept either layout and verify the actual
           # bundled assets that the frozen self-test already exercises.
           $roots = @($exeDir, (Join-Path $exeDir '_internal')) | Where-Object { Test-Path $_ }
+          # Premium V2 is the required installed UI. Verify both launch assets
+          # are present in the frozen package and byte-for-byte equal to source.
+          $frontendSource = Join-Path (Get-Location) 'assets\frontend\ryu_audiobook_premium_v2.html'
+          $adapterSource = Join-Path (Get-Location) 'assets\frontend\premium_v2_backend_adapter.js'
+          foreach ($source in @($frontendSource, $adapterSource)) {
+            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+              throw "Required Premium V2 source asset is missing: $source"
+            }
+          }
+          $frontendCandidates = @(
+            (Join-Path $exeDir 'assets\frontend\ryu_audiobook_premium_v2.html'),
+            (Join-Path $exeDir '_internal\assets\frontend\ryu_audiobook_premium_v2.html')
+          )
+          $adapterCandidates = @(
+            (Join-Path $exeDir 'assets\frontend\premium_v2_backend_adapter.js'),
+            (Join-Path $exeDir '_internal\assets\frontend\premium_v2_backend_adapter.js')
+          )
+          $packagedFrontend = $frontendCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+          $packagedAdapter = $adapterCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+          if (-not $packagedFrontend) { throw 'Frozen package is missing the Premium V2 Dragon Studio HTML frontend; legacy UI fallback is prohibited.' }
+          if (-not $packagedAdapter) { throw 'Frozen package is missing the Premium V2 backend adapter; legacy UI fallback is prohibited.' }
+          foreach ($pair in @(@{Source=$frontendSource;Packaged=$packagedFrontend},@{Source=$adapterSource;Packaged=$packagedAdapter})) {
+            $sourceHash = (Get-FileHash -LiteralPath $pair.Source -Algorithm SHA256).Hash
+            $packageHash = (Get-FileHash -LiteralPath $pair.Packaged -Algorithm SHA256).Hash
+            if ($sourceHash -ne $packageHash) { throw "Packaged Premium V2 asset differs from source: $($pair.Packaged)" }
+            Write-Host "Premium V2 asset verified: $($pair.Packaged) SHA256=$packageHash"
+          }
+
           $piperModels = @()
           $kokoroVoices = $null
           foreach ($root in $roots) {

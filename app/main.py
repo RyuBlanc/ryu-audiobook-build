@@ -6,7 +6,7 @@ import sys
 
 from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QCursor, QIcon, QPixmap
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.core.paths import ensure_roots
 from app.version import APP_NAME, full_version
@@ -736,6 +736,35 @@ QPushButton:disabled, QToolButton:disabled {
 }
 """
 
+def create_main_window(ui_mode: str | None = None):
+    """Create the requested UI and fail closed if Premium V2 is not packaged.
+
+    Premium V2 is the normal installed UI. The older native Qt shell remains
+    available only through the explicit RYU_UI_MODE=native compatibility option.
+    """
+    requested_mode = os.environ.get("RYU_UI_MODE", "premium-v2") if ui_mode is None else ui_mode
+    mode = str(requested_mode or "").strip().casefold()
+
+    if mode == "native":
+        window = ProjectWorkflow()
+        window.setWindowTitle(f"{APP_NAME} • {full_version()}")
+        return window
+
+    if mode not in {"premium-v2", "html", "web"}:
+        raise ValueError(
+            f"Unsupported RYU_UI_MODE={mode!r}. Use 'premium-v2' or the explicit 'native' compatibility option."
+        )
+
+    from app.ui.premium_v2_host import PremiumV2Window, frontend_path
+    packaged_frontend = frontend_path()
+    if not packaged_frontend.is_file():
+        raise FileNotFoundError(
+            f"Required Premium V2 Dragon Studio frontend is missing: {packaged_frontend}. "
+            "The application will not fall back to the older native interface."
+        )
+    return PremiumV2Window()
+
+
 def main() -> int:
     ensure_roots()
     app = QApplication(sys.argv)
@@ -770,20 +799,22 @@ def main() -> int:
                 app_icon = candidate_icon
                 break
     app.setWindowIcon(app_icon)
-    # Premium V2 is the approved Dragon Studio interface and must be the
-    # installed default. Keep the native Qt shell available as a compatibility
-    # option by explicitly setting RYU_UI_MODE=native.
+    # Premium V2 is the approved Dragon Studio interface and must remain the
+    # installed default. The native Qt shell is an explicit compatibility mode
+    # only; never silently switch to it if the packaged Premium V2 asset is
+    # missing, because that masks a broken/incomplete installation.
     ui_mode = os.environ.get("RYU_UI_MODE", "premium-v2").strip().casefold()
-    if ui_mode in {"premium-v2", "html", "web"}:
-        from app.ui.premium_v2_host import PremiumV2Window, frontend_path
-        if frontend_path().is_file():
-            window = PremiumV2Window()
-        else:
-            window = ProjectWorkflow()
-            window.setWindowTitle(f"{APP_NAME} • {full_version()}")
-    else:
-        window = ProjectWorkflow()
-        window.setWindowTitle(f"{APP_NAME} • {full_version()}")
+    try:
+        window = create_main_window(ui_mode)
+    except Exception as exc:
+        QMessageBox.critical(
+            None,
+            f"{APP_NAME} — Startup Error",
+            "The requested application interface could not be started. "
+            "Ryu's Audiobook has not switched to a different or older interface.\n\n"
+            f"{exc}\n\nRepair or reinstall the application, then retry.",
+        )
+        return 2
     window.setWindowIcon(app_icon)
     # Apply persisted geometry before the first display. Showing the default
     # size and resizing immediately afterward caused a visible startup jump on
