@@ -1201,6 +1201,15 @@ class NativeCharacterDialoguePanel(QWidget):
         if not name or not series:
             QMessageBox.warning(self, "Character details required", "Choose a character and series before assigning dialogue.")
             return
+        # Validate the chosen profile before mutating/saving chapter dialogue.
+        # A missing profile must not leave behind an assignment with mismatched
+        # character metadata and audio settings.
+        if profile_name and not any(profile.name == profile_name for profile in load_profiles()):
+            QMessageBox.warning(
+                self, "Voice profile unavailable",
+                "This voice profile is no longer saved. Nothing was assigned; choose a saved profile and retry.",
+            )
+            return
 
         existing = list(getattr(chapter, "dialogue_assignments", []) or [])
         conflicting = [
@@ -1256,19 +1265,6 @@ class NativeCharacterDialoguePanel(QWidget):
         else:
             row["series"] = series
             row["aliases"] = aliases or list(row.get("aliases") or [])
-        if profile_name and not any(profile.name == profile_name for profile in load_profiles()):
-            QMessageBox.warning(
-                self, "Voice profile unavailable",
-                "This voice profile is no longer saved. The dialogue assignment was not changed; select a saved profile and retry.",
-            )
-            # The dialogue was persisted above. Roll it back too so the UI does
-            # not report a speaker/profile combination that was not accepted.
-            chapter.dialogue_assignments = existing
-            try:
-                project.save()
-            except Exception:
-                pass
-            return
         # A blank name is the dialog's explicit "Unassigned" choice. Clear the
         # character's prior voice and persist that change to both book and
         # series registry instead of leaving a stale voice active.
