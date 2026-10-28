@@ -1,14 +1,13 @@
 name: Actions Storage Cleanup
 
 on:
-  push:
-    branches: [main]
-  schedule:
-    - cron: "17 3 * * *"
+  workflow_run:
+    workflows: ["Build Windows App"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
-  actions: read
+  actions: write
   contents: read
 
 concurrency:
@@ -17,11 +16,99 @@ concurrency:
 
 jobs:
   cleanup:
+    name: Prune superseded Windows package artifacts
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Preserve all workflow-run and artifact evidence
-        shell: bash
-        run: |
-          echo "Automatic workflow-run/artifact deletion is disabled."
-          echo "Per-substage regression tests, failed-run diagnostics, checkpoint packages and SHA-256 manifests must remain available until the version 1.2.0 release is manually reviewed."
-          echo "Re-enable retention only through a separately reviewed change after release acceptance."
+      - name: Delete old packages only after replacement artifacts exist
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            if (!run && context.eventName !== 'workflow_dispatch') {
+              core.setFailed('No completed Build Windows App run was supplied.');
+              return;
+            }
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const protectedRunNumbers = new Set([1441]);
+            let currentRunNumber = run?.run_number ?? null;
+            let currentRunId = run?.id ?? null;
+
+            if (context.eventName === 'workflow_dispatch') {
+              core.info('Manual dispatch is safety-gated: no package will be deleted without a verified latest successful checkpoint.');
+              const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+                owner, repo, workflow_id: 'build-windows.yml', status: 'success', per_page: 100
+              });
+              const candidates = runs.filter(r => r.conclusion === 'success');
+              let found = null;
+              for (const candidate of candidates) {
+                const candidateArtifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+                  owner, repo, run_id: candidate.id, per_page: 100
+                });
+                const names = new Set(candidateArtifacts.filter(a => !a.expired).map(a => a.name));
+                const legacy = names.has(`Ryu-Audiobook-Windows-${candidate.run_number}`);
+                const split = names.has(`Ryu-Audiobook-Installer-${candidate.run_number}`)
+                  && names.has(`Ryu-Audiobook-Portable-${candidate.run_number}`)
+                  && names.has(`Ryu-Audiobook-Release-SHA256-${candidate.run_number}`);
+                if (legacy || split) { found = candidate; break; }
+              }
+              if (!found) {
+                core.info('No successful checkpoint with complete package artifacts was found; nothing deleted.');
+                return;
+              }
+              currentRunNumber = found.run_number;
+              currentRunId = found.id;
+              core.info(`Manual cleanup is anchored to successful Build Windows App #${currentRunNumber}.`);
+            }
+
+            const currentArtifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner, repo, run_id: currentRunId, per_page: 100
+            });
+            const currentNames = new Set(currentArtifacts.filter(a => !a.expired).map(a => a.name));
+            const hasLegacyPackage = currentNames.has(`Ryu-Audiobook-Windows-${currentRunNumber}`);
+            const hasCompleteSplitPackage =
+              currentNames.has(`Ryu-Audiobook-Installer-${currentRunNumber}`)
+              && currentNames.has(`Ryu-Audiobook-Portable-${currentRunNumber}`)
+              && currentNames.has(`Ryu-Audiobook-Release-SHA256-${currentRunNumber}`);
+
+            if (!hasLegacyPackage && !hasCompleteSplitPackage) {
+              core.info(`Build #${currentRunNumber} has no complete package artifact set; preserving all older artifacts.`);
+              return;
+            }
+
+            core.info(`Verified replacement package artifacts for Build #${currentRunNumber}; locating superseded package files.`);
+            const allArtifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
+              owner, repo, per_page: 100
+            });
+            const packageName = /^Ryu-Audiobook-(?:Windows|Installer|Portable|Release-SHA256)-(\d+)$/;
+            let deleted = 0;
+            let protectedCount = 0;
+            let keptCurrent = 0;
+
+            for (const artifact of allArtifacts) {
+              const match = artifact.name.match(packageName);
+              if (!match || artifact.expired) continue;
+              const number = Number(match[1]);
+
+              if (artifact.workflow_run?.id === currentRunId || number === currentRunNumber) {
+                keptCurrent++;
+                continue;
+              }
+              if (protectedRunNumbers.has(number)) {
+                protectedCount++;
+                core.info(`Protected known rollback package artifact: ${artifact.name}`);
+                continue;
+              }
+              if (number >= currentRunNumber) continue;
+
+              await github.rest.actions.deleteArtifact({
+                owner, repo, artifact_id: artifact.id
+              });
+              deleted++;
+              core.info(`Deleted superseded package artifact: ${artifact.name}`);
+            }
+
+            core.info(`Cleanup complete. Deleted ${deleted} old installer/portable/package-manifest artifacts; kept ${keptCurrent} current artifacts and protected ${protectedCount} Build #1441 rollback artifact(s).`);
+            core.info('All Ryu-Audiobook-Test-Evidence-* artifacts and workflow-run logs are intentionally retained.');
