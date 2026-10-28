@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch, sentinel
+from unittest.mock import Mock, patch, sentinel
 
 import app.main as application
 
@@ -44,10 +44,12 @@ class PremiumV2StartupTests(unittest.TestCase):
             native_window.assert_not_called()
 
     def test_native_compatibility_shell_requires_explicit_mode(self):
-        with patch("app.main.ProjectWorkflow", return_value=sentinel.native_window) as native_window:
+        native_instance = Mock()
+        with patch("app.main.ProjectWorkflow", return_value=native_instance) as native_window:
             selected = application.create_main_window("native")
-        self.assertIs(selected, sentinel.native_window)
+        self.assertIs(selected, native_instance)
         native_window.assert_called_once_with()
+        native_instance.setWindowTitle.assert_called_once()
 
     def test_unknown_mode_is_rejected_instead_of_defaulting_to_native_ui(self):
         with patch("app.main.ProjectWorkflow") as native_window:

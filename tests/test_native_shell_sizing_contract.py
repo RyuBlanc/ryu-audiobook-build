@@ -22,12 +22,19 @@ class NativeShellSizingContracts(unittest.TestCase):
 
     def test_premium_v2_is_default_and_native_shell_is_explicit_compatibility_mode(self):
         main = (ROOT / "app/main.py").read_text(encoding="utf-8")
-        before_main = main[:main.index("def main()")]
-        self.assertNotIn("from app.ui.premium_v2_host import", before_main)
-        self.assertIn('os.environ.get("RYU_UI_MODE", "premium-v2")', main)
-        self.assertIn('if ui_mode in {"premium-v2", "html", "web"}:', main)
-        self.assertIn("window = PremiumV2Window()", main)
-        self.assertIn("window = ProjectWorkflow()", main)
+        helper_start = main.index("def create_main_window(")
+        helper_end = main.index("def main()", helper_start)
+        startup = main[helper_start:helper_end]
+        self.assertIn('os.environ.get("RYU_UI_MODE", "premium-v2")', startup)
+        self.assertIn('if mode == "native":', startup)
+        self.assertIn('if mode not in {"premium-v2", "html", "web"}:', startup)
+        self.assertIn("return PremiumV2Window()", startup)
+        self.assertIn("window = ProjectWorkflow()", startup)  # explicit native compatibility only
+        self.assertIn("Required Premium V2 Dragon Studio frontend is missing", startup)
+        self.assertIn("The application will not fall back to the older native interface.", startup)
+        self.assertNotIn("if frontend_path().is_file():", startup)
+        main_body = main[main.index("def main()"):]
+        self.assertIn("window = create_main_window(ui_mode)", main_body)
 
     def test_native_window_applies_saved_size_before_first_display(self):
         main = (ROOT / "app/main.py").read_text(encoding="utf-8")
