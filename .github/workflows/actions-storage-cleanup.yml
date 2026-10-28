@@ -39,7 +39,7 @@ jobs:
             if (context.eventName === 'workflow_dispatch') {
               core.info('Manual dispatch is safety-gated: no package will be deleted without a verified latest successful checkpoint.');
               const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
-                owner, repo, workflow_id: 'build-windows.yml', status: 'success', per_page: 100
+                owner, repo, workflow_id: 'build-windows.yml', status: 'completed', per_page: 100
               });
               const candidates = runs.filter(r => r.conclusion === 'success');
               let found = null;
