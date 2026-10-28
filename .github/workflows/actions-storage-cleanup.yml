@@ -17,7 +17,7 @@ concurrency:
 jobs:
   cleanup:
     name: Prune superseded Windows package artifacts
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_commit.message, '[artifact-checkpoint]')) }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Delete old packages only after replacement artifacts exist
@@ -41,7 +41,7 @@ jobs:
               const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
                 owner, repo, workflow_id: 'build-windows.yml', status: 'completed', per_page: 100
               });
-              const candidates = runs.filter(r => r.conclusion === 'success' && String(r.head_commit?.message || '').startsWith('[artifact-checkpoint]'));
+              const candidates = runs.filter(r => r.conclusion === 'success');
               let found = null;
               for (const candidate of candidates) {
                 const candidateArtifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
