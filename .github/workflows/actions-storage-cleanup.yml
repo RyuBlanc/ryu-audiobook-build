@@ -82,7 +82,13 @@ jobs:
             const allArtifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
               owner, repo, per_page: 100
             });
-            const packageName = /^Ryu-Audiobook-(?:Windows|Installer|Portable|Release-SHA256)-(\d+)$/;
+            const packageName = /^Ryu-Audiobook-(Windows|Installer|Portable|Release-SHA256)-(\\d+)$/;
+            // A split checkpoint replaces every package category. The legacy main
+            // workflow uploads only the installer, so keep older portable packages
+            // and manifests unless that category also has a replacement artifact.
+            const deletableTypes = hasCompleteSplitPackage
+              ? new Set(["Windows", "Installer", "Portable", "Release-SHA256"])
+              : new Set(["Windows", "Installer"]);
             let deleted = 0;
             let protectedCount = 0;
             let keptCurrent = 0;
@@ -90,7 +96,9 @@ jobs:
             for (const artifact of allArtifacts) {
               const match = artifact.name.match(packageName);
               if (!match || artifact.expired) continue;
-              const number = Number(match[1]);
+              const category = match[1];
+              const number = Number(match[2]);
+              if (!deletableTypes.has(category)) continue;
 
               if (artifact.workflow_run?.id === currentRunId || number === currentRunNumber) {
                 keptCurrent++;
@@ -110,5 +118,5 @@ jobs:
               core.info(`Deleted superseded package artifact: ${artifact.name}`);
             }
 
-            core.info(`Cleanup complete. Deleted ${deleted} old installer/portable/package-manifest artifacts; kept ${keptCurrent} current artifacts and protected ${protectedCount} Build #1441 rollback artifact(s).`);
+            core.info(`Cleanup complete. Deleted ${deleted} superseded package artifact(s) in replaced categories; kept ${keptCurrent} current artifacts and protected ${protectedCount} rollback artifact(s).`);
             core.info('All Ryu-Audiobook-Test-Evidence-* artifacts and workflow-run logs are intentionally retained.');
