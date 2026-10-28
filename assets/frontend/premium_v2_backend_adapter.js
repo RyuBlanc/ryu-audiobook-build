@@ -246,9 +246,17 @@
   };
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const message = (text, error = false) => {
-    const node = $('importStatus'); if (node) node.textContent = text;
-    const validation = $('validation'); if (validation && error) validation.textContent = text;
-    const toasts = $('toasts'); if (toasts) { toasts.textContent = text; toasts.classList.add('show'); }
+    // A global notification must not overwrite the Import Studio status or a
+    // hidden Voice Studio validation panel. Those panels are owned by their
+    // respective workflows; errors may additionally be reflected on the page
+    // the user is currently viewing.
+    const activeValidation = document.querySelector('.page.active #validation');
+    if (activeValidation && error) setTextIfChanged(activeValidation, text);
+    const toasts = $('toasts');
+    if (toasts) {
+      setTextIfChanged(toasts, text);
+      toasts.classList.add('show');
+    }
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };

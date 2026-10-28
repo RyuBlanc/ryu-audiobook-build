@@ -79,6 +79,23 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertNotIn("if ($('importBar')) $('importBar').style.width =", monitor)
         self.assertNotIn("if ($('previewProgress')) $('previewProgress').style.width =", monitor)
 
+
+    def test_global_notifications_do_not_overwrite_import_or_hidden_voice_status(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("const message = (text, error = false) =>")
+        end = adapter.index("const act =", start)
+        helper = adapter[start:end]
+        self.assertNotIn("const node = $('importStatus')", helper)
+        self.assertNotIn("const validation = $('validation')", helper)
+        self.assertIn("document.querySelector('.page.active #validation')", helper)
+        self.assertIn("setTextIfChanged(activeValidation, text)", helper)
+        self.assertIn("setTextIfChanged(toasts, text)", helper)
+        # Import and preview workflows own their detailed status elements.
+        self.assertIn("setTextIfChanged($('importStatus'), job.message || job.stage || job.state)", adapter)
+        self.assertIn("setTextIfChanged($('validation'), 'Synthesizing preview", adapter)
+
     def test_premium_effects_bound_blur_and_disable_whole_view_entry_animations(self):
         html = (
             ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"
