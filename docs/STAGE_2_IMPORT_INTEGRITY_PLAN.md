@@ -36,6 +36,13 @@
 - Follow-up commits add deterministic editor-operation tests for text/title and dialogue-assignment integrity, delete renumbering, reorder metadata, merge/split offsets, invalid split safety, history invalidation, Unicode Find/Replace offsets, and redetection preview/stale-fingerprint behavior. The latest complete checkpoint run must pass before these tests are counted as verified.
 - Structural history invalidation is a safety guard, not full cross-structure undo. Undo/redo remains scoped to the active chapter's text-edit history.
 
+## New automated coverage added for the current checkpoint
+
+- Chapter history is invalidated after structural chapter mutations to prevent stale per-number undo snapshots from being applied to a different chapter.
+- Case-insensitive chapter Find/Replace uses match offsets in the original string, avoiding Unicode lowercasing length changes.
+- Re-detection requires a before/after review and an unchanged-source fingerprint; preview is non-mutating, and missing/stale fingerprints are rejected.
+- Import edge tests cover duplicate guidance (browse and dropped file), staging cleanup, unsupported/empty file rejection, cancellation before publishing, and recoverable extraction failure without source loss.
+
 ## Remaining Stage 2 gates
 
 - [ ] Latest checkpoint CI run passes on the current branch head, including all regression tests and (for the artifact-checkpoint commit) Windows packaging.
