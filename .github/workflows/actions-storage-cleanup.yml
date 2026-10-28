@@ -5,12 +5,13 @@ on:
     branches:
       - main
       - fix/premium-v2-live-voice-chapter-workflow
+      - integration/stage3-feature-preservation
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
 
 permissions:
-  actions: write
+  actions: read
   contents: read
 
 concurrency:
@@ -18,19 +19,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  cleanup:
+  preserve:
+    name: Preserve test and checkpoint evidence
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout cleanup script
-        uses: actions/checkout@v4
-      - name: Prune stale workflow runs and attached storage
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          CURRENT_RUN_ID: ${{ github.run_id }}
-          CURRENT_WORKFLOW_NAME: ${{ github.workflow }}
-          PRUNE_CURRENT_WORKFLOW_TO_CURRENT: 'false'
-        shell: pwsh
+      - name: Confirm automatic cleanup is disabled
+        shell: bash
         run: |
-          $ErrorActionPreference = 'Stop'
-          ./.github/scripts/cleanup_actions_storage.ps1
+          echo "Automatic workflow-run and artifact deletion is disabled."
+          echo "Per-substage test runs, failed diagnostics, checkpoint installers, portable builds and SHA-256 manifests must remain available."
+          echo "A retention policy may only be reintroduced after Version 1.2.0 acceptance and explicit user approval."

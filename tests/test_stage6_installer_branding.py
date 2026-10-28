@@ -164,6 +164,21 @@ class InstallerBrandingContractTests(unittest.TestCase):
         self.assertIn("$env:PYTHONPATH = (Get-Location).Path", workflow)
         self.assertIn("- name: Validate installer JavaScript syntax", workflow)
         self.assertIn("--check 'installer\\ryu_installer.js'", workflow)
+    def test_installer_uses_lzma2_without_removing_application_payload(self):
+        self.assertRegex(self.script, r"(?m)^Compression=lzma2/ultra$")
+        source_lines = [line for line in self.script.splitlines() if line.strip().startswith("Source:")]
+        self.assertEqual(len(source_lines), 1)
+        self.assertIn("dist", source_lines[0])
+        self.assertIn("Flags: ignoreversion recursesubdirs createallsubdirs", source_lines[0])
+
+    def test_ci_preserves_build_evidence_and_does_not_prune_runs(self):
+        workflow = (ROOT / ".github" / "workflows" / "build-windows.yml").read_text(encoding="utf-8")
+        self.assertIn("integration/stage3-feature-preservation", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn("retention-days: 90", workflow)
+        self.assertNotIn("cleanup_actions_storage.ps1", workflow)
+        self.assertNotIn("gh api --method DELETE", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

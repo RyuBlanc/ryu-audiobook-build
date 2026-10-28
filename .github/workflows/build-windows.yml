@@ -20,6 +20,7 @@ on:
       - fix/installer-live-controls-space-and-logo
       - fix/dashboard-live-data-project-covers-player
       - fix/html-installer-transparent-logo
+      - integration/stage3-feature-preservation
   workflow_dispatch:
     inputs:
       build_artifacts:
@@ -83,7 +84,7 @@ jobs:
             test-evidence/stage1-test-results.txt
             test-evidence/stage1-acceptance-matrix.md
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 90
 
   build:
     if: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.event.head_commit.message, '[artifact-checkpoint]'))) || (github.event_name == 'workflow_dispatch' && inputs.build_artifacts == true) }}
@@ -755,7 +756,7 @@ jobs:
           path: installer/installer-output/Ryu's Audiobook Setup.exe
           if-no-files-found: error
           compression-level: 0
-          retention-days: 30
+          retention-days: 90
 
       - name: Upload release SHA-256 manifest
         uses: actions/upload-artifact@v4
@@ -763,7 +764,7 @@ jobs:
           name: Ryu-Audiobook-Release-SHA256-${{ github.run_number }}
           path: release-sha256-manifest.json
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
 
       - name: Upload portable Windows application
         uses: actions/upload-artifact@v4
@@ -772,7 +773,7 @@ jobs:
           path: dist/Ryu's Audiobook/
           if-no-files-found: error
           compression-level: 0
-          retention-days: 30
+          retention-days: 90
 
       - name: Publish verified installer release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -784,45 +785,24 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($semanticVersion)) { throw "Application version was not exported by the validated build step for release tagging." }
           $tag = "v$semanticVersion-build-${{ github.run_number }}"
           gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, the Obsidian/Ember dragon-tech interface, global Reduce Motion preference, a local-first audio catalogue with 26 real starter BGM tracks across calm, fantasy, adventure, comedy, action, sci-fi, emotional, mystery, horror and slice-of-life moods, plus six real book opening/page-turn/closing sound cues. Add licensed tracks through Generate > Real BGM catalogue / Real audiobook cue files. Includes Qwen VoiceDesign preset isolation, audiobook AI smoke validation, Chatterbox runtime validation, frozen EXE checks and installer verification. Starter-track source and license notes are included beside the local audio library." --target $env:GITHUB_SHA
-      - name: Clean old Actions runs and storage after verified Windows build
-        if: success()
-        continue-on-error: true
+      - name: Preserve CI evidence and checkpoint artifacts
+        if: always()
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          CURRENT_RUN_ID: ${{ github.run_id }}
-          CURRENT_WORKFLOW_NAME: ${{ github.workflow }}
-          PRUNE_CURRENT_WORKFLOW_TO_CURRENT: 'true'
         run: |
-          $ErrorActionPreference = 'Stop'
-          ./.github/scripts/cleanup_actions_storage.ps1
+          Write-Host 'Retention guard active: no previous test run, diagnostic log, checkpoint artifact or manifest is deleted by this workflow.'
+          Write-Host 'Keep per-substage regression evidence until Version 1.2.0 has passed manual release review.'
 
-  # Run storage cleanup even when tests/package validation fails, so old
-  # failed/cancelled runs do not accumulate indefinitely. The cleanup script
-  # preserves the latest successful run whenever this run did not pass.
-  cleanup:
-    name: Clean stale Actions runs and storage
-    continue-on-error: true
+
+  # Preserve all run/test evidence. Pruning stays disabled until the frozen
+  # Version 1.2.0 scope is accepted and the user authorizes a retention policy.
+  evidence_retention:
+    name: Preserve regression and checkpoint evidence
     if: always()
     needs: [tests, build]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      actions: write
-      contents: read
     steps:
-      - name: Checkout cleanup script
-        uses: actions/checkout@v4
-      - name: Prune stale completed runs and attached storage
-        continue-on-error: true
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          CURRENT_RUN_ID: ${{ github.run_id }}
-          CURRENT_WORKFLOW_NAME: ${{ github.workflow }}
-          PRUNE_CURRENT_WORKFLOW_TO_CURRENT: ${{ needs.build.result == 'success' }}
+      - name: Confirm no automatic pruning
+        shell: bash
         run: |
-          $ErrorActionPreference = 'Stop'
-          ./.github/scripts/cleanup_actions_storage.ps1
+          echo "Automatic Actions run/artifact deletion is disabled."
+          echo "Keep focused tests, full-suite logs, failed-run diagnostics, installers, portable builds and SHA-256 manifests."

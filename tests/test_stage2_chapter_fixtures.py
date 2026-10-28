@@ -100,6 +100,33 @@ class ChapterDetectionFixtureTests(unittest.TestCase):
             self.assertTrue(loaded.chapters[0].skip_for_generation)
             self.assertEqual(loaded.chapters[0].dialogue_assignments, chapter.dialogue_assignments)
 
+    def test_part_only_roman_headings_are_detected_without_leaking_next_body(self):
+        source = (
+            "Part I: Arrival\\n"
+            "The first part remains intact.\\n\\n"
+            "Part II: Departure\\n"
+            "The second part remains intact."
+        )
+        chapters = detect_chapters(source)
+        self.assertEqual([chapter.title for chapter in chapters], [
+            "Part I: Arrival", "Part II: Departure"
+        ])
+        self.assertIn("The first part remains intact.", chapters[0].text)
+        self.assertNotIn("Part II: Departure", chapters[0].text)
+        self.assertIn("The second part remains intact.", chapters[1].text)
+
+    def test_embedded_slash_titles_and_urls_are_not_structural_headings(self):
+        source = (
+            "The speaker discussed BLACK DOG/BIRTH before turning away.\\n"
+            "Read https://example.com/BLACK/DOG for additional context.\\n"
+            "The paragraph continues as ordinary narrative."
+        )
+        chapters = detect_chapters(source)
+        self.assertEqual(len(chapters), 1)
+        self.assertEqual(chapters[0].title, "Full Book")
+        self.assertIn("BLACK DOG/BIRTH", chapters[0].text)
+        self.assertIn("https://example.com/BLACK/DOG", chapters[0].text)
+
 
 if __name__ == "__main__":
     unittest.main()

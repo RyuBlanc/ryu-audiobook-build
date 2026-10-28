@@ -1,6 +1,6 @@
 # Stage 3 Plan — Voice Studio and Character Assignment
 
-**Working branch:** `fix/native-ui-font-scale-learning-ai`  
+**Working branch:** `integration/stage3-feature-preservation`  
 **Latest successful artifact checkpoint:** Build Windows App #1486 completed successfully on 28 October 2026 using tested commit `e02972e5c9451c4d25766186de5d7cf20b4a57d6`. The full regression suite passed 766/766 (0 failed, 0 errors, 0 skipped), including the standalone subdued-emotion cue regression.  
 **UI rule:** preserve the approved Premium V2 HTML and existing control layout. Improve real backend behavior, validation, persistence, and tests; do not replace connected behavior with demo data.
 
@@ -81,3 +81,15 @@ The next focused work batch is the outstanding Sound Design consistency gate: gl
 ## Completion rule
 
 Do not mark Stage 3 complete from a green build alone. Require regression tests, verified package output, and a clearly documented target-Windows acceptance result. Do not claim voice quality is correct without listening to the generated preview/audio.
+
+
+## Full-feature candidate reconciliation — 2026-10-28
+
+- The earlier Stage 3-only branch produced builds #1496–#1501, but is not the acceptable source for the next all-feature candidate: it is hundreds of commits behind the full-feature baseline and lacks newer modules such as reusable Character Library, recoverable project Trash, current Dashboard, Settings and functional HTML installer components.
+- Active integration branch: `integration/stage3-feature-preservation`, starting from full-feature source commit `efaca414fe4db0e4f2596ea19e5a567b7e793215`. Preserve the existing Dashboard, Library/recovery, Character Library, Settings, Premium V2 adapter, Stage 4 pronunciation/sound-design code and all bundled assets.
+- Code review confirmed that several Stage 3 fixes are already present in the newer implementation: case-insensitive first-person narrator detection; fail-closed routing when an assigned voice profile is missing; safe chapter assignment remapping on split; request-ID/profile-signature guards for stale preview callbacks; and compound slash-title/Part heading handling. Do not overwrite these richer implementations with older Stage 3 versions.
+- The integration adds focused behavioral regression tests for partial character edits, safe deletion while assignments still reference a character, Voice Cast visibility/persistence, and stale preview request callbacks; it also expands chapter-heading edge-case tests. The existing full-feature Stage 3 voice/character suite and cross-stage assignment tests remain in place.
+- The branded native dark installer and full-resolution logo pipeline are already present on this baseline. Compression changes to LZMA2/ultra/solid only; no feature, model, voice, BGM/cue or payload file is removed. Package-size goal must be judged from resulting artifacts, not assumed.
+- CI explicitly tests this integration branch, uses branch-scoped non-cancelling concurrency, retains test evidence and release artifacts for 90 days, and has automatic pruning disabled. Ordinary commits run tests only; artifact packaging remains deferred until this test-only candidate passes.
+- No artifact from the older Stage 3-only branch is accepted as the all-feature candidate. Product version remains 1.1.1 until frozen requirements have passed final acceptance; do not publish Version 1.2.0 early.
+- Packaged Windows runtime/audio acceptance remains open. CI cannot prove the wizard appearance on the user's PC or that selected voice identity, generated audio, playback and settings persistence are accepted.
