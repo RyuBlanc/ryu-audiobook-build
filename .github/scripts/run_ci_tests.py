@@ -19,6 +19,16 @@ os.chdir(ROOT)
 os.environ.setdefault("PYTHONPATH", str(ROOT))
 os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
 
+# GitHub's Windows runner may default stdout/stderr to CP1252 even though test
+# summaries contain Unicode symbols. Reconfigure before printing the final report
+# so reporting cannot turn an otherwise completed suite into a spurious CI failure.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
 
 class EvidenceTextResult(unittest.TextTestResult):
     """Capture per-test status and duration without changing test semantics."""
