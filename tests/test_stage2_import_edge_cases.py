@@ -137,6 +137,34 @@ class Stage2ImportEdgeCaseTests(unittest.TestCase):
                 for call in bridge._job_update.call_args_list
             ))
 
+    def test_failed_import_can_be_retried_without_losing_the_original_source(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "retry-book.txt"
+            source.write_text("Chapter 1: Arrival\\nMira reaches the city gate.", encoding="utf-8")
+            bridge, cancel_event = bridge_harness("import-first")
+            bridge._new_job.side_effect = ["import-first", "import-retry"]
+            with patch("app.ui.premium_v2_host.app_root", return_value=root), \
+                 patch("app.ui.premium_v2_host.extract_text", side_effect=ValueError("temporary extraction failure")):
+                PremiumV2Bridge._import_worker(bridge, "import-first", source, "Retry Book", cancel_event)
+
+            self.assertTrue(source.is_file())
+            self.assertTrue(any(
+                call.kwargs.get("state") == "failed" and call.kwargs.get("recoverable") is True
+                for call in bridge._job_update.call_args_list
+            ))
+
+            with patch("app.ui.premium_v2_host.list_projects", return_value=[]), \
+                 patch("app.ui.premium_v2_host.threading.Thread") as thread:
+                result = PremiumV2Bridge._import_start(bridge, {"file_path": str(source)})
+
+            self.assertEqual(result["job_id"], "import-retry")
+            self.assertEqual(result["state"], "running")
+            self.assertTrue(source.is_file())
+            bridge._new_job.assert_called_with("import", "Import retry-book", "Extract text and detect chapters")
+            thread.assert_called_once()
+            thread.return_value.start.assert_called_once()
+
     def test_extract_failure_reports_actionable_failed_job_and_preserves_source(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
