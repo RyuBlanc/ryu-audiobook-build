@@ -33,6 +33,7 @@ from app.ui.frontend_assets import (
     FrontendAssetError,
     load_premium_v2_adapter,
     premium_v2_logo_candidates,
+    prepare_native_host_html,
 )
 from app.core.project import create_project, list_projects
 from app.core.character_library import (
@@ -1197,7 +1198,6 @@ class PremiumV2Bridge(QObject):
             "skip_for_generation": chapter.skip_for_generation,
             "saved": True,
         }
-
     @staticmethod
     def _now() -> str:
         return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -5713,7 +5713,7 @@ class PremiumV2Bridge(QObject):
             if callable(reveal):
                 reveal()
             return True
-        if kind in {"javascript-error", "unhandled-rejection", "adapter-start-failed"}:
+        if kind in {"javascript-error", "unhandled-rejection", "adapter-start-failed", "backend-bridge-failed"}:
             log.error("Premium V2 frontend %s: %s (source=%s, line=%s)%s",
                       kind, message or "(no message)", source or "(inline)", line,
                       ("\\n" + stack) if stack else "")
@@ -5724,14 +5724,18 @@ class PremiumV2Bridge(QObject):
         # A top-level adapter failure means essential frontend wiring/hydration
         # did not finish. Show the native recovery surface immediately instead
         # of leaving the user on the loading screen until the watchdog expires.
-        if kind == "adapter-start-failed":
+        if kind in {"backend-bridge-failed", "adapter-start-failed"}:
             window = self.parent()
             show_failure = getattr(window, "_show_web_failure", None)
             if callable(show_failure) and not getattr(window, "_frontend_ready", False):
                 show_failure(
-                    "The Premium V2 interface could not complete startup. "
+                    (
+                        "The local desktop bridge could not connect. "
+                        if kind == "backend-bridge-failed"
+                        else "The Premium V2 interface could not complete startup. "
+                    ) +
                     "Your local project files have not been deleted. Details: " +
-                    (message or "The adapter failed without a diagnostic message.")
+                    (message or "Startup failed without a diagnostic message.")
                 )
         return True
 
@@ -5935,7 +5939,22 @@ class PremiumV2Window(QMainWindow):
         self._web_stack.setCurrentWidget(self._loading_page)
         self.setCentralWidget(self._web_stack)
 
-        self.web.load(QUrl.fromLocalFile(str(path.resolve())))
+        # Prefer the approved HTML loader for the packaged desktop launch. Hold its
+        # original animation until the native bridge and required data hydration
+        # finish; use the native splash only if the HTML contract cannot be prepared.
+        self._hosted_html_source: str | None = None
+        self._hosted_html_base_url = QUrl.fromLocalFile(str(path.parent.resolve()) + os.sep)
+        self._uses_html_startup_loader = False
+        try:
+            source = path.read_text(encoding="utf-8")
+            self._hosted_html_source = prepare_native_host_html(source)
+            self._uses_html_startup_loader = True
+            self.web.setHtml(self._hosted_html_source, self._hosted_html_base_url)
+        except (OSError, FrontendAssetError):
+            log.exception("Could not prepare the approved HTML startup loader; retaining native loading fallback")
+            self._hosted_html_source = None
+            self._uses_html_startup_loader = False
+            self.web.load(QUrl.fromLocalFile(str(path.resolve())))
         self.apply_window_size(str(QSettings("RyuBlanc", "Ryu's Audiobook").value("ui/window_size", "auto")))
 
     def apply_window_size(self, choice: str) -> None:
@@ -5980,11 +5999,30 @@ class PremiumV2Window(QMainWindow):
         self._frontend_failure_shown = True
         if hasattr(self, "_frontend_watchdog"):
             self._frontend_watchdog.stop()
+        self._write_startup_smoke_marker("failed", str(message or "Frontend startup failed."))
         log.error("Premium V2 renderer recovery surface shown: %s", message)
         if hasattr(self, "_web_error_message"):
             self._web_error_message.setText(str(message))
         if hasattr(self, "_web_stack") and hasattr(self, "_web_error_page"):
             self._web_stack.setCurrentWidget(self._web_error_page)
+
+    def _write_startup_smoke_marker(self, status: str, detail: str = "") -> None:
+        """Expose real frontend readiness to CI; production launches opt out by default."""
+        marker_value = str(os.environ.get("RYU_STARTUP_SMOKE_MARKER") or "").strip()
+        if not marker_value:
+            return
+        payload = {
+            "status": str(status or "failed"),
+            "frontend": "Premium V2",
+            "version": full_version(),
+            "detail": str(detail or "")[:1200],
+        }
+        destination = Path(marker_value)
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            log.exception("Could not write Premium V2 startup smoke marker to %s", destination)
 
     def _set_loading_status(self, message: str) -> None:
         if hasattr(self, "_loading_status"):
@@ -6031,6 +6069,7 @@ class PremiumV2Window(QMainWindow):
         if hasattr(self, "_web_stack") and hasattr(self, "web"):
             self._web_stack.setCurrentWidget(self.web)
         log.info("Premium V2 frontend and native backend bridge are ready")
+        self._write_startup_smoke_marker("ready")
 
     def _retry_web_renderer(self) -> None:
         # Keep the native loading surface visible during reload. Switching to the
@@ -6044,9 +6083,14 @@ class PremiumV2Window(QMainWindow):
         self._frontend_generation += 1
         generation = self._frontend_generation
         self._update_startup_progress("Retrying the interface and reconnecting local services…", 5)
-        if hasattr(self, "_web_stack") and hasattr(self, "_loading_page"):
-            self._web_stack.setCurrentWidget(self._loading_page)
-        self.web.reload()
+        if self._uses_html_startup_loader and self._hosted_html_source is not None:
+            if hasattr(self, "_web_stack"):
+                self._web_stack.setCurrentWidget(self.web)
+            self.web.setHtml(self._hosted_html_source, self._hosted_html_base_url)
+        else:
+            if hasattr(self, "_web_stack") and hasattr(self, "_loading_page"):
+                self._web_stack.setCurrentWidget(self._loading_page)
+            self.web.reload()
         QTimer.singleShot(30000, lambda: self._show_web_failure(
             "The interface retry timed out. Your project data remains on disk. Check the local log and try again."
         ) if generation == self._frontend_generation and not self._frontend_ready else None)
@@ -6072,8 +6116,10 @@ class PremiumV2Window(QMainWindow):
         self._frontend_ready = False
         generation = self._frontend_generation
         self._update_startup_progress("Premium V2 interface loaded. Connecting to local services…", 18)
-        if hasattr(self, "_web_stack") and hasattr(self, "_loading_page"):
-            self._web_stack.setCurrentWidget(self._loading_page)
+        if hasattr(self, "_web_stack"):
+            self._web_stack.setCurrentWidget(
+                self.web if self._uses_html_startup_loader else self._loading_page
+            )
         # Install error handlers before the adapter executes. A page load may
         # succeed while a JavaScript exception leaves the visible interface blank.
         script = r"""
@@ -6119,50 +6165,95 @@ class PremiumV2Window(QMainWindow):
           }, true);
         })();
         (() => {
-          const setup = () => {
-            if (!window.QWebChannel || !window.qt || !qt.webChannelTransport) return false;
-            new QWebChannel(qt.webChannelTransport, channel => {
-              const native = channel.objects.ryuBackend;
-              window.__ryuSendFrontendDiagnostic = payload => {
-                try { native.report_frontend_diagnostic(JSON.stringify(payload || {})); }
-                catch (_) {}
-              };
-              const pendingDiagnostics = window.__ryuFrontendPendingDiagnostics || [];
-              window.__ryuFrontendPendingDiagnostics = [];
-              pendingDiagnostics.forEach(payload => window.__ryuSendFrontendDiagnostic(payload));
-              window.ryuBackend = Object.freeze({
-                invoke(command, payload = {}) {
-                  return new Promise(resolve => {
-                    native.dispatch(String(command), JSON.stringify(payload || {}), raw => {
-                      try { resolve(JSON.parse(raw)); }
-                      catch (_) { resolve({success:false,error:{code:'invalid_response',message:'Invalid backend response.'}}); }
-                    });
-                  });
-                },
-                bootstrap() {
-                  return new Promise(resolve => native.bootstrap(raw => {
-                    try { resolve(JSON.parse(raw)); }
-                    catch (_) { resolve({}); }
-                  }));
-                }
-              });
-              emit('startup-progress', {
-                message:'Local backend connected. Loading your saved workspace…',
-                progress:26
-              });
-              window.dispatchEvent(new CustomEvent('ryu-backend-ready'));
+          const bridgeStartedAt = Date.now();
+          let channelScriptRequested = false;
+          let channelConnecting = false;
+          let completed = false;
+          const failBridge = reason => {
+            if (completed) return;
+            completed = true;
+            window.clearTimeout(bridgeTimeout);
+            emit('backend-bridge-failed', {
+              message:String(reason || 'The local backend bridge could not connect.').slice(0,1200)
             });
-            return true;
           };
-          const load = () => {
-            if (setup()) return;
-            const script = document.createElement('script');
-            script.src = 'qrc:///qtwebchannel/qwebchannel.js';
-            script.onload = setup;
-            script.onerror = () => console.error('Qt WebChannel unavailable; backend actions are not connected.');
-            document.head.appendChild(script);
+          const bridgeTimeout = window.setTimeout(() => failBridge(
+            'Qt WebChannel did not connect within 15 seconds. The HTML interface loaded, but the local desktop bridge is not responding.'
+          ), 15000);
+          const tryConnect = () => {
+            if (completed || channelConnecting) return;
+            if (!window.QWebChannel || !window.qt || !qt.webChannelTransport) {
+              if (Date.now() - bridgeStartedAt >= 15000) {
+                failBridge('Qt WebChannel loaded, but its native transport did not become ready within 15 seconds.');
+                return;
+              }
+              window.setTimeout(waitForTransport, 100);
+              return;
+            }
+            channelConnecting = true;
+            try {
+              new QWebChannel(qt.webChannelTransport, channel => {
+                if (completed) return;
+                const native = channel && channel.objects && channel.objects.ryuBackend;
+                if (!native || typeof native.dispatch !== 'function' ||
+                    typeof native.bootstrap !== 'function' ||
+                    typeof native.report_frontend_diagnostic !== 'function') {
+                  channelConnecting = false;
+                  failBridge('Qt WebChannel connected without the required Ryu desktop bridge methods.');
+                  return;
+                }
+                completed = true;
+                window.clearTimeout(bridgeTimeout);
+                window.__ryuSendFrontendDiagnostic = payload => {
+                  try { native.report_frontend_diagnostic(JSON.stringify(payload || {})); }
+                  catch (_) {}
+                };
+                const pendingDiagnostics = window.__ryuFrontendPendingDiagnostics || [];
+                window.__ryuFrontendPendingDiagnostics = [];
+                pendingDiagnostics.forEach(payload => window.__ryuSendFrontendDiagnostic(payload));
+                window.ryuBackend = Object.freeze({
+                  invoke(command, payload = {}) {
+                    return new Promise(resolve => {
+                      native.dispatch(String(command), JSON.stringify(payload || {}), raw => {
+                        try { resolve(JSON.parse(raw)); }
+                        catch (_) { resolve({success:false,error:{code:'invalid_response',message:'Invalid backend response.'}}); }
+                      });
+                    });
+                  },
+                  bootstrap() {
+                    return new Promise(resolve => native.bootstrap(raw => {
+                      try { resolve(JSON.parse(raw)); }
+                      catch (_) { resolve({}); }
+                    }));
+                  }
+                });
+                emit('startup-progress', {
+                  message:'Local backend connected. Loading your saved workspace…',
+                  progress:26
+                });
+                window.dispatchEvent(new CustomEvent('ryu-backend-ready'));
+              });
+            } catch (error) {
+              channelConnecting = false;
+              failBridge('Qt WebChannel initialization failed: ' + String(error && error.message || error));
+            }
           };
-          load();
+          const waitForTransport = () => {
+            if (completed) return;
+            if (!window.QWebChannel && !channelScriptRequested) {
+              channelScriptRequested = true;
+              const script = document.createElement('script');
+              script.src = 'qrc:///qtwebchannel/qwebchannel.js';
+              script.onload = tryConnect;
+              script.onerror = () => failBridge(
+                'Could not load qrc:///qtwebchannel/qwebchannel.js from the packaged Qt runtime.'
+              );
+              document.head.appendChild(script);
+              return;
+            }
+            tryConnect();
+          };
+          waitForTransport();
         })();
         """
         adapter_path = frontend_path().with_name("premium_v2_backend_adapter.js")
