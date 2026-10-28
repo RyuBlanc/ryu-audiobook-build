@@ -188,7 +188,7 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("blur(12px) saturate(125%)", guard)
         self.assertIn("html[data-effects='high'] .card", guard)
         self.assertIn("blur(8px) saturate(115%)", guard)
-        self.assertIn("filter: blur(28px)", guard)
+        self.assertIn("filter: blur(16px)", guard)
         self.assertIn("max-height:min(42vh,320px)", guard)
         self.assertIn("body.ryu-mini-player-visible .toast-wrap { bottom:96px; }", guard)
         self.assertIn("@media(max-width:800px)", guard)
