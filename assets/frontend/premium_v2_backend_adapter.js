@@ -3975,7 +3975,16 @@
   async function startImportPayload(payload, displayName) {
     if ($('importStatus')) $('importStatus').textContent = 'Importing ' + displayName + '…';
     if ($('importBar')) $('importBar').style.width = '5%';
-    const result = await call('import.start', payload);
+    let result;
+    try {
+      result = await call('import.start', payload);
+    } catch (error) {
+      // Do not leave Import Studio stuck at "Importing…" when the backend
+      // rejects the start request (missing file, unsupported format, disk error).
+      if ($('importStatus')) setTextIfChanged($('importStatus'), 'Import could not start: ' + (error?.message || String(error)));
+      setStyleIfChanged($('importBar'), 'width', '0%');
+      throw error;
+    }
     if (result.job_id) {
       setImportCancelControl(result.job_id, true);
       try {
@@ -3984,9 +3993,16 @@
           if (typeof window.go === 'function') window.go('chapters');
         }, async job => {
           if (activeImportJobId === String(result.job_id)) setImportCancelControl(null, false);
-          if (job.state === 'cancelled' && $('importStatus')) {
-            $('importStatus').textContent = job.message || 'Import cancelled. The original source file was preserved.';
-          }
+          const detail = String(job.error?.message || '').trim();
+          const statusText = job.state === 'completed'
+            ? (job.message || 'Import completed. Review the detected chapter boundaries before generation.')
+            : job.state === 'cancelled'
+              ? (job.message || 'Import cancelled. The original source file was preserved.')
+              : job.state === 'failed'
+                ? ((job.message || 'Import failed.') + (detail ? ' ' + detail : ''))
+                : (job.message || job.stage || String(job.state || 'Import status unavailable'));
+          if ($('importStatus')) setTextIfChanged($('importStatus'), statusText);
+          if (job.state === 'completed') setStyleIfChanged($('importBar'), 'width', '100%');
         });
       } finally {
         if (activeImportJobId === String(result.job_id)) setImportCancelControl(null, false);

@@ -80,6 +80,23 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertNotIn("if ($('previewProgress')) $('previewProgress').style.width =", monitor)
 
 
+
+    def test_import_start_failure_and_terminal_states_keep_truthful_import_status(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("async function startImportPayload(")
+        end = adapter.index("async function importBook(", start)
+        import_flow = adapter[start:end]
+        self.assertIn("Import could not start:", import_flow)
+        self.assertIn("setStyleIfChanged($('importBar'), 'width', '0%')", import_flow)
+        self.assertIn("catch (error)", import_flow)
+        self.assertIn("const statusText = job.state === 'completed'", import_flow)
+        self.assertIn("job.state === 'cancelled'", import_flow)
+        self.assertIn("job.state === 'failed'", import_flow)
+        self.assertIn("setTextIfChanged($('importStatus'), statusText)", import_flow)
+        self.assertIn("setStyleIfChanged($('importBar'), 'width', '100%')", import_flow)
+
     def test_global_notifications_do_not_overwrite_import_or_hidden_voice_status(self):
         adapter = (
             ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"

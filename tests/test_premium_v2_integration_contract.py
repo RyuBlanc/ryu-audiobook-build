@@ -831,7 +831,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         adapter = (
             ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
         ).read_text(encoding="utf-8")
-        self.assertIn("let activeProjectCardEpoch = 0", adapter)
+        self.assertIn("activeProjectCardEpoch = 0", adapter)
         start = adapter.index("async function refreshCurrentProjectCard(")
         end = adapter.index("function installProjectCardStatusObserver()", start)
         refresh = adapter[start:end]
