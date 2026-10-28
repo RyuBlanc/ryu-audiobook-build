@@ -55,6 +55,25 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertNotIn("if (stage) stage.textContent =", jobs)
         self.assertNotIn("if (progress) progress.style.width =", jobs)
 
+
+    def test_repeated_job_monitor_tick_skips_unchanged_progress_writes(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        monitor_start = adapter.index("async function monitorJob(")
+        monitor_end = adapter.index("function requestElevenLabsApiKey()", monitor_start)
+        monitor = adapter[monitor_start:monitor_end]
+        self.assertIn("setTextIfChanged($('genPercent'), Math.round(pct) + '%')", monitor)
+        self.assertIn("setCssPropertyIfChanged($('genRing'), '--progress', pct + '%')", monitor)
+        self.assertIn("setStyleIfChanged($('importBar'), 'width', pct + '%')", monitor)
+        self.assertIn("setStyleIfChanged($('aiProgressBar'), 'width', pct + '%')", monitor)
+        self.assertIn("setStyleIfChanged($('previewProgress'), 'width', pct + '%')", monitor)
+        self.assertIn("setTextIfChanged($('previewState'),", monitor)
+        self.assertIn("setTextIfChanged($('validation'),", monitor)
+        self.assertNotIn("$('genPercent')) $('genPercent').textContent =", monitor)
+        self.assertNotIn("$('genRing').style.setProperty('--progress'", monitor)
+        self.assertNotIn("$('previewProgress').style.width =", monitor)
+
     def test_premium_effects_bound_blur_and_disable_whole_view_entry_animations(self):
         html = (
             ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"

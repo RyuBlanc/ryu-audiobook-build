@@ -19,6 +19,13 @@
     node.style[property] = next;
     return true;
   }
+  function setCssPropertyIfChanged(node, property, value) {
+    if (!node?.style?.getPropertyValue || !node.style.setProperty) return false;
+    const next = String(value ?? '');
+    if (node.style.getPropertyValue(property) === next) return false;
+    node.style.setProperty(property, next);
+    return true;
+  }
   function setAttributeIfChanged(node, name, value) {
     if (!node?.getAttribute || !node?.setAttribute) return false;
     const next = String(value ?? '');
@@ -3378,13 +3385,13 @@
         if (!job) return;
         if (activeJob === jobId) activeJobType = job.type || null;
         const pct = Math.max(0, Math.min(100, Number(job.progress || 0)));
-        if ($('genPercent')) $('genPercent').textContent = Math.round(pct) + '%';
-        if ($('genRing')) $('genRing').style.setProperty('--progress', pct + '%');
-        if ($('importBar')) $('importBar').style.width = pct + '%';
-        if ($('genStage')) $('genStage').textContent = job.stage || job.message || job.state;
-        if ($('aiProgressText')) $('aiProgressText').textContent = job.stage || job.message || job.state;
-        if ($('aiProgressBar')) $('aiProgressBar').style.width = pct + '%';
-        if ($('previewProgress')) $('previewProgress').style.width = pct + '%';
+        setTextIfChanged($('genPercent'), Math.round(pct) + '%');
+        setCssPropertyIfChanged($('genRing'), '--progress', pct + '%');
+        setStyleIfChanged($('importBar'), 'width', pct + '%');
+        setTextIfChanged($('genStage'), job.stage || job.message || job.state);
+        setTextIfChanged($('aiProgressText'), job.stage || job.message || job.state);
+        setStyleIfChanged($('aiProgressBar'), 'width', pct + '%');
+        setStyleIfChanged($('previewProgress'), 'width', pct + '%');
         if ($('previewState') && job.type === 'voice-preview') {
           const previewDetail = String(job.message || '').trim();
           const elapsedMatch = previewDetail.match(/elapsed \d+:\d{2}/i);
@@ -3396,13 +3403,13 @@
              /qwen model loaded/i.test(previewDetail) ? 'Model loaded' : '');
           // Keep the compact badge stable-width. Putting the full backend heartbeat
           // here makes the toolbar wrap between refresh ticks and moves the preview.
-          $('previewState').textContent = (job.stage || job.state) + ' · ' + Math.round(pct) + '%';
-          if($('sumPreview'))$('sumPreview').textContent=['completed','failed','cancelled'].includes(job.state)
+          setTextIfChanged($('previewState'), (job.stage || job.state) + ' · ' + Math.round(pct) + '%');
+          setTextIfChanged($('sumPreview'), ['completed','failed','cancelled'].includes(job.state)
             ? (job.state==='completed'?'Finalizing':job.state==='failed'?'Failed':'Cancelled')
-            : 'Synthesizing · '+Math.round(pct)+'%';
+            : 'Synthesizing · '+Math.round(pct)+'%');
           if($('validation')&&!['completed','failed','cancelled'].includes(job.state)) {
-            $('validation').textContent = 'Synthesizing preview · '+Math.round(pct)+'% · '+
-              (job.stage||job.state)+(previewDetailIsUseful ? ' · '+shortDetail : '');
+            setTextIfChanged($('validation'), 'Synthesizing preview · '+Math.round(pct)+'% · '+
+              (job.stage||job.state)+(previewDetailIsUseful ? ' · '+shortDetail : ''));
           }
         }
         await refreshJobs();
