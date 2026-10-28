@@ -58,11 +58,13 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         for setting in (
             "background_audio_mode=", "background_audio_path=", "background_audio_volume=",
             "ambience_audio_path=", "ambience_audio_volume=", "chapter_transition_sound=",
-            "opening_cue_path=", "page_turn_cue_path=", "scene_transition_cue_path=",
-            "ending_cue_path=", "chapter_bgm_overrides=",
+            "opening_cue_path=", "page_turn_cue_path=", "ending_cue_path=",
+            "chapter_bgm_overrides=",
         ):
             self.assertIn(setting, source)
-
+        self.assertIn("effective_background_audio_mode(state)", source)
+        self.assertIn("fixed_book_cues_enabled(state)", source)
+        self.assertNotIn("scene_transition_cue_path=", source)
     def test_sound_design_preview_button_requests_full_book_mix_not_short_voice_preview(self):
         source = Path("assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         branch = source[source.index("soundButton.id === 'soundPreviewBook'"):]

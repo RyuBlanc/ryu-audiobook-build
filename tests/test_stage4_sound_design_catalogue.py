@@ -148,7 +148,7 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         self.assertIn("validate_saved_audio_paths(state)", host_source)
         self.assertIn("validate_saved_audio_paths(state)", preview_source)
         generation = host_source[host_source.index("def _production_generate_book"):host_source.index("def _sound_catalog")]
-        self.assertIn('opening_cue_path=Path(state["opening_cue_path"]) if state.get("opening_cue_path") else None', generation)
-        self.assertIn('opening_cue_path=Path(str(state["opening_cue_path"])) if state.get("opening_cue_path") else None', preview_source)
+        self.assertIn('opening_cue_path=Path(state["opening_cue_path"]) if book_cues_enabled and state.get("opening_cue_path") else None', generation)
+        self.assertIn('opening_cue_path=Path(str(state["opening_cue_path"])) if book_cues_enabled and state.get("opening_cue_path") else None', preview_source)
 
 if __name__ == "__main__": unittest.main()
