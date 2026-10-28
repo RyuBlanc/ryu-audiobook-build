@@ -143,7 +143,7 @@ class Stage2ImportEdgeCaseTests(unittest.TestCase):
             source = root / "retry-book.txt"
             source.write_text("Chapter 1: Arrival\\nMira reaches the city gate.", encoding="utf-8")
             bridge, cancel_event = bridge_harness("import-first")
-            bridge._new_job.side_effect = ["import-first", "import-retry"]
+            bridge._new_job.side_effect = ["import-retry"]
             with patch("app.ui.premium_v2_host.app_root", return_value=root), \
                  patch("app.ui.premium_v2_host.extract_text", side_effect=ValueError("temporary extraction failure")):
                 PremiumV2Bridge._import_worker(bridge, "import-first", source, "Retry Book", cancel_event)
