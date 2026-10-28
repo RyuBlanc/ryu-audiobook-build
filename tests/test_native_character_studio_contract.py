@@ -37,6 +37,23 @@ class NativeCharacterStudioContractTests(unittest.TestCase):
         self.assertIn("Test assigned sentence", cast)
         self.assertIn("VoicePreviewWorker(preview_profile, sample_text, output, 10)", panel)
 
+    def test_assignment_honors_explicit_unassigned_choice_and_validates_profile_first(self):
+        panel = (ROOT / "app/ui/native_character_studio.py").read_text(encoding="utf-8")
+        dialog_start = panel.index("    def assign_selected(self):")
+        dialog_end = panel.index("    def create_and_assign(self):", dialog_start)
+        assign_selected = panel[dialog_start:dialog_end]
+        self.assertIn('"voice_profile": str(self.profile.currentData() or "")', assign_selected)
+        self.assertNotIn("self.profile.currentData() or value.get(\"voice_profile\")", assign_selected)
+
+        passage_start = panel.index("    def assign_passage(self, passage: dict, character: dict, profile_name: str = \"\"):")
+        passage_end = panel.index("    def unassign_passage(self, passage: dict):", passage_start)
+        assign_passage = panel[passage_start:passage_end]
+        validation = assign_passage.index("if profile_name and not any(profile.name == profile_name for profile in load_profiles()):")
+        mutation = assign_passage.index("chapter.dialogue_assignments = [")
+        self.assertLess(validation, mutation)
+        self.assertIn('row["voice"] = profile_name or None', assign_passage)
+        self.assertIn("self.cast_page._save_cast(update_voice=True)", assign_passage)
+
     def test_assigned_sentence_preview_uses_real_synthesis_and_player(self):
         panel = (ROOT / "app/ui/native_character_studio.py").read_text(encoding="utf-8")
         self.assertIn("self._player.setSource(QUrl.fromLocalFile(path))", panel)
