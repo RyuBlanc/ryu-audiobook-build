@@ -3587,16 +3587,23 @@ class PremiumV2Bridge(QObject):
             aliases = [part.strip() for part in aliases.replace("\n", ",").split(",") if part.strip()]
         if not isinstance(aliases, list):
             raise ValueError("Character aliases must be a list or comma-separated text.")
-        # A renamed character may still appear under the previous name in saved
-        # dialogue assignments and older analysis evidence. Keep that name as an
-        # alias so cast-aware narration routing continues to resolve the identity.
-        if original_name.casefold() != name.casefold():
-            aliases = [original_name, *aliases]
-        aliases = list(dict.fromkeys(
-            str(alias).strip()[:160]
-            for alias in aliases
-            if str(alias).strip() and str(alias).strip().casefold() != name.casefold()
-        ))
+        # Preserve the canonical saved name rather than trusting the casing of
+        # the name submitted by a UI caller. Older dialogue assignments may still
+        # use this name after the character is renamed.
+        saved_original_name = str(item.get("name") or original_name).strip()
+        if saved_original_name.casefold() != name.casefold():
+            aliases = [saved_original_name, *aliases]
+        # Alias identity is case-insensitive. De-duplicate aliases after trimming,
+        # omit the current canonical name, and retain the first user-facing spelling.
+        normalized_aliases = []
+        seen_alias_keys = {name.casefold()}
+        for raw_alias in aliases:
+            alias = str(raw_alias or "").strip()[:160]
+            alias_key = alias.casefold()
+            if alias and alias_key not in seen_alias_keys:
+                seen_alias_keys.add(alias_key)
+                normalized_aliases.append(alias)
+        aliases = normalized_aliases
         role_value = payload.get("role") if "role" in payload else item.get("role", "Character")
         description_value = payload.get("short_description") if "short_description" in payload else item.get("short_description", "")
         notes_value = payload.get("notes") if "notes" in payload else item.get("notes", "")
@@ -3611,7 +3618,7 @@ class PremiumV2Bridge(QObject):
             "name": name,
             "role": str(role_value or "Character").strip()[:160],
             "short_description": str(description_value or "").strip()[:1000],
-            "aliases": list(dict.fromkeys(str(alias).strip()[:160] for alias in aliases if str(alias).strip())),
+            "aliases": aliases,
             "notes": str(notes_value or "").strip()[:4000],
             "scope": ("Series · " + series_value) if series_value else str(scope_value or "Current book only").strip()[:80],
             "series": series_value,
@@ -3661,12 +3668,49 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Choose a character to delete.")
         state = load_state(project.folder)
         characters = list(state.get("characters") or [])
+        matching = [
+            c for c in characters
+            if isinstance(c, dict) and str(c.get("name", "")).strip().casefold() == name.casefold()
+        ]
+        if not matching:
+            raise ValueError("The selected character is no longer in the saved cast.")
+
+        # Deleting a cast record must not silently orphan source-backed dialogue
+        # assignments that still name the character (including a preserved alias).
+        # The safe action is to reassign or unassign those passages first.
+        referenced_names = set()
+        for character in matching:
+            canonical_name = str(character.get("name") or "").strip()
+            if canonical_name:
+                referenced_names.add(canonical_name.casefold())
+            raw_aliases = character.get("aliases") or []
+            if isinstance(raw_aliases, str):
+                raw_aliases = [part.strip() for part in raw_aliases.replace("\\n", ",").split(",") if part.strip()]
+            if isinstance(raw_aliases, (list, tuple, set)):
+                referenced_names.update(
+                    str(alias).strip().casefold()
+                    for alias in raw_aliases if str(alias).strip()
+                )
+
+        for chapter in list(getattr(project, "chapters", []) or []):
+            for assignment in list(getattr(chapter, "dialogue_assignments", []) or []):
+                if not isinstance(assignment, dict):
+                    continue
+                speakers = assignment.get("speakers")
+                speaker_values = list(speakers) if isinstance(speakers, (list, tuple)) else []
+                legacy_speaker = str(assignment.get("speaker") or "").strip()
+                if legacy_speaker:
+                    speaker_values.append(legacy_speaker)
+                if any(str(speaker or "").strip().casefold() in referenced_names for speaker in speaker_values):
+                    raise ValueError(
+                        "Cannot delete this character while saved dialogue assignments still reference "
+                        "the character or an alias. Reassign or unassign those dialogue passages first."
+                    )
+
         kept = [c for c in characters if not (
-            isinstance(c, dict) and str(c.get("name", "")).casefold() == name.casefold()
+            isinstance(c, dict) and str(c.get("name", "")).strip().casefold() == name.casefold()
         )]
         removed = len(characters) - len(kept)
-        if not removed:
-            raise ValueError("The selected character is no longer in the saved cast.")
         state["characters"] = kept
         state["modified_at"] = self._now()
         save_state(project.folder, state)
