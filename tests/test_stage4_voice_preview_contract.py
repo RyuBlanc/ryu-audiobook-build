@@ -66,7 +66,7 @@ class VoicePreviewContractTests(unittest.TestCase):
                 bridge._new_job.assert_not_called()
 
     def test_preview_worker_reports_requested_and_measured_duration(self):
-        profile = SimpleNamespace(name="Saved Narrator")
+        profile = SimpleNamespace(name="Saved Narrator", provider="piper", voice_id="amy")
         provider = object()
         updates = []
 
@@ -98,6 +98,19 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertEqual(completed["result"]["actual_duration_seconds"], 30.4)
         self.assertEqual(completed["result"]["voices_used"], ["voice-id"])
         self.assertEqual(completed["result"]["segments"], 3)
+        self.assertEqual(completed["result"]["selected_profile"], profile.name)
+        self.assertEqual(completed["result"]["selected_provider"], profile.provider)
+        self.assertEqual(completed["result"]["selected_voice_id"], profile.voice_id)
+        self.assertGreaterEqual(completed["result"]["total_seconds"], 0)
+        self.assertGreaterEqual(completed["result"]["synthesis_seconds"], 0)
+        self.assertAlmostEqual(
+            completed["result"]["real_time_factor"],
+            round(completed["result"]["synthesis_seconds"] / completed["result"]["actual_duration_seconds"], 3),
+        )
+        self.assertEqual(
+            completed["result"]["performance_target_met"],
+            completed["result"]["total_seconds"] <= 60,
+        )
 
     def test_preview_worker_fails_closed_when_duration_cannot_be_measured(self):
         profile = SimpleNamespace(name="Saved Narrator")
@@ -762,6 +775,57 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("if callable(close_cache):", generation)
         self.assertIn("close_cache()", generation)
         self.assertIn("close_preview_provider_cache", host[host.index("class PremiumV2Window"):])
+
+
+    def test_preview_worker_records_when_thirty_second_performance_target_is_exceeded(self):
+        profile = SimpleNamespace(name="Saved Narrator", provider="piper", voice_id="amy")
+        provider = object()
+        updates = []
+
+        def update(_job_id, **kwargs):
+            updates.append(kwargs)
+            return kwargs
+
+        bridge = SimpleNamespace(_job_update=update)
+
+        class NoOpThread:
+            def __init__(self, *args, **kwargs):
+                pass
+            def start(self):
+                return None
+            def join(self, timeout=None):
+                return None
+
+        clock_values = iter((0.0, 1.0, 65.0, 67.0))
+        fake_clock = SimpleNamespace(monotonic=lambda: next(clock_values))
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+
+            def fake_build(_text, _provider, _voice, output_path, **kwargs):
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(b"preview")
+                return SimpleNamespace(output_path=output_path, voices_used=("voice-id",), segments=3)
+
+            with (
+                patch.object(premium_v2_host, "time", fake_clock),
+                patch.object(premium_v2_host.threading, "Thread", NoOpThread),
+                patch.object(premium_v2_host, "provider_from_profile", return_value=(provider, "voice-id")),
+                patch.object(premium_v2_host, "load_profiles", return_value=[]),
+                patch.object(premium_v2_host, "app_root", return_value=root),
+                patch.object(premium_v2_host, "build_voice_preview", side_effect=fake_build),
+                patch.object(premium_v2_host, "_effective_pronunciation_dictionary", return_value=[]),
+                patch("app.audio.assembler._duration_ms", return_value=30_400),
+            ):
+                premium_v2_host.PremiumV2Bridge._preview_worker(
+                    bridge, "slow-preview-job", profile, "A longer source passage.", 30, {}
+                )
+
+        completed = next(item for item in updates if item.get("state") == "completed")
+        self.assertEqual(completed["result"]["total_seconds"], 67.0)
+        self.assertEqual(completed["result"]["synthesis_seconds"], 64.0)
+        self.assertFalse(completed["result"]["performance_target_met"])
+        self.assertIn("30-second/60-second performance target was exceeded", completed["message"])
 
 
 if __name__ == "__main__":

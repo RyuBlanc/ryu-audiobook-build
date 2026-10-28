@@ -239,5 +239,64 @@ class Stage3CharacterLifecycleBehaviorTests(unittest.TestCase):
 
 
 
+    def test_bridge_reorder_preserves_assignment_text_and_offsets(self):
+        first_text = 'Mira said, “Hello.”'
+        second_text = 'Ren replied, “Goodbye.”'
+        first = Chapter(1, "First", first_text, dialogue_assignments=[{
+            "start": first_text.index("“Hello.”"),
+            "end": first_text.index("“Hello.”") + len("“Hello.”"),
+            "text": "“Hello.”", "speaker": "Mira",
+        }])
+        second = Chapter(2, "Second", second_text, dialogue_assignments=[{
+            "start": second_text.index("“Goodbye.”"),
+            "end": second_text.index("“Goodbye.”") + len("“Goodbye.”"),
+            "text": "“Goodbye.”", "speaker": "Ren",
+        }])
+        self.project.chapters = [first, second]
+        self.project.save = Mock()
+        self.bridge._mark_project_edited = Mock()
+
+        result = self.bridge._chapter_reorder({"number": 1, "new_number": 2})
+
+        self.assertEqual(result["moved_to"], 2)
+        self.assertEqual([(chapter.number, chapter.title) for chapter in self.project.chapters],
+                         [(1, "Second"), (2, "First")])
+        for chapter in self.project.chapters:
+            for assignment in chapter.dialogue_assignments:
+                self.assertEqual(chapter.text[assignment["start"]:assignment["end"]], assignment["text"])
+        self.project.save.assert_called_once()
+
+    def test_bridge_split_discards_assignment_that_crosses_split_boundary(self):
+        text = 'Mira said, “Hello.”\n\nRen replied, “Goodbye.”'
+        crossing_text = 'said, “Hello.”\n\nRen'
+        first_dialogue = '“Hello.”'
+        second_dialogue = '“Goodbye.”'
+        chapter = Chapter(1, "Combined", text, dialogue_assignments=[
+            {"start": text.index(first_dialogue), "end": text.index(first_dialogue) + len(first_dialogue),
+             "text": first_dialogue, "speaker": "Mira"},
+            {"start": text.index(second_dialogue), "end": text.index(second_dialogue) + len(second_dialogue),
+             "text": second_dialogue, "speaker": "Ren"},
+            {"start": text.index(crossing_text), "end": text.index(crossing_text) + len(crossing_text),
+             "text": crossing_text, "speaker": "Conflicting legacy span"},
+        ])
+        self.project.chapters = [chapter]
+        self.project.save = Mock()
+        self.bridge._mark_project_edited = Mock()
+        split_at = text.index("Ren replied")
+
+        self.bridge._chapter_split({
+            "number": 1, "split_at": split_at, "text": text,
+            "title": "First", "new_title": "Second",
+        })
+
+        first, second = self.project.chapters
+        self.assertEqual([item["text"] for item in first.dialogue_assignments], [first_dialogue])
+        self.assertEqual([item["text"] for item in second.dialogue_assignments], [second_dialogue])
+        for result_chapter in self.project.chapters:
+            for item in result_chapter.dialogue_assignments:
+                self.assertEqual(result_chapter.text[item["start"]:item["end"]], item["text"])
+        self.project.save.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
