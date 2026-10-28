@@ -444,11 +444,21 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("ryu_audiobook_premium_v2.html", self.build)
         self.assertIn("ProjectWorkflow", self.main)
         self.assertIn('ui_mode = os.environ.get("RYU_UI_MODE", "premium-v2").strip().casefold()', self.main)
-        self.assertIn('if ui_mode in {"premium-v2", "html", "web"}:', self.main)
-        self.assertIn("from app.ui.premium_v2_host import PremiumV2Window, frontend_path", self.main)
-        self.assertIn("window = PremiumV2Window()", self.main)
-        self.assertIn("window = ProjectWorkflow()", self.main)
-        self.assertNotIn("from app.ui.premium_v2_host import", self.main[:self.main.index("def main()")])
+        self.assertIn("window = create_main_window(ui_mode)", self.main)
+        self.assertIn("def create_main_window(ui_mode: str | None = None):", self.main)
+        helper_start = self.main.index("def create_main_window(")
+        helper_end = self.main.index("def main()", helper_start)
+        startup = self.main[helper_start:helper_end]
+        self.assertIn('if mode == "native":', startup)
+        self.assertIn('if mode not in {"premium-v2", "html", "web"}:', startup)
+        self.assertIn("from app.ui.premium_v2_host import PremiumV2Window, frontend_path", startup)
+        self.assertIn("return PremiumV2Window()", startup)
+        self.assertIn("Required Premium V2 Dragon Studio frontend is missing", startup)
+        self.assertIn("The application will not fall back to the older native interface.", startup)
+        self.assertNotRegex(
+            startup,
+            r"if packaged_frontend\\.is_file\\(\\):[\\s\\S]*?else:[\\s\\S]*?ProjectWorkflow",
+        )
 
     def test_production_skips_empty_chapters_and_rejects_all_empty_books(self):
         start = self.host.index("def _production_generate_book")
