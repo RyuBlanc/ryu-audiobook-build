@@ -202,9 +202,31 @@
 
   function applyVisualStabilityPreferences(settings = {}) {
     installReducedMotionStyles();
+    const root = document.documentElement;
+    // Persisted settings must drive the CSS attributes as well as the controls.
+    // Assigning a select's value alone does not activate the matching theme/effect rules.
+    const themeRaw = String(
+      settings.theme ?? $('themeSelectAdvanced')?.value ?? root?.dataset.theme ?? 'dark'
+    ).trim().toLowerCase();
+    const theme = themeRaw === 'light' ? 'light' : 'dark';
+    const effectsRaw = String(
+      settings.effects ?? $('effectsModeAdvanced')?.value ?? root?.dataset.effects ?? 'high'
+    ).trim().toLowerCase();
+    const effects = effectsRaw === 'normal' ? 'normal' : 'high';
+    if (root) {
+      if (root.dataset.theme !== theme) root.dataset.theme = theme;
+      if (root.dataset.effects !== effects) root.dataset.effects = effects;
+    }
+    const themeControl = $('themeSelectAdvanced');
+    if (themeControl && themeControl.value !== theme) themeControl.value = theme;
+    const effectsControl = $('effectsModeAdvanced');
+    if (effectsControl && effectsControl.value !== effects) effectsControl.value = effects;
+    const effectsLabel = $('aboutEffects');
+    if (effectsLabel) writeTextIfChanged(
+      effectsLabel, effects === 'high' ? 'High Glass' : 'Normal Smooth Blur'
+    );
     const raw = settings.reduce_motion;
     const reduce = typeof raw === 'boolean' ? raw : Boolean($('reduceMotionAdvanced')?.checked);
-    const root = document.documentElement;
     if (root) root.dataset.ryuReduceMotion = reduce ? '1' : '0';
     const checkbox = $('reduceMotionAdvanced');
     if (checkbox && checkbox.checked !== reduce) checkbox.checked = reduce;
@@ -774,7 +796,14 @@
   }
   function syncMiniPlayer() {
     const dock = $('miniPlayer');
-    if (dock) dock.classList.toggle('hidden', !(playerAudio && playerAudio.src && !miniPlayerDismissed && !audiobookPageActive()));
+    const visible = Boolean(playerAudio && playerAudio.src && !miniPlayerDismissed && !audiobookPageActive());
+    if (dock && dock.classList.contains('hidden') === visible) {
+      dock.classList.toggle('hidden', !visible);
+    }
+    const body = document.body;
+    if (body && body.classList.contains('ryu-mini-player-visible') !== visible) {
+      body.classList.toggle('ryu-mini-player-visible', visible);
+    }
   }
   function dashboardPageActive() {
     const page = $('dashboard');

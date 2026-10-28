@@ -94,6 +94,50 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("if (typeof renderLiveChapterInsights === 'function') renderLiveChapterInsights()", refresh)
         self.assertIn("Draft preserved locally — chapter refresh needs attention", refresh)
 
+
+    def test_saved_theme_effects_and_motion_are_applied_to_the_document_root(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("function applyVisualStabilityPreferences(")
+        end = adapter.index("const call =", start)
+        prefs = adapter[start:end]
+        self.assertIn("settings.theme", prefs)
+        self.assertIn("root.dataset.theme !== theme", prefs)
+        self.assertIn("root.dataset.theme = theme", prefs)
+        self.assertIn("settings.effects", prefs)
+        self.assertIn("root.dataset.effects !== effects", prefs)
+        self.assertIn("root.dataset.effects = effects", prefs)
+        self.assertIn("root.dataset.ryuReduceMotion = reduce ? '1' : '0'", prefs)
+
+    def test_high_effects_remain_enabled_with_bounded_blur_and_safe_toast_layout(self):
+        html = (
+            ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"
+        ).read_text(encoding="utf-8")
+        start = html.index("Stage 1 stability: bounded glass effects")
+        end = html.index("</style>", start)
+        guard = html[start:end]
+        self.assertIn("html[data-effects='high'] .production-flow", guard)
+        self.assertIn("blur(12px) saturate(125%)", guard)
+        self.assertIn("html[data-effects='high'] .card", guard)
+        self.assertIn("blur(8px) saturate(115%)", guard)
+        self.assertIn("filter: blur(28px)", guard)
+        self.assertIn("max-height:min(42vh,320px)", guard)
+        self.assertIn("body.ryu-mini-player-visible .toast-wrap { bottom:96px; }", guard)
+        self.assertIn("@media(max-width:800px)", guard)
+        self.assertIn("body.ryu-mini-player-visible .toast-wrap { bottom:86px; }", guard)
+
+    def test_mini_player_visibility_toggles_notification_safe_area(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("function syncMiniPlayer()")
+        end = adapter.index("function dashboardPageActive()", start)
+        sync = adapter[start:end]
+        self.assertIn("const visible = Boolean(playerAudio && playerAudio.src", sync)
+        self.assertIn("ryu-mini-player-visible", sync)
+        self.assertIn("body.classList.toggle('ryu-mini-player-visible', visible)", sync)
+
     def test_progress_text_is_updated_in_place_not_used_to_rebuild_job_rows(self):
         adapter = (
             ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
