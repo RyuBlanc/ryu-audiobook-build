@@ -89,6 +89,67 @@ def _qwen_preview_profile_key(profile: VoiceProfile) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+
+def _same_profile_ui_settings(saved: VoiceProfile, draft: VoiceProfile) -> bool:
+    """Whether editable controls still represent the selected saved profile.
+
+    Fields not exposed as editable controls (for example the generated Qwen
+    anchor path and profile identity) must be retained from the saved record,
+    not reconstructed from UI defaults.
+    """
+    if (
+        saved.name != draft.name
+        or saved.provider != draft.provider
+        or saved.voice_id != draft.voice_id
+    ):
+        return False
+
+    provider = saved.provider
+    if provider == "qwen-character":
+        mode = saved.qwen_mode or "custom"
+        if mode != (draft.qwen_mode or "custom"):
+            return False
+        if mode == "design":
+            saved_prompt = (saved.qwen_prompt or saved.notes or "").replace(
+                "Qwen VoiceDesign • ", ""
+            ).strip()
+            return (
+                saved_prompt == str(draft.qwen_prompt or "").strip()
+                and (saved.language or "English") == (draft.language or "English")
+                and int(saved.qwen_seed or 3101) == int(draft.qwen_seed or 3101)
+            )
+        if mode == "clone":
+            def normalized_path(value):
+                return str(Path(value).expanduser().resolve()) if value else ""
+            return (
+                normalized_path(saved.sample_path) == normalized_path(draft.sample_path)
+                and str(saved.reference_text or "").strip() == str(draft.reference_text or "").strip()
+                and bool(saved.authorized) == bool(draft.authorized)
+            )
+        # Qwen CustomVoice's prompt/model metadata is provider-owned and not
+        # editable in this panel; identity plus the selected speaker is enough.
+        return True
+
+    if provider == "chatterbox":
+        def normalized_path(value):
+            return str(Path(value).expanduser().resolve()) if value else ""
+        return (
+            normalized_path(saved.sample_path) == normalized_path(draft.sample_path)
+            and bool(saved.authorized) == bool(draft.authorized)
+            and saved.style_preset == draft.style_preset
+            and float(saved.exaggeration) == float(draft.exaggeration)
+            and float(saved.cfg_weight) == float(draft.cfg_weight)
+        )
+
+    if provider == "windows-sapi":
+        return True
+
+    if provider in {"edge-tts", "elevenlabs", "piper", "kokoro"}:
+        return (saved.language or "") == (draft.language or "")
+
+    return True
+
+
 def _close_provider_safely(provider) -> None:
     close = getattr(provider, "close", None)
     if callable(close):
@@ -2700,6 +2761,31 @@ class VoicePage(QWidget):
         return self._draft_qwen_clone_profile_ids[draft_key]
 
     def _profile_from_ui(self) -> VoiceProfile | None:
+        draft = self._profile_from_ui_base()
+        if draft is None:
+            return None
+        selected_name = (
+            self.saved_profiles.currentData()
+            if hasattr(self, "saved_profiles") and self.saved_profiles.count()
+            else None
+        )
+        if not selected_name or str(selected_name).casefold() != draft.name.casefold():
+            return draft
+        saved = next(
+            (
+                item for item in load_saved_profiles()
+                if item.name.casefold() == str(selected_name).casefold()
+            ),
+            None,
+        )
+        if saved is not None and _same_profile_ui_settings(saved, draft):
+            # Use the exact saved record so non-editable generation fields
+            # (Qwen anchors/model identity and provider metadata) survive load,
+            # preview, save and assignment.
+            return saved
+        return draft
+
+    def _profile_from_ui_base(self) -> VoiceProfile | None:
         provider = self.mode.currentData()
         name = self.name.text().strip()
 
