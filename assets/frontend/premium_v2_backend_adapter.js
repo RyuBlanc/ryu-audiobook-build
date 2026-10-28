@@ -233,6 +233,14 @@
   }
   const chapterUndoStacks = new Map(), chapterRedoStacks = new Map();
   let chapterLastText = '', chapterHistoryGroupOpen = false, chapterHistoryGroupTimer = null, chapterHistoryApplying = false;
+  function clearChapterHistory() {
+    // Chapter numbers are renumbered by add/delete/move/merge/split/re-detect.
+    // Histories keyed only by number must never be replayed against a different chapter.
+    chapterUndoStacks.clear();
+    chapterRedoStacks.clear();
+    chapterHistoryGroupOpen = false;
+    if (chapterHistoryGroupTimer) { clearTimeout(chapterHistoryGroupTimer); chapterHistoryGroupTimer = null; }
+  }
   let libraryCharacters = [], libraryEditorId = null, libraryEditorActive = false;
   let characterDialogueSuggestions = [], characterSuggestionsEpoch = 0;
   let characterAnalysisStatus = {analyzed:false, updated_at:null, dialogue_total:0, unassigned_dialogue:0, suggestion_count:0};
@@ -1905,6 +1913,7 @@
       // the identity of a later chapter in the selected batch.
       for (const number of numbers) {
         await call('chapter.delete', {number});
+        clearChapterHistory();
         deleted += 1;
       }
       const remaining = await call('chapter.list');
@@ -5955,6 +5964,7 @@
             if (!approved) return;
             const selectedBefore = Number(window.ryuPremiumSelectedChapter || number || 1);
             const result = await call('chapter.redetect', {selected_number:selectedBefore});
+            clearChapterHistory();
             const loaded = await call('chapter.list');
             chapters = Array.isArray(loaded) ? loaded : [];
             const next = chapters.find(item => Number(item.number) === selectedBefore) ||
@@ -5973,6 +5983,7 @@
             const title = window.prompt('New chapter title:', 'Chapter ' + (chapters.length + 1));
             if (title === null) return;
             const created = await call('chapter.add', {title: title.trim() || 'Chapter ' + (chapters.length + 1), text: ''});
+            clearChapterHistory();
             window.ryuPremiumSelectedChapter = created.number;
             await refreshChapters();
             message('New chapter added. Enter its text and save when ready.');
@@ -5986,6 +5997,7 @@
           } else if (choice === 'delete') {
             if (!window.confirm('Delete "' + selected.title + '" permanently from this project?')) return;
             await call('chapter.delete', {number});
+            clearChapterHistory();
             const remaining = await call('chapter.list');
             chapters = remaining;
             window.ryuPremiumSelectedChapter = remaining[Math.min(number - 1, remaining.length - 1)]?.number || remaining[0]?.number;
@@ -5995,6 +6007,7 @@
             const destination = number + (choice === 'up' ? -1 : 1);
             if (destination < 1 || destination > chapters.length) throw new Error('This chapter cannot move farther in that direction.');
             await call('chapter.reorder', {number, new_number: destination});
+            clearChapterHistory();
             window.ryuPremiumSelectedChapter = destination;
             await refreshChapters();
             message('Chapter order updated.');
@@ -6002,6 +6015,7 @@
             if (number === 1) throw new Error('The first chapter cannot merge into a previous chapter.');
             if (!window.confirm('Merge "' + selected.title + '" into the previous chapter?')) return;
             await call('chapter.merge', {number});
+            clearChapterHistory();
             window.ryuPremiumSelectedChapter = number - 1;
             await refreshChapters();
             message('Chapter merged into the previous chapter.');
@@ -6103,6 +6117,7 @@
       const splitAt = editor.selectionStart, text = editor.value;
       if (splitAt <= 0 || splitAt >= text.length) throw new Error('Place the cursor inside the chapter text, between two passages.');
       const result = await call('chapter.split',{number:c.number,title:$('chapterTitle')?.textContent||c.title,text,split_at:splitAt});
+      clearChapterHistory();
       window.ryuPremiumSelectedChapter = result.new_number;
       await refreshChapters();
       const next = chapters.find(item=>item.number===result.new_number);
