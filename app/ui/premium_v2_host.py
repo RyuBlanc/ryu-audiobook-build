@@ -3685,7 +3685,7 @@ class PremiumV2Bridge(QObject):
                 referenced_names.add(canonical_name.casefold())
             raw_aliases = character.get("aliases") or []
             if isinstance(raw_aliases, str):
-                raw_aliases = [part.strip() for part in raw_aliases.replace("\\n", ",").split(",") if part.strip()]
+                raw_aliases = [part.strip() for part in raw_aliases.replace("\n", ",").split(",") if part.strip()]
             if isinstance(raw_aliases, (list, tuple, set)):
                 referenced_names.update(
                     str(alias).strip().casefold()

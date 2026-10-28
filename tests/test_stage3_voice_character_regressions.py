@@ -192,9 +192,11 @@ class Stage3CharacterAnalysisTests(unittest.TestCase):
             host_source.index("def _character_delete(")
         ]
 
-        self.assertIn("if original_name.casefold() != name.casefold():", update_method)
-        self.assertIn("aliases = [original_name, *aliases]", update_method)
-        self.assertIn('str(alias).strip().casefold() != name.casefold()', update_method)
+        self.assertIn('saved_original_name = str(item.get("name") or original_name).strip()', update_method)
+        self.assertIn("if saved_original_name.casefold() != name.casefold():", update_method)
+        self.assertIn("aliases = [saved_original_name, *aliases]", update_method)
+        self.assertIn("seen_alias_keys = {name.casefold()}", update_method)
+        self.assertIn("if alias and alias_key not in seen_alias_keys:", update_method)
 
     def test_manual_assignments_remain_character_candidates_during_reanalysis(self):
         chapter = Chapter(
