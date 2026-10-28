@@ -19,7 +19,7 @@ class DefaultUiModeContractTests(unittest.TestCase):
         )
         self.assertIn("window = create_main_window(ui_mode)", self.source)
         self.assertIn('if mode not in {"premium-v2", "html", "web"}:', self.source)
-        self.assertIn("window = PremiumV2Window()", self.source)
+        self.assertIn("return PremiumV2Window()", self.source)
         self.assertIn("Required Premium V2 Dragon Studio frontend is missing", self.source)
 
     def test_native_qt_shell_is_only_an_explicit_compatibility_mode(self):
