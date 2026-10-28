@@ -124,7 +124,7 @@ class Stage2ChapterOperationTests(unittest.TestCase):
         # A successful structural mutation invalidates stale per-number history.
         expected_calls = (
             "await call('chapter.delete', {number});\n        clearChapterHistory();",
-            "const result = await call('chapter.redetect', {selected_number:selectedBefore});\n            clearChapterHistory();",
+            "const result = await call('chapter.redetect', {\n              selected_number:selectedBefore,\n              expected_source_fingerprint:preview.source_fingerprint\n            });\n            clearChapterHistory();",
             "const created = await call('chapter.add', {title: title.trim() || 'Chapter ' + (chapters.length + 1), text: ''});\n            clearChapterHistory();",
             "await call('chapter.reorder', {number, new_number: destination});\n            clearChapterHistory();",
             "await call('chapter.merge', {number});\n            clearChapterHistory();",
