@@ -97,6 +97,15 @@ class Stage2ChapterOperationTests(unittest.TestCase):
             editor.split(0, 0, "New")
         self.assertEqual([(c.number, c.title, c.text) for c in editor.chapters], before)
 
+    def test_adapter_find_replace_uses_original_unicode_match_offsets(self):
+        adapter_path = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        source = adapter_path.read_text(encoding="utf-8")
+        self.assertIn("const firstMatch = new RegExp(escapedNeedle, 'iu').exec(source);", source)
+        self.assertIn("const matches = [...source.matchAll(new RegExp(escapedNeedle, 'giu'))];", source)
+        self.assertIn("firstMatch.index + firstMatch[0].length", source)
+        self.assertNotIn("source.toLocaleLowerCase().indexOf(needle.toLocaleLowerCase())", source)
+        self.assertNotIn("const lowered = source.toLocaleLowerCase(), target = needle.toLocaleLowerCase();", source)
+
     def test_adapter_clears_number_keyed_undo_history_after_each_structural_operation(self):
         adapter_path = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
         source = adapter_path.read_text(encoding="utf-8")
