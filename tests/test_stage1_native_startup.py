@@ -66,6 +66,10 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
         self.assertIn("bridgeStartedAt", host)
         self.assertIn("window.setTimeout(waitForTransport, 100)", host)
         self.assertIn("script.onerror", host)
+        self.assertIn("window.__ryuBridgeFailureReason = String(reason || '')", host)
+        self.assertIn("def _finish_bridge_connect_timeout(", host)
+        self.assertIn("performance.getEntriesByType('resource')", host)
+        self.assertIn("Qt WebChannel handshake diagnostics:", host)
         self.assertIn('kind in {"backend-bridge-failed", "adapter-start-failed"}', host)
 
     def test_startup_smoke_marker_records_real_frontend_ready_or_failure(self):
