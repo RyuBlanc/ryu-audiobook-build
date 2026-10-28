@@ -114,3 +114,10 @@ Do not mark Stage 3 complete from a green build alone. Require regression tests,
 - This test run produced no installer or portable application and is not artifact acceptance.
 - Next step: a dedicated `[artifact-checkpoint]` commit must rerun all 783+ tests on its exact SHA, verify frozen EXE/module/asset integrity, compile both core and functional installers, verify logo assets, generate SHA-256 manifest, complete Microsoft Defender scans, and upload installer/manifest/portable artifacts. Keep release publication skipped.
 - Do not begin the next Stage 4 sound-design code batch until this matching-head checkpoint passes. Once it passes, proceed with the outstanding Voice Only/BGM Off rule across production and preview, and remove any fixed legacy Scene Transition cue from the UI/backend while preserving contextual story effects.
+
+
+## Stage 3 diff-audit follow-up — missing reverse-order heading coverage — 2026-10-28
+
+- The full-feature baseline already handles slash-title-first compounds (for example, `BLACK DOG/BIRTH` followed by `Part 1`), but the Stage 3-only detector also supported the reverse layout (`Part 2` followed by `BLACK DOG/RETURN`). The full-feature parser is being extended narrowly to normalize this ordering without replacing its stronger TOC, prose-sentence, URL, and source-heading safeguards.
+- Added a save/reload regression for `character_analysis.dialogue_total` and `unassigned_dialogue`, in addition to the existing full-feature serialization behavior.
+- This follow-up is on top of the Stage 3 artifact-checkpoint source SHA `13c074a92c92d088b8579531bc0f021869e1e8f4`; Build Windows App #1512 remains pinned to that SHA and is an intermediate checkpoint. The new source requires its own full regression run before it may be considered for the final all-feature package.

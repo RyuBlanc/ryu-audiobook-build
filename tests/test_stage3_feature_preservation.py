@@ -22,12 +22,24 @@ from app.ui.voice_page import VoicePage
 class BridgeHarness:
     def __init__(self, project):
         self.project = project
+        self.job_updates = []
+        from threading import RLock
+        self._character_review_state_lock = RLock()
 
     def _active_project(self):
         return self.project
 
     def _find_profile(self, name):
         return {"name": name} if str(name).casefold() in {"mira voice", "ren voice"} else None
+
+    def _project_series_name(self, project, state=None):
+        return PremiumV2Bridge._project_series_name(self, project, state)
+
+    def _sync_saved_cast(self, project, characters, state=None, **kwargs):
+        return PremiumV2Bridge._sync_saved_cast(self, project, characters, state, **kwargs)
+
+    def _job_update(self, *args, **kwargs):
+        self.job_updates.append((args, kwargs))
 
     def _now(self):
         return "2026-10-28T00:00:00Z"
@@ -78,6 +90,27 @@ class Stage3FullFeatureCharacterSafetyTests(unittest.TestCase):
                 "original_name": "Ren", "name": "mIRA",
             })
         self.assertEqual(load_state(self.folder)["characters"], original["characters"])
+
+    def test_unassigned_dialogue_count_survives_analysis_save_and_reload(self):
+        folder = self.folder / "unassigned-dialogue"
+        project = Project(
+            "Unassigned dialogue",
+            folder,
+            chapters=[Chapter(1, "One", "“Nobody answered.”")],
+        )
+        project.save()
+        bridge = BridgeHarness(project)
+
+        with (
+            patch("app.ui.premium_v2_host.list_reusable_characters", return_value=[]),
+            patch("app.chapters.character_learning.load_learning_examples", return_value=[]),
+        ):
+            PremiumV2Bridge._character_worker(bridge, "unassigned-job", project)
+
+        saved = load_state(folder)["character_analysis"]
+        self.assertEqual(saved["dialogue_total"], 1)
+        self.assertEqual(saved["unassigned_dialogue"], 1)
+        self.assertEqual(bridge.job_updates[-1][1]["state"], "completed")
 
     def test_delete_is_blocked_until_assigned_dialogue_is_reassigned(self):
         text = self.project.chapters[0].text

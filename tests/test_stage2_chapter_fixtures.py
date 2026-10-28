@@ -100,6 +100,24 @@ class ChapterDetectionFixtureTests(unittest.TestCase):
             self.assertTrue(loaded.chapters[0].skip_for_generation)
             self.assertEqual(loaded.chapters[0].dialogue_assignments, chapter.dialogue_assignments)
 
+    def test_part_heading_before_named_slash_title_combines_as_one_boundary(self):
+        source = (
+            "BLACK DOG/BIRTH\n"
+            "Part 1\n"
+            "The first section begins here.\n\n"
+            "Part 2\n"
+            "BLACK DOG/RETURN\n"
+            "The second section begins here."
+        )
+        chapters = detect_chapters(source)
+        self.assertEqual([chapter.title for chapter in chapters], [
+            "BLACK DOG/BIRTH: Part 1", "BLACK DOG/RETURN: Part 2"
+        ])
+        self.assertIn("The first section begins here.", chapters[0].text)
+        self.assertNotIn("Part 2", chapters[0].text)
+        self.assertNotIn("BLACK DOG/RETURN", chapters[0].text)
+        self.assertIn("The second section begins here.", chapters[1].text)
+
     def test_part_only_roman_headings_are_detected_without_leaking_next_body(self):
         source = (
             "Part I: Arrival\n"

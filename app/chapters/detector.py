@@ -78,7 +78,7 @@ def detect_chapters(text: str) -> list[Chapter]:
 
 
 def _combine_split_slash_titles(lines: list[str]) -> list[str]:
-    """Join slash-style book titles and a following Part/Volume label."""
+    """Join slash-style book titles and adjacent Part/Volume labels in either order."""
     output: list[str] = []
     index = 0
     section_re = re.compile(
@@ -89,20 +89,32 @@ def _combine_split_slash_titles(lines: list[str]) -> list[str]:
     )
     while index < len(lines):
         current = lines[index].strip()
-        if current and is_slash_title_candidate(current):
-            next_index = index + 1
-            while next_index < len(lines) and not lines[next_index].strip():
-                next_index += 1
+        next_index = index + 1
+        while next_index < len(lines) and not lines[next_index].strip():
+            next_index += 1
+
+        # Some light novels place the Part marker before the named section:
+        # "Part 2" on one line followed by "BLACK DOG/RETURN". Normalize this
+        # to the same title order as "BLACK DOG/BIRTH" followed by "Part 1".
+        if current and section_re.fullmatch(current) and parse_heading_title(current):
             if next_index < len(lines):
-                section = lines[next_index].strip()
-                if section_re.fullmatch(section) and parse_heading_title(section):
-                    output.append(f"{current}: {section}")
+                section_title = lines[next_index].strip()
+                if is_slash_title_candidate(section_title):
+                    output.append(f"{section_title}: {current}")
                     index = next_index + 1
                     continue
+
+        # Also handle the common named-section-first layout.
+        if current and is_slash_title_candidate(current) and next_index < len(lines):
+            section = lines[next_index].strip()
+            if section_re.fullmatch(section) and parse_heading_title(section):
+                output.append(f"{current}: {section}")
+                index = next_index + 1
+                continue
+
         output.append(lines[index])
         index += 1
     return output
-
 
 def _looks_like_story_preamble(preamble: str) -> bool:
     """Distinguish a substantial unheaded story opening from short front matter."""
