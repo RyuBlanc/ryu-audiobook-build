@@ -15,7 +15,62 @@ from app.chapters.characters import analyze_book, merge_character_analysis_recor
 from app.chapters.detector import Chapter
 from app.tts.voice_profile import VoiceProfile, load_saved_profiles, save_profiles
 from app.tts.cast_provider import CastAwareProvider
+from app.core.character_identity import character_identity_key, set_character_voice_assignment
+from app.ui.voice_page import VoicePage
 
+
+
+class Stage3VoiceAssignmentPersistenceTests(unittest.TestCase):
+    def test_assignment_overwrites_stale_empty_scoped_value(self):
+        primary_key = character_identity_key("Mira", "Chronicles")
+        other_series_key = character_identity_key("Mira", "Side Story")
+        state = {
+            "voice_cast": {"Mira": "Old Voice"},
+            "voice_cast_identity_assignments": {
+                primary_key: "",
+                other_series_key: "Side Story Voice",
+            },
+        }
+
+        updated = set_character_voice_assignment(
+            state, "Mira", "Chronicles", "New Mira Voice"
+        )
+
+        self.assertEqual(
+            updated["voice_cast_identity_assignments"][primary_key],
+            "New Mira Voice",
+        )
+        self.assertEqual(
+            updated["voice_cast_identity_assignments"][other_series_key],
+            "Side Story Voice",
+        )
+        self.assertEqual(updated["voice_cast"]["Mira"], "New Mira Voice")
+        # The helper returns a new outer state instead of mutating callers'
+        # in-memory state before persistence succeeds.
+        self.assertEqual(state["voice_cast_identity_assignments"][primary_key], "")
+        self.assertEqual(state["voice_cast"]["Mira"], "Old Voice")
+
+    def test_profile_signature_includes_qwen_anchor_and_other_saved_fields(self):
+        base = VoiceProfile(
+            name="Narrator",
+            provider="qwen-character",
+            voice_id="Ryan",
+            qwen_mode="design",
+            qwen_prompt="Warm narration",
+            qwen_anchor_text="Anchor A",
+        )
+        changed_anchor = VoiceProfile(
+            name="Narrator",
+            provider="qwen-character",
+            voice_id="Ryan",
+            qwen_mode="design",
+            qwen_prompt="Warm narration",
+            qwen_anchor_text="Anchor B",
+        )
+        self.assertNotEqual(
+            VoicePage._voice_profile_signature(base),
+            VoicePage._voice_profile_signature(changed_anchor),
+        )
 
 
 class QwenModelIntegrityTests(unittest.TestCase):
