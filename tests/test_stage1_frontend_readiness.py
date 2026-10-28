@@ -161,6 +161,31 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
         self.assertIn("self._frontend_watchdog.start(120000)", updater)
 
 
+
+    def test_native_live_splash_removes_duplicate_timer_driven_html_loader_before_backend_calls(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        html = (
+            ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn('id="appLoader"', html)
+        self.assertIn("setTimeout(finish,1700)", html)
+
+        wire_start = adapter.index("async function wire()")
+        first_backend_call = adapter.index("await call('app.get_info')", wire_start)
+        startup = adapter[wire_start:first_backend_call]
+        self.assertIn("const legacyLoader = $('appLoader')", startup)
+        self.assertIn("if (legacyLoader) legacyLoader.remove()", startup)
+        self.assertLess(
+            startup.index("legacyLoader.remove()"),
+            startup.index("window.__ryuEmitFrontendDiagnostic?.('startup-progress'"),
+        )
+        self.assertLess(
+            startup.index("legacyLoader.remove()"),
+            adapter.index("await call('app.get_info')", wire_start),
+        )
+
     def test_loading_stays_live_during_early_adapter_wiring(self):
         adapter = (
             ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"

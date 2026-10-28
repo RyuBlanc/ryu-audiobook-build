@@ -5317,6 +5317,13 @@
   }
 
   async function wire() {
+    // The approved HTML carries an older timer-driven splash with an embedded
+    // preview JPEG. The native Windows splash uses the real bundled logo and
+    // backend-driven progress, so remove the duplicate before any await or
+    // backend work; its timer can no longer cover the live startup surface.
+    const legacyLoader = $('appLoader');
+    if (legacyLoader) legacyLoader.remove();
+
     // The native splash is still visible while controls are bound and the first
     // local backend calls are verified. Keep it animated instead of showing a
     // stationary percentage during this real setup work.
