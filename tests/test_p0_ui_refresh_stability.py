@@ -125,6 +125,24 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("await refreshChapters()", transition)
         self.assertIn("await refreshCharacters()", transition)
 
+    def test_project_switch_waits_for_a_stable_chapter_draft_and_stops_on_churn(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("async function flushChapterDraftBeforeSwitch()")
+        end = adapter.index("function chapterDeleteSelection()", start)
+        flush = adapter[start:end]
+        self.assertIn("for (let attempt = 0; attempt < 5; attempt++)", flush)
+        self.assertIn("let previousSaveFailed = false", flush)
+        self.assertIn("const hasUnsavedDraft = text !== savedText || title !== savedTitle", flush)
+        self.assertIn("previousSaveFailed || chapterSaveTimer || hasUnsavedDraft || saveStateNeedsRetry", flush)
+        self.assertIn("await saveTask", flush)
+        self.assertIn("The chapter kept changing while it was being saved.", flush)
+        self.assertIn("The project switch was stopped to protect your edits", flush)
+        self.assertIn("if (Number(window.ryuPremiumSelectedChapter || 0) !== number) continue;", flush)
+        self.assertLess(flush.index("await chapterSavePromise"), flush.index("const text = String(editor.value"))
+        self.assertIn("throw error", flush)
+
     def test_empty_chapter_state_clears_prototype_text_and_disables_editing(self):
         adapter = (
             ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"

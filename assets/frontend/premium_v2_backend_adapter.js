@@ -1868,20 +1868,61 @@
   }
 
   async function flushChapterDraftBeforeSwitch() {
-    const number = Number(window.ryuPremiumSelectedChapter || 0);
-    if (!number) { await chapterSavePromise; return; }
-    if (!chapterSaveTimer && /autosave failed/i.test(String($('saveState')?.textContent || ''))) {
-      throw new Error('The last chapter autosave failed. Save the current chapter successfully before switching away.');
-    }
-    if (chapterSaveTimer) {
+    // A project switch is allowed only when the editor, the in-memory chapter
+    // record, and the last successful backend save reach a stable fixed point.
+    // Limit retries so continuous typing or a broken autosave cannot hang the UI.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const number = Number(window.ryuPremiumSelectedChapter || 0);
+      if (!number) {
+        if (chapterSaveTimer) {
+          throw new Error('A chapter save is pending but no chapter is selected. Stay in Chapter Studio and save the draft before switching projects.');
+        }
+        try { await chapterSavePromise; }
+        catch (error) {
+          throw new Error('A chapter save did not complete, so the project switch was stopped: ' + (error?.message || String(error)));
+        }
+        if (!Number(window.ryuPremiumSelectedChapter || 0) && !chapterSaveTimer) return;
+        continue;
+      }
+
+      if (chapterSaveTimer) {
+        clearTimeout(chapterSaveTimer);
+        chapterSaveTimer = null;
+      }
+
+      let previousSaveFailed = false;
+      try { await chapterSavePromise; }
+      catch (_) { previousSaveFailed = true; }
+
+      // Selection can change while an in-flight save completes. Re-read it on
+      // the next pass rather than writing one chapter's text into another.
+      if (Number(window.ryuPremiumSelectedChapter || 0) !== number) continue;
+
       const chapter = chapters.find(item => Number(item.number) === number);
       const editor = $('chapterEditor');
-      if (!chapter || !editor) throw new Error('The current chapter draft could not be preserved. Stay on this chapter and retry Save.');
-      clearTimeout(chapterSaveTimer);
-      chapterSaveTimer = null;
+      if (!chapter || !editor) {
+        throw new Error('The current chapter draft could not be verified. Stay in Chapter Studio and retry the Save before switching projects.');
+      }
+
+      // Read the latest editor values only after any earlier save has settled.
+      // If the user typed during that save, the mismatch forces another save.
       const text = String(editor.value ?? chapter.text ?? '');
       const title = String($('chapterTitle')?.textContent || chapter.title || '');
-      const saveTask = chapterSavePromise.catch(() => {}).then(async () => {
+      const savedText = String(chapter.text ?? '');
+      const savedTitle = String(chapter.title ?? '');
+      const saveLabel = String($('saveState')?.textContent || '');
+      const hasUnsavedDraft = text !== savedText || title !== savedTitle;
+      const saveStateNeedsRetry = /unsaved changes|saving|autosave failed/i.test(saveLabel);
+      const needsSave = Boolean(
+        previousSaveFailed || chapterSaveTimer || hasUnsavedDraft || saveStateNeedsRetry
+      );
+      if (!needsSave) return;
+
+      if (chapterSaveTimer) {
+        clearTimeout(chapterSaveTimer);
+        chapterSaveTimer = null;
+      }
+      const saveTask = Promise.resolve(chapterSavePromise).catch(() => {}).then(async () => {
         const result = await call('chapter.update', {number, title, text});
         const saved = chapters.find(item => Number(item.number) === number);
         if (saved) {
@@ -1889,7 +1930,9 @@
           saved.title = result?.title || title;
           saved.word_count = result?.word_count ?? (text.trim() ? text.trim().split(/\s+/).filter(Boolean).length : 0);
         }
-        if (window.ryuPremiumSelectedChapter === number && $('saveState')) $('saveState').textContent = 'Autosaved just now';
+        if (window.ryuPremiumSelectedChapter === number && $('saveState')) {
+          $('saveState').textContent = 'Autosaved just now';
+        }
         return result;
       });
       chapterSavePromise = saveTask;
@@ -1901,9 +1944,10 @@
       } finally {
         if (chapterSavePromise === saveTask) chapterSavePromise = Promise.resolve();
       }
-    } else {
-      await chapterSavePromise;
+      // Re-evaluate the editor after the save: never assume the snapshot stayed
+      // current while the backend request was in flight.
     }
+    throw new Error('The chapter kept changing while it was being saved. The project switch was stopped to protect your edits; wait for editing to settle and retry.');
   }
 
   function chapterDeleteSelection() {
