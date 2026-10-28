@@ -21,32 +21,36 @@ This batch follows the repository's Import + Chapter Studio roadmap. It does not
 
 ## Automated test and artifact evidence — successful checkpoint
 
-- **Actions run:** [Build Windows App #1464](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40548201450) — completed successfully on 27 October 2026.
-- **Tested commit:** `579c378ae81ab9c06e7c68feae5485574f3f02cc`
-- **Regression tests:** 732 total, 732 passed, 0 failed, 0 errors, 0 skipped; 28.745 seconds. The uploaded evidence JSON records this exact commit SHA, run number, and run ID.
-- **Build validation:** JavaScript syntax, application preparation/frozen build, bundled voice assets/critical modules, core installer payload, functional HTML installer, logo transparency and SHA-256 generation, and Microsoft Defender scanning all passed.
-- **Release artifacts (available in the Actions run for 30 days, through 26 November 2026):**
+- **Actions run:** [Build Windows App #1478](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40614478453) — completed successfully on 28 October 2026.
+- **Tested commit:** `cbe8b41a46b1d5807699e67fbd54a5d1e698c6a0`
+- **Regression tests:** 752 total; **752 passed, 0 failed, 0 errors, 0 skipped**. Test evidence JSON records this exact commit SHA, run number and run ID.
+- **Build validation:** installer JavaScript syntax, application preparation/frozen build, bundled voice assets/critical modules, core installer payload, functional HTML installer, logo transparency/hash generation, Microsoft Defender scan, installer upload, release-manifest upload, and portable app upload all passed. The stale Actions-run/storage cleanup job also passed.
+- **Defender:** no threats found in either installer executable.
+- **Public release:** skipped because this checkpoint is on the working branch; build artifacts remain available from the Actions run for the retention period.
 
-| Artifact | Artifact ID | Size | Artifact digest |
+| Artifact | Artifact ID | Archive size | Artifact SHA-256 |
 |---|---:|---:|---|
-| `Ryu-Audiobook-Test-Evidence-1464` | `12753478505` | 46,619 bytes | `c9af4bc1704c31bdd505d57afa7bae9d62c02caa97b1ecb2e2262a5b98cfa2af` |
-| `Ryu-Audiobook-Installer-1464` | `12754079470` | 878,046,356 bytes (about 878 MB) | `bac0af904ad9a30504e9931e2ea0e03d0e0c834d1b725cb63acfb3ae460ff35b` |
-| `Ryu-Audiobook-Portable-1464` | `12753879857` | 1,349,451,876 bytes (about 1.35 GB) | `d5f5463909d790315c2ca3529b4bb8a35b90847ca6443774c7ec1ccba8f72180` |
-| `Ryu-Audiobook-Release-SHA256-1464` | `12754439163` | 776 bytes | `4479bd93ab1b754deb520cc39901e9b97f5da3fdf7e78b99f35105f0bffe881a` |
+| `Ryu-Audiobook-Test-Evidence-1478` | `12784567421` | 48,176 bytes | `7d758e1267e4b9017bb46e840474ecfd30301eb7003ddd43026da719047bfafb` |
+| `Ryu-Audiobook-Installer-1478` | `12785012587` | 878,100,084 bytes (~878 MB) | `3512d604015dab925f05cfbbd5a07aea272e838292f9eb471cffda768f9cfb36` |
+| `Ryu-Audiobook-Portable-1478` | `12785122261` | 1,349,458,232 bytes (~1.35 GB) | `ce3afa9a2b432467117f17bb295f35db842ef942eef3db6b971185ab522f9ffc` |
+| `Ryu-Audiobook-Release-SHA256-1478` | `12785047505` | 780 bytes | `5f4e09c607e3e4cb947b774a61de9d34fc0b218ed4465ded773a6114cfc606b5` |
 
-The release manifest's SHA-256 for the installer executable is `aa3d0a5c56528115f59d5bbda2a4a859a2efef174f2d80874fefe4ee3cc85dd3` (878,046,192 bytes). The portable artifact digest above is GitHub's artifact archive digest; the build's manifest lists the executable and logo assets inside the package separately.
+The inspected release SHA-256 manifest records these executable files:
 
-The repository workflow skipped public-release publishing because this is a working branch. The installer, portable app, manifest, and test evidence are uploaded as Actions artifacts in the run linked above. The automated evidence ZIP retains the workflow's shared test-evidence filename/title; its metadata verifies the Stage 2 commit and run identity.
+| File | Size | SHA-256 |
+|---|---:|---|
+| `Ryu's Audiobook Setup.exe` | 878,099,920 bytes | `a51c4cbb006bc8550f08a5732256059e51fea85c9a9a02fbacaa36256773a258` |
+| `Ryu's Audiobook Core Setup.exe` | 651,146,735 bytes | `76101390aeead3e346e88e361bc7e302a36d58223487a7b446ff68ccba372b54` |
+| `Ryu's Audiobook.exe` (portable app entry point) | 11,551,025 bytes | `49f7a164f5ebd06b9064b1ee1450feee56e66cb512c5999102cf140703cf90ff` |
 
-**Acceptance boundary:** automated CI/package validation passed; manual interactive acceptance of the exact installer on a target Windows PC remains open. Do not treat this checkpoint as proof of every UI interaction, import format, chapter edit path, or cancel timing on the user's machine.
+The artifact archive digests above identify the GitHub ZIPs; the manifest hashes identify the files contained in the release package. The manifest and the automated evidence ZIP were downloaded and inspected. The installer and portable artifacts are larger than 500 MB; this checkpoint did not attempt lossy compression or claim a smaller package.
 
-- Stage 2 editor-operation coverage now includes model-level rename/edit, delete-renumber, move payload retention, merge/split assignment offset integrity, invalid split safety, Unicode-safe Find/Replace offsets, and invalidation of stale number-keyed undo/redo history after structural edits.
-- Chapter re-detection now presents before/after chapter title and text-snippet summaries without saving. Apply requires the SHA-256 fingerprint from the current preview; missing or stale fingerprints are rejected. Added tests for preview-only behavior, no-mutation rejection paths, successful apply, and matching UI adapter flow.
-- Import edge-case tests now cover exact duplicate guidance for Browse imports, temporary-file cleanup for duplicate drag/drop imports, empty/unsupported files, cancellation after extraction/detection before publication, and recoverable failure status with original source preservation.
+**Acceptance boundary:** CI and package validation passed. The exact packaged installer has not been interactively accepted on the target Windows PC. Keep the manual checklist below open; automated tests do not prove that every UI interaction and real-book import behaves correctly on the user's machine.
 
-## Consolidated checkpoint candidate
-
-The current working branch includes regression coverage for editor structural operations, Unicode-safe Find/Replace, non-mutating before/after re-detection preview with stale-fingerprint rejection, and import duplicate/cancellation/retry/failure paths. Run #1477 reached 749/750 tests; the single failure was an outdated re-detection contract assertion. The runner then hit a separate CP1252 Unicode encoding error while printing the report. Both are corrected in the current candidate, and the next `[artifact-checkpoint]` run is the validation source of truth. Final counts and package artifacts are recorded only after that run finishes successfully.
+- Editor-operation tests cover title/text edits, delete renumbering, move payload retention, merge/split assignment-offset integrity, invalid split safety, Unicode-safe Find/Replace offsets, and invalidation of stale number-keyed undo/redo history after structural edits.
+- Re-detection presents before/after chapter titles and text snippets without saving. Applying it requires a SHA-256 fingerprint matching the saved source; missing or stale fingerprints are rejected.
+- Import edge tests cover duplicate guidance for Browse and dropped files, temporary staging cleanup, empty/unsupported files, cancellation after extraction/detection before publication, recoverable extraction failure, and retry while preserving the source.
+- The preceding #1477 run exposed an outdated re-detection contract assertion and CP1252 report-printing failure; both were corrected. The runner was updated for UTF-8-safe output, and #1478 is the successful consolidated checkpoint.
 
 ## Packaged-Windows acceptance checklist
 
