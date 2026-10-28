@@ -88,7 +88,7 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertIn('reveal = getattr(window, "_on_frontend_ready", None)', host)
         self.assertIn('def _set_loading_status(self, message: str)', host)
         self.assertIn('Retrying the interface and reconnecting local services', host)
-        self.assertIn('await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters]);', adapter)
+        self.assertIn('await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters], {required:true});', adapter)
         self.assertNotIn('self._web_stack.setCurrentWidget(self.web)\n        self.web.reload()', host)
 
     def test_window_minimum_size_is_bounded_by_the_available_screen(self):

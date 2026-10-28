@@ -951,7 +951,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             encoding="utf-8"
         )
         wire_start = adapter.index("async function wire()")
-        core_hydration = adapter.index("await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters]);", wire_start)
+        core_hydration = adapter.index("await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters], {required:true});", wire_start)
         first_handler = adapter.index("document.addEventListener('click', e => {", wire_start)
         settings_loaded = adapter.index("async function loadSettings()")
         optional_hydration = adapter.index("void (async () => {", core_hydration)
@@ -963,7 +963,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("await hydratePhase([refreshCharacters, refreshCharacterLibrary, refreshTerms]);", hydration)
         self.assertIn("await hydratePhase([refreshSounds, refreshSoundCues, refreshChapterBgm]);", hydration)
         self.assertIn("await hydratePhase([refreshJobs, refreshHistory, refreshModels]);", hydration)
-        self.assertIn("await new Promise(resolve => setTimeout(resolve, 0))", adapter[adapter.index("const hydratePhase = async phase =>", wire_start):timer_start])
+        self.assertIn("const required = options.required === true", adapter[adapter.index("const hydratePhase = async (phase, options = {}) =>", wire_start):timer_start])
+        self.assertIn("await new Promise(resolve => setTimeout(resolve, 0))", adapter[adapter.index("const hydratePhase = async (phase, options = {}) =>", wire_start):timer_start])
         self.assertNotIn("refreshPerformance", hydration)
 
     def test_monitor_job_does_not_restart_polling_after_initial_terminal_result(self):
