@@ -6,7 +6,7 @@ import sys
 
 from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QCursor, QIcon, QPixmap
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.core.paths import ensure_roots
 from app.version import APP_NAME, full_version
@@ -776,11 +776,18 @@ def main() -> int:
     ui_mode = os.environ.get("RYU_UI_MODE", "premium-v2").strip().casefold()
     if ui_mode in {"premium-v2", "html", "web"}:
         from app.ui.premium_v2_host import PremiumV2Window, frontend_path
-        if frontend_path().is_file():
-            window = PremiumV2Window()
-        else:
-            window = ProjectWorkflow()
-            window.setWindowTitle(f"{APP_NAME} • {full_version()}")
+        premium_frontend = frontend_path()
+        if not premium_frontend.is_file():
+            QMessageBox.critical(
+                None,
+                f"{APP_NAME} — interface unavailable",
+                "The approved Premium V2 Dragon Studio interface is missing.\n\n"
+                f"Expected file: {premium_frontend}\n\n"
+                "The older interface will not be loaded as a fallback. "
+                "Repair or reinstall Ryu's Audiobook from a verified build.",
+            )
+            return 2
+        window = PremiumV2Window()
     else:
         window = ProjectWorkflow()
         window.setWindowTitle(f"{APP_NAME} • {full_version()}")
