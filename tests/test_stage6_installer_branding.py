@@ -179,6 +179,25 @@ class InstallerBrandingContractTests(unittest.TestCase):
         self.assertNotIn("cleanup_actions_storage.ps1", workflow)
         self.assertNotIn("gh api --method DELETE", workflow)
 
+    def test_frozen_build_explicitly_requires_current_feature_modules(self):
+        build_script = (ROOT / "build.py").read_text(encoding="utf-8")
+        required_section = build_script.split("required_modules = [", 1)[1].split("]", 1)[0]
+        required_modules = (
+            "app.ui.dashboard_page",
+            "app.ui.character_library",
+            "app.ui.audiobooks_page",
+            "app.ui.history_page",
+            "app.ui.settings_page",
+            "app.ui.premium_v2_host",
+            "app.core.character_library",
+            "app.core.project_history",
+            "app.core.project_trash",
+        )
+        for module in required_modules:
+            with self.subTest(module=module):
+                self.assertIn(f'"{module}"', required_section)
+        self.assertIn('"--collect-submodules=app"', build_script)
+
 
 if __name__ == "__main__":
     unittest.main()

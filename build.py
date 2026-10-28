@@ -371,6 +371,17 @@ build_logo_assets()
 write_installer_version()
 
 required_modules = [
+    # Explicitly freeze current production features that are loaded dynamically
+    # by the Premium V2 shell and book/workflow navigation.
+    "app.ui.dashboard_page",
+    "app.ui.character_library",
+    "app.ui.audiobooks_page",
+    "app.ui.history_page",
+    "app.ui.settings_page",
+    "app.ui.premium_v2_host",
+    "app.core.character_library",
+    "app.core.project_history",
+    "app.core.project_trash",
     "app.ui.assembly_page",
     "app.ui.chapter_editor",
     "app.ui.generation_page",
