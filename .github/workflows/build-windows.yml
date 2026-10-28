@@ -600,7 +600,7 @@ jobs:
           retention-days: 30
 
       - name: Remove older Windows build runs and artifacts
-        if: success()
+        if: success() && contains(github.event.head_commit.message, '[artifact-checkpoint]')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -623,7 +623,7 @@ jobs:
           Write-Host "Only the newly uploaded Windows build is retained."
 
       - name: Publish verified installer release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[artifact-checkpoint]')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
