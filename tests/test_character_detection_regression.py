@@ -42,5 +42,40 @@ class CharacterDetectionRegressionTests(unittest.TestCase):
         self.assertEqual(result.dialogue_total, 3)
 
 
+    def test_first_person_self_identification_is_preserved_as_narrating_character(self):
+        chapter = Chapter(
+            number=1,
+            title="The Beginning",
+            text=(
+                "My name is Rias Gremory. I was walking through the courtyard. "
+                "I heard footsteps behind me."
+            ),
+        )
+        result = analyze_book([chapter])
+        narrator = next(
+            (character for character in result.characters
+             if character.name.casefold() == "rias gremory"),
+            None,
+        )
+        self.assertIsNotNone(narrator)
+        self.assertEqual(narrator.role, "Narrating Character")
+
+    def test_common_sentence_initial_words_are_not_misclassified_as_characters(self):
+        chapter = Chapter(
+            number=1,
+            title="False Positive Guard",
+            text=(
+                "Wait, I thought this was the wrong road. "
+                "Magic was everywhere in that strange room. "
+                "Honestly, I did not know what to say. "
+                "Later, the rain stopped."
+            ),
+        )
+        result = analyze_book([chapter])
+        names = {character.name.casefold() for character in result.characters}
+        self.assertTrue(names.isdisjoint({"wait", "magic", "honestly", "later"}))
+
+
+
 if __name__ == "__main__":
     unittest.main()

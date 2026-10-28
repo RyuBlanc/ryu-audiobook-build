@@ -244,10 +244,12 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn('if len(project.chapters) <= 1:', host)
         self.assertIn('A project must keep at least one chapter.', host)
-        self.assertIn('assignment_offset = len(previous_text + separator)', host)
+        merge_method = host[host.index("def _chapter_merge("):host.index("def _chapter_split(")]
+        self.assertIn("from app.chapters.editor import _remap_assignments", merge_method)
+        self.assertIn("merged_text = merged_raw.strip()", merge_method)
+        self.assertIn("previous.dialogue_assignments = _remap_assignments(merged_text, assignments)", merge_method)
         self.assertIn('removed_leading = len(current_original) - len(current_text)', host)
-        self.assertIn('shifted["start"] = max(0, shifted["start"] - removed_leading) + assignment_offset', host)
-        self.assertIn('shifted["end"] = max(0, shifted["end"] - removed_leading) + assignment_offset', host)
+        self.assertIn("right_offset = len(previous_text + separator) - leading_trim - removed_leading", merge_method)
         self.assertIn("const openChapterNumber = Number(window.ryuPremiumSelectedChapter || 0)", adapter)
         self.assertIn("await chapterSavePromise.catch(() => {});", adapter)
 
