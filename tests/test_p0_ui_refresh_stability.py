@@ -62,19 +62,68 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("if (requestToken !== activeProjectCardEpoch)", refresh)
         self.assertIn("window.ryuPremiumActiveProject = null", refresh)
 
+
+    def test_every_project_open_route_uses_one_draft_safe_transition(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("async function openProjectWithPreservedDraft(folder)")
+        end = adapter.index("// Dashboard recent cards are re-rendered", start)
+        transition = adapter[start:end]
+        self.assertLess(
+            transition.index("await flushChapterDraftBeforeSwitch()"),
+            transition.index("call('project.open', {folder:targetFolder})"),
+        )
+        for required in (
+            "chapterListEpoch++",
+            "chapterSelectionEpoch++",
+            "characterListEpoch++",
+            "characterSuggestionsEpoch++",
+            "await refreshCurrentProjectCard()",
+            "String(active.folder || '') !== targetFolder",
+            "await refreshProjects()",
+            "await refreshChapters()",
+            "await refreshCharacters()",
+        ):
+            self.assertIn(required, transition)
+
+        for route in (
+            "openProjectWithPreservedDraft(c.source_project_folder)",
+            "openProjectWithPreservedDraft(folder)",
+            "openProjectWithPreservedDraft(button.dataset.openProject)",
+            "openProjectWithPreservedDraft(recentProject.dataset.projectFolder)",
+            "openProjectWithPreservedDraft(candidate.folder)",
+        ):
+            self.assertIn(route, adapter)
+        self.assertEqual(adapter.count("call('project.open'"), 1)
+
+    def test_project_open_does_not_start_a_racing_fire_and_forget_active_refresh(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("const call = async (command, payload = {}) =>")
+        end = adapter.index("const esc =", start)
+        bridge_call = adapter[start:end]
+        self.assertNotIn("command === 'project.open'", bridge_call)
+        self.assertIn("if (command === 'project.rename')", bridge_call)
+        start = adapter.index("async function openProjectWithPreservedDraft(folder)")
+        end = adapter.index("// Dashboard recent cards are re-rendered", start)
+        self.assertIn("await refreshCurrentProjectCard()", adapter[start:end])
+
     def test_project_switch_flushes_pending_chapter_edits_before_open(self):
         adapter = (
             ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
         ).read_text(encoding="utf-8")
-        dashboard_start = adapter.index("if ($('dashboard')) $('dashboard').addEventListener('click'")
-        library_start = adapter.index("if ($('libraryGrid')) $('libraryGrid').addEventListener('click'", dashboard_start)
-        dashboard = adapter[dashboard_start:library_start]
-        library_end = adapter.index("if ($('libraryGrid') && !$('libraryGrid').dataset.bulkDeleteBound)", library_start)
-        library = adapter[library_start:library_end]
-        for block in (dashboard, library):
-            self.assertLess(block.index("await flushChapterDraftBeforeSwitch()"), block.index("call('project.open'"))
-            self.assertLess(block.index("call('project.open'"), block.index("await refreshCurrentProjectCard()"))
-            self.assertIn("await refreshChapters()", block)
+        start = adapter.index("async function openProjectWithPreservedDraft(folder)")
+        end = adapter.index("// Dashboard recent cards are re-rendered", start)
+        transition = adapter[start:end]
+        self.assertLess(
+            transition.index("await flushChapterDraftBeforeSwitch()"),
+            transition.index("call('project.open', {folder:targetFolder})"),
+        )
+        self.assertIn("await refreshCurrentProjectCard()", transition)
+        self.assertIn("await refreshChapters()", transition)
+        self.assertIn("await refreshCharacters()", transition)
 
     def test_empty_chapter_state_clears_prototype_text_and_disables_editing(self):
         adapter = (

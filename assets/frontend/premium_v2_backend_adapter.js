@@ -237,9 +237,10 @@
     const response = await window.ryuBackend.invoke(command, payload);
     if (!response?.success) throw new Error(response?.error?.message || command + ' failed.');
     const data = response.data;
-    if (command === 'project.open') {
-      void refreshCurrentProjectCard('Opened · saved locally').catch(() => {});
-    } else if (command === 'project.rename') {
+    // Project-open refreshes are owned by openProjectWithPreservedDraft().
+    // Starting a second fire-and-forget active-project read here can race the
+    // caller's verified transition and briefly re-apply stale identity.
+    if (command === 'project.rename') {
       void refreshCurrentProjectCard('Renamed · saved locally').catch(() => {});
     }
     return data;
@@ -5396,7 +5397,7 @@
       if(save&&libraryEditorActive){e.preventDefault();e.stopImmediatePropagation();saveLibraryEditor().catch(err=>message(err?.message||String(err),true));return;}
       if(del&&libraryEditorActive){e.preventDefault();e.stopImmediatePropagation();if(!libraryEditorId){libraryEditorActive=false;$('characterEditorModal')?.classList.remove('show');if($('editCharacterVoice'))$('editCharacterVoice').disabled=false;return;}const c=libraryCharacters.find(x=>String(x.id)===String(libraryEditorId));if(!c||!window.confirm('Move '+c.name+' to the Character Recovery Bin? You can restore it later.'))return;call('character_library.delete',{id:libraryEditorId}).then(()=>{libraryEditorActive=false;$('characterEditorModal')?.classList.remove('show');if($('editCharacterVoice'))$('editCharacterVoice').disabled=false;return refreshCharacterLibrary();}).then(()=>message('Character moved to the Recovery Bin.')).catch(err=>message(err?.message||String(err),true));return;}
       if(e.target.closest('#characterLibrarySearch, #characterSeriesFilter'))setTimeout(()=>refreshCharacterLibrary().catch(err=>message(err?.message||String(err),true)),0);
-      if(studio){e.preventDefault();e.stopImmediatePropagation();const c=libraryCharacters.find(x=>String(x.id)===studio.dataset.characterStudio);if(!c){message('Choose a saved character first.',true);return;}if(!c.source_project_folder){window.ryuPremiumSelectedCharacter=c.name;window.go?.('characters');message('Opened Character Studio. Open a project from this series to assign a voice.');return;}void (async()=>{try{await call('project.open',{folder:c.source_project_folder});await refreshProjects();await refreshChapters();await refreshCharacters();window.ryuPremiumSelectedCharacter=c.name;window.go?.('characters');const castItem=[...document.querySelectorAll('[data-character-name]')].find(node=>node.dataset.characterName===c.name);castItem?.click();message('Opened Character Studio for '+c.name+'. Manage its voice assignment here.');}catch(err){message(err?.message||String(err),true);}})();return;}
+      if(studio){e.preventDefault();e.stopImmediatePropagation();const c=libraryCharacters.find(x=>String(x.id)===studio.dataset.characterStudio);if(!c){message('Choose a saved character first.',true);return;}if(!c.source_project_folder){window.ryuPremiumSelectedCharacter=c.name;window.go?.('characters');message('Opened Character Studio. Open a project from this series to assign a voice.');return;}void (async()=>{try{await openProjectWithPreservedDraft(c.source_project_folder);window.ryuPremiumSelectedCharacter=c.name;window.go?.('characters');const castItem=[...document.querySelectorAll('[data-character-name]')].find(node=>node.dataset.characterName===c.name);castItem?.click();message('Opened Character Studio for '+c.name+'. Manage its voice assignment here.');}catch(err){message(err?.message||String(err),true);}})();return;}
       if(test){e.preventDefault();e.stopImmediatePropagation();const c=libraryCharacters.find(x=>String(x.id)===test.dataset.testLibrary);const profile=voices.find(v=>String(v.name).toLowerCase()===String(c?.voice||'').toLowerCase());if(!c||!profile){message('No matching saved voice profile exists for this character. Choose a saved profile in Voice Studio first.',true);return;}call('voice.preview',{profile_name:profile.name,text:'Hello, my name is '+c.name+'.',duration_seconds:10}).then(data=>monitorJob(data.job_id,async job=>{const url=job?.result?.file_url;if(!url)throw new Error('The character preview finished without a playable audio file.');if(previewAudio)previewAudio.pause();previewAudio=new Audio(url);await previewAudio.play();message('Playing character voice preview.');})).catch(err=>message(err?.message||String(err),true));return;}
     }, true);
     // These selectors change real UI state; the previous HTML prototype left them inert.
@@ -5519,6 +5520,35 @@
       const q=$('pronSearchAdvanced').value.trim().toLowerCase();
       $('pronDictionaryBody')?.querySelectorAll('tr,[data-pron-row]').forEach(el=>el.hidden=!el.textContent.toLowerCase().includes(q));
     };
+
+  async function openProjectWithPreservedDraft(folder) {
+    const targetFolder = String(folder || '').trim();
+    if (!targetFolder) throw new Error('Choose a local project before opening it.');
+
+    // This is the only path allowed to switch the backend's active project.
+    // A failed save aborts the switch; all open routes then invalidate old
+    // chapter/cast reads, verify the new active folder, and hydrate in order.
+    await flushChapterDraftBeforeSwitch();
+    chapterListEpoch++;
+    chapterSelectionEpoch++;
+    characterListEpoch++;
+    characterSuggestionsEpoch++;
+
+    const opened = await call('project.open', {folder:targetFolder});
+    const active = await refreshCurrentProjectCard();
+    if (!active || String(active.folder || '') !== targetFolder) {
+      throw new Error(
+        'The active project could not be verified after opening. The view was not refreshed with potentially stale project data. Retry from Library.'
+      );
+    }
+    await refreshProjects();
+    await refreshChapters();
+    await refreshCharacters();
+
+    const listed = projects.find(project => String(project.folder || '') === targetFolder) || {};
+    return {...listed, ...(opened && typeof opened === 'object' ? opened : {}), folder:targetFolder};
+  }
+
     // Dashboard recent cards are re-rendered from backend project records. Delegate
     // clicks from the stable dashboard container so refreshed cards open their own project.
     if ($('dashboard')) $('dashboard').addEventListener('click', async e => {
@@ -5529,18 +5559,7 @@
       const folder = card.dataset.projectFolder;
       if (!folder) { message('This dashboard card has no local project folder.', true); return; }
       try {
-        await flushChapterDraftBeforeSwitch();
-        // Invalidate older chapter/cast replies before the backend changes its
-        // active-project pointer; they must not repaint the new project's UI.
-        chapterListEpoch++;
-        chapterSelectionEpoch++;
-        characterListEpoch++;
-        characterSuggestionsEpoch++;
-        const opened = await call('project.open', {folder});
-        await refreshCurrentProjectCard();
-        await refreshProjects();
-        await refreshChapters();
-        await refreshCharacters();
+        const opened = await openProjectWithPreservedDraft(folder);
         if (typeof window.go === 'function') window.go('chapters');
         message('Opened local project: ' + (opened.title || opened.folder || 'project'));
       } catch (err) {
@@ -5571,16 +5590,7 @@
       const button = e.target.closest('[data-open-project]'); if (!button) return;
       button.disabled = true;
       try {
-        await flushChapterDraftBeforeSwitch();
-        chapterListEpoch++;
-        chapterSelectionEpoch++;
-        characterListEpoch++;
-        characterSuggestionsEpoch++;
-        const opened = await call('project.open', {folder:button.dataset.openProject});
-        await refreshCurrentProjectCard();
-        await refreshProjects();
-        await refreshChapters();
-        await refreshCharacters();
+        const opened = await openProjectWithPreservedDraft(button.dataset.openProject);
         if (typeof window.go === 'function') window.go('chapters');
         message('Opened local project: ' + (opened.title || opened.folder || 'project'));
       }
@@ -6012,8 +6022,7 @@
       if (recentProject) {
         e.preventDefault(); e.stopImmediatePropagation();
         try {
-          const opened = await call('project.open', {folder:recentProject.dataset.projectFolder});
-          await refreshProjects(); await refreshChapters(); await refreshCharacters();
+          const opened = await openProjectWithPreservedDraft(recentProject.dataset.projectFolder);
           const destination = navigateToProjectStage(opened, routeForResume(opened));
           message('Opened local project: ' + (opened.title || 'project') + ' · ' + destination + '.');
         } catch (err) { message(err?.message || String(err), true); }
@@ -6047,10 +6056,7 @@
               dashboardProject?.folder || '';
             const candidate = projects.find(project => project.folder === folder) || null;
             if (!candidate) throw new Error('Select a saved project or use Create New Project to import a book.');
-            const opened = await call('project.open', {folder:candidate.folder});
-            await refreshProjects();
-            await refreshChapters();
-            await refreshCharacters();
+            const opened = await openProjectWithPreservedDraft(candidate.folder);
             const destination = navigateToProjectStage(opened, routeForResume(opened));
             message('Continuing ' + (opened.title || candidate.title) + ' · ' + destination + '.');
           } catch (err) { message(err?.message || String(err), true); }
