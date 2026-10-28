@@ -14,6 +14,10 @@ This batch follows the repository's Import + Chapter Studio roadmap. It does not
 - Explicitly skipped text remains excluded after a split/merge of boundaries; this conservatively skips a new chapter if it overlaps previously excluded text.
 - Dialogue assignment offsets are remapped from absolute source spans. Assignments that no longer map exactly to one chapter are dropped rather than left with stale offsets, and the user is told the count.
 - Added dedicated regression tests for re-detection text preservation, manual title/review/skip persistence, assignment remapping, empty chapters, and failure-without-mutation.
+- Added a before/after chapter re-detection preview that makes no changes by itself; applying it requires a SHA-256 fingerprint matching the current saved chapter data. Missing or stale preview tokens reject the save.
+- Invalidated chapter undo/redo stacks after structural edits so history keyed by chapter number cannot be applied to another chapter after numbering changes.
+- Corrected case-insensitive Find/Replace to use regex matches and offsets in the original text, avoiding corrupt offsets when Unicode case conversion changes string length.
+- Added regression coverage for editor operations, Unicode Find/Replace source offsets, preview-only behavior, stale-preview rejection, and the successful preview-then-apply flow.
 
 ## Automated test and artifact evidence — successful checkpoint
 
