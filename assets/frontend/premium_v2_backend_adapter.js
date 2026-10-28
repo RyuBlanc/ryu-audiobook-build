@@ -3354,7 +3354,7 @@
   }
   async function refreshJobsImpl() {
     const allJobs = await call('job.list', {include_hidden:false});
-    refreshDashboardGeneration(allJobs);
+    if (dashboardPageActive()) refreshDashboardGeneration(allJobs);
     const jobs = allJobs.filter(j => backendJobFilter === 'all' ||
       (backendJobFilter === 'completed' ? j.state === 'completed' :
       (backendJobFilter === 'failed' ? j.state === 'failed' :
@@ -3419,6 +3419,7 @@
     return allJobs;
   }
   async function monitorJob(jobId, done, terminal) {
+    const originPage = document.querySelector('.page.active')?.id || '';
     const monitorToken = ++monitorEpoch;
     activeJob = jobId;
     activeJobType = null;
@@ -3439,14 +3440,28 @@
         if (!job) return;
         if (activeJob === jobId) activeJobType = job.type || null;
         const pct = Math.max(0, Math.min(100, Number(job.progress || 0)));
-        setTextIfChanged($('genPercent'), Math.round(pct) + '%');
-        setCssPropertyIfChanged($('genRing'), '--progress', pct + '%');
-        setStyleIfChanged($('importBar'), 'width', pct + '%');
-        setTextIfChanged($('genStage'), job.stage || job.message || job.state);
-        setTextIfChanged($('aiProgressText'), job.stage || job.message || job.state);
-        setStyleIfChanged($('aiProgressBar'), 'width', pct + '%');
-        setStyleIfChanged($('previewProgress'), 'width', pct + '%');
-        if ($('previewState') && job.type === 'voice-preview') {
+        const originPageVisible = Boolean(originPage && $(originPage)?.classList.contains('active'));
+        // A shared monitor can outlive the page that started it. Only update the
+        // originating page's dedicated progress widgets, and only for matching
+        // job types. Background Jobs and History remain live across navigation.
+        if (originPageVisible && originPage === 'generate' &&
+            ['audiobook-generation','voice-preview'].includes(job.type)) {
+          setTextIfChanged($('genPercent'), Math.round(pct) + '%');
+          setCssPropertyIfChanged($('genRing'), '--progress', pct + '%');
+          setTextIfChanged($('genStage'), job.stage || job.message || job.state);
+        }
+        if (originPageVisible && originPage === 'import' && job.type === 'import') {
+          setStyleIfChanged($('importBar'), 'width', pct + '%');
+          setTextIfChanged($('importStatus'), job.message || job.stage || job.state);
+        }
+        if (originPageVisible && originPage === 'characters' && job.type === 'character-analysis') {
+          setTextIfChanged($('aiProgressText'), job.stage || job.message || job.state);
+          setStyleIfChanged($('aiProgressBar'), 'width', pct + '%');
+        }
+        if (originPageVisible && originPage === 'voices' && job.type === 'voice-preview') {
+          setStyleIfChanged($('previewProgress'), 'width', pct + '%');
+        }
+        if (originPageVisible && originPage === 'voices' && $('previewState') && job.type === 'voice-preview') {
           const previewDetail = String(job.message || '').trim();
           const elapsedMatch = previewDetail.match(/elapsed \d+:\d{2}/i);
           const previewDetailIsUseful = Boolean(elapsedMatch) ||
@@ -5759,6 +5774,15 @@
           if (page && page.classList.contains('active')) {
             refreshPerformance().catch(error => message(error?.message || String(error), true));
           }
+        }, 0);
+      }, true);
+    }
+    if (!window.__ryuDashboardRefreshBound) {
+      window.__ryuDashboardRefreshBound = true;
+      document.addEventListener('click', event => {
+        if (!event.target.closest('.nav-btn[data-page="dashboard"],[data-page="dashboard"]')) return;
+        setTimeout(() => {
+          if (dashboardPageActive()) refreshJobs().catch(() => {});
         }, 0);
       }, true);
     }

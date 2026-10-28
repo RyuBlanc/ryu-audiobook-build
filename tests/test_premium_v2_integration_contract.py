@@ -836,10 +836,16 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             adapter,
         )
         self.assertIn("e.target.closest('.recent-grid [data-project-folder]')", adapter)
-        self.assertIn("call('project.open', {folder})", adapter)
-        self.assertIn("await refreshChapters()", adapter)
-        self.assertIn("await refreshCharacters()", adapter)
-        self.assertIn("window.go('chapters')", adapter)
+        self.assertIn("async function openProjectAndRefresh(folder)", adapter)
+        open_helper_start = adapter.index("async function openProjectAndRefresh(folder)")
+        open_helper_end = adapter.index("async function wire()", open_helper_start)
+        open_helper = adapter[open_helper_start:open_helper_end]
+        self.assertLess(open_helper.index("await flushChapterDraftBeforeSwitch()"), open_helper.index("call('project.open', {folder:targetFolder})"))
+        self.assertIn("openProjectAndRefresh(folder)", adapter)
+        self.assertIn("openProjectAndRefresh(button.dataset.openProject)", adapter)
+        self.assertIn("await refreshChapters()", open_helper)
+        self.assertIn("await refreshCharacters()", open_helper)
+        self.assertIn("window.go('chapters')", open_helper)
 
 
     def test_workflow_tracker_highlights_only_the_active_screen(self):
@@ -1293,6 +1299,25 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("await refreshProjects().catch(() => {});", monitor)
         self.assertIn("await refreshHistory().catch(() => {});", monitor)
         self.assertLess(monitor.index(gate), monitor.index("await refreshChapters().catch(()=>{})"))
+
+    def test_job_monitor_progress_updates_are_scoped_to_originating_visible_screen(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("async function monitorJob(")
+        end = adapter.index("function requestElevenLabsApiKey()", start)
+        monitor = adapter[start:end]
+        self.assertIn("const originPage = document.querySelector('.page.active')?.id || ''", monitor)
+        self.assertIn("const originPageVisible = Boolean(originPage && $(originPage)?.classList.contains('active'))", monitor)
+        for required in (
+            "originPage === 'generate' &&",
+            "['audiobook-generation','voice-preview'].includes(job.type)",
+            "originPage === 'import' && job.type === 'import'",
+            "originPage === 'characters' && job.type === 'character-analysis'",
+            "originPage === 'voices' && job.type === 'voice-preview'",
+        ):
+            self.assertIn(required, monitor)
+        self.assertIn("if (dashboardPageActive()) refreshDashboardGeneration(allJobs)", adapter)
+        self.assertIn("window.__ryuDashboardRefreshBound = true", adapter)
+
     def test_job_polling_updates_existing_rows_without_rebuilding_hidden_panel(self):
         """Job polling should not repeatedly replace DOM rows and trigger visible flicker."""
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
