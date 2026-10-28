@@ -5317,13 +5317,6 @@
   }
 
   async function wire() {
-    // The approved HTML carries an older timer-driven splash with an embedded
-    // preview JPEG. The native Windows splash uses the real bundled logo and
-    // backend-driven progress, so remove the duplicate before any await or
-    // backend work; its timer can no longer cover the live startup surface.
-    const legacyLoader = $('appLoader');
-    if (legacyLoader) legacyLoader.remove();
-
     // The native splash is still visible while controls are bound and the first
     // local backend calls are verified. Keep it animated instead of showing a
     // stationary percentage during this real setup work.
@@ -7000,6 +6993,12 @@
       });
       window.__ryuBackendJobsObserver.observe(jobsBox, {childList:true,subtree:false});
     }
+    // Keep the approved HTML loader visible until the local bridge is connected,
+    // required project/voice/chapter hydration has completed, and all essential
+    // handlers have been registered. The desktop host prevents the prototype's
+    // short demo timer from dismissing it during this real startup path.
+    const legacyLoader = $('appLoader');
+    if (legacyLoader) legacyLoader.remove();
     message('Premium V2 local backend connected.');
   }
   const start = () => wire().then(() => {
@@ -7017,4 +7016,3 @@
     message(window.__ryuPremiumAdapterFailure, true);
   });
   if (window.ryuBackend?.invoke) start(); else window.addEventListener('ryu-backend-ready', start, {once:true});
-})();
