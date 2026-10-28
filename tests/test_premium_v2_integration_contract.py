@@ -769,10 +769,18 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             adapter,
         )
         self.assertIn("e.target.closest('.recent-grid [data-project-folder]')", adapter)
-        self.assertIn("call('project.open', {folder})", adapter)
+        dashboard_start = adapter.index("if ($('dashboard')) $('dashboard').addEventListener('click', async e => {")
+        library_start = adapter.index("if ($('libraryGrid')) $('libraryGrid').addEventListener('click'", dashboard_start)
+        dashboard_handler = adapter[dashboard_start:library_start]
+        self.assertIn("openProjectWithPreservedDraft(folder)", dashboard_handler)
+        self.assertNotIn("call('project.open'", dashboard_handler)
         self.assertIn("await refreshChapters()", adapter)
         self.assertIn("await refreshCharacters()", adapter)
-        self.assertIn("window.go('chapters')", adapter)
+        transition_start = adapter.index("async function openProjectWithPreservedDraft(folder)")
+        transition_end = adapter.index("// Dashboard recent cards are re-rendered", transition_start)
+        transition = adapter[transition_start:transition_end]
+        self.assertIn("call('project.open', {folder:targetFolder})", transition)
+        self.assertIn("window.go('chapters')", dashboard_handler)
 
 
     def test_workflow_tracker_highlights_only_the_active_screen(self):
