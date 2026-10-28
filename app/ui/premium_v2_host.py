@@ -6179,7 +6179,7 @@ class PremiumV2Window(QMainWindow):
             self._show_web_failure(message)
             return
         script += "\n" + adapter_source
-        self._update_startup_progress("Starting saved-settings and project checks…", 28)
+        self._update_startup_progress("Preparing the local backend bridge…", 22)
         self.web.page().runJavaScript(script)
         # Check for a UI that loaded at the HTML level but never finished
         # initializing the backend adapter. This gives the user a native

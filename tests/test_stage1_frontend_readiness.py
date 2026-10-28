@@ -118,6 +118,19 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
         self.assertIn('self._loading_progress.setFormat("%p%")', window)
         self.assertIn("self._update_startup_progress", window)
 
+
+    def test_startup_percentage_order_matches_real_bridge_milestones(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        install_start = host.index("    def _install_bridge(self, ok: bool)")
+        install_end = host.index("    def _check_frontend_ready(", install_start)
+        install = host[install_start:install_end]
+        self.assertLess(
+            install.index('self._update_startup_progress("Preparing the local backend bridge…", 22)'),
+            install.index("progress:26"),
+        )
+        self.assertLess(install.index("progress:26"), install.index("self._frontend_watchdog.start(120000)"))
+        self.assertIn("self._update_startup_progress(\"Premium V2 interface loaded. Connecting to local services…\", 18)", install)
+
     def test_startup_progress_diagnostics_update_native_status_monotonically(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         diagnostic_start = host.index("def report_frontend_diagnostic(")
