@@ -36,6 +36,7 @@ from app.ui.motion import SmoothProgressBar
 from app.ui.stable_refresh import sync_combo_items_in_place
 from app.core.state import load_state, save_state
 from app.core.character_library import sync_characters
+from app.core.character_identity import character_identity_key, parse_character_identity_key, set_character_voice_assignment
 from app.tts.profile_provider import provider_from_profile
 from app.tts.preview import build_voice_preview
 from app.tts.expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT
@@ -1181,13 +1182,10 @@ class VoicePage(QWidget):
     def _voice_profile_signature(profile: VoiceProfile | None) -> tuple | None:
         if profile is None:
             return None
-        return (
-            profile.name, profile.provider, profile.voice_id, profile.model_id,
-            profile.backend, profile.language, profile.qwen_mode, profile.qwen_prompt,
-            profile.qwen_seed, profile.qwen_profile_id, profile.sample_path,
-            profile.reference_text, profile.authorized, profile.style_preset,
-            profile.exaggeration, profile.cfg_weight,
-        )
+        # Compare every persisted profile field. Omitting notes or Qwen anchor
+        # metadata can make a preview appear to belong to a profile that would
+        # synthesize different audio during final generation.
+        return tuple(asdict(profile).items())
 
     def _preview_request_is_current(self, request_id: int | None = None) -> bool:
         """Return whether a callback still belongs to the active preview request."""
@@ -1298,68 +1296,111 @@ class VoicePage(QWidget):
         if saved_profile is None:
             self.status.setText("Save this voice profile first, then generate its preview and assign it.")
             return
+        if self._voice_profile_signature(saved_profile) != self._voice_profile_signature(profile):
+            self.status.setText(
+                "The preview uses unsaved voice settings. Save/update this profile, then generate a fresh preview before assignment."
+            )
+            self._refresh_assignment_actions()
+            return
+
         window = self.window()
         cast_page = getattr(window, "voice_cast", None)
-        names = []
-        if cast_page is not None:
-            names.extend(
-                str(row.get("name") or "").strip()
-                for row in getattr(cast_page, "rows", [])
-                if str(row.get("name") or "").strip()
-            )
-        state = load_state(folder)
-        assignments = state.get("voice_cast", {})
-        if isinstance(assignments, dict):
-            names.extend(str(name).strip() for name in assignments if str(name).strip())
-        names = sorted({name for name in names if name.casefold() != "narrator"}, key=str.casefold)
-        if not names:
-            self.status.setText(
-                "No characters are available yet. Open Voice Cast, analyze the book, then assign this voice."
-            )
-            if hasattr(window, "select_section"):
-                window.select_section("Voice Cast")
-            return
-        character, ok = QInputDialog.getItem(
-            self, "Assign Voice to Character", "Character:", names, 0, False
-        )
-        if not ok or not character:
-            return
-        assignments = dict(assignments) if isinstance(assignments, dict) else {}
-        assignments[character] = saved_profile.name
-        state["voice_cast"] = assignments
-        save_state(folder, state)
-
-        # Native Voice Studio must update the shared series-level registry too,
-        # not only this book's voice_cast mapping. Sync only this character so
-        # unrelated/unassigned character voices are never cleared by the update.
-        library_sync_error = None
         project = getattr(window, "project", None)
+        state = load_state(folder)
         metadata = state.get("metadata") if isinstance(state.get("metadata"), dict) else {}
-        series = str(
+        default_series = str(
             state.get("series_name")
             or state.get("series")
             or metadata.get("series")
             or getattr(project, "title", "")
             or ""
         ).strip()
-        if series:
-            roster = state.get("voice_cast_character_roster", [])
+
+        # Keep identity choices series-scoped. A name-only prompt is ambiguous
+        # when a book/collection contains the same character name in two series.
+        candidates: dict[str, tuple[str, str]] = {}
+
+        def add_candidate(raw_name, raw_series=""):
+            name = str(raw_name or "").strip()
+            if not name or name.casefold() == "narrator":
+                return
+            series = str(raw_series or default_series).strip()
+            candidates.setdefault(character_identity_key(name, series), (name, series))
+
+        if cast_page is not None:
+            for row in getattr(cast_page, "rows", []):
+                if isinstance(row, dict):
+                    add_candidate(row.get("name"), row.get("series"))
+        roster = state.get("voice_cast_character_roster", [])
+        if isinstance(roster, list):
+            for row in roster:
+                if isinstance(row, dict):
+                    add_candidate(row.get("name"), row.get("series"))
+        identity_assignments = state.get("voice_cast_identity_assignments", {})
+        if isinstance(identity_assignments, dict):
+            for raw_key in identity_assignments:
+                parsed = parse_character_identity_key(str(raw_key))
+                if parsed:
+                    parsed_series, parsed_name = parsed
+                    add_candidate(parsed_name, parsed_series)
+        assignments = state.get("voice_cast", {})
+        if isinstance(assignments, dict):
+            for name in assignments:
+                add_candidate(name, default_series)
+
+        if not candidates:
+            self.status.setText(
+                "No characters are available yet. Open Voice Cast, analyze the book, then assign this voice."
+            )
+            if hasattr(window, "select_section"):
+                window.select_section("Voice Cast")
+            return
+
+        ordered = sorted(candidates.values(), key=lambda item: (item[0].casefold(), item[1].casefold()))
+        series_by_name: dict[str, set[str]] = {}
+        for name, series in ordered:
+            series_by_name.setdefault(name.casefold(), set()).add(series.casefold())
+        label_to_identity: dict[str, tuple[str, str]] = {}
+        for name, series in ordered:
+            label = name
+            if len(series_by_name[name.casefold()]) > 1:
+                label = f"{name} — {series or '(series not set)'}"
+            label_to_identity[label] = (name, series)
+        choices = list(label_to_identity)
+        selected_label, ok = QInputDialog.getItem(
+            self, "Assign Voice to Character", "Character:", choices, 0, False
+        )
+        if not ok or not selected_label:
+            return
+        character, character_series = label_to_identity[selected_label]
+
+        # Update both lookup formats. CastAwareProvider intentionally treats an
+        # existing scoped value (including an empty one) as authoritative, so
+        # writing only the legacy name map can leave generation on a stale voice.
+        state = set_character_voice_assignment(
+            state, character, character_series, saved_profile.name
+        )
+        save_state(folder, state)
+
+        # Update the shared series-level registry without replacing unrelated
+        # character records or their richer metadata.
+        library_sync_error = None
+        if character_series:
             roster_row = next(
                 (
                     row for row in roster
                     if isinstance(row, dict)
                     and str(row.get("name") or "").strip().casefold() == character.casefold()
+                    and str(row.get("series") or default_series).strip().casefold() == character_series.casefold()
                 ),
                 None,
             ) if isinstance(roster, list) else None
-            # Only update the selected identity and voice. Sending analysis
-            # confidence/line counts here could overwrite richer library metadata.
             source_row = {"name": character, "voice": saved_profile.name}
             if isinstance(roster_row, dict) and isinstance(roster_row.get("aliases"), list):
                 source_row["aliases"] = list(roster_row["aliases"])
             try:
                 sync_characters(
-                    series,
+                    character_series,
                     [source_row],
                     source_project_folder=str(folder),
                     source_project_title=str(getattr(project, "title", "") or ""),
@@ -1372,7 +1413,11 @@ class VoicePage(QWidget):
 
         if cast_page is not None:
             for row in getattr(cast_page, "rows", []):
-                if str(row.get("name", "")).casefold() == character.casefold():
+                row_series = str(row.get("series") or default_series).strip()
+                if (
+                    str(row.get("name", "")).strip().casefold() == character.casefold()
+                    and row_series.casefold() == character_series.casefold()
+                ):
                     row["voice"] = saved_profile.name
             cast_page._refresh_labels()
         generation = getattr(window, "generation", None)
@@ -1389,6 +1434,7 @@ class VoicePage(QWidget):
                 f"Assigned '{saved_profile.name}' to {character} for this book and series Character Library."
             )
         self._refresh_assignment_actions()
+
     def _set_voice_step(self, index: int) -> None:
         """Select a Voice Studio step without rebuilding or losing its controls."""
         self.voice_step_index = max(0, min(3, int(index)))
