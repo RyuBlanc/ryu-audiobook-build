@@ -588,9 +588,12 @@ class NativeCharacterAssignmentDialog(QDialog):
             self.status.setText("Select a saved character or AI suggestion first.")
             return
         self.action = "assign"
+        # The combo is preselected from the saved character when available.
+        # Once the user chooses "Unassigned", preserve that explicit empty
+        # value instead of falling back to the character's previous profile.
         self.character_result = {
             **value,
-            "voice_profile": str(self.profile.currentData() or value.get("voice_profile") or ""),
+            "voice_profile": str(self.profile.currentData() or ""),
         }
         self.accept()
 
@@ -1253,17 +1256,29 @@ class NativeCharacterDialoguePanel(QWidget):
         else:
             row["series"] = series
             row["aliases"] = aliases or list(row.get("aliases") or [])
-        if profile_name:
-            if not any(profile.name == profile_name for profile in load_profiles()):
-                QMessageBox.warning(self, "Voice profile unavailable", "This voice profile is no longer saved. The character assignment was saved, but the profile was not changed.")
-            else:
-                row["voice"] = profile_name
+        if profile_name and not any(profile.name == profile_name for profile in load_profiles()):
+            QMessageBox.warning(
+                self, "Voice profile unavailable",
+                "This voice profile is no longer saved. The dialogue assignment was not changed; select a saved profile and retry.",
+            )
+            # The dialogue was persisted above. Roll it back too so the UI does
+            # not report a speaker/profile combination that was not accepted.
+            chapter.dialogue_assignments = existing
+            try:
+                project.save()
+            except Exception:
+                pass
+            return
+        # A blank name is the dialog's explicit "Unassigned" choice. Clear the
+        # character's prior voice and persist that change to both book and
+        # series registry instead of leaving a stale voice active.
+        row["voice"] = profile_name or None
         examples = list(row.get("examples") or [])
         if exact not in examples:
             examples.insert(0, exact)
         row["examples"] = examples[:12]
         self.cast_page._refresh_character_counts()
-        self.cast_page._save_cast(update_voice=bool(profile_name))
+        self.cast_page._save_cast(update_voice=True)
         try:
             record_assignment_feedback(
                 series=series, speaker=name, aliases=aliases,
