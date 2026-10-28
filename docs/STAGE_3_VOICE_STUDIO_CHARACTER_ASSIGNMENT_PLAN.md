@@ -44,22 +44,26 @@
 
 Stage 2 PR #17 was merged after Run #877 succeeded. The Stage 2 packaged-Windows acceptance items remain release gates: duplicate import guidance, cancellation/retry, real supported-format imports, and edit/reopen comparison on the target PC. Stage 1 hardware-specific freeze/crash acceptance also remains open.
 
-Stage 3 implementation and automated/package gates passed Run #894 on commit `ec20d76106e01971e16c045a475eb72f78115c83`. Changes include character metadata preservation on partial updates, renamed-character aliases, cast routing regression coverage, and fail-closed handling for missing assigned voice profiles. The complete unittest suite and Windows packaging pipeline passed. Remaining Stage 3 items are explicitly listed below: behavioral edge-case/persistence tests and target-PC audio/UI acceptance.
+Stage 3 automated coverage and package gates passed the earlier Run #894 baseline and were extended in Runs #1491–#1495. The completed automated work now covers character metadata/alias lifecycle, analysis persistence, assignment offset integrity through chapter edits, cast-to-narrator routing, missing-profile fail-closed behavior, preview selection/duration contracts, and a newly discovered late-preview callback race. The newest test-only run is #1495 (431 tests passed); its dedicated artifact checkpoint follows this update.
+
+Stage 3 is **automated-gate complete after the pending checkpoint build**, but is not fully accepted until the packaged Windows UI/audio checks listed above are completed on the target PC. Stage 1 hardware and Stage 2 import acceptance also remain open.
 
 ## Completion rule
 
 Do not mark Stage 3 complete from a green build alone. Require regression tests, verified package output, and a clearly documented target-Windows acceptance result. Do not claim voice quality is correct without listening to the generated preview/audio.
 
 
-## Stage 3 closure work — 2026-10-28
+## Stage 3 automated closure summary — 2026-10-28
 
-The remaining automated closure work is being addressed before the checkpoint build:
-- Add behavioral tests for case-insensitive character updates, duplicate-name rejection, deletion semantics, and reference cleanup.
-- Verify character-analysis evidence and user-authored metadata survive persisted save/reload.
-- Fix split handling so dialogue offsets migrate with the right-hand chapter only when source text is unchanged; invalidate stale or boundary-crossing offsets safely.
-- Expand character-detection fixtures for first-person self-identification, short-name aliases, and attributed dialogue.
-- Change the Windows workflow so ordinary commits run the full unittest suite only; frozen-app/package/security/artifact gates run only on an explicit `[artifact-checkpoint]` commit.
-- These items remain open until the test-only CI run passes. Packaged Windows UI/audio acceptance remains a separate manual gate.
+The following automated closure items are complete and covered by the passing test-only runs:
+- [x] Case-insensitive character updates, duplicate-name rejection, deletion semantics, and assignment-reference cleanup.
+- [x] Character-analysis evidence and user-authored metadata surviving persisted save/reload, including unassigned-dialogue counts.
+- [x] Assignment offsets staying attached to the correct chapter through reorder/merge/split, with safe invalidation of stale or boundary-crossing source spans.
+- [x] First-person self-identification, short-name aliases, and attributed-dialogue fixtures.
+- [x] Ordinary commits running the full unittest suite only; package/security/artifact gates require an explicit `[artifact-checkpoint]` commit.
+- [x] Voice Studio stale-preview race fix: every preview callback is bound to the worker generation and the profile signature that launched it; obsolete signals cannot reactivate stale audio or clear a newer worker. See the targeted Run #1495 tests below.
+
+Do not close Stage 3 from CI alone. Packaged Windows interaction and actual audio preview/generation still require target-PC acceptance.
 
 
 ## Test-only CI result and correction — 2026-10-28
@@ -82,4 +86,16 @@ The remaining automated closure work is being addressed before the checkpoint bu
 
 - Run #1493 passed **427 tests** on commit `af626c4cceeecf7da3bc749ce07a62d1d0185eaa`: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40629252242.
 - This includes the explicit save/reload assertion for unassigned dialogue counts. The test-only run skipped frozen-app packaging, security scans, artifact upload, cleanup, and release steps as intended.
-- The following `[artifact-checkpoint]` commit will rerun the suite first and then execute the Windows package/security/artifact gates. Stage 3 is not fully accepted until the packaged Windows UI/audio checks are completed; Stage 1 hardware and Stage 2 import acceptance also remain open.
+- The follow-up checkpoint Run #1494 reran the suite and passed the Windows frozen-app, bundled-assets/modules, installer, SHA-256, Defender and artifact-upload gates; release publication remained skipped by workflow policy.
+- A subsequent review found a separate stale-preview callback race in Voice Studio. It was fixed in commit `74e312be9769b00c773e918a2575921309ebcd1e` and verified by test-only Run #1495 before the next artifact checkpoint.
+- Stage 3 is not fully accepted until packaged Windows UI/audio checks are completed; Stage 1 hardware and Stage 2 import acceptance also remain open.
+
+
+## Voice Studio stale-preview race fix — test-only Run #1495 — 2026-10-28
+
+- Commit `74e312be9769b00c773e918a2575921309ebcd1e` binds each preview worker to a generation token and the selected profile signature that launched it.
+- Invalidated/obsolete worker success, status, progress, failure and cancellation callbacks are ignored. A late finish from an older worker cannot clear a newer worker. Retry controls are not re-enabled until the current worker has actually finished, avoiding overlapping work against the shared preview output file.
+- Added `tests/test_stage3_voice_preview_race.py`: verifies stale success cannot resurrect audio, stale status cannot overwrite current UI state, old worker completion cannot clear a newer worker, and only the current generation may update UI state.
+- Run #1495 passed **431 tests in 24.661 seconds**: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40638532775. Packaging/security/artifact steps were skipped as intended for a fix commit.
+- This commit is the follow-up `[artifact-checkpoint]`: it reruns the complete suite and, if green, executes frozen-app validation, asset/module checks, installer build, SHA-256 generation, Microsoft Defender scanning, and artifact uploads.
+- Manual target-PC gates remain open: selected-profile audio actually plays through the chosen provider; saved profiles and assignments survive app restart/navigation; packaged Character Studio assignments are shown correctly; generation uses assigned character voices and narrator for surrounding narration; provider failures are actionable. Stage 1 hardware stability and Stage 2 import/edit/reopen acceptance remain separate open gates.
