@@ -471,10 +471,11 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('if value not in {10, 30, 60, 90}:', self.host)
         self.assertIn('Preview duration must be 10, 30, 60, or 90 seconds.', self.host)
 
-    def test_chapter_bgm_and_scene_cues_reach_final_assembly(self):
+    def test_chapter_bgm_reaches_final_assembly_without_fixed_scene_cue(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         assembler = (ROOT / "app" / "audio" / "assembler.py").read_text(encoding="utf-8")
         manager = (ROOT / "app" / "tts" / "manager.py").read_text(encoding="utf-8")
+        full_preview = (ROOT / "app" / "ui" / "full_book_preview.py").read_text(encoding="utf-8")
         self.assertIn('"sound.chapter_bgm.get": self._sound_chapter_bgm_get', self.host)
         self.assertIn('"sound.chapter_bgm.save": self._sound_chapter_bgm_save', self.host)
         self.assertIn('state["chapter_bgm_overrides"] = overrides', self.host)
@@ -484,10 +485,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("def _mix_chapter_bgm(", assembler)
         self.assertIn("chapter_bgm_overrides: dict[str, dict] | None = None", assembler)
         self.assertIn("mixed-chapter-background-audio", assembler)
-        self.assertIn("scene_transition_cue_path: Path | str | None = None", assembler)
-        self.assertIn("auto-real-scene-cue-", assembler)
-        self.assertIn("scene_transition_cue_path=self.scene_transition_cue_path", manager)
-
+        self.assertNotIn("auto-real-scene-cue-", assembler)
+        self.assertNotIn("scene_transition_cue_path=self.scene_transition_cue_path", manager)
+        self.assertNotIn("scene_transition_cue_path=Path(str(state[", full_preview)
     def test_performance_screen_never_displays_unmeasured_hardware_as_fact(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("async function refreshPerformance()", adapter)
@@ -498,13 +498,13 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("const result=await refreshPerformance();", adapter)
         self.assertIn('"performance.info": False', (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8"))
 
-    def test_scene_cue_feedback_matches_current_assembly_support(self):
+    def test_removed_scene_cue_has_no_success_promise_or_runtime_slot(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
-        self.assertIn("Scene transition cue saved to this book and will be included during audiobook assembly.", adapter)
-        self.assertIn("const assignedSlot = pendingCueSlot;", adapter)
-        self.assertNotIn("current audiobook assembly does not yet render a separate scene cue", adapter)
-        self.assertIn("scene_transition_cue_path=self.scene_transition_cue_path", (ROOT / "app" / "tts" / "manager.py").read_text(encoding="utf-8"))
-
+        html = (ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
+        self.assertNotIn("Scene transition cue saved to this book", adapter)
+        self.assertNotIn("sceneCueName", adapter)
+        self.assertNotIn('data-assign-cue="scene"', html)
+        self.assertNotIn('id="mixSceneCue"', html)
     def test_sound_cue_assignments_are_allowlisted_and_persisted(self):
         for command, method in (
             ("sound.cues.get", "_sound_cues_get"),
@@ -515,15 +515,14 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         start = self.host.index("def _sound_cues_save")
         end = self.host.index("def _sound_cues_clear", start)
         worker = self.host[start:end]
-        self.assertIn('{"opening", "chapter", "scene", "closing"}', worker)
+        self.assertIn('{"opening", "chapter", "closing"}', worker)
         self.assertIn('state["sound_cues"] = cues', worker)
         self.assertIn('state["opening_cue_path"] = selected_path', worker)
         self.assertIn('state["page_turn_cue_path"] = selected_path', worker)
         self.assertIn('state["ending_cue_path"] = selected_path', worker)
+        self.assertIn('state.pop("scene_transition_cue_path", None)', worker)
         self.assertIn('"generation_supported": True', worker)
-        self.assertIn('state["sound_cues"] = {"opening": None, "chapter": None, "scene": None, "closing": None}', self.host)
-
-
+        self.assertIn('state["sound_cues"] = {"opening": None, "chapter": None, "closing": None}', self.host)
     def test_settings_get_returns_saved_effects_preference(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")

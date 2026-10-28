@@ -1801,7 +1801,7 @@ class RegressionTests(unittest.TestCase):
                 self.assertGreaterEqual(_duration_ms(output), 4500)
                 self.assertLessEqual(_duration_ms(output), 5200)
 
-    def test_chapter_and_finale_real_cues_work_when_background_music_is_off(self):
+    def test_voice_only_excludes_fixed_book_cues_even_when_the_cue_preference_is_enabled(self):
         from unittest.mock import patch
         from app.audio.library import import_audio_files
         from app.audio.assembler import _duration_ms
@@ -1820,30 +1820,28 @@ class RegressionTests(unittest.TestCase):
                 folder = root / f"{number:03d}_Chapter_{number}"
                 _write_wav(folder / "chunks" / "00001.wav", 1.0)
                 (folder / "narration.json").write_text(
-                    json.dumps({
-                        "title": f"Chapter {number}",
-                        "narration_text": "The story continues.",
-                    }),
+                    json.dumps({"title": f"Chapter {number}", "narration_text": "The story continues."}),
                     encoding="utf-8",
                 )
                 chapters.append(folder)
-            output = root / "chapter-cues-without-bgm.m4b"
+            output = root / "voice-only.m4b"
             with patch("app.audio.library.audio_library_root", return_value=library_root):
                 import_audio_files([opening], target_kind="opening")
                 import_audio_files([page], target_kind="page")
                 import_audio_files([ending], target_kind="ending")
                 assemble_m4b(
-                    chapters,
-                    output,
-                    "Cues without BGM",
+                    chapters, output, "Voice Only",
                     chapter_titles=["Chapter 1", "Chapter 2"],
                     background_audio_mode="off",
                     chapter_transition_sound=True,
+                    opening_cue_path=opening,
+                    page_turn_cue_path=page,
+                    ending_cue_path=ending,
+                    story_effects_enabled=False,
                 )
             duration = _duration_ms(output)
-            self.assertGreaterEqual(duration, 6000)
-            self.assertLessEqual(duration, 7000)
-
+            self.assertGreaterEqual(duration, 1800)
+            self.assertLessEqual(duration, 3200)
     def test_chapter_specific_bgm_override_is_mixed_before_book_concat(self):
         from app.audio.assembler import _duration_ms
 
@@ -2068,6 +2066,44 @@ class RegressionTests(unittest.TestCase):
             ui.index("self.story_effects_enabled.toggled.connect(self.story_effect_volume.setEnabled)"),
         )
 
+    def test_voice_preview_global_off_suppresses_fixed_book_cues(self):
+        from unittest.mock import patch
+        from app.audio.library import import_audio_files
+        from app.audio.preview_mixer import mix_voice_preview
+        from app.audio.assembler import _duration_ms
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            library_root = root / "Audio Library"
+            voice = root / "voice.wav"
+            _write_wav(voice, 1.5)
+            opening = root / "real-opening.wav"
+            page = root / "real-page-turn.wav"
+            ending = root / "real-ending.wav"
+            _write_wav(opening, 1.18)
+            _write_wav(page, 0.62)
+            _write_wav(ending, 2.65)
+            with patch("app.audio.library.audio_library_root", return_value=library_root):
+                import_audio_files([opening], target_kind="opening")
+                import_audio_files([page], target_kind="page")
+                import_audio_files([ending], target_kind="ending")
+                output = root / "voice-only-preview.wav"
+                mix_voice_preview(
+                    voice, output, "A calm narration passage.",
+                    background_enabled=False,
+                    background_mode="manual",
+                    story_effects_enabled=False,
+                    chapter_transition_sound=True,
+                    is_first_chapter=True,
+                    is_last_chapter=True,
+                    opening_cue_path=opening,
+                    page_turn_cue_path=page,
+                    ending_cue_path=ending,
+                )
+            duration = _duration_ms(output)
+            self.assertGreaterEqual(duration, 1300)
+            self.assertLessEqual(duration, 2300)
+
     def test_voice_preview_runs_in_a_worker_thread(self):
         from app.ui.voice_page import VoicePreviewWorker
         from PySide6.QtCore import QThread
@@ -2165,7 +2201,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("_selected_music_recipe", assembler)
         self.assertIn("sidechaincompress=", assembler)
         self.assertIn("automatic-real-audio-design", assembler)
-        self.assertIn('effective_audio_mode in {"manual","off"}', assembler)
+        self.assertIn('elif effective_audio_mode == "manual" and chapter_transition_sound:', assembler)
+        self.assertNotIn('effective_audio_mode in {"manual", "off"} and scene_transition_cue_path', assembler)
 
     def test_audiobook_audio_categories_and_mood_detection(self):
         from app.audio.sound_design import detect_chapter_mood
@@ -2354,6 +2391,35 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('story_effects_enabled=self.story_effects_enabled.isChecked()', ui)
         self.assertIn('story_effects_enabled: bool = False', manager)
         self.assertIn('if story_effects_enabled:', assembler)
+
+    def test_legacy_scene_transition_path_is_ignored_by_book_assembly(self):
+        from app.audio.assembler import _duration_ms
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            chapters = []
+            for number in (1, 2):
+                folder = root / f"{number:03d}_Chapter_{number}"
+                _write_wav(folder / "chunks" / "00001.wav", 1.0)
+                (folder / "narration.json").write_text(
+                    json.dumps({"title": f"Chapter {number}", "narration_text": "The story continues."}),
+                    encoding="utf-8",
+                )
+                chapters.append(folder)
+            legacy_scene = root / "legacy-scene-transition.wav"
+            _write_wav(legacy_scene, 2.0)
+            output = root / "legacy-scene-ignored.m4b"
+            assemble_m4b(
+                chapters, output, "Legacy Scene Cue",
+                chapter_titles=["Chapter 1", "Chapter 2"],
+                background_audio_mode="manual",
+                chapter_transition_sound=False,
+                scene_transition_cue_path=legacy_scene,
+                story_effects_enabled=False,
+            )
+            duration = _duration_ms(output)
+            self.assertGreaterEqual(duration, 1800)
+            self.assertLessEqual(duration, 3200)
 
     def test_manual_music_still_gets_real_chapter_transition_cues(self):
         from unittest.mock import patch

@@ -2788,13 +2788,16 @@ class PremiumV2Bridge(QObject):
         """Render a short audition using the active book's real music/cue assignments."""
         from app.audio.assembler import _concat_audio_files, _duration_ms, _run
         from app.audio.library import validate_saved_audio_paths
+        from app.audio.sound_settings import effective_background_audio_mode, fixed_book_cues_enabled
         validate_saved_audio_paths(state)
 
         preview_root = app_root() / "Previews"
         preview_root.mkdir(parents=True, exist_ok=True)
         audio_source = Path(source).resolve()
+        audio_mode = effective_background_audio_mode(state)
+        book_cues_enabled = fixed_book_cues_enabled(state)
         opening = Path(str(state.get("opening_cue_path") or "")).expanduser()
-        if opening.is_file():
+        if book_cues_enabled and opening.is_file():
             with_opening = preview_root / f"sound-preview-opening-{job_id}.m4a"
             _concat_audio_files(opening, audio_source, with_opening, "192k")
             audio_source = with_opening
@@ -2802,7 +2805,7 @@ class PremiumV2Bridge(QObject):
         music_path = None
         volume = max(0.0, min(0.50, float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18)))
         first_override = (state.get("chapter_bgm_overrides") or {}).get("1", {})
-        if str(state.get("background_audio_mode") or "off").lower() == "manual" and isinstance(first_override, dict):
+        if audio_mode == "manual" and isinstance(first_override, dict):
             rule = str(first_override.get("rule") or "default").lower()
             if rule == "none":
                 music_path = None
@@ -2813,7 +2816,7 @@ class PremiumV2Bridge(QObject):
                 raw_music = str(state.get("background_audio_path") or "")
                 music_path = Path(raw_music).expanduser() if raw_music else None
                 volume = max(0.0, min(0.50, float(first_override.get("volume", volume))))
-        elif str(state.get("background_audio_mode") or "off").lower() == "manual":
+        elif audio_mode == "manual":
             raw_music = str(state.get("background_audio_path") or "")
             music_path = Path(raw_music).expanduser() if raw_music else None
 
@@ -4442,6 +4445,9 @@ class PremiumV2Bridge(QObject):
             "year": str(state.get("year") or state.get("release_year") or "").strip(),
             "genre": str(state.get("genre") or "").strip(),
         }
+        from app.audio.sound_settings import effective_background_audio_mode, fixed_book_cues_enabled
+        audio_mode = effective_background_audio_mode(state)
+        book_cues_enabled = fixed_book_cues_enabled(state)
         manager = GenerationManager(
             provider, voice, chapters, project.folder / "working_audio",
             on_progress=lambda *args: self._generation_progress(job_id, *args),
@@ -4450,23 +4456,22 @@ class PremiumV2Bridge(QObject):
             narration_speed=float(state.get("narration_speed") or 0.90),
             pacing_profile=str(state.get("pacing_profile") or "natural"),
             metadata=metadata, bitrate=bitrate,
-            background_audio_path=Path(state["background_audio_path"]) if state.get("background_audio_path") else None,
+            background_audio_path=Path(state["background_audio_path"]) if audio_mode != "off" and state.get("background_audio_path") else None,
             background_audio_volume=float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18),
-            ambience_audio_path=Path(state["ambience_audio_path"]) if state.get("ambience_audio_path") else None,
+            ambience_audio_path=Path(state["ambience_audio_path"]) if audio_mode != "off" and state.get("ambience_audio_path") else None,
             ambience_audio_volume=float(state.get("ambience_audio_volume") if state.get("ambience_audio_volume") is not None else 0.10),
             background_audio_fade_in=float(state.get("background_audio_fade_in") if state.get("background_audio_fade_in") is not None else 2.0),
             background_audio_fade_out=float(state.get("background_audio_fade_out") if state.get("background_audio_fade_out") is not None else 3.0),
-            background_audio_mode=str(state.get("background_audio_mode") or "off"),
+            background_audio_mode=audio_mode,
             auto_music_style=str(state.get("auto_music_style") or "auto"),
             auto_music_variation=state.get("auto_music_track_path") or None,
-            chapter_transition_sound=bool(state.get("chapter_transition_sound", False)),
+            chapter_transition_sound=book_cues_enabled,
             story_effects_enabled=bool(state.get("story_effects_enabled", False)),
             story_effect_volume=float(state.get("story_effect_volume") if state.get("story_effect_volume") is not None else 0.22),
             sound_cue_style=str(state.get("sound_cue_style") or "classic-book"),
-            opening_cue_path=Path(state["opening_cue_path"]) if state.get("opening_cue_path") else None,
-            page_turn_cue_path=Path(state["page_turn_cue_path"]) if state.get("page_turn_cue_path") else None,
-            ending_cue_path=Path(state["ending_cue_path"]) if state.get("ending_cue_path") else None,
-            scene_transition_cue_path=Path(state["scene_transition_cue_path"]) if state.get("scene_transition_cue_path") else None,
+            opening_cue_path=Path(state["opening_cue_path"]) if book_cues_enabled and state.get("opening_cue_path") else None,
+            page_turn_cue_path=Path(state["page_turn_cue_path"]) if book_cues_enabled and state.get("page_turn_cue_path") else None,
+            ending_cue_path=Path(state["ending_cue_path"]) if book_cues_enabled and state.get("ending_cue_path") else None,
             chapter_bgm_overrides=state.get("chapter_bgm_overrides") if isinstance(state.get("chapter_bgm_overrides"), dict) else {},
         )
         with self._jobs_lock:
@@ -6013,21 +6018,20 @@ class PremiumV2Bridge(QObject):
                 "strategy": "custom", "override_count": len(overrides)}
 
     def _sound_cues_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
-        """Return persisted book cue assignments, resolving legacy state keys."""
+        """Return only the supported Opening, Next Chapter, and Closing assignments."""
         project = self._active_project()
         state = load_state(project.folder)
-        cues = state.get("sound_cues")
-        if not isinstance(cues, dict):
-            cues = {
+        stored = state.get("sound_cues")
+        if not isinstance(stored, dict):
+            stored = {
                 "opening": state.get("opening_cue_path"),
                 "chapter": state.get("page_turn_cue_path"),
-                "scene": state.get("scene_transition_cue_path"),
                 "closing": state.get("ending_cue_path"),
             }
         catalog = {str(row["path"]): row for row in self._sound_catalog({})}
         result = {}
-        for slot in ("opening", "chapter", "scene", "closing"):
-            raw = cues.get(slot)
+        for slot in ("opening", "chapter", "closing"):
+            raw = stored.get(slot)
             path = str(raw).strip() if raw else ""
             row = catalog.get(path)
             result[slot] = {"path": path if row else None, "title": row["title"] if row else None,
@@ -6035,10 +6039,10 @@ class PremiumV2Bridge(QObject):
         return result
 
     def _sound_cues_save(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Persist one cue assignment and update the supported generation cue fields."""
+        """Persist one supported fixed cue assignment; legacy Scene Transition slots are rejected."""
         slot = str(payload.get("slot") or "").strip().lower()
-        if slot not in {"opening", "chapter", "scene", "closing"}:
-            raise ValueError("Choose opening, chapter, scene, or closing cue.")
+        if slot not in {"opening", "chapter", "closing"}:
+            raise ValueError("Choose an Opening, Next Chapter, or Closing cue.")
         raw = str(payload.get("path") or "").strip()
         selected_path = None
         selected_title = None
@@ -6051,29 +6055,26 @@ class PremiumV2Bridge(QObject):
             selected_path, selected_title = str(selected), str(row["title"])
         project = self._active_project()
         state = load_state(project.folder)
-        cues = state.get("sound_cues")
-        if not isinstance(cues, dict):
-            cues = {
+        stored = state.get("sound_cues")
+        if not isinstance(stored, dict):
+            stored = {
                 "opening": state.get("opening_cue_path"),
                 "chapter": state.get("page_turn_cue_path"),
-                "scene": state.get("scene_transition_cue_path"),
                 "closing": state.get("ending_cue_path"),
             }
+        cues = {key: stored.get(key) for key in ("opening", "chapter", "closing")}
         cues[slot] = selected_path
         state["sound_cues"] = cues
+        # Remove legacy fixed Scene Transition state. Contextual story events use
+        # their own story-event pipeline and are not book cue assignment slots.
+        state.pop("scene_transition_cue_path", None)
         state["chapter_transition_sound"] = any(cues.get(key) for key in ("opening", "chapter", "closing"))
-        # Keep the legacy fields synchronized with the saved cue manifest; the
-        # production assembler consumes all four cue paths, including scene transitions.
         if slot == "opening":
             state["opening_cue_path"] = selected_path
         elif slot == "chapter":
             state["page_turn_cue_path"] = selected_path
-        elif slot == "closing":
-            state["ending_cue_path"] = selected_path
         else:
-            # Scene transitions are mixed independently from the
-            # opening/chapter/closing cue toggle.
-            state["scene_transition_cue_path"] = selected_path
+            state["ending_cue_path"] = selected_path
         state["modified_at"] = self._now()
         save_state(project.folder, state)
         return {"saved": True, "slot": slot, "path": selected_path, "title": selected_title,
@@ -6082,15 +6083,15 @@ class PremiumV2Bridge(QObject):
     def _sound_cues_clear(self, _payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
         state = load_state(project.folder)
-        state["sound_cues"] = {"opening": None, "chapter": None, "scene": None, "closing": None}
+        state["sound_cues"] = {"opening": None, "chapter": None, "closing": None}
         state["opening_cue_path"] = None
         state["page_turn_cue_path"] = None
-        state["scene_transition_cue_path"] = None
         state["ending_cue_path"] = None
+        state.pop("scene_transition_cue_path", None)
         state["chapter_transition_sound"] = False
         state["modified_at"] = self._now()
         save_state(project.folder, state)
-        return {"saved": True, "cleared": ["opening", "chapter", "scene", "closing"]}
+        return {"saved": True, "cleared": ["opening", "chapter", "closing"]}
 
     @Slot(str, result=bool)
     def report_frontend_diagnostic(self, payload_json: str) -> bool:

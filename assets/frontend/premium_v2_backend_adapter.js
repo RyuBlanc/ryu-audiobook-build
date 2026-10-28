@@ -3126,7 +3126,7 @@
     const loadedAssignments = await call('sound.cues.get');
     if (requestToken !== cueListEpoch) return cueAssignments;
     cueAssignments = loadedAssignments && typeof loadedAssignments === 'object' ? loadedAssignments : {};
-    const names = {opening:'openingCueName',chapter:'chapterCueName',scene:'sceneCueName',closing:'closingCueName'};
+    const names = {opening:'openingCueName',chapter:'chapterCueName',closing:'closingCueName'};
     for (const [slot,id] of Object.entries(names)) {
       const node = $(id);
       if (node) node.textContent = cueAssignments[slot]?.title || 'Not assigned';
@@ -6445,7 +6445,7 @@
             const result = await call('sound.cues.save', {slot:assignedSlot,path});
             pendingCueSlot = null;
             await refreshSoundCues();
-            message(result.generation_supported ? (assignedSlot === 'scene' ? 'Scene transition cue saved to this book and will be included during audiobook assembly.' : 'Cue assignment saved to this book.') : 'Cue assignment saved, but this build reports that the selected cue is not used during audiobook assembly.');
+            message(result.generation_supported ? ('Cue assignment saved to this book.') : 'Cue assignment saved, but this build reports that the selected cue is not used during audiobook assembly.');
           } else {
             selectedSoundPath = path;
             message('Cue clip selected. Choose Change beside a cue slot, then select this clip to assign it.');

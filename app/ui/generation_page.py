@@ -2783,7 +2783,7 @@ class GenerationPage(QWidget):
         ambience_audio_path = None
         background_audio_mode = "off"
         auto_music_style = str(self.auto_music_style.currentData() or "auto")
-        chapter_transition_sound = bool(self.chapter_transition_sound.isChecked())
+        chapter_transition_sound = bool(self.background_audio_enabled.isChecked() and self.chapter_transition_sound.isChecked())
         sound_cue_style = "library"
         opening_cue_path = self.opening_cue_path.text().strip() or None
         page_turn_cue_path = self.page_turn_cue_path.text().strip() or None

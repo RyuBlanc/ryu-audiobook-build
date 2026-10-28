@@ -6,6 +6,32 @@ from pathlib import Path
 
 
 class Stage828SoundDesignPreviewTests(unittest.TestCase):
+    def test_global_audio_mode_overrides_fixed_cues_but_keeps_legacy_projects_enabled(self):
+        from app.audio.sound_settings import effective_background_audio_mode, fixed_book_cues_enabled
+
+        voice_only = {
+            "background_audio_enabled": False,
+            "background_audio_mode": "manual",
+            "chapter_transition_sound": True,
+            "story_effects_enabled": True,
+        }
+        self.assertEqual(effective_background_audio_mode(voice_only), "off")
+        self.assertFalse(fixed_book_cues_enabled(voice_only))
+
+        # Existing projects without the explicit enable flag retain their saved
+        # audio mode until the user turns the global option off.
+        legacy = {"background_audio_mode": "manual", "chapter_transition_sound": True}
+        self.assertEqual(effective_background_audio_mode(legacy), "manual")
+        self.assertTrue(fixed_book_cues_enabled(legacy))
+
+        enabled = {
+            "background_audio_enabled": True,
+            "background_audio_mode": "manual",
+            "chapter_transition_sound": True,
+        }
+        self.assertEqual(effective_background_audio_mode(enabled), "manual")
+        self.assertTrue(fixed_book_cues_enabled(enabled))
+
     def test_full_book_mix_preview_is_registered_as_a_background_job(self):
         source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         worker = Path("app/ui/full_book_preview.py").read_text(encoding="utf-8")
@@ -46,22 +72,28 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         self.assertNotIn("call('production.preview'", branch)
 
 
-    def test_scene_cue_is_independent_of_opening_chapter_closing_toggle(self):
+    def test_legacy_scene_transition_is_not_a_fixed_cue_assignment(self):
         assembler = Path("app/audio/assembler.py").read_text(encoding="utf-8")
+        manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
+        full_preview = Path("app/ui/full_book_preview.py").read_text(encoding="utf-8")
         host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = Path("assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        html = Path("assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
 
-        # Scene cues are handled in their own manual/off pass, so assigning
-        # only a scene cue does not turn on unrelated opening/page/closing cues.
-        self.assertIn(
-            'if effective_audio_mode in {"manual", "off"} and scene_transition_cue_path:',
-            assembler,
-        )
-        self.assertIn(
-            'state["chapter_transition_sound"] = any(cues.get(key) for key in ("opening", "chapter", "closing"))',
-            host,
-        )
-        self.assertIn('scene_transition_cue_path=Path(str(state["scene_transition_cue_path"]))', Path("app/ui/full_book_preview.py").read_text(encoding="utf-8"))
+        self.assertNotIn("auto-real-scene-cue-", assembler)
+        self.assertNotIn('if effective_audio_mode in {"manual", "off"} and scene_transition_cue_path:', assembler)
+        self.assertNotIn("scene_transition_cue_path=self.scene_transition_cue_path", manager)
+        self.assertNotIn("scene_transition_cue_path=Path(str(state[", full_preview)
+        self.assertNotIn('data-assign-cue="scene"', html)
+        self.assertNotIn('id="sceneCueName"', html)
+        self.assertNotIn('id="mixSceneCue"', html)
+        self.assertNotIn("sceneCueName", adapter)
 
+        save_start = host.index("def _sound_cues_save")
+        save_end = host.index("def _sound_cues_clear", save_start)
+        save_method = host[save_start:save_end]
+        self.assertIn('{"opening", "chapter", "closing"}', save_method)
+        self.assertIn('state.pop("scene_transition_cue_path", None)', save_method)
     def test_chapter_bgm_mixer_preserves_timeline_and_applies_offset_and_fades(self):
         from tempfile import TemporaryDirectory
         from unittest.mock import patch

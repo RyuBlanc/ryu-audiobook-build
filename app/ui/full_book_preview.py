@@ -90,6 +90,7 @@ def _render_full_book_preview(host, job_id, project, chapter_dirs, chapter_title
     from app.tts.preview import PreviewCancelledError
     try:
         from app.audio.assembler import assemble_m4b, _duration_ms
+        from app.audio.sound_settings import effective_background_audio_mode, fixed_book_cues_enabled
 
         def check_cancelled() -> None:
             if cancel_event is not None and cancel_event.is_set():
@@ -101,6 +102,8 @@ def _render_full_book_preview(host, job_id, project, chapter_dirs, chapter_title
             host._job_update(job_id, state="running", stage=str(stage), progress=progress,
                              message="Rendering full-book sound design preview.")
 
+        audio_mode = effective_background_audio_mode(state)
+        book_cues_enabled = fixed_book_cues_enabled(state)
         cover_value = state.get("cover_path")
         cover = Path(str(cover_value)).expanduser() if cover_value else None
         if cover is not None and not cover.is_file():
@@ -119,23 +122,22 @@ def _render_full_book_preview(host, job_id, project, chapter_dirs, chapter_title
             staged_dirs, output, title, author, cover, chapter_titles,
             metadata=metadata, progress=report, bitrate=bitrate,
             narration_speed=float(state.get("narration_speed") if state.get("narration_speed") is not None else 0.90),
-            background_audio_path=Path(str(state["background_audio_path"])) if state.get("background_audio_path") else None,
+            background_audio_path=Path(str(state["background_audio_path"])) if audio_mode != "off" and state.get("background_audio_path") else None,
             background_audio_volume=float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18),
             background_audio_fade_in=float(state.get("background_audio_fade_in") if state.get("background_audio_fade_in") is not None else 2.0),
             background_audio_fade_out=float(state.get("background_audio_fade_out") if state.get("background_audio_fade_out") is not None else 3.0),
-            ambience_audio_path=Path(str(state["ambience_audio_path"])) if state.get("ambience_audio_path") else None,
+            ambience_audio_path=Path(str(state["ambience_audio_path"])) if audio_mode != "off" and state.get("ambience_audio_path") else None,
             ambience_audio_volume=float(state.get("ambience_audio_volume") if state.get("ambience_audio_volume") is not None else 0.10),
-            background_audio_mode=str(state.get("background_audio_mode") or "off"),
+            background_audio_mode=audio_mode,
             auto_music_style=str(state.get("auto_music_style") or "auto"),
             auto_music_variation=state.get("auto_music_track_path") or None,
-            chapter_transition_sound=bool(state.get("chapter_transition_sound", False)),
+            chapter_transition_sound=book_cues_enabled,
             story_effects_enabled=bool(state.get("story_effects_enabled", False)),
             story_effect_volume=float(state.get("story_effect_volume") if state.get("story_effect_volume") is not None else 0.22),
             sound_cue_style=str(state.get("sound_cue_style") or "classic-book"),
-            opening_cue_path=Path(str(state["opening_cue_path"])) if state.get("opening_cue_path") else None,
-            page_turn_cue_path=Path(str(state["page_turn_cue_path"])) if state.get("page_turn_cue_path") else None,
-            ending_cue_path=Path(str(state["ending_cue_path"])) if state.get("ending_cue_path") else None,
-            scene_transition_cue_path=Path(str(state["scene_transition_cue_path"])) if state.get("scene_transition_cue_path") else None,
+            opening_cue_path=Path(str(state["opening_cue_path"])) if book_cues_enabled and state.get("opening_cue_path") else None,
+            page_turn_cue_path=Path(str(state["page_turn_cue_path"])) if book_cues_enabled and state.get("page_turn_cue_path") else None,
+            ending_cue_path=Path(str(state["ending_cue_path"])) if book_cues_enabled and state.get("ending_cue_path") else None,
             chapter_bgm_overrides=state.get("chapter_bgm_overrides")
                 if isinstance(state.get("chapter_bgm_overrides"), dict) else {},
             )

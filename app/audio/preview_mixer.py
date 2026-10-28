@@ -122,7 +122,7 @@ def mix_voice_preview(
                 seed_text=f"{kind}|{mood}|{selected_variation}|{text[:120]}",
             )
 
-        if chapter_transition_sound:
+        if background_enabled and chapter_transition_sound:
             kind = "opening" if is_first_chapter else "page"
             custom = opening_cue_path if is_first_chapter else page_turn_cue_path
             cue = selected_cue(kind, custom)
@@ -234,7 +234,7 @@ def mix_voice_preview(
             raise RuntimeError("The voice-plus-sound-design preview was not produced.")
 
         final_path = mixed_path
-        if chapter_transition_sound and is_last_chapter:
+        if background_enabled and chapter_transition_sound and is_last_chapter:
             ending = selected_cue("ending", ending_cue_path)
             if ending is not None:
                 closed_path = temp / "preview-with-book-ending.wav"
