@@ -608,6 +608,33 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(custom._auto_select_model)
         self.assertTrue(clone._auto_select_model)
 
+    def test_voice_emotion_classifier_covers_requested_delivery_cues(self):
+        from app.tts.expression import (
+            classify_expression, expression_instruction, expression_temperature, reference_style,
+        )
+        examples = {
+            "She was happy and cheerful about the news.": "warm",
+            "They were laughing at the joke.": "amused",
+            "He seemed sad and subdued after the call.": "sad",
+            "She was crying after the defeat.": "sad",
+            "He was angry about the decision.": "angry",
+            "He felt fearful and tense.": "tense",
+            "She was surprised by the result.": "excited",
+            "He was bored during the lecture.": "bored",
+            "Her voice was calm and measured.": "neutral",
+            "He remained serious about the plan.": "serious",
+        }
+        for source_text, expected_style in examples.items():
+            with self.subTest(source_text=source_text):
+                self.assertEqual(classify_expression(source_text), expected_style)
+
+        instruction = expression_instruction("Young adult narrator, lower-mid pitch.", "bored")
+        self.assertIn("low-energy", instruction)
+        self.assertIn("same exact character identity", instruction.lower())
+        self.assertEqual(reference_style("bored"), "neutral")
+        self.assertEqual(expression_temperature("bored"), 0.80)
+
+
     def test_voice_design_anchor_instruction_preserves_identity_and_mood_range(self):
         from app.tts.expression import voice_design_anchor_instruction
         instruction = voice_design_anchor_instruction(

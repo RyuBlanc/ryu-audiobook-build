@@ -70,6 +70,11 @@ EXPRESSION_STYLES = {
         "Keep the same exact character identity. Use unhurried, inward-looking phrasing with "
         "small meaningful pauses and a gentle downward contour."
     ),
+    "bored": (
+        "Keep the same exact character identity and timbre. Use low-energy, mildly flatter but "
+        "still natural intonation with a slower, disengaged cadence. Keep diction clear and "
+        "avoid caricatured monotony or making the speaker sound like a different person."
+    ),
 }
 
 EXPRESSION_TEMPERATURES = {
@@ -86,6 +91,7 @@ EXPRESSION_TEMPERATURES = {
     "amused": 0.88,
     "serious": 0.82,
     "reflective": 0.83,
+    "bored": 0.80,
 }
 
 _STYLE_ALIASES = {
@@ -102,6 +108,7 @@ _STYLE_ALIASES = {
     "angry": "concerned",
     "tense": "concerned",
     "serious": "neutral",
+    "bored": "neutral",
 }
 
 
@@ -121,22 +128,30 @@ def classify_expression(text: str) -> str:
     # Explicit delivery/action cues take priority over punctuation.
     if re.search(r"\b(whisper(?:ed|ing)?|murmur(?:ed|ing)?|softly|quietly|under (?:her|his|their) breath|hushed)\b", low):
         return "soft"
-    if re.search(r"\b(sob(?:bed|bing)?|wept|tears streamed|heartbroken|grief-stricken|mournful)\b", low):
+    if re.search(r"\b(crying|cried|sob(?:bed|bing)?|weeping|wept|tears streamed|heartbroken|grief-stricken|mournful)\b", low):
         return "sad"
-    if re.search(r"\b(furious|enraged|angrily|snapped|barked|how dare you|damn you|shut up)\b", low):
+    if re.search(r"\b(angry|anger|furious|enraged|angrily|snapped|barked|how dare you|damn you|shut up)\b", low):
         return "angry"
-    if re.search(r"\b(terrified|panicked|desperate|urgent|in a panic|danger|dangerous|run away|get back|help me|don't touch|do not touch|worried|afraid|fearful|anxious|trembl(?:ed|ing)|hurt|pain)\b", low):
-        return "tense" if re.search(r"\b(terrified|panicked|desperate|urgent|run away|get back|help me|don't touch|do not touch)\b", low) else "concerned"
+    if re.search(r"\b(terrified|panicked|desperate|urgent|in a panic|danger|dangerous|run away|get back|help me|don't touch|do not touch|worried|afraid|fearful|frightened|scared|tense|anxious|trembl(?:ed|ing)|hurt|pain)\b", low):
+        return "tense" if re.search(r"\b(terrified|panicked|desperate|urgent|run away|get back|help me|don't touch|do not touch|fearful|frightened|scared|tense)\b", low) else "concerned"
     if re.search(r"\b(laughed|laughing|chuckled|chuckling|smiled|smiling|grinned|amused|joked|teased|teasing|heh|haha)\b", low):
         return "amused"
+    if re.search(r"\b(surprised|surprising|astonished|stunned|shocked|startled|taken aback)\b", low):
+        return "excited"
+    if re.search(r"\b(happy|happily|cheerful|cheerfully|joyful|joyfully|delighted|overjoyed|elated|pleased)\b", low):
+        return "warm"
+    if re.search(r"\b(bored|boredom|uninterested|listless|weary of)\b", low):
+        return "bored"
     if re.search(r"\b(maybe|perhaps|i think|i wonder|not sure|could it be|i guess|hesitat(?:ed|ing)|uncertain|hesitant)\b", low) or "…" in value or "..." in value:
         return "thoughtful"
     if re.search(r"\b(curious|wondered|intrigued|eager to know)\b", low):
         return "curious"
     if re.search(r"\b(sad|sadly|sorrow|regret(?:ted|fully)?|lonely|miss(?:ed|ing) you|disappointed)\b", low):
         return "sad"
-    if re.search(r"\b(seriously|in a low voice|firmly|solemnly|gravely|matter-of-fact)\b", low):
+    if re.search(r"\b(serious|seriously|in a low voice|firmly|solemnly|gravely|matter-of-fact)\b", low):
         return "serious"
+    if re.search(r"\b(calm|calmly|serene|peaceful)\b", low):
+        return "neutral"
     if re.search(r"\b(reflected|thought to himself|thought to herself|remembered|in retrospect)\b", low):
         return "reflective"
 
