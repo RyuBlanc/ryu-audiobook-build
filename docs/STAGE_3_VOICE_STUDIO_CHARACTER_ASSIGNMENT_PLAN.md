@@ -17,7 +17,7 @@
 - [x] Regression coverage includes dialogue attribution, manual-assignment names, first-person self-identification, short-name aliases, and attributed-dialogue fixtures. Run #1492 passed 426 tests.
 - [x] Re-analysis preserves voice-profile assignment and edited cast metadata for case-insensitive exact-name matches; regression test passed in Run #894.
 - [x] Regression contract covers rename preserving the old canonical name as an alias and partial updates preserving omitted metadata; behavioral tests now cover case-insensitive updates, alias edits, duplicate-name rejection, delete semantics and assignment-reference cleanup. Run #1492 passed 426 tests.
-- [x] Persistence-level tests verify analysis output, confidence/examples, dialogue totals and user-authored metadata across save/reopen (Run #1492); an explicit unassigned-count persistence assertion is added for the next test-only run.
+- [x] Persistence-level tests verify analysis output, confidence/examples, dialogue totals, unassigned-dialogue count and user-authored metadata across save/reopen. Run #1493 passed 427 tests.
 
 ### 3.3 Dialogue assignment and generation routing
 - [x] Regression tests for legacy/multi-speaker assignment shapes, ambiguous quote rejection, exact/stale-span unassignment and multi-speaker candidate detection passed in Run #894.
@@ -76,3 +76,10 @@ The remaining automated closure work is being addressed before the checkpoint bu
 - The run verified the first-person narrator detection correction and the new chapter reorder/merge/split assignment-offset tests.
 - A further explicit persistence assertion for the unassigned-dialogue count is being added before the checkpoint run.
 - Packaging, installer, Defender, artifact upload, cleanup, and release steps were all skipped because this was a test-only commit.
+
+
+## Stage 3 test-only Run #1493 — 2026-10-28
+
+- Run #1493 passed **427 tests** on commit `af626c4cceeecf7da3bc749ce07a62d1d0185eaa`: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40629252242.
+- This includes the explicit save/reload assertion for unassigned dialogue counts. The test-only run skipped frozen-app packaging, security scans, artifact upload, cleanup, and release steps as intended.
+- The following `[artifact-checkpoint]` commit will rerun the suite first and then execute the Windows package/security/artifact gates. Stage 3 is not fully accepted until the packaged Windows UI/audio checks are completed; Stage 1 hardware and Stage 2 import acceptance also remain open.
