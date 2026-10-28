@@ -359,3 +359,8 @@ Production Pause/Cancel is generation-type guarded. Chapter switching saves a pe
 - Added a native-side WebEngine probe to capture whether the page loaded `qwebchannel.js`, whether `window.QWebChannel`, `qt.webChannelTransport` and the adapter were present, plus the queued bridge failure reason/resource entries. The next readiness-gated checkpoint must be inspected for this diagnostic before accepting the fix.
 - Keep Stage 1 open. Do not weaken the readiness gate, and do not mark the loading-screen issue complete until the frozen EXE reaches Premium V2 readiness and the original HTML loader is visibly dismissed into the workspace.
 
+### WebChannel diagnostic regression gate reconciliation — 28 October 2026
+- The first diagnostics test commit failed before packaging because the test expected `window.__ryuBridgeFailureReason = String(reason || '')` as one literal line. The implementation intentionally formats the `String(...)` assignment across multiple lines.
+- The assertion now checks the assignment's actual source form. No production behavior was changed to satisfy the test.
+- Next checkpoint: rerun all 748+ regression tests, then package and inspect the native-side probe result from the frozen EXE. Only that runtime result can distinguish a missing qrc script, missing Qt transport, or an unavailable renderer.
+
