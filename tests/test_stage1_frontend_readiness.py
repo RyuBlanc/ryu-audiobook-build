@@ -160,6 +160,21 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
         self.assertIn("self._loading_progress.setRange(0, 100)", updater)
         self.assertIn("self._frontend_watchdog.start(120000)", updater)
 
+
+    def test_loading_stays_live_during_early_adapter_wiring(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        start = adapter.index("async function wire()")
+        controls = adapter.index("installUiTextScaleRuntime()", start)
+        first_backend_call = adapter.index("await call('app.get_info')", start)
+        early_setup = adapter[start:first_backend_call]
+        self.assertIn("window.__ryuEmitFrontendDiagnostic?.('startup-progress'", early_setup)
+        self.assertIn("message:'Preparing studio controls and local services…'", early_setup)
+        self.assertIn("progress:null", early_setup)
+        self.assertLess(early_setup.index("progress:null"), early_setup.index("installUiTextScaleRuntime()"))
+        self.assertLess(controls, first_backend_call)
+
     def test_startup_progress_reports_real_required_hydration_milestones(self):
         adapter = (
             ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"

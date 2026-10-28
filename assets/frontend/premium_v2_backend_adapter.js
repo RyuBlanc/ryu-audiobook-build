@@ -5317,6 +5317,13 @@
   }
 
   async function wire() {
+    // The native splash is still visible while controls are bound and the first
+    // local backend calls are verified. Keep it animated instead of showing a
+    // stationary percentage during this real setup work.
+    window.__ryuEmitFrontendDiagnostic?.('startup-progress', {
+      message:'Preparing studio controls and local services…',
+      progress:null
+    });
     installUiTextScaleRuntime();
     installCharacterStudioHandlers();
     // Remove the prototype's same-element click handlers synchronously, before
