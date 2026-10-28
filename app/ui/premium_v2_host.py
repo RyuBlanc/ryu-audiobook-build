@@ -6003,11 +6003,64 @@ class PremiumV2Window(QMainWindow):
     def _bridge_connect_timeout(self) -> None:
         if self._frontend_ready or self._frontend_failure_shown:
             return
+        # The renderer may be alive even when Qt WebChannel has not connected.
+        # Inspect it from the native process so a failed qrc script load or
+        # missing transport is recorded even though the bridge cannot report it.
+        probe = r"""
+        (() => {
+          const pending = Array.isArray(window.__ryuFrontendPendingDiagnostics)
+            ? window.__ryuFrontendPendingDiagnostics.slice(-5).map(item => ({
+                kind:String(item?.kind || '').slice(0,40),
+                message:String(item?.message || '').slice(0,250)
+              }))
+            : [];
+          const resources = performance.getEntriesByType('resource')
+            .filter(entry => /qwebchannel/i.test(String(entry.name || '')))
+            .slice(-5)
+            .map(entry => ({
+              name:String(entry.name || '').slice(0,240),
+              duration:Math.round(Number(entry.duration || 0))
+            }));
+          return {
+            url:String(location.href || '').slice(0,300),
+            nativeHost:window.__ryuNativeHost === true,
+            documentReadyState:String(document.readyState || ''),
+            diagnosticsInstalled:Boolean(window.__ryuFrontendDiagnosticsInstalled),
+            qWebChannelType:typeof window.QWebChannel,
+            qtType:typeof window.qt,
+            transportType:typeof window.qt === 'undefined'
+              ? 'unavailable' : typeof window.qt.webChannelTransport,
+            backendType:typeof window.ryuBackend,
+            bridgeFailureReason:String(window.__ryuBridgeFailureReason || '').slice(0,500),
+            pendingDiagnostics:pending,
+            qwebchannelResources:resources,
+            scripts:Array.from(document.scripts || [])
+              .map(script => String(script.src || ''))
+              .filter(Boolean)
+              .slice(-8)
+          };
+        })()
+        """
+        self.web.page().runJavaScript(probe, self._finish_bridge_connect_timeout)
+        # If the renderer itself is unresponsive, still reveal a recovery surface.
+        QTimer.singleShot(2500, lambda: self._finish_bridge_connect_timeout(None))
+
+    def _finish_bridge_connect_timeout(self, result: Any) -> None:
+        if self._frontend_ready or self._frontend_failure_shown:
+            return
+        if isinstance(result, dict):
+            try:
+                details = json.dumps(result, ensure_ascii=False, default=str)[:900]
+            except (TypeError, ValueError):
+                details = str(result)[:900]
+        else:
+            details = "The renderer did not return its WebChannel state probe."
         self._show_web_failure(
             "The local desktop bridge did not connect within 20 seconds. "
             "The HTML page opened, but Qt WebChannel did not become ready. "
-            "Your local project files have not been deleted; retry the interface "
-            "and send the local application log if the problem repeats."
+            "Your local project files have not been deleted. "
+            "Qt WebChannel handshake diagnostics: " + details +
+            ". Check the local application log and retry the interface."
         )
 
     def _show_web_failure(self, message: str) -> None:
@@ -6193,9 +6246,13 @@ class PremiumV2Window(QMainWindow):
           const failBridge = reason => {
             if (completed) return;
             completed = true;
+            window.__ryuBridgeFailureReason = String(
+              reason || 'The local backend bridge could not connect.'
+            ).slice(0,1200);
+            window.__ryuBridgeFailureAt = Date.now();
             window.clearTimeout(bridgeTimeout);
             emit('backend-bridge-failed', {
-              message:String(reason || 'The local backend bridge could not connect.').slice(0,1200)
+              message:window.__ryuBridgeFailureReason
             });
           };
           const bridgeTimeout = window.setTimeout(() => failBridge(
