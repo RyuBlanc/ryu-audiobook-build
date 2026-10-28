@@ -351,3 +351,11 @@ Production Pause/Cancel is generation-type guarded. Chapter switching saves a pe
 - Updated both `tests/test_stage1_frontend_readiness.py` and `tests/test_native_shell_sizing_contract.py` to assert the intended combined failure path; production behavior was not weakened to satisfy stale expectations.
 - These assertion updates still require a green full-suite run. The next readiness-gated artifact checkpoint must be checked against its exact HEAD SHA; packaging is not accepted until tests, startup marker smoke, artifact hashes and installer/portable build all pass.
 
+### Packaged startup smoke feedback — 28 October 2026
+- Candidate: `e49c68a9493b5aa9272973c7e2d317443c7312e1`; [Build #1588](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40737369933).
+- Regression tests passed: **748 tests in 32.103 seconds, OK**. The frozen EXE build and offline synthesis self-test also passed.
+- The new runtime gate correctly blocked artifact upload: the launched EXE reported **“The local desktop bridge did not connect within 20 seconds. The HTML page opened, but Qt WebChannel did not become ready.”** This confirms the remaining issue is the actual Qt WebChannel handshake, not the 22% progress label or Windows packaging.
+- No Build #1588 release artifacts were uploaded; installer, portable ZIP and release manifest are absent for this failed checkpoint.
+- Added a native-side WebEngine probe to capture whether the page loaded `qwebchannel.js`, whether `window.QWebChannel`, `qt.webChannelTransport` and the adapter were present, plus the queued bridge failure reason/resource entries. The next readiness-gated checkpoint must be inspected for this diagnostic before accepting the fix.
+- Keep Stage 1 open. Do not weaken the readiness gate, and do not mark the loading-screen issue complete until the frozen EXE reaches Premium V2 readiness and the original HTML loader is visibly dismissed into the workspace.
+
