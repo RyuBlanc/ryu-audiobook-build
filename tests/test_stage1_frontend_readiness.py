@@ -72,6 +72,24 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
         self.assertIn("Your local project files have not been deleted. Details: ", finish)
         self.assertIn("self._show_web_failure(", finish)
 
+
+    def test_adapter_start_failure_shows_native_recovery_surface_immediately(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        start = host.index("def report_frontend_diagnostic(")
+        end = host.index("def _settings_get(", start)
+        diagnostic = host[start:end]
+        self.assertIn('if kind == "adapter-start-failed":', diagnostic)
+        self.assertIn('show_failure = getattr(window, "_show_web_failure", None)', diagnostic)
+        self.assertIn("show_failure(", diagnostic)
+        self.assertIn("if not getattr(window, \"_frontend_ready\", False):", diagnostic)
+        self.assertIn("The Premium V2 interface could not complete startup.", diagnostic)
+
+        show_start = host.index("def _show_web_failure(self, message: str)")
+        show_end = host.index("def _set_loading_status(", show_start)
+        self.assertIn("self._frontend_failure_shown = True", host[show_start:show_end])
+        self.assertIn("or self._frontend_failure_shown", host[host.index("def _check_frontend_ready("):host.index("def _finish_frontend_health_check(")])
+        self.assertIn("self._frontend_failure_shown = False", host[host.index("def _retry_web_renderer("):host.index("def _handle_renderer_terminated(")])
+
     def test_native_host_fails_before_javascript_injection_when_adapter_cannot_load(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         start = host.index("    def _install_bridge(self, ok: bool)")

@@ -177,6 +177,19 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertIn("window.__ryuPremiumAdapterReady = true", adapter)
         self.assertIn("adapter-start-failed", adapter)
 
+
+    def test_adapter_start_failure_opens_recovery_surface_without_waiting_for_watchdog(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        start = host.index("def report_frontend_diagnostic(")
+        end = host.index("def _settings_get(", start)
+        diagnostic = host[start:end]
+        self.assertIn('if kind == "adapter-start-failed":', diagnostic)
+        self.assertIn('show_failure = getattr(window, "_show_web_failure", None)', diagnostic)
+        self.assertIn("show_failure(", diagnostic)
+        self.assertIn("if not getattr(window, \"_frontend_ready\", False):", diagnostic)
+        self.assertIn("self._frontend_failure_shown = True", host)
+        self.assertIn("or self._frontend_failure_shown", host)
+
     def test_text_scaling_uses_one_css_scale_variable_and_skips_default_size_work(self):
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("function captureUiFontBaselines(root)", adapter)

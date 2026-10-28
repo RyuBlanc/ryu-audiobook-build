@@ -5705,6 +5705,19 @@ class PremiumV2Bridge(QObject):
         else:
             log.warning("Premium V2 frontend %s: %s (source=%s, line=%s)",
                         kind, message or "(no message)", source or "(inline)", line)
+
+        # A top-level adapter failure means essential frontend wiring/hydration
+        # did not finish. Show the native recovery surface immediately instead
+        # of leaving the user on the loading screen until the watchdog expires.
+        if kind == "adapter-start-failed":
+            window = self.parent()
+            show_failure = getattr(window, "_show_web_failure", None)
+            if callable(show_failure) and not getattr(window, "_frontend_ready", False):
+                show_failure(
+                    "The Premium V2 interface could not complete startup. "
+                    "Your local project files have not been deleted. Details: " +
+                    (message or "The adapter failed without a diagnostic message.")
+                )
         return True
 
     def _settings_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
@@ -5788,6 +5801,7 @@ class PremiumV2Window(QMainWindow):
         self._renderer_restart_attempts = 0
         self._frontend_generation = 0
         self._frontend_ready = False
+        self._frontend_failure_shown = False
         self.web.loadFinished.connect(self._install_bridge)
         self.web.page().renderProcessTerminated.connect(self._handle_renderer_terminated)
 
@@ -5879,6 +5893,7 @@ class PremiumV2Window(QMainWindow):
             self.web.setZoomFactor(1.0)
 
     def _show_web_failure(self, message: str) -> None:
+        self._frontend_failure_shown = True
         log.error("Premium V2 renderer recovery surface shown: %s", message)
         if hasattr(self, "_web_error_message"):
             self._web_error_message.setText(str(message))
@@ -5892,6 +5907,7 @@ class PremiumV2Window(QMainWindow):
     def _on_frontend_ready(self) -> None:
         """Reveal the app only after the backend bridge and frontend wiring have finished."""
         self._frontend_ready = True
+        self._frontend_failure_shown = False
         self._renderer_restart_attempts = 0
         if hasattr(self, "_web_stack") and hasattr(self, "web"):
             self._web_stack.setCurrentWidget(self.web)
@@ -5901,6 +5917,7 @@ class PremiumV2Window(QMainWindow):
         # Keep the native loading surface visible during reload. Switching to the
         # WebEngine first exposes a blank frame until Chromium paints the page.
         self._frontend_ready = False
+        self._frontend_failure_shown = False
         self._frontend_generation += 1
         generation = self._frontend_generation
         self._set_loading_status("Retrying the interface and reconnecting local services…")
@@ -6039,7 +6056,7 @@ class PremiumV2Window(QMainWindow):
         QTimer.singleShot(15000, lambda: self._check_frontend_ready(generation))
 
     def _check_frontend_ready(self, generation: int) -> None:
-        if generation != self._frontend_generation or self._frontend_ready:
+        if generation != self._frontend_generation or self._frontend_ready or self._frontend_failure_shown:
             return
         self.web.page().runJavaScript(
             "({adapter:window.__ryuPremiumAdapterReady===true, body:!!document.body && "
@@ -6049,7 +6066,7 @@ class PremiumV2Window(QMainWindow):
         )
 
     def _finish_frontend_health_check(self, generation: int, result: Any) -> None:
-        if generation != self._frontend_generation or self._frontend_ready:
+        if generation != self._frontend_generation or self._frontend_ready or self._frontend_failure_shown:
             return
         if isinstance(result, dict) and result.get("adapter") and result.get("body"):
             self._on_frontend_ready()
@@ -6061,7 +6078,7 @@ class PremiumV2Window(QMainWindow):
         if startup_error:
             log.error("Premium V2 required startup hydration failed: %s", startup_error)
             self._show_web_failure(
-                "Ryu's Audiobook could not load its required startup data. "
+                "Ryu's Audiobook could not complete startup. "
                 "Your local project files have not been deleted. Details: " + startup_error
             )
             return
