@@ -6912,9 +6912,38 @@
     bindMiniPlayerNavigation();
     syncMiniPlayer();
 
+    const startupMilestones = {
+      loadSettings: {
+        starting: 31, complete: 39,
+        loading: 'Loading saved settings…',
+        loaded: 'Saved settings loaded.'
+      },
+      refreshProjects: {
+        starting: 42, complete: 54,
+        loading: 'Loading your local project library…',
+        loaded: 'Project library loaded.'
+      },
+      refreshVoices: {
+        starting: 57, complete: 69,
+        loading: 'Loading saved voice profiles…',
+        loaded: 'Voice profiles loaded.'
+      },
+      refreshChapters: {
+        starting: 72, complete: 88,
+        loading: 'Restoring the chapter workspace…',
+        loaded: 'Chapter workspace restored.'
+      }
+    };
+    const reportStartupProgress = (message, progress) => {
+      try {
+        window.__ryuEmitFrontendDiagnostic?.('startup-progress', {message, progress});
+      } catch (_) {}
+    };
     const hydratePhase = async (phase, options = {}) => {
       const required = options.required === true;
       for (const refresh of phase) {
+        const milestone = required ? startupMilestones[String(refresh?.name || '')] : null;
+        if (milestone) reportStartupProgress(milestone.loading, milestone.starting);
         try { await refresh(); }
         catch (error) {
           console.warn('[Ryu hydration]', error);
@@ -6926,6 +6955,7 @@
             );
           }
         }
+        if (milestone) reportStartupProgress(milestone.loaded, milestone.complete);
         // Give Chromium a paint/dispatch opportunity between backend reads.
         await new Promise(resolve => setTimeout(resolve, 0));
       }
@@ -6934,6 +6964,7 @@
     // while persisted Settings are still loading. PremiumV2Window keeps a native
     // loading surface visible until wire() finishes this essential phase.
     await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters], {required:true});
+    reportStartupProgress('Essential workspace loaded. Finishing the studio…', 94);
     // Secondary panels remain asynchronous and are isolated: a slow optional
     // sound/model subsystem cannot hold the main interface hostage.
     void (async () => {

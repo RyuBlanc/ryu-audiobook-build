@@ -29,3 +29,18 @@ def load_premium_v2_adapter(path: Path) -> str:
         raise FrontendAssetError(f"Premium V2 backend adapter is empty: {target}")
 
     return source
+
+
+
+def premium_v2_logo_candidates(frontend_file: Path) -> tuple[Path, ...]:
+    """Return packaged logo paths in the application's existing icon priority order."""
+    assets_directory = Path(frontend_file).parent.parent
+    return tuple(
+        assets_directory / name
+        for name in (
+            "ryu_audiobook_logo.png",
+            "ryu_audiobook_logo_master.png",
+            "ryu_audiobook_logo.svg",
+            "ryu_audiobook_logo.jpg",
+        )
+    )

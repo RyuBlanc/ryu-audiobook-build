@@ -3,7 +3,11 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from app.ui.frontend_assets import FrontendAssetError, load_premium_v2_adapter
+from app.ui.frontend_assets import (
+    FrontendAssetError,
+    load_premium_v2_adapter,
+    premium_v2_logo_candidates,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,6 +93,78 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
         self.assertIn("self._frontend_failure_shown = True", host[show_start:show_end])
         self.assertIn("or self._frontend_failure_shown", host[host.index("def _check_frontend_ready("):host.index("def _finish_frontend_health_check(")])
         self.assertIn("self._frontend_failure_shown = False", host[host.index("def _retry_web_renderer("):host.index("def _handle_renderer_terminated(")])
+
+
+    def test_native_loading_screen_uses_the_real_bundled_logo_and_progress_bar(self):
+        frontend_html = ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"
+        candidates = premium_v2_logo_candidates(frontend_html)
+        self.assertEqual(candidates[0].name, "ryu_audiobook_logo.png")
+        self.assertTrue(
+            any(path.is_file() and path.stat().st_size > 0 for path in candidates),
+            f"No real application logo asset found in: {candidates}",
+        )
+
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        window_start = host.index("class PremiumV2Window(")
+        window_end = host.index("    def apply_window_size(", window_start)
+        window = host[window_start:window_end]
+        self.assertIn('self._loading_page.setObjectName("startupLoadingPage")', window)
+        self.assertIn('self._loading_logo.setObjectName("startupLogo")', window)
+        self.assertIn("premium_v2_logo_candidates(path)", window)
+        self.assertIn("QPixmap(str(logo_path))", window)
+        self.assertIn("self._loading_logo.setPixmap(", window)
+        self.assertIn('self._loading_progress = QProgressBar(self._loading_page)', window)
+        self.assertIn('self._loading_progress.setObjectName("startupProgress")', window)
+        self.assertIn('self._loading_progress.setFormat("%p%")', window)
+        self.assertIn("self._update_startup_progress", window)
+
+    def test_startup_progress_diagnostics_update_native_status_monotonically(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        diagnostic_start = host.index("def report_frontend_diagnostic(")
+        diagnostic_end = host.index("def _settings_get(", diagnostic_start)
+        diagnostic = host[diagnostic_start:diagnostic_end]
+        self.assertIn('if kind == "startup-progress":', diagnostic)
+        self.assertIn('update = getattr(window, "_update_startup_progress", None)', diagnostic)
+
+        updater_start = host.index("def _update_startup_progress(")
+        updater_end = host.index("def _on_frontend_ready(", updater_start)
+        updater = host[updater_start:updater_end]
+        self.assertIn("self._set_loading_status(message)", updater)
+        self.assertIn("self._startup_progress_value = max(self._startup_progress_value, value)", updater)
+        self.assertIn("self._loading_progress.setValue(self._startup_progress_value)", updater)
+
+    def test_startup_progress_reports_real_required_hydration_milestones(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        milestones_start = adapter.index("const startupMilestones = {")
+        milestones_end = adapter.index("const reportStartupProgress =", milestones_start)
+        milestones = adapter[milestones_start:milestones_end]
+        for label in (
+            "Loading saved settings",
+            "Loading your local project library",
+            "Loading saved voice profiles",
+            "Restoring the chapter workspace",
+        ):
+            self.assertIn(label, milestones)
+        phase_start = adapter.index("const hydratePhase = async (phase, options = {})")
+        phase_end = adapter.index("await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters], {required:true})", phase_start)
+        phase = adapter[phase_start:phase_end]
+        self.assertIn("if (milestone) reportStartupProgress(milestone.loading, milestone.starting)", phase)
+        self.assertIn("await refresh()", phase)
+        self.assertIn("if (milestone) reportStartupProgress(milestone.loaded, milestone.complete)", phase)
+        self.assertIn("reportStartupProgress('Essential workspace loaded. Finishing the studio…', 94)", adapter)
+        self.assertIn("window.__ryuEmitFrontendDiagnostic?.('startup-progress'", adapter)
+
+    def test_native_bridge_diagnostic_carries_bounded_progress(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        start = host.index("const emit = (kind, details = {}) =>")
+        end = host.index("window.__ryuEmitFrontendDiagnostic = emit;", start)
+        bridge = host[start:end]
+        self.assertIn("details.progress === undefined || details.progress === null", bridge)
+        self.assertIn("Math.max(0, Math.min(100, Math.round(Number(details.progress))))", bridge)
+        self.assertIn("emit('startup-progress'", host)
+        self.assertIn("progress:26", host)
 
     def test_native_host_fails_before_javascript_injection_when_adapter_cannot_load(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")

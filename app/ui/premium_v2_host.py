@@ -25,11 +25,15 @@ from PySide6.QtCore import QObject, QSettings, QTimer, QUrl, Slot, Qt
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMainWindow, QProgressBar, QPushButton, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtGui import QDesktopServices, QPixmap
 
 from app.core.paths import app_root, audiobooks_root, ensure_roots, library_root, settings_root
-from app.ui.frontend_assets import FrontendAssetError, load_premium_v2_adapter
+from app.ui.frontend_assets import (
+    FrontendAssetError,
+    load_premium_v2_adapter,
+    premium_v2_logo_candidates,
+)
 from app.core.project import create_project, list_projects
 from app.core.character_library import (
     character_library_path as reusable_character_library_path,
@@ -5691,6 +5695,17 @@ class PremiumV2Bridge(QObject):
             line = max(0, min(10_000_000, int(payload.get("line") or 0)))
         except (TypeError, ValueError, OverflowError):
             line = 0
+        if kind == "startup-progress":
+            raw_progress = payload.get("progress")
+            try:
+                progress = None if raw_progress is None else max(0, min(100, int(raw_progress)))
+            except (TypeError, ValueError, OverflowError):
+                progress = None
+            window = self.parent()
+            update = getattr(window, "_update_startup_progress", None)
+            if callable(update):
+                update(message or "Preparing the local studio…", progress)
+            return True
         if kind == "frontend-ready":
             log.info("Premium V2 frontend initialized successfully")
             window = self.parent()
@@ -5802,6 +5817,7 @@ class PremiumV2Window(QMainWindow):
         self._frontend_generation = 0
         self._frontend_ready = False
         self._frontend_failure_shown = False
+        self._startup_progress_value = 0
         self.web.loadFinished.connect(self._install_bridge)
         self.web.page().renderProcessTerminated.connect(self._handle_renderer_terminated)
 
@@ -5811,20 +5827,83 @@ class PremiumV2Window(QMainWindow):
         self._web_stack = QStackedWidget(self)
 
         self._loading_page = QWidget(self._web_stack)
+        self._loading_page.setObjectName("startupLoadingPage")
         self._loading_page.setStyleSheet("background:#080a10;color:#eef0f5;")
         loading_layout = QVBoxLayout(self._loading_page)
-        loading_layout.setContentsMargins(36, 36, 36, 36)
-        loading_layout.addStretch(1)
-        self._loading_title = QLabel("Ryu’s Audiobook", self._loading_page)
+        loading_layout.setContentsMargins(36, 34, 36, 30)
+        loading_layout.setSpacing(13)
+        loading_layout.addStretch(2)
+
+        # Use the actual bundled Ryu logo, not a placeholder drawing. Try the
+        # same icon asset first, then the lossless master PNG and vector artwork.
+        self._loading_logo = QLabel(self._loading_page)
+        self._loading_logo.setObjectName("startupLogo")
+        self._loading_logo.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter)
+        self._loading_logo.setMinimumSize(132, 132)
+        self._loading_logo.setMaximumSize(132, 132)
+        self._loading_logo.setStyleSheet("background:transparent;border:0;")
+        self._loading_logo_source = None
+        self._loading_logo_pixmap = QPixmap()
+        for logo_path in premium_v2_logo_candidates(path):
+            candidate = QPixmap(str(logo_path))
+            if not candidate.isNull():
+                self._loading_logo_source = logo_path
+                self._loading_logo_pixmap = candidate
+                self._loading_logo.setPixmap(candidate.scaled(
+                    132, 132,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                ))
+                break
+        if self._loading_logo_pixmap.isNull():
+            log.error("No readable Ryu logo asset was found for the startup screen: %s",
+                      premium_v2_logo_candidates(path))
+            self._loading_logo.setText("RYU")
+            self._loading_logo.setStyleSheet(
+                "background:transparent;border:0;color:#e64160;font-size:30px;font-weight:800;"
+            )
+        self._loading_logo.setAccessibleName("Ryu's Audiobook logo")
+        loading_layout.addWidget(self._loading_logo, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        self._loading_title = QLabel(APP_NAME.upper(), self._loading_page)
+        self._loading_title.setObjectName("startupTitle")
         self._loading_title.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        self._loading_title.setStyleSheet("font-size:26px;font-weight:750;color:#f0f2f7;")
+        self._loading_title.setStyleSheet(
+            "font-size:23px;font-weight:800;letter-spacing:2px;color:#f5edf3;"
+        )
         self._loading_status = QLabel("Starting the Windows interface…", self._loading_page)
+        self._loading_status.setObjectName("startupStatus")
         self._loading_status.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self._loading_status.setWordWrap(True)
-        self._loading_status.setStyleSheet("font-size:14px;color:#aeb6c5;")
-        loading_layout.addWidget(self._loading_title)
-        loading_layout.addWidget(self._loading_status)
-        loading_layout.addStretch(1)
+        self._loading_status.setMinimumWidth(300)
+        self._loading_status.setMaximumWidth(620)
+        self._loading_status.setStyleSheet("font-size:14px;color:#b9b2c0;padding:4px 0;")
+        loading_layout.addWidget(self._loading_title, 0, Qt.AlignmentFlag.AlignHCenter)
+        loading_layout.addWidget(self._loading_status, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        self._loading_progress = QProgressBar(self._loading_page)
+        self._loading_progress.setObjectName("startupProgress")
+        self._loading_progress.setRange(0, 100)
+        self._loading_progress.setValue(3)
+        self._loading_progress.setFormat("%p%")
+        self._loading_progress.setTextVisible(True)
+        self._loading_progress.setFixedHeight(22)
+        self._loading_progress.setMinimumWidth(300)
+        self._loading_progress.setMaximumWidth(480)
+        self._loading_progress.setStyleSheet(
+            "QProgressBar{background:#19141d;border:1px solid #342634;border-radius:7px;"
+            "color:#f7edf2;text-align:center;font-size:10px;font-weight:700;}"
+            "QProgressBar::chunk{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            "stop:0 #8c1735,stop:1 #e64160);border-radius:6px;}"
+        )
+        loading_layout.addWidget(self._loading_progress, 0, Qt.AlignmentFlag.AlignHCenter)
+        self._loading_version = QLabel(f"VERSION {full_version()}", self._loading_page)
+        self._loading_version.setObjectName("startupVersion")
+        self._loading_version.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self._loading_version.setStyleSheet("font-size:10px;letter-spacing:1px;color:#77717f;")
+        loading_layout.addWidget(self._loading_version, 0, Qt.AlignmentFlag.AlignHCenter)
+        loading_layout.addStretch(3)
+        self._update_startup_progress("Preparing the local studio…", 5)
         self._web_stack.addWidget(self._loading_page)
         self._web_stack.addWidget(self.web)
 
@@ -5904,8 +5983,29 @@ class PremiumV2Window(QMainWindow):
         if hasattr(self, "_loading_status"):
             self._loading_status.setText(str(message or "Starting the Windows interface…"))
 
+    def _update_startup_progress(self, message: str, progress: int | None = None) -> None:
+        """Show live native loading status from confirmed frontend startup milestones."""
+        if self._frontend_ready or self._frontend_failure_shown:
+            return
+        self._set_loading_status(message)
+        if progress is None:
+            return
+        try:
+            value = max(0, min(100, int(progress)))
+        except (TypeError, ValueError, OverflowError):
+            return
+        # Ignore stale/out-of-order status callbacks so the visible meter never
+        # moves backwards during one startup attempt.
+        self._startup_progress_value = max(self._startup_progress_value, value)
+        if hasattr(self, "_loading_progress"):
+            self._loading_progress.setValue(self._startup_progress_value)
+
     def _on_frontend_ready(self) -> None:
         """Reveal the app only after the backend bridge and frontend wiring have finished."""
+        self._set_loading_status("Studio ready. Opening your workspace…")
+        self._startup_progress_value = 100
+        if hasattr(self, "_loading_progress"):
+            self._loading_progress.setValue(100)
         self._frontend_ready = True
         self._frontend_failure_shown = False
         self._renderer_restart_attempts = 0
@@ -5918,9 +6018,10 @@ class PremiumV2Window(QMainWindow):
         # WebEngine first exposes a blank frame until Chromium paints the page.
         self._frontend_ready = False
         self._frontend_failure_shown = False
+        self._startup_progress_value = 0
         self._frontend_generation += 1
         generation = self._frontend_generation
-        self._set_loading_status("Retrying the interface and reconnecting local services…")
+        self._update_startup_progress("Retrying the interface and reconnecting local services…", 5)
         if hasattr(self, "_web_stack") and hasattr(self, "_loading_page"):
             self._web_stack.setCurrentWidget(self._loading_page)
         self.web.reload()
@@ -5948,7 +6049,7 @@ class PremiumV2Window(QMainWindow):
         self._frontend_generation += 1
         self._frontend_ready = False
         generation = self._frontend_generation
-        self._set_loading_status("Connecting to the local backend and loading saved settings…")
+        self._update_startup_progress("Premium V2 interface loaded. Connecting to local services…", 18)
         if hasattr(self, "_web_stack") and hasattr(self, "_loading_page"):
             self._web_stack.setCurrentWidget(self._loading_page)
         # Install error handlers before the adapter executes. A page load may
@@ -5965,7 +6066,10 @@ class PremiumV2Window(QMainWindow):
               message: String(details.message || '').slice(0, 2500),
               source: String(details.source || '').slice(0, 600),
               line: Number.isFinite(Number(details.line)) ? Number(details.line) : 0,
-              stack: String(details.stack || '').slice(0, 3000)
+              stack: String(details.stack || '').slice(0, 3000),
+              progress: details.progress === undefined || details.progress === null ||
+                !Number.isFinite(Number(details.progress))
+                ? null : Math.max(0, Math.min(100, Math.round(Number(details.progress))))
             };
             try {
               if (typeof window.__ryuSendFrontendDiagnostic === 'function') {
@@ -6020,6 +6124,10 @@ class PremiumV2Window(QMainWindow):
                   }));
                 }
               });
+              emit('startup-progress', {
+                message:'Local backend connected. Loading your saved workspace…',
+                progress:26
+              });
               window.dispatchEvent(new CustomEvent('ryu-backend-ready'));
             });
             return true;
@@ -6049,6 +6157,7 @@ class PremiumV2Window(QMainWindow):
             self._show_web_failure(message)
             return
         script += "\n" + adapter_source
+        self._update_startup_progress("Starting saved-settings and project checks…", 28)
         self.web.page().runJavaScript(script)
         # Check for a UI that loaded at the HTML level but never finished
         # initializing the backend adapter. This gives the user a native
