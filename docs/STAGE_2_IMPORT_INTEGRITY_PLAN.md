@@ -21,7 +21,7 @@
 - [x] Automated fixtures cover numbered/Roman chapters, prologue/epilogue, preambles, books without headings, empty-heading boundaries and named/compound slash-title/Part headings. Continue adding real-book fixtures during acceptance.
 - [x] Verify covered chapter boundaries preserve body text; project save normalizes chapter numbering to current order, and regression tests verify reordered chapters reload in that order.
 - [ ] Persistence regression now covers chapter title/text edits, reorder, dialogue assignments, review status, and skip-for-generation after reload. Still verify all editor operations (add/delete/merge/split/clean/find-replace/undo-redo) in automated or packaged-app tests.
-- [ ] Keep re-detection disabled unless it can show a before/after review and protect manual edits.
+- [x] Re-detection now requires an explicit before/after preview and a matching saved-data fingerprint before applying; preview-only calls do not mutate the project, and stale/missing preview tokens are rejected by regression tests.
 
 ### 2.4 Automated and Windows acceptance
 - [x] Run the complete unittest regression suite and Windows package/installer pipeline on the final Stage 2 branch head; Run #877 passed on commit `05e03c14637bb4ff3fe8514a50101ebde0d2ab4b`.
@@ -33,7 +33,7 @@
 
 - Run #1464 passed on tested code commit `579c378ae81ab9c06e7c68feae5485574f3f02cc`: 732/732 tests passed, with installer, portable app, SHA-256 manifest, Defender scan, and test evidence uploaded. See [Stage 2 evidence](STAGE_2_IMPORT_CHAPTER_EVIDENCE.md).
 - Follow-up commit `a2666867425ab0c0710b5fd34417ae608280fb62` clears number-keyed chapter undo/redo stacks after structural edits so old snapshots cannot be applied to a different chapter after renumbering.
-- Follow-up commit `9d983356522b272cbbf1d12b948769d4a836d0e3` adds six chapter-operation regressions for rename/edit assignment integrity, delete renumbering, reorder metadata, merge/split offsets, invalid split safety, and adapter history invalidation. Its Windows CI run is pending/in progress; do not count these tests as passed until the run concludes successfully.
+- Follow-up commits add deterministic editor-operation tests for text/title and dialogue-assignment integrity, delete renumbering, reorder metadata, merge/split offsets, invalid split safety, history invalidation, Unicode Find/Replace offsets, and redetection preview/stale-fingerprint behavior. The latest complete checkpoint run must pass before these tests are counted as verified.
 - Structural history invalidation is a safety guard, not full cross-structure undo. Undo/redo remains scoped to the active chapter's text-edit history.
 
 ## Remaining Stage 2 gates
