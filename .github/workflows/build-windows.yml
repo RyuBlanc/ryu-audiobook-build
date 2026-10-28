@@ -39,6 +39,7 @@ jobs:
         shell: pwsh
         env:
           RYU_BUILD_NUMBER: ${{ github.run_number }}
+          RYU_BUILD_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           $ErrorActionPreference = 'Stop'
           $env:PYTHONDONTWRITEBYTECODE = '1'
@@ -77,6 +78,13 @@ jobs:
           $env:PYTHONDONTWRITEBYTECODE = '1'
           & $pythonExe -B -m unittest discover -s tests -v
           if ($LASTEXITCODE -ne 0) { throw "Regression tests failed with exit code $LASTEXITCODE." }
+
+          # Ordinary fix commits run the full test suite only. Packaging and
+          # artifact creation require an explicit [artifact-checkpoint] commit.
+          if ($env:RYU_BUILD_MESSAGE -notmatch '\[artifact-checkpoint\]') {
+            Write-Host 'Test-only run passed; checkpoint marker absent, so packaging and artifact creation are skipped.'
+            exit 0
+          }
 
           Write-Host '=== Verify pinned Chatterbox Nano source ==='
           $source = Get-Content 'app\tts\chatterbox_runtime.py' -Raw

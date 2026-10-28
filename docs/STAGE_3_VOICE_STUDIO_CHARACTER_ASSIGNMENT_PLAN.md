@@ -49,3 +49,14 @@ Stage 3 implementation and automated/package gates passed Run #894 on commit `ec
 ## Completion rule
 
 Do not mark Stage 3 complete from a green build alone. Require regression tests, verified package output, and a clearly documented target-Windows acceptance result. Do not claim voice quality is correct without listening to the generated preview/audio.
+
+
+## Stage 3 closure work — 2026-10-28
+
+The remaining automated closure work is being addressed before the checkpoint build:
+- Add behavioral tests for case-insensitive character updates, duplicate-name rejection, deletion semantics, and reference cleanup.
+- Verify character-analysis evidence and user-authored metadata survive persisted save/reload.
+- Fix split handling so dialogue offsets migrate with the right-hand chapter only when source text is unchanged; invalidate stale or boundary-crossing offsets safely.
+- Expand character-detection fixtures for first-person self-identification, short-name aliases, and attributed dialogue.
+- Change the Windows workflow so ordinary commits run the full unittest suite only; frozen-app/package/security/artifact gates run only on an explicit `[artifact-checkpoint]` commit.
+- These items remain open until the test-only CI run passes. Packaged Windows UI/audio acceptance remains a separate manual gate.

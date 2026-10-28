@@ -867,9 +867,38 @@ class PremiumV2Bridge(QObject):
         if not title_value:
             raise ValueError("Chapter title cannot be empty.")
         chapter.title = title_value
+        original_text = str(chapter.text or "")
+        saved_assignments = list(getattr(chapter, "dialogue_assignments", []) or [])
         chapter.text = left
         new_title = str(payload.get("new_title") or f"{title_value} (continued)").strip()[:500]
-        new_chapter = Chapter(number + 1, new_title, right)
+
+        # Dialogue offsets are relative to the exact source text. If the editor
+        # supplied changed text, old offsets are no longer trustworthy.
+        left_assignments = []
+        right_assignments = []
+        if text_value == original_text:
+            right_source = text_value[split_at:]
+            removed_right_prefix = len(right_source) - len(right_source.lstrip())
+            right_boundary = split_at + removed_right_prefix
+            for assignment in saved_assignments:
+                if not isinstance(assignment, dict):
+                    continue
+                start, end = assignment.get("start"), assignment.get("end")
+                if (isinstance(start, bool) or not isinstance(start, int)
+                        or isinstance(end, bool) or not isinstance(end, int)
+                        or start < 0 or end <= start or end > len(text_value)):
+                    continue
+                if end <= split_at:
+                    left_assignments.append(dict(assignment))
+                elif start >= right_boundary:
+                    shifted = dict(assignment)
+                    shifted["start"] = start - right_boundary
+                    shifted["end"] = end - right_boundary
+                    right_assignments.append(shifted)
+                # A boundary-crossing span or span inside trimmed whitespace is
+                # invalidated rather than assigned to the wrong chapter.
+        chapter.dialogue_assignments = left_assignments
+        new_chapter = Chapter(number + 1, new_title, right, dialogue_assignments=right_assignments)
         project.chapters.insert(index + 1, new_chapter)
         for i, item in enumerate(project.chapters, 1):
             item.number = i
@@ -1333,20 +1362,63 @@ class PremiumV2Bridge(QObject):
         return {"character": item, "saved": True}
 
     def _character_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Remove one character from the active book's saved cast."""
+        """Delete a cast entry without leaving dangling chapter or voice-cast references."""
+        from app.chapters.assignment_utils import assignment_speakers, normalize_assignment
+
         project = self._active_project()
         name = str(payload.get("name") or "").strip()
         if not name:
             raise ValueError("Choose a character to delete.")
         state = load_state(project.folder)
-        characters = list(state.get("characters") or [])
-        kept = [c for c in characters if not (
-            isinstance(c, dict) and str(c.get("name", "")).casefold() == name.casefold()
-        )]
-        removed = len(characters) - len(kept)
-        if not removed:
+        characters = [c for c in (state.get("characters") or []) if isinstance(c, dict)]
+        target = next((c for c in characters
+                       if str(c.get("name", "")).strip().casefold() == name.casefold()), None)
+        if target is None:
             raise ValueError("The selected character is no longer in the saved cast.")
+
+        canonical_names = {
+            str(c.get("name", "")).strip().casefold()
+            for c in characters if c is not target and str(c.get("name", "")).strip()
+        }
+        target_names = {str(target.get("name", "")).strip().casefold()}
+        aliases = target.get("aliases") or []
+        if isinstance(aliases, str):
+            aliases = [aliases]
+        target_names.update(
+            str(alias).strip().casefold() for alias in aliases
+            if str(alias).strip() and str(alias).strip().casefold() not in canonical_names
+        )
+
+        kept = [c for c in characters if c is not target]
+        # Keep other speakers in a multi-speaker passage. Remove a single-speaker
+        # assignment only when no speaker remains; never leave a deleted character
+        # as a stale routing target.
+        for chapter in project.chapters:
+            updated_assignments = []
+            for assignment in getattr(chapter, "dialogue_assignments", []) or []:
+                if not isinstance(assignment, dict):
+                    continue
+                speakers = assignment_speakers(assignment)
+                remaining = [speaker for speaker in speakers
+                             if speaker.strip().casefold() not in target_names]
+                if len(remaining) == len(speakers):
+                    updated_assignments.append(assignment)
+                elif remaining:
+                    updated_assignments.append(normalize_assignment(
+                        assignment, remaining,
+                        str(assignment.get("multi_speaker_mode") or "chorus"),
+                    ))
+                # An assignment with no remaining speaker is intentionally dropped.
+            chapter.dialogue_assignments = updated_assignments
+
+        voice_cast = state.get("voice_cast")
+        if isinstance(voice_cast, dict):
+            state["voice_cast"] = {
+                key: value for key, value in voice_cast.items()
+                if str(key).strip().casefold() not in target_names
+            }
         state["characters"] = kept
+        project.save()
         save_state(project.folder, state)
         return {"name": name, "deleted": True, "remaining": len(kept)}
 
