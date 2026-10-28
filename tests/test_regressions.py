@@ -1102,27 +1102,20 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("worker.finished.connect(", source)
         self.assertIn("shiboken6.isValid(widget)", source)
 
-    def test_actions_storage_cleanup_prunes_prior_success_only_after_validated_build(self):
+    def test_actions_storage_cleanup_is_disabled_until_release_review(self):
         script = Path(".github/scripts/cleanup_actions_storage.ps1").read_text(encoding="utf-8")
         workflow = Path(".github/workflows/build-windows.yml").read_text(encoding="utf-8")
-        self.assertIn("$currentRun = $allRuns | Where-Object { $_.id -eq $currentRunId }", script)
-        self.assertIn("$currentRunIsEligibleForReplacement = ($currentRun -and $pruneCurrentWorkflowToCurrent)", script)
-        self.assertIn(
-            "if (-not ($isCurrentWorkflow -and $currentRunIsEligibleForReplacement))",
-            script,
-        )
-        self.assertNotIn("$currentRunIsCompleted", script)
-        self.assertIn("$keepIds['39933305387'] = $true", script)
-        inline_start = workflow.index("name: Clean old Actions runs and storage after verified Windows build")
-        publish_start = workflow.index("name: Publish verified installer release")
-        self.assertGreater(inline_start, publish_start)
-        self.assertIn("continue-on-error: true", workflow[inline_start:inline_start + 400])
-        workflow_lines = workflow.splitlines()
-        cleanup_job_start = workflow_lines.index("  cleanup:")
-        cleanup_steps_start = workflow_lines.index("    steps:", cleanup_job_start)
-        cleanup_job_header = "\n".join(workflow_lines[cleanup_job_start:cleanup_steps_start])
-        self.assertIn("    continue-on-error: true", cleanup_job_header)
-        self.assertIn("continue-on-error: true", workflow[workflow.index("name: Prune stale completed runs"):])
+        storage_workflow = Path(".github/workflows/actions-storage-cleanup.yml").read_text(encoding="utf-8")
+
+        self.assertIn("Automatic Actions run/artifact deletion is disabled pending Version 1.2.0 acceptance.", script)
+        self.assertNotIn("gh api --method DELETE", script)
+        self.assertNotIn("Clean old Actions runs and storage", workflow)
+        self.assertNotIn("cleanup_actions_storage.ps1", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn("retention-days: 90", workflow)
+        self.assertNotIn("cleanup_actions_storage.ps1", storage_workflow)
+        self.assertNotIn("gh api --method DELETE", storage_workflow)
+        self.assertIn("Automatic workflow-run and artifact deletion is disabled.", storage_workflow)
 
 
     def test_qwen_voice_preview_reuses_warm_provider_and_replaces_changed_profile(self):

@@ -102,9 +102,9 @@ class ChapterDetectionFixtureTests(unittest.TestCase):
 
     def test_part_only_roman_headings_are_detected_without_leaking_next_body(self):
         source = (
-            "Part I: Arrival\\n"
-            "The first part remains intact.\\n\\n"
-            "Part II: Departure\\n"
+            "Part I: Arrival\n"
+            "The first part remains intact.\n\n"
+            "Part II: Departure\n"
             "The second part remains intact."
         )
         chapters = detect_chapters(source)

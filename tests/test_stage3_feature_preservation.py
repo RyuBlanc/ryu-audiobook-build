@@ -187,7 +187,7 @@ class VoiceCastPagePersistenceTests(unittest.TestCase):
             )
             try:
                 with patch("app.ui.voice_cast_page.load_profiles", return_value=[profile]):
-                    first_page = VoiceCastPage(lambda: [], parent=host)
+                    first_page = VoiceCastPage(lambda: [], parent=host, get_project=lambda: SimpleNamespace(folder=folder))
                     self.app.processEvents()
                     self.assertEqual(first_page.rows[0]["name"], "Mira")
                     self.assertIsNone(first_page.rows[0]["voice"])
@@ -198,7 +198,7 @@ class VoiceCastPagePersistenceTests(unittest.TestCase):
                     self.assertEqual(first_page.rows[0]["voice"], "Mira Voice")
                     self.assertIn("assigned", first_page.list.item(0).text().casefold())
                     self.assertEqual(load_state(folder)["voice_cast"]["Mira"], "Mira Voice")
-                    second_page = VoiceCastPage(lambda: [], parent=host)
+                    second_page = VoiceCastPage(lambda: [], parent=host, get_project=lambda: SimpleNamespace(folder=folder))
                     self.app.processEvents()
                     self.assertEqual(second_page.rows[0]["voice"], "Mira Voice")
                     self.assertIn("assigned", second_page.list.item(0).text().casefold())

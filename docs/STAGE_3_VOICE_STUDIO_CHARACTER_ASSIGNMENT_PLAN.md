@@ -93,3 +93,13 @@ Do not mark Stage 3 complete from a green build alone. Require regression tests,
 - CI explicitly tests this integration branch, uses branch-scoped non-cancelling concurrency, retains test evidence and release artifacts for 90 days, and has automatic pruning disabled. Ordinary commits run tests only; artifact packaging remains deferred until this test-only candidate passes.
 - No artifact from the older Stage 3-only branch is accepted as the all-feature candidate. Product version remains 1.1.1 until frozen requirements have passed final acceptance; do not publish Version 1.2.0 early.
 - Packaged Windows runtime/audio acceptance remains open. CI cannot prove the wizard appearance on the user's PC or that selected voice identity, generated audio, playback and settings persistence are accepted.
+
+
+## Integration test-only Run #1503 — failure analysis and correction — 2026-10-28
+
+- Run #1503 tested full-feature integration commit `d46baa3c402956b59f10f0f24b222ff5701e798d`: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40652903861.
+- The suite ran 782 tests and reported 1 failure / 2 errors. The test evidence artifact `Ryu-Audiobook-Test-Evidence-1503` (artifact ID `12799828407`) was uploaded successfully and must be retained.
+- The Roman Part-heading fixture was incorrectly encoded with literal backslash-n characters; fix the test input to contain actual line breaks. This is a test-fixture correction, not a parser regression.
+- The Voice Cast UI test did not supply the current `get_project` callback, so the widget correctly had no active project and no rows. Update the test to pass that callback and then verify visible assignment persistence across widget recreation.
+- An existing regression test still expected the previous destructive cleanup script. Replace it with a contract asserting that both cleanup workflows and the underlying script are non-destructive. This aligns testing with the explicit evidence-retention rule.
+- No installer artifact was produced by Run #1503. Correct these issues and run the complete test suite again on a new fix commit. The package/checkpoint gate remains closed until all tests pass.
