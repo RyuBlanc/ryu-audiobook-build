@@ -1,4 +1,5 @@
 """Stage 2 import edge-case tests: duplicate detection, cancellation and failure status."""
+import base64
 import tempfile
 import threading
 import unittest
@@ -46,6 +47,29 @@ class Stage2ImportEdgeCaseTests(unittest.TestCase):
             thread.assert_not_called()
             self.assertTrue(selected.is_file())
             self.assertTrue(existing.is_file())
+
+    def test_duplicate_dropped_file_cleans_temporary_staging_copy(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            existing = root / "already-imported.txt"
+            content = b"Chapter 1: Arrival\\nMira reached the old city gate before sunset."
+            existing.write_bytes(content)
+            project = SimpleNamespace(title="Existing Drop", source_path=existing)
+            bridge, _event = bridge_harness()
+            incoming = root / "incoming_imports"
+
+            with patch("app.ui.premium_v2_host.app_root", return_value=root), \
+                 patch("app.ui.premium_v2_host.list_projects", return_value=[project]):
+                with self.assertRaisesRegex(ValueError, "Open that project from Audiobook Library"):
+                    PremiumV2Bridge._import_start(bridge, {
+                        "content_base64": base64.b64encode(content).decode("ascii"),
+                        "file_name": "same-book.txt",
+                    })
+
+            bridge._new_job.assert_not_called()
+            self.assertTrue(existing.is_file())
+            self.assertTrue(incoming.is_dir())
+            self.assertEqual(list(incoming.iterdir()), [])
 
     def test_empty_and_unsupported_files_are_rejected_before_job_creation(self):
         with tempfile.TemporaryDirectory() as temp:
