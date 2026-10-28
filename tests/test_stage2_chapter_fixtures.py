@@ -118,7 +118,7 @@ class ChapterDetectionFixtureTests(unittest.TestCase):
     def test_embedded_slash_titles_and_urls_are_not_structural_headings(self):
         source = (
             "The speaker discussed BLACK DOG/BIRTH before turning away.\\n"
-            "Read https://example.com/BLACK/DOG for additional context.\\n"
+            "Read https://example.com/BLACK/DOG for additional context.\n"
             "The paragraph continues as ordinary narrative."
         )
         chapters = detect_chapters(source)
