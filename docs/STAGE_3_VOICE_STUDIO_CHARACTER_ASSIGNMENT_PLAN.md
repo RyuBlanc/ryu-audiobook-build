@@ -14,14 +14,14 @@
 - [ ] Target-PC acceptance: verify custom/reference voices and built-in voices remain distinguishable and reload after application restart.
 
 ### 3.2 Character analysis and cast persistence
-- [x] Regression coverage includes dialogue attribution and manual-assignment names surviving analysis; first-person narration and broader alias/false-positive fixtures remain to be expanded.
+- [x] Regression coverage includes dialogue attribution, manual-assignment names, first-person self-identification, short-name aliases, and attributed-dialogue fixtures. Run #1492 passed 426 tests.
 - [x] Re-analysis preserves voice-profile assignment and edited cast metadata for case-insensitive exact-name matches; regression test passed in Run #894.
-- [x] Regression contract covers rename preserving the old canonical name as an alias and partial updates preserving omitted metadata; Run #894 passed. Still required: behavioral tests for case-insensitive updates, alias edits, duplicate names, delete semantics and assignment references.
-- [ ] Add persistence-level tests for analysis output, confidence/examples, dialogue totals and unassigned counts across save/reopen.
+- [x] Regression contract covers rename preserving the old canonical name as an alias and partial updates preserving omitted metadata; behavioral tests now cover case-insensitive updates, alias edits, duplicate-name rejection, delete semantics and assignment-reference cleanup. Run #1492 passed 426 tests.
+- [x] Persistence-level tests verify analysis output, confidence/examples, dialogue totals and user-authored metadata across save/reopen (Run #1492); an explicit unassigned-count persistence assertion is added for the next test-only run.
 
 ### 3.3 Dialogue assignment and generation routing
 - [x] Regression tests for legacy/multi-speaker assignment shapes, ambiguous quote rejection, exact/stale-span unassignment and multi-speaker candidate detection passed in Run #894.
-- [ ] Add tests for assignment integrity through chapter reorder/merge/split and explicitly define offset migration or safe invalidation behavior.
+- [x] Tests cover assignment integrity through chapter reorder/merge/split, offset migration for valid spans, and safe invalidation for boundary-crossing or changed-source spans. Run #1492 passed 426 tests.
 - [x] Regression test confirms assigned dialogue routes to cast profiles while surrounding narration uses the narrator; Run #894 passed.
 - [x] Missing assigned cast profile now fails with actionable guidance rather than silently using the narrator; regression test passed in Run #894.
 - [ ] Target-PC acceptance: verify UI displays saved assignment state and preview/generation failures accurately.
@@ -68,3 +68,11 @@ The remaining automated closure work is being addressed before the checkpoint bu
 - The root cause is case-sensitive matching in `_detect_first_person_narrator`; the follow-up makes introductory phrase matching case-insensitive while retaining name plausibility validation.
 - Add chapter reorder and merge offset-integrity tests alongside the split migration tests.
 - Run #1491 did not package or upload artifacts. Continue test-only CI until the full suite passes; checkpoint packaging remains deferred.
+
+
+## Stage 3 test-only Run #1492 — 2026-10-28
+
+- Run #1492 passed **426 tests** on commit `5137f4e3a32d396716476bac0c2d4ce0410a5d51`: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40628970505.
+- The run verified the first-person narrator detection correction and the new chapter reorder/merge/split assignment-offset tests.
+- A further explicit persistence assertion for the unassigned-dialogue count is being added before the checkpoint run.
+- Packaging, installer, Defender, artifact upload, cleanup, and release steps were all skipped because this was a test-only commit.

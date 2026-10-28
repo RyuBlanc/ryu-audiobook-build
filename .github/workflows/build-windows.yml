@@ -12,7 +12,7 @@ on:
       - stage-3/voice-studio-character-assignment
   workflow_dispatch:
 
-# Build artifacts are produced and verified on every main build.
+# Every push runs regression tests; package/artifact gates require an explicit [artifact-checkpoint] commit.
 
 permissions:
   contents: write

@@ -156,6 +156,23 @@ class Stage3CharacterAnalysisPersistenceTests(unittest.TestCase):
             self.assertEqual(bridge.job_updates[-1][1]["state"], "completed")
 
 
+    def test_unassigned_dialogue_count_survives_analysis_save_and_reload(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            project = Project("Unassigned dialogue", folder, chapters=[
+                Chapter(1, "One", "“Nobody answered.”")
+            ])
+            project.save()
+            bridge = _BridgeHarness(project)
+
+            PremiumV2Bridge._character_worker(bridge, "unassigned-job", project)
+
+            saved = load_state(folder)["character_analysis"]
+            self.assertEqual(saved["dialogue_total"], 1)
+            self.assertEqual(saved["unassigned_dialogue"], 1)
+            self.assertEqual(bridge.job_updates[-1][1]["state"], "completed")
+
+
 class Stage3ChapterAssignmentOffsetTests(unittest.TestCase):
     def _project(self, folder, text, assignments):
         chapter = Chapter(1, "One", text, dialogue_assignments=assignments)
