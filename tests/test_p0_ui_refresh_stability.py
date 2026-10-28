@@ -194,6 +194,25 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("@media(max-width:800px)", guard)
         self.assertIn("body.ryu-mini-player-visible .toast-wrap { bottom:86px; }", guard)
 
+
+    def test_workflow_strip_and_voice_status_blurs_are_bounded_in_both_effect_modes(self):
+        html = (
+            ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"
+        ).read_text(encoding="utf-8")
+        start = html.index("Stage 1 stability: bounded glass effects")
+        end = html.index("</style>", start)
+        guard = html[start:end]
+        self.assertIn("html[data-effects='high'] .workflow-strip", guard)
+        self.assertIn("html[data-effects='high'] #voices .status", guard)
+        self.assertIn("html[data-effects='normal'] .workflow-strip", guard)
+        self.assertIn("html[data-effects='normal'] #voices .status", guard)
+        high_workflow = guard[guard.index("html[data-effects='high'] .workflow-strip"):guard.index("html[data-effects='high'] #voices .status")]
+        high_voice = guard[guard.index("html[data-effects='high'] #voices .status"):guard.index("html[data-effects='normal'] .workflow-strip")]
+        normal = guard[guard.index("html[data-effects='normal'] .workflow-strip"):guard.index(".loader-glass")]
+        self.assertIn("blur(12px) saturate(125%) !important", high_workflow)
+        self.assertIn("blur(8px) saturate(115%) !important", high_voice)
+        self.assertIn("blur(4px) saturate(110%) !important", normal)
+
     def test_mini_player_visibility_toggles_notification_safe_area(self):
         adapter = (
             ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
