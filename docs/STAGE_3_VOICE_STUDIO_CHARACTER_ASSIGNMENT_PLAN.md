@@ -103,3 +103,14 @@ Do not mark Stage 3 complete from a green build alone. Require regression tests,
 - The Voice Cast UI test did not supply the current `get_project` callback, so the widget correctly had no active project and no rows. Update the test to pass that callback and then verify visible assignment persistence across widget recreation.
 - An existing regression test still expected the previous destructive cleanup script. Replace it with a contract asserting that both cleanup workflows and the underlying script are non-destructive. This aligns testing with the explicit evidence-retention rule.
 - No installer artifact was produced by Run #1503. Correct these issues and run the complete test suite again on a new fix commit. The package/checkpoint gate remains closed until all tests pass.
+
+
+## Full-feature Stage 3 test-only checkpoint — 2026-10-28
+
+- Test-only Build Windows App #1511 passed on candidate commit `7a9300bc0fcf97699acc8d97088482bf30008f38`: **783 tests passed in 28.878 seconds**. Run: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40658007399.
+- Test evidence artifact `Ryu-Audiobook-Test-Evidence-1511`, ID `12802252319`, was uploaded successfully (49,873 bytes; SHA-256 `6d374afa181757ea8fc46f7455b1114e34fe96fd65d88ee76f2f42633ea96e16`). This artifact must remain available for the release audit.
+- The tested tree starts from full-feature baseline `efaca414fe4db0e4f2596ea19e5a567b7e793215`, retains the later Dashboard/Character Library/Trash/History/Settings modules, uses the current chapter-assignment remapping and preview request-ID/profile-signature architecture, and explicitly lists key modules in frozen-build requirements.
+- Test-only fixes resolved the fixture newline issue, updated the cleanup contract to prohibit run/artifact deletion, and made Voice Cast lifecycle tests exercise project loading and refresh the saved profile choices on both initial open and page recreation.
+- This test run produced no installer or portable application and is not artifact acceptance.
+- Next step: a dedicated `[artifact-checkpoint]` commit must rerun all 783+ tests on its exact SHA, verify frozen EXE/module/asset integrity, compile both core and functional installers, verify logo assets, generate SHA-256 manifest, complete Microsoft Defender scans, and upload installer/manifest/portable artifacts. Keep release publication skipped.
+- Do not begin the next Stage 4 sound-design code batch until this matching-head checkpoint passes. Once it passes, proceed with the outstanding Voice Only/BGM Off rule across production and preview, and remove any fixed legacy Scene Transition cue from the UI/backend while preserving contextual story effects.
