@@ -16,7 +16,7 @@ from app.chapters.detector import Chapter
 from app.tts.voice_profile import VoiceProfile, load_saved_profiles, save_profiles
 from app.tts.cast_provider import CastAwareProvider
 from app.core.character_identity import character_identity_key, set_character_voice_assignment
-from app.ui.voice_page import VoicePage
+from app.ui.voice_page import VoicePage, _same_profile_ui_settings
 
 
 
@@ -49,6 +49,89 @@ class Stage3VoiceAssignmentPersistenceTests(unittest.TestCase):
         # in-memory state before persistence succeeds.
         self.assertEqual(state["voice_cast_identity_assignments"][primary_key], "")
         self.assertEqual(state["voice_cast"]["Mira"], "Old Voice")
+
+    def test_updated_scoped_assignment_is_used_by_real_cast_router(self):
+        primary_key = character_identity_key("Mira", "Chronicles")
+        other_series_key = character_identity_key("Mira", "Side Story")
+        state = {
+            "voice_cast": {"Mira": "Old Voice"},
+            "voice_cast_identity_assignments": {
+                primary_key: "",
+                other_series_key: "Side Story Voice",
+            },
+        }
+        updated = set_character_voice_assignment(
+            state, "Mira", "Chronicles", "New Mira Voice"
+        )
+
+        class DummyProvider:
+            recommended_chunk_chars = 1400
+            recommended_chunk_sentences = 2
+
+            def synthesize(self, text, output_path, voice=None):
+                return output_path
+
+        profile = VoiceProfile("New Mira Voice", "piper", "mira-new")
+        provider = CastAwareProvider(
+            DummyProvider(),
+            "Narrator",
+            {"New Mira Voice": profile},
+            updated["voice_cast"],
+            identity_assignments=updated["voice_cast_identity_assignments"],
+        )
+        source = 'Mira said, “Wait here.”'
+        start, end = source.index("“"), source.index("”") + 1
+        parts = provider.split_for_cast(
+            source,
+            "Narrator",
+            dialogue_assignments=[{
+                "start": start, "end": end, "text": source[start:end],
+                "speaker": "Mira", "speakers": ["Mira"],
+                "series": "Chronicles", "source": "manual",
+            }],
+        )
+        self.assertTrue(any("Wait here." in text and voice == "New Mira Voice" for text, voice in parts))
+        provider.close()
+
+    def test_saved_qwen_anchor_metadata_survives_unchanged_ui_selection(self):
+        saved = VoiceProfile(
+            name="Mira Narrator",
+            provider="qwen-character",
+            voice_id="design-mira-narrator",
+            model_id="design-1.7b",
+            language="Japanese",
+            qwen_mode="design",
+            qwen_prompt="Warm, clear character voice.",
+            qwen_seed=4031,
+            qwen_anchor_path="voice_anchors/mira.wav",
+            qwen_anchor_text="A sentence encoded for this saved identity.",
+            qwen_profile_id="saved-qwen-profile-identity",
+        )
+        # The visible editor does not expose the saved anchor path/text or
+        # internal Qwen profile identity. They must be taken from the saved
+        # profile when the editable settings are unchanged.
+        draft = VoiceProfile(
+            name="Mira Narrator",
+            provider="qwen-character",
+            voice_id="design-mira-narrator",
+            model_id="design-1.7b",
+            language="Japanese",
+            qwen_mode="design",
+            qwen_prompt="Warm, clear character voice.",
+            qwen_seed=4031,
+        )
+        self.assertTrue(_same_profile_ui_settings(saved, draft))
+        changed_prompt = VoiceProfile(
+            name=draft.name,
+            provider=draft.provider,
+            voice_id=draft.voice_id,
+            model_id=draft.model_id,
+            language=draft.language,
+            qwen_mode=draft.qwen_mode,
+            qwen_prompt="A different voice.",
+            qwen_seed=draft.qwen_seed,
+        )
+        self.assertFalse(_same_profile_ui_settings(saved, changed_prompt))
 
     def test_profile_signature_includes_qwen_anchor_and_other_saved_fields(self):
         base = VoiceProfile(
