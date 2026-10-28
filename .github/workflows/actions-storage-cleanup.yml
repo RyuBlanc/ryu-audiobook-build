@@ -37,6 +37,10 @@ jobs:
           done > "${RUNNER_TEMP}/runs.tsv"
 
           while IFS= read -r workflow_name; do
+            if [[ "$workflow_name" == "Build Windows App" ]]; then
+              echo "Preserving all Windows build/test/checkpoint runs as regression evidence."
+              continue
+            fi
             count=0
             while IFS=$'\t' read -r run_id name created_at; do
               if [[ "$name" != "$workflow_name" ]]; then

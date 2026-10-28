@@ -121,3 +121,13 @@ Do not close Stage 3 from CI alone. Packaged Windows interaction and actual audi
 - Do not treat Stage 3 as fully accepted solely from CI. Packaged Windows runtime checks remain open for actual selected-profile audio, profile/assignment persistence across navigation and restart, Voice Cast behavior, selected character voice routing, and actionable provider errors. Physical target-PC testing is not performed by CI.
 - Stage 1 target-PC hardware stability and Stage 2 target-PC import/edit/reopen checks remain separate open gates and must not be silently marked complete when Stage 3 moves forward.
 - Stage 3 exit criteria: successful matching-head artifact checkpoint plus recorded target-PC acceptance or explicitly open acceptance items. No existing completed fix is to be repeated just to increase the build number.
+
+
+## Acceptance regression found in packaged Build #1498 — 2026-10-28
+
+- The user-installed screenshot showed black body text on a dark destination page and the default Inno Setup wizard image instead of the Ryu logo. The artifact title was 1.1.1.1498; the product version remains intentionally 1.1.1 until the complete frozen release is accepted.
+- Root cause verified against the built source: this Stage 3 branch still used WizardStyle=modern plus a label-only InitializeWizard color override, and did not set WizardSmallImageFile or a branded wizard panel. Ordinary wizard labels therefore remained dark on the dark surface and the standard Inno image remained visible. The installer-branding branch had a newer implementation, but it was not an ancestor of the Stage 3 checkpoint commit.
+- Adaptive fix is limited to installer presentation/packaging and evidence retention. It keeps the native installer, application files, voice models, BGM/cue catalogue, install paths, user-data preservation, and launch/shortcut behavior. It uses native dark-mode styling, generated transparent brand images, and stronger lossless installer compression; it does not remove features or reduce audio quality.
+- CI cleanup is being disabled for the Windows build workflow, and the scheduled storage cleaner is being changed to preserve every Windows build/test/checkpoint run as evidence. Artifact retention is extended to 90 days.
+- Focused validation is the updated tests/test_stage6_installer_branding.py; the full regression suite and a matching artifact checkpoint are required before this package can be accepted.
+- This is an acceptance-triggered cross-stage correction; it does not reopen already-passing Voice Studio/character-analysis fixes. Stage 3 still requires packaged Windows/audio acceptance, and Stage 4 must not begin until the current Stage 3 checkpoint is verified.

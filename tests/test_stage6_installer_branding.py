@@ -12,12 +12,36 @@ class InstallerBrandingContractTests(unittest.TestCase):
     def setUpClass(cls):
         cls.script = INSTALLER.read_text(encoding="utf-8")
 
-    def test_setup_wizard_uses_premium_v2_dark_gold_palette(self):
-        self.assertIn("WizardForm.Color := $000F0A09;", self.script)
-        self.assertIn("WizardForm.MainPanel.Color := $001A130F;", self.script)
-        self.assertIn("WizardForm.PageNameLabel.Font.Color := $006AB0D6;", self.script)
-        self.assertIn("WizardForm.Font.Name := 'Segoe UI';", self.script)
+    def test_setup_wizard_uses_native_dark_mode_and_brand_assets(self):
+        self.assertIn("Compression=lzma2/ultra", self.script)
+        self.assertIn("SolidCompression=yes", self.script)
+        self.assertIn("WizardStyle=modern dark hidebevels includetitlebar", self.script)
+        self.assertIn("WizardBackColor=#05060A", self.script)
+        self.assertIn("WizardImageFile=..\\assets\\installer_brand_panel.png", self.script)
+        self.assertIn("WizardSmallImageFile=..\\assets\\ryu_audiobook_logo.png", self.script)
+        self.assertIn("WizardSmallImageBackColor=#05060A", self.script)
+        self.assertIn("DefaultDialogFontName=Segoe UI", self.script)
         self.assertIn("SetupIconFile=..\\assets\\ryu_audiobook_logo.ico", self.script)
+        # Native dark styling fixes ordinary labels and controls that the old
+        # label-only InitializeWizard color loop left black on dark surfaces.
+        self.assertNotIn("WizardForm.Color :=", self.script)
+        self.assertNotIn("WizardForm.InnerPage.Color :=", self.script)
+
+    def test_logo_pipeline_builds_native_resolution_transparent_installer_art(self):
+        build_script = (ROOT / "build.py").read_text(encoding="utf-8")
+        self.assertIn("source_size = renderer.defaultSize()", build_script)
+        self.assertIn('INSTALLER_BRAND_PANEL_PNG = ASSETS / "installer_brand_panel.png"', build_script)
+        self.assertIn('ImageChops.multiply(rgba.getchannel("A"), clip_mask)', build_script)
+        self.assertIn("panel.alpha_composite(", build_script)
+        self.assertIn('panel.save(INSTALLER_BRAND_PANEL_PNG, format="PNG", optimize=True)', build_script)
+        self.assertIn("Installer brand panel must keep a transparent full-size canvas.", build_script)
+
+    def test_installer_keeps_the_complete_application_payload(self):
+        source_lines = [line for line in self.script.splitlines() if line.strip().startswith("Source:")]
+        self.assertEqual(len(source_lines), 1)
+        self.assertIn("dist", source_lines[0])
+        self.assertIn("recursesubdirs", source_lines[0])
+        self.assertIn("Flags: ignoreversion recursesubdirs createallsubdirs", source_lines[0])
 
     def test_setup_keeps_standard_install_launch_and_shortcut_paths(self):
         self.assertIn('DefaultDirName={autopf}\\Ryu\'s Audiobook', self.script)

@@ -503,9 +503,10 @@ jobs:
           Add-Type -AssemblyName System.Drawing
           $png = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.png'
           $ico = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.ico'
+          $panel = Join-Path (Get-Location) 'assets\installer_brand_panel.png'
           $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
           $exe = Join-Path (Get-Location) "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
-          foreach ($path in @($png, $ico, $installer, $exe)) {
+          foreach ($path in @($png, $ico, $panel, $installer, $exe)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required release asset missing: $path" }
           }
           $bitmap = [System.Drawing.Bitmap]::FromFile($png)
@@ -525,10 +526,16 @@ jobs:
           } finally {
             $bitmap.Dispose()
           }
+          $panelBitmap = [System.Drawing.Bitmap]::FromFile($panel)
+          try {
+            if ($panelBitmap.Width -ne 656 -or $panelBitmap.Height -ne 1256) { throw "Installer brand panel has unexpected dimensions: $($panelBitmap.Width)x$($panelBitmap.Height)" }
+            if ($panelBitmap.GetPixel(0,0).A -ne 0 -or $panelBitmap.GetPixel($panelBitmap.Width-1,0).A -ne 0 -or $panelBitmap.GetPixel(0,$panelBitmap.Height-1).A -ne 0 -or $panelBitmap.GetPixel($panelBitmap.Width-1,$panelBitmap.Height-1).A -ne 0) { throw 'Installer brand panel outer corners must remain transparent.' }
+            Write-Host 'Installer brand panel dimensions and transparent corners verified.'
+          } finally { $panelBitmap.Dispose() }
           if ((Get-Item -LiteralPath $ico).Length -lt 1024) { throw 'Generated Windows ICO is unexpectedly small.' }
           Write-Host "Generated Windows ICO exists and is non-trivial in size: $((Get-Item -LiteralPath $ico).Length) bytes."
           $manifest = @()
-          foreach ($path in @($installer, $exe, $png, $ico)) {
+          foreach ($path in @($installer, $exe, $png, $ico, $panel)) {
             $hash = Get-FileHash -LiteralPath $path -Algorithm SHA256
             $manifest += [pscustomobject]@{
               file = [System.IO.Path]::GetRelativePath((Get-Location).Path, $path)
@@ -578,7 +585,7 @@ jobs:
           path: installer/installer-output/Ryu's Audiobook Setup.exe
           if-no-files-found: error
           compression-level: 0
-          retention-days: 30
+          retention-days: 90
 
       - name: Upload release SHA-256 manifest
         if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
@@ -587,7 +594,7 @@ jobs:
           name: Ryu-Audiobook-Release-SHA256-${{ github.run_number }}
           path: release-sha256-manifest.json
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
 
       - name: Upload portable Windows application
         if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
@@ -597,30 +604,14 @@ jobs:
           path: dist/Ryu's Audiobook/
           if-no-files-found: error
           compression-level: 0
-          retention-days: 30
+          retention-days: 90
 
-      - name: Remove older Windows build runs and artifacts
+      - name: Preserve regression evidence and checkpoint artifacts
         if: success() && contains(github.event.head_commit.message, '[artifact-checkpoint]')
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          CURRENT_RUN_ID: ${{ github.run_id }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $runs = gh api --paginate "/repos/$env:REPOSITORY/actions/runs?per_page=100" --jq '.workflow_runs[] | select(.name == "Build Windows App") | [.id,.status,.created_at] | @tsv'
-          foreach ($line in $runs) {
-            if ([string]::IsNullOrWhiteSpace($line)) { continue }
-            $parts = $line -split "	"
-            $runId = $parts[0]
-            $status = $parts[1]
-            if ($runId -eq $env:CURRENT_RUN_ID) { continue }
-            if ($status -in @('in_progress','queued','waiting','requested','pending')) { continue }
-            Write-Host "Removing old Windows build run $runId ($status) and its artifact."
-            gh api --method DELETE "/repos/$env:REPOSITORY/actions/runs/$runId" | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "Could not remove old workflow run $runId." }
-          }
-          Write-Host "Only the newly uploaded Windows build is retained."
+          Write-Host 'Retention guard active: this build does not delete any prior workflow runs or artifacts.'
+          Write-Host 'Preserve focused substage tests, full regression evidence, and prior checkpoint packages for review.'
 
       - name: Publish verified installer release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[artifact-checkpoint]')
