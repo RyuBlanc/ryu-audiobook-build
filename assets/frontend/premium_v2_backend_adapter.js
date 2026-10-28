@@ -7016,3 +7016,4 @@
     message(window.__ryuPremiumAdapterFailure, true);
   });
   if (window.ryuBackend?.invoke) start(); else window.addEventListener('ryu-backend-ready', start, {once:true});
+})();
