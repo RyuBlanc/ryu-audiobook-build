@@ -1305,7 +1305,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("if (box && panelVisible)", refresh_jobs)
         self.assertIn("box.dataset.backendJobsSignature !== signature", refresh_jobs)
         self.assertIn("row.querySelector('[data-job-progress]')", refresh_jobs)
-        self.assertIn("progress.style.width = pct + '%'", refresh_jobs)
+        self.assertIn("setStyleIfChanged(progress, 'width', pct + '%')", refresh_jobs)
+        self.assertNotIn("progress.style.width = pct + '%'", refresh_jobs)
 
 
     def test_only_unimplemented_prototype_actions_are_disabled(self):
