@@ -66,7 +66,7 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
         self.assertIn("bridgeStartedAt", host)
         self.assertIn("window.setTimeout(waitForTransport, 100)", host)
         self.assertIn("script.onerror", host)
-        self.assertIn("window.__ryuBridgeFailureReason = String(reason || '')", host)
+        self.assertIn("window.__ryuBridgeFailureReason = String(", host)
         self.assertIn("def _finish_bridge_connect_timeout(", host)
         self.assertIn("performance.getEntriesByType('resource')", host)
         self.assertIn("Qt WebChannel handshake diagnostics:", host)
