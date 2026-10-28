@@ -1102,13 +1102,13 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("worker.finished.connect(", source)
         self.assertIn("shiboken6.isValid(widget)", source)
 
-    def test_actions_cleanup_prunes_only_old_package_artifacts_after_verified_checkpoint(self):
+    def test_actions_cleanup_prunes_only_after_successful_replacement_package(self):
         script = Path(".github/scripts/cleanup_actions_storage.ps1").read_text(encoding="utf-8")
         workflow = Path(".github/workflows/build-windows.yml").read_text(encoding="utf-8")
         storage_workflow = Path(".github/workflows/actions-storage-cleanup.yml").read_text(encoding="utf-8")
 
         # The legacy script must not delete runs or logs. The new workflow removes
-        # only superseded package ZIPs after a complete replacement checkpoint is present.
+        # only superseded package ZIPs after a complete replacement package is present.
         self.assertIn("intentionally non-destructive", script)
         self.assertNotIn("gh api --method DELETE", script)
         self.assertNotIn("Clean old Actions runs and storage", workflow)
@@ -1117,7 +1117,9 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("retention-days: 90", workflow)
         self.assertIn('workflows: ["Build Windows App"]', storage_workflow)
         self.assertIn("types: [completed]", storage_workflow)
-        self.assertIn("startsWith(github.event.workflow_run.head_commit.message, '[artifact-checkpoint]')", storage_workflow)
+        self.assertIn("github.event.workflow_run.conclusion == 'success'", storage_workflow)
+        self.assertIn("hasCompleteSplitPackage", storage_workflow)
+        self.assertIn("if (!hasLegacyPackage && !hasCompleteSplitPackage)", storage_workflow)
         self.assertIn("new Set([1441, 1536])", storage_workflow)
         self.assertIn("Ryu-Audiobook-Installer", storage_workflow)
         self.assertIn("Ryu-Audiobook-Portable", storage_workflow)
