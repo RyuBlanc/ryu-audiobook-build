@@ -17,12 +17,17 @@ class DefaultUiModeContractTests(unittest.TestCase):
             'ui_mode = os.environ.get("RYU_UI_MODE", "premium-v2").strip().casefold()',
             self.source,
         )
-        self.assertIn('if ui_mode in {"premium-v2", "html", "web"}:', self.source)
+        self.assertIn("window = create_main_window(ui_mode)", self.source)
+        self.assertIn('if mode not in {"premium-v2", "html", "web"}:', self.source)
         self.assertIn("window = PremiumV2Window()", self.source)
+        self.assertIn("Required Premium V2 Dragon Studio frontend is missing", self.source)
 
-    def test_native_qt_shell_remains_available_as_an_explicit_compatibility_mode(self):
+    def test_native_qt_shell_is_only_an_explicit_compatibility_mode(self):
         self.assertIn("RYU_UI_MODE=native", self.source)
-        self.assertRegex(self.source, r"else:\s*\n\s*window = ProjectWorkflow\(\)")
+        self.assertIn('if mode == "native":', self.source)
+        self.assertIn("window = ProjectWorkflow()", self.source)
+        self.assertIn("The application will not fall back to the older native interface.", self.source)
+        self.assertNotRegex(self.source, r"if frontend_path\(\)\.is_file\(\):\s*\n\s*window = PremiumV2Window\(\)\s*\n\s*else:\s*\n\s*window = ProjectWorkflow\(\)")
 
 
 if __name__ == "__main__":
