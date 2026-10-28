@@ -44,6 +44,10 @@ The repository workflow skipped public-release publishing because this is a work
 - Chapter re-detection now presents before/after chapter title and text-snippet summaries without saving. Apply requires the SHA-256 fingerprint from the current preview; missing or stale fingerprints are rejected. Added tests for preview-only behavior, no-mutation rejection paths, successful apply, and matching UI adapter flow.
 - Import edge-case tests now cover exact duplicate guidance for Browse imports, temporary-file cleanup for duplicate drag/drop imports, empty/unsupported files, cancellation after extraction/detection before publication, and recoverable failure status with original source preservation.
 
+## Consolidated checkpoint candidate
+
+The current working branch includes additional regression coverage for editor structural operations, Unicode-safe Find/Replace, non-mutating before/after re-detection preview with stale-fingerprint rejection, and import duplicate/cancellation/failure paths. The next `[artifact-checkpoint]` workflow run is the validation source of truth for these changes; counts and package artifacts are recorded only after that run finishes successfully.
+
 ## Packaged-Windows acceptance checklist
 
 - [ ] Start a TXT import and cancel mid-extraction / chapter detection; verify the job becomes cancelled and no incomplete project is published.
