@@ -126,11 +126,20 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
         install_start = host.index("    def _install_bridge(self, ok: bool)")
         install_end = host.index("    def _check_frontend_ready(", install_start)
         install = host[install_start:install_end]
+        # The 26% notification is inside injected JavaScript and only runs after
+        # runJavaScript executes; compare host call order separately from JS callback order.
         self.assertLess(
             install.index('self._update_startup_progress("Preparing the local backend bridge…", 22)'),
-            install.index("progress:26"),
+            install.index("self.web.page().runJavaScript(script)"),
         )
-        self.assertLess(install.index("progress:26"), install.index("self._frontend_watchdog.start(120000)"))
+        self.assertLess(
+            install.index("self.web.page().runJavaScript(script)"),
+            install.index("self._frontend_watchdog.start(120000)"),
+        )
+        self.assertLess(
+            install.index("progress:26"),
+            install.index("window.dispatchEvent(new CustomEvent('ryu-backend-ready'))"),
+        )
         self.assertIn("self._update_startup_progress(\"Premium V2 interface loaded. Connecting to local services…\", 18)", install)
 
     def test_startup_progress_diagnostics_update_native_status_monotonically(self):
