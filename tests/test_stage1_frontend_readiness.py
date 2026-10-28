@@ -81,7 +81,7 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
         self.assertIn('if kind == "adapter-start-failed":', diagnostic)
         self.assertIn('show_failure = getattr(window, "_show_web_failure", None)', diagnostic)
         self.assertIn("show_failure(", diagnostic)
-        self.assertIn("if not getattr(window, \"_frontend_ready\", False):", diagnostic)
+        self.assertIn('if callable(show_failure) and not getattr(window, "_frontend_ready", False):', diagnostic)
         self.assertIn("The Premium V2 interface could not complete startup.", diagnostic)
 
         show_start = host.index("def _show_web_failure(self, message: str)")

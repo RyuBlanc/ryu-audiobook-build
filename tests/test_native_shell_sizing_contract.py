@@ -186,7 +186,7 @@ class NativeShellSizingContracts(unittest.TestCase):
         self.assertIn('if kind == "adapter-start-failed":', diagnostic)
         self.assertIn('show_failure = getattr(window, "_show_web_failure", None)', diagnostic)
         self.assertIn("show_failure(", diagnostic)
-        self.assertIn("if not getattr(window, \"_frontend_ready\", False):", diagnostic)
+        self.assertIn('if callable(show_failure) and not getattr(window, "_frontend_ready", False):', diagnostic)
         self.assertIn("self._frontend_failure_shown = True", host)
         self.assertIn("or self._frontend_failure_shown", host)
 
