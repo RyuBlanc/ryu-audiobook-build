@@ -615,7 +615,8 @@ class RegressionTests(unittest.TestCase):
         examples = {
             "She was happy and cheerful about the news.": "warm",
             "They were laughing at the joke.": "amused",
-            "He seemed sad and subdued after the call.": "sad",
+            "He seemed sad after the call.": "sad",
+            "Her delivery was subdued after the news.": "sad",
             "She was crying after the defeat.": "sad",
             "He was angry about the decision.": "angry",
             "He felt fearful and tense.": "tense",

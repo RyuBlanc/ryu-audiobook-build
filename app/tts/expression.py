@@ -146,7 +146,7 @@ def classify_expression(text: str) -> str:
         return "thoughtful"
     if re.search(r"\b(curious|wondered|intrigued|eager to know)\b", low):
         return "curious"
-    if re.search(r"\b(sad|sadly|sorrow|regret(?:ted|fully)?|lonely|miss(?:ed|ing) you|disappointed)\b", low):
+    if re.search(r"\b(sad|sadly|subdued|sorrow|regret(?:ted|fully)?|lonely|miss(?:ed|ing) you|disappointed)\b", low):
         return "sad"
     if re.search(r"\b(serious|seriously|in a low voice|firmly|solemnly|gravely|matter-of-fact)\b", low):
         return "serious"
