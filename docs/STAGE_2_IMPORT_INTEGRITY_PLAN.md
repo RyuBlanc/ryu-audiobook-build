@@ -10,7 +10,7 @@
 - [x] Exercise TXT (including UTF-8 BOM), EPUB reading order/spine, PDF searchable-text quality, and DOCX paragraphs/tables using reproducible fixtures.
 - [x] Publish a project only after source staging, project metadata, chapter JSON, and a reload verification succeed.
 - [x] Confirm failed source copy, metadata/chapter write, and missing-source validation do not publish a partial project; automated regression tests cover these failure paths.
-- [ ] Verify duplicate import guidance, cancellation, retry, and failure status in the packaged Windows app.
+- [ ] Verify duplicate import guidance, cancellation timing, retry, and failure status interactively in the packaged Windows app (automated paths are covered, target-PC UI acceptance remains open).
 
 ### 2.2 Cleaning without story loss
 - [x] Test known ebook watermarks/page counters and repeated boilerplate against normal narrative, URLs, punctuation, dialogue, and Unicode with fixtures.
@@ -20,20 +20,20 @@
 ### 2.3 Chapter detection and editing
 - [x] Automated fixtures cover numbered/Roman chapters, prologue/epilogue, preambles, books without headings, empty-heading boundaries and named/compound slash-title/Part headings. Continue adding real-book fixtures during acceptance.
 - [x] Verify covered chapter boundaries preserve body text; project save normalizes chapter numbering to current order, and regression tests verify reordered chapters reload in that order.
-- [ ] Persistence regression now covers chapter title/text edits, reorder, dialogue assignments, review status, and skip-for-generation after reload. Still verify all editor operations (add/delete/merge/split/clean/find-replace/undo-redo) in automated or packaged-app tests.
+- [x] Automated regression coverage now exercises chapter title/text changes, deletion and renumbering, move payload retention, merge/split text and dialogue-assignment offsets, invalid split safety, Unicode-safe Find/Replace indexing, and invalidation of number-keyed undo/redo after structural edits. Full packaged-UI acceptance for all of these operations remains open.
 - [x] Re-detection now requires an explicit before/after preview and a matching saved-data fingerprint before applying; preview-only calls do not mutate the project, and stale/missing preview tokens are rejected by regression tests.
 
 ### 2.4 Automated and Windows acceptance
-- [x] Run the complete unittest regression suite and Windows package/installer pipeline on the final Stage 2 branch head; Run #877 passed on commit `05e03c14637bb4ff3fe8514a50101ebde0d2ab4b`.
-- [ ] Inspect failures and fix them before merging.
+- [x] Run the complete unittest regression suite and Windows package/installer pipeline on the current Stage 2 checkpoint: Build Windows App #1478 passed on commit `cbe8b41a46b1d5807699e67fbd54a5d1e698c6a0` (752/752 tests; package verification, Defender scan and artifact uploads passed).
+- [x] Inspect and fix the failures found during checkpoint validation: updated the obsolete re-detection contract assertion and corrected CP1252/Unicode output handling in the Windows CI runner. #1478 passed after these corrections; no merge was performed.
 - [ ] On a target Windows install, import one fixture in each supported format, edit and save chapters, restart/reopen, and compare text and chapter counts.
 - [ ] Record any Windows-only acceptance that cannot be performed in cloud CI as an explicit release gate.
 
 ## Current validation on `fix/native-ui-font-scale-learning-ai`
 
-- Run #1464 passed on tested code commit `579c378ae81ab9c06e7c68feae5485574f3f02cc`: 732/732 tests passed, with installer, portable app, SHA-256 manifest, Defender scan, and test evidence uploaded. See [Stage 2 evidence](STAGE_2_IMPORT_CHAPTER_EVIDENCE.md).
+- Run #1478 passed on tested commit `cbe8b41a46b1d5807699e67fbd54a5d1e698c6a0`: 752/752 tests passed, with installer, portable app, SHA-256 manifest, Defender scan and test evidence uploaded. See [Stage 2 evidence](STAGE_2_IMPORT_CHAPTER_EVIDENCE.md).
 - Follow-up commit `a2666867425ab0c0710b5fd34417ae608280fb62` clears number-keyed chapter undo/redo stacks after structural edits so old snapshots cannot be applied to a different chapter after renumbering.
-- Follow-up commits add deterministic editor-operation tests for text/title and dialogue-assignment integrity, delete renumbering, reorder metadata, merge/split offsets, invalid split safety, history invalidation, Unicode Find/Replace offsets, and redetection preview/stale-fingerprint behavior. The latest complete checkpoint run must pass before these tests are counted as verified.
+- Follow-up commits add deterministic editor-operation tests for text/title and dialogue-assignment integrity, delete renumbering, reorder metadata, merge/split offsets, invalid split safety, history invalidation, Unicode Find/Replace offsets, redetection preview/stale-fingerprint behavior, and import duplicate/cancellation/retry/failure paths. These tests passed in #1478.
 - Structural history invalidation is a safety guard, not full cross-structure undo. Undo/redo remains scoped to the active chapter's text-edit history.
 
 ## New automated coverage added for the current checkpoint
@@ -45,9 +45,9 @@
 
 ## Remaining Stage 2 gates
 
-- [ ] Latest checkpoint CI run passes on the current branch head, including all regression tests and (for the artifact-checkpoint commit) Windows packaging.
-- [ ] Extend automated/packaged acceptance for import cancellation timing, duplicate import, unsupported/empty/damaged files, retry/error states, and cleanup on failure.
-- [ ] Exercise chapter add/delete/move/merge/split/clean/find-replace/undo-redo through the packaged UI; core operation tests alone do not prove the UI interaction contract.
+- [x] Latest checkpoint CI run passes: #1478 completed successfully with 752/752 tests, Windows installer/portable packaging, hash generation, Defender scan and artifact uploads.
+- [ ] Verify import cancellation timing, duplicate guidance, empty/unsupported/damaged files, retry/error states and cleanup interactively in the packaged Windows app. Automated tests cover duplicate handling, cancellation after extraction/detection before publication, empty/unsupported rejection, recoverable extraction failure, retry and temporary staging cleanup; packaged UI acceptance remains open.
+- [ ] Exercise chapter add/delete/move/merge/split/clean/find-replace/undo-redo through the packaged UI; automated model/adapter regressions pass, but core tests do not prove the complete UI interaction contract.
 - [ ] On the target Windows install, import TXT, EPUB, searchable PDF, and DOCX; edit/save/reopen, compare source/body text and chapter counts, and capture exceptions/logs.
 - [ ] Record real-book outcomes and any limitations; do not claim zero-defect or full interactive acceptance from CI alone.
 
