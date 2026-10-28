@@ -1074,28 +1074,23 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("worker.finished.connect(", source)
         self.assertIn("shiboken6.isValid(widget)", source)
 
-    def test_actions_storage_cleanup_prunes_prior_success_only_after_validated_build(self):
+    def test_actions_cleanup_preserves_history_and_prunes_only_superseded_packages(self):
         script = Path(".github/scripts/cleanup_actions_storage.ps1").read_text(encoding="utf-8")
         workflow = Path(".github/workflows/build-windows.yml").read_text(encoding="utf-8")
-        self.assertIn("$currentRun = $allRuns | Where-Object { $_.id -eq $currentRunId }", script)
-        self.assertIn("$currentRunIsEligibleForReplacement = ($currentRun -and $pruneCurrentWorkflowToCurrent)", script)
-        self.assertIn(
-            "if (-not ($isCurrentWorkflow -and $currentRunIsEligibleForReplacement))",
-            script,
-        )
-        self.assertNotIn("$currentRunIsCompleted", script)
-        self.assertIn("$keepIds['39933305387'] = $true", script)
-        inline_start = workflow.index("name: Clean old Actions runs and storage after verified Windows build")
-        publish_start = workflow.index("name: Publish verified installer release")
-        self.assertGreater(inline_start, publish_start)
-        self.assertIn("continue-on-error: true", workflow[inline_start:inline_start + 400])
-        workflow_lines = workflow.splitlines()
-        cleanup_job_start = workflow_lines.index("  cleanup:")
-        cleanup_steps_start = workflow_lines.index("    steps:", cleanup_job_start)
-        cleanup_job_header = "\n".join(workflow_lines[cleanup_job_start:cleanup_steps_start])
-        self.assertIn("    continue-on-error: true", cleanup_job_header)
-        self.assertIn("continue-on-error: true", workflow[workflow.index("name: Prune stale completed runs"):])
+        storage_workflow = Path(".github/workflows/actions-storage-cleanup.yml").read_text(encoding="utf-8")
 
+        self.assertIn("intentionally non-destructive", script)
+        self.assertNotIn("gh api --method DELETE", script)
+        self.assertIn("cancel-in-progress: false", workflow)
+        self.assertIn("workflow_run:", storage_workflow)
+        self.assertIn("types: [completed]", storage_workflow)
+        self.assertIn("artifact-checkpoint", storage_workflow)
+        self.assertIn("new Set([1441])", storage_workflow)
+        self.assertIn("Ryu-Audiobook-Installer", storage_workflow)
+        self.assertIn("Ryu-Audiobook-Portable", storage_workflow)
+        self.assertIn("Ryu-Audiobook-Release-SHA256", storage_workflow)
+        self.assertIn("All Ryu-Audiobook-Test-Evidence-* artifacts and workflow-run logs are intentionally retained.", storage_workflow)
+        self.assertNotIn("/actions/runs/", storage_workflow)
 
     def test_qwen_voice_preview_reuses_warm_provider_and_replaces_changed_profile(self):
         from types import SimpleNamespace
