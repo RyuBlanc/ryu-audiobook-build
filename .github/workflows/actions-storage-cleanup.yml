@@ -6,17 +6,10 @@ on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
-  workflow_run:
-    workflows: ["Build Windows App"]
-    types: [completed]
-    branches:
-      - main
-      - fix/installer-branding-accessibility
 
 permissions:
-  actions: write
+  actions: read
   contents: read
-  pull-requests: read
 
 concurrency:
   group: ryu-audiobook-actions-cleanup
@@ -26,131 +19,9 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Prune old workflow runs only after a verified replacement release exists
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          RELEASE_BRANCH: "fix/installer-branding-accessibility"
-          FALLBACK_RELEASE_RUN_ID: "39933305387"
-          FALLBACK_RELEASE_RUN_NUMBER: "1021"
+      - name: Preserve all workflow-run and artifact evidence
         shell: bash
         run: |
-          set -euo pipefail
-          api="/repos/${REPOSITORY}"
-
-          echo "Finding the newest successful 1.1.1 installer run with all required artifacts."
-          gh api --paginate -H "Accept: application/vnd.github+json"             "${api}/actions/runs?branch=${RELEASE_BRANCH}&per_page=100"             --jq '.workflow_runs[] | select(.name == "Build Windows App" and .status == "completed" and .conclusion == "success") | [.id,.run_number,.head_sha,.created_at] | @tsv'             | sort -t $'\t' -k4,4r > "${RUNNER_TEMP}/release-candidates.tsv"
-
-          latest_release_run_id=""
-          latest_release_run_number="0"
-          latest_release_sha=""
-          latest_release_created=""
-          candidate_count=0
-          while IFS=$'\t' read -r candidate_id candidate_number candidate_sha candidate_created; do
-            [[ -z "${candidate_id:-}" ]] && continue
-            candidate_count=$((candidate_count + 1))
-            artifact_rows=$(gh api -H "Accept: application/vnd.github+json"               "${api}/actions/runs/${candidate_id}/artifacts?per_page=100"               --jq '.artifacts[] | select(.expired == false) | [.name,.size_in_bytes] | @tsv')
-            has_artifact() {
-              awk -F '\t' -v expected="$1" '$1 == expected && $2 > 0 { found=1 } END { exit !found }' <<< "$artifact_rows"
-            }
-            if has_artifact "Ryu-Audiobook-Installer-${candidate_number}"               && has_artifact "Ryu-Audiobook-Portable-${candidate_number}"               && has_artifact "Ryu-Audiobook-Release-SHA256-${candidate_number}"; then
-              latest_release_run_id="$candidate_id"
-              latest_release_run_number="$candidate_number"
-              latest_release_sha="$candidate_sha"
-              latest_release_created="$candidate_created"
-              echo "Verified 1.1.1 release candidate: Build ${candidate_number}, run ${candidate_id}."
-              break
-            fi
-            echo "Ignoring Build ${candidate_number}: one or more required artifacts are missing, expired, or empty."
-          done < "${RUNNER_TEMP}/release-candidates.tsv"
-
-          RELEASE_PROMOTED=false
-          if [[ -n "$latest_release_run_id" ]]             && [[ "$latest_release_run_id" != "$FALLBACK_RELEASE_RUN_ID" ]]             && (( latest_release_run_number > FALLBACK_RELEASE_RUN_NUMBER )); then
-            RELEASE_PROMOTED=true
-          fi
-
-          if [[ -z "$latest_release_run_id" ]]; then
-            echo "WARNING: No complete successful 1.1.1 artifact set was found."
-            echo "Release-line workflow history will be preserved; cleanup will not guess a replacement."
-          elif [[ "$RELEASE_PROMOTED" == "true" ]]; then
-            echo "A newer verified artifact set exists. Build 1021 is no longer the permanent reference."
-            echo "Current protected release: Build ${latest_release_run_number}, run ${latest_release_run_id}."
-          else
-            echo "No newer verified artifact set exists; retaining Build 1021 and later 1.1.1 diagnostic runs."
-          fi
-
-          echo "Collecting open PR head SHAs."
-          gh api --paginate -H "Accept: application/vnd.github+json"             "${api}/pulls?state=open&per_page=100"             --jq '.[] | select(.head.repo.full_name == env.REPOSITORY) | [.head.sha,.head.ref,.number] | @tsv'             > "${RUNNER_TEMP}/open-pr-heads.tsv"
-
-          echo "Listing completed runs."
-          gh api --paginate -H "Accept: application/vnd.github+json"             "${api}/actions/runs?per_page=100"             --jq '.workflow_runs[] | select(.status == "completed") | [.id,.name,.head_sha,.head_branch,.run_number,.created_at,.conclusion] | @tsv'             > "${RUNNER_TEMP}/runs.tsv"
-          sort -t $'\t' -k6,6r "${RUNNER_TEMP}/runs.tsv" > "${RUNNER_TEMP}/runs-sorted.tsv"
-
-          # Precompute each workflow's newest two completed runs, plus its
-          # newest successful run. A failed newest run must not erase the last
-          # successful checkpoint for that workflow.
-          declare -A run_rank=()
-          declare -A workflow_seen=()
-          declare -A latest_success=()
-          while IFS=$'\t' read -r run_id workflow_name sha run_branch run_number created_at conclusion; do
-            [[ -z "${run_id:-}" ]] && continue
-            rank=${workflow_seen["$workflow_name"]:-0}
-            rank=$((rank + 1))
-            workflow_seen["$workflow_name"]=$rank
-            run_rank["$run_id"]=$rank
-            if [[ "$conclusion" == "success" && -z "${latest_success["$workflow_name"]:-}" ]]; then
-              latest_success["$workflow_name"]="$run_id"
-            fi
-          done < "${RUNNER_TEMP}/runs-sorted.tsv"
-
-          echo "Applying protected, success-aware retention policy."
-          while IFS=$'\t' read -r run_id workflow_name sha run_branch run_number created_at conclusion; do
-            [[ -z "${run_id:-}" ]] && continue
-
-            # Always protect the newest successful 1.1.1 build whose installer,
-            # portable app and SHA-256 manifest were all verified above.
-            if [[ -n "$latest_release_run_id" && "$run_id" == "$latest_release_run_id" ]]; then
-              echo "Preserving verified 1.1.1 artifact set: run $run_id."
-              continue
-            fi
-
-            # Until a newer verified 1.1.1 artifact set exists, preserve the
-            # fallback reference and every later run on that release branch.
-            if [[ "$workflow_name" == "Build Windows App" && "$run_branch" == "$RELEASE_BRANCH" ]]; then
-              if [[ -z "$latest_release_run_id" ]]; then
-                echo "Preserving release-line run $run_id: no verified replacement is available."
-                continue
-              fi
-              if [[ "$RELEASE_PROMOTED" != "true" ]] && (( run_number >= FALLBACK_RELEASE_RUN_NUMBER )); then
-                echo "Preserving release-line run $run_id until a newer full artifact set succeeds."
-                continue
-              fi
-              # After promotion, keep failed/cancelled runs newer than the
-              # current good build so in-progress fixes can still be debugged.
-              if (( run_number > latest_release_run_number )) && [[ "$conclusion" != "success" ]]; then
-                echo "Preserving newer diagnostic run $run_id ($conclusion)."
-                continue
-              fi
-            fi
-
-            if awk -F '\t' -v sha="$sha" '$1 == sha { found=1 } END { exit !found }' "${RUNNER_TEMP}/open-pr-heads.tsv"; then
-              echo "Preserving run $run_id: its commit is the head of an open PR."
-              continue
-            fi
-
-            if [[ "${latest_success["$workflow_name"]:-}" == "$run_id" ]]; then
-              echo "Preserving the newest successful $workflow_name run: $run_id."
-              continue
-            fi
-
-            rank=${run_rank["$run_id"]:-999999}
-            if (( rank <= 2 )); then
-              echo "Preserving one of the two newest $workflow_name runs: $run_id (rank $rank)."
-              continue
-            fi
-
-            echo "Deleting obsolete workflow run $run_id ($workflow_name, branch $run_branch, $conclusion, $created_at)."
-            gh api --method DELETE -H "Accept: application/vnd.github+json"               "${api}/actions/runs/${run_id}" >/dev/null
-          done < "${RUNNER_TEMP}/runs-sorted.tsv"
-
-          echo "Storage cleanup completed. The release reference is now selected by verified artifact availability, not pinned forever to Build 1021."
+          echo "Automatic workflow-run/artifact deletion is disabled."
+          echo "Per-substage regression tests, failed-run diagnostics, checkpoint packages and SHA-256 manifests must remain available until the version 1.2.0 release is manually reviewed."
+          echo "Re-enable retention only through a separately reviewed change after release acceptance."
