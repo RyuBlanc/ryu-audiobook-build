@@ -2,6 +2,51 @@
   'use strict';
   window.__ryuPremiumAdapterReady = false;
   const $ = id => document.getElementById(id);
+
+  // Job polling runs every 1.5 seconds. Avoid writing the same values back to
+  // Chromium's DOM/style system when nothing changed; this keeps layout work
+  // proportional to real state changes rather than polling frequency.
+  function writeTextIfChanged(node, value) {
+    if (!node) return false;
+    const next = String(value ?? '');
+    if (node.textContent === next) return false;
+    node.textContent = next;
+    return true;
+  }
+  function writeStyleIfChanged(node, property, value) {
+    if (!node?.style) return false;
+    const next = String(value ?? '');
+    if (node.style[property] === next) return false;
+    node.style[property] = next;
+    return true;
+  }
+  function writeCssVariableIfChanged(node, property, value) {
+    if (!node?.style?.getPropertyValue || !node.style.setProperty) return false;
+    const next = String(value ?? '');
+    if (node.style.getPropertyValue(property) === next) return false;
+    node.style.setProperty(property, next);
+    return true;
+  }
+  function writeAttributeIfChanged(node, name, value) {
+    if (!node?.getAttribute || !node?.setAttribute) return false;
+    const next = String(value ?? '');
+    if (node.getAttribute(name) === next) return false;
+    node.setAttribute(name, next);
+    return true;
+  }
+  function writeBooleanIfChanged(node, property, value) {
+    if (!node || !(property in node)) return false;
+    const next = Boolean(value);
+    if (node[property] === next) return false;
+    node[property] = next;
+    return true;
+  }
+  function isVisiblePage(pageId) {
+    const page = $(pageId);
+    if (!page || !page.classList.contains('active') || page.classList.contains('hidden')) return false;
+    const style = window.getComputedStyle(page);
+    return style.display !== 'none' && style.visibility !== 'hidden' && page.getClientRects().length > 0;
+  }
   let ryuUiTextScale = 100;
   let ryuUiTextObserver = null;
   const ryuUiScalePendingRoots = new Set();
@@ -179,9 +224,15 @@
   };
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const message = (text, error = false) => {
-    const node = $('importStatus'); if (node) node.textContent = text;
-    const validation = $('validation'); if (validation && error) validation.textContent = text;
-    const toasts = $('toasts'); if (toasts) { toasts.textContent = text; toasts.classList.add('show'); }
+    // Global notifications must not overwrite a different workflow's status.
+    // Only surface inline validation on the page the user is currently viewing.
+    const activeValidation = document.querySelector('.page.active #validation');
+    if (error && activeValidation) writeTextIfChanged(activeValidation, text);
+    const toasts = $('toasts');
+    if (toasts) {
+      writeTextIfChanged(toasts, text);
+      toasts.classList.add('show');
+    }
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
@@ -191,6 +242,7 @@
   let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0, projectListEpoch = 0, characterListEpoch = 0, termsListEpoch = 0, soundListEpoch = 0, historyListEpoch = 0, librarySearchTimer = null, soundSearchTimer = null;
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
   let activeProjectCardFolder = null, projectCardStatusObserver = null;
+  let activeProjectCardEpoch = 0;
   const resumeCheckpointKey = 'ryu.project.resume-checkpoints.v1';
   const resumeStages = new Set(['import','chapters','narrator','characters','sound','production','player']);
   const resumeStageRoutes = {
@@ -636,7 +688,7 @@
     for (let depth = 0; depth < 4 && node.parentElement; depth++) {
       const parent = node.parentElement;
       const siblings = [...parent.children].filter(child => child !== node && dashboardText(child.textContent) !== dashboardText(label));
-      if (siblings.length) { siblings[siblings.length - 1].textContent = value; return; }
+      if (siblings.length) { writeTextIfChanged(siblings[siblings.length - 1], value); return; }
       node = parent;
     }
   }
@@ -669,12 +721,21 @@
         ? (selectedProject.completed && selectedProject.output_path ? 'Audiobook ready' :
           ('Setup checkpoint · ' + (savedResumeStage(selectedProject) || routeForResume(selectedProject))))
         : 'No active generation job');
-      if (percentLabel) percentLabel.textContent = '';
-      if (etaLabel) etaLabel.textContent = '';
-      if (fill) { fill.style.width = '0%'; fill.setAttribute('aria-valuenow','0'); if (fill.tagName === 'PROGRESS') fill.value = 0; }
-      if (track) track.style.visibility = 'hidden';
-      if (view) { view.disabled = true; delete view.dataset.dashboardJobId; }
-      if (control) { control.disabled = true; delete control.dataset.dashboardJobId; delete control.dataset.dashboardGenerationAction; }
+      writeTextIfChanged(percentLabel, '');
+      writeTextIfChanged(etaLabel, '');
+      writeStyleIfChanged(fill, 'width', '0%');
+      writeAttributeIfChanged(fill, 'aria-valuenow', '0');
+      if (fill?.tagName === 'PROGRESS' && fill.value !== 0) fill.value = 0;
+      writeStyleIfChanged(track, 'visibility', 'hidden');
+      if (view) {
+        writeBooleanIfChanged(view, 'disabled', true);
+        if (view.dataset.dashboardJobId) delete view.dataset.dashboardJobId;
+      }
+      if (control) {
+        writeBooleanIfChanged(control, 'disabled', true);
+        if (control.dataset.dashboardJobId) delete control.dataset.dashboardJobId;
+        if (control.dataset.dashboardGenerationAction) delete control.dataset.dashboardGenerationAction;
+      }
       return;
     }
     const project = projects.find(row => row.folder === job.project_folder);
@@ -683,18 +744,23 @@
     setDashboardRow(card, 'current chapter', current > 0 ? current + ' of ' + (total || '—') : (total ? '0 of ' + total : '—'));
     setDashboardRow(card, 'processing stage', job.stage || job.message || 'Working');
     const percent = Math.max(0, Math.min(100, Math.round(Number(job.progress || 0))));
-    if (percentLabel) percentLabel.textContent = percent + '% complete';
+    writeTextIfChanged(percentLabel, percent + '% complete');
     const eta = Number(job.eta_seconds);
-    if (etaLabel) etaLabel.textContent = Number.isFinite(eta) && eta > 0 ? Math.floor(eta/60) + 'm ' + String(Math.floor(eta%60)).padStart(2,'0') + 's remaining' : '';
-    if (track) track.style.visibility = '';
-    if (fill) { fill.style.width = percent + '%'; fill.setAttribute('aria-valuenow',String(percent)); if (fill.tagName === 'PROGRESS') fill.value = percent; }
-    if (view) { view.disabled = false; view.dataset.dashboardJobId = job.job_id || ''; }
+    writeTextIfChanged(etaLabel, Number.isFinite(eta) && eta > 0 ? Math.floor(eta/60) + 'm ' + String(Math.floor(eta%60)).padStart(2,'0') + 's remaining' : '');
+    writeStyleIfChanged(track, 'visibility', '');
+    writeStyleIfChanged(fill, 'width', percent + '%');
+    writeAttributeIfChanged(fill, 'aria-valuenow', String(percent));
+    if (fill?.tagName === 'PROGRESS' && fill.value !== percent) fill.value = percent;
+    if (view) {
+      writeBooleanIfChanged(view, 'disabled', false);
+      writeAttributeIfChanged(view, 'data-dashboard-job-id', job.job_id || '');
+    }
     if (control) {
       const paused = ['paused','pause_requested'].includes(String(job.state || '').toLowerCase());
-      control.textContent = paused ? 'Resume' : 'Pause';
-      control.disabled = !['running','paused'].includes(String(job.state || '').toLowerCase());
-      control.dataset.dashboardGenerationAction = paused ? 'resume' : 'pause';
-      control.dataset.dashboardJobId = job.job_id || '';
+      writeTextIfChanged(control, paused ? 'Resume' : 'Pause');
+      writeBooleanIfChanged(control, 'disabled', !['running','paused'].includes(String(job.state || '').toLowerCase()));
+      writeAttributeIfChanged(control, 'data-dashboard-generation-action', paused ? 'resume' : 'pause');
+      writeAttributeIfChanged(control, 'data-dashboard-job-id', job.job_id || '');
     }
   }
   function audiobookPageActive() {
@@ -943,9 +1009,16 @@
   }
 
   async function refreshCurrentProjectCard(statusOverride = '') {
+    const requestToken = ++activeProjectCardEpoch;
     let active = null;
     try { active = await call('project.get_active'); }
-    catch (_) { return null; } // Do not erase the last confirmed UI state on a transient bridge error.
+    catch (_) {
+      if (requestToken !== activeProjectCardEpoch) return window.ryuPremiumActiveProject || null;
+      return null; // Preserve the last confirmed UI state on a transient bridge error.
+    }
+    // Concurrent open/rename/hydration calls can complete out of order. Ignore
+    // stale results before they can replace the project's current identity.
+    if (requestToken !== activeProjectCardEpoch) return window.ryuPremiumActiveProject || null;
     if (active) window.ryuPremiumActiveProject = active;
     const card = document.querySelector('.project-mini');
     const titleNode = card?.querySelector('.pm-body b');
@@ -954,6 +1027,7 @@
     const folder = String(active?.folder || '');
     const title = String(active?.title || '').trim();
     if (!active || !folder || !title) {
+      window.ryuPremiumActiveProject = null;
       activeProjectCardFolder = null;
       if (titleNode && titleNode.textContent !== 'No project selected') titleNode.textContent = 'No project selected';
       if (titleNode) titleNode.title = 'Open a project from Library to begin';
@@ -1950,7 +2024,38 @@
       text: editorBeforeRefresh.value,
       title: String(titleBeforeRefresh?.textContent || '')
     } : null;
-    const loaded = await call('chapter.list');
+    const chaptersBeforeRefresh = chapters;
+    let loaded;
+    let noActiveProject = false;
+    try {
+      loaded = await call('chapter.list');
+    } catch (error) {
+      if (requestToken !== chapterListEpoch) return chapters;
+      const detail = String(error?.message || error || '');
+      if (!/open a local project from the Library first|active project is no longer available in the local library/i.test(detail)) {
+        throw error;
+      }
+      noActiveProject = true;
+      loaded = [];
+      // The host clears an invalid active-folder setting before returning this
+      // error. Clear old project identity and cached cast data, not the source
+      // files, if this is a genuine no-project state.
+      window.ryuPremiumActiveProject = null;
+      activeProjectCardEpoch++;
+      activeProjectCardFolder = null;
+      characters = [];
+      characterDialogueSuggestions = [];
+      characterAnalysisStatus = {analyzed:false, updated_at:null, dialogue_total:0, unassigned_dialogue:0, suggestion_count:0};
+      window.ryuPremiumCharacterDialogueSuggestions = [];
+      window.ryuPremiumCharacterAnalysisStatus = characterAnalysisStatus;
+      window.ryuPremiumSelectedCharacter = '';
+      window.ryuPremiumSelectedDialogueId = '';
+      const projectTitleNode = document.querySelector('.project-mini .pm-body b');
+      const projectCrumb = document.querySelector('.topbar .crumb span');
+      writeTextIfChanged(projectTitleNode, 'No project selected');
+      writeTextIfChanged(projectCrumb, 'No project selected');
+      setProjectCardStatus('No project selected');
+    }
     if (requestToken !== chapterListEpoch) return chapters;
     chapters = Array.isArray(loaded) ? loaded : [];
     if (draft) {
@@ -1961,11 +2066,76 @@
         if (draft.title.trim()) pendingChapter.title = draft.title.trim();
       }
     }
+    // If a refresh unexpectedly returns no chapters while a user has a pending
+    // edit, retain the visible source instead of silently discarding the draft.
+    if (!chapters.length && draft && chaptersBeforeRefresh.some(c => Number(c.number) === draft.number)) {
+      chapters = chaptersBeforeRefresh;
+      const preserved = chapters.find(c => Number(c.number) === draft.number);
+      if (preserved) {
+        preserved.text = draft.text;
+        preserved.word_count = String(draft.text || '').trim().split(/\s+/).filter(Boolean).length;
+        if (draft.title.trim()) preserved.title = draft.title.trim();
+      }
+      window.ryuPremiumChapters = chapters;
+      writeTextIfChanged($('saveState'), 'Draft preserved locally — chapter refresh needs attention');
+      message('The chapter list returned empty while edits were pending. Your visible draft was preserved; reopen the project and save it before continuing.', true);
+      renderDialogueReview();
+      renderCharacterStudioLive();
+      if (typeof renderLiveChapterInsights === 'function') renderLiveChapterInsights();
+      return chapters;
+    }
     window.ryuPremiumChapters = chapters;
-    await refreshCharacterDialogueSuggestions();
-    if (!chapters.length) { renderDialogueReview(); renderCharacterStudioLive(); return chapters; }
+    if (noActiveProject) {
+      characterDialogueSuggestions = [];
+      characterAnalysisStatus = {analyzed:false, updated_at:null, dialogue_total:0, unassigned_dialogue:0, suggestion_count:0};
+      window.ryuPremiumCharacterDialogueSuggestions = [];
+      window.ryuPremiumCharacterAnalysisStatus = characterAnalysisStatus;
+    } else {
+      await refreshCharacterDialogueSuggestions();
+    }
+    if (!chapters.length) {
+      const list = $('chapterList'), editor = $('chapterEditor'), title = $('chapterTitle');
+      const activeProject = window.ryuPremiumActiveProject;
+      const hasActiveProject = Boolean(activeProject && activeProject.folder);
+      const emptyMessage = hasActiveProject
+        ? 'No saved chapters yet. Add a chapter or re-import the source book.'
+        : 'No project selected. Import a book or open one from Library to begin.';
+      const emptySignature = 'empty:' + String(activeProject?.folder || 'none');
+      if (list && list.dataset.chapterListSignature !== emptySignature) {
+        list.innerHTML = '<p class="muted" data-chapter-empty-state="1">' + esc(emptyMessage) + '</p>';
+        list.dataset.chapterListSignature = emptySignature;
+      }
+      window.ryuPremiumSelectedChapter = null;
+      window.ryuPremiumSelectedDialogueId = '';
+      window.ryuPremiumChapters = [];
+      if (editor) {
+        if (editor.value !== '') editor.value = '';
+        editor.disabled = true;
+        editor.placeholder = hasActiveProject ? 'Add a chapter before editing text.' : 'Import or open a project before editing chapters.';
+      }
+      writeTextIfChanged(title, hasActiveProject ? 'No chapter selected' : 'No project selected');
+      writeTextIfChanged($('wordCount'), '0');
+      writeTextIfChanged($('saveState'), hasActiveProject ? 'No chapter selected' : 'Import or open a project to begin');
+      const search = $('chapterSearch');
+      if (search) writeBooleanIfChanged(search, 'disabled', true);
+      for (const id of ['saveChapter', 'cleanText']) {
+        const button = $(id);
+        if (button) writeBooleanIfChanged(button, 'disabled', true);
+      }
+      chapterDeleteSelection().clear();
+      chapterHistoryGroupOpen = false;
+      if (chapterHistoryGroupTimer) { clearTimeout(chapterHistoryGroupTimer); chapterHistoryGroupTimer = null; }
+      renderDialogueReview();
+      renderCharacterStudioLive();
+      if (typeof renderLiveChapterInsights === 'function') renderLiveChapterInsights();
+      return chapters;
+    }
     if (!chapters.some(c => Number(c.number) === Number(window.ryuPremiumSelectedChapter))) window.ryuPremiumSelectedChapter = chapters[0].number;
     const current = selectedChapter(), list = $('chapterList'), editor = $('chapterEditor'), title = $('chapterTitle');
+    if (editor) { writeBooleanIfChanged(editor, 'disabled', false); editor.removeAttribute('placeholder'); }
+    if ($('chapterSearch')) writeBooleanIfChanged($('chapterSearch'), 'disabled', false);
+    if ($('saveChapter')) writeBooleanIfChanged($('saveChapter'), 'disabled', false);
+    if ($('cleanText')) writeBooleanIfChanged($('cleanText'), 'disabled', false);
     if (list) {
       ensureChapterDeleteControls(list);
       list.style.maxHeight = 'calc(100vh - 270px)';
@@ -3220,7 +3390,7 @@
   }
   async function refreshJobsImpl() {
     const allJobs = await call('job.list', {include_hidden:false});
-    refreshDashboardGeneration(allJobs);
+    if (isVisiblePage('dashboard')) refreshDashboardGeneration(allJobs);
     const jobs = allJobs.filter(j => backendJobFilter === 'all' ||
       (backendJobFilter === 'completed' ? j.state === 'completed' :
       (backendJobFilter === 'failed' ? j.state === 'failed' :
@@ -3267,24 +3437,25 @@
           const state = row.querySelector('[data-job-state]');
           const messageNode = row.querySelector('[data-job-message]');
           const errorNode = row.querySelector('[data-job-error]');
-          if (stage) stage.textContent = j.stage || j.message || j.state || 'unknown';
-          if (progress) progress.style.width = pct + '%';
-          if (state) state.textContent = String(j.state || 'unknown') + ' · ' + Math.round(pct) + '%';
-          if (messageNode) messageNode.textContent = j.message || '';
-          if (messageNode) messageNode.hidden = !j.message;
-          if (errorNode) errorNode.textContent = j.error?.message || '';
-          if (errorNode) errorNode.hidden = !j.error?.message;
+          writeTextIfChanged(stage, j.stage || j.message || j.state || 'unknown');
+          writeStyleIfChanged(progress, 'width', pct + '%');
+          writeTextIfChanged(state, String(j.state || 'unknown') + ' · ' + Math.round(pct) + '%');
+          writeTextIfChanged(messageNode, j.message || '');
+          writeBooleanIfChanged(messageNode, 'hidden', !j.message);
+          writeTextIfChanged(errorNode, j.error?.message || '');
+          writeBooleanIfChanged(errorNode, 'hidden', !j.error?.message);
         });
       }
       box.dataset.backendJobsRendered = '1';
     }
-    if ($('jobsRunningCount')) $('jobsRunningCount').textContent = allJobs.filter(j => ['running','pause_requested','cancel_requested'].includes(j.state)).length;
-    if ($('jobsQueuedCount')) $('jobsQueuedCount').textContent = allJobs.filter(j => j.state === 'queued').length;
-    if ($('jobsCompletedCount')) $('jobsCompletedCount').textContent = allJobs.filter(j => j.state === 'completed').length;
-    if ($('backgroundJobCount')) $('backgroundJobCount').textContent = allJobs.filter(j => !['completed','failed','cancelled'].includes(j.state)).length + ' background jobs';
+    writeTextIfChanged($('jobsRunningCount'), allJobs.filter(j => ['running','pause_requested','cancel_requested'].includes(j.state)).length);
+    writeTextIfChanged($('jobsQueuedCount'), allJobs.filter(j => j.state === 'queued').length);
+    writeTextIfChanged($('jobsCompletedCount'), allJobs.filter(j => j.state === 'completed').length);
+    writeTextIfChanged($('backgroundJobCount'), allJobs.filter(j => !['completed','failed','cancelled'].includes(j.state)).length + ' background jobs');
     return allJobs;
   }
   async function monitorJob(jobId, done, terminal) {
+    const originPage = document.querySelector('.page.active')?.id || '';
     const monitorToken = ++monitorEpoch;
     activeJob = jobId;
     activeJobType = null;
@@ -3305,14 +3476,27 @@
         if (!job) return;
         if (activeJob === jobId) activeJobType = job.type || null;
         const pct = Math.max(0, Math.min(100, Number(job.progress || 0)));
-        if ($('genPercent')) $('genPercent').textContent = Math.round(pct) + '%';
-        if ($('genRing')) $('genRing').style.setProperty('--progress', pct + '%');
-        if ($('importBar')) $('importBar').style.width = pct + '%';
-        if ($('genStage')) $('genStage').textContent = job.stage || job.message || job.state;
-        if ($('aiProgressText')) $('aiProgressText').textContent = job.stage || job.message || job.state;
-        if ($('aiProgressBar')) $('aiProgressBar').style.width = pct + '%';
-        if ($('previewProgress')) $('previewProgress').style.width = pct + '%';
-        if ($('previewState') && job.type === 'voice-preview') {
+        const originVisible = isVisiblePage(originPage);
+        // A background job must never write progress into an unrelated screen.
+        // Dedicated progress widgets are only updated while their owning screen
+        // is visible; the shared Background Jobs and History views remain global.
+        if (originVisible && originPage === 'generate') {
+          writeTextIfChanged($('genPercent'), Math.round(pct) + '%');
+          writeCssVariableIfChanged($('genRing'), '--progress', pct + '%');
+          writeTextIfChanged($('genStage'), job.stage || job.message || job.state);
+        }
+        if (originVisible && originPage === 'import' && job.type === 'import') {
+          writeStyleIfChanged($('importBar'), 'width', pct + '%');
+          writeTextIfChanged($('importStatus'), job.message || job.stage || job.state);
+        }
+        if (originVisible && originPage === 'characters' && job.type === 'character-analysis') {
+          writeTextIfChanged($('aiProgressText'), job.stage || job.message || job.state);
+          writeStyleIfChanged($('aiProgressBar'), 'width', pct + '%');
+        }
+        if (originVisible && originPage === 'voices' && job.type === 'voice-preview') {
+          writeStyleIfChanged($('previewProgress'), 'width', pct + '%');
+        }
+        if (originVisible && originPage === 'voices' && job.type === 'voice-preview') {
           const previewDetail = String(job.message || '').trim();
           const elapsedMatch = previewDetail.match(/elapsed \d+:\d{2}/i);
           const previewDetailIsUseful = Boolean(elapsedMatch) ||
@@ -3323,13 +3507,13 @@
              /qwen model loaded/i.test(previewDetail) ? 'Model loaded' : '');
           // Keep the compact badge stable-width. Putting the full backend heartbeat
           // here makes the toolbar wrap between refresh ticks and moves the preview.
-          $('previewState').textContent = (job.stage || job.state) + ' · ' + Math.round(pct) + '%';
-          if($('sumPreview'))$('sumPreview').textContent=['completed','failed','cancelled'].includes(job.state)
+          writeTextIfChanged($('previewState'), (job.stage || job.state) + ' · ' + Math.round(pct) + '%');
+          writeTextIfChanged($('sumPreview'), ['completed','failed','cancelled'].includes(job.state)
             ? (job.state==='completed'?'Finalizing':job.state==='failed'?'Failed':'Cancelled')
-            : 'Synthesizing · '+Math.round(pct)+'%';
+            : 'Synthesizing · '+Math.round(pct)+'%');
           if($('validation')&&!['completed','failed','cancelled'].includes(job.state)) {
-            $('validation').textContent = 'Synthesizing preview · '+Math.round(pct)+'% · '+
-              (job.stage||job.state)+(previewDetailIsUseful ? ' · '+shortDetail : '');
+            writeTextIfChanged($('validation'), 'Synthesizing preview · '+Math.round(pct)+'% · '+
+              (job.stage||job.state)+(previewDetailIsUseful ? ' · '+shortDetail : ''));
           }
         }
         await refreshJobs();
@@ -5316,7 +5500,15 @@
       const folder = card.dataset.projectFolder;
       if (!folder) { message('This dashboard card has no local project folder.', true); return; }
       try {
+        await flushChapterDraftBeforeSwitch();
+        // Invalidate older chapter/cast replies before the backend changes its
+        // active-project pointer; they must not repaint the new project's UI.
+        chapterListEpoch++;
+        chapterSelectionEpoch++;
+        characterListEpoch++;
+        characterSuggestionsEpoch++;
         const opened = await call('project.open', {folder});
+        await refreshCurrentProjectCard();
         await refreshProjects();
         await refreshChapters();
         await refreshCharacters();
@@ -5349,7 +5541,20 @@
       }
       const button = e.target.closest('[data-open-project]'); if (!button) return;
       button.disabled = true;
-      try { const opened = await call('project.open', {folder:button.dataset.openProject}); await refreshProjects(); await refreshChapters(); await refreshCharacters(); if (typeof window.go === 'function') window.go('chapters'); message('Opened local project: ' + (opened.title || opened.folder || 'project')); }
+      try {
+        await flushChapterDraftBeforeSwitch();
+        chapterListEpoch++;
+        chapterSelectionEpoch++;
+        characterListEpoch++;
+        characterSuggestionsEpoch++;
+        const opened = await call('project.open', {folder:button.dataset.openProject});
+        await refreshCurrentProjectCard();
+        await refreshProjects();
+        await refreshChapters();
+        await refreshCharacters();
+        if (typeof window.go === 'function') window.go('chapters');
+        message('Opened local project: ' + (opened.title || opened.folder || 'project'));
+      }
       catch (err) { message(err?.message || String(err), true); }
       finally { button.disabled = false; }
     });
