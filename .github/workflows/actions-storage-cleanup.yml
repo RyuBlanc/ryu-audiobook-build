@@ -32,7 +32,7 @@ jobs:
 
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const protectedRunNumbers = new Set([1441]);
+            const protectedRunNumbers = new Set([1441, 1536]);
             let currentRunNumber = run?.run_number ?? null;
             let currentRunId = run?.id ?? null;
 
