@@ -205,6 +205,7 @@ class VoiceCastPagePersistenceTests(unittest.TestCase):
                     self.assertEqual(load_state(folder)["voice_cast"]["Mira"], "Mira Voice")
                     second_page = VoiceCastPage(lambda: [], parent=host, get_project=lambda: SimpleNamespace(folder=folder))
                     second_page.load_current_project()
+                    second_page.refresh_profiles()
                     self.app.processEvents()
                     self.assertEqual(second_page.rows[0]["voice"], "Mira Voice")
                     self.assertIn("assigned", second_page.list.item(0).text().casefold())
