@@ -265,7 +265,7 @@
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
   let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0, projectListEpoch = 0, characterListEpoch = 0, termsListEpoch = 0, soundListEpoch = 0, historyListEpoch = 0, librarySearchTimer = null, soundSearchTimer = null;
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
-  let activeProjectCardFolder = null, projectCardStatusObserver = null;
+  let activeProjectCardFolder = null, projectCardStatusObserver = null, activeProjectCardEpoch = 0;
   const resumeCheckpointKey = 'ryu.project.resume-checkpoints.v1';
   const resumeStages = new Set(['import','chapters','narrator','characters','sound','production','player']);
   const resumeStageRoutes = {
@@ -1030,9 +1030,16 @@
   }
 
   async function refreshCurrentProjectCard(statusOverride = '') {
+    const requestToken = ++activeProjectCardEpoch;
     let active = null;
     try { active = await call('project.get_active'); }
-    catch (_) { return null; } // Do not erase the last confirmed UI state on a transient bridge error.
+    catch (_) {
+      if (requestToken !== activeProjectCardEpoch) return window.ryuPremiumActiveProject || null;
+      return null; // Do not erase the last confirmed UI state on a transient bridge error.
+    }
+    // Multiple callers can query the active project during open/rename/recovery.
+    // Never let an older reply overwrite the identity selected by a newer action.
+    if (requestToken !== activeProjectCardEpoch) return window.ryuPremiumActiveProject || null;
     if (active) window.ryuPremiumActiveProject = active;
     const card = document.querySelector('.project-mini');
     const titleNode = card?.querySelector('.pm-body b');

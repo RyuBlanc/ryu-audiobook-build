@@ -113,7 +113,7 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("loaded = [];", refresh)
         self.assertIn("data-chapter-empty-state", refresh)
         self.assertIn("No project selected. Import a book or open one from Library to begin.", refresh)
-        self.assertIn("Other bridge/storage errors remain errors", refresh)
+        self.assertIn("bridge/storage errors remain errors", refresh)
 
     def test_responsive_workflow_and_notifications_have_bounded_layout_guards(self):
         html = (

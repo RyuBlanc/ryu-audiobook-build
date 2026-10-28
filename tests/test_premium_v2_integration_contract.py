@@ -826,6 +826,22 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         )
 
 
+
+    def test_active_project_card_refresh_ignores_out_of_order_replies(self):
+        adapter = (
+            ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        ).read_text(encoding="utf-8")
+        self.assertIn("let activeProjectCardEpoch = 0", adapter)
+        start = adapter.index("async function refreshCurrentProjectCard(")
+        end = adapter.index("function installProjectCardStatusObserver()", start)
+        refresh = adapter[start:end]
+        self.assertIn("const requestToken = ++activeProjectCardEpoch", refresh)
+        self.assertIn("if (requestToken !== activeProjectCardEpoch) return window.ryuPremiumActiveProject || null", refresh)
+        self.assertLess(
+            refresh.index("if (requestToken !== activeProjectCardEpoch) return window.ryuPremiumActiveProject || null;\n    if (active) window.ryuPremiumActiveProject = active;"),
+            refresh.index("const changedProject = folder !== activeProjectCardFolder"),
+        )
+
     def test_dashboard_recent_project_cards_open_real_local_project(self):
         """Dashboard cards must open their own backend project, not a prototype card."""
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
