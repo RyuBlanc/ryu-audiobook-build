@@ -325,3 +325,24 @@ The **source-level control audit is now closed** for the currently inventoried l
 ## 2026-10-24 current-branch reliability addendum
 
 Production Pause/Cancel is generation-type guarded. Chapter switching saves a pending draft before navigation and aborts on save failure. Stale replies are ignored across project/chapter/cast/pronunciation/sound/cues/model/voice/provider/history lists; unchanged DOM is retained and search is debounced. See docs/SIX_STAGE_AUDIT_AND_ACCEPTANCE.md for the 15-screen ledger. Do not claim zero flicker/crash without repeated target-Windows evidence.
+
+## 2026-10-28 — Stage 1.7: packaged startup and HTML loader acceptance
+
+### User-reported blocker
+- The installed Build #1575 opened a native loading screen and remained at **22% — “Preparing the local backend bridge…”**, never reaching the Premium V2 workspace.
+- Baseline artifact checkpoint: [Build #1575](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40726679173), source SHA `43d86f9a64d603bb3c627b8cf41eafe02c016cfd`.
+- That run passed its automated test/package jobs, but its startup smoke only checked that the EXE remained alive for 12 seconds. It did not prove the web UI or native bridge was ready. Treat this as a verified gap in the acceptance test, not as evidence that startup worked.
+
+### Stage 1.7 correction
+- The desktop host now prepares the approved HTML for desktop startup, sets a native-host marker before HTML scripts execute, and prevents the prototype's 1.7-second loader timer from hiding the approved HTML loading screen during real startup.
+- The adapter keeps that HTML loader present until the native bridge is connected, required settings/project/voice/chapter hydration succeeds, and essential handlers are registered. It is removed only at the end of the required startup path.
+- The Qt WebChannel handshake retries transport readiness instead of relying on a single probe. Missing resource/transport, invalid bridge methods, or a startup handshake that exceeds the watchdog produces an actionable native recovery surface instead of silently leaving the user at 22%.
+- A `RYU_STARTUP_SMOKE_MARKER` is written by the real Premium V2 host on frontend-ready or startup failure. The Windows packaging workflow now waits up to 90 seconds for the marker and fails on a startup failure or timeout; process liveness alone no longer counts as startup acceptance.
+- New/updated regression coverage: `tests/test_stage1_native_startup.py` and `tests/test_stage1_frontend_readiness.py`.
+
+### Acceptance status at this checkpoint
+- Implementation is on `stage1/build1536-clean-baseline`.
+- The exact-candidate full regression suite, frozen-app readiness smoke, artifact hashes, and installer/portable packaging must all pass in the next `[artifact-checkpoint]` run before this startup defect can be marked automated-acceptance complete.
+- The approved packaged build still requires the user's hands-on check for the intended HTML loader appearance, successful workspace display/navigation, effects-enabled stability, resizing/scrolling, and reopen behavior. CI evidence is not a substitute for that visual/runtime check.
+- Do not infer that all other Stage 1 requirements in this register are closed from this startup fix.
+
