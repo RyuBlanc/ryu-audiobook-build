@@ -21,6 +21,7 @@ on:
       - fix/dashboard-live-data-project-covers-player
       - fix/html-installer-transparent-logo
       - recovery/build-1441-baseline
+      - stage1/build1536-clean-baseline
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.
@@ -69,7 +70,11 @@ jobs:
           & $pythonExe -B -m unittest discover -s tests -v
           if ($LASTEXITCODE -ne 0) { throw "Regression tests failed with exit code $LASTEXITCODE." }
 
+  # On feature branches, run the full regression suite without packaging or
+  # storage cleanup. Only explicit artifact checkpoints (and main/manual runs)
+  # may create release artifacts.
   build:
+    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.event.head_commit.message, '[artifact-checkpoint]') || github.event_name == 'workflow_dispatch' }}
     needs: tests
     runs-on: windows-latest
     timeout-minutes: 120
@@ -787,7 +792,7 @@ jobs:
   cleanup:
     name: Clean stale Actions runs and storage
     continue-on-error: true
-    if: always()
+    if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.event.head_commit.message, '[artifact-checkpoint]') || github.event_name == 'workflow_dispatch') }}
     needs: [tests, build]
     runs-on: ubuntu-latest
     timeout-minutes: 10
