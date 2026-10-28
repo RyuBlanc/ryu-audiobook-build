@@ -346,3 +346,8 @@ Production Pause/Cancel is generation-type guarded. Chapter switching saves a pe
 - The approved packaged build still requires the user's hands-on check for the intended HTML loader appearance, successful workspace display/navigation, effects-enabled stability, resizing/scrolling, and reopen behavior. CI evidence is not a substitute for that visual/runtime check.
 - Do not infer that all other Stage 1 requirements in this register are closed from this startup fix.
 
+### Regression reconciliation — 28 October 2026
+- The first complete Stage 1.7 regression execution ran 748 tests. The new startup-focused tests passed. Two older contracts failed because they asserted the previous exclusive `adapter-start-failed` condition after the recovery path was widened to handle both `backend-bridge-failed` and `adapter-start-failed`.
+- Updated both `tests/test_stage1_frontend_readiness.py` and `tests/test_native_shell_sizing_contract.py` to assert the intended combined failure path; production behavior was not weakened to satisfy stale expectations.
+- These assertion updates still require a green full-suite run. The next readiness-gated artifact checkpoint must be checked against its exact HEAD SHA; packaging is not accepted until tests, startup marker smoke, artifact hashes and installer/portable build all pass.
+
