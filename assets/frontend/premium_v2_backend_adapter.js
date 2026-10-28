@@ -6038,27 +6038,7 @@
             // Use match indices from the original string. Lowercasing can expand some
             // Unicode characters (for example U+0130), making offsets into a lowered
             // copy unsafe for selection and replacement.
-            const escapedNeedle = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\            const source = editor.value;
-            const index = source.toLocaleLowerCase().indexOf(needle.toLocaleLowerCase());
-            if (choice === 'find') {
-              if (index < 0) { message('No matching text was found in this chapter.'); return; }
-              editor.focus(); editor.setSelectionRange(index, index + needle.length);
-              message('Match selected in the chapter editor.');
-            } else {
-              const replacement = window.prompt('Replace every case-insensitive match with:', '');
-              if (replacement === null) return;
-              const lowered = source.toLocaleLowerCase(), target = needle.toLocaleLowerCase();
-              let count = 0, cursor = 0, output = '', matchAt = -1;
-              while ((matchAt = lowered.indexOf(target, cursor)) !== -1) {
-                output += source.slice(cursor, matchAt) + replacement;
-                cursor = matchAt + needle.length; count++;
-              }
-              if (!count) { message('No matching text was found; chapter text was not changed.'); return; }
-              if (!window.confirm('Replace ' + count + ' occurrence(s) in this chapter?')) return;
-              editor.value = output + source.slice(cursor);
-              editor.dispatchEvent(new Event('input', {bubbles:true}));
-              message('Replaced ' + count + ' occurrence(s). Changes will autosave shortly.');
-            }');
+            const escapedNeedle = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const firstMatch = new RegExp(escapedNeedle, 'iu').exec(source);
             if (choice === 'find') {
               if (!firstMatch) { message('No matching text was found in this chapter.'); return; }
