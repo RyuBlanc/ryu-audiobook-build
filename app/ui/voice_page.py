@@ -1225,6 +1225,7 @@ class VoicePage(QWidget):
             profile
             and any(
                 item.name.casefold() == profile.name.casefold()
+                and self._voice_profile_signature(item) == current_signature
                 for item in load_saved_profiles()
             )
         )
@@ -1252,6 +1253,12 @@ class VoicePage(QWidget):
         )
         if saved_profile is None:
             self.status.setText("Save this voice profile first, then generate its preview and assign it.")
+            return
+        if self._voice_profile_signature(saved_profile) != self._voice_profile_signature(profile):
+            self.status.setText(
+                "The preview uses unsaved voice settings. Save/update this profile, then generate a fresh preview before assignment."
+            )
+            self._refresh_assignment_actions()
             return
         state = load_state(folder)
         state["voice_profile"] = saved_profile.name
