@@ -6914,22 +6914,22 @@
 
     const startupMilestones = {
       loadSettings: {
-        starting: 31, complete: 39,
+        complete: 39,
         loading: 'Loading saved settings…',
         loaded: 'Saved settings loaded.'
       },
       refreshProjects: {
-        starting: 42, complete: 54,
+        complete: 54,
         loading: 'Loading your local project library…',
         loaded: 'Project library loaded.'
       },
       refreshVoices: {
-        starting: 57, complete: 69,
+        complete: 69,
         loading: 'Loading saved voice profiles…',
         loaded: 'Voice profiles loaded.'
       },
       refreshChapters: {
-        starting: 72, complete: 88,
+        complete: 88,
         loading: 'Restoring the chapter workspace…',
         loaded: 'Chapter workspace restored.'
       }
@@ -6943,7 +6943,7 @@
       const required = options.required === true;
       for (const refresh of phase) {
         const milestone = required ? startupMilestones[String(refresh?.name || '')] : null;
-        if (milestone) reportStartupProgress(milestone.loading, milestone.starting);
+        if (milestone) reportStartupProgress(milestone.loading, null);
         try { await refresh(); }
         catch (error) {
           console.warn('[Ryu hydration]', error);

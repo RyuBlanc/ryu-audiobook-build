@@ -5818,6 +5818,11 @@ class PremiumV2Window(QMainWindow):
         self._frontend_ready = False
         self._frontend_failure_shown = False
         self._startup_progress_value = 0
+        self._frontend_watchdog = QTimer(self)
+        self._frontend_watchdog.setSingleShot(True)
+        self._frontend_watchdog.timeout.connect(
+            lambda: self._check_frontend_ready(self._frontend_generation)
+        )
         self.web.loadFinished.connect(self._install_bridge)
         self.web.page().renderProcessTerminated.connect(self._handle_renderer_terminated)
 
@@ -5973,6 +5978,8 @@ class PremiumV2Window(QMainWindow):
 
     def _show_web_failure(self, message: str) -> None:
         self._frontend_failure_shown = True
+        if hasattr(self, "_frontend_watchdog"):
+            self._frontend_watchdog.stop()
         log.error("Premium V2 renderer recovery surface shown: %s", message)
         if hasattr(self, "_web_error_message"):
             self._web_error_message.setText(str(message))
@@ -5988,7 +5995,16 @@ class PremiumV2Window(QMainWindow):
         if self._frontend_ready or self._frontend_failure_shown:
             return
         self._set_loading_status(message)
+        # This is an inactivity watchdog, not a total-startup deadline. Each
+        # actual milestone refreshes it; slow but progressing local reads keep
+        # the loading surface alive instead of being mistaken for a frozen UI.
+        if self._frontend_generation > 0 and hasattr(self, "_frontend_watchdog"):
+            self._frontend_watchdog.start(120000)
         if progress is None:
+            # The current step is genuinely in progress; use Qt's busy animation
+            # rather than inventing a percentage before the operation completes.
+            if hasattr(self, "_loading_progress"):
+                self._loading_progress.setRange(0, 0)
             return
         try:
             value = max(0, min(100, int(progress)))
@@ -5998,6 +6014,7 @@ class PremiumV2Window(QMainWindow):
         # moves backwards during one startup attempt.
         self._startup_progress_value = max(self._startup_progress_value, value)
         if hasattr(self, "_loading_progress"):
+            self._loading_progress.setRange(0, 100)
             self._loading_progress.setValue(self._startup_progress_value)
 
     def _on_frontend_ready(self) -> None:
@@ -6008,6 +6025,8 @@ class PremiumV2Window(QMainWindow):
             self._loading_progress.setValue(100)
         self._frontend_ready = True
         self._frontend_failure_shown = False
+        if hasattr(self, "_frontend_watchdog"):
+            self._frontend_watchdog.stop()
         self._renderer_restart_attempts = 0
         if hasattr(self, "_web_stack") and hasattr(self, "web"):
             self._web_stack.setCurrentWidget(self.web)
@@ -6019,6 +6038,9 @@ class PremiumV2Window(QMainWindow):
         self._frontend_ready = False
         self._frontend_failure_shown = False
         self._startup_progress_value = 0
+        if hasattr(self, "_loading_progress"):
+            self._loading_progress.setRange(0, 100)
+            self._loading_progress.setValue(5)
         self._frontend_generation += 1
         generation = self._frontend_generation
         self._update_startup_progress("Retrying the interface and reconnecting local services…", 5)
@@ -6162,7 +6184,7 @@ class PremiumV2Window(QMainWindow):
         # Check for a UI that loaded at the HTML level but never finished
         # initializing the backend adapter. This gives the user a native
         # recovery surface instead of an indefinitely blank black window.
-        QTimer.singleShot(15000, lambda: self._check_frontend_ready(generation))
+        self._frontend_watchdog.start(120000)
 
     def _check_frontend_ready(self, generation: int) -> None:
         if generation != self._frontend_generation or self._frontend_ready or self._frontend_failure_shown:

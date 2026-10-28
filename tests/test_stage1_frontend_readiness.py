@@ -132,6 +132,9 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
         self.assertIn("self._set_loading_status(message)", updater)
         self.assertIn("self._startup_progress_value = max(self._startup_progress_value, value)", updater)
         self.assertIn("self._loading_progress.setValue(self._startup_progress_value)", updater)
+        self.assertIn("self._loading_progress.setRange(0, 0)", updater)
+        self.assertIn("self._loading_progress.setRange(0, 100)", updater)
+        self.assertIn("self._frontend_watchdog.start(120000)", updater)
 
     def test_startup_progress_reports_real_required_hydration_milestones(self):
         adapter = (
@@ -150,7 +153,7 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
         phase_start = adapter.index("const hydratePhase = async (phase, options = {})")
         phase_end = adapter.index("await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters], {required:true})", phase_start)
         phase = adapter[phase_start:phase_end]
-        self.assertIn("if (milestone) reportStartupProgress(milestone.loading, milestone.starting)", phase)
+        self.assertIn("if (milestone) reportStartupProgress(milestone.loading, null)", phase)
         self.assertIn("await refresh()", phase)
         self.assertIn("if (milestone) reportStartupProgress(milestone.loaded, milestone.complete)", phase)
         self.assertIn("reportStartupProgress('Essential workspace loaded. Finishing the studio…', 94)", adapter)
@@ -166,6 +169,29 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
         self.assertIn("emit('startup-progress'", host)
         self.assertIn("progress:26", host)
 
+
+    def test_startup_watchdog_is_inactivity_based_and_stops_on_ready_or_failure(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        init_start = host.index("class PremiumV2Window(")
+        init_end = host.index("    def apply_window_size(", init_start)
+        constructor = host[init_start:init_end]
+        self.assertIn("self._frontend_watchdog = QTimer(self)", constructor)
+        self.assertIn("self._frontend_watchdog.setSingleShot(True)", constructor)
+        self.assertIn("lambda: self._check_frontend_ready(self._frontend_generation)", constructor)
+
+        updater_start = host.index("def _update_startup_progress(")
+        updater_end = host.index("def _on_frontend_ready(", updater_start)
+        updater = host[updater_start:updater_end]
+        self.assertIn("self._frontend_watchdog.start(120000)", updater)
+        self.assertIn("if self._frontend_generation > 0", updater)
+        ready_start = host.index("def _on_frontend_ready(")
+        ready_end = host.index("def _retry_web_renderer(", ready_start)
+        self.assertIn("self._frontend_watchdog.stop()", host[ready_start:ready_end])
+        failure_start = host.index("def _show_web_failure(")
+        failure_end = host.index("def _set_loading_status(", failure_start)
+        self.assertIn("self._frontend_watchdog.stop()", host[failure_start:failure_end])
+        self.assertNotIn("QTimer.singleShot(15000", host)
+
     def test_native_host_fails_before_javascript_injection_when_adapter_cannot_load(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         start = host.index("    def _install_bridge(self, ok: bool)")
@@ -180,7 +206,7 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
         )
         self.assertIn('"could not be read. The application will not continue in a "', install)
         self.assertIn('"partially connected state. Repair or reinstall the application.', install)
-        self.assertIn("QTimer.singleShot(15000", install)
+        self.assertIn("self._frontend_watchdog.start(120000)", install)
 
 if __name__ == "__main__":
     unittest.main()
