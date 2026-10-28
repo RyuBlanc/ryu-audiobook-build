@@ -399,6 +399,18 @@ html[data-effects='normal'] #voices .status {
   -webkit-backdrop-filter: blur(4px) saturate(110%) !important;
   backdrop-filter: blur(4px) saturate(110%) !important;
 }
+
+/* Avoid translating/scaling full-page glass layers during high-effects navigation.
+   A short opacity-only reveal keeps the transition while limiting WebEngine repaint work. */
+html[data-effects='high'] .page.active,
+html[data-effects='high'] #voices>.content,
+html[data-effects='high'] #voices .panel.active {
+  animation: stage1HighEffectsReveal 140ms ease-out both !important;
+}
+@keyframes stage1HighEffectsReveal {
+  from { opacity: .94; }
+  to { opacity: 1; }
+}
 .loader-glass {
   -webkit-backdrop-filter: blur(16px) saturate(140%) !important;
   backdrop-filter: blur(16px) saturate(140%) !important;

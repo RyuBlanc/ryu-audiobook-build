@@ -195,6 +195,25 @@ class BackgroundJobRefreshStabilityTests(unittest.TestCase):
         self.assertIn("body.ryu-mini-player-visible .toast-wrap { bottom:86px; }", guard)
 
 
+    def test_high_effects_page_transitions_do_not_translate_or_scale_large_containers(self):
+        html = (
+            ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"
+        ).read_text(encoding="utf-8")
+        start = html.index("Stage 1 stability: bounded glass effects")
+        end = html.index("</style>", start)
+        guard = html[start:end]
+        rule_start = guard.index("html[data-effects='high'] .page.active")
+        rule_end = guard.index("@keyframes stage1HighEffectsReveal", rule_start)
+        reveal_rule = guard[rule_start:rule_end]
+        self.assertIn("#voices>.content", reveal_rule)
+        self.assertIn("#voices .panel.active", reveal_rule)
+        self.assertIn("animation: stage1HighEffectsReveal 140ms ease-out both !important", reveal_rule)
+        self.assertNotIn("translate", reveal_rule)
+        self.assertNotIn("scale(", reveal_rule)
+        keyframes = guard[rule_end:]
+        self.assertIn("from { opacity: .94; }", keyframes)
+        self.assertIn("to { opacity: 1; }", keyframes)
+
     def test_workflow_strip_and_voice_status_blurs_are_bounded_in_both_effect_modes(self):
         html = (
             ROOT / "assets" / "frontend" / "ryu_audiobook_premium_v2.html"
