@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-Write-Host 'Automatic Actions run/artifact deletion is disabled pending Version 1.2.0 acceptance.'
-Write-Host 'Preserve per-substage tests, full-suite logs, failed-run diagnostics, checkpoint installers, portable builds and SHA-256 manifests.'
-Write-Host 'Do not enable pruning without explicit user approval after release acceptance.'
+Write-Host 'This legacy cleanup helper is intentionally non-destructive.'
+Write-Host 'It must not delete workflow runs, logs, or test-evidence artifacts.'
+Write-Host 'Superseded installer/portable artifacts are pruned only by .github/workflows/actions-storage-cleanup.yml after a successful [artifact-checkpoint] package set has been uploaded.'
 exit 0
