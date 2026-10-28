@@ -1,7 +1,7 @@
 # Stage 3 Plan — Voice Studio and Character Assignment
 
 **Working branch:** `fix/native-ui-font-scale-learning-ai`  
-**Automated baseline before checkpoint:** full regression run #1485 passed 766/766 on `ae3fd8b9eed9244c97132591ff9a8a45ee11e5f2`; this checkpoint commit adds a direct subdued-cue regression and must pass its own test gate before packaging.  
+**Latest successful artifact checkpoint:** Build Windows App #1486 completed successfully on 28 October 2026 using tested commit `e02972e5c9451c4d25766186de5d7cf20b4a57d6`. The full regression suite passed 766/766 (0 failed, 0 errors, 0 skipped), including the standalone subdued-emotion cue regression.  
 **UI rule:** preserve the approved Premium V2 HTML and existing control layout. Improve real backend behavior, validation, persistence, and tests; do not replace connected behavior with demo data.
 
 ## Objectives
@@ -14,9 +14,9 @@
 - [ ] Target-PC acceptance: verify custom/reference voices and built-in voices remain distinguishable and reload after application restart.
 
 ### 3.2 Character analysis and cast persistence
-- [x] Regression coverage includes dialogue attribution, manual-assignment names, first-person narrator self-identification, and common-word false-positive guards; current test-only run #1485 passed 766/766 before the final checkpoint commit.
+- [x] Regression coverage includes dialogue attribution, manual-assignment names, first-person narrator self-identification, and common-word false-positive guards; included in successful Run #1486 (766/766).
 - [x] Re-analysis preserves voice-profile assignment and edited cast metadata for case-insensitive exact-name matches; regression test passed in Run #894.
-- [x] Behavioral tests cover case-insensitive rename, alias normalization, duplicate names, deletion guards for legacy/multi-speaker assignments, and preservation of omitted metadata; the full suite passed on #1485.
+- [x] Behavioral tests cover case-insensitive rename, alias normalization, duplicate names, deletion guards for legacy/multi-speaker assignments, and preservation of omitted metadata; included in successful Run #1486 (766/766).
 - [x] Persistence-level test reloads saved project state after character analysis and verifies confidence/examples, voice profile, user notes, aliases, dialogue totals and unassigned counts; passed on #1480/#1483/#1485.
 
 ### 3.3 Dialogue assignment and generation routing
@@ -28,8 +28,8 @@
 
 ### 3.4 Verification and release gates
 - [x] Historical baseline Run #894 passed the full unittest suite and Windows build/package workflow on commit `ec20d76106e01971e16c045a475eb72f78115c83`.
-- [x] Test-only Run #1485 passed 766/766 cases on `ae3fd8b9eed9244c97132591ff9a8a45ee11e5f2`; the checkpoint commit adds the isolated `subdued` emotion cue test and records current evidence.
-- [ ] This commit requests the Stage 3 artifact checkpoint. Record its exact test/build result and artifact hashes after the run completes.
+- [x] Test-only Run #1485 passed 766/766 cases on `ae3fd8b9eed9244c97132591ff9a8a45ee11e5f2`.
+- [x] Artifact checkpoint Run #1486 passed 766/766 and completed the Windows package workflow on `e02972e5c9451c4d25766186de5d7cf20b4a57d6`. Frozen-app validation, bundled-asset/module checks, installer packaging, logo transparency/hash generation, Microsoft Defender scans, artifact uploads, and cleanup passed. Public release publishing was skipped by workflow policy.
 - [x] Run #894 passed the Windows build/package workflow, frozen-app verification, bundled assets/modules checks, installer build, SHA-256 manifest and Microsoft Defender scan. Release publication was skipped by workflow policy.
 - [ ] Target-PC acceptance: exercise Voice Studio and Character Studio in the packaged Windows app, including actual audio preview and generation.
 - [ ] Keep hardware-specific Stage 1 validation and Stage 2 import acceptance explicitly open until tested on the target PC.
@@ -42,15 +42,41 @@
 - Chapter-level dialogue assignments are persisted in project JSON and support legacy single-speaker plus newer multi-speaker records.
 - The Windows workflow must explicitly include this branch to produce fresh CI evidence.
 
-## Current work after Stage 2
+## Current work and checkpoint evidence
 
-Stage 2 PR #17 was merged after Run #877 succeeded. The Stage 2 packaged-Windows acceptance items remain release gates: duplicate import guidance, cancellation/retry, real supported-format imports, and edit/reopen comparison on the target PC. Stage 1 hardware-specific freeze/crash acceptance also remains open.
+### Stage 3 — Voice Studio and voice quality
 
-Stage 3 automated verification was extended on `fix/native-ui-font-scale-learning-ai`: case-insensitive first-person narrator recognition; case-insensitive character rename/alias normalization; duplicate-name protection; character deletion blocked while saved dialogue assignments reference its canonical name or aliases; analysis output/state-reload coverage; bridge-level chapter reorder/merge/split assignment integrity; and truthful preview performance telemetry. Emotion classification now explicitly covers happy/cheerful, laughing, sad/subdued, crying/sobbing, angry, fearful/tense, surprised, bored, calm and serious delivery while keeping the bored style in the existing neutral reference family so it does not require a separate voice identity. Runs #1480, #1483 and #1484 passed at 758/758, 762/762 and 765/765; Run #1485 passed 766/766 on `ae3fd8b9eed9244c97132591ff9a8a45ee11e5f2`. The package-triggering commit includes a final direct `subdued` cue test and must pass its own test job before Windows packaging proceeds.
+Automated coverage has been extended for:
+- Case-insensitive first-person narrator recognition and common-word false-positive guards.
+- Case-insensitive character rename, alias normalization, duplicate-name protection, and deletion blocked while saved dialogue assignments refer to the character or its aliases.
+- Character-analysis persistence after state reload, including confidence/examples, saved voice profile, notes, aliases, dialogue totals and unassigned counts.
+- Chapter reorder/merge/split assignment integrity, with text-span verification and safe removal of an assignment crossing a split boundary.
+- Preview profile/provider/voice identity and truthful timing telemetry for the 30-second preview target.
+- Explicit happy/cheerful, laughing, sad/subdued, crying/sobbing, angry, fearful/tense, surprised, bored, calm and serious delivery cues. The bored delivery style stays in the existing neutral reference family to avoid inventing a new voice identity.
 
-**Runtime boundary:** per your instruction, hands-on Windows, model-dependent latency measurement, and listening-based voice identity/emotion acceptance are deferred until all stages are complete. They remain open release gates, not claimed as passed.
+Runs #1480, #1483, #1484 and #1485 passed at 758/758, 762/762, 765/765 and 766/766. The final Stage 3 checkpoint, Run #1486, passed 766/766 on commit `e02972e5c9451c4d25766186de5d7cf20b4a57d6` and completed the Windows build and artifact workflow successfully.
 
-**Stage map alignment note:** the supplied master continuation prompt maps overall Stage 2 to Sound Design/Music Library and places Import/Chapter work in Stage 6. The #1478 checkpoint validated the Import/Chapter automated batch; it does not close the master register's Sound Design/Music Library requirements. Those remain open unless separately verified.
+| Run #1486 artifact | Artifact ID | Archive size (bytes) | Artifact ZIP SHA-256 |
+|---|---:|---:|---|
+| `Ryu-Audiobook-Test-Evidence-1486` | `12787405456` | `48,931` | `22b875d02e7fb8d5a09ad3901589a5dfa6ec6707cb1521c594fb67e358d38993` |
+| `Ryu-Audiobook-Installer-1486` | `12787702526` | `878,067,165` | `71cad91085d1fcff96f61a8a27144320eec2a332e82f838bedbb24f3983a25ad` |
+| `Ryu-Audiobook-Portable-1486` | `12787004695` | `1,349,466,654` | `46496fccd59d139097449577c041b2a2898958a4150d6c3b055bebddff24c36a` |
+| `Ryu-Audiobook-Release-SHA256-1486` | `12787567955` | `778` | `a479aafd5006fc3baf8addf747d619393662d457e38d455e0a2552c23ef1783a` |
+
+Release executable hashes recorded by the successful build log:
+- `Ryu's Audiobook Setup.exe`: `D2BEEFEA92CBC1247F3BDA1DA71BA9C1192C757E7AFEBCF99A8B9C9A59893ED9` (878,067,001 bytes).
+- `Ryu's Audiobook Core Setup.exe`: `7F35C76936440F7A918EDE416630A975B2721157D8D01B8F392C560AF5A8ABB4`.
+- `Ryu's Audiobook.exe`: `C447C84CE48461359A700E6CBB6E8A9827304AF1D0967A6027D6F9368756BC7E`.
+
+The Microsoft Defender scan reported no threats for the portable executable, functional installer executable or core installer executable. The artifacts remain available until approximately 27 November 2026. The package sizes remain above the previously discussed 500 MB target; package-size optimization belongs to the later Models/Packaging stage and was not attempted in this checkpoint.
+
+**Runtime boundary:** per the user's instruction, hands-on Windows UI checks, hardware-specific preview-latency measurements and listening-based voice identity/emotion acceptance are deferred until all stages are complete. They remain open release gates and are not claimed to have passed.
+
+### Authoritative stage mapping and next work
+
+The master continuation prompt defines overall Stage 2 as Sound Design and Music Library, and overall Stage 6 as Library/import/chapter work. The earlier #1478 evidence document labels the Import/Chapter batch “Stage 2”; that automated checkpoint must not be mistaken for completion of the master register's Sound Design stage.
+
+The next focused work batch is the outstanding Sound Design consistency gate: global Voice Only/BGM Off must suppress both background music and configured Opening/Next Chapter/Closing cues across generation and previews; the fixed Scene Transition assignment must be removed from the UI/backend and must not be mixed as a legacy fixed cue. Contextual story effects remain a distinct capability. Run focused tests first and do not trigger another package until this coherent batch passes.
 
 ## Completion rule
 
