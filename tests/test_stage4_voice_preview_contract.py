@@ -529,11 +529,15 @@ class VoicePreviewContractTests(unittest.TestCase):
         source = voice_page.read_text(encoding="utf-8")
         method = source[source.index("    def assign_to_character("):source.index("    def _set_voice_step(")]
         self.assertIn("from app.core.character_library import sync_characters", source)
-        self.assertIn("sync_characters(\n                    series,\n                    [source_row]", method)
+        self.assertIn("sync_characters(\n                    character_series,\n                    [source_row]", method)
         self.assertIn('source_row = {"name": character, "voice": saved_profile.name}', method)
         self.assertIn('source_row["aliases"] = list(roster_row["aliases"])', method)
         self.assertIn("update_voice=True", method)
-        self.assertIn('state["voice_cast"] = assignments', method)
+        self.assertIn("set_character_voice_assignment(", method)
+        self.assertIn("character_series, saved_profile.name", method)
+        identity_source = (Path(__file__).resolve().parents[1] / "app" / "core" / "character_identity.py").read_text(encoding="utf-8")
+        self.assertIn("identity_assignments[character_identity_key(character_name, series)] = voice_name", identity_source)
+        self.assertIn("legacy_assignments[character_name] = voice_name", identity_source)
         self.assertIn("but Character Library sync failed", method)
     def test_missing_saved_native_voice_stays_visible_without_substitution(self):
         voice_page = Path(__file__).resolve().parents[1] / "app" / "ui" / "voice_page.py"
