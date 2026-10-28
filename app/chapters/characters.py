@@ -195,7 +195,10 @@ def _detect_first_person_narrator(text: str) -> str | None:
         r"\b(?:I['’]m|I am|this is)\s+([A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30}(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30})?)\b",
     )
     for pattern in patterns:
-        match = re.search(pattern, text)
+        # Self-identification commonly starts a sentence ("My name is...").
+        # Match the cue case-insensitively, while _is_plausible_name continues
+        # to validate the captured character name and its intended capitalization.
+        match = re.search(pattern, text, flags=re.IGNORECASE)
         if match and _is_plausible_name(match.group(1)):
             return _clean_name(match.group(1))
     return None

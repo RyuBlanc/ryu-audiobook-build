@@ -43,22 +43,26 @@ class CharacterDetectionRegressionTests(unittest.TestCase):
 
 
     def test_first_person_self_identification_is_preserved_as_narrating_character(self):
-        chapter = Chapter(
-            number=1,
-            title="The Beginning",
-            text=(
-                "My name is Rias Gremory. I was walking through the courtyard. "
-                "I heard footsteps behind me."
-            ),
-        )
-        result = analyze_book([chapter])
-        narrator = next(
-            (character for character in result.characters
-             if character.name.casefold() == "rias gremory"),
-            None,
-        )
-        self.assertIsNotNone(narrator)
-        self.assertEqual(narrator.role, "Narrating Character")
+        for introduction in (
+            "My name is Rias Gremory.",
+            "I am Rias Gremory.",
+            "I'm Rias Gremory.",
+            "This is Rias Gremory.",
+        ):
+            with self.subTest(introduction=introduction):
+                chapter = Chapter(
+                    number=1,
+                    title="The Beginning",
+                    text=introduction + " I was walking through the courtyard. I heard footsteps behind me.",
+                )
+                result = analyze_book([chapter])
+                narrator = next(
+                    (character for character in result.characters
+                     if character.name.casefold() == "rias gremory"),
+                    None,
+                )
+                self.assertIsNotNone(narrator)
+                self.assertEqual(narrator.role, "Narrating Character")
 
     def test_common_sentence_initial_words_are_not_misclassified_as_characters(self):
         chapter = Chapter(
