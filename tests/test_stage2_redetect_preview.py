@@ -17,15 +17,17 @@ def sample_chapters():
 
 class Stage2RedetectionPreviewTests(unittest.TestCase):
     def _bridge_and_project(self):
-        bridge = object.__new__(PremiumV2Bridge)
         project = SimpleNamespace(chapters=sample_chapters(), save=Mock())
+        bridge = SimpleNamespace(
+            _active_project=Mock(return_value=project),
+            _mark_project_edited=Mock(),
+        )
         return bridge, project
 
     def test_preview_returns_before_after_and_fingerprint_without_saving(self):
         bridge, project = self._bridge_and_project()
         before_text = project.chapters[0].text
-        with patch.object(bridge, "_active_project", return_value=project):
-            preview = bridge._chapter_redetect({"preview": True})
+        preview = PremiumV2Bridge._chapter_redetect(bridge, {"preview": True})
 
         self.assertTrue(preview["preview_only"])
         self.assertFalse(preview["saved"])
@@ -39,41 +41,37 @@ class Stage2RedetectionPreviewTests(unittest.TestCase):
     def test_apply_without_preview_fingerprint_is_rejected_without_mutation(self):
         bridge, project = self._bridge_and_project()
         before = [(chapter.title, chapter.text) for chapter in project.chapters]
-        with patch.object(bridge, "_active_project", return_value=project):
-            with self.assertRaisesRegex(ValueError, "Review the before/after preview"):
-                bridge._chapter_redetect({"selected_number": 1})
+        with self.assertRaisesRegex(ValueError, "Review the before/after preview"):
+            PremiumV2Bridge._chapter_redetect(bridge, {"selected_number": 1})
 
         self.assertEqual([(chapter.title, chapter.text) for chapter in project.chapters], before)
         project.save.assert_not_called()
 
     def test_apply_rejects_stale_preview_fingerprint(self):
         bridge, project = self._bridge_and_project()
-        with patch.object(bridge, "_active_project", return_value=project):
-            preview = bridge._chapter_redetect({"preview": True})
-            project.chapters[0].title = "Changed after preview"
-            with self.assertRaisesRegex(ValueError, "changed after the preview"):
-                bridge._chapter_redetect({
-                    "selected_number": 1,
-                    "expected_source_fingerprint": preview["source_fingerprint"],
-                })
+        preview = PremiumV2Bridge._chapter_redetect(bridge, {"preview": True})
+        project.chapters[0].title = "Changed after preview"
+        with self.assertRaisesRegex(ValueError, "changed after the preview"):
+            PremiumV2Bridge._chapter_redetect(bridge, {
+                "selected_number": 1,
+                "expected_source_fingerprint": preview["source_fingerprint"],
+            })
 
         project.save.assert_not_called()
 
     def test_matching_preview_fingerprint_applies_and_persists_new_boundaries(self):
         bridge, project = self._bridge_and_project()
-        with patch.object(bridge, "_active_project", return_value=project), \
-             patch.object(bridge, "_mark_project_edited") as mark_edited:
-            preview = bridge._chapter_redetect({"preview": True})
-            result = bridge._chapter_redetect({
-                "selected_number": 1,
-                "expected_source_fingerprint": preview["source_fingerprint"],
-            })
+        preview = PremiumV2Bridge._chapter_redetect(bridge, {"preview": True})
+        result = PremiumV2Bridge._chapter_redetect(bridge, {
+            "selected_number": 1,
+            "expected_source_fingerprint": preview["source_fingerprint"],
+        })
 
         self.assertTrue(result["saved"])
         self.assertEqual(result["chapter_count"], 2)
         self.assertEqual(len(project.chapters), 2)
         project.save.assert_called_once()
-        mark_edited.assert_called_once()
+        bridge._mark_project_edited.assert_called_once()
 
 
 if __name__ == "__main__":
