@@ -162,7 +162,7 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
 
 
 
-    def test_native_live_splash_removes_duplicate_timer_driven_html_loader_before_backend_calls(self):
+    def test_native_live_splash_keeps_html_loader_until_required_hydration(self):
         adapter = (
             ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js"
         ).read_text(encoding="utf-8")
@@ -174,17 +174,21 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
 
         wire_start = adapter.index("async function wire()")
         first_backend_call = adapter.index("await call('app.get_info')", wire_start)
-        startup = adapter[wire_start:first_backend_call]
-        self.assertIn("const legacyLoader = $('appLoader')", startup)
-        self.assertIn("if (legacyLoader) legacyLoader.remove()", startup)
-        self.assertLess(
-            startup.index("legacyLoader.remove()"),
-            startup.index("window.__ryuEmitFrontendDiagnostic?.('startup-progress'"),
+        required_hydration = adapter.index(
+            "await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters], {required:true})",
+            wire_start,
         )
-        self.assertLess(
-            startup.index("legacyLoader.remove()"),
-            adapter.index("await call('app.get_info')", wire_start),
+        loader_removal = adapter.index("legacyLoader.remove()", wire_start)
+        self.assertGreater(
+            loader_removal,
+            required_hydration,
+            "the approved HTML loader must cover required workspace hydration",
         )
+        self.assertGreater(loader_removal, first_backend_call)
+
+        helper = (ROOT / "app" / "ui" / "frontend_assets.py").read_text(encoding="utf-8")
+        self.assertIn("window.__ryuNativeHost = true;", helper)
+        self.assertIn("if (!window.__ryuNativeHost) setTimeout(finish,1700)", helper)
 
     def test_loading_stays_live_during_early_adapter_wiring(self):
         adapter = (
