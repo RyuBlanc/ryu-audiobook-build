@@ -57,9 +57,9 @@
 2. Added import integrity regression tests for BOM handling, chapter boundary separation, watermark cleanup, persistence of review/skip flags, and failed source-copy cleanup.
 3. Added this branch to the Windows workflow trigger so these changes receive the full build/test/package pipeline.
 
-## Current status after Run #871
+## Historical implementation status
 
-Run #877 passed on final Stage 2 commit `05e03c14637bb4ff3fe8514a50101ebde0d2ab4b`, including added coverage for edited/reordered chapter persistence, invalid-source rejection, and repeated boilerplate cleanup. PR #17 was merged as `9aa1ba5cc9be0808d596c1e2c0618584433c9917`. Automated implementation and package gates passed; packaged-Windows acceptance remains explicitly outstanding.
+Run #877 and PR #17 are prior Stage 2 history. The current checkpoint is Build Windows App #1478, which passed on 28 October 2026 at commit `cbe8b41a46b1d5807699e67fbd54a5d1e698c6a0`: 752/752 tests passed, installer/portable packages were built, release hashes generated, Defender found no threats, and all four CI artifacts were uploaded. The exact installer and package artifact details are recorded in [Stage 2 evidence](STAGE_2_IMPORT_CHAPTER_EVIDENCE.md). Target-Windows interactive acceptance remains explicitly outstanding.
 
 ## Known limitations / risk boundaries
 
