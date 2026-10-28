@@ -106,6 +106,14 @@ class Stage2ChapterOperationTests(unittest.TestCase):
         self.assertNotIn("source.toLocaleLowerCase().indexOf(needle.toLocaleLowerCase())", source)
         self.assertNotIn("const lowered = source.toLocaleLowerCase(), target = needle.toLocaleLowerCase();", source)
 
+    def test_adapter_redetection_uses_preview_fingerprint_before_applying(self):
+        adapter_path = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        source = adapter_path.read_text(encoding="utf-8")
+        self.assertIn("call('chapter.redetect', {selected_number:selectedBefore, preview:true})", source)
+        self.assertIn("expected_source_fingerprint:preview.source_fingerprint", source)
+        self.assertIn("CHAPTER RE-DETECTION PREVIEW — nothing has been saved yet.", source)
+        self.assertIn("Cancel leaves the project unchanged.", source)
+
     def test_adapter_clears_number_keyed_undo_history_after_each_structural_operation(self):
         adapter_path = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
         source = adapter_path.read_text(encoding="utf-8")
