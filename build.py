@@ -76,6 +76,8 @@ STARTER_AUDIO = ASSETS / "starter_audio"
 LOGO_SVG = ASSETS / "ryu_audiobook_logo.svg"
 LOGO_PNG = ASSETS / "ryu_audiobook_logo.png"
 LOGO_ICO = ASSETS / "ryu_audiobook_logo.ico"
+LOGO_BMP = ASSETS / "ryu_audiobook_logo.bmp"
+INSTALLER_BRAND_PANEL_BMP = ASSETS / "installer_brand_panel.bmp"
 INSTALLER_BRAND_PANEL_PNG = ASSETS / "installer_brand_panel.png"
 DRAGON_MASTER_PNG = ASSETS / "dragon_four_winged.png"
 DRAGON_CROSS_PNG = ASSETS / "dragon_cross.png"
@@ -163,6 +165,17 @@ def build_logo_assets() -> None:
         )
         panel.save(INSTALLER_BRAND_PANEL_PNG, format="PNG", optimize=True)
 
+        # Inno Setup wizard slots use Windows bitmap assets. Composite only
+        # these installer-specific BMPs onto the exact dark wizard background;
+        # keep the application's PNG and ICO transparent and full resolution.
+        logo_bmp = Image.new("RGB", rgba.size, (5, 6, 10))
+        logo_bmp.paste(rgba, (0, 0), rgba.getchannel("A"))
+        logo_bmp.save(LOGO_BMP, format="BMP")
+
+        panel_bmp = Image.new("RGB", panel.size, (5, 6, 10))
+        panel_bmp.paste(panel, (0, 0), panel.getchannel("A"))
+        panel_bmp.save(INSTALLER_BRAND_PANEL_BMP, format="BMP")
+
         with Image.open(LOGO_PNG) as logo_check:
             logo_alpha = logo_check.convert("RGBA").getchannel("A")
             if logo_check.size != (source_size.width(), source_size.height()):
@@ -192,8 +205,20 @@ def build_logo_assets() -> None:
 
         if LOGO_PNG.stat().st_size < 4096 or LOGO_ICO.stat().st_size < 1024:
             raise RuntimeError("Generated application logo assets are unexpectedly small.")
+        if LOGO_BMP.stat().st_size < 4096:
+            raise RuntimeError("Generated installer logo BMP is unexpectedly small.")
         if INSTALLER_BRAND_PANEL_PNG.stat().st_size < 4096:
-            raise RuntimeError("Generated installer brand panel is unexpectedly small.")
+            raise RuntimeError("Generated installer brand panel PNG is unexpectedly small.")
+        if INSTALLER_BRAND_PANEL_BMP.stat().st_size < 4096:
+            raise RuntimeError("Generated installer brand panel BMP is unexpectedly small.")
+        with Image.open(LOGO_BMP) as logo_bitmap:
+            if logo_bitmap.mode != "RGB" or logo_bitmap.getpixel((0, 0)) != (5, 6, 10):
+                raise RuntimeError("Installer logo BMP must match WizardBackColor.")
+        with Image.open(INSTALLER_BRAND_PANEL_BMP) as panel_bitmap:
+            if panel_bitmap.mode != "RGB" or panel_bitmap.size != (656, 1256):
+                raise RuntimeError("Installer brand panel BMP must be RGB at 656x1256.")
+            if panel_bitmap.getpixel((0, 0)) != (5, 6, 10):
+                raise RuntimeError("Installer brand panel BMP must match WizardBackColor.")
 
         # Preserve the supplied four-winged dragon artwork used by UI controls.
         if not DRAGON_MASTER_PNG.is_file():

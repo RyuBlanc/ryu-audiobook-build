@@ -131,3 +131,13 @@ Do not close Stage 3 from CI alone. Packaged Windows interaction and actual audi
 - CI cleanup is being disabled for the Windows build workflow, and the scheduled storage cleaner is being changed to preserve every Windows build/test/checkpoint run as evidence. Artifact retention is extended to 90 days.
 - Focused validation is the updated tests/test_stage6_installer_branding.py; the full regression suite and a matching artifact checkpoint are required before this package can be accepted.
 - This is an acceptance-triggered cross-stage correction; it does not reopen already-passing Voice Studio/character-analysis fixes. Stage 3 still requires packaged Windows/audio acceptance, and Stage 4 must not begin until the current Stage 3 checkpoint is verified.
+
+
+## Installer acceptance correction follow-up — 2026-10-28
+
+- Root cause confirmed from installed Build #1498: it was built from the Stage 3 branch while the newer installer-branding change lived on a different stacked feature branch. The old installer script used a label-only color override and default Inno Setup illustration.
+- Installer uses native dark wizard mode, an explicit small logo and a branded portrait panel. Wizard assets are Windows BMPs, composited only for the installer onto the matching dark background. The application PNG/ICO retain transparency and native source resolution.
+- Compression is set to LZMA2 ultra/solid. No voice models, audio tracks, UI modules, source code, or other features are removed to reduce size. The actual size target can only be claimed after the generated artifact size is measured.
+- Workflow concurrency is branch-scoped and no longer cancels an active build when a different branch's validation starts. The checkpoint workflow no longer deletes prior runs, the scheduled cleanup workflow is disabled until manual release review, and uploaded artifacts are retained for 90 days.
+- The previous successful test-only run #1500 is evidence for the prior source SHA, not this correction. This correction needs its own focused tests, then a full checkpoint test and packaging run on one exact source SHA.
+- A separate source-scope gate remains: the Stage 3 branch contains the recent Stage 3 fixes but not all later-stage feature branches. Do not describe a Stage 3-only artifact as a complete all-feature product until the requested feature scope is reconciled and verified.
