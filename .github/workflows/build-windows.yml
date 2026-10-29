@@ -503,8 +503,8 @@ jobs:
             $ready = $false
             $startup = $null
             try {
-              # Test the approved installed default explicitly on every fresh launch.
-              $env:RYU_UI_MODE = 'premium-v2'
+              # Test the packaged default: do not force a UI mode via the environment.
+              Remove-Item Env:RYU_UI_MODE -ErrorAction SilentlyContinue
               $proc = Start-Process -FilePath $exe -PassThru
               $deadline = (Get-Date).AddSeconds(90)
               while ((Get-Date) -lt $deadline) {
