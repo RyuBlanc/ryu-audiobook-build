@@ -401,6 +401,7 @@ def assemble_m4b(
     ending_cue_path: Path | str | None = None,
     scene_transition_cue_path: Path | str | None = None,
     chapter_bgm_overrides: dict[str, dict] | None = None,
+    chapter_bgm_strategy: str | None = None,
 ) -> Path:
     """Create one premium M4B containing all chapters and navigation metadata.
 
@@ -449,6 +450,22 @@ def assemble_m4b(
     effective_audio_mode = str(background_audio_mode or "manual").strip().casefold()
     if effective_audio_mode not in {"off", "auto", "manual"}:
         raise ValueError(f"Unsupported background audio mode: {background_audio_mode}")
+
+    # "custom" is the existing persisted key for the approved Chapter-Based
+    # strategy. Keep accepting it for existing projects, but make the strategy
+    # explicit at assembly time so an empty override map cannot fall back to
+    # the book-default track.
+    raw_bgm_strategy = (
+        ("custom" if chapter_bgm_overrides else "same")
+        if chapter_bgm_strategy is None
+        else str(chapter_bgm_strategy).strip().casefold()
+    )
+    if raw_bgm_strategy in {"same", "same-bgm", "same_bgm"}:
+        effective_bgm_strategy = "same"
+    elif raw_bgm_strategy in {"custom", "chapter-based", "chapter_based", "chapter"}:
+        effective_bgm_strategy = "chapter-based"
+    else:
+        raise ValueError(f"Unsupported chapter BGM strategy: {chapter_bgm_strategy}")
 
     # Actual duration of each inserted cue is used to keep story-effect timing
     # aligned, including user-selected custom opening/page/closing audio.
@@ -755,10 +772,14 @@ def assemble_m4b(
                     progress(chapter_index, len(chapters), "story-effects-mixed")
             chapters = mixed_chapters
 
-        # Mix chapter-specific BGM before concatenation. When overrides exist,
-        # book music is scoped per chapter so custom/none rules replace the default.
+        # Chapter-Based BGM is a separate strategy, not a set of optional
+        # overrides on top of the book default. It remains chapter-scoped even
+        # when no chapters have explicit assignments yet.
         effective_overrides = chapter_bgm_overrides if isinstance(chapter_bgm_overrides, dict) else {}
-        chapter_scoped_bgm = bool(effective_overrides) and effective_audio_mode == "manual"
+        chapter_scoped_bgm = (
+            effective_bgm_strategy == "chapter-based"
+            and effective_audio_mode == "manual"
+        )
         if chapter_scoped_bgm:
             chapter_music_files: list[Path] = []
             for chapter_index, (chapter_file, chapter_dir) in enumerate(zip(chapters, chapter_dirs), start=1):
@@ -766,14 +787,23 @@ def assemble_m4b(
                 override = effective_overrides.get(str(source_chapter_number), {})
                 if not isinstance(override, dict):
                     override = {}
-                rule = str(override.get("rule") or "default").strip().lower()
-                if rule not in {"default", "custom", "none"}:
-                    raise ValueError(f"Unsupported BGM rule for chapter {chapter_index}: {rule}")
-                selected_track = override.get("path") if rule == "custom" else background_audio_path
-                if rule == "none" or not selected_track:
+                rule = str(override.get("rule") or "none").strip().lower()
+                # Older projects may have persisted "default" overrides. Under
+                # the frozen Chapter-Based strategy that means no assigned track,
+                # never a silent fallback to book-wide BGM.
+                if rule == "default":
+                    rule = "none"
+                if rule not in {"custom", "none"}:
+                    raise ValueError(f"Unsupported chapter-based BGM rule for chapter {chapter_index}: {rule}")
+                if rule == "none":
                     chapter_music_files.append(chapter_file)
                     continue
-                if rule == "custom" and not Path(str(selected_track)).expanduser().is_file():
+                selected_track = override.get("path")
+                if not selected_track:
+                    raise ValueError(
+                        f"Custom BGM for chapter {chapter_index} has no saved track. Reassign it in Sound Design."
+                    )
+                if not Path(str(selected_track)).expanduser().is_file():
                     raise FileNotFoundError(f"Custom BGM for chapter {chapter_index} was not found: {selected_track}")
                 volume = override.get("volume", background_audio_volume)
                 start_offset = str(override.get("start_offset") or "immediate").strip().lower()
