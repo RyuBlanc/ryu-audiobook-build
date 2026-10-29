@@ -10,6 +10,7 @@ on:
       - fix/stage-1-generation-stability
       - stage-2/import-integrity
       - stage-3/voice-studio-character-assignment
+      - stage-4-pronunciation-sound-design
   workflow_dispatch:
 
 # Every push runs regression tests; package/artifact gates require an explicit [artifact-checkpoint] commit.
@@ -581,13 +582,18 @@ jobs:
           if (-not $mp -or -not (Test-Path $mp)) { throw 'Microsoft Defender command-line scanner was not found.' }
           foreach ($path in @($exe, $installer)) {
             Write-Host "Microsoft Defender custom scan: $path"
-            & $mp -Scan -ScanType 3 -File $path
+            $scanOutput = @(& $mp -Scan -ScanType 3 -File $path -DisableRemediation 2>&1)
             $scanExit = $LASTEXITCODE
-            if ($scanExit -ne 0) {
-              throw "Microsoft Defender did not return a clean scan for '$path' (exit code $scanExit). No release artifacts will be uploaded."
+            $scanOutput | ForEach-Object { Write-Host $_ }
+            $scanText = $scanOutput -join "`n"
+            if ($scanExit -ne 0 -or $scanText -match '(?i)\bwas skipped\b|\bscan skipped\b') {
+              throw "Microsoft Defender did not complete a verifiable clean scan for '$path' (exit code $scanExit). Output: $scanText. No release artifacts will be uploaded."
+            }
+            if ($scanText -notmatch '(?i)scan finished|scan completed|no threats? found|no threats? detected') {
+              throw "Microsoft Defender did not provide a recognized completed-scan result for '$path'. Output: $scanText. No release artifacts will be uploaded."
             }
           }
-          Write-Host 'Microsoft Defender returned clean scan results for both release executables.'
+          Write-Host 'Microsoft Defender completed both release executable scans without reporting a detection.'
 
       - name: Upload Windows installer artifact
         if: contains(github.event.head_commit.message, '[artifact-checkpoint]')

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
 import unicodedata
 
@@ -12,6 +12,7 @@ from app.tts.pacing import is_heading_line
 class NarrationResult:
     source_text: str
     narration_text: str
+    applied_rule_counts: dict[str, int] = field(default_factory=dict)
 
 
 def _normalize_typography(text: str) -> str:
@@ -95,32 +96,48 @@ def _join_wrapped_lines(text: str) -> str:
     return "\n".join(output)
 
 
-def apply_pronunciation_dictionary(text: str, dictionary: list[dict] | None = None) -> str:
-    """Apply explicit written -> spoken pronunciation overrides.
-
-    Matching is case-insensitive and phrase-aware. Only entries marked
-    enabled are applied. The source text is never modified; this operates
-    only on the narration copy.
-    """
+def apply_pronunciation_dictionary_with_counts(
+    text: str, dictionary: list[dict] | None = None
+) -> tuple[str, dict[str, int]]:
+    """Apply pronunciation overrides in one pass and report actual substitutions."""
+    text = unicodedata.normalize("NFC", text)
     if not dictionary:
-        return text
-
-    result = text
-    entries = []
+        return text, {}
+    entries: list[tuple[str, str]] = []
+    seen_written: set[str] = set()
     for item in dictionary:
         if not isinstance(item, dict) or item.get("enabled", True) is False:
             continue
-        written = str(item.get("written", "")).strip()
-        spoken = str(item.get("spoken", "")).strip()
-        if written and spoken:
-            entries.append((written, spoken))
-
+        written_value = item.get("written_form") or item.get("written") or item.get("word") or ""
+        spoken_value = item.get("spoken_form") or item.get("spoken") or item.get("pronunciation") or ""
+        if not isinstance(written_value, str) or not isinstance(spoken_value, str):
+            continue
+        written = unicodedata.normalize("NFC", written_value).strip()
+        spoken = unicodedata.normalize("NFC", spoken_value).strip()
+        if not written or not spoken:
+            continue
+        key = written.casefold()
+        if key in seen_written:
+            continue
+        entries.append((written, spoken))
+        seen_written.add(key)
+    if not entries:
+        return text, {}
     entries.sort(key=lambda pair: len(pair[0]), reverse=True)
-    for written, spoken in entries:
-        pattern = re.compile(r"(?<!\w)" + re.escape(written) + r"(?!\w)", re.IGNORECASE)
-        result = pattern.sub(lambda match: spoken, result)
-    return result
+    by_written = {written.casefold(): (written, spoken) for written, spoken in entries}
+    alternatives = "|".join(re.escape(written) for written, _spoken in entries)
+    pattern = re.compile(r"(?<!\w)(?P<written>" + alternatives + r")(?!\w)", re.IGNORECASE)
+    counts: dict[str, int] = {}
+    def replace_match(match: re.Match[str]) -> str:
+        written, spoken = by_written[unicodedata.normalize("NFC", match.group("written")).casefold()]
+        counts[written] = counts.get(written, 0) + 1
+        return spoken
+    return pattern.sub(replace_match, text), counts
 
+
+def apply_pronunciation_dictionary(text: str, dictionary: list[dict] | None = None) -> str:
+    """Backwards-compatible string-only pronunciation substitution API."""
+    return apply_pronunciation_dictionary_with_counts(text, dictionary)[0]
 
 def prepare_for_narration(
     text: str,
@@ -145,6 +162,6 @@ def prepare_for_narration(
     # Keep common PDF/extraction spacing from becoming awkward TTS input.
     narration = re.sub(r"\s+([,.;:!?])", r"\1", narration)
     narration = re.sub(r"([—–])\s+", r"\1 ", narration)
-    narration = apply_pronunciation_dictionary(narration, pronunciation_dictionary)
+    narration, applied_rule_counts = apply_pronunciation_dictionary_with_counts(narration, pronunciation_dictionary)
 
-    return NarrationResult(source_text=source, narration_text=narration)
+    return NarrationResult(source_text=source, narration_text=narration, applied_rule_counts=applied_rule_counts)

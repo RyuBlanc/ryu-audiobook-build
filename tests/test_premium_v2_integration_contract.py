@@ -317,7 +317,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
     def test_sound_design_controls_do_not_fall_back_to_prototype_success_toasts(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("#importMusicTracks, #importCueClips, #previewSelectedTrack", adapter)
-        self.assertIn("call('sound.import')", adapter)
+        self.assertIn("call('sound.import'", adapter)
+        self.assertIn("target_kind: soundButton.id === 'importMusicTracks' ? 'music' : 'cue'", adapter)
         self.assertIn("call('sound.assign'", adapter)
         self.assertIn("call('sound.save_manifest'", adapter)
         self.assertIn("The selected local audio file could not be played", adapter)

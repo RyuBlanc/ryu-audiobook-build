@@ -11,7 +11,9 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
+import unicodedata
 import uuid
 import wave
 from datetime import datetime, timezone
@@ -56,6 +58,151 @@ def _json_result(*, success: bool, data: Any = None, error: str | None = None,
     return json.dumps(payload, ensure_ascii=False, default=str)
 
 
+def _normalize_pronunciation_text(value: Any, field: str, limit: int) -> str:
+    """Validate and NFC-normalize a saved pronunciation field."""
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be text.")
+    normalized = unicodedata.normalize("NFC", value).strip()
+    if not normalized:
+        raise ValueError(f"{field} is required.")
+    if len(normalized) > limit:
+        raise ValueError(f"{field} must be {limit} characters or fewer.")
+    if any(ord(char) < 32 or ord(char) == 127 for char in normalized):
+        raise ValueError(f"{field} cannot contain control characters.")
+    return normalized
+
+
+def _parse_pronunciation_scope(value: Any, scope_id: Any = None) -> tuple[str, str, str]:
+    """Return scope type, scope id, and stable UI label; reject unsupported scope text."""
+    raw = unicodedata.normalize("NFC", str(value or "current_book")).strip()
+    folded = raw.casefold().replace("_", " ").replace("-", " ")
+    if folded in {"current book", "book", "current"}:
+        return "current_book", "", "Current book"
+    if folded in {"global library", "global", "library"}:
+        return "global_library", "", "Global library"
+    series_name = str(scope_id or "").strip()
+    match = re.fullmatch(r"series\s*[·:]\s*(.+)", raw, flags=re.IGNORECASE)
+    if match:
+        series_name = match.group(1).strip()
+    elif folded == "series" and series_name:
+        pass
+    else:
+        raise ValueError("Choose Current book, Global library, or a named Series scope.")
+    series_name = _normalize_pronunciation_text(series_name, "Series name", 120)
+    return "series", series_name, f"Series · {series_name}"
+
+
+def _pronunciation_scope_path(scope_type: str, scope_id: str = "") -> Path:
+    """Return an app-owned persistent dictionary file for non-project scopes."""
+    root = settings_root()
+    if scope_type == "global_library":
+        return root / "pronunciation_dictionary_global.json"
+    if scope_type == "series":
+        key = hashlib.sha256(unicodedata.normalize("NFC", scope_id).casefold().encode("utf-8")).hexdigest()
+        return root / "pronunciation_dictionary_series" / f"{key}.json"
+    raise ValueError("Project-scoped pronunciation entries are stored in the project state.")
+
+
+def _read_pronunciation_store(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"The saved pronunciation dictionary could not be read: {path.name}. It was not overwritten.") from exc
+    if not isinstance(value, list):
+        raise ValueError(f"The saved pronunciation dictionary is invalid: {path.name}. It was not overwritten.")
+    return [row for row in value if isinstance(row, dict)]
+
+
+def _write_pronunciation_store(path: Path, entries: list[dict[str, Any]]) -> None:
+    """Atomically persist global/series dictionary files without risking a partial JSON write."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent), text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(entries, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        Path(temp_name).replace(path)
+    except Exception:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        Path(temp_name).unlink(missing_ok=True)
+        raise
+
+
+def _clean_pronunciation_entries(entries: list[dict[str, Any]], scope_type: str, scope_id: str = "") -> list[dict[str, Any]]:
+    """Normalize legacy rows and collapse duplicate written forms deterministically."""
+    clean: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in entries:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            written_value = raw.get("written_form") or raw.get("written") or raw.get("word")
+            spoken_value = raw.get("spoken_form") or raw.get("spoken") or raw.get("pronunciation")
+            written = _normalize_pronunciation_text(written_value, "Written term", 500)
+            spoken = _normalize_pronunciation_text(spoken_value, "Pronunciation", 1000)
+        except ValueError:
+            # Older projects may contain incomplete rows. Ignore them in the
+            # editor/runtime view without destroying the original until a save.
+            continue
+        key = written.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        row = dict(raw)
+        row.update({
+            "written_form": written,
+            "spoken_form": spoken,
+            "scope_type": scope_type,
+            "scope_id": scope_id,
+            "scope": "Current book" if scope_type == "current_book" else (
+                "Global library" if scope_type == "global_library" else f"Series · {scope_id}"
+            ),
+            "enabled": raw.get("enabled", True) is not False,
+        })
+        row.pop("written", None)
+        row.pop("spoken", None)
+        row.pop("word", None)
+        row.pop("pronunciation", None)
+        clean.append(row)
+    return clean
+
+
+def _effective_pronunciation_dictionary(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Combine synthesis rules in Current book > matching Series > Global order."""
+    scoped: list[list[dict[str, Any]]] = []
+    book_rows = state.get("pronunciation_dictionary")
+    scoped.append(_clean_pronunciation_entries(
+        book_rows if isinstance(book_rows, list) else [], "current_book"
+    ))
+    series_name = str(state.get("series") or "").strip()
+    if series_name:
+        scoped.append(_clean_pronunciation_entries(
+            _read_pronunciation_store(_pronunciation_scope_path("series", series_name)),
+            "series", series_name
+        ))
+    scoped.append(_clean_pronunciation_entries(
+        _read_pronunciation_store(_pronunciation_scope_path("global_library")),
+        "global_library"
+    ))
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for rows in scoped:
+        for row in rows:
+            key = unicodedata.normalize("NFC", str(row.get("written_form") or "")).casefold()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            if row.get("enabled", True) is not False:
+                selected.append(row)
+    return selected
+
+
 def _sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     """Hash large book files incrementally so duplicate checks do not load them fully into RAM."""
     digest = hashlib.sha256()
@@ -90,6 +237,7 @@ class PremiumV2Bridge(QObject):
         self._jobs: dict[str, dict[str, Any]] = {}
         self._generators: dict[str, GenerationManager] = {}
         self._import_cancel_events: dict[str, threading.Event] = {}
+        self._preview_cancel_events: dict[str, threading.Event] = {}
         self._load_durable_jobs()
 
     @Slot(str, str, result=str)
@@ -1091,8 +1239,13 @@ class PremiumV2Bridge(QObject):
         job_id = self._new_job("sound-design-preview" if include_sound_design else "voice-preview",
                                ("Sound Design mix preview · " if include_sound_design else "Preview · ") + profile.name,
                                f"Generate up to {seconds} seconds using the selected provider", project)
+        cancel_event = threading.Event()
+        if not hasattr(self, "_preview_cancel_events"):
+            self._preview_cancel_events = {}
+        with getattr(self, "_jobs_lock", threading.RLock()):
+            self._preview_cancel_events[job_id] = cancel_event
         self._job_update(job_id, state="running", started_at=self._now(), stage="Preparing preview", progress=2)
-        threading.Thread(target=self._preview_worker, args=(job_id, profile, text_value, seconds, state),
+        threading.Thread(target=self._preview_worker, args=(job_id, profile, text_value, seconds, state, cancel_event),
                          daemon=True, name="RyuPremiumPreview").start()
         return {"job_id": job_id, "state": "running", "duration_seconds": seconds, "profile_name": profile.name}
 
@@ -1104,6 +1257,8 @@ class PremiumV2Bridge(QObject):
     def _render_sound_design_preview(self, source: Path, job_id: str, state: dict[str, Any]) -> Path:
         """Render a short audition using the active book's real music/cue assignments."""
         from app.audio.assembler import _concat_audio_files, _duration_ms, _run
+        from app.audio.library import validate_saved_audio_paths
+        validate_saved_audio_paths(state)
 
         preview_root = app_root() / "Previews"
         preview_root.mkdir(parents=True, exist_ok=True)
@@ -1163,10 +1318,17 @@ class PremiumV2Bridge(QObject):
             raise RuntimeError("The Sound Design mix preview could not be rendered.")
         if abs(_duration_ms(output) - duration_ms) > 1800:
             raise RuntimeError("The Sound Design mix preview changed duration unexpectedly.")
+        if audio_source != Path(source).resolve():
+            audio_source.unlink(missing_ok=True)
         return output
 
-    def _preview_worker(self, job_id: str, profile, text_value: str, seconds: int, state: dict[str, Any]) -> None:
+    def _preview_worker(self, job_id: str, profile, text_value: str, seconds: int, state: dict[str, Any], cancel_event=None) -> None:
+        from app.tts.preview import PreviewCancelledError
+        output = app_root() / "Previews" / f"preview_{job_id}.wav"
+        preview_path = output
         try:
+            if cancel_event is not None and cancel_event.is_set():
+                raise PreviewCancelledError("Preview cancelled by user.")
             provider, voice = provider_from_profile(profile)
             # Keep Voice Studio previews consistent with production: saved
             # character assignments must route quoted dialogue through their
@@ -1208,15 +1370,20 @@ class PremiumV2Bridge(QObject):
                 self._job_update(job_id, stage=str(stage), progress=min(95, max(2, 5 + int(90 * current / max(1, total)))))
             result = build_voice_preview(
                 text_value, provider, voice, output,
-                pronunciation_dictionary=list(state.get("pronunciation_dictionary") or []),
+                pronunciation_dictionary=_effective_pronunciation_dictionary(state),
                 narration_speed=float(state.get("narration_speed") or 0.90),
                 pacing_profile=str(state.get("pacing_profile") or "natural"),
                 max_chars=max(1400, seconds * 240), progress_callback=progress,
                 target_seconds=seconds,
+                cancel_check=cancel_event.is_set if cancel_event is not None else None,
             )
+            if cancel_event is not None and cancel_event.is_set():
+                raise PreviewCancelledError("Preview cancelled by user.")
             preview_path = Path(result.output_path)
             if state.get("_include_sound_design_preview"):
                 preview_path = self._render_sound_design_preview(preview_path, job_id, state)
+            if cancel_event is not None and cancel_event.is_set():
+                raise PreviewCancelledError("Preview cancelled by user.")
             duration = None
             try:
                 from app.audio.assembler import _duration_ms
@@ -1232,17 +1399,47 @@ class PremiumV2Bridge(QObject):
                     "The preview audio was generated, but its duration could not be measured. "
                     "The preview is not marked ready; check the audio runtime and retry."
                 )
+            rule_counts = getattr(result, "applied_rule_counts", {}) or {}
+            replacements = sum(rule_counts.values())
+            count_message = f" Pronunciation applied {replacements} replacement(s) across {len(rule_counts)} rule(s)."
             self._job_update(job_id, state="completed", stage="Preview ready", progress=100,
-                             message="Sound Design mix preview ready" if state.get("_include_sound_design_preview") else "Audio preview was generated by the selected voice provider",
+                             message=("Sound Design mix preview ready." if state.get("_include_sound_design_preview") else "Audio preview generated.") + count_message,
                              output_path=str(preview_path), result={
                                  "output_path": str(preview_path), "file_url": preview_path.resolve().as_uri(),
                                  "requested_duration_seconds": seconds, "actual_duration_seconds": duration,
                                  "voices_used": list(result.voices_used), "segments": result.segments,
+                                 "selected_profile": profile.name,
+                                 "selected_provider": str(getattr(profile, "provider", "") or ""),
+                                 "selected_voice_id": str(getattr(profile, "voice_id", "") or ""),
+                                 "pronunciation_replacements": replacements,
+                                 "pronunciation_rule_counts": dict(rule_counts),
                              })
         except Exception as exc:
-            log.exception("Premium V2 voice preview failed")
-            self._job_update(job_id, state="failed", stage="Preview failed", progress=0, message=str(exc),
-                             error={"code": "preview_failed", "message": str(exc)}, recoverable=True)
+            if cancel_event is not None and cancel_event.is_set() or isinstance(exc, PreviewCancelledError):
+                for candidate in {output, preview_path,
+                                   app_root() / "Previews" / f"sound_mix_preview_{job_id}.m4a",
+                                   app_root() / "Previews" / f"sound-preview-opening-{job_id}.m4a"}:
+                    try:
+                        Path(candidate).unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                self._job_update(job_id, state="cancelled", stage="Preview cancelled", progress=0,
+                                 message="Preview cancelled at a safe synthesis boundary; temporary audio was discarded.")
+            else:
+                log.exception("Premium V2 voice preview failed")
+                for candidate in {output, preview_path,
+                                   app_root() / "Previews" / f"sound_mix_preview_{job_id}.m4a",
+                                   app_root() / "Previews" / f"sound-preview-opening-{job_id}.m4a"}:
+                    try:
+                        Path(candidate).unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                self._job_update(job_id, state="failed", stage="Preview failed", progress=0, message=str(exc),
+                                 error={"code": "preview_failed", "message": str(exc)}, recoverable=True)
+        finally:
+            if cancel_event is not None:
+                with self._jobs_lock:
+                    self._preview_cancel_events.pop(job_id, None)
 
     def _character_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         state = load_state(self._active_project().folder)
@@ -1494,41 +1691,116 @@ class PremiumV2Bridge(QObject):
         self._character_library_write(rows)
         return {"imported": imported, "count": len(rows), "merged_by_name": True}
     def _pronunciation_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        entries = load_state(self._active_project().folder).get("pronunciation_dictionary") or []
-        return entries if isinstance(entries, list) else []
+        project = self._active_project()
+        state = load_state(project.folder)
+        # Legacy scope labels were stored inside project state but were never
+        # shared across projects. Keep those rows book-local during migration.
+        entries = _clean_pronunciation_entries(
+            state.get("pronunciation_dictionary") if isinstance(state.get("pronunciation_dictionary"), list) else [],
+            "current_book",
+        )
+        entries.extend(_clean_pronunciation_entries(
+            _read_pronunciation_store(_pronunciation_scope_path("global_library")),
+            "global_library",
+        ))
+        series_dir = settings_root() / "pronunciation_dictionary_series"
+        if series_dir.exists():
+            for path in sorted(series_dir.glob("*.json")):
+                for row in _read_pronunciation_store(path):
+                    try:
+                        scope_type, scope_id, _label = _parse_pronunciation_scope(
+                            row.get("scope") or "series", row.get("scope_id")
+                        )
+                    except ValueError:
+                        continue
+                    if scope_type == "series":
+                        entries.extend(_clean_pronunciation_entries([row], "series", scope_id))
+        return entries
 
     def _pronunciation_save(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
-        word = str(payload.get("written_form") or payload.get("word") or "").strip()
-        spoken = str(payload.get("spoken_form") or payload.get("pronunciation") or "").strip()
-        if not word or not spoken:
-            raise ValueError("Enter a written term and its intended pronunciation.")
-        if len(word) > 500 or len(spoken) > 1000:
-            raise ValueError("The term or pronunciation is too long.")
-        state = load_state(project.folder)
-        entries = list(state.get("pronunciation_dictionary") or [])
-        item = next((e for e in entries if str(e.get("written_form") or e.get("word") or "").casefold() == word.casefold()), None)
-        value = {"written_form": word, "spoken_form": spoken,
-                 "language": str(payload.get("language") or "Auto"),
-                 "handling_mode": str(payload.get("handling_mode") or payload.get("mode") or "automatic"),
-                 "scope": str(payload.get("scope") or "current_book"), "enabled": bool(payload.get("enabled", True)),
-                 "updated_at": self._now()}
-        if item is None:
-            entries.append(value)
+        word = _normalize_pronunciation_text(payload.get("written_form", payload.get("word", "")), "Written term", 500)
+        spoken = _normalize_pronunciation_text(payload.get("spoken_form", payload.get("pronunciation", "")), "Pronunciation", 1000)
+        scope_type, scope_id, scope_label = _parse_pronunciation_scope(
+            payload.get("scope") or "current_book", payload.get("scope_id")
+        )
+        language = _normalize_pronunciation_text(payload.get("language") or "Auto", "Language", 100)
+        handling_mode = _normalize_pronunciation_text(
+            payload.get("handling_mode") or payload.get("mode") or "automatic", "Handling mode", 100
+        )
+        enabled = payload.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise ValueError("Enabled must be a boolean.")
+        if scope_type == "current_book":
+            state = load_state(project.folder)
+            raw_entries = state.get("pronunciation_dictionary")
+            raw_entries = raw_entries if isinstance(raw_entries, list) else []
+            raw_match_count = sum(
+                1 for row in raw_entries if isinstance(row, dict) and
+                unicodedata.normalize("NFC", str(row.get("written_form") or row.get("written") or row.get("word") or "")).strip().casefold() == word.casefold()
+            )
+            entries = _clean_pronunciation_entries(raw_entries, "current_book")
         else:
-            item.update(value)
-        state["pronunciation_dictionary"] = entries
-        save_state(project.folder, state)
-        return {"entry": value, "count": len(entries), "saved": True}
+            path = _pronunciation_scope_path(scope_type, scope_id)
+            raw_entries = _read_pronunciation_store(path)
+            raw_match_count = sum(
+                1 for row in raw_entries if
+                unicodedata.normalize("NFC", str(row.get("written_form") or row.get("written") or row.get("word") or "")).strip().casefold() == word.casefold()
+            )
+            entries = _clean_pronunciation_entries(raw_entries, scope_type, scope_id)
+        key = word.casefold()
+        matching = [row for row in entries if row["written_form"].casefold() == key]
+        old_spoken = matching[0]["spoken_form"] if matching else None
+        value = {
+            "written_form": word,
+            "spoken_form": spoken,
+            "language": language,
+            "handling_mode": handling_mode,
+            "scope_type": scope_type,
+            "scope_id": scope_id,
+            "scope": scope_label,
+            "enabled": enabled,
+            "updated_at": self._now(),
+        }
+        entries = [row for row in entries if row["written_form"].casefold() != key]
+        entries.append(value)
+        if scope_type == "current_book":
+            state["pronunciation_dictionary"] = entries
+            save_state(project.folder, state)
+        else:
+            _write_pronunciation_store(_pronunciation_scope_path(scope_type, scope_id), entries)
+        return {
+            "entry": value,
+            "count": len(entries),
+            "saved": True,
+            "updated_existing": bool(matching),
+            "conflict_resolved": bool(matching and old_spoken != spoken),
+            "duplicate_rows_collapsed": max(0, raw_match_count - 1),
+        }
 
     def _pronunciation_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
-        word = str(payload.get("written_form") or payload.get("word") or "").casefold()
-        state = load_state(project.folder)
-        entries = list(state.get("pronunciation_dictionary") or [])
-        state["pronunciation_dictionary"] = [e for e in entries if str(e.get("written_form") or e.get("word") or "").casefold() != word]
-        save_state(project.folder, state)
-        return {"count": len(state["pronunciation_dictionary"]), "deleted": len(entries) - len(state["pronunciation_dictionary"])}
+        word = _normalize_pronunciation_text(payload.get("written_form", payload.get("word", "")), "Written term", 500)
+        scope_type, scope_id, _scope_label = _parse_pronunciation_scope(
+            payload.get("scope") or "current_book", payload.get("scope_id")
+        )
+        if scope_type == "current_book":
+            state = load_state(project.folder)
+            raw_entries = state.get("pronunciation_dictionary")
+            entries = _clean_pronunciation_entries(raw_entries if isinstance(raw_entries, list) else [], "current_book")
+        else:
+            entries = _clean_pronunciation_entries(
+                _read_pronunciation_store(_pronunciation_scope_path(scope_type, scope_id)), scope_type, scope_id
+            )
+        key = word.casefold()
+        kept = [row for row in entries if row["written_form"].casefold() != key]
+        deleted = len(entries) - len(kept)
+        if scope_type == "current_book":
+            state["pronunciation_dictionary"] = kept
+            save_state(project.folder, state)
+        elif deleted:
+            _write_pronunciation_store(_pronunciation_scope_path(scope_type, scope_id), kept)
+        return {"count": len(kept), "deleted": deleted, "scope_type": scope_type, "scope_id": scope_id}
 
     def _pronunciation_analyze(self, _payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
@@ -1555,6 +1827,8 @@ class PremiumV2Bridge(QObject):
         if not chapters:
             raise ValueError("No chapters are eligible for generation. Restore chapter text or re-include a skipped chapter.")
         state = load_state(project.folder)
+        from app.audio.library import validate_saved_audio_paths
+        validate_saved_audio_paths(state)
         profile_name = str(payload.get("profile_name") or state.get("voice_profile") or "").strip()
         profile = self._find_profile(profile_name)
         if profile is None:
@@ -1632,25 +1906,27 @@ class PremiumV2Bridge(QObject):
             provider, voice, chapters, project.folder / "working_audio",
             on_progress=lambda *args: self._generation_progress(job_id, *args),
             on_finished=lambda summary: self._generation_finished(job_id, project, summary, output, profile.name),
-            pronunciation_dictionary=list(state.get("pronunciation_dictionary") or []),
+            pronunciation_dictionary=_effective_pronunciation_dictionary(state),
             narration_speed=float(state.get("narration_speed") or 0.90),
             pacing_profile=str(state.get("pacing_profile") or "natural"),
             metadata=metadata, bitrate=bitrate,
-            background_audio_path=Path(state["background_audio_path"]) if state.get("background_audio_path") and Path(state["background_audio_path"]).is_file() else None,
-            background_audio_volume=float(state.get("background_audio_volume") or 0.18),
-            ambience_audio_path=Path(state["ambience_audio_path"]) if state.get("ambience_audio_path") and Path(state["ambience_audio_path"]).is_file() else None,
-            ambience_audio_volume=float(state.get("ambience_audio_volume") or 0.10),
+            background_audio_path=Path(state["background_audio_path"]) if state.get("background_audio_path") else None,
+            background_audio_volume=float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18),
+            ambience_audio_path=Path(state["ambience_audio_path"]) if state.get("ambience_audio_path") else None,
+            ambience_audio_volume=float(state.get("ambience_audio_volume") if state.get("ambience_audio_volume") is not None else 0.10),
+            background_audio_fade_in=float(state.get("background_audio_fade_in") if state.get("background_audio_fade_in") is not None else 2.0),
+            background_audio_fade_out=float(state.get("background_audio_fade_out") if state.get("background_audio_fade_out") is not None else 3.0),
             background_audio_mode=str(state.get("background_audio_mode") or "off"),
             auto_music_style=str(state.get("auto_music_style") or "auto"),
             auto_music_variation=state.get("auto_music_track_path") or None,
             chapter_transition_sound=bool(state.get("chapter_transition_sound", False)),
             story_effects_enabled=bool(state.get("story_effects_enabled", False)),
-            story_effect_volume=float(state.get("story_effect_volume") or 0.22),
+            story_effect_volume=float(state.get("story_effect_volume") if state.get("story_effect_volume") is not None else 0.22),
             sound_cue_style=str(state.get("sound_cue_style") or "classic-book"),
-            opening_cue_path=Path(state["opening_cue_path"]) if state.get("opening_cue_path") and Path(state["opening_cue_path"]).is_file() else None,
-            page_turn_cue_path=Path(state["page_turn_cue_path"]) if state.get("page_turn_cue_path") and Path(state["page_turn_cue_path"]).is_file() else None,
-            ending_cue_path=Path(state["ending_cue_path"]) if state.get("ending_cue_path") and Path(state["ending_cue_path"]).is_file() else None,
-            scene_transition_cue_path=Path(state["scene_transition_cue_path"]) if state.get("scene_transition_cue_path") and Path(state["scene_transition_cue_path"]).is_file() else None,
+            opening_cue_path=Path(state["opening_cue_path"]) if state.get("opening_cue_path") else None,
+            page_turn_cue_path=Path(state["page_turn_cue_path"]) if state.get("page_turn_cue_path") else None,
+            ending_cue_path=Path(state["ending_cue_path"]) if state.get("ending_cue_path") else None,
+            scene_transition_cue_path=Path(state["scene_transition_cue_path"]) if state.get("scene_transition_cue_path") else None,
             chapter_bgm_overrides=state.get("chapter_bgm_overrides") if isinstance(state.get("chapter_bgm_overrides"), dict) else {},
         )
         with self._jobs_lock:
@@ -1688,6 +1964,10 @@ class PremiumV2Bridge(QObject):
             stage, progress = "Preparing generation plan", 2
         elif msg.startswith("provider:"):
             stage, msg = "Voice provider", msg.partition(":")[2]
+        elif msg.startswith("pronunciation:"):
+            _prefix, replacements, rules = msg.split(":", 2)
+            stage = "Pronunciation rules applied"
+            msg = f"Prepared {int(replacements)} pronunciation replacement(s) across {int(rules)} enabled rule(s) for synthesis."
         elif msg.startswith("chunk-start:"):
             stage, progress = "Rendering chapter audio", min(85, max(3, int(85 * max(0, chapter - 1) / max(1, total))))
         elif msg.startswith("chunk:"):
@@ -1783,6 +2063,13 @@ class PremiumV2Bridge(QObject):
             manager = self._generators.get(job_id)
             row = self._jobs.get(job_id)
         if manager is None:
+            with self._jobs_lock:
+                preview_cancel = self._preview_cancel_events.get(job_id)
+                import_cancel = self._import_cancel_events.get(job_id)
+            if row and preview_cancel is not None and row.get("state") in {"queued", "running", "cancel_requested"}:
+                preview_cancel.set()
+                return self._job_update(job_id, state="cancel_requested", stage="Cancellation requested",
+                                        message="Preview will stop at the next safe synthesis or FFmpeg boundary; partial preview audio will be discarded.")
             with self._jobs_lock:
                 import_cancel = self._import_cancel_events.get(job_id)
             if row and row.get("type") == "import" and import_cancel is not None and row.get("state") in {"queued", "running", "cancel_requested"}:
@@ -2096,7 +2383,8 @@ class PremiumV2Bridge(QObject):
         return {"opened": True, "path": str(folder.resolve())}
 
     def _sound_catalog(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        extensions = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".aiff", ".opus"}
+        from app.audio.library import AUDIO_EXTENSIONS, metadata_for
+        extensions = AUDIO_EXTENSIONS
         roots = [(app_root() / "Audio Library", "Imported locally")]
         bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])) / "assets" / "starter_audio"
         if bundled.is_dir():
@@ -2118,10 +2406,12 @@ class PremiumV2Bridge(QObject):
                     if size <= 0:
                         continue
                     key = str(resolved)
-                    found[key] = {"id": key, "title": path.stem, "path": key,
+                    metadata = metadata_for(resolved)
+                    license_note = str(metadata.get("license_note") or metadata.get("source_note") or metadata.get("license") or "Unknown; verify rights before publishing")
+                    found[key] = {"id": key, "title": str(metadata.get("title") or path.stem), "path": key,
                                   "source": source, "format": path.suffix.lower(),
-                                  "size_bytes": size, "duration_seconds": None,
-                                  "licensing": "Unknown; verify rights before publishing"}
+                                  "size_bytes": size, "duration_seconds": metadata.get("duration_seconds"),
+                                  "licensing": license_note, "metadata": metadata}
             except OSError:
                 log.exception("Could not scan sound asset folder %s", root)
         return sorted(found.values(), key=lambda row: (row["source"], row["title"].casefold()))
@@ -2136,7 +2426,8 @@ class PremiumV2Bridge(QObject):
             paths = selected
         if not paths:
             return {"cancelled": True, "imported": []}
-        extensions = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".aiff", ".opus"}
+        from app.audio.library import AUDIO_EXTENSIONS, probe_audio_duration_seconds
+        extensions = AUDIO_EXTENSIONS
         target_root = app_root() / "Audio Library"
         target_root.mkdir(parents=True, exist_ok=True)
         imported = []
@@ -2144,11 +2435,25 @@ class PremiumV2Bridge(QObject):
             source = Path(str(raw)).expanduser().resolve()
             if not source.is_file() or source.suffix.lower() not in extensions:
                 raise ValueError(f"Unsupported or missing audio asset: {source.name}")
+            duration_seconds = probe_audio_duration_seconds(source)
             destination = target_root / source.name
             if destination.exists() and destination.resolve() != source:
                 destination = target_root / f"{source.stem}-{uuid.uuid4().hex[:8]}{source.suffix.lower()}"
             if source != destination.resolve():
                 shutil.copy2(source, destination)
+            metadata_path = destination.with_name(destination.name + ".license.json")
+            metadata = {"role": "music" if str(payload.get("target_kind") or "").casefold() == "music" else "cue",
+                        "category": str(payload.get("category") or "universal"),
+                        "title": destination.stem, "original_filename": source.name,
+                        "license_note": str(payload.get("license_note") or "User-imported; verify license before publishing"),
+                        "duration_seconds": duration_seconds, "imported_at": self._now()}
+            try:
+                metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+            except OSError as exc:
+                if destination.resolve() != source:
+                    try: destination.unlink()
+                    except OSError: pass
+                raise RuntimeError(f"Could not save metadata for imported audio {destination.name}: {exc}") from exc
             imported.append({"title": destination.stem, "path": str(destination.resolve()),
                              "source": "Imported locally", "format": destination.suffix.lower(),
                              "size_bytes": destination.stat().st_size})
@@ -2158,26 +2463,47 @@ class PremiumV2Bridge(QObject):
         project = self._active_project()
         raw = str(payload.get("path") or "").strip()
         state = load_state(project.folder)
+        try:
+            fade_in = max(0.0, min(30.0, float(payload.get("fade_in_seconds", state.get("background_audio_fade_in", 2.0)))))
+            fade_out = max(0.0, min(30.0, float(payload.get("fade_out_seconds", state.get("background_audio_fade_out", 3.0)))))
+        except (TypeError, ValueError):
+            raise ValueError("Background music fade values must be between 0 and 30 seconds.")
         if not raw:
-            state.update({"background_audio_path": "", "background_audio_mode": "off"})
+            state.update({"background_audio_path": "", "background_audio_mode": "off",
+                          "background_audio_enabled": False,
+                          "background_audio_fade_in": fade_in, "background_audio_fade_out": fade_out})
             save_state(project.folder, state)
-            return {"saved": True, "path": None, "mode": "off"}
+            return {"saved": True, "path": None, "mode": "off",
+                    "fade_in_seconds": fade_in, "fade_out_seconds": fade_out}
         selected = Path(raw).expanduser().resolve()
         valid = any(str(row["path"]) == str(selected) for row in self._sound_catalog({}))
         if not selected.is_file() or not valid:
             raise ValueError("Choose an audio file from the local Sound Design catalogue.")
-        volume = max(0.0, min(1.0, float(payload.get("volume", 0.18))))
+        try:
+            volume = max(0.0, min(1.0, float(payload.get("volume", 0.18))))
+            fade_in = max(0.0, min(30.0, float(payload.get("fade_in_seconds", state.get("background_audio_fade_in", 2.0)))))
+            fade_out = max(0.0, min(30.0, float(payload.get("fade_out_seconds", state.get("background_audio_fade_out", 3.0)))))
+        except (TypeError, ValueError):
+            raise ValueError("Background volume must be 0–100 percent and fades 0–30 seconds.")
         state.update({"background_audio_path": str(selected), "background_audio_volume": volume,
-                      "background_audio_mode": "manual", "modified_at": self._now()})
+                      "background_audio_fade_in": fade_in, "background_audio_fade_out": fade_out,
+                      "background_audio_mode": "manual", "background_audio_enabled": True,
+                      "modified_at": self._now()})
         save_state(project.folder, state)
-        return {"saved": True, "path": str(selected), "title": selected.stem, "volume": volume, "mode": "manual"}
+        return {"saved": True, "path": str(selected), "title": selected.stem, "volume": volume,
+                "fade_in_seconds": fade_in, "fade_out_seconds": fade_out, "mode": "manual"}
 
     def _sound_save_manifest(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
         state = load_state(project.folder)
         path = str(payload.get("path") or state.get("background_audio_path") or "").strip()
         enabled = bool(payload.get("enabled", bool(path)))
-        volume = max(0.0, min(1.0, float(payload.get("volume", state.get("background_audio_volume") or 0.18))))
+        try:
+            volume = max(0.0, min(1.0, float(payload.get("volume", state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18))))
+            fade_in = max(0.0, min(30.0, float(payload.get("fade_in_seconds", state.get("background_audio_fade_in", 2.0)))))
+            fade_out = max(0.0, min(30.0, float(payload.get("fade_out_seconds", state.get("background_audio_fade_out", 3.0)))))
+        except (TypeError, ValueError):
+            raise ValueError("Background volume must be 0–100 percent and fades 0–30 seconds.")
         if enabled and path:
             selected = Path(path).expanduser().resolve()
             if not selected.is_file() or not any(row["path"] == str(selected) for row in self._sound_catalog({})):
@@ -2186,8 +2512,11 @@ class PremiumV2Bridge(QObject):
                           "background_audio_enabled": True, "background_audio_volume": volume})
         else:
             state.update({"background_audio_path": "", "background_audio_mode": "off", "background_audio_enabled": False})
+        state["background_audio_fade_in"] = fade_in
+        state["background_audio_fade_out"] = fade_out
         state["sound_manifest"] = {"bgm_path": state.get("background_audio_path") or None,
-                                   "bgm_volume": volume, "enabled": bool(enabled and path),
+                                   "bgm_volume": volume, "fade_in_seconds": fade_in,
+                                   "fade_out_seconds": fade_out, "enabled": bool(enabled and path),
                                    "updated_at": self._now()}
         save_state(project.folder, state)
         return dict(state["sound_manifest"])
@@ -2215,6 +2544,8 @@ class PremiumV2Bridge(QObject):
             "strategy": str(state.get("chapter_bgm_strategy") or "same"),
             "default_path": state.get("background_audio_path") or None,
             "default_volume": float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18),
+            "fade_in_seconds": float(state.get("background_audio_fade_in") if state.get("background_audio_fade_in") is not None else 2.0),
+            "fade_out_seconds": float(state.get("background_audio_fade_out") if state.get("background_audio_fade_out") is not None else 3.0),
             "overrides": overrides,
             "chapters": [{"number": chapter.number, "title": chapter.title} for chapter in project.chapters],
         }
@@ -2230,6 +2561,12 @@ class PremiumV2Bridge(QObject):
             state["chapter_bgm_strategy"] = strategy
             if strategy == "same":
                 state["chapter_bgm_overrides"] = {}
+            else:
+                # Chapter-specific tracks must be mixed even when the book has
+                # no separate default BGM assigned. The assembler gates custom
+                # overrides on manual mode, so choosing chapter-based BGM
+                # explicitly activates that mode.
+                state["background_audio_mode"] = "manual"
             state["modified_at"] = self._now()
             save_state(project.folder, state)
             return self._sound_chapter_bgm_get({})
@@ -2272,6 +2609,7 @@ class PremiumV2Bridge(QObject):
         }
         state["chapter_bgm_overrides"] = overrides
         state["chapter_bgm_strategy"] = "custom"
+        state["background_audio_mode"] = "manual"
         state["modified_at"] = self._now()
         save_state(project.folder, state)
         return {"saved": True, "number": number, "title": chapter.title,

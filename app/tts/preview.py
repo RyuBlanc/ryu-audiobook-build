@@ -8,10 +8,20 @@ import wave
 
 import imageio_ffmpeg
 
-from app.tts.narration import prepare_for_narration
+from app.tts.narration import apply_pronunciation_dictionary_with_counts, prepare_for_narration
 from app.tts.pacing import append_silence, pause_after_ms, split_for_pacing
 from app.tts.base import TTSProvider
 from app.tts.multivoice import synthesize_voice_set
+
+
+class _PreviewUnits(list):
+    def __init__(self):
+        super().__init__()
+        self.rule_counts: list[dict[str, int]] = []
+
+
+class PreviewCancelledError(RuntimeError):
+    """Raised when a user cancels a preview at a safe synthesis boundary."""
 
 
 @dataclass(frozen=True)
@@ -21,6 +31,7 @@ class PreviewResult:
     voices_used: tuple[str, ...]
     # Exact text represented by synthesized segments; used to align preview SFX.
     source_text: str = ""
+    applied_rule_counts: dict[str, int] | None = None
 
 
 def _run_ffmpeg(args: list[str]) -> None:
@@ -89,10 +100,7 @@ def _preview_units(
     max_chars: int,
     dialogue_assignments=None,
 ) -> list[tuple[str, str | list[str] | None]]:
-    narration = prepare_for_narration(
-        text,
-        pronunciation_dictionary=pronunciation_dictionary,
-    ).narration_text
+    narration = prepare_for_narration(text).narration_text
 
     if hasattr(provider, "split_for_cast"):
         try:
@@ -108,7 +116,7 @@ def _preview_units(
     else:
         raw = [(narration, voice)]
 
-    units: list[tuple[str, str | list[str] | None]] = []
+    units = _PreviewUnits()
     used_chars = 0
     preview_unit_chars = 360
     preview_unit_sentences = 1
@@ -120,6 +128,7 @@ def _preview_units(
             max_chars=preview_unit_chars,
             max_sentences=preview_unit_sentences,
         ):
+            unit, rule_counts = apply_pronunciation_dictionary_with_counts(unit, pronunciation_dictionary)
             if used_chars >= max_chars:
                 return units
             remaining = max_chars - used_chars
@@ -127,6 +136,7 @@ def _preview_units(
                 # Never cut through a sentence merely to fill the preview.
                 return units
             units.append((unit, segment_voice))
+            units.rule_counts.append(rule_counts)
             used_chars += len(unit)
             if used_chars >= max_chars:
                 return units
@@ -145,6 +155,7 @@ def build_voice_preview(
     dialogue_assignments=None,
     progress_callback=None,
     target_seconds: float | None = None,
+    cancel_check=None,
 ) -> PreviewResult:
     if target_seconds is not None and float(target_seconds) > 0:
         # A character estimate is only a safety budget, not the preview's
@@ -161,6 +172,7 @@ def build_voice_preview(
         )
     else:
         effective_max_chars = int(max_chars)
+    applied_rule_counts: dict[str, int] = {}
     units = _preview_units(
         text,
         provider,
@@ -169,6 +181,7 @@ def build_voice_preview(
         max_chars=effective_max_chars,
         dialogue_assignments=dialogue_assignments,
     )
+    unit_rule_counts = getattr(units, "rule_counts", [])
     if not units:
         raise ValueError("The selected chapter does not contain enough readable text for a preview.")
 
@@ -181,6 +194,11 @@ def build_voice_preview(
             except Exception:
                 pass
 
+    def check_cancelled() -> None:
+        if callable(cancel_check) and cancel_check():
+            raise PreviewCancelledError("Preview cancelled by user.")
+
+    check_cancelled()
     report("preparing", 0, total_units)
     target = max(0.0, float(target_seconds or 0.0))
     accumulated_seconds = 0.0
@@ -198,6 +216,7 @@ def build_voice_preview(
         generated_segments = 0
         generated_text: list[str] = []
         for index, (unit, unit_voice) in enumerate(units):
+            check_cancelled()
             report("synthesizing", index, total_units)
             raw_path = root / f"{index:03d}.wav"
             normalized_path = root / f"{index:03d}-normalized.wav"
@@ -205,15 +224,20 @@ def build_voice_preview(
                 synthesize_voice_set(provider, unit, unit_voice, raw_path)
             else:
                 provider.synthesize(unit, raw_path, unit_voice)
+            check_cancelled()
             if not provider_handles_controls:
                 _apply_speed(raw_path, narration_speed)
                 next_text = units[index + 1][0] if index + 1 < len(units) else None
                 pause_ms = pause_after_ms(unit, pacing_profile, next_text=next_text)
                 if pause_ms:
                     append_silence(raw_path, pause_ms)
+            check_cancelled()
             _normalize(raw_path, normalized_path)
+            check_cancelled()
             normalized.append(normalized_path)
             generated_text.append(unit)
+            for written, count in (unit_rule_counts[index] if index < len(unit_rule_counts) else {}).items():
+                applied_rule_counts[written] = applied_rule_counts.get(written, 0) + count
             generated_segments += 1
             if unit_voice:
                 voices_used.append(str(unit_voice))
@@ -228,8 +252,10 @@ def build_voice_preview(
             if target > 0 and accumulated_seconds >= target:
                 break
 
+        check_cancelled()
         report("finalizing", 0, 1)
         _concat(normalized, output_path)
+        check_cancelled()
         report("finalizing", 1, 1)
 
     if not output_path.exists() or output_path.stat().st_size < 1024:
@@ -240,4 +266,5 @@ def build_voice_preview(
         segments=generated_segments,
         voices_used=tuple(dict.fromkeys(voices_used)),
         source_text="\n".join(generated_text),
+        applied_rule_counts=applied_rule_counts,
     )

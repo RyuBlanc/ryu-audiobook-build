@@ -286,3 +286,28 @@ Premium V2 adds controls for AI dialogue review and assignment, reusable Charact
 ### Stage 1 closure boundary
 
 The **source-level control audit is now closed** for the currently inventoried legacy control groups: all 89 old IDs are classified (69 retained, 20 mapped to named successors), and the no-ID groups below are mapped to stable selectors plus their event/backend paths. Regression tests guard both inventories. This closes the source audit, not manual acceptance: successor IDs and source handlers do not prove equivalent runtime behavior. Stage 6 must still verify interactions, persistence, responsiveness and real audio in the packaged Windows build.
+
+
+## Stage 4 Prompt 5 — cross-stage audit evidence and release blockers (23 October 2026)
+
+- Audit commit: `aa9b4587c39c65f4d8a66c9bede8ec191dac7704`; branch `stage-4-pronunciation-sound-design`.
+- Stage 3 PR #18 remains open at `d5d17f41393910596ad793dfe8df8753c6a1a836`. Stage 4 is 50 commits ahead and 0 behind; its merge base is the Stage 3 head. Merge Stage 3 first, then reconcile Stage 4. Never force-reset to an older baseline.
+
+### Cross-stage editor defect — fixed and verified
+- `app/chapters/editor.py` had failed to preserve assignment records from the next chapter during merge, partition/remap spans during split, and retain multi-speaker/cast metadata through remapping. The fix remaps exact assignment text into resulting chapter content and discards stale/removed-heading spans instead of guessing.
+- `tests/test_cross_stage_chapter_assignment_integrity.py`: all five tests passed in Run #945 (merge, paragraph split, split-at-selection, metadata retention on edits, and project save/reload compatibility).
+- **Full suite:** Run #945, `Ran 464 tests in 30.608s` / `OK`, Windows Server 2025, Python 3.12.10, exact head `aa9b4587c39c65f4d8a66c9bede8ec191dac7704`. https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/39862896213.
+
+### Windows package and scan evidence — Run #945
+- Passed: frozen EXE self-test; bundled Piper/Kokoro voice assets and critical modules; Inno Setup installation and installer compilation; original logo transparency/content check; release SHA-256 manifest; installer, manifest, and portable-artifact uploads; cleanup of older Windows build runs/artifacts.
+- **Defender scanned both executables:** log explicitly says the portable `Ryu's Audiobook.exe` scan and `Ryu's Audiobook Setup.exe` scan each “found no threats.” The fail-closed guard rejects nonzero exit codes, skipped scans, or output without a recognized completed-scan result. Custom scan passed `-DisableRemediation`. This run resolves the previous Run #940 / #938 “scan skipped” ambiguity for this commit.
+- Artifacts (expire 2026-11-21 UTC): portable `Ryu-Audiobook-Portable-945`, ID `12463925128`, 1,348,226,514 bytes, ZIP SHA-256 `abd8bbfbd426d698d5cd8cdcc55207e12a28762aedd4667caa0ff41654c3b3a3`; installer `Ryu-Audiobook-Installer-945`, ID `12463695558`, 648,309,461 bytes, ZIP SHA-256 `652788ed1e55bca8bbc41f9d4eff7f8f40b18f0479c48fa1b12750afb92fb9d0`; manifest `Ryu-Audiobook-Release-SHA256-945`, ID `12463311632`, 513 bytes, ZIP SHA-256 `1b8527b90fbb861d3c727915f97ba0289ec206f10efbb742cba572b812b90e74`. Executable hashes recorded inside manifest: portable EXE `337C69B6E7F15F7222099E8792C26B6DA1DF38D5E01F7CF699B6FAC940F8BF7F`; installer EXE `DCC024150176CFBF240FE1AAC09A0C380F4820987A2C29F3A25A777CD5F09A3C`.
+- `springly_sprigs.mp3` successfully downloaded in Run #945, so the earlier transient curl exit 35 from Run #940 does not describe this run. `Publish verified installer release` was skipped by workflow conditions; no GitHub release publication is claimed. No test/build/scan/upload step failed, and no steps/jobs were cancelled in Run #945.
+
+### Remaining acceptance gates — keep Stage 4 open
+- Stage 1: target-PC hardware freeze/crash and packaged UI responsiveness/flicker.
+- Stage 2: TXT/EPUB/PDF/DOCX import; duplicate/cancel/retry; full chapter edit/merge/split/find-replace/undo-redo/save/reopen.
+- Stage 3: actual selected saved profile/provider preview and voice quality; Voice Studio/Character Studio persistence/error UI; analysis result persistence; rename/alias/duplicate/delete behavior.
+- Stage 4: real listening for pronunciation on/off and voice identity; sound preview versus final mix; cue boundaries, BGM-off and duration; provider/FFmpeg failure, cancellation, retry, cleanup and checkpoint/source-text preservation.
+- Keep the approved Premium V2 HTML visually unchanged. Automated CI does not establish target-PC operation or perceived audio quality.
+
