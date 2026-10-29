@@ -6333,7 +6333,7 @@
         const nextView = soundTab.dataset.soundTab;
         const currentView = document.querySelector('#sound .sound-tabs [data-sound-tab].active')?.dataset.soundTab || 'music';
         try {
-          if (currentView === 'chapters' && nextView !== 'chapters') await saveCurrentChapterBgmDraft();
+          if (currentView === 'chapters' && chapterBgmDraftDirty) await saveCurrentChapterBgmDraft();
           document.querySelectorAll('#sound .sound-tabs [data-sound-tab]').forEach(button => button.classList.toggle('active', button === soundTab));
           document.querySelectorAll('#sound .sound-view[data-sound-view]').forEach(view => view.classList.toggle('active', view.dataset.soundView === nextView));
           if (nextView === 'music') await refreshSounds();
