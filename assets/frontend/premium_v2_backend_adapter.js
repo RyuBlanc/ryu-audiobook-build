@@ -2134,6 +2134,7 @@
     }
     if (requestToken !== chapterListEpoch) return chapters;
     chapters = Array.isArray(loaded) ? loaded : [];
+    renderProductionPreviewChapterOptions();
     if (draft) {
       const pendingChapter = chapters.find(chapter => Number(chapter.number) === draft.number);
       if (pendingChapter) {
@@ -3843,6 +3844,7 @@
   async function refreshJobsImpl() {
     const allJobs = await call('job.list', {include_hidden:false});
     if (isVisiblePage('dashboard')) refreshDashboardGeneration(allJobs);
+    if (isVisiblePage('generate')) renderProductionGeneration(allJobs);
     const jobs = allJobs.filter(j => backendJobFilter === 'all' ||
       (backendJobFilter === 'completed' ? j.state === 'completed' :
       (backendJobFilter === 'failed' ? j.state === 'failed' :
@@ -5282,6 +5284,107 @@
     syncMiniPlayer();
     setPlaybackButtonState();
   }
+  function renderProductionPreviewChapterOptions() {
+    const select = $('productionPreviewChapter');
+    if (!select) return;
+    const previous = String(select.value || '');
+    const eligible = chapters.filter(chapter => String(chapter.text || '').trim());
+    select.innerHTML = '<option value="">Select a saved chapter from the active project</option>' +
+      eligible.map(chapter => '<option value="' + Number(chapter.number) + '">' +
+        esc('Chapter ' + chapter.number + ' · ' + (chapter.title || 'Untitled chapter')) + '</option>').join('');
+    if (previous && eligible.some(chapter => String(chapter.number) === previous)) select.value = previous;
+    else select.value = '';
+    syncProductionPreviewControls();
+  }
+  function syncProductionPreviewControls() {
+    const chapterNumber = Number($('productionPreviewChapter')?.value || 0);
+    const selectedOwner = productionPreviewOwner &&
+      Number(productionPreviewOwner.chapter_number) === chapterNumber &&
+      (!window.ryuPremiumActiveProject?.folder || String(window.ryuPremiumActiveProject.folder) === String(productionPreviewOwner.folder));
+    const ready = Boolean(selectedOwner && voicePreviewValid && lastVoicePreviewPath && previewAudio);
+    for (const id of ['productionPlayPreview','productionStopPreview','productionDownloadPreview']) {
+      const node = $(id);
+      if (node) node.disabled = !ready;
+    }
+    const status = $('productionPreviewStatus');
+    if (status && !ready) {
+      status.textContent = chapterNumber
+        ? 'No validated preview for the selected chapter yet. Generate preview audio to create one.'
+        : 'Select a chapter to generate a chapter-specific preview. Full-book generation is not affected by this selection.';
+    } else if (status && ready) {
+      status.textContent = 'Preview ready for Chapter ' + chapterNumber + ' · ' +
+        Number(productionPreviewDuration || 30) + ' second request. Playback and download use this saved preview.';
+    }
+  }
+  async function refreshProductionSummary() {
+    const active = await call('project.get_active');
+    if (!active || !active.folder) {
+      window.ryuPremiumActiveProject = null;
+      writeTextIfChanged($('productionBookTitle'), 'No project selected');
+      writeTextIfChanged($('productionBookMetadata'), 'Open or import a project to view its saved metadata.');
+      writeTextIfChanged($('productionNarrator'), 'Not set');
+      writeTextIfChanged($('productionVoiceCastCount'), 'No saved character assignments');
+      writeTextIfChanged($('productionOutputSummary'), 'No project output configured');
+      writeTextIfChanged($('productionSoundReady'), 'No project selected');
+      renderProductionPreviewChapterOptions();
+      return null;
+    }
+    window.ryuPremiumActiveProject = active;
+    writeTextIfChanged($('productionBookTitle'), active.title || 'Untitled audiobook');
+    const author = String(active.author || '').trim() || 'Author not set';
+    const language = String(active.language || '').trim() || 'Language not set';
+    const publisher = String(active.publisher || '').trim();
+    const details = [author, language, publisher ? 'Publisher ' + publisher : 'Publisher not set'].join(' · ');
+    writeTextIfChanged($('productionBookMetadata'), details);
+    writeTextIfChanged($('productionNarrator'), String(active.narrator || active.voice_profile || '').trim() || 'Not set');
+    const totalCharacters = Math.max(0, Number(active.character_count || 0));
+    const assignedCharacters = Math.max(0, Number(active.character_voice_count || 0));
+    writeTextIfChanged($('productionVoiceCastCount'), totalCharacters
+      ? assignedCharacters + ' / ' + totalCharacters + ' assigned'
+      : 'No character voices recorded');
+    const output = String(active.output_path || '').trim();
+    const outputFolder = String(active.output_folder || '').trim();
+    writeTextIfChanged($('productionOutputSummary'), output
+      ? output
+      : (outputFolder ? 'Folder configured · ' + outputFolder : 'Output folder not configured'));
+    writeTextIfChanged($('productionSoundReady'), active.sound_design_configured
+      ? 'Saved sound settings detected'
+      : 'Sound settings not yet configured');
+    return active;
+  }
+  function renderProductionGeneration(jobs = []) {
+    const page = $('generate');
+    if (!page || !isVisiblePage('generate')) return;
+    const active = jobs.filter(job => job.type === 'audiobook-generation' &&
+      ['queued','running','pause_requested','paused','cancel_requested','retrying'].includes(String(job.state || '').toLowerCase()))
+      .sort((a,b) => (Date.parse(b.updated_at || b.started_at || b.queued_at || '') || 0) -
+                     (Date.parse(a.updated_at || a.started_at || a.queued_at || '') || 0))[0];
+    const project = window.ryuPremiumActiveProject;
+    const projectJob = active && (!project?.folder || String(active.project_folder || '') === String(project.folder)) ? active : null;
+    const done = !projectJob && Boolean(project?.completed && project?.output_path);
+    const percent = projectJob ? Math.max(0,Math.min(100,Math.round(Number(projectJob.progress || 0)))) : (done ? 100 : 0);
+    writeTextIfChanged($('genPercent'), percent + '%');
+    writeCssVariableIfChanged($('genRing'), '--progress', percent + '%');
+    writeTextIfChanged($('genStage'), projectJob
+      ? (projectJob.stage || projectJob.message || projectJob.state)
+      : (done ? 'Audiobook ready' : 'No active generation job'));
+    const current = Number(projectJob?.current_chapter || 0);
+    const total = Number(projectJob?.chapters_total || project?.chapter_count || 0);
+    writeTextIfChanged($('genChapter'), projectJob
+      ? (current > 0 ? 'Chapter ' + current + (total ? ' of ' + total : '') : 'Waiting for first chapter')
+      : (done ? (total ? total + ' chapters generated' : 'Completed output verified') : 'No chapter currently rendering'));
+    const elapsed = Number(projectJob?.elapsed_seconds);
+    const eta = Number(projectJob?.eta_seconds);
+    writeTextIfChanged($('elapsed'), Number.isFinite(elapsed) && elapsed >= 0 ? formatTime(elapsed) : '—');
+    writeTextIfChanged($('remaining'), Number.isFinite(eta) && eta >= 0 ? formatTime(eta) : '—');
+    const pause = $('pauseGenerate');
+    if (pause) {
+      const canPause = projectJob && ['audiobook-generation'].includes(projectJob.type) &&
+        ['running','paused','pause_requested'].includes(String(projectJob.state || '').toLowerCase());
+      pause.disabled = !canPause;
+      writeTextIfChanged(pause, projectJob && ['paused','pause_requested'].includes(String(projectJob.state || '').toLowerCase()) ? 'Resume' : 'Pause');
+    }
+  }
   const formatTime = seconds => {
     const n = Math.max(0, Math.floor(Number(seconds) || 0)), h = Math.floor(n / 3600), m = Math.floor((n % 3600) / 60), sec = n % 60;
     return h ? h + ':' + String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0') : m + ':' + String(sec).padStart(2,'0');
@@ -6288,7 +6391,70 @@
       message('Profile saved and assigned as the active narrator.');
     });
     if ($('generatePreview')) $('generatePreview').onclick=act(previewVoice);
-    if ($('previewGenerate')) $('previewGenerate').onclick=act(async()=>{const name=selectedVoice||$('profileName')?.value;const group=[...document.querySelectorAll('#generate .segmented')].find(el=>[...el.querySelectorAll('button')].some(b=>/10s|30s|60s/i.test(b.textContent)));const duration=group?.querySelector('button.active')?.textContent.match(/\d+/)?.[0]||'30';const data=await call('production.preview',{profile_name:name,duration_seconds:Number(duration)});await monitorJob(data.job_id,job=>preparePreviewPlayback(job,Number(duration)));});
+    if ($('productionPreviewDuration')) $('productionPreviewDuration').addEventListener('click', e => {
+      const button = e.target.closest('[data-preview-seconds]');
+      if (!button) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      document.querySelectorAll('#productionPreviewDuration [data-preview-seconds]').forEach(item => item.classList.toggle('active', item === button));
+      productionPreviewDuration = Number(button.dataset.previewSeconds) || 30;
+      syncProductionPreviewControls();
+    });
+    if ($('productionPreviewChapter')) $('productionPreviewChapter').addEventListener('change', () => syncProductionPreviewControls());
+    if ($('previewGenerate')) $('previewGenerate').onclick=act(async()=>{
+      const chapterNumber = Number($('productionPreviewChapter')?.value || 0);
+      const chapter = chapters.find(item => Number(item.number) === chapterNumber && String(item.text || '').trim());
+      if (!chapter) throw new Error('Select a saved chapter containing narration text before generating a Production preview.');
+      const active = await call('project.get_active');
+      if (!active?.folder) throw new Error('Open a saved project before generating a Production preview.');
+      const name = selectedVoice || currentVoiceName() || $('profileName')?.value || active.voice_profile;
+      const duration = Number(document.querySelector('#productionPreviewDuration [data-preview-seconds].active')?.dataset.previewSeconds || 30);
+      productionPreviewOwner = {folder:String(active.folder),chapter_number:chapterNumber,chapter_title:String(chapter.title || '')};
+      productionPreviewDuration = duration;
+      const status = $('productionPreviewStatus');
+      if (status) status.textContent = 'Generating a real voice preview for Chapter ' + chapterNumber + ' (' + duration + 's requested)…';
+      syncProductionPreviewControls();
+      const data = await call('production.preview',{profile_name:name,chapter_number:chapterNumber,duration_seconds:duration,include_sound_design:false});
+      const owner = {...productionPreviewOwner};
+      await monitorJob(data.job_id,async job=>{
+        const currentProject = await call('project.get_active');
+        const currentChapter = Number($('productionPreviewChapter')?.value || 0);
+        if (!currentProject?.folder || String(currentProject.folder) !== owner.folder || currentChapter !== owner.chapter_number) {
+          if (status) status.textContent = 'This preview finished for a previous project/chapter and was not attached to the current selection.';
+          message('Preview finished for Chapter ' + owner.chapter_number + ', but the active project/chapter changed. Select that chapter and generate again.', true);
+          return true;
+        }
+        const accepted = preparePreviewPlayback(job,duration);
+        if (!accepted) { syncProductionPreviewControls(); return false; }
+        productionPreviewOwner = owner;
+        productionPreviewPath = String(job?.result?.output_path || lastVoicePreviewPath || '');
+        productionPreviewAudio = previewAudio;
+        const actual = Number(job?.result?.actual_duration_seconds);
+        if (status) status.textContent = 'Ready · Chapter ' + owner.chapter_number + ' · ' +
+          (Number.isFinite(actual) ? actual.toFixed(1) : 'measured') + 's audio · generated with saved narration settings.';
+        syncProductionPreviewControls();
+        return true;
+      });
+    });
+    if ($('productionPlayPreview')) $('productionPlayPreview').onclick=act(async()=>{
+      if (!productionPreviewOwner || !voicePreviewValid || !previewAudio || !lastVoicePreviewPath) throw new Error('Generate and validate a preview for the selected chapter first.');
+      if (previewAudio.paused) await previewAudio.play(); else previewAudio.pause();
+      syncProductionPreviewControls();
+    });
+    if ($('productionStopPreview')) $('productionStopPreview').onclick=()=>{
+      if (previewAudio) { previewAudio.pause(); try { previewAudio.currentTime = 0; } catch (_) {} }
+      syncProductionPreviewControls();
+    };
+    if ($('productionDownloadPreview')) $('productionDownloadPreview').onclick=act(async()=>{
+      const owner = productionPreviewOwner;
+      if (!owner || !voicePreviewValid || !lastVoicePreviewPath || Number($('productionPreviewChapter')?.value || 0) !== owner.chapter_number) throw new Error('Generate and validate a preview for the selected chapter first.');
+      const active = await call('project.get_active');
+      if (!active?.folder || String(active.folder) !== owner.folder) throw new Error('The active project changed. Generate a preview for its selected chapter before downloading.');
+      const safeTitle = String(active.title || 'Audiobook').replace(/[<>:"/\\|?*\x00-\x1f]+/g,'-').trim();
+      const chapterTitle = String(owner.chapter_title || ('Chapter ' + owner.chapter_number)).replace(/[<>:"/\\|?*\x00-\x1f]+/g,'-').trim();
+      const result = await call('voice.preview.save',{source_path:lastVoicePreviewPath,suggested_name:(safeTitle + '_Chapter_' + owner.chapter_number + '_' + chapterTitle).replace(/\s+/g,'_')});
+      if (result.cancelled) { message('Preview save cancelled.'); return; }
+      message('Chapter ' + owner.chapter_number + ' preview saved to ' + result.path);
+    });
     if ($('playPreview')) $('playPreview').onclick=act(async()=>{if(!previewAudio||!voicePreviewValid)throw new Error('Generate a validated preview first.');if(!previewAudio.paused){previewAudio.pause();$('playPreview').textContent='▶ Play';}else{await previewAudio.play();$('playPreview').textContent='Ⅱ Pause';}});
     if ($('stopPreview')) $('stopPreview').onclick=()=>{if(previewAudio){previewAudio.pause();previewAudio.currentTime=0;}if($('playPreview'))$('playPreview').textContent='▶ Play';syncPreviewPlaybackTime();};
     if ($('downloadPreview')) $('downloadPreview').onclick=act(async()=>{
@@ -7573,7 +7739,7 @@
     void (async () => {
       await hydratePhase([refreshCharacters, refreshCharacterLibrary, refreshTerms]);
       await hydratePhase([refreshSounds, refreshSoundCues, refreshChapterBgm]);
-      await hydratePhase([refreshJobs, refreshHistory, refreshModels]);
+      await hydratePhase([refreshProductionSummary, refreshJobs, refreshHistory, refreshModels]);
     })();
     applyUnavailableControlStates();
     // The prototype action controls were replaced before any async work above;
