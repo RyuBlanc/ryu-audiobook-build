@@ -23,8 +23,15 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
             "<script>setTimeout(finish,1700);</script>"
             "</body></html>"
         )
-        prepared = prepare_native_host_html(source)
+        prepared = prepare_native_host_html(
+            source,
+            base_url="file:///C:/Program%20Files/Ryu/assets/frontend/",
+        )
 
+        self.assertIn(
+            '<base href="file:///C:/Program%20Files/Ryu/assets/frontend/">',
+            prepared,
+        )
         self.assertIn("window.__ryuNativeHost = true;", prepared)
         self.assertIn(
             "if (!window.__ryuNativeHost) setTimeout(finish,1700);",
@@ -57,8 +64,10 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
         install_end = host.index("def _check_frontend_ready(", install_start)
         install = host[install_start:install_end]
         self.assertIn("self.web if self._uses_html_startup_loader else self._loading_page", install)
-        self.assertIn("self.web.setHtml(", host)
+        self.assertIn("self._hosted_html_path.write_text(self._hosted_html_source, encoding=\"utf-8\")", host)
+        self.assertIn("self.web.load(QUrl.fromLocalFile(str(self._hosted_html_path.resolve())))", host)
         self.assertIn("prepare_native_host_html(", host)
+        self.assertNotIn("self.web.setHtml(", host)
 
     def test_bridge_iife_uses_the_exported_diagnostic_emitter(self):
         host = HOST.read_text(encoding="utf-8")
