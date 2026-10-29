@@ -6239,6 +6239,9 @@ class PremiumV2Window(QMainWindow):
           }, true);
         })();
         (() => {
+          // This is a separate IIFE from the diagnostic listeners above. Rebind
+          // their public emitter here; a block-scoped `emit` does not cross IIFEs.
+          const emit = window.__ryuEmitFrontendDiagnostic;
           const bridgeStartedAt = Date.now();
           let channelScriptRequested = false;
           let channelConnecting = false;
