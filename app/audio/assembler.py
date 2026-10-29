@@ -551,7 +551,7 @@ def assemble_m4b(
                 if progress: progress(index,len(chapters),"automatic-real-audio-design")
             chapters=processed_chapters
 
-        elif effective_audio_mode in {"manual","off"} and chapter_transition_sound:
+        elif effective_audio_mode == "manual" and chapter_transition_sound:
             cued_chapters: list[Path]=[]
             for index,(chapter_file,chapter_dir,chapter_title) in enumerate(zip(chapters,chapter_dirs,names),start=1):
                 narration_text=""
@@ -584,7 +584,7 @@ def assemble_m4b(
         # Scene cues are independent of the opening/chapter/closing transition
         # toggle. A scene-only assignment must not silently enable the library's
         # opening/page/closing defaults, and it must still reach the final mix.
-        if effective_audio_mode in {"manual", "off"} and scene_transition_cue_path:
+        if effective_audio_mode == "manual" and scene_transition_cue_path:
             scene_cued_chapters: list[Path] = []
             for index, (chapter_file, chapter_dir, chapter_title) in enumerate(
                 zip(chapters, chapter_dirs, names), start=1
