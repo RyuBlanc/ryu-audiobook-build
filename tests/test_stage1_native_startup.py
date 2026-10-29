@@ -20,7 +20,7 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
         source = (
             "<html><head><title>Ryu</title></head><body>"
             '<div id="appLoader"></div>'
-            "<script>setTimeout(finish,1700);</script>"
+            "<script>setTimeout(finish,1700)</script>"
             "</body></html>"
         )
         prepared = prepare_native_host_html(
@@ -51,7 +51,7 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
             prepared,
         )
         with self.assertRaises(FrontendAssetError):
-            prepare_native_host_html("<html><head></head><body></body></html>")
+            prepare_native_host_html("<html><head></head><body></body></html><script>setTimeout(finish,1700)</script>")
 
     def test_adapter_does_not_remove_html_loader_before_required_hydration(self):
         adapter = ADAPTER.read_text(encoding="utf-8")
