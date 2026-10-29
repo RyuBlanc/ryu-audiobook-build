@@ -378,3 +378,8 @@ Production Pause/Cancel is generation-type guarded. Chapter switching saves a pe
 - Other test output included existing runtime-dependent FFmpeg/preview error traces, but the reported unittest summary was specifically `FAILED (errors=1)` for the loader contract. Do not misclassify those logged traces as additional failed tests without checking their unittest result.
 - Next: rerun all tests and then frozen-app startup. Stage 1 remains open until the HTML loader transitions into Premium V2 and all requested Stage 1 register items are either closed with evidence or explicitly retained as documented manual acceptance gates.
 
+### Stage 1 loader regression alignment — 29 October 2026
+- Build #1606 ran 750 tests and reported two loader contract issues: the test expected the old semicolon output, and the invalid-input test no longer contained the timer contract so correctly failed earlier at timer recognition instead of the missing `<head>` branch.
+- Updated the test fixture to use the semicolon-free timer form and made the invalid-input case contain that timer so it specifically exercises missing-head rejection. The production matcher now accepts an optional semicolon and normalizes to the same output.
+- Next checkpoint: Build #1608 is queued on the diagnostic + file-backed loader candidate. Confirm exact HEAD, then inspect tests and packaged startup smoke before accepting any artifact.
+
