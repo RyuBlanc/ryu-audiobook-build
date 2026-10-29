@@ -135,7 +135,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "pronunciation.save", "pronunciation.analyze", "production.preview",
             "production.generate_book", "player.get_active", "job.list", "job.pause", "job.resume",
             "job.cancel", "settings.save", "sound.catalog", "sound.import", "sound.assign", "sound.save_manifest",
-            "sound.cues.get", "sound.cues.save", "sound.cues.clear", "sound.chapter_bgm.get", "sound.chapter_bgm.save", "models.install",
+            "sound.cues.get", "sound.cues.save", "sound.chapter_bgm.get", "sound.chapter_bgm.save", "models.install",
         ):
             self.assertIn(command, script)
         self.assertIn('adapter_path = frontend_path().with_name("premium_v2_backend_adapter.js")', self.host)
@@ -154,6 +154,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("async function refreshHistory()", script)
         self.assertIn("async function refreshModels()", script)
         self.assertIn("call('diagnostics.check')", script)
+        self.assertIn("pendingCueAssignments[slot] = null", script)
+        self.assertNotIn("call('sound.cues.clear')", script)
         self.assertIn("call('models.install'", script)
         self.assertIn("qwen_mode:provider === 'qwen-character' ? qwenMode", script)
         self.assertIn("qwen_prompt:choice === 'voicedesign' ? designPrompt", script)
@@ -352,7 +354,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("The selected local audio file could not be played", adapter)
         self.assertIn("call('sound.cues.save'", adapter)
         self.assertIn("call('sound.cues.get')", adapter)
-        self.assertIn("call('sound.cues.clear')", adapter)
+        self.assertNotIn("call('sound.cues.clear')", adapter)
+        self.assertIn("pendingCueAssignments[slot] = null", adapter)
+        self.assertIn("Choose Save Cue Changes", adapter)
         self.assertIn("refreshSoundCues().catch", adapter)
         self.assertIn("Playing assigned cue clips in book order.", adapter)
         self.assertIn("call('sound.preview_book')", adapter)
@@ -455,9 +459,11 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
 
     def test_cue_feedback_matches_current_three_slot_assignment_contract(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
-        self.assertIn("message(result.generation_supported ? 'Cue assignment saved to this book.' :", adapter)
+        self.assertIn("pendingCueAssignments[pendingCueSlot] = path", adapter)
+        self.assertIn("Use Save Cue Changes to persist this assignment.", adapter)
+        self.assertIn("soundButton.id === 'saveCueChanges'", adapter)
+        self.assertNotIn("message(result.generation_supported ? 'Cue assignment saved to this book.' :", adapter)
         self.assertNotIn("Scene transition cue saved to this book and will be included during audiobook assembly.", adapter)
-        self.assertIn("const assignedSlot = pendingCueSlot;", adapter)
         self.assertNotIn("current audiobook assembly does not yet render a separate scene cue", adapter)
         self.assertIn("scene_transition_cue_path=self.scene_transition_cue_path", (ROOT / "app" / "tts" / "manager.py").read_text(encoding="utf-8"))
 

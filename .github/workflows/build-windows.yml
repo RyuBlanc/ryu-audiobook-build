@@ -24,6 +24,7 @@ on:
       - recovery/build-1441-baseline
       - stage1/build1536-clean-baseline
       - stage-2/sound-design-music-library-post-stage1
+      - stage-2/sound-design-interactivity-repair
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.

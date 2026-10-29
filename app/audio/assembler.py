@@ -78,6 +78,21 @@ def _run(args: list[str]) -> None:
         raise RuntimeError(f"FFmpeg packaging command failed.\nCommand: {command}\n{detail}")
 
 
+def _scale_audio_gain(source: Path, output: Path, volume: float, bitrate: str) -> Path:
+    """Apply a real playback gain to an audio layer without changing its duration."""
+    gain = max(0.0, min(1.0, float(volume)))
+    if abs(gain - 1.0) < 1e-9:
+        return source
+    output.parent.mkdir(parents=True, exist_ok=True)
+    _run([
+        "-i", str(source), "-filter:a", f"volume={gain:.4f}",
+        "-vn", "-c:a", "aac", "-b:a", bitrate, "-ar", "44100", str(output),
+    ])
+    if not output.is_file() or output.stat().st_size < 1024:
+        raise RuntimeError(f"Could not apply audio level to {source.name}.")
+    return output
+
+
 def _concat_audio_files(first: Path, second: Path, output: Path, bitrate: str) -> Path:
     """Join two audio files in order while preserving the chapter timeline."""
     _run([
@@ -295,7 +310,7 @@ def _mix_chapter_bgm(
     bitrate: str = "192k",
 ) -> Path:
     """Mix one chapter-specific music bed under narration without changing duration."""
-    gain = max(0.0, min(1.0, float(volume)))
+    gain = max(0.0, min(0.50, float(volume)))
     # A zero-gain override means narration-only: don't probe/re-encode the
     # narration and don't require a music asset that will never be used.
     if gain <= 0.0:
@@ -385,6 +400,8 @@ def assemble_m4b(
     narration_speed: float = 1.0,
     background_audio_path: Path | str | None = None,
     background_audio_volume: float = 0.18,
+    narration_volume: float = 1.0,
+    cue_audio_volume: float = 0.25,
     ambience_audio_path: Path | str | None = None,
     ambience_audio_volume: float = 0.10,
     background_audio_fade_in: float = 2.0,
@@ -450,6 +467,9 @@ def assemble_m4b(
     effective_audio_mode = str(background_audio_mode or "manual").strip().casefold()
     if effective_audio_mode not in {"off", "auto", "manual"}:
         raise ValueError(f"Unsupported background audio mode: {background_audio_mode}")
+    # Enforce the product-wide master BGM ceiling at the final mixer boundary,
+    # including old projects and direct callers that bypass the UI/backend guard.
+    background_audio_volume = max(0.0, min(0.50, float(background_audio_volume)))
 
     # "custom" is the existing persisted key for the approved Chapter-Based
     # strategy. Keep accepting it for existing projects, but make the strategy
@@ -472,6 +492,21 @@ def assemble_m4b(
     cue_offset_by_chapter: dict[int, int] = {}
     with tempfile.TemporaryDirectory(prefix="ryu-m4b-") as temp:
         temp_dir = Path(temp)
+        narration_gain = max(0.0, min(1.0, float(narration_volume)))
+        cue_gain = max(0.0, min(0.50, float(cue_audio_volume)))
+        if abs(narration_gain - 1.0) >= 1e-9:
+            chapters = [
+                _scale_audio_gain(chapter_file, temp_dir / f"narration-level-{index:05d}.m4a",
+                                  narration_gain, audio_bitrate)
+                for index, chapter_file in enumerate(chapters, start=1)
+            ]
+
+        def apply_cue_level(cue: Path | None, label: str) -> Path | None:
+            # A zero cue level disables the cue altogether; do not insert a
+            # silent clip that shifts narration timing in preview or final output.
+            if cue is None or cue_gain <= 1e-9:
+                return None
+            return _scale_audio_gain(cue, temp_dir / f"{label}-level.m4a", cue_gain, audio_bitrate)
 
         # Real local audio only: no procedural BGM and no fake book cues.
         from app.audio.library import resolve_music_track
@@ -498,6 +533,7 @@ def assemble_m4b(
                     selected_cue = opening_cue_path if cue_kind == "opening" else page_turn_cue_path
                     # A missing explicit path means use the imported library cue.
                     cue = _resolve_cue_audio(temp_dir, cue_kind, "library", variation, mood, selected_cue)
+                    cue = apply_cue_level(cue, f"auto-cue-{index:05d}")
                     if cue is not None:
                         prefixed = temp_dir / f"auto-real-cue-{index:05d}.m4a"
                         cue_offset_by_chapter[index] = _duration_ms(cue)
@@ -505,6 +541,7 @@ def assemble_m4b(
                         current_audio = prefixed
                 if index > 1 and scene_transition_cue_path:
                     scene_cue = _resolve_cue_audio(temp_dir, "scene", "library", variation, mood, scene_transition_cue_path)
+                    scene_cue = apply_cue_level(scene_cue, f"auto-scene-cue-{index:05d}")
                     if scene_cue is not None:
                         scene_prefixed = temp_dir / f"auto-real-scene-cue-{index:05d}.m4a"
                         _concat_audio_files(scene_cue, current_audio, scene_prefixed, audio_bitrate)
@@ -513,7 +550,7 @@ def assemble_m4b(
 
                 duration_ms = _duration_ms(current_audio)
                 duration_seconds = max(0.1, duration_ms / 1000.0)
-                music_gain = max(0.0, min(1.0, float(background_audio_volume)))
+                music_gain = max(0.0, min(0.50, float(background_audio_volume)))
                 music_path = resolve_music_track(
                     mood, selected_track=auto_music_variation,
                     seed_text=f"{chapter_title}|{narration_text}|{index}",
@@ -543,6 +580,7 @@ def assemble_m4b(
                 if chapter_transition_sound and index==len(chapters):
                     # Resolve the imported closing cue even when no custom path is supplied.
                     closing=_resolve_cue_audio(temp_dir,"ending","library",variation,mood,ending_cue_path)
+                    closing=apply_cue_level(closing, f"auto-ending-cue-{index:05d}")
                     if closing is not None:
                         ended=temp_dir/f"auto-real-ending-{index:05d}.m4a"
                         _concat_audio_files(final_chapter,closing,ended,audio_bitrate)
@@ -567,6 +605,7 @@ def assemble_m4b(
                 selected_cue=opening_cue_path if kind=="opening" else page_turn_cue_path
                 # Fall back to the imported library when no custom cue is selected.
                 cue=_resolve_cue_audio(temp_dir,kind,"library",variation,mood,selected_cue)
+                cue=apply_cue_level(cue, f"manual-cue-{index:05d}")
                 if cue is not None:
                     prefixed=temp_dir/f"{effective_audio_mode}-real-cue-{index:05d}.m4a"
                     cue_offset_by_chapter[index]=_duration_ms(cue)
@@ -574,6 +613,7 @@ def assemble_m4b(
                     current_audio=prefixed
                 if index==len(chapters):
                     closing=_resolve_cue_audio(temp_dir,"ending","library",variation,mood,ending_cue_path)
+                    closing=apply_cue_level(closing, f"manual-ending-cue-{index:05d}")
                     if closing is not None:
                         ended=temp_dir/f"{effective_audio_mode}-real-ending-{index:05d}.m4a"
                         _concat_audio_files(current_audio,closing,ended,audio_bitrate)

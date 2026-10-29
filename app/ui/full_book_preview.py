@@ -121,6 +121,8 @@ def _render_full_book_preview(host, job_id, project, chapter_dirs, chapter_title
             narration_speed=float(state.get("narration_speed") if state.get("narration_speed") is not None else 0.90),
             background_audio_path=Path(str(state["background_audio_path"])) if state.get("background_audio_path") else None,
             background_audio_volume=float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18),
+            narration_volume=float(state.get("narration_audio_volume") if state.get("narration_audio_volume") is not None else 1.0),
+            cue_audio_volume=float(state.get("sound_cue_volume") if state.get("sound_cue_volume") is not None else 0.25),
             background_audio_fade_in=float(state.get("background_audio_fade_in") if state.get("background_audio_fade_in") is not None else 2.0),
             background_audio_fade_out=float(state.get("background_audio_fade_out") if state.get("background_audio_fade_out") is not None else 3.0),
             ambience_audio_path=Path(str(state["ambience_audio_path"])) if state.get("ambience_audio_path") else None,

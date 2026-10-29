@@ -85,7 +85,7 @@ class SoundDesignCatalogueTests(unittest.TestCase):
 
     def test_cue_assignments_save_clear_and_reload_are_book_local(self):
         track = _valid_wav(self.app_root / "Audio Library" / "opening.wav")
-        self.bridge_a.catalog = [{"path": str(track.resolve()), "title": "opening"}]
+        self.bridge_a.catalog = [{"path": str(track.resolve()), "title": "opening", "role": "cue", "duration_seconds": 1.0}]
         self.assertTrue(host.PremiumV2Bridge._sound_cues_save(self.bridge_a, {"slot": "opening", "path": str(track)})["saved"])
         self.assertEqual(host.PremiumV2Bridge._sound_cues_get(self.bridge_a, {})["opening"]["path"], str(track.resolve()))
         self.assertIsNone(host.PremiumV2Bridge._sound_cues_get(self.bridge_b, {})["opening"]["path"])
