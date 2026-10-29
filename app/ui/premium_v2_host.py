@@ -5897,18 +5897,17 @@ class PremiumV2Window(QMainWindow):
 
         self._loading_progress = QProgressBar(self._loading_page)
         self._loading_progress.setObjectName("startupProgress")
-        self._loading_progress.setRange(0, 100)
-        self._loading_progress.setValue(3)
-        self._loading_progress.setFormat("%p%")
-        self._loading_progress.setTextVisible(True)
-        self._loading_progress.setFixedHeight(22)
+        # Keep startup feedback quiet: an indeterminate line signals activity
+        # without displaying a guessed percentage or a determinate progress value.
+        self._loading_progress.setRange(0, 0)
+        self._loading_progress.setTextVisible(False)
+        self._loading_progress.setFixedHeight(6)
         self._loading_progress.setMinimumWidth(300)
         self._loading_progress.setMaximumWidth(480)
         self._loading_progress.setStyleSheet(
-            "QProgressBar{background:#19141d;border:1px solid #342634;border-radius:7px;"
-            "color:#f7edf2;text-align:center;font-size:10px;font-weight:700;}"
+            "QProgressBar{background:#19141d;border:1px solid #342634;border-radius:4px;}"
             "QProgressBar::chunk{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            "stop:0 #8c1735,stop:1 #e64160);border-radius:6px;}"
+            "stop:0 #8c1735,stop:1 #e64160);border-radius:3px;}"
         )
         loading_layout.addWidget(self._loading_progress, 0, Qt.AlignmentFlag.AlignHCenter)
         self._loading_version = QLabel(f"VERSION {full_version()}", self._loading_page)
@@ -6140,16 +6139,15 @@ class PremiumV2Window(QMainWindow):
         self._startup_progress_value = max(self._startup_progress_value, value)
         if value >= 26 and hasattr(self, "_bridge_watchdog"):
             self._bridge_watchdog.stop()
+        # The progress numbers above are internal startup milestones only.
+        # Keep the visible indicator indeterminate; never display a percentage.
         if hasattr(self, "_loading_progress"):
-            self._loading_progress.setRange(0, 100)
-            self._loading_progress.setValue(self._startup_progress_value)
+            self._loading_progress.setRange(0, 0)
 
     def _on_frontend_ready(self) -> None:
         """Reveal the app only after the backend bridge and frontend wiring have finished."""
         self._set_loading_status("Studio ready. Opening your workspace…")
-        self._startup_progress_value = 100
-        if hasattr(self, "_loading_progress"):
-            self._loading_progress.setValue(100)
+        self._frontend_ready = True
         self._frontend_ready = True
         self._frontend_failure_shown = False
         if hasattr(self, "_frontend_watchdog"):
@@ -6169,8 +6167,7 @@ class PremiumV2Window(QMainWindow):
         self._frontend_failure_shown = False
         self._startup_progress_value = 0
         if hasattr(self, "_loading_progress"):
-            self._loading_progress.setRange(0, 100)
-            self._loading_progress.setValue(5)
+            self._loading_progress.setRange(0, 0)
         self._frontend_generation += 1
         generation = self._frontend_generation
         self._update_startup_progress("Retrying the interface and reconnecting local services…", 5)
@@ -6211,10 +6208,12 @@ class PremiumV2Window(QMainWindow):
         self._frontend_ready = False
         generation = self._frontend_generation
         self._update_startup_progress("Premium V2 interface loaded. Connecting to local services…", 18)
+        # Never expose the WebEngine during the bridge/hydration gap. Even
+        # when the HTML loader is available, Chromium can briefly present a
+        # white frame before its first paint. Keep the native splash visible
+        # until _on_frontend_ready confirms the actual interactive UI is ready.
         if hasattr(self, "_web_stack"):
-            self._web_stack.setCurrentWidget(
-                self.web if self._uses_html_startup_loader else self._loading_page
-            )
+            self._web_stack.setCurrentWidget(self._loading_page)
         # Install error handlers before the adapter executes. A page load may
         # succeed while a JavaScript exception leaves the visible interface blank.
         script = r"""
