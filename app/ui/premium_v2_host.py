@@ -6148,7 +6148,6 @@ class PremiumV2Window(QMainWindow):
         """Reveal the app only after the backend bridge and frontend wiring have finished."""
         self._set_loading_status("Studio ready. Opening your workspace…")
         self._frontend_ready = True
-        self._frontend_ready = True
         self._frontend_failure_shown = False
         if hasattr(self, "_frontend_watchdog"):
             self._frontend_watchdog.stop()
