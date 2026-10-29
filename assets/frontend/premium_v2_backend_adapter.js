@@ -6401,6 +6401,7 @@
         chapterBgmDraftDirty = true;
         const valueNode = $('chapterVolumeValue');
         if (valueNode) valueNode.textContent = Math.round(Number(e.target.value || 0)) + '%';
+        if ($('chapterBgmSaveState')) $('chapterBgmSaveState').textContent = 'Unsaved chapter volume change — save to apply it.';
       } else if (e.target?.id === 'narrationVolume') {
         e.stopImmediatePropagation();
         mixLevelsDirty = true;
@@ -6520,19 +6521,71 @@
         } catch (err) { message(err?.message || String(err), true); }
         return;
       }
+      const chapterSource = e.target.closest('#chapterBgmSourceFilter [data-chapter-source]');
+      if (chapterSource) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        chapterSourceFilter = chapterSource.dataset.chapterSource || 'all';
+        document.querySelectorAll('#chapterBgmSourceFilter [data-chapter-source]').forEach(button => button.classList.toggle('active', button === chapterSource));
+        renderChapterTrackPicker(); return;
+      }
+      const chapterCategory = e.target.closest('#chapterBgmCategoryFilter [data-chapter-category]');
+      if (chapterCategory) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        chapterCategoryFilter = chapterCategory.dataset.chapterCategory || 'all';
+        document.querySelectorAll('#chapterBgmCategoryFilter [data-chapter-category]').forEach(button => button.classList.toggle('active', button === chapterCategory));
+        renderChapterTrackPicker(); return;
+      }
       const chapterRuleButton = e.target.closest('#sound .chapter-rule [data-chapter-rule]');
       if (chapterRuleButton) {
         e.preventDefault(); e.stopImmediatePropagation();
         document.querySelectorAll('#sound .chapter-rule [data-chapter-rule]').forEach(b => b.classList.toggle('active', b === chapterRuleButton));
-        chapterBgmDraftDirty = true;
+        if (chapterRuleButton.dataset.chapterRule === 'none') {
+          selectedBgmTrackPath = null;
+          candidateBgmTrackPath = null;
+          chapterBgmDraftDirty = true;
+          if ($('chapterCurrentAssignment')) $('chapterCurrentAssignment').textContent = 'No BGM · Unsaved';
+          if ($('chapterTrackSelectionState')) $('chapterTrackSelectionState').textContent = 'No BGM is selected for this chapter; save the chapter assignment to persist it.';
+        } else if (chapterRuleButton.dataset.chapterRule === 'custom') {
+          if ($('chapterTrackSelectionState')) $('chapterTrackSelectionState').textContent = 'Select a candidate, press Select track, then save the chapter assignment.';
+          chapterBgmDraftDirty = true;
+        } else {
+          if ($('chapterTrackSelectionState')) $('chapterTrackSelectionState').textContent = 'Same BGM uses the saved book track; no chapter-specific track is selected.';
+          chapterBgmDraftDirty = false;
+        }
+        if ($('chapterBgmSaveState')) $('chapterBgmSaveState').textContent = chapterBgmDraftDirty ? 'Unsaved chapter changes — save to apply them.' : 'Same BGM strategy selected.';
+        renderChapterTrackPicker();
         return;
       }
       const chapterTrack = e.target.closest('#chapterTrackPicker [data-chapter-track]');
       if (chapterTrack) {
         e.preventDefault(); e.stopImmediatePropagation();
-        selectedBgmTrackPath = chapterTrack.dataset.chapterTrack;
-        document.querySelectorAll('#chapterTrackPicker [data-chapter-track]').forEach(b => b.classList.toggle('active', b === chapterTrack));
-        chapterBgmDraftDirty = true;
+        candidateBgmTrackPath = chapterTrack.dataset.chapterTrack;
+        candidateBgmChapter = Number(selectedBgmChapter);
+        const candidate = sounds.find(track => String(track.path || '') === String(candidateBgmTrackPath));
+        if ($('chapterSelectedTrackTitle')) $('chapterSelectedTrackTitle').textContent = candidate?.title || 'Selected track';
+        if ($('chapterSelectedTrackMeta')) $('chapterSelectedTrackMeta').textContent = candidate
+          ? String(candidate.category_label || candidate.category || 'Others') + ' · ' + String(candidate.source || '') + ' · ' + String(candidate.format || '')
+          : 'Selected music candidate';
+        if ($('confirmChapterTrack')) $('confirmChapterTrack').disabled = !candidate || !['custom','chapter-based','chapter_based','chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
+        if ($('chapterTrackSelectionState')) $('chapterTrackSelectionState').textContent = 'Candidate selected only. The saved chapter assignment has not changed; press Select track to confirm.';
+        renderChapterTrackPicker();
+        return;
+      }
+      if (e.target.closest('#confirmChapterTrack')) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        try {
+          if (!candidateBgmTrackPath || Number(candidateBgmChapter) !== Number(selectedBgmChapter)) throw new Error('Select a music candidate for the current chapter first.');
+          if (!['custom','chapter-based','chapter_based','chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase())) throw new Error('Switch to Chapter-Based BGM before confirming a chapter track.');
+          selectedBgmTrackPath = candidateBgmTrackPath;
+          const customRule = document.querySelector('#sound .chapter-rule [data-chapter-rule="custom"]');
+          document.querySelectorAll('#sound .chapter-rule [data-chapter-rule]').forEach(button => button.classList.toggle('active', button === customRule));
+          chapterBgmDraftDirty = true;
+          const selected = sounds.find(track => String(track.path || '') === String(selectedBgmTrackPath));
+          if ($('chapterCurrentAssignment')) $('chapterCurrentAssignment').textContent = (selected?.title || 'Selected music') + ' · Unsaved';
+          if ($('chapterTrackSelectionState')) $('chapterTrackSelectionState').textContent = 'Track confirmed for this chapter draft. Press Save chapter assignment to persist it.';
+          if ($('chapterBgmSaveState')) $('chapterBgmSaveState').textContent = 'Unsaved chapter changes — save to apply them.';
+          message('Track confirmed for Chapter ' + selectedBgmChapter + '. Save the chapter assignment to persist it.');
+        } catch (error) { message(error?.message || String(error), true); }
         return;
       }
       if (e.target.closest('#saveChapterBgm')) {
@@ -6644,12 +6697,11 @@
           : 'Selected cue from the local catalogue';
         document.querySelectorAll('#cueGrid [data-cue-path]').forEach(button => button.classList.toggle('active', button.dataset.cuePath === path));
         if (pendingCueSlot) {
-          pendingCueAssignments[pendingCueSlot] = path;
-          cueChangesDirty = true;
           const slot = pendingCueSlot;
+          stageCueChange(slot, path);
           pendingCueSlot = null;
           await refreshSoundCues();
-          message('Draft cue selected for ' + slot + '. Use Save Cue Changes to persist this assignment.');
+          message('Draft cue selected for ' + slot + '. Autosave is scheduled; Save Cue Changes saves immediately.');
         } else {
           message('Cue clip selected. Play it here, or choose Change beside a cue slot and then Save Cue Changes.');
         }
@@ -6735,11 +6787,9 @@
             await saveCurrentChapterBgmDraft(true);
           } else if (soundButton.id === 'clearAllCues') {
             pendingCueSlot = null;
-            pendingCueAssignments = Object.create(null);
-            for (const slot of ['opening','chapter','closing']) pendingCueAssignments[slot] = null;
-            cueChangesDirty = true;
+            for (const slot of ['opening','chapter','closing']) stageCueChange(slot, null);
             await refreshSoundCues();
-            message('Clear-all is staged. Choose Save Cue Changes to remove the three saved cue assignments.');
+            message('Clear-all is staged and will autosave. Save Cue Changes applies it immediately.');
           } else if (soundButton.id === 'previewCueSequence') {
             const sequence = ['opening','chapter','closing'].map(slot => cueAssignments[slot]?.path).filter(Boolean);
             if (!sequence.length) throw new Error('Assign at least one saved cue before previewing the sequence.');
