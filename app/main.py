@@ -771,10 +771,13 @@ def main() -> int:
                 break
     app.setWindowIcon(app_icon)
     # Premium V2 is the approved Dragon Studio interface and must be the
-    # installed default. Keep the native Qt shell available as a compatibility
-    # option by explicitly setting RYU_UI_MODE=native.
+    # installed default. The native Qt shell is available only when the user
+    # explicitly opts into compatibility mode with RYU_UI_MODE=native.
     ui_mode = os.environ.get("RYU_UI_MODE", "premium-v2").strip().casefold()
-    if ui_mode in {"premium-v2", "html", "web"}:
+    if ui_mode == "native":
+        window = ProjectWorkflow()
+        window.setWindowTitle(f"{APP_NAME} • {full_version()}")
+    else:
         from app.ui.premium_v2_host import PremiumV2Window, frontend_path
         premium_frontend = frontend_path()
         if not premium_frontend.is_file():
@@ -788,9 +791,6 @@ def main() -> int:
             )
             return 2
         window = PremiumV2Window()
-    else:
-        window = ProjectWorkflow()
-        window.setWindowTitle(f"{APP_NAME} • {full_version()}")
     window.setWindowIcon(app_icon)
     # Apply persisted geometry before the first display. Showing the default
     # size and resizing immediately afterward caused a visible startup jump on

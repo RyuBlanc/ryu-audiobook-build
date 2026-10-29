@@ -494,51 +494,61 @@ jobs:
           Remove-Item -Force $marker -ErrorAction SilentlyContinue
           Write-Host 'Frozen EXE offline synthesis self-test PASSED.'
 
-          $marker = Join-Path $env:TEMP "RyuAudiobookStartupSmoke-$env:GITHUB_RUN_ID.json"
-          Remove-Item -Force $marker -ErrorAction SilentlyContinue
-          $env:RYU_STARTUP_SMOKE_MARKER = $marker
-          $proc = Start-Process -FilePath $exe -PassThru
-          $ready = $false
-          $deadline = (Get-Date).AddSeconds(90)
-          try {
-            while ((Get-Date) -lt $deadline) {
-              $proc.Refresh()
-              if ($proc.HasExited) {
-                throw "Frozen EXE exited before Premium V2 became ready (exit code $($proc.ExitCode))."
-              }
-              if (Test-Path -LiteralPath $marker -PathType Leaf) {
-                try {
-                  $startup = Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json
-                } catch {
-                  throw "Premium V2 startup smoke marker could not be parsed: $($_.Exception.Message)"
-                }
-                if ($startup.status -eq 'failed') {
-                  throw "The Premium V2 startup smoke reported failure: $($startup.detail)"
-                }
-                if ($startup.status -eq 'ready') {
-                  if ($startup.frontend -ne 'Premium V2') {
-                    throw "Startup marker reported the wrong interface: $($startup.frontend)"
-                  }
-                  $ready = $true
-                  Write-Host "Premium V2 startup readiness PASSED. Version=$($startup.version)"
-                  break
-                }
-              }
-              Start-Sleep -Milliseconds 500
-            }
-            if (-not $ready) {
-              $detail = if (Test-Path -LiteralPath $marker -PathType Leaf) {
-                Get-Content -LiteralPath $marker -Raw
-              } else {
-                'No startup-ready marker was written by the running application.'
-              }
-              throw "The Premium V2 startup smoke did not reach Premium V2 readiness within 90 seconds. $detail"
-            }
-          } finally {
-            $proc.Refresh()
-            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          for ($launchAttempt = 1; $launchAttempt -le 3; $launchAttempt++) {
+            $marker = Join-Path $env:TEMP "RyuAudiobookStartupSmoke-$env:GITHUB_RUN_ID-$launchAttempt.json"
             Remove-Item -Force $marker -ErrorAction SilentlyContinue
             Remove-Item Env:RYU_STARTUP_SMOKE_MARKER -ErrorAction SilentlyContinue
+            $env:RYU_STARTUP_SMOKE_MARKER = $marker
+            $proc = $null
+            $ready = $false
+            $startup = $null
+            try {
+              # Test the approved installed default explicitly on every fresh launch.
+              $env:RYU_UI_MODE = 'premium-v2'
+              $proc = Start-Process -FilePath $exe -PassThru
+              $deadline = (Get-Date).AddSeconds(90)
+              while ((Get-Date) -lt $deadline) {
+                $proc.Refresh()
+                if ($proc.HasExited) {
+                  throw "Frozen EXE exited before Premium V2 became ready on launch $launchAttempt/3 (exit code $($proc.ExitCode))."
+                }
+                if (Test-Path -LiteralPath $marker -PathType Leaf) {
+                  try {
+                    $startup = Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json
+                  } catch {
+                    throw "Premium V2 startup smoke marker for launch $launchAttempt/3 could not be parsed: $($_.Exception.Message)"
+                  }
+                  if ($startup.status -eq 'failed') {
+                    throw "The Premium V2 startup smoke reported failure on launch $launchAttempt/3: $($startup.detail)"
+                  }
+                  if ($startup.status -eq 'ready') {
+                    if ($startup.frontend -ne 'Premium V2') {
+                      throw "Startup marker for launch $launchAttempt/3 reported the wrong interface: $($startup.frontend)"
+                    }
+                    $ready = $true
+                    Write-Host "Premium V2 startup readiness PASSED for launch $launchAttempt/3. Version=$($startup.version)"
+                    break
+                  }
+                }
+                Start-Sleep -Milliseconds 500
+              }
+              if (-not $ready) {
+                $detail = if (Test-Path -LiteralPath $marker -PathType Leaf) {
+                  Get-Content -LiteralPath $marker -Raw
+                } else {
+                  'No startup-ready marker was written by the running application.'
+                }
+                throw "The Premium V2 startup smoke did not reach Premium V2 readiness on launch $launchAttempt/3 within 90 seconds. $detail"
+              }
+            } finally {
+              if ($null -ne $proc) {
+                $proc.Refresh()
+                if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+              }
+              Remove-Item -Force $marker -ErrorAction SilentlyContinue
+              Remove-Item Env:RYU_STARTUP_SMOKE_MARKER -ErrorAction SilentlyContinue
+              Remove-Item Env:RYU_UI_MODE -ErrorAction SilentlyContinue
+            }
           }
 
       - name: Verify bundled voice assets and critical modules
