@@ -46,21 +46,21 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         self.assertNotIn("call('production.preview'", branch)
 
 
-    def test_scene_cue_is_independent_of_opening_chapter_closing_toggle(self):
+    def test_scene_transition_is_not_a_fixed_cue_assignment(self):
         assembler = Path("app/audio/assembler.py").read_text(encoding="utf-8")
         host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        preview = Path("app/ui/full_book_preview.py").read_text(encoding="utf-8")
 
-        # Scene cues are handled in their own manual/off pass, so assigning
-        # only a scene cue does not turn on unrelated opening/page/closing cues.
-        self.assertIn(
-            'if effective_audio_mode in {"manual", "off"} and scene_transition_cue_path:',
+        self.assertNotIn(
+            'if effective_audio_mode == "manual" and scene_transition_cue_path:',
             assembler,
         )
         self.assertIn(
-            'state["chapter_transition_sound"] = any(cues.get(key) for key in ("opening", "chapter", "closing"))',
+            'if slot not in {"opening", "chapter", "closing"}:',
             host,
         )
-        self.assertIn('scene_transition_cue_path=Path(str(state["scene_transition_cue_path"]))', Path("app/ui/full_book_preview.py").read_text(encoding="utf-8"))
+        self.assertNotIn('scene_transition_cue_path=Path(state["scene_transition_cue_path"])', host)
+        self.assertNotIn('scene_transition_cue_path=Path(str(state["scene_transition_cue_path"]))', preview)
 
     def test_chapter_bgm_mixer_preserves_timeline_and_applies_offset_and_fades(self):
         from tempfile import TemporaryDirectory

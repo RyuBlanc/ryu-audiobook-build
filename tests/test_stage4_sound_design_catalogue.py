@@ -92,6 +92,12 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         host.PremiumV2Bridge._sound_cues_clear(self.bridge_a, {})
         self.assertIsNone(host.PremiumV2Bridge._sound_cues_get(self.bridge_a, {})["opening"]["path"])
 
+    def test_scene_transition_slot_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Opening, Next Chapter, or Closing"):
+            host.PremiumV2Bridge._sound_cues_save(
+                self.bridge_a, {"slot": "scene", "path": ""}
+            )
+
     def test_catalogue_uses_sidecar_title_license_and_duration(self):
         track = _valid_wav(self.app_root / "Audio Library" / "custom.wav")
         track.with_name(track.name + ".license.json").write_text(json.dumps({
