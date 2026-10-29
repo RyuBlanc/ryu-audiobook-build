@@ -5549,6 +5549,7 @@ class PremiumV2Bridge(QObject):
             preferred = path or str(state.get("background_audio_path") or state.get("background_audio_preferred_path") or "").strip()
             state.update({"background_audio_path": "", "background_audio_preferred_path": preferred,
                           "background_audio_mode": "off", "background_audio_enabled": False})
+        state["background_audio_volume"] = volume
         state["background_audio_fade_in"] = fade_in
         state["background_audio_fade_out"] = fade_out
         state["narration_audio_volume"] = narration_volume
