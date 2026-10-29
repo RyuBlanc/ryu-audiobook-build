@@ -128,6 +128,25 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
         self.assertIn("The Premium V2 startup smoke reported failure", workflow)
         self.assertNotIn("Start-Sleep -Seconds 12", workflow)
 
+    def test_packaged_startup_smoke_uses_the_environment_free_default_ui_mode(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        smoke_start = workflow.index(
+            'for ($launchAttempt = 1; $launchAttempt -le 3; $launchAttempt++)'
+        )
+        smoke_end = workflow.index(
+            "\n      - name: Verify bundled voice assets and critical modules",
+            smoke_start,
+        )
+        smoke = workflow[smoke_start:smoke_end]
+        launch = smoke.index("$proc = Start-Process -FilePath $exe -PassThru")
+        before_launch = smoke[:launch]
+        self.assertIn(
+            "Remove-Item Env:RYU_UI_MODE -ErrorAction SilentlyContinue",
+            before_launch,
+            "Each launch must exercise the application's actual default UI mode.",
+        )
+        self.assertNotIn("$env:RYU_UI_MODE = 'premium-v2'", before_launch)
+
     def test_packaged_startup_smoke_repeats_three_clean_launch_cycles(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(
