@@ -48,12 +48,15 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
 
     def test_scene_transition_is_not_a_fixed_cue_assignment(self):
         assembler = Path("app/audio/assembler.py").read_text(encoding="utf-8")
+        manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
         host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         preview = Path("app/ui/full_book_preview.py").read_text(encoding="utf-8")
 
-        block_start = assembler.index("# Fixed Scene Transition assignment")
-        block_end = assembler.index("# Story-aware SFX", block_start)
-        self.assertNotIn("scene_transition_cue_path", assembler[block_start:block_end])
+        # Scene Transition is no longer an assembly input at all. Fixed cue
+        # slots are exactly Opening, Next Chapter, and Closing.
+        self.assertNotIn("scene_transition_cue_path", assembler)
+        self.assertNotIn('scene_cue = _resolve_cue_audio(temp_dir, "scene"', assembler)
+        self.assertNotIn("scene_transition_cue_path=self.scene_transition_cue_path", manager)
         self.assertIn('if slot not in {"opening", "chapter", "closing"}:', host)
         self.assertNotIn("scene_transition_cue_path=Path(state[", host)
         self.assertNotIn("scene_transition_cue_path=Path(str(state[", preview)
