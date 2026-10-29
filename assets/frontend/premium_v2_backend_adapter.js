@@ -6277,8 +6277,27 @@
         scheduleLibrarySearchRefresh();
       } else if (e.target?.id === 'advancedMusicVolume') {
         e.stopImmediatePropagation();
+        mixLevelsDirty = true;
         const valueNode = $('advancedMusicVolumeValue');
         if (valueNode) valueNode.textContent = Math.round(Number(e.target.value || 0)) + '%';
+        renderSoundMixSummary();
+      } else if (e.target?.id === 'chapterVolume') {
+        e.stopImmediatePropagation();
+        chapterBgmDraftDirty = true;
+        const valueNode = $('chapterVolumeValue');
+        if (valueNode) valueNode.textContent = Math.round(Number(e.target.value || 0)) + '%';
+      } else if (e.target?.id === 'narrationVolume') {
+        e.stopImmediatePropagation();
+        mixLevelsDirty = true;
+        const valueNode = $('narrationVolumeValue');
+        if (valueNode) valueNode.textContent = Math.round(Number(e.target.value || 0)) + '%';
+        renderSoundMixSummary();
+      } else if (e.target?.id === 'cueVolume') {
+        e.stopImmediatePropagation();
+        mixLevelsDirty = true;
+        const valueNode = $('cueVolumeValue');
+        if (valueNode) valueNode.textContent = Math.round(Number(e.target.value || 0)) + '%';
+        renderSoundMixSummary();
       } else if (e.target?.id === 'soundTrackSearch') {
         e.stopImmediatePropagation();
         scheduleSoundSearchRefresh();
@@ -6287,7 +6306,46 @@
         scheduleCueSearchRefresh();
       }
     }, true);
+    document.addEventListener('change', async e => {
+      if (e.target?.id === 'chapterStartOffset' || e.target?.id === 'chapterEndBehavior') {
+        chapterBgmDraftDirty = true;
+        return;
+      }
+      if (['advancedMusicVolume','narrationVolume','cueVolume'].includes(e.target?.id)) {
+        e.stopImmediatePropagation();
+        mixLevelsDirty = true;
+        try {
+          await saveSoundMixLevels();
+          message('Narration, cue, and BGM levels saved for preview and final generation.');
+        } catch (error) {
+          const status = $('mixLevelsSaveState');
+          if (status) status.textContent = 'Save failed. The current level values have not been confirmed as saved.';
+          message(error?.message || String(error), true);
+        }
+      }
+    });
     document.addEventListener('click', async e => {
+      const soundTab = e.target.closest('#sound .sound-tabs [data-sound-tab]');
+      if (soundTab) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        const nextView = soundTab.dataset.soundTab;
+        const currentView = document.querySelector('#sound .sound-tabs [data-sound-tab].active')?.dataset.soundTab || 'music';
+        try {
+          if (currentView === 'chapters' && nextView !== 'chapters') await saveCurrentChapterBgmDraft();
+          document.querySelectorAll('#sound .sound-tabs [data-sound-tab]').forEach(button => button.classList.toggle('active', button === soundTab));
+          document.querySelectorAll('#sound .sound-view[data-sound-view]').forEach(view => view.classList.toggle('active', view.dataset.soundView === nextView));
+          if (nextView === 'music') await refreshSounds();
+          else if (nextView === 'chapters') await refreshChapterBgm();
+          else if (nextView === 'cues') await refreshSoundCues();
+          else if (nextView === 'mix') {
+            await refreshChapterBgm();
+            renderSoundMixSummary();
+          }
+        } catch (error) {
+          message(error?.message || String(error), true);
+        }
+        return;
+      }
       const bgmMasterToggle = e.target.closest('#sound [data-bgm-enabled]');
       if (bgmMasterToggle) {
         e.preventDefault(); e.stopImmediatePropagation();
@@ -6297,14 +6355,17 @@
         const path = chapterBased ? '' : defaultPath;
         const currentVolume = $('advancedMusicVolume')?.value;
         const volume = currentVolume == null
-          ? Number(chapterBgmState.default_volume ?? 0.18)
-          : Number(currentVolume) / 100;
+          ? Math.max(0, Math.min(0.50, Number(chapterBgmState.default_volume ?? 0.18)))
+          : Math.max(0, Math.min(0.50, Number(currentVolume) / 100));
         try {
           await call('sound.save_manifest', {
             path, enabled, volume,
+            narration_volume:Number($('narrationVolume')?.value ?? Math.round(Number(chapterBgmState.narration_volume ?? 1) * 100))/100,
+            cue_volume:Number($('cueVolume')?.value ?? Math.round(Number(chapterBgmState.cue_volume ?? 0.25) * 100))/100,
             fade_in_seconds:fadeSeconds('bgmFadeIn'),
             fade_out_seconds:fadeSeconds('bgmFadeOut')
           });
+          mixLevelsDirty = false;
           await refreshChapterBgm();
           await refreshSoundCues();
           message(enabled
@@ -6321,17 +6382,23 @@
       const chapterBgmItem = e.target.closest('#chapterBgmList [data-chapter-bgm]');
       if (chapterBgmItem) {
         e.preventDefault(); e.stopImmediatePropagation();
-        selectedBgmChapter = Number(chapterBgmItem.dataset.chapterBgm);
-        renderChapterBgm();
+        try {
+          await saveCurrentChapterBgmDraft();
+          selectedBgmChapter = Number(chapterBgmItem.dataset.chapterBgm);
+          renderChapterBgm();
+        } catch (error) { message(error?.message || String(error), true); }
         return;
       }
       const chapterStrategy = e.target.closest('#sound [data-bgm-strategy]');
       if (chapterStrategy) {
         e.preventDefault(); e.stopImmediatePropagation();
         try {
+          await saveCurrentChapterBgmDraft();
           await call('sound.chapter_bgm.save', {strategy:chapterStrategy.dataset.bgmStrategy});
           await refreshChapterBgm();
-          message(chapterBgmState.strategy === 'same' ? 'Same book-wide BGM strategy saved; chapter overrides cleared.' : 'Chapter-based BGM strategy enabled.');
+          message(chapterBgmState.strategy === 'same'
+            ? 'Same book-wide BGM strategy saved; chapter assignments were preserved for switching back.'
+            : 'Chapter-based BGM strategy enabled; saved chapter assignments are available.');
         } catch (err) { message(err?.message || String(err), true); }
         return;
       }
@@ -6339,6 +6406,7 @@
       if (chapterRuleButton) {
         e.preventDefault(); e.stopImmediatePropagation();
         document.querySelectorAll('#sound .chapter-rule [data-chapter-rule]').forEach(b => b.classList.toggle('active', b === chapterRuleButton));
+        chapterBgmDraftDirty = true;
         return;
       }
       const chapterTrack = e.target.closest('#chapterTrackPicker [data-chapter-track]');
@@ -6346,25 +6414,13 @@
         e.preventDefault(); e.stopImmediatePropagation();
         selectedBgmTrackPath = chapterTrack.dataset.chapterTrack;
         document.querySelectorAll('#chapterTrackPicker [data-chapter-track]').forEach(b => b.classList.toggle('active', b === chapterTrack));
+        chapterBgmDraftDirty = true;
         return;
       }
       if (e.target.closest('#saveChapterBgm')) {
         e.preventDefault(); e.stopImmediatePropagation();
         try {
-          const chapterBased = ['custom', 'chapter-based', 'chapter_based'].includes(chapterBgmState.strategy || 'same');
-          if (!chapterBased) throw new Error('Switch to Chapter-Based BGM before saving a chapter assignment.');
-          let rule = document.querySelector('#sound .chapter-rule [data-chapter-rule].active')?.dataset.chapterRule || 'none';
-          if (rule === 'default') rule = 'none';
-          if (rule === 'custom' && !selectedBgmTrackPath) throw new Error('Choose a custom music track for this chapter first.');
-          const selects = document.querySelectorAll('#sound [data-sound-view="chapters"] .chapter-mix-row select');
-          const startOffset = ['immediate','after_first_paragraph','after_10_seconds'][selects[0]?.selectedIndex || 0];
-          const endBehavior = ['fade_before_end','continue_to_transition','stop_immediately'][selects[1]?.selectedIndex || 0];
-          await call('sound.chapter_bgm.save', {
-            number:selectedBgmChapter, rule, path:rule === 'custom' ? selectedBgmTrackPath : null,
-            volume:Number($('chapterVolume')?.value || 18)/100,
-            start_offset:startOffset, end_behavior:endBehavior
-          });
-          await refreshChapterBgm();
+          await saveCurrentChapterBgmDraft(true);
           message('Saved BGM assignment for Chapter ' + selectedBgmChapter + '.');
         } catch (err) { message(err?.message || String(err), true); }
         return;
