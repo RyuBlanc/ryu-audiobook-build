@@ -6639,7 +6639,7 @@
               audio.play().catch(err => { stopSoundPreview(); message(err?.message || 'Cue sequence playback failed.', true); });
             };
             playNext();
-            message('Playing saved cue clips in book order.');
+            message('Playing assigned cue clips in book order.');
 
           } else if (soundButton.id === 'soundPreviewBook') {
             stopSoundPreview();
