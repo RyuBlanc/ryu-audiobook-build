@@ -659,7 +659,11 @@ class PremiumV2Bridge(QObject):
         )
         # Narrator is book metadata; readiness requires a selected, saved TTS voice profile.
         narrator_ready = bool(str(state.get("voice_profile") or "").strip())
-        output_configured = bool(output_value)
+        output_target_value = str(state.get("generation_target_path") or output_value or "").strip()
+        if not output_target_value:
+            safe_output_stem = re.sub(r'[<>:"/\\|?*]+', "_", project.title).strip() or "Audiobook"
+            output_target_value = str(audiobooks_root() / (safe_output_stem + ".m4b"))
+        output_configured = bool(output_target_value)
         pronunciation_rules = (
             state.get("pronunciation_dictionary")
             or state.get("pronunciation_rules")
@@ -737,8 +741,15 @@ class PremiumV2Bridge(QObject):
             "completed": bool(completed),
             "cover_path": str(cover) if cover else None,
             "author": str(state.get("author") or ""),
+            "publisher": str(state.get("publisher") or ""),
+            "series": str(state.get("series") or ""),
+            "language": str(state.get("language") or ""),
+            "year": str(state.get("year") or ""),
+            "genre": str(state.get("genre") or ""),
+            "audio_bitrate": int(state.get("audio_bitrate") or 256),
             "narrator": str(state.get("narrator") or state.get("voice_profile") or ""),
             "voice_profile": str(state.get("voice_profile") or ""),
+            "output_target_path": output_target_value,
             "narrator_voice_configured": narrator_ready,
             "character_count": len(character_names),
             "character_voice_count": character_voice_count,
@@ -5929,6 +5940,7 @@ class PremiumV2Bridge(QObject):
             "window_size": self.settings.value("ui/window_size", "auto"),
             "storage_root": str(app_root()),
             "library_root": str(library_root()),
+            "output_root": str(audiobooks_root()),
         }
 
 
