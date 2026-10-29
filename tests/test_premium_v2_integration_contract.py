@@ -135,7 +135,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "pronunciation.save", "pronunciation.analyze", "production.preview",
             "production.generate_book", "player.get_active", "job.list", "job.pause", "job.resume",
             "job.cancel", "settings.save", "sound.catalog", "sound.import", "sound.assign", "sound.save_manifest",
-            "sound.cues.get", "sound.cues.save", "sound.cues.clear", "sound.chapter_bgm.get", "sound.chapter_bgm.save", "models.install",
+            "sound.cues.get", "sound.cues.save", "sound.chapter_bgm.get", "sound.chapter_bgm.save", "models.install",
         ):
             self.assertIn(command, script)
         self.assertIn('adapter_path = frontend_path().with_name("premium_v2_backend_adapter.js")', self.host)
@@ -154,6 +154,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("async function refreshHistory()", script)
         self.assertIn("async function refreshModels()", script)
         self.assertIn("call('diagnostics.check')", script)
+        self.assertIn("pendingCueAssignments[slot] = null", script)
+        self.assertNotIn("call('sound.cues.clear')", script)
         self.assertIn("call('models.install'", script)
         self.assertIn("qwen_mode:provider === 'qwen-character' ? qwenMode", script)
         self.assertIn("qwen_prompt:choice === 'voicedesign' ? designPrompt", script)
