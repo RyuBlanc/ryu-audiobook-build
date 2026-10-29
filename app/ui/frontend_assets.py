@@ -58,9 +58,11 @@ def prepare_native_host_html(source: str, base_url: str | None = None) -> str:
     if not isinstance(source, str) or not source.strip():
         raise FrontendAssetError("Premium V2 HTML is empty or unreadable.")
 
+    # Accept both source formatting variants seen in approved HTML revisions,
+    # while only changing the prototype timer that hides this loader.
     source, timer_count = re.subn(
-        r"setTimeout\s*\(\s*finish\s*,\s*1700\s*\)",
-        "if (!window.__ryuNativeHost) setTimeout(finish,1700)",
+        r"setTimeout\s*\(\s*finish\s*,\s*1700\s*\)\s*;?",
+        lambda match: "if (!window.__ryuNativeHost) setTimeout(finish,1700)",
         source,
         count=1,
     )
