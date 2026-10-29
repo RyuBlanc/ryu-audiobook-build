@@ -3506,6 +3506,11 @@
     setText('mixBgmStatus', !masterEnabled ? 'Voice only' : (hasActiveBgm ? 'Enabled' : 'Enabled · no BGM track assigned'));
     const defaultLabel = !defaultPath ? 'Not assigned' : (!defaultAvailable || !defaultTrack ? 'Missing track' : defaultTrack.title);
     setText('mixDefaultTrack', chapterBased ? 'Not used · Chapter-Based BGM' : defaultLabel);
+    const mixBgmInput = $('mixBgmVolume');
+    if (mixBgmInput) mixBgmInput.disabled = chapterBased;
+    setText('mixBgmVolumeHelp', chapterBased
+      ? 'Not applied in Chapter-Based BGM. Use the chapter-level volume for each assigned track.'
+      : 'Applies to the single book-default track throughout the story.');
     setText('mixStrategy', chapterBased ? 'Chapter-Based BGM' : 'Same BGM');
     setText('mixOverrides', assignedOverrideCount + ' chapters');
     const cueLabel = slot => {
@@ -3558,13 +3563,11 @@
     }
     const uniqueChapterTracks = [...new Set(activeChapterRows.map(item => String(item.path || '')).filter(Boolean))];
     const noBgmChapterCount = rowsCountForChapterSummary(overrides, chapterBgmState.chapters || chapters);
-    setText('productionMusicSummary', hasActiveBgm && masterEnabled
-      ? (chapterBased
+    setText('productionMusicSummary', !masterEnabled
+      ? 'Voice Only · BGM disabled'
+      : (chapterBased
         ? 'Chapter-Based BGM (' + uniqueChapterTracks.length + ' unique tracks; ' + noBgmChapterCount + ' No BGM chapters)'
-        : (defaultTrack?.title || 'Book BGM'))
-      : (masterEnabled
-        ? (chapterBased ? 'Chapter-Based BGM (0 unique tracks; all unassigned chapters use No BGM)' : 'No BGM track assigned')
-        : 'Voice Only · BGM disabled'));
+        : (hasActiveBgm ? (defaultTrack?.title || 'Book BGM') : 'No BGM track assigned')));
     setText('productionPreviewMix', outputDescription);
     setText('productionFinalMix', !masterEnabled ? 'Voice Only' : (chapterBased ? 'Chapter-Based BGM' : 'Same BGM'));
   }
