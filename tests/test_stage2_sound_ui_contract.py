@@ -150,6 +150,26 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("target_kind: soundButton.id === 'importMusicTracks' ? 'music' : 'cue'", self.adapter)
 
 
+    def test_bundled_cue_roles_are_normalized_and_not_shown_as_music(self):
+        self.assertIn('role = "cue" if role_value in {"opening", "page", "ending", "closing", "chapter"} else role_value', self.host)
+        self.assertIn("const isCue = String(t.role || t.metadata?.role || 'music').toLowerCase() === 'cue';", self.adapter)
+        self.assertIn("return isCue && (!query || text.includes(query))", self.adapter)
+
+    def test_returning_to_same_bgm_restores_saved_book_default_track(self):
+        start = self.host.index("    def _sound_chapter_bgm_save(")
+        end = self.host.index("    def _sound_cues_get(", start)
+        method = self.host[start:end]
+        self.assertIn('preferred = str(state.get("background_audio_path") or state.get("background_audio_preferred_path") or "").strip()', method)
+        self.assertIn("if master_enabled and preferred and preferred in catalog_paths and Path(preferred).is_file():", method)
+        self.assertIn('state["background_audio_path"] = preferred', method)
+
+    def test_cue_assignment_rejects_music_and_long_assets(self):
+        start = self.host.index("    def _sound_cues_save(")
+        end = self.host.index("    def _sound_cues_clear(", start)
+        method = self.host[start:end]
+        self.assertIn('str(row.get("role") or "music").casefold() != "cue"', method)
+        self.assertIn("if float(duration_seconds) > 5.0:", method)
+
 
 if __name__ == "__main__":
     unittest.main()
