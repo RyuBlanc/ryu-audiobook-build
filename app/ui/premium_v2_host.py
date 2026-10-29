@@ -4061,7 +4061,6 @@ class PremiumV2Bridge(QObject):
             opening_cue_path=Path(state["opening_cue_path"]) if state.get("opening_cue_path") else None,
             page_turn_cue_path=Path(state["page_turn_cue_path"]) if state.get("page_turn_cue_path") else None,
             ending_cue_path=Path(state["ending_cue_path"]) if state.get("ending_cue_path") else None,
-            scene_transition_cue_path=Path(state["scene_transition_cue_path"]) if state.get("scene_transition_cue_path") else None,
             chapter_bgm_overrides=state.get("chapter_bgm_overrides") if isinstance(state.get("chapter_bgm_overrides"), dict) else {},
             chapter_bgm_strategy=str(state.get("chapter_bgm_strategy") or ("custom" if state.get("chapter_bgm_overrides") else "same")),
         )
@@ -5621,12 +5620,11 @@ class PremiumV2Bridge(QObject):
             cues = {
                 "opening": state.get("opening_cue_path"),
                 "chapter": state.get("page_turn_cue_path"),
-                "scene": state.get("scene_transition_cue_path"),
                 "closing": state.get("ending_cue_path"),
             }
         catalog = {str(row["path"]): row for row in self._sound_catalog({})}
         result = {}
-        for slot in ("opening", "chapter", "scene", "closing"):
+        for slot in ("opening", "chapter", "closing"):
             raw = cues.get(slot)
             path = str(raw).strip() if raw else ""
             row = catalog.get(path)
@@ -5637,8 +5635,8 @@ class PremiumV2Bridge(QObject):
     def _sound_cues_save(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Persist one cue assignment and update the supported generation cue fields."""
         slot = str(payload.get("slot") or "").strip().lower()
-        if slot not in {"opening", "chapter", "scene", "closing"}:
-            raise ValueError("Choose opening, chapter, scene, or closing cue.")
+        if slot not in {"opening", "chapter", "closing"}:
+            raise ValueError("Choose Opening, Next Chapter, or Closing audio.")
         raw = str(payload.get("path") or "").strip()
         selected_path = None
         selected_title = None
@@ -5656,11 +5654,10 @@ class PremiumV2Bridge(QObject):
             cues = {
                 "opening": state.get("opening_cue_path"),
                 "chapter": state.get("page_turn_cue_path"),
-                "scene": state.get("scene_transition_cue_path"),
                 "closing": state.get("ending_cue_path"),
             }
         cues[slot] = selected_path
-        state["sound_cues"] = cues
+        state["sound_cues"] = {key: cues.get(key) for key in ("opening", "chapter", "closing")}
         state["chapter_transition_sound"] = any(cues.get(key) for key in ("opening", "chapter", "closing"))
         # Keep the legacy fields synchronized with the saved cue manifest; the
         # production assembler consumes all four cue paths, including scene transitions.
@@ -5670,10 +5667,6 @@ class PremiumV2Bridge(QObject):
             state["page_turn_cue_path"] = selected_path
         elif slot == "closing":
             state["ending_cue_path"] = selected_path
-        else:
-            # Scene transitions are mixed independently from the
-            # opening/chapter/closing cue toggle.
-            state["scene_transition_cue_path"] = selected_path
         state["modified_at"] = self._now()
         save_state(project.folder, state)
         return {"saved": True, "slot": slot, "path": selected_path, "title": selected_title,
@@ -5682,7 +5675,7 @@ class PremiumV2Bridge(QObject):
     def _sound_cues_clear(self, _payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
         state = load_state(project.folder)
-        state["sound_cues"] = {"opening": None, "chapter": None, "scene": None, "closing": None}
+        state["sound_cues"] = {"opening": None, "chapter": None, "closing": None}
         state["opening_cue_path"] = None
         state["page_turn_cue_path"] = None
         state["scene_transition_cue_path"] = None
@@ -5690,7 +5683,7 @@ class PremiumV2Bridge(QObject):
         state["chapter_transition_sound"] = False
         state["modified_at"] = self._now()
         save_state(project.folder, state)
-        return {"saved": True, "cleared": ["opening", "chapter", "scene", "closing"]}
+        return {"saved": True, "cleared": ["opening", "chapter", "closing"]}
 
     @Slot(str, result=bool)
     def report_frontend_diagnostic(self, payload_json: str) -> bool:

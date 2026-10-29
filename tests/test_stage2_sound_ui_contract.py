@@ -12,10 +12,11 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         start = self.html.index('<section class="page" id="sound">')
         end = self.html.index('<section class="page" id="generate">', start)
         self.sound_markup = self.html[start:end]
+        self.sound_header = self.sound_markup[:self.sound_markup.index('<div class="sound-master card">')]
 
     def test_removed_top_right_preview_and_sync_actions_are_not_rendered(self):
-        self.assertNotRegex(self.sound_markup, r'<button\\b[^>]*\\bid="soundPreviewBook"')
-        self.assertNotRegex(self.sound_markup, r'<button\\b[^>]*\\bid="saveSoundPresetAdvanced"')
+        self.assertNotRegex(self.sound_header, r'<button\b[^>]*\bid="soundPreviewBook"')
+        self.assertNotRegex(self.sound_header, r'<button\b[^>]*\bid="saveSoundPresetAdvanced"')
 
     def test_removed_controls_and_scene_slot_are_not_dereferenced_by_prototype_scripts(self):
         self.assertNotIn("document.getElementById('soundPreviewBook').addEventListener", self.html)

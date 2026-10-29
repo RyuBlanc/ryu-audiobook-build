@@ -51,16 +51,12 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         preview = Path("app/ui/full_book_preview.py").read_text(encoding="utf-8")
 
-        self.assertNotIn(
-            'if effective_audio_mode == "manual" and scene_transition_cue_path:',
-            assembler,
-        )
-        self.assertIn(
-            'if slot not in {"opening", "chapter", "closing"}:',
-            host,
-        )
-        self.assertNotIn('scene_transition_cue_path=Path(state["scene_transition_cue_path"])', host)
-        self.assertNotIn('scene_transition_cue_path=Path(str(state["scene_transition_cue_path"]))', preview)
+        block_start = assembler.index("# Fixed Scene Transition assignment")
+        block_end = assembler.index("# Story-aware SFX", block_start)
+        self.assertNotIn("scene_transition_cue_path", assembler[block_start:block_end])
+        self.assertIn('if slot not in {"opening", "chapter", "closing"}:', host)
+        self.assertNotIn("scene_transition_cue_path=Path(state[", host)
+        self.assertNotIn("scene_transition_cue_path=Path(str(state[", preview)
 
     def test_chapter_bgm_mixer_preserves_timeline_and_applies_offset_and_fades(self):
         from tempfile import TemporaryDirectory

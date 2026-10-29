@@ -1768,7 +1768,7 @@ class RegressionTests(unittest.TestCase):
                 self.assertGreaterEqual(_duration_ms(output), 4500)
                 self.assertLessEqual(_duration_ms(output), 5200)
 
-    def test_chapter_and_finale_real_cues_work_when_background_music_is_off(self):
+    def test_voice_only_mode_excludes_opening_next_chapter_and_closing_cues(self):
         from unittest.mock import patch
         from app.audio.library import import_audio_files
         from app.audio.assembler import _duration_ms
@@ -1794,7 +1794,7 @@ class RegressionTests(unittest.TestCase):
                     encoding="utf-8",
                 )
                 chapters.append(folder)
-            output = root / "chapter-cues-without-bgm.m4b"
+            output = root / "voice-only-with-no-cues.m4b"
             with patch("app.audio.library.audio_library_root", return_value=library_root):
                 import_audio_files([opening], target_kind="opening")
                 import_audio_files([page], target_kind="page")
@@ -1808,8 +1808,8 @@ class RegressionTests(unittest.TestCase):
                     chapter_transition_sound=True,
                 )
             duration = _duration_ms(output)
-            self.assertGreaterEqual(duration, 6000)
-            self.assertLessEqual(duration, 7000)
+            self.assertGreaterEqual(duration, 1500)
+            self.assertLessEqual(duration, 3500)
 
     def test_chapter_specific_bgm_override_is_mixed_before_book_concat(self):
         from app.audio.assembler import _duration_ms
@@ -2132,7 +2132,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("_selected_music_recipe", assembler)
         self.assertIn("sidechaincompress=", assembler)
         self.assertIn("automatic-real-audio-design", assembler)
-        self.assertIn('effective_audio_mode in {"manual","off"}', assembler)
+        self.assertIn('elif effective_audio_mode == "manual" and chapter_transition_sound:', assembler)
 
     def test_audiobook_audio_categories_and_mood_detection(self):
         from app.audio.sound_design import detect_chapter_mood

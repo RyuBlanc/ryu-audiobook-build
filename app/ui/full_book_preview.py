@@ -135,7 +135,6 @@ def _render_full_book_preview(host, job_id, project, chapter_dirs, chapter_title
             opening_cue_path=Path(str(state["opening_cue_path"])) if state.get("opening_cue_path") else None,
             page_turn_cue_path=Path(str(state["page_turn_cue_path"])) if state.get("page_turn_cue_path") else None,
             ending_cue_path=Path(str(state["ending_cue_path"])) if state.get("ending_cue_path") else None,
-            scene_transition_cue_path=Path(str(state["scene_transition_cue_path"])) if state.get("scene_transition_cue_path") else None,
             chapter_bgm_overrides=state.get("chapter_bgm_overrides")
                 if isinstance(state.get("chapter_bgm_overrides"), dict) else {},
             chapter_bgm_strategy=str(state.get("chapter_bgm_strategy") or ("custom" if state.get("chapter_bgm_overrides") else "same")),

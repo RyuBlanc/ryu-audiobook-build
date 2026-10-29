@@ -318,7 +318,7 @@
   // whose actions are handled by the real backend adapter; visual markup is unchanged.
   ['importMusicTracks','importCueClips','previewSelectedTrack','setBookDefaultTrack',
    'saveChapterBgm','previewCueSequence','clearAllCues','soundPreviewBook',
-   'saveSoundPresetAdvanced','applySoundToProduction'].forEach(id => {
+   'applySoundToProduction'].forEach(id => {
     const node = $(id);
     if (node?.parentNode) node.replaceWith(node.cloneNode(true));
   });
@@ -6190,7 +6190,7 @@
         } catch (err) { message(err?.message || String(err), true); }
         return;
       }
-      const soundButton = e.target.closest('#importMusicTracks, #importCueClips, #previewSelectedTrack, #setBookDefaultTrack, #saveSoundPresetAdvanced, #applySoundToProduction, #soundPreviewBook, #previewCueSequence, #clearAllCues, #saveChapterBgm');
+      const soundButton = e.target.closest('#importMusicTracks, #importCueClips, #previewSelectedTrack, #setBookDefaultTrack, #applySoundToProduction, #soundPreviewBook, #previewCueSequence, #clearAllCues, #saveChapterBgm');
       if (soundButton) {
         e.preventDefault(); e.stopImmediatePropagation();
         try {
@@ -6216,10 +6216,6 @@
             await call('sound.assign', {path:selectedSoundPath,volume:Number($('advancedMusicVolume')?.value ?? 18)/100,fade_in_seconds:fadeSeconds('bgmFadeIn'),fade_out_seconds:fadeSeconds('bgmFadeOut')});
             await refreshChapterBgm();
             message('Book default background track saved.');
-          } else if (soundButton.id === 'saveSoundPresetAdvanced') {
-            const result = await call('sound.save_manifest', {path:selectedSoundPath || '',enabled:Boolean(selectedSoundPath),volume:Number($('advancedMusicVolume')?.value ?? 18)/100,fade_in_seconds:fadeSeconds('bgmFadeIn'),fade_out_seconds:fadeSeconds('bgmFadeOut')});
-            await refreshChapterBgm();
-            message(result.enabled ? 'Book sound manifest saved.' : 'Book sound manifest saved with background music disabled.');
           } else if (soundButton.id === 'applySoundToProduction') {
             await call('sound.save_manifest', {path:selectedSoundPath || '',enabled:Boolean(selectedSoundPath),volume:Number($('advancedMusicVolume')?.value ?? 18)/100,fade_in_seconds:fadeSeconds('bgmFadeIn'),fade_out_seconds:fadeSeconds('bgmFadeOut')});
             await refreshChapterBgm();
@@ -6230,9 +6226,9 @@
             await call('sound.cues.clear');
             pendingCueSlot = null;
             await refreshSoundCues();
-            message('All book cue assignments cleared.');
+            message('Opening, next-chapter, and closing cue assignments cleared.');
           } else if (soundButton.id === 'previewCueSequence') {
-            const sequence = ['opening','chapter','scene','closing'].map(slot => cueAssignments[slot]?.path).filter(Boolean);
+            const sequence = ['opening','chapter','closing'].map(slot => cueAssignments[slot]?.path).filter(Boolean);
             if (!sequence.length) throw new Error('Assign at least one cue before previewing the sequence.');
             if (soundPreviewAudio) { soundPreviewAudio.pause(); soundPreviewAudio = null; }
             let index = 0;
