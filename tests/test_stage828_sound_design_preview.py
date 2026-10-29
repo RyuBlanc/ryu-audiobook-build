@@ -32,7 +32,7 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         for setting in (
             "background_audio_mode=", "background_audio_path=", "background_audio_volume=",
             "ambience_audio_path=", "ambience_audio_volume=", "chapter_transition_sound=",
-            "opening_cue_path=", "page_turn_cue_path=", "scene_transition_cue_path=",
+            "opening_cue_path=", "page_turn_cue_path=",
             "ending_cue_path=", "chapter_bgm_overrides=",
         ):
             self.assertIn(setting, source)

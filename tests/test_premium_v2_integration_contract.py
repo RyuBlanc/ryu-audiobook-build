@@ -470,13 +470,13 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         start = self.host.index("def _sound_cues_save")
         end = self.host.index("def _sound_cues_clear", start)
         worker = self.host[start:end]
-        self.assertIn('{"opening", "chapter", "scene", "closing"}', worker)
-        self.assertIn('state["sound_cues"] = cues', worker)
+        self.assertIn('{"opening", "chapter", "closing"}', worker)
+        self.assertIn('state["sound_cues"] = {key: cues.get(key) for key in ("opening", "chapter", "closing")}', worker)
         self.assertIn('state["opening_cue_path"] = selected_path', worker)
         self.assertIn('state["page_turn_cue_path"] = selected_path', worker)
         self.assertIn('state["ending_cue_path"] = selected_path', worker)
         self.assertIn('"generation_supported": True', worker)
-        self.assertIn('state["sound_cues"] = {"opening": None, "chapter": None, "scene": None, "closing": None}', self.host)
+        self.assertIn('state["sound_cues"] = {"opening": None, "chapter": None, "closing": None}', self.host)
 
 
     def test_settings_get_returns_saved_effects_preference(self):
