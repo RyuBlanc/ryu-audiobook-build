@@ -6472,13 +6472,18 @@
           ? Math.max(0, Math.min(0.50, Number(chapterBgmState.default_volume ?? 0.18)))
           : Math.max(0, Math.min(0.50, Number(currentVolume) / 100));
         try {
-          await call('sound.save_manifest', {
+          if (chapterBgmDraftDirty) await saveCurrentChapterBgmDraft();
+          if (cueSaveTimer) { clearTimeout(cueSaveTimer); cueSaveTimer = null; }
+          if (cueChangesDirty) await savePendingCueChanges({source:'manual'});
+          if (chapterBgmDraftDirty || cueChangesDirty) throw new Error('Sound Design changes remain unsaved. Resolve the save state before changing the global sound toggle.');
+          const manifest = await call('sound.save_manifest', {
             path, enabled, volume,
             narration_volume:Number($('narrationVolume')?.value ?? Math.round(Number(chapterBgmState.narration_volume ?? 1) * 100))/100,
             cue_volume:Number($('cueVolume')?.value ?? Math.round(Number(chapterBgmState.cue_volume ?? 0.25) * 100))/100,
             fade_in_seconds:fadeSeconds('bgmFadeIn'),
             fade_out_seconds:fadeSeconds('bgmFadeOut')
           });
+          if (!manifest || typeof manifest !== 'object' || !Object.prototype.hasOwnProperty.call(manifest, 'updated_at')) throw new Error('The backend did not confirm saving the sound configuration.');
           mixLevelsDirty = false;
           await refreshChapterBgm();
           await refreshSoundCues();
@@ -6676,7 +6681,8 @@
           const slot = pendingCueSlot;
           pendingCueSlot = null;
           await refreshSoundCues();
-          message('Draft cue selected for ' + slot + '. Use Save Cue Changes to persist this assignment.');
+          scheduleCueAutosave();
+          message('Draft cue selected for ' + slot + '. It will autosave; use Save Cue Changes to save immediately.');
         } else {
           message('Cue clip selected. Play it here, or choose Change beside a cue slot and then Save Cue Changes.');
         }
@@ -6696,7 +6702,8 @@
             await refreshChapterBgm();
             message('Imported ' + (result.imported || []).length + ' audio asset(s) into the local catalogue.');
           } else if (soundButton.id === 'saveCueChanges') {
-            const saved = await savePendingCueChanges();
+            if (cueSaveTimer) { clearTimeout(cueSaveTimer); cueSaveTimer = null; }
+            const saved = await savePendingCueChanges({source:'manual'});
             if (saved) {
               await refreshChapterBgm();
               message('Cue changes saved to the active book and ready for preview/final generation.');
@@ -6743,17 +6750,20 @@
             await refreshChapterBgm();
             message('Book default background track saved.');
           } else if (soundButton.id === 'applySoundToProduction') {
-            await saveCurrentChapterBgmDraft();
-            await savePendingCueChanges();
+            if (chapterBgmDraftDirty) await saveCurrentChapterBgmDraft();
+            if (cueSaveTimer) { clearTimeout(cueSaveTimer); cueSaveTimer = null; }
+            await savePendingCueChanges({source:'manual'});
+            if (cueChangesDirty || chapterBgmDraftDirty || mixLevelsDirty) throw new Error('Some Sound Design changes remain unsaved. Nothing was opened in Production Studio.');
             const chapterBased = ['custom', 'chapter-based', 'chapter_based', 'chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
-            await call('sound.save_manifest', {
+            const manifest = await call('sound.save_manifest', {
               path:chapterBased ? '' : (chapterBgmState.default_path || ''),
               enabled:Boolean(chapterBgmState.bgm_enabled),
-              volume:Math.max(0,Math.min(0.50,Number($('advancedMusicVolume')?.value ?? Math.round(Number(chapterBgmState.default_volume ?? 0.18) * 100))/100)),
+              volume:Math.max(0,Math.min(0.50,Number(document.activeElement?.id === 'mixBgmVolume' ? $('mixBgmVolume')?.value : $('advancedMusicVolume')?.value ?? Math.round(Number(chapterBgmState.default_volume ?? 0.18) * 100))/100)),
               narration_volume:Number($('narrationVolume')?.value ?? Math.round(Number(chapterBgmState.narration_volume ?? 1) * 100))/100,
               cue_volume:Number($('cueVolume')?.value ?? Math.round(Number(chapterBgmState.cue_volume ?? 0.25) * 100))/100,
               fade_in_seconds:fadeSeconds('bgmFadeIn'),fade_out_seconds:fadeSeconds('bgmFadeOut')
             });
+            if (!manifest || typeof manifest !== 'object' || !Object.prototype.hasOwnProperty.call(manifest, 'updated_at')) throw new Error('The backend did not confirm saving the sound configuration.');
             mixLevelsDirty = false;
             await refreshChapterBgm();
             await refreshSoundCues();
@@ -6766,7 +6776,8 @@
             for (const slot of ['opening','chapter','closing']) pendingCueAssignments[slot] = null;
             cueChangesDirty = true;
             await refreshSoundCues();
-            message('Clear-all is staged. Choose Save Cue Changes to remove the three saved cue assignments.');
+            scheduleCueAutosave();
+            message('Clear-all is staged and will autosave. Use Save Cue Changes to save immediately.');
           } else if (soundButton.id === 'previewCueSequence') {
             const sequence = ['opening','chapter','closing'].map(slot => cueAssignments[slot]?.path).filter(Boolean);
             if (!sequence.length) throw new Error('Assign at least one saved cue before previewing the sequence.');
