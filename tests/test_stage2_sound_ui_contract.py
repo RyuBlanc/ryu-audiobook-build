@@ -235,6 +235,17 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn('max="50"', mix[mix.index('id="mixBgmVolume"') - 100:mix.index('id="mixBgmVolume"') + 150])
         self.assertIn("setText('mixSavedState', anySoundDraft ? 'Unsaved changes' : (chapterBgmState.last_saved_at ? 'Saved' : 'Not saved'));", self.adapter)
 
+
+    def test_production_summary_counts_unique_chapter_tracks_and_no_bgm_chapters(self):
+        self.assertIn("const uniqueChapterTracks = [...new Set(activeChapterRows.map(item => String(item.path || '')).filter(Boolean))];", self.adapter)
+        self.assertIn("const noBgmChapterCount = rowsCountForChapterSummary(overrides, chapterBgmState.chapters || chapters);", self.adapter)
+        self.assertIn("'Chapter-Based BGM (' + uniqueChapterTracks.length + ' unique tracks; ' + noBgmChapterCount + ' No BGM chapters)'", self.adapter)
+        self.assertIn("Not used · Chapter-Based BGM", self.adapter)
+        self.assertIn('id="mixBgmVolumeHelp"', self.sound_markup)
+        self.assertIn("mixBgmInput.disabled = chapterBased", self.adapter)
+        self.assertIn("Not applied in Chapter-Based BGM. Use the chapter-level volume for each assigned track.", self.adapter)
+
+
     def test_cue_autosave_is_debounced_serialized_and_preserves_newer_edits(self):
         self.assertIn("function scheduleCueAutosave(delay = 650)", self.adapter)
         self.assertIn("if (cueSavePromise) {", self.adapter)
