@@ -371,3 +371,10 @@ Production Pause/Cancel is generation-type guarded. Chapter switching saves a pe
 - Patched the bridge IIFE to bind `const emit = window.__ryuEmitFrontendDiagnostic;` and added `test_bridge_iife_uses_the_exported_diagnostic_emitter` to enforce that the startup progress event is emitted before the adapter-ready event.
 - **Next gate:** rerun all regression tests and the exact frozen Windows launch. If the bridge still times out, improve the native/renderer probe rather than weakening startup readiness. No artifact is accepted until the EXE reaches `frontend-ready`, reports `Premium V2`, and the loader transitions into the workspace.
 
+### Stage 1 checkpoint #1605 failure analysis — 29 October 2026
+- [Build #1605](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40802090511) stopped in the test job; the artifact build was skipped. Result: 750 tests, one error.
+- Exact failing test: `test_native_host_base_url_is_escaped_and_loader_contract_is_required`. Its fixture used `setTimeout(finish,1700)` without a semicolon, while `prepare_native_host_html` only recognized the semicolon-terminated form. The shipped approved HTML uses the semicolon-free form, so this was a test/validator contract mismatch rather than a packaged runtime result.
+- Fix: allow an optional semicolon in the timer matcher, normalize to a single non-semicolon output string, and align the regression expectation with that normalized result.
+- Other test output included existing runtime-dependent FFmpeg/preview error traces, but the reported unittest summary was specifically `FAILED (errors=1)` for the loader contract. Do not misclassify those logged traces as additional failed tests without checking their unittest result.
+- Next: rerun all tests and then frozen-app startup. Stage 1 remains open until the HTML loader transitions into Premium V2 and all requested Stage 1 register items are either closed with evidence or explicitly retained as documented manual acceptance gates.
+
