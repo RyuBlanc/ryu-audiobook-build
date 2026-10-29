@@ -6517,23 +6517,27 @@
       const cueTrack = e.target.closest('#cueGrid [data-cue-path]');
       if (cueTrack) {
         e.preventDefault(); e.stopImmediatePropagation();
-        try {
-          const path = cueTrack.dataset.cuePath;
-          if (pendingCueSlot) {
-            const assignedSlot = pendingCueSlot;
-            const result = await call('sound.cues.save', {slot:assignedSlot,path});
-            pendingCueSlot = null;
-            await refreshSoundCues();
-            await refreshChapterBgm();
-            message(result.generation_supported ? 'Cue assignment saved to this book.' : 'Cue assignment saved, but this build reports that the selected cue is not used during audiobook assembly.');
-          } else {
-            selectedSoundPath = path;
-            message('Cue clip selected. Choose Change beside a cue slot, then select this clip to assign it.');
-          }
-        } catch (err) { message(err?.message || String(err), true); }
+        const path = cueTrack.dataset.cuePath;
+        selectedCuePath = path;
+        const selectedCue = sounds.find(track => String(track.path || '') === String(path));
+        if ($('selectedCueTitle')) $('selectedCueTitle').textContent = selectedCue?.title || 'Selected cue';
+        if ($('selectedCueMeta')) $('selectedCueMeta').textContent = selectedCue
+          ? String(selectedCue.source || 'Local catalogue') + ' · ' + String(selectedCue.format || '')
+          : 'Selected cue from the local catalogue';
+        document.querySelectorAll('#cueGrid [data-cue-path]').forEach(button => button.classList.toggle('active', button.dataset.cuePath === path));
+        if (pendingCueSlot) {
+          pendingCueAssignments[pendingCueSlot] = path;
+          cueChangesDirty = true;
+          const slot = pendingCueSlot;
+          pendingCueSlot = null;
+          await refreshSoundCues();
+          message('Draft cue selected for ' + slot + '. Use Save Cue Changes to persist this assignment.');
+        } else {
+          message('Cue clip selected. Play it here, or choose Change beside a cue slot and then Save Cue Changes.');
+        }
         return;
       }
-      const soundButton = e.target.closest('#importMusicTracks, #importCueClips, #previewSelectedTrack, #setBookDefaultTrack, #applySoundToProduction, #soundPreviewBook, #previewCueSequence, #clearAllCues, #saveChapterBgm');
+      const soundButton = e.target.closest('#importMusicTracks, #importCueClips, #previewSelectedTrack, #setBookDefaultTrack, #applySoundToProduction, #soundPreviewBook, #previewCueSequence, #clearAllCues, #saveChapterBgm, #saveCueChanges, #playSelectedCue, #pauseSelectedCue, #replaySelectedCue');
       if (soundButton) {
         e.preventDefault(); e.stopImmediatePropagation();
         try {
@@ -6546,60 +6550,97 @@
             await refreshSoundCues();
             await refreshChapterBgm();
             message('Imported ' + (result.imported || []).length + ' audio asset(s) into the local catalogue.');
+          } else if (soundButton.id === 'saveCueChanges') {
+            const saved = await savePendingCueChanges();
+            if (saved) {
+              await refreshChapterBgm();
+              message('Cue changes saved to the active book and ready for preview/final generation.');
+            }
+          } else if (soundButton.id === 'playSelectedCue') {
+            if (!selectedCuePath) throw new Error('Select a cue clip from the Effects library first.');
+            if (soundPreviewAudio && soundPreviewKind === 'cue' && soundPreviewPath === selectedCuePath) {
+              if (soundPreviewAudio.paused) await soundPreviewAudio.play();
+            } else {
+              stopSoundPreview();
+              const audio = createSoundPreview(selectedCuePath, 'cue', Number($('cueVolume')?.value ?? 25) / 100);
+              await audio.play();
+            }
+          } else if (soundButton.id === 'pauseSelectedCue') {
+            if (soundPreviewAudio && soundPreviewKind === 'cue' && soundPreviewPath === selectedCuePath) {
+              soundPreviewAudio.pause();
+            } else {
+              message('The selected cue is not currently playing.');
+            }
+          } else if (soundButton.id === 'replaySelectedCue') {
+            if (!selectedCuePath) throw new Error('Select a cue clip from the Effects library first.');
+            stopSoundPreview();
+            const audio = createSoundPreview(selectedCuePath, 'cue', Number($('cueVolume')?.value ?? 25) / 100);
+            await audio.play();
           } else if (soundButton.id === 'previewSelectedTrack') {
             const track = sounds.find(item => item.path === selectedSoundPath);
-            if (!track) throw new Error('Select a track from the local catalogue first.');
-            if (soundPreviewAudio) { soundPreviewAudio.pause(); soundPreviewAudio = null; }
-            const normalized = String(track.path).replace(/\\/g, '/');
-            const fileUrl = 'file:///' + normalized.split('/').map((part, i) => i === 0 && /^[A-Za-z]:$/.test(part) ? part : encodeURIComponent(part)).join('/');
-            soundPreviewAudio = new Audio(fileUrl);
-            soundPreviewAudio.onended = () => $('soundWave')?.classList.remove('playing');
-            soundPreviewAudio.onerror = () => message('The selected local audio file could not be played in the embedded preview.', true);
-            await soundPreviewAudio.play();
-            $('soundWave')?.classList.add('playing');
+            if (!track) throw new Error('Select a track from the local music catalogue first.');
+            if (soundPreviewAudio && soundPreviewKind === 'music' && soundPreviewPath === track.path) {
+              if (soundPreviewAudio.paused) await soundPreviewAudio.play();
+              else soundPreviewAudio.pause();
+              const previewButton = $('previewSelectedTrack');
+              if (previewButton) previewButton.textContent = soundPreviewAudio.paused ? '▶ Preview selected track' : 'Ⅱ Pause selected track';
+            } else {
+              stopSoundPreview();
+              const audio = createSoundPreview(track.path, 'music', Number($('advancedMusicVolume')?.value ?? 18) / 100);
+              await audio.play();
+              $('soundWave')?.classList.add('playing');
+              const previewButton = $('previewSelectedTrack');
+              if (previewButton) previewButton.textContent = 'Ⅱ Pause selected track';
+            }
           } else if (soundButton.id === 'setBookDefaultTrack') {
             if (!selectedSoundPath) throw new Error('Select a track from the local sound catalogue first.');
-            await call('sound.assign', {path:selectedSoundPath,volume:Number($('advancedMusicVolume')?.value ?? 18)/100,fade_in_seconds:fadeSeconds('bgmFadeIn'),fade_out_seconds:fadeSeconds('bgmFadeOut')});
+            await call('sound.assign', {path:selectedSoundPath,volume:Math.max(0,Math.min(0.50,Number($('advancedMusicVolume')?.value ?? 18)/100)),fade_in_seconds:fadeSeconds('bgmFadeIn'),fade_out_seconds:fadeSeconds('bgmFadeOut')});
             await refreshChapterBgm();
             message('Book default background track saved.');
           } else if (soundButton.id === 'applySoundToProduction') {
-            const chapterBased = ['custom', 'chapter-based', 'chapter_based'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
+            await saveCurrentChapterBgmDraft();
+            await savePendingCueChanges();
+            const chapterBased = ['custom', 'chapter-based', 'chapter_based', 'chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
             await call('sound.save_manifest', {
               path:chapterBased ? '' : (selectedSoundPath || chapterBgmState.default_path || ''),
               enabled:Boolean(chapterBgmState.bgm_enabled),
-              volume:Number($('advancedMusicVolume')?.value ?? Math.round(Number(chapterBgmState.default_volume ?? 0.18) * 100))/100,
+              volume:Math.max(0,Math.min(0.50,Number($('advancedMusicVolume')?.value ?? Math.round(Number(chapterBgmState.default_volume ?? 0.18) * 100))/100)),
+              narration_volume:Number($('narrationVolume')?.value ?? Math.round(Number(chapterBgmState.narration_volume ?? 1) * 100))/100,
+              cue_volume:Number($('cueVolume')?.value ?? Math.round(Number(chapterBgmState.cue_volume ?? 0.25) * 100))/100,
               fade_in_seconds:fadeSeconds('bgmFadeIn'),fade_out_seconds:fadeSeconds('bgmFadeOut')
             });
+            mixLevelsDirty = false;
             await refreshChapterBgm();
+            await refreshSoundCues();
             document.querySelector('[data-page="generate"]')?.click();
           } else if (soundButton.id === 'saveChapterBgm') {
-            await refreshChapterBgm();
+            await saveCurrentChapterBgmDraft(true);
           } else if (soundButton.id === 'clearAllCues') {
             await call('sound.cues.clear');
             pendingCueSlot = null;
+            pendingCueAssignments = Object.create(null);
+            cueChangesDirty = false;
             await refreshSoundCues();
             await refreshChapterBgm();
             message('Opening, next-chapter, and closing cue assignments cleared.');
           } else if (soundButton.id === 'previewCueSequence') {
             const sequence = ['opening','chapter','closing'].map(slot => cueAssignments[slot]?.path).filter(Boolean);
-            if (!sequence.length) throw new Error('Assign at least one cue before previewing the sequence.');
-            if (soundPreviewAudio) { soundPreviewAudio.pause(); soundPreviewAudio = null; }
+            if (!sequence.length) throw new Error('Assign at least one saved cue before previewing the sequence.');
+            stopSoundPreview();
             let index = 0;
             const playNext = () => {
-              if (index >= sequence.length) { soundPreviewAudio = null; return; }
+              if (index >= sequence.length) { stopSoundPreview(); return; }
               const raw = sequence[index++];
-              const normalized = String(raw).replace(/\\/g, '/');
-              const fileUrl = 'file:///' + normalized.split('/').map((part, i) => i === 0 && /^[A-Za-z]:$/.test(part) ? part : encodeURIComponent(part)).join('/');
-              soundPreviewAudio = new Audio(fileUrl);
-              soundPreviewAudio.onended = playNext;
-              soundPreviewAudio.onerror = () => { soundPreviewAudio = null; message('A cue clip could not be played in the embedded preview.', true); };
-              soundPreviewAudio.play().catch(err => { soundPreviewAudio = null; message(err?.message || 'Cue sequence playback failed.', true); });
+              const audio = createSoundPreview(raw, 'cue-sequence', Number($('cueVolume')?.value ?? 25) / 100);
+              audio.onended = playNext;
+              audio.onerror = () => { stopSoundPreview(); message('A cue clip could not be played in the embedded preview.', true); };
+              audio.play().catch(err => { stopSoundPreview(); message(err?.message || 'Cue sequence playback failed.', true); });
             };
             playNext();
-            message('Playing assigned cue clips in book order.');
+            message('Playing saved cue clips in book order.');
 
           } else if (soundButton.id === 'soundPreviewBook') {
-            if (soundPreviewAudio) { soundPreviewAudio.pause(); soundPreviewAudio = null; }
+            stopSoundPreview();
             const started = await call('sound.preview_book');
             message('Generating the full-book mix preview from saved chapter narration…');
             let finished = false;
