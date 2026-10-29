@@ -161,5 +161,25 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
         self.assertIn("Remove-Item Env:RYU_STARTUP_SMOKE_MARKER -ErrorAction SilentlyContinue", workflow)
 
 
+    def test_packaged_startup_smoke_validates_current_build_metadata(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        smoke_start = workflow.index(
+            'for ($launchAttempt = 1; $launchAttempt -le 3; $launchAttempt++)'
+        )
+        smoke_end = workflow.index(
+            "\\n      - name: Verify bundled voice assets and critical modules",
+            smoke_start,
+        )
+        smoke = workflow[smoke_start:smoke_end]
+        self.assertIn(
+            "if ([string]::IsNullOrWhiteSpace([string]$startup.version))",
+            smoke,
+            "A ready marker without version/build metadata must fail the packaged startup gate.",
+        )
+        self.assertIn("$expectedBuild = [string]$env:GITHUB_RUN_NUMBER", smoke)
+        self.assertIn("if ($startup.version -notmatch", smoke)
+        self.assertIn("expected build number", smoke.casefold())
+
+
 if __name__ == "__main__":
     unittest.main()
