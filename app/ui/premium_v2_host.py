@@ -5764,8 +5764,14 @@ class PremiumV2Bridge(QObject):
             selected = Path(raw).expanduser().resolve()
             catalog = {str(row["path"]): row for row in self._sound_catalog({})}
             row = catalog.get(str(selected))
-            if not selected.is_file() or row is None:
-                raise ValueError("Choose a cue from the local Sound Design catalogue.")
+            if not selected.is_file() or row is None or str(row.get("role") or "music").casefold() != "cue":
+                raise ValueError("Choose a cue clip from the local Sound Design cue catalogue.")
+            from app.audio.library import probe_audio_duration_seconds
+            duration_seconds = row.get("duration_seconds")
+            if duration_seconds is None:
+                duration_seconds = probe_audio_duration_seconds(selected)
+            if float(duration_seconds) > 5.0:
+                raise ValueError("Opening, next-chapter, and closing cue clips must be 5 seconds or shorter. Import longer tracks into Music Library and assign them as BGM.")
             selected_path, selected_title = str(selected), str(row["title"])
         project = self._active_project()
         state = load_state(project.folder)
