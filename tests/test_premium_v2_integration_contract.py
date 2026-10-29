@@ -453,9 +453,10 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("const result=await refreshPerformance();", adapter)
         self.assertIn('"performance.info": False', (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8"))
 
-    def test_scene_cue_feedback_matches_current_assembly_support(self):
+    def test_cue_feedback_matches_current_three_slot_assignment_contract(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
-        self.assertIn("Scene transition cue saved to this book and will be included during audiobook assembly.", adapter)
+        self.assertIn("message(result.generation_supported ? 'Cue assignment saved to this book.' :", adapter)
+        self.assertNotIn("Scene transition cue saved to this book and will be included during audiobook assembly.", adapter)
         self.assertIn("const assignedSlot = pendingCueSlot;", adapter)
         self.assertNotIn("current audiobook assembly does not yet render a separate scene cue", adapter)
         self.assertIn("scene_transition_cue_path=self.scene_transition_cue_path", (ROOT / "app" / "tts" / "manager.py").read_text(encoding="utf-8"))
