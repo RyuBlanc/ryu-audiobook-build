@@ -4063,6 +4063,7 @@ class PremiumV2Bridge(QObject):
             ending_cue_path=Path(state["ending_cue_path"]) if state.get("ending_cue_path") else None,
             scene_transition_cue_path=Path(state["scene_transition_cue_path"]) if state.get("scene_transition_cue_path") else None,
             chapter_bgm_overrides=state.get("chapter_bgm_overrides") if isinstance(state.get("chapter_bgm_overrides"), dict) else {},
+            chapter_bgm_strategy=str(state.get("chapter_bgm_strategy") or "same"),
         )
         with self._jobs_lock:
             self._generators[job_id] = manager
