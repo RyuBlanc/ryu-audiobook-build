@@ -364,3 +364,10 @@ Production Pause/Cancel is generation-type guarded. Chapter switching saves a pe
 - The assertion now checks the assignment's actual source form. No production behavior was changed to satisfy the test.
 - Next checkpoint: rerun all 748+ regression tests, then package and inspect the native-side probe result from the frozen EXE. Only that runtime result can distinguish a missing qrc script, missing Qt transport, or an unavailable renderer.
 
+### Bridge emitter closure defect — 29 October 2026
+- Candidate [Build #1593](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40741147741) passed all **748 tests** and the frozen EXE offline synthesis self-test, but its new startup readiness gate failed before release artifacts could be uploaded.
+- The native-side probe itself returned no WebEngine state. This is not enough evidence to conclude whether the renderer was unresponsive or the probe callback returned no value; keep that uncertainty explicit.
+- A source inspection identified a definite separate defect in the bootstrap code: the `emit` function was block-scoped inside the first diagnostic IIFE, then called from the second bridge IIFE. If the channel-connected branch ran, `emit('startup-progress', …)` could throw before `ryu-backend-ready` was dispatched. The timeout path also called that out-of-scope symbol.
+- Patched the bridge IIFE to bind `const emit = window.__ryuEmitFrontendDiagnostic;` and added `test_bridge_iife_uses_the_exported_diagnostic_emitter` to enforce that the startup progress event is emitted before the adapter-ready event.
+- **Next gate:** rerun all regression tests and the exact frozen Windows launch. If the bridge still times out, improve the native/renderer probe rather than weakening startup readiness. No artifact is accepted until the EXE reaches `frontend-ready`, reports `Premium V2`, and the loader transitions into the workspace.
+
