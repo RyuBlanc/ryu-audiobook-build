@@ -399,3 +399,8 @@ Production Pause/Cancel is generation-type guarded. Chapter switching saves a pe
 - The active #1613 run uses commit `70e21f1404cff6b44d8e7c573f495deccdabd0ff`. While it was queued/running, another fixture detail was identified: the escaped base-URL test includes the timer but uses the semicolon-free spelling while the helper currently normalizes both spellings. To make this test specifically exercise normalization and avoid another source-form mismatch, changed its input to the semicolon-terminated spelling.
 - Source commit with that test-only correction: `2c089336968f42bd23023e9d0f59f076e57da659`. Verify the newest run by SHA, not an earlier cancelled/superseded run.
 
+### Stage 1 #1613 regression result — negative fixture fixed
+- #1613 ran **750 tests** and failed one assertion in `test_native_host_base_url_is_escaped_and_loader_contract_is_required`: the negative case called the helper with a valid `<head>`, so no `FrontendAssetError` should be raised. The production helper is correct for that case; the test was targeting the wrong failure condition.
+- Corrected the negative case to omit the `<head>` while retaining `setTimeout(finish,1700)`, so the test now exercises the intended missing-head validation branch.
+- Candidate commit `663cedda737941c398825cdbeb92a14126421924` triggers a new test run. After a green full suite, run the artifact checkpoint and evaluate the actual packaged startup gate. Stage 1 remains open.
+
