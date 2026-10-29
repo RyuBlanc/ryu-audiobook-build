@@ -3438,6 +3438,14 @@
     }
     return cueAssignments;
   }
+  function rowsCountForChapterSummary(overrides, chapterRows) {
+    const rows = Array.isArray(chapterRows) ? chapterRows : [];
+    if (!rows.length) return 0;
+    return rows.filter(chapter => {
+      const item = overrides[String(chapter.number)] || {};
+      return item.rule !== 'custom' || !item.path || item.available === false;
+    }).length;
+  }
   function renderSoundMixSummary() {
     const setText = (id, value) => {
       const node = $(id);
@@ -3497,9 +3505,7 @@
 
     setText('mixBgmStatus', !masterEnabled ? 'Voice only' : (hasActiveBgm ? 'Enabled' : 'Enabled · no BGM track assigned'));
     const defaultLabel = !defaultPath ? 'Not assigned' : (!defaultAvailable || !defaultTrack ? 'Missing track' : defaultTrack.title);
-    setText('mixDefaultTrack', chapterBased && defaultPath
-      ? (defaultLabel === 'Missing track' ? 'Missing default · ignored by chapter strategy' : defaultLabel + ' · ignored by chapter strategy')
-      : defaultLabel);
+    setText('mixDefaultTrack', chapterBased ? 'Not used · Chapter-Based BGM' : defaultLabel);
     setText('mixStrategy', chapterBased ? 'Chapter-Based BGM' : 'Same BGM');
     setText('mixOverrides', assignedOverrideCount + ' chapters');
     const cueLabel = slot => {
@@ -3550,7 +3556,15 @@
       readiness.textContent = missingCount ? ('! ' + missingCount + ' missing sound asset(s)') : (anySoundDraft ? 'Unsaved sound changes' : (masterEnabled ? '✓ Synced' : '✓ Voice only'));
       readiness.style.color = missingCount || anySoundDraft ? 'var(--amber)' : 'var(--green)';
     }
-    setText('productionMusicSummary', hasActiveBgm && masterEnabled ? (chapterBased ? 'Chapter-based BGM' : (defaultTrack?.title || 'Book BGM')) : (masterEnabled ? 'No BGM track assigned' : 'Voice only · BGM off'));
+    const uniqueChapterTracks = [...new Set(activeChapterRows.map(item => String(item.path || '')).filter(Boolean))];
+    const noBgmChapterCount = rowsCountForChapterSummary(overrides, chapterBgmState.chapters || chapters);
+    setText('productionMusicSummary', hasActiveBgm && masterEnabled
+      ? (chapterBased
+        ? 'Chapter-Based BGM (' + uniqueChapterTracks.length + ' unique tracks; ' + noBgmChapterCount + ' No BGM chapters)'
+        : (defaultTrack?.title || 'Book BGM'))
+      : (masterEnabled
+        ? (chapterBased ? 'Chapter-Based BGM (0 unique tracks; all unassigned chapters use No BGM)' : 'No BGM track assigned')
+        : 'Voice Only · BGM disabled'));
     setText('productionPreviewMix', outputDescription);
     setText('productionFinalMix', !masterEnabled ? 'Voice Only' : (chapterBased ? 'Chapter-Based BGM' : 'Same BGM'));
   }
