@@ -409,3 +409,12 @@ Production Pause/Cancel is generation-type guarded. Chapter switching saves a pe
 - Commit `f0ddd456f43b51d752e2a654370c4cb7c917270f` adds the semicolon form to that missing-head input so the loader-normalization stage passes and the call tests the expected missing-head error.
 - The newer `[artifact-checkpoint]` run will test this exact fixture and the packaged startup gate. The earlier run is not considered a pass.
 
+### Stage 1 checkpoint #1617 — automated build success, 29 October 2026
+- Workflow [Build #1617](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/40803965924) completed with conclusion **success** on SHA `169ab578cce0a952905bbd2f7eb48b5f1c84cf08`.
+- **750 regression tests passed**; frontend and installer JavaScript syntax passed. The frozen application verification passed, which includes the real Premium V2 readiness gate. Bundled voice assets/critical modules check passed.
+- Build steps passed: core installer payload, functional HTML installer, logo transparency and release hash verification, Microsoft Defender scan, Windows installer artifact upload, release SHA-256 manifest upload, and portable application upload.
+- Uploaded artifacts: installer ZIP ID `12868017806` (878,014,378 bytes), portable ZIP ID `12868456047` (1,349,449,062 bytes), manifest ZIP ID `12868665105` (774 bytes). All three report expiry `2026-11-28`.
+- Manifest entries include installer EXE SHA-256 `2ca50257e189556195b9718e490a8253fb06801262fa70aa33f7745f02a3b47f`, core installer EXE SHA-256 `9857e75dcff18d645f3f839b89d607d25bb4b08d3eb8daa1ea8d285b0e830f8f`, and portable EXE SHA-256 `214e67d1778a02da23085edbe1ae8945fdc505ba2e9a75f2df915a25978f5aad`.
+- Artifact uploads are completed, but the installer/portable ZIPs exceed the connector's 512 MiB download limit. Use the links from the workflow artifact section to download them in GitHub/Actions; the small manifest ZIP is directly inspectable.
+- **Important boundary:** CI verified that the frozen EXE reached Premium V2 readiness and all release checks passed. The user must still install/launch Build #1617 on the target Windows PC and confirm the approved HTML loading-screen visuals, full workspace navigation, saved voice assignment, window resizing/scrolling, effects-enabled flicker/crash stability, and close/reopen behavior. Do not claim user-PC acceptance from CI alone. Keep Stage 1 source/runtime acceptance open until that manual smoke is reported; do not start Stage 2 prematurely.
+
