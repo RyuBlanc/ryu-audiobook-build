@@ -262,7 +262,7 @@
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
   let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
-  let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, pendingCueSlot = null, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null;
+  let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, selectedCuePath = null, pendingCueSlot = null, pendingCueAssignments = Object.create(null), cueChangesDirty = false, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null, chapterBgmDraftDirty = false, mixLevelsDirty = false, soundPreviewKind = null, soundPreviewPath = null;
   let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0, projectListEpoch = 0, characterListEpoch = 0, termsListEpoch = 0, soundListEpoch = 0, historyListEpoch = 0, librarySearchTimer = null, soundSearchTimer = null;
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
   let activeProjectCardFolder = null, projectCardStatusObserver = null;
@@ -318,7 +318,8 @@
   // whose actions are handled by the real backend adapter; visual markup is unchanged.
   ['importMusicTracks','importCueClips','previewSelectedTrack','setBookDefaultTrack',
    'saveChapterBgm','previewCueSequence','clearAllCues','soundPreviewBook',
-   'applySoundToProduction','advancedMusicVolume'].forEach(id => {
+   'applySoundToProduction','advancedMusicVolume','playSelectedCue','pauseSelectedCue',
+   'replaySelectedCue','saveCueChanges'].forEach(id => {
     const node = $(id);
     if (node?.parentNode) node.replaceWith(node.cloneNode(true));
   });
@@ -3388,7 +3389,25 @@
     for (const [slot,id] of Object.entries(names)) {
       const node = $(id);
       const cue = cueAssignments[slot] || {};
-      if (node) node.textContent = cue.available === true && cue.title ? cue.title : (cue.assigned || cue.missing ? 'Missing file' : 'Not assigned');
+      const hasDraft = Object.prototype.hasOwnProperty.call(pendingCueAssignments, slot);
+      const draftPath = hasDraft ? pendingCueAssignments[slot] : cue.path;
+      const draftTrack = draftPath ? sounds.find(track => String(track.path || '') === String(draftPath)) : null;
+      if (node) node.textContent = hasDraft
+        ? (draftPath ? (draftTrack?.title || 'Selected cue (unsaved)') + ' · Unsaved' : 'Will be cleared · Unsaved')
+        : (cue.available === true && cue.title ? cue.title : (cue.assigned || cue.missing ? 'Missing file' : 'Not assigned'));
+    }
+    const cueSaveState = $('cueSaveState');
+    if (cueSaveState) cueSaveState.textContent = cueChangesDirty
+      ? 'Unsaved cue changes — use Save Cue Changes to apply them to this book.'
+      : 'All cue changes saved.';
+    const cueSaveButton = $('saveCueChanges');
+    if (cueSaveButton) cueSaveButton.disabled = !cueChangesDirty;
+    if (selectedCuePath) {
+      const selectedCue = sounds.find(track => String(track.path || '') === String(selectedCuePath));
+      if ($('selectedCueTitle')) $('selectedCueTitle').textContent = selectedCue?.title || 'Selected cue';
+      if ($('selectedCueMeta')) $('selectedCueMeta').textContent = selectedCue
+        ? String(selectedCue.source || 'Local catalogue') + ' · ' + String(selectedCue.format || '')
+        : 'Selected cue is no longer available in the local catalogue.';
     }
     renderSoundMixSummary();
     const grid = $('cueGrid');
@@ -3419,6 +3438,19 @@
       ? chapterBgmState.overrides : {};
     const chapterBased = ['custom', 'chapter-based', 'chapter_based'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
     const masterEnabled = chapterBgmState.bgm_enabled === true;
+    const narrationInput = $('narrationVolume');
+    const cueLevelInput = $('cueVolume');
+    const storedNarration = Math.max(0, Math.min(1, Number(chapterBgmState.narration_volume ?? 1)));
+    const storedCue = Math.max(0, Math.min(0.50, Number(chapterBgmState.cue_volume ?? 0.25)));
+    if (narrationInput && document.activeElement !== narrationInput && Number.isFinite(storedNarration)) narrationInput.value = String(Math.round(storedNarration * 100));
+    if (cueLevelInput && document.activeElement !== cueLevelInput && Number.isFinite(storedCue)) cueLevelInput.value = String(Math.round(storedCue * 100));
+    const narrationLevel = Math.max(0, Math.min(1, Number(narrationInput?.value ?? storedNarration * 100) / 100));
+    const cueLevel = Math.max(0, Math.min(0.50, Number(cueLevelInput?.value ?? storedCue * 100) / 100));
+    setText('narrationVolumeValue', Math.round(narrationLevel * 100) + '%');
+    setText('cueVolumeValue', Math.round(cueLevel * 100) + '%');
+    setText('mixLevelsSaveState', mixLevelsDirty
+      ? 'Unsaved mix level changes — release the slider to save them.'
+      : 'Narration and cue levels are saved with the mix.');
     const defaultPath = String(chapterBgmState.default_path || '').trim();
     const defaultTrack = defaultPath
       ? sounds.find(track => String(track.path || '') === defaultPath && String(track.role || 'music').toLowerCase() !== 'cue')
@@ -3468,9 +3500,11 @@
       ? selectedVolumes.reduce((sum, volume) => sum + (Number.isFinite(volume) ? volume : 0), 0) / selectedVolumes.length
       : 0;
     const musicWidth = masterEnabled && hasActiveBgm ? Math.max(0, Math.min(100, averageVolume / 0.5 * 100)) : 0;
-    const cueWidth = activeCueSlots.length / 3 * 100;
+    const narrationSignal = $('mixNarrationSignal');
+    const cueWidth = masterEnabled ? Math.max(0, Math.min(100, cueLevel / 0.50 * 100)) : 0;
     const musicSignal = $('mixBgmSignal');
     const cueSignal = $('mixCueSignal');
+    if (narrationSignal?.style) narrationSignal.style.width = Math.max(0, Math.min(100, narrationLevel * 100)) + '%';
     if (musicSignal?.style) musicSignal.style.width = musicWidth + '%';
     if (cueSignal?.style) cueSignal.style.width = cueWidth + '%';
 
@@ -3561,6 +3595,104 @@
     renderChapterBgm();
     renderSoundMixSummary();
     return chapterBgmState;
+  }
+  function soundFileUrl(rawPath) {
+    const normalized = String(rawPath || '').replace(/\\/g, '/');
+    return 'file:///' + normalized.split('/').map((part, index) =>
+      index === 0 && /^[A-Za-z]:$/.test(part) ? part : encodeURIComponent(part)
+    ).join('/');
+  }
+  function stopSoundPreview() {
+    if (soundPreviewAudio) {
+      soundPreviewAudio.pause();
+      soundPreviewAudio = null;
+    }
+    soundPreviewKind = null;
+    soundPreviewPath = null;
+    $('soundWave')?.classList.remove('playing');
+  }
+  function createSoundPreview(rawPath, kind, volume = 1) {
+    const audio = new Audio(soundFileUrl(rawPath));
+    audio.volume = Math.max(0, Math.min(1, Number(volume)));
+    soundPreviewAudio = audio;
+    soundPreviewKind = kind;
+    soundPreviewPath = String(rawPath || '');
+    audio.onended = () => {
+      if (soundPreviewAudio === audio) {
+        soundPreviewAudio = null;
+        soundPreviewKind = null;
+        soundPreviewPath = null;
+        $('soundWave')?.classList.remove('playing');
+      }
+    };
+    audio.onerror = () => message('The selected local audio file could not be played in the embedded preview.', true);
+    return audio;
+  }
+  async function saveCurrentChapterBgmDraft(force = false) {
+    if (!chapterBgmDraftDirty && !force) return false;
+    const strategy = String(chapterBgmState.strategy || 'same').toLowerCase();
+    const chapterBased = ['custom','chapter-based','chapter_based','chapter'].includes(strategy);
+    if (!chapterBased) {
+      if (!force) return false;
+      throw new Error('Switch to Chapter-Based BGM before saving a chapter assignment.');
+    }
+    if (!selectedBgmChapter) throw new Error('Choose a chapter before saving its BGM assignment.');
+    let rule = document.querySelector('#sound .chapter-rule [data-chapter-rule].active')?.dataset.chapterRule || 'none';
+    if (rule === 'default') rule = 'none';
+    if (rule === 'custom' && !selectedBgmTrackPath) throw new Error('Choose a custom music track for this chapter first.');
+    const selects = document.querySelectorAll('#sound [data-sound-view="chapters"] .chapter-mix-row select');
+    const startOffset = ['immediate','after_first_paragraph','after_10_seconds'][selects[0]?.selectedIndex || 0];
+    const endBehavior = ['fade_before_end','continue_to_transition','stop_immediately'][selects[1]?.selectedIndex || 0];
+    await call('sound.chapter_bgm.save', {
+      number:selectedBgmChapter, rule, path:rule === 'custom' ? selectedBgmTrackPath : null,
+      volume:Number($('chapterVolume')?.value ?? 18)/100,
+      start_offset:startOffset, end_behavior:endBehavior
+    });
+    chapterBgmDraftDirty = false;
+    await refreshChapterBgm();
+    return true;
+  }
+  async function savePendingCueChanges() {
+    const entries = Object.entries(pendingCueAssignments);
+    if (!entries.length) return false;
+    const status = $('cueSaveState');
+    if (status) status.textContent = 'Saving cue changes…';
+    const button = $('saveCueChanges');
+    if (button) button.disabled = true;
+    try {
+      for (const [slot, path] of entries) {
+        await call('sound.cues.save', {slot, path:path || null});
+        delete pendingCueAssignments[slot];
+      }
+      cueChangesDirty = Object.keys(pendingCueAssignments).length > 0;
+      await refreshSoundCues();
+      if (status) status.textContent = cueChangesDirty ? 'Some cue changes remain unsaved.' : 'All cue changes saved.';
+      return !cueChangesDirty;
+    } catch (error) {
+      cueChangesDirty = Object.keys(pendingCueAssignments).length > 0;
+      if (status) status.textContent = 'Save failed. Unsaved cue changes have been retained.';
+      if (button) button.disabled = !cueChangesDirty;
+      throw error;
+    }
+  }
+  async function saveSoundMixLevels() {
+    const chapterBased = ['custom','chapter-based','chapter_based','chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
+    const currentVolume = $('advancedMusicVolume')?.value;
+    const volume = currentVolume == null
+      ? Math.max(0, Math.min(0.50, Number(chapterBgmState.default_volume ?? 0.18)))
+      : Math.max(0, Math.min(0.50, Number(currentVolume) / 100));
+    const narration = Math.max(0, Math.min(1, Number($('narrationVolume')?.value ?? Math.round(Number(chapterBgmState.narration_volume ?? 1) * 100)) / 100));
+    const cue = Math.max(0, Math.min(0.50, Number($('cueVolume')?.value ?? Math.round(Number(chapterBgmState.cue_volume ?? 0.25) * 100)) / 100));
+    const result = await call('sound.save_manifest', {
+      path:chapterBased ? '' : (selectedSoundPath || chapterBgmState.default_path || ''),
+      enabled:chapterBgmState.bgm_enabled === true,
+      volume, narration_volume:narration, cue_volume:cue,
+      fade_in_seconds:fadeSeconds('bgmFadeIn'), fade_out_seconds:fadeSeconds('bgmFadeOut')
+    });
+    mixLevelsDirty = false;
+    await refreshChapterBgm();
+    renderSoundMixSummary();
+    return result;
   }
   function scheduleLibrarySearchRefresh() {
     if (librarySearchTimer) clearTimeout(librarySearchTimer);
