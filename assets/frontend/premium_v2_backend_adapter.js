@@ -3305,18 +3305,22 @@
   }
   let pronunciationEnabled = true;
   let pronunciationSettingEpoch = 0;
-  function renderPronunciationEnabled(enabled, savedAt = null) {
+  function renderPronunciationEnabled(enabled, savedAt = null, hasActiveProject = true) {
     pronunciationEnabled = enabled !== false;
     document.querySelectorAll('#pronunciation [data-pronunciation-enabled], #generate [data-pronunciation-enabled]').forEach(button => {
       button.classList.toggle('active', (button.dataset.pronunciationEnabled === 'true') === pronunciationEnabled);
+      button.disabled = !hasActiveProject;
+      button.title = hasActiveProject ? '' : 'Open a local project to change its pronunciation setting.';
     });
-    const label = pronunciationEnabled
-      ? 'Pronunciation On · only individually enabled rules are applied.'
-      : 'Pronunciation Off · no dictionary replacements are applied in preview or final generation.';
+    const label = !hasActiveProject
+      ? 'Open a local project to change its saved pronunciation setting.'
+      : (pronunciationEnabled
+        ? 'Pronunciation On · only individually enabled rules are applied.'
+        : 'Pronunciation Off · no dictionary replacements are applied in preview or final generation.');
     const studioStatus = $('pronunciationGlobalStatus');
     const generateStatus = $('generatePronunciationStatus');
-    if (studioStatus) studioStatus.textContent = savedAt ? label + ' Saved.' : label;
-    if (generateStatus) generateStatus.textContent = savedAt ? label + ' Saved.' : label;
+    if (studioStatus) studioStatus.textContent = hasActiveProject && savedAt ? label + ' Saved.' : label;
+    if (generateStatus) generateStatus.textContent = hasActiveProject && savedAt ? label + ' Saved.' : label;
   }
   async function refreshPronunciationEnabled() {
     const requestToken = ++pronunciationSettingEpoch;
@@ -3325,7 +3329,7 @@
     if (!result || typeof result !== 'object' || typeof result.enabled !== 'boolean') {
       throw new Error('The backend did not return the saved project pronunciation setting.');
     }
-    renderPronunciationEnabled(result.enabled, result.last_saved_at || null);
+    renderPronunciationEnabled(result.enabled, result.last_saved_at || null, result.has_active_project !== false);
     return pronunciationEnabled;
   }
   function pronunciationScopeKey(term) {
@@ -5730,7 +5734,7 @@
     // any asynchronous backend initialization or real handler registration.
     suppressLegacyVoicePreviewHandlers();
     await call('app.get_info');
-    await refreshPronunciationEnabled();
+    await refreshPronunciationEnabled().catch(error => message(error?.message || String(error), true));
     await refreshCurrentProjectCard();
     installProjectCardStatusObserver();
 
