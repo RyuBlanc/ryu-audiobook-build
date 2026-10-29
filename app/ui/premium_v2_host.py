@@ -5949,14 +5949,35 @@ class PremiumV2Window(QMainWindow):
         # finish; use the native splash only if the HTML contract cannot be prepared.
         self._hosted_html_source: str | None = None
         self._hosted_html_base_url = QUrl.fromLocalFile(str(path.parent.resolve()) + os.sep)
+        self._hosted_html_temp_directory: tempfile.TemporaryDirectory | None = None
+        self._hosted_html_path: Path | None = None
         self._uses_html_startup_loader = False
         try:
             source = path.read_text(encoding="utf-8")
-            self._hosted_html_source = prepare_native_host_html(source)
+            self._hosted_html_source = prepare_native_host_html(
+                source,
+                base_url=self._hosted_html_base_url.toString(),
+            )
+            # Keep the HTML in a real file URL. QWebEngineView.setHtml() routes
+            # the entire document through a data URL; this multi-megabyte page
+            # can exceed that route's size limit and leave WebChannel unresponsive.
+            self._hosted_html_temp_directory = tempfile.TemporaryDirectory(
+                prefix="ryu-premium-v2-"
+            )
+            self._hosted_html_path = (
+                Path(self._hosted_html_temp_directory.name) / path.name
+            )
+            self._hosted_html_path.write_text(
+                self._hosted_html_source, encoding="utf-8"
+            )
             self._uses_html_startup_loader = True
-            self.web.setHtml(self._hosted_html_source, self._hosted_html_base_url)
+            self.web.load(QUrl.fromLocalFile(str(self._hosted_html_path.resolve())))
         except (OSError, FrontendAssetError):
             log.exception("Could not prepare the approved HTML startup loader; retaining native loading fallback")
+            if self._hosted_html_temp_directory is not None:
+                self._hosted_html_temp_directory.cleanup()
+            self._hosted_html_temp_directory = None
+            self._hosted_html_path = None
             self._hosted_html_source = None
             self._uses_html_startup_loader = False
             self.web.load(QUrl.fromLocalFile(str(path.resolve())))
@@ -6157,10 +6178,14 @@ class PremiumV2Window(QMainWindow):
         self._frontend_generation += 1
         generation = self._frontend_generation
         self._update_startup_progress("Retrying the interface and reconnecting local services…", 5)
-        if self._uses_html_startup_loader and self._hosted_html_source is not None:
+        if (
+            self._uses_html_startup_loader
+            and self._hosted_html_path is not None
+            and self._hosted_html_path.is_file()
+        ):
             if hasattr(self, "_web_stack"):
                 self._web_stack.setCurrentWidget(self.web)
-            self.web.setHtml(self._hosted_html_source, self._hosted_html_base_url)
+            self.web.load(QUrl.fromLocalFile(str(self._hosted_html_path.resolve())))
         else:
             if hasattr(self, "_web_stack") and hasattr(self, "_loading_page"):
                 self._web_stack.setCurrentWidget(self._loading_page)
