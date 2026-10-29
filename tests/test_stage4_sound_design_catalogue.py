@@ -147,8 +147,53 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         state = load_state(self.project_a)
         self.assertEqual(state["background_audio_mode"], "off")
         self.assertEqual(state["background_audio_path"], "")
+        self.assertEqual(state["background_audio_preferred_path"], str(track.resolve()))
         self.assertEqual(state["background_audio_fade_out"], 5.0)
         self.assertFalse(disabled["enabled"])
+        summary = host.PremiumV2Bridge._sound_chapter_bgm_get(self.bridge_a, {})
+        self.assertFalse(summary["bgm_enabled"])
+        self.assertEqual(summary["default_path"], str(track.resolve()))
+        self.assertTrue(summary["default_available"])
+        self.assertEqual(summary["last_saved_at"], "2026-10-22T00:00:00+00:00")
+
+
+    def test_chapter_bgm_can_be_enabled_without_activating_book_default(self):
+        track = _valid_wav(self.app_root / "Audio Library" / "chapter-only.wav")
+        self.bridge_a.catalog = [{"path": str(track.resolve()), "title": "chapter-only", "role": "music"}]
+        host.PremiumV2Bridge._sound_chapter_bgm_save(self.bridge_a, {"strategy": "custom"})
+        host.PremiumV2Bridge._sound_chapter_bgm_save(self.bridge_a, {
+            "number": 1, "rule": "custom", "path": str(track), "volume": 0.2,
+            "start_offset": "immediate", "end_behavior": "fade_before_end"
+        })
+        saved = host.PremiumV2Bridge._sound_save_manifest(self.bridge_a, {
+            "path": "", "enabled": True, "volume": 0.18, "fade_in_seconds": 2, "fade_out_seconds": 3
+        })
+        from app.core.state import load_state
+        state = load_state(self.project_a)
+        self.assertTrue(state["background_audio_enabled"])
+        self.assertEqual(state["background_audio_mode"], "manual")
+        self.assertEqual(state["background_audio_path"], "")
+        self.assertTrue(saved["enabled"])
+        summary = host.PremiumV2Bridge._sound_chapter_bgm_get(self.bridge_a, {})
+        self.assertTrue(summary["bgm_enabled"])
+        self.assertEqual(summary["strategy"], "custom")
+        self.assertEqual(summary["overrides"]["1"]["path"], str(track.resolve()))
+
+    def test_cue_summary_distinguishes_unassigned_from_missing_file(self):
+        track = _valid_wav(self.app_root / "Audio Library" / "vanishing-cue.wav")
+        self.bridge_a.catalog = [{"path": str(track.resolve()), "title": "vanishing-cue", "role": "cue"}]
+        host.PremiumV2Bridge._sound_cues_save(self.bridge_a, {"slot": "opening", "path": str(track)})
+        track.unlink()
+        self.bridge_a.catalog = []
+        missing = host.PremiumV2Bridge._sound_cues_get(self.bridge_a, {})["opening"]
+        self.assertTrue(missing["assigned"])
+        self.assertTrue(missing["missing"])
+        self.assertFalse(missing["available"])
+        self.assertIsNone(missing["path"])
+        host.PremiumV2Bridge._sound_cues_clear(self.bridge_a, {})
+        empty = host.PremiumV2Bridge._sound_cues_get(self.bridge_a, {})["opening"]
+        self.assertFalse(empty["assigned"])
+        self.assertFalse(empty["missing"])
 
     def test_production_generation_passes_saved_fades_and_preserves_zero_volumes(self):
         source = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")

@@ -5474,9 +5474,11 @@ class PremiumV2Bridge(QObject):
         except (TypeError, ValueError):
             raise ValueError("Background music fade values must be between 0 and 30 seconds.")
         if not raw:
-            state.update({"background_audio_path": "", "background_audio_mode": "off",
-                          "background_audio_enabled": False,
-                          "background_audio_fade_in": fade_in, "background_audio_fade_out": fade_out})
+            saved_at = self._now()
+            state.update({"background_audio_path": "", "background_audio_preferred_path": "",
+                          "background_audio_mode": "off", "background_audio_enabled": False,
+                          "background_audio_fade_in": fade_in, "background_audio_fade_out": fade_out,
+                          "modified_at": saved_at, "sound_design_saved_at": saved_at})
             save_state(project.folder, state)
             return {"saved": True, "path": None, "mode": "off",
                     "fade_in_seconds": fade_in, "fade_out_seconds": fade_out}
@@ -5490,10 +5492,12 @@ class PremiumV2Bridge(QObject):
             fade_out = max(0.0, min(30.0, float(payload.get("fade_out_seconds", state.get("background_audio_fade_out", 3.0)))))
         except (TypeError, ValueError):
             raise ValueError("Background volume must be 0–100 percent and fades 0–30 seconds.")
-        state.update({"background_audio_path": str(selected), "background_audio_volume": volume,
-                      "background_audio_fade_in": fade_in, "background_audio_fade_out": fade_out,
-                      "background_audio_mode": "manual", "background_audio_enabled": True,
-                      "modified_at": self._now()})
+        saved_at = self._now()
+        state.update({"background_audio_path": str(selected), "background_audio_preferred_path": str(selected),
+                      "background_audio_volume": volume, "background_audio_fade_in": fade_in,
+                      "background_audio_fade_out": fade_out, "background_audio_mode": "manual",
+                      "background_audio_enabled": True, "modified_at": saved_at,
+                      "sound_design_saved_at": saved_at})
         save_state(project.folder, state)
         return {"saved": True, "path": str(selected), "title": selected.stem, "volume": volume,
                 "fade_in_seconds": fade_in, "fade_out_seconds": fade_out, "mode": "manual"}
@@ -5501,28 +5505,59 @@ class PremiumV2Bridge(QObject):
     def _sound_save_manifest(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
         state = load_state(project.folder)
-        path = str(payload.get("path") or state.get("background_audio_path") or "").strip()
+        if "path" in payload:
+            path = str(payload.get("path") or "").strip()
+        else:
+            path = str(state.get("background_audio_path") or state.get("background_audio_preferred_path") or "").strip()
         enabled = bool(payload.get("enabled", bool(path)))
         try:
-            volume = max(0.0, min(1.0, float(payload.get("volume", state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18))))
+            volume = max(0.0, min(1.0, float(payload.get("volume", state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18)))
             fade_in = max(0.0, min(30.0, float(payload.get("fade_in_seconds", state.get("background_audio_fade_in", 2.0)))))
             fade_out = max(0.0, min(30.0, float(payload.get("fade_out_seconds", state.get("background_audio_fade_out", 3.0)))))
         except (TypeError, ValueError):
             raise ValueError("Background volume must be 0–100 percent and fades 0–30 seconds.")
+        catalog = self._sound_catalog({})
+        catalog_paths = {str(row["path"]) for row in catalog}
         if enabled and path:
             selected = Path(path).expanduser().resolve()
-            if not selected.is_file() or not any(row["path"] == str(selected) for row in self._sound_catalog({})):
+            if not selected.is_file() or str(selected) not in catalog_paths:
                 raise ValueError("Selected BGM is missing from the local sound library.")
-            state.update({"background_audio_path": str(selected), "background_audio_mode": "manual",
-                          "background_audio_enabled": True, "background_audio_volume": volume})
+            state.update({"background_audio_path": str(selected), "background_audio_preferred_path": str(selected),
+                          "background_audio_mode": "manual", "background_audio_enabled": True,
+                          "background_audio_volume": volume})
+        elif enabled:
+            # Enable chapter-assigned BGM/story cues without activating an
+            # unrelated book-wide default in Chapter-Based mode.
+            preferred = str(state.get("background_audio_path") or state.get("background_audio_preferred_path") or "").strip()
+            state.update({"background_audio_path": "", "background_audio_preferred_path": preferred,
+                          "background_audio_mode": "manual", "background_audio_enabled": True,
+                          "background_audio_volume": volume})
         else:
-            state.update({"background_audio_path": "", "background_audio_mode": "off", "background_audio_enabled": False})
+            # Keep the preferred path so the user can re-enable it later, but
+            # never leave disabled/missing audio in the active generation state.
+            preferred = path or str(state.get("background_audio_path") or state.get("background_audio_preferred_path") or "").strip()
+            state.update({"background_audio_path": "", "background_audio_preferred_path": preferred,
+                          "background_audio_mode": "off", "background_audio_enabled": False})
         state["background_audio_fade_in"] = fade_in
         state["background_audio_fade_out"] = fade_out
+        chapter_overrides = state.get("chapter_bgm_overrides")
+        if not isinstance(chapter_overrides, dict):
+            chapter_overrides = {}
+        chapter_strategy = str(state.get("chapter_bgm_strategy") or ("custom" if chapter_overrides else "same")).lower()
+        is_chapter_based = chapter_strategy in {"custom", "chapter-based", "chapter_based", "chapter"}
+        has_valid_chapter_track = any(
+            isinstance(item, dict) and item.get("rule") == "custom" and
+            str(item.get("path") or "") in catalog_paths and Path(str(item.get("path") or "")).is_file()
+            for item in chapter_overrides.values()
+        ) if is_chapter_based else False
+        saved_at = self._now()
+        state["sound_design_saved_at"] = saved_at
         state["sound_manifest"] = {"bgm_path": state.get("background_audio_path") or None,
                                    "bgm_volume": volume, "fade_in_seconds": fade_in,
-                                   "fade_out_seconds": fade_out, "enabled": bool(enabled and path),
-                                   "updated_at": self._now()}
+                                   "fade_out_seconds": fade_out,
+                                   "enabled": bool(enabled and (state.get("background_audio_path") or has_valid_chapter_track)),
+                                   "updated_at": saved_at}
+        state["modified_at"] = saved_at
         save_state(project.folder, state)
         return dict(state["sound_manifest"])
 
@@ -5537,6 +5572,15 @@ class PremiumV2Bridge(QObject):
         saved_strategy = str(
             state.get("chapter_bgm_strategy") or ("custom" if stored else "same")
         ).strip().lower()
+        saved_mode = str(state.get("background_audio_mode") or (
+            "manual" if state.get("background_audio_path") or
+            (saved_strategy in {"custom", "chapter-based", "chapter_based", "chapter"} and stored)
+            else "off"
+        )).strip().lower()
+        default_path = str(state.get("background_audio_path") or state.get("background_audio_preferred_path") or "").strip()
+        bgm_enabled = bool(state.get("background_audio_enabled", saved_mode != "off")) and saved_mode != "off"
+        last_manifest = state.get("sound_manifest") if isinstance(state.get("sound_manifest"), dict) else {}
+        last_saved_at = state.get("sound_design_saved_at") or last_manifest.get("updated_at")
         overrides: dict[str, dict[str, Any]] = {}
         for key, value in stored.items():
             if not isinstance(value, dict):
@@ -5544,13 +5588,18 @@ class PremiumV2Bridge(QObject):
             row = dict(value)
             raw_path = str(row.get("path") or "")
             track = catalog.get(raw_path)
-            row["path"] = raw_path if track else None
-            row["title"] = track["title"] if track else None
-            row["available"] = bool(track) if row.get("rule") == "custom" else True
+            available = bool(track and Path(raw_path).is_file())
+            row["path"] = raw_path if available else None
+            row["title"] = track["title"] if available else None
+            row["available"] = available if row.get("rule") == "custom" else True
             overrides[str(key)] = row
         return {
             "strategy": saved_strategy,
-            "default_path": state.get("background_audio_path") or None,
+            "default_path": default_path or None,
+            "default_available": bool(default_path and default_path in catalog and Path(default_path).is_file()),
+            "background_audio_mode": saved_mode,
+            "bgm_enabled": bgm_enabled,
+            "last_saved_at": last_saved_at,
             "default_volume": float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18),
             "fade_in_seconds": float(state.get("background_audio_fade_in") if state.get("background_audio_fade_in") is not None else 2.0),
             "fade_out_seconds": float(state.get("background_audio_fade_out") if state.get("background_audio_fade_out") is not None else 3.0),
@@ -5563,6 +5612,14 @@ class PremiumV2Bridge(QObject):
         project = self._active_project()
         state = load_state(project.folder)
         strategy = str(payload.get("strategy") or "").strip().lower()
+        prior_overrides = state.get("chapter_bgm_overrides") if isinstance(state.get("chapter_bgm_overrides"), dict) else {}
+        prior_strategy = str(state.get("chapter_bgm_strategy") or ("custom" if prior_overrides else "same")).lower()
+        prior_mode = str(state.get("background_audio_mode") or (
+            "manual" if state.get("background_audio_path") or
+            (prior_strategy in {"custom", "chapter-based", "chapter_based", "chapter"} and prior_overrides)
+            else "off"
+        )).lower()
+        master_enabled = bool(state.get("background_audio_enabled", prior_mode != "off")) and prior_mode != "off"
         if strategy:
             if strategy in {"chapter-based", "chapter_based", "chapter"}:
                 strategy = "custom"
@@ -5571,13 +5628,12 @@ class PremiumV2Bridge(QObject):
             state["chapter_bgm_strategy"] = strategy
             if strategy == "same":
                 state["chapter_bgm_overrides"] = {}
-            else:
-                # Chapter-specific tracks must be mixed even when the book has
-                # no separate default BGM assigned. The assembler gates custom
-                # overrides on manual mode, so choosing chapter-based BGM
-                # explicitly activates that mode.
-                state["background_audio_mode"] = "manual"
-            state["modified_at"] = self._now()
+            # Strategy changes must respect the global BGM/Voice Only control.
+            state["background_audio_enabled"] = master_enabled
+            state["background_audio_mode"] = "manual" if master_enabled else "off"
+            saved_at = self._now()
+            state["modified_at"] = saved_at
+            state["sound_design_saved_at"] = saved_at
             save_state(project.folder, state)
             return self._sound_chapter_bgm_get({})
         try:
@@ -5628,8 +5684,15 @@ class PremiumV2Bridge(QObject):
         }
         state["chapter_bgm_overrides"] = overrides
         state["chapter_bgm_strategy"] = "custom"
-        state["background_audio_mode"] = "manual"
-        state["modified_at"] = self._now()
+        current_mode = str(state.get("background_audio_mode") or (
+            "manual" if state.get("background_audio_path") or overrides else "off"
+        )).lower()
+        master_enabled = bool(state.get("background_audio_enabled", current_mode != "off")) and current_mode != "off"
+        state["background_audio_enabled"] = master_enabled
+        state["background_audio_mode"] = "manual" if master_enabled else "off"
+        saved_at = self._now()
+        state["modified_at"] = saved_at
+        state["sound_design_saved_at"] = saved_at
         save_state(project.folder, state)
         return {"saved": True, "number": number, "title": chapter.title,
                 "rule": rule, "path": path, "track_title": title,
@@ -5652,8 +5715,11 @@ class PremiumV2Bridge(QObject):
             raw = cues.get(slot)
             path = str(raw).strip() if raw else ""
             row = catalog.get(path)
-            result[slot] = {"path": path if row else None, "title": row["title"] if row else None,
-                            "available": bool(row)}
+            available = bool(row and path and Path(path).is_file())
+            result[slot] = {"path": path if available else None,
+                            "title": row["title"] if available else None,
+                            "available": available, "assigned": bool(path),
+                            "missing": bool(path and not available)}
         return result
 
     def _sound_cues_save(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -5691,7 +5757,9 @@ class PremiumV2Bridge(QObject):
             state["page_turn_cue_path"] = selected_path
         elif slot == "closing":
             state["ending_cue_path"] = selected_path
-        state["modified_at"] = self._now()
+        saved_at = self._now()
+        state["modified_at"] = saved_at
+        state["sound_design_saved_at"] = saved_at
         save_state(project.folder, state)
         return {"saved": True, "slot": slot, "path": selected_path, "title": selected_title,
                 "generation_supported": True}
@@ -5705,7 +5773,9 @@ class PremiumV2Bridge(QObject):
         state["scene_transition_cue_path"] = None
         state["ending_cue_path"] = None
         state["chapter_transition_sound"] = False
-        state["modified_at"] = self._now()
+        saved_at = self._now()
+        state["modified_at"] = saved_at
+        state["sound_design_saved_at"] = saved_at
         save_state(project.folder, state)
         return {"saved": True, "cleared": ["opening", "chapter", "closing"]}
 

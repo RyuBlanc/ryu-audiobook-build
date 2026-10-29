@@ -25,6 +25,26 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertNotIn("['opening','chapter','scene','closing']", self.html)
         self.assertNotIn("['opening','chapter','scene','closing']", self.adapter)
 
+
+    def test_voice_only_copy_and_master_toggle_match_saved_generation_contract(self):
+        self.assertIn("Narration only; BGM and all story cues are disabled", self.sound_markup)
+        self.assertNotIn("Keep narration and story cues only", self.sound_markup)
+        self.assertIn("const bgmMasterToggle = e.target.closest('#sound [data-bgm-enabled]');", self.adapter)
+        self.assertIn("call('sound.save_manifest'", self.adapter)
+        self.assertIn("Voice Only saved. Background music and all story cues are disabled", self.adapter)
+
+    def test_mix_summary_values_are_loaded_from_backend_not_demo_defaults(self):
+        self.assertIn("function renderSoundMixSummary()", self.adapter)
+        for field in ("mixBgmStatus", "mixDefaultTrack", "mixStrategy", "mixOverrides",
+                      "mixOpening", "mixChapterCue", "mixClosing", "soundPreviewPath",
+                      "soundFinalRenderPath", "soundMissingFiles", "soundLastSaved"):
+            self.assertIn("setText('" + field + "'", self.adapter)
+        self.assertIn('id="soundMissingFiles"', self.sound_markup)
+        self.assertIn('id="mixCueSignal"', self.sound_markup)
+        self.assertNotIn('id="mixBgmStatus">Enabled</b>', self.sound_markup)
+        self.assertNotIn('id="mixDefaultTrack">Fantasy Kingdom</b>', self.sound_markup)
+        self.assertNotIn('<div><span>Missing imported files</span>', self.sound_markup)
+
     def test_music_library_categories_are_real_filter_controls(self):
         required = (
             "all", "fantasy-adventure", "battle-warfare", "mystery",

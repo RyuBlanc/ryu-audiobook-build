@@ -318,7 +318,7 @@
   // whose actions are handled by the real backend adapter; visual markup is unchanged.
   ['importMusicTracks','importCueClips','previewSelectedTrack','setBookDefaultTrack',
    'saveChapterBgm','previewCueSequence','clearAllCues','soundPreviewBook',
-   'applySoundToProduction'].forEach(id => {
+   'applySoundToProduction','advancedMusicVolume'].forEach(id => {
     const node = $(id);
     if (node?.parentNode) node.replaceWith(node.cloneNode(true));
   });
@@ -3376,6 +3376,7 @@
       grid.dataset.soundListSignature = signature;
       grid.innerHTML = visible.map(t => '<article class="sound-track card"><div class="sound-track-info"><b>' + esc(t.title) + '</b><small>' + esc(t.category_label || t.category || 'Others') + ' · ' + esc(t.source) + ' · ' + esc(t.format) + ' · ' + Math.round(Number(t.size_bytes || 0)/1024) + ' KB</small></div><button class="btn small secondary" data-select-sound="' + esc(t.path) + '">Select</button></article>').join('') || '<p class="muted">No tracks match these filters. Try All, another category, or import a licensed audio file.</p>';
     }
+    renderSoundMixSummary();
     return sounds;
   }
   async function refreshSoundCues() {
@@ -3386,8 +3387,10 @@
     const names = {opening:'openingCueName',chapter:'chapterCueName',closing:'closingCueName'};
     for (const [slot,id] of Object.entries(names)) {
       const node = $(id);
-      if (node) node.textContent = cueAssignments[slot]?.title || 'Not assigned';
+      const cue = cueAssignments[slot] || {};
+      if (node) node.textContent = cue.available === true && cue.title ? cue.title : (cue.assigned || cue.missing ? 'Missing file' : 'Not assigned');
     }
+    renderSoundMixSummary();
     const grid = $('cueGrid');
     if (!grid) return cueAssignments;
     const query = ($('cueSearch')?.value || '').trim().toLowerCase();
@@ -3406,6 +3409,92 @@
         '<p class="muted">No matching local cue clips. Import licensed audio clips to use them here.</p>';
     }
     return cueAssignments;
+  }
+  function renderSoundMixSummary() {
+    const setText = (id, value) => {
+      const node = $(id);
+      if (node) node.textContent = String(value ?? '');
+    };
+    const overrides = chapterBgmState.overrides && typeof chapterBgmState.overrides === 'object'
+      ? chapterBgmState.overrides : {};
+    const chapterBased = ['custom', 'chapter-based', 'chapter_based'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
+    const masterEnabled = chapterBgmState.bgm_enabled === true;
+    const defaultPath = String(chapterBgmState.default_path || '').trim();
+    const defaultTrack = defaultPath
+      ? sounds.find(track => String(track.path || '') === defaultPath && String(track.role || 'music').toLowerCase() !== 'cue')
+      : null;
+    const defaultAvailable = Boolean(defaultPath && (chapterBgmState.default_available === true || defaultTrack));
+    const activeChapterRows = Object.values(overrides).filter(item =>
+      item && item.rule === 'custom' && item.path && item.available !== false &&
+      sounds.some(track => String(track.path || '') === String(item.path) && String(track.role || 'music').toLowerCase() !== 'cue')
+    );
+    const hasActiveBgm = chapterBased ? activeChapterRows.length > 0 : Boolean(defaultAvailable && defaultTrack);
+    const activeCueSlots = ['opening','chapter','closing'].filter(slot => {
+      const cue = cueAssignments[slot] || {};
+      return masterEnabled && cue.available === true && Boolean(cue.path);
+    });
+    const missingDefault = defaultPath && !defaultAvailable ? 1 : 0;
+    const missingChapterTracks = Object.values(overrides).filter(item =>
+      item && item.rule === 'custom' && (item.available === false || !item.path)
+    ).length;
+    const missingCues = ['opening','chapter','closing'].filter(slot => {
+      const cue = cueAssignments[slot] || {};
+      return cue.missing === true || (cue.assigned === true && cue.available !== true);
+    }).length;
+    const missingCount = missingDefault + missingChapterTracks + missingCues;
+    const assignedOverrideCount = Object.values(overrides).filter(item => item && ['custom','none'].includes(item.rule)).length;
+
+    setText('mixBgmStatus', !masterEnabled ? 'Voice only' : (hasActiveBgm ? 'Enabled' : 'Enabled · no BGM track assigned'));
+    const defaultLabel = !defaultPath ? 'Not assigned' : (!defaultAvailable || !defaultTrack ? 'Missing track' : defaultTrack.title);
+    setText('mixDefaultTrack', chapterBased && defaultPath
+      ? (defaultLabel === 'Missing track' ? 'Missing default · ignored by chapter strategy' : defaultLabel + ' · ignored by chapter strategy')
+      : defaultLabel);
+    setText('mixStrategy', chapterBased ? 'Chapter-Based BGM' : 'Same BGM');
+    setText('mixOverrides', assignedOverrideCount + ' chapters');
+    const cueLabel = slot => {
+      const cue = cueAssignments[slot] || {};
+      if (cue.available === true && cue.title) return cue.title;
+      if (cue.missing === true || cue.assigned === true) return 'Missing file';
+      return 'Not assigned';
+    };
+    setText('mixOpening', cueLabel('opening'));
+    setText('mixChapterCue', cueLabel('chapter'));
+    setText('mixClosing', cueLabel('closing'));
+
+    const selectedVolumes = chapterBased
+      ? activeChapterRows.map(item => Number(item.volume ?? chapterBgmState.default_volume ?? 0.18))
+      : (hasActiveBgm ? [Number(chapterBgmState.default_volume ?? 0.18)] : []);
+    const averageVolume = selectedVolumes.length
+      ? selectedVolumes.reduce((sum, volume) => sum + (Number.isFinite(volume) ? volume : 0), 0) / selectedVolumes.length
+      : 0;
+    const musicWidth = masterEnabled && hasActiveBgm ? Math.max(0, Math.min(100, averageVolume / 0.5 * 100)) : 0;
+    const cueWidth = activeCueSlots.length / 3 * 100;
+    const musicSignal = $('mixBgmSignal');
+    const cueSignal = $('mixCueSignal');
+    if (musicSignal?.style) musicSignal.style.width = musicWidth + '%';
+    if (cueSignal?.style) cueSignal.style.width = cueWidth + '%';
+
+    const outputDescription = !masterEnabled
+      ? 'Narration only · BGM and cues disabled'
+      : (hasActiveBgm
+        ? (activeCueSlots.length ? 'Narration + BGM + configured cues' : 'Narration + BGM')
+        : (activeCueSlots.length ? 'Narration + cues · no BGM track assigned' : 'Narration only · no BGM track assigned'));
+    setText('soundPreviewPath', outputDescription);
+    setText('soundFinalRenderPath', 'Uses the same saved sound settings');
+    setText('soundMissingFiles', String(missingCount));
+    const savedAt = chapterBgmState.last_saved_at;
+    let savedLabel = 'Not saved yet';
+    if (savedAt) {
+      const date = new Date(savedAt);
+      savedLabel = Number.isNaN(date.getTime()) ? String(savedAt) : date.toLocaleString();
+    }
+    setText('soundLastSaved', savedLabel);
+    document.querySelectorAll('#sound [data-bgm-enabled]').forEach(button => {
+      button.classList.toggle('active', (button.dataset.bgmEnabled === 'true') === masterEnabled);
+    });
+    setText('productionMusicSummary', hasActiveBgm && masterEnabled ? (chapterBased ? 'Chapter-based BGM' : (defaultTrack?.title || 'Book BGM')) : (masterEnabled ? 'No BGM track assigned' : 'Voice only · BGM off'));
+    setText('productionPreviewMix', outputDescription);
+    setText('productionFinalMix', !masterEnabled ? 'Voice Only' : (chapterBased ? 'Chapter-Based BGM' : 'Same BGM'));
   }
   function renderChapterBgm() {
     const list = $('chapterBgmList'), picker = $('chapterTrackPicker');
@@ -3470,6 +3559,7 @@
     if ($('bgmFadeIn')) $('bgmFadeIn').selectedIndex = ({0:0,2:1,3:2,5:3})[fadeIn] ?? 0;
     if ($('bgmFadeOut')) $('bgmFadeOut').selectedIndex = ({0:0,3:1,5:2,8:3})[fadeOut] ?? 0;
     renderChapterBgm();
+    renderSoundMixSummary();
     return chapterBgmState;
   }
   function scheduleLibrarySearchRefresh() {
@@ -6053,6 +6143,10 @@
       if (e.target?.id === 'librarySearch') {
         e.stopImmediatePropagation();
         scheduleLibrarySearchRefresh();
+      } else if (e.target?.id === 'advancedMusicVolume') {
+        e.stopImmediatePropagation();
+        const valueNode = $('advancedMusicVolumeValue');
+        if (valueNode) valueNode.textContent = Math.round(Number(e.target.value || 0)) + '%';
       } else if (e.target?.id === 'soundTrackSearch') {
         e.stopImmediatePropagation();
         scheduleSoundSearchRefresh();
@@ -6062,6 +6156,36 @@
       }
     }, true);
     document.addEventListener('click', async e => {
+      const bgmMasterToggle = e.target.closest('#sound [data-bgm-enabled]');
+      if (bgmMasterToggle) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        const enabled = bgmMasterToggle.dataset.bgmEnabled === 'true';
+        const chapterBased = ['custom', 'chapter-based', 'chapter_based'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
+        const defaultPath = String(chapterBgmState.default_path || '').trim();
+        const path = chapterBased ? '' : defaultPath;
+        const currentVolume = $('advancedMusicVolume')?.value;
+        const volume = currentVolume == null
+          ? Number(chapterBgmState.default_volume ?? 0.18)
+          : Number(currentVolume) / 100;
+        try {
+          await call('sound.save_manifest', {
+            path, enabled, volume,
+            fade_in_seconds:fadeSeconds('bgmFadeIn'),
+            fade_out_seconds:fadeSeconds('bgmFadeOut')
+          });
+          await refreshChapterBgm();
+          await refreshSoundCues();
+          message(enabled
+            ? (chapterBased
+              ? 'Sound playback enabled; Chapter-Based BGM and configured story cues will be used.'
+              : (path ? 'Background music and configured story cues enabled.' : 'Sound playback enabled; no book-default BGM track is assigned yet.'))
+            : 'Voice Only saved. Background music and all story cues are disabled for preview and generation.');
+        } catch (err) {
+          await refreshChapterBgm().catch(() => {});
+          message(err?.message || String(err), true);
+        }
+        return;
+      }
       const chapterBgmItem = e.target.closest('#chapterBgmList [data-chapter-bgm]');
       if (chapterBgmItem) {
         e.preventDefault(); e.stopImmediatePropagation();
@@ -6212,6 +6336,7 @@
             const result = await call('sound.cues.save', {slot:assignedSlot,path});
             pendingCueSlot = null;
             await refreshSoundCues();
+            await refreshChapterBgm();
             message(result.generation_supported ? 'Cue assignment saved to this book.' : 'Cue assignment saved, but this build reports that the selected cue is not used during audiobook assembly.');
           } else {
             selectedSoundPath = path;
@@ -6250,7 +6375,13 @@
             await refreshChapterBgm();
             message('Book default background track saved.');
           } else if (soundButton.id === 'applySoundToProduction') {
-            await call('sound.save_manifest', {path:selectedSoundPath || '',enabled:Boolean(selectedSoundPath),volume:Number($('advancedMusicVolume')?.value ?? 18)/100,fade_in_seconds:fadeSeconds('bgmFadeIn'),fade_out_seconds:fadeSeconds('bgmFadeOut')});
+            const chapterBased = ['custom', 'chapter-based', 'chapter_based'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
+            await call('sound.save_manifest', {
+              path:chapterBased ? '' : (selectedSoundPath || chapterBgmState.default_path || ''),
+              enabled:Boolean(chapterBgmState.bgm_enabled),
+              volume:Number($('advancedMusicVolume')?.value ?? Math.round(Number(chapterBgmState.default_volume ?? 0.18) * 100))/100,
+              fade_in_seconds:fadeSeconds('bgmFadeIn'),fade_out_seconds:fadeSeconds('bgmFadeOut')
+            });
             await refreshChapterBgm();
             document.querySelector('[data-page="generate"]')?.click();
           } else if (soundButton.id === 'saveChapterBgm') {
@@ -6259,6 +6390,7 @@
             await call('sound.cues.clear');
             pendingCueSlot = null;
             await refreshSoundCues();
+            await refreshChapterBgm();
             message('Opening, next-chapter, and closing cue assignments cleared.');
           } else if (soundButton.id === 'previewCueSequence') {
             const sequence = ['opening','chapter','closing'].map(slot => cueAssignments[slot]?.path).filter(Boolean);
