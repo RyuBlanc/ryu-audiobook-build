@@ -391,11 +391,19 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("ryu_audiobook_premium_v2.html", self.build)
         self.assertIn("ProjectWorkflow", self.main)
         self.assertIn('ui_mode = os.environ.get("RYU_UI_MODE", "premium-v2").strip().casefold()', self.main)
-        self.assertIn('if ui_mode in {"premium-v2", "html", "web"}:', self.main)
-        self.assertIn("from app.ui.premium_v2_host import PremiumV2Window, frontend_path", self.main)
-        self.assertIn("window = PremiumV2Window()", self.main)
-        self.assertIn("window = ProjectWorkflow()", self.main)
+        self.assertIn('if ui_mode == "native":', self.main)
+        premium_import = "from app.ui.premium_v2_host import PremiumV2Window, frontend_path"
+        self.assertIn(premium_import, self.main)
         self.assertNotIn("from app.ui.premium_v2_host import", self.main[:self.main.index("def main()")])
+
+        native_start = self.main.index('if ui_mode == "native":')
+        premium_start = self.main.index(premium_import, native_start)
+        premium_end = self.main.index("window.setWindowIcon(app_icon)", premium_start)
+        native_branch = self.main[native_start:premium_start]
+        premium_branch = self.main[premium_start:premium_end]
+        self.assertIn("window = ProjectWorkflow()", native_branch)
+        self.assertIn("window = PremiumV2Window()", premium_branch)
+        self.assertNotIn("ProjectWorkflow()", premium_branch)
 
     def test_production_skips_empty_chapters_and_rejects_all_empty_books(self):
         start = self.host.index("def _production_generate_book")
