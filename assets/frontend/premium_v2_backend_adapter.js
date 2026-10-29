@@ -3401,7 +3401,11 @@
       ? 'Unsaved cue changes — use Save Cue Changes to apply them to this book.'
       : 'All cue changes saved.';
     const cueSaveButton = $('saveCueChanges');
-    if (cueSaveButton) cueSaveButton.disabled = !cueChangesDirty;
+    if (cueSaveButton) cueSaveButton.disabled = cueSaveBusy;
+    const mixSaved = $('mixSavedState');
+    if (mixSaved) mixSaved.textContent = (cueChangesDirty || chapterBgmDraftDirty || mixLevelsDirty)
+      ? 'Unsaved changes — save before opening Production Studio.'
+      : (chapterBgmState.last_saved_at ? 'All displayed sound settings are saved.' : 'Saved state not yet confirmed for this project.');
     if (selectedCuePath) {
       const selectedCue = sounds.find(track => String(track.path || '') === String(selectedCuePath));
       if ($('selectedCueTitle')) $('selectedCueTitle').textContent = selectedCue?.title || 'Selected cue';
@@ -3437,7 +3441,7 @@
     };
     const overrides = chapterBgmState.overrides && typeof chapterBgmState.overrides === 'object'
       ? chapterBgmState.overrides : {};
-    const chapterBased = ['custom', 'chapter-based', 'chapter_based'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
+    const chapterBased = ['custom', 'chapter-based', 'chapter_based', 'chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
     const masterEnabled = chapterBgmState.bgm_enabled === true;
     const narrationInput = $('narrationVolume');
     const cueLevelInput = $('cueVolume');
@@ -3484,6 +3488,7 @@
       : defaultLabel);
     setText('mixStrategy', chapterBased ? 'Chapter-Based BGM' : 'Same BGM');
     setText('mixOverrides', assignedOverrideCount + ' chapters');
+    setText('mixBgmLevel', Math.round(Math.max(0, Math.min(0.50, Number(chapterBgmState.default_volume ?? 0.18))) * 100) + '%');
     const cueLabel = slot => {
       const cue = cueAssignments[slot] || {};
       if (cue.available === true && cue.title) return cue.title;
@@ -3717,28 +3722,66 @@
     await refreshChapterBgm();
     return true;
   }
-  async function savePendingCueChanges() {
-    const entries = Object.entries(pendingCueAssignments);
-    if (!entries.length) return false;
+  function scheduleCueAutosave(delay = 900) {
+    if (cueAutosaveTimer) clearTimeout(cueAutosaveTimer);
+    cueAutosaveTimer = null;
+    if (!cueChangesDirty) return;
     const status = $('cueSaveState');
-    if (status) status.textContent = 'Saving cue changes…';
-    const button = $('saveCueChanges');
-    if (button) button.disabled = true;
-    try {
-      for (const [slot, path] of entries) {
-        await call('sound.cues.save', {slot, path:path || null});
-        delete pendingCueAssignments[slot];
+    if (status && !cueSaveBusy) status.textContent = 'Unsaved cue changes — saving automatically…';
+    cueAutosaveTimer = setTimeout(() => {
+      cueAutosaveTimer = null;
+      savePendingCueChanges({autosave:true}).catch(error => {
+        console.warn('[Ryu cue autosave]', error);
+        const node = $('cueSaveState');
+        if (node) node.textContent = 'Autosave failed. Changes are retained; use Save Cue Changes to retry.';
+      });
+    }, delay);
+  }
+  async function savePendingCueChanges(options = {}) {
+    if (cueAutosaveTimer) { clearTimeout(cueAutosaveTimer); cueAutosaveTimer = null; }
+    const work = async () => {
+      const snapshots = Object.entries(pendingCueAssignments).map(([slot,path]) => [slot,path]);
+      if (!snapshots.length) {
+        cueChangesDirty = false;
+        if ($('cueSaveState')) $('cueSaveState').textContent = 'All cue changes saved.';
+        if ($('saveCueChanges')) $('saveCueChanges').disabled = false;
+        return true;
       }
-      cueChangesDirty = Object.keys(pendingCueAssignments).length > 0;
-      await refreshSoundCues();
-      if (status) status.textContent = cueChangesDirty ? 'Some cue changes remain unsaved.' : 'All cue changes saved.';
-      return !cueChangesDirty;
-    } catch (error) {
-      cueChangesDirty = Object.keys(pendingCueAssignments).length > 0;
-      if (status) status.textContent = 'Save failed. Unsaved cue changes have been retained.';
-      if (button) button.disabled = !cueChangesDirty;
-      throw error;
-    }
+      const status = $('cueSaveState'), button = $('saveCueChanges');
+      cueSaveBusy = true;
+      if (status) status.textContent = options.autosave ? 'Autosaving cue changes…' : 'Saving cue changes…';
+      if (button) button.disabled = true;
+      try {
+        for (const [slot,path] of snapshots) {
+          await call('sound.cues.save', {slot, path:path || null});
+          if (Object.prototype.hasOwnProperty.call(pendingCueAssignments,slot) &&
+              Object.is(pendingCueAssignments[slot],path)) delete pendingCueAssignments[slot];
+        }
+        cueChangesDirty = Object.keys(pendingCueAssignments).length > 0;
+        cueSaveBusy = false;
+        await refreshSoundCues();
+        if (status) status.textContent = cueChangesDirty ? 'Newer cue changes remain unsaved.' : 'All cue changes saved.';
+        if (button) button.disabled = false;
+        if (cueChangesDirty) scheduleCueAutosave(200);
+        return !cueChangesDirty;
+      } catch (error) {
+        cueChangesDirty = Object.keys(pendingCueAssignments).length > 0;
+        cueSaveBusy = false;
+        if (status) status.textContent = 'Save failed. Unsaved cue changes have been retained.';
+        if (button) button.disabled = false;
+        throw error;
+      }
+    };
+    const queued = cueSaveChain.then(work, work);
+    cueSaveChain = queued.catch(() => {});
+    return queued;
+  }
+  function stageCueChange(slot, path) {
+    if (!['opening','chapter','closing'].includes(String(slot))) throw new Error('Choose Opening, Next Chapter, or Closing audio.');
+    pendingCueAssignments[slot] = path || null;
+    cueChangesDirty = true;
+    cueDraftRevision += 1;
+    scheduleCueAutosave();
   }
   async function saveSoundMixLevels() {
     const chapterBased = ['custom','chapter-based','chapter_based','chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
@@ -3778,6 +3821,13 @@
     cueSearchTimer = setTimeout(() => {
       cueSearchTimer = null;
       refreshSoundCues().catch(error => message(error?.message || String(error), true));
+    }, 160);
+  }
+  function scheduleChapterBgmSearchRefresh() {
+    if (chapterBgmSearchTimer) clearTimeout(chapterBgmSearchTimer);
+    chapterBgmSearchTimer = setTimeout(() => {
+      chapterBgmSearchTimer = null;
+      renderChapterTrackPicker();
     }, 160);
   }
   let backendJobFilter = 'active';
@@ -6363,6 +6413,9 @@
         const valueNode = $('cueVolumeValue');
         if (valueNode) valueNode.textContent = Math.round(Number(e.target.value || 0)) + '%';
         renderSoundMixSummary();
+      } else if (e.target?.id === 'chapterTrackSearch') {
+        e.stopImmediatePropagation();
+        scheduleChapterBgmSearchRefresh();
       } else if (e.target?.id === 'soundTrackSearch') {
         e.stopImmediatePropagation();
         scheduleSoundSearchRefresh();
@@ -6415,7 +6468,7 @@
       if (bgmMasterToggle) {
         e.preventDefault(); e.stopImmediatePropagation();
         const enabled = bgmMasterToggle.dataset.bgmEnabled === 'true';
-        const chapterBased = ['custom', 'chapter-based', 'chapter_based'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
+        const chapterBased = ['custom', 'chapter-based', 'chapter_based', 'chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
         const defaultPath = String(chapterBgmState.default_path || '').trim();
         const path = chapterBased ? '' : defaultPath;
         const currentVolume = $('advancedMusicVolume')?.value;
