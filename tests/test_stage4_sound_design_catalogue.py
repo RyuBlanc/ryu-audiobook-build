@@ -100,11 +100,26 @@ class SoundDesignCatalogueTests(unittest.TestCase):
     def test_catalogue_uses_sidecar_title_license_and_duration(self):
         track = _valid_wav(self.app_root / "Audio Library" / "custom.wav")
         track.with_name(track.name + ".license.json").write_text(json.dumps({
-            "title": "A Custom Cue", "license_note": "CC0", "duration_seconds": 1.0}), encoding="utf-8")
+            "title": "A Custom Cue", "license_note": "CC0", "duration_seconds": 1.0,
+            "category": "fantasy"}), encoding="utf-8")
         rows = host.PremiumV2Bridge._sound_catalog(self.bridge_a, {})
         row = next(item for item in rows if item["path"] == str(track.resolve()))
         self.assertEqual(row["title"], "A Custom Cue"); self.assertEqual(row["licensing"], "CC0")
         self.assertEqual(row["duration_seconds"], 1.0)
+        self.assertEqual(row["category"], "fantasy")
+
+    def test_imported_music_category_roundtrips_into_catalogue(self):
+        source = _valid_wav(self.root / "incoming-romance.wav")
+        result = host.PremiumV2Bridge._sound_import(self.bridge_a, {
+            "paths": [str(source)], "target_kind": "music",
+            "category": "romance", "license_note": "CC0",
+        })
+        self.assertFalse(result["cancelled"])
+        imported_path = Path(result["imported"][0]["path"])
+        metadata = json.loads(imported_path.with_name(imported_path.name + ".license.json").read_text(encoding="utf-8"))
+        self.assertEqual(metadata["category"], "romance")
+        row = next(item for item in host.PremiumV2Bridge._sound_catalog(self.bridge_a, {}) if item["path"] == str(imported_path.resolve()))
+        self.assertEqual(row["category"], "romance")
 
     def test_final_output_cannot_overwrite_selected_sound_asset(self):
         asset = _valid_wav(self.root / "source.m4b")

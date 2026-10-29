@@ -25,6 +25,21 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertNotIn("['opening','chapter','scene','closing']", self.html)
         self.assertNotIn("['opening','chapter','scene','closing']", self.adapter)
 
+    def test_music_library_categories_are_real_filter_controls(self):
+        required = (
+            "all", "fantasy-adventure", "battle-warfare", "mystery",
+            "horror", "romance", "sci-fi", "calm-narration", "others",
+        )
+        for category in required:
+            self.assertIn(f'data-music-category="{category}"', self.sound_markup)
+        self.assertIn("selectedMusicCategory", self.adapter)
+        self.assertIn("matchesCategory", self.adapter)
+        self.assertIn("metadata?.category", self.adapter)
+
+    def test_music_import_uses_selected_category(self):
+        self.assertIn('id="musicImportCategory"', self.sound_markup)
+        self.assertIn("category: soundButton.id === 'importMusicTracks' ? ($('musicImportCategory')?.value || 'universal') : 'universal'", self.adapter)
+
     def test_fixed_cue_markup_has_only_supported_opening_next_and_closing_slots(self):
         self.assertNotIn('data-assign-cue="scene"', self.sound_markup)
         self.assertNotIn('id="sceneCueName"', self.sound_markup)
