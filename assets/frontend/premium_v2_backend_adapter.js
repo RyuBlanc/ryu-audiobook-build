@@ -6439,11 +6439,13 @@
           if (currentView === 'chapters' && chapterBgmDraftDirty) await saveCurrentChapterBgmDraft();
           document.querySelectorAll('#sound .sound-tabs [data-sound-tab]').forEach(button => button.classList.toggle('active', button === soundTab));
           document.querySelectorAll('#sound .sound-view[data-sound-view]').forEach(view => view.classList.toggle('active', view.dataset.soundView === nextView));
+          if (!sounds.length) await refreshSounds();
           if (nextView === 'music') await refreshSounds();
           else if (nextView === 'chapters') await refreshChapterBgm();
           else if (nextView === 'cues') await refreshSoundCues();
           else if (nextView === 'mix') {
             await refreshChapterBgm();
+            await refreshSoundCues();
             renderSoundMixSummary();
           }
         } catch (error) {
@@ -6451,7 +6453,14 @@
         }
         return;
       }
-      const bgmMasterToggle = e.target.closest('#sound [data-bgm-enabled]');
+      const chapterSource = e.target.closest('#chapterBgmSourceFilter [data-chapter-source]');
+      if (chapterSource) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        document.querySelectorAll('#chapterBgmSourceFilter [data-chapter-source]').forEach(button => button.classList.toggle('active', button === chapterSource));
+        renderChapterBgm();
+        return;
+      }
+      const bgmMasterToggle = e.target.closest('#sound [data-bgm-enabled], #generate [data-bgm-enabled]');
       if (bgmMasterToggle) {
         e.preventDefault(); e.stopImmediatePropagation();
         const enabled = bgmMasterToggle.dataset.bgmEnabled === 'true';
@@ -6488,8 +6497,11 @@
       if (chapterBgmItem) {
         e.preventDefault(); e.stopImmediatePropagation();
         try {
-          await saveCurrentChapterBgmDraft();
+          if (chapterBgmDraftDirty) await saveCurrentChapterBgmDraft();
           selectedBgmChapter = Number(chapterBgmItem.dataset.chapterBgm);
+          chapterBgmCandidateChapter = null;
+          selectedBgmTrackPath = null;
+          chapterBgmCandidateConfirmed = false;
           renderChapterBgm();
         } catch (error) { message(error?.message || String(error), true); }
         return;
@@ -6511,15 +6523,43 @@
       if (chapterRuleButton) {
         e.preventDefault(); e.stopImmediatePropagation();
         document.querySelectorAll('#sound .chapter-rule [data-chapter-rule]').forEach(b => b.classList.toggle('active', b === chapterRuleButton));
+        if (chapterRuleButton.dataset.chapterRule === 'none') {
+          selectedBgmTrackPath = null;
+          chapterBgmCandidateConfirmed = true;
+        } else if (chapterRuleButton.dataset.chapterRule === 'custom' && !selectedBgmTrackPath) {
+          chapterBgmCandidateConfirmed = false;
+        }
         chapterBgmDraftDirty = true;
+        renderChapterBgm();
         return;
       }
       const chapterTrack = e.target.closest('#chapterTrackPicker [data-chapter-track]');
       if (chapterTrack) {
         e.preventDefault(); e.stopImmediatePropagation();
         selectedBgmTrackPath = chapterTrack.dataset.chapterTrack;
+        chapterBgmCandidateConfirmed = false;
         document.querySelectorAll('#chapterTrackPicker [data-chapter-track]').forEach(b => b.classList.toggle('active', b === chapterTrack));
         chapterBgmDraftDirty = true;
+        renderChapterBgm();
+        return;
+      }
+      if (e.target.closest('#confirmChapterTrackSelection')) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        try {
+          const chapterBased = ['custom','chapter-based','chapter_based','chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
+          if (!chapterBased) throw new Error('Switch to Chapter-Based BGM before assigning a chapter track.');
+          if (!selectedBgmTrackPath) throw new Error('Select a music candidate first.');
+          chapterBgmCandidateConfirmed = true;
+          document.querySelectorAll('#sound .chapter-rule [data-chapter-rule]').forEach(button => button.classList.toggle('active', button.dataset.chapterRule === 'custom'));
+          chapterBgmDraftDirty = true;
+          await saveCurrentChapterBgmDraft(true);
+          if ($('chapterSelectStatus')) $('chapterSelectStatus').textContent = 'Track selected and saved for this chapter.';
+          message('Selected music track saved to Chapter ' + selectedBgmChapter + '.');
+        } catch (error) {
+          chapterBgmCandidateConfirmed = false;
+          if ($('chapterSelectStatus')) $('chapterSelectStatus').textContent = error?.message || String(error);
+          message(error?.message || String(error), true);
+        }
         return;
       }
       if (e.target.closest('#saveChapterBgm')) {
