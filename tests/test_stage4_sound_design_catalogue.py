@@ -20,6 +20,7 @@ class _BridgeHarness:
     def _active_project(self): return self.project
     def _now(self): return "2026-10-22T00:00:00+00:00"
     def _sound_catalog(self, _payload): return getattr(self, "catalog", [])
+    def _sound_chapter_bgm_get(self, payload): return host.PremiumV2Bridge._sound_chapter_bgm_get(self, payload)
 
 class SoundDesignCatalogueTests(unittest.TestCase):
     def setUp(self):
