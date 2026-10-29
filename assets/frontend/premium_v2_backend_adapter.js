@@ -6531,10 +6531,15 @@
         if (chapterRuleButton.dataset.chapterRule === 'none') {
           selectedBgmTrackPath = null;
           chapterBgmCandidateConfirmed = true;
-        } else if (chapterRuleButton.dataset.chapterRule === 'custom' && !selectedBgmTrackPath) {
+          chapterBgmDraftDirty = true;
+        } else if (chapterRuleButton.dataset.chapterRule === 'custom') {
+          const savedCurrent = (chapterBgmState.overrides || {})[String(selectedBgmChapter)] || {};
+          chapterBgmCandidateConfirmed = Boolean(selectedBgmTrackPath && selectedBgmTrackPath === savedCurrent.path);
+          chapterBgmDraftDirty = !savedCurrent.path;
+        } else {
           chapterBgmCandidateConfirmed = false;
+          chapterBgmDraftDirty = false;
         }
-        chapterBgmDraftDirty = true;
         renderChapterBgm();
         return;
       }
@@ -6544,8 +6549,9 @@
         selectedBgmTrackPath = chapterTrack.dataset.chapterTrack;
         chapterBgmCandidateConfirmed = false;
         document.querySelectorAll('#chapterTrackPicker [data-chapter-track]').forEach(b => b.classList.toggle('active', b === chapterTrack));
-        chapterBgmDraftDirty = true;
+        // Candidate selection is UI-only; persist only when Select is pressed.
         renderChapterBgm();
+        if ($('chapterSelectStatus')) $('chapterSelectStatus').textContent = 'Candidate only. Select confirms and saves this chapter assignment.';
         return;
       }
       if (e.target.closest('#confirmChapterTrackSelection')) {
