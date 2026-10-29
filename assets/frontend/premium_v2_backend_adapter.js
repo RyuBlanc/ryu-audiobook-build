@@ -3343,17 +3343,38 @@
     const grid = $('soundTrackGrid');
     const query = ($('soundTrackSearch')?.value || '').trim().toLowerCase();
     const sourceFilter = document.querySelector('#soundSourceFilter [data-source].active')?.dataset.source || 'all';
+    const selectedMusicCategory = document.querySelector('#sound .sound-categories-list [data-music-category].active')?.dataset.musicCategory || 'all';
+    const categoryGroup = track => {
+      const metadata = track.metadata && typeof track.metadata === 'object' ? track.metadata : {};
+      const category = String(track.category || track.metadata?.category || 'universal').trim().toLowerCase();
+      if (['fantasy','adventure'].includes(category)) return 'fantasy-adventure';
+      if (category === 'action') return 'battle-warfare';
+      if (['mystery','horror','romance','sci-fi'].includes(category)) return category;
+      if (['calm','universal'].includes(category)) return 'calm-narration';
+      return 'others';
+    };
     const visible = sounds.filter(t => {
-      const matchesQuery = !query || (t.title + ' ' + t.source + ' ' + t.format).toLowerCase().includes(query);
+      const metadata = t.metadata && typeof t.metadata === 'object' ? t.metadata : {};
+      const role = String(t.role || metadata.role || 'music').toLowerCase();
+      const searchable = [
+        t.title, t.source, t.format, t.category, t.category_label,
+        metadata.category, metadata.tags, metadata.mood, metadata.original_filename
+      ].map(value => Array.isArray(value) ? value.join(' ') : String(value ?? '')).join(' ').toLowerCase();
+      const matchesMusicType = role !== 'cue';
+      const matchesQuery = !query || searchable.includes(query);
       const matchesSource = sourceFilter === 'all' ||
         (sourceFilter === 'built-in' && String(t.source).toLowerCase().includes('bundled')) ||
         (sourceFilter === 'imported' && String(t.source).toLowerCase().includes('imported'));
-      return matchesQuery && matchesSource;
+      const matchesCategory = selectedMusicCategory === 'all' || categoryGroup(t) === selectedMusicCategory;
+      return matchesMusicType && matchesQuery && matchesSource && matchesCategory;
     });
-    const signature = JSON.stringify({query,sourceFilter,rows:visible.map(t => [t.path,t.title,t.source,t.format,t.size_bytes])});
+    const signature = JSON.stringify({
+      query, sourceFilter, selectedMusicCategory,
+      rows: visible.map(t => [t.path,t.title,t.source,t.format,t.size_bytes,t.category])
+    });
     if (grid && grid.dataset.soundListSignature !== signature) {
       grid.dataset.soundListSignature = signature;
-      grid.innerHTML = visible.map(t => '<article class="sound-track card"><div class="sound-track-info"><b>' + esc(t.title) + '</b><small>' + esc(t.source) + ' · ' + esc(t.format) + ' · ' + Math.round(Number(t.size_bytes || 0)/1024) + ' KB</small></div><button class="btn small secondary" data-select-sound="' + esc(t.path) + '">Select</button></article>').join('') || '<p class="muted">No local or bundled sound tracks found. Import your own licensed audio files.</p>';
+      grid.innerHTML = visible.map(t => '<article class="sound-track card"><div class="sound-track-info"><b>' + esc(t.title) + '</b><small>' + esc(t.category_label || t.category || 'Others') + ' · ' + esc(t.source) + ' · ' + esc(t.format) + ' · ' + Math.round(Number(t.size_bytes || 0)/1024) + ' KB</small></div><button class="btn small secondary" data-select-sound="' + esc(t.path) + '">Select</button></article>').join('') || '<p class="muted">No tracks match these filters. Try All, another category, or import a licensed audio file.</p>';
     }
     return sounds;
   }
@@ -6165,6 +6186,15 @@
         refreshSounds().catch(err => message(err?.message || String(err), true));
         return;
       }
+      const musicCategory = e.target.closest('#sound .sound-categories-list [data-music-category]');
+      if (musicCategory) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        document.querySelectorAll('#sound .sound-categories-list [data-music-category]').forEach(button => {
+          button.classList.toggle('active', button === musicCategory);
+        });
+        refreshSounds().catch(error => message(error?.message || String(error), true));
+        return;
+      }
       const cueSlot = e.target.closest('[data-assign-cue]');
       if (cueSlot) {
         e.preventDefault(); e.stopImmediatePropagation();
@@ -6182,7 +6212,7 @@
             const result = await call('sound.cues.save', {slot:assignedSlot,path});
             pendingCueSlot = null;
             await refreshSoundCues();
-            message(result.generation_supported ? (assignedSlot === 'scene' ? 'Scene transition cue saved to this book and will be included during audiobook assembly.' : 'Cue assignment saved to this book.') : 'Cue assignment saved, but this build reports that the selected cue is not used during audiobook assembly.');
+            message(result.generation_supported ? 'Cue assignment saved to this book.' : 'Cue assignment saved, but this build reports that the selected cue is not used during audiobook assembly.');
           } else {
             selectedSoundPath = path;
             message('Cue clip selected. Choose Change beside a cue slot, then select this clip to assign it.');
@@ -6195,7 +6225,10 @@
         e.preventDefault(); e.stopImmediatePropagation();
         try {
           if (soundButton.id === 'importMusicTracks' || soundButton.id === 'importCueClips') {
-            const result = await call('sound.import', {target_kind: soundButton.id === 'importMusicTracks' ? 'music' : 'cue'});
+            const result = await call('sound.import', {
+              target_kind: soundButton.id === 'importMusicTracks' ? 'music' : 'cue',
+              category: soundButton.id === 'importMusicTracks' ? ($('musicImportCategory')?.value || 'universal') : 'universal'
+            });
             await refreshSounds();
             await refreshSoundCues();
             await refreshChapterBgm();

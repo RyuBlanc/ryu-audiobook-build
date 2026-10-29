@@ -5364,13 +5364,24 @@ class PremiumV2Bridge(QObject):
         return {"opened": True, "path": str(folder.resolve())}
 
     def _sound_catalog(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        from app.audio.library import AUDIO_EXTENSIONS, metadata_for
+        from app.audio.library import AUDIO_EXTENSIONS, MUSIC_CATEGORY_LABELS, metadata_for
         extensions = AUDIO_EXTENSIONS
         roots = [(app_root() / "Audio Library", "Imported locally")]
         bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])) / "assets" / "starter_audio"
         if bundled.is_dir():
             roots.append((bundled, "Bundled with application"))
         found: dict[str, dict[str, Any]] = {}
+        category_aliases = {
+            "fantasy adventure": "fantasy", "battle & warfare": "action",
+            "calm narration": "calm", "others": "emotional",
+        }
+        category_display = {
+            "fantasy": "Fantasy adventure", "adventure": "Fantasy adventure",
+            "action": "Battle & warfare", "mystery": "Mystery", "horror": "Horror",
+            "romance": "Romance", "sci-fi": "Sci-fi", "calm": "Calm narration",
+            "universal": "Calm narration", "emotional": "Others",
+            "slice-of-life": "Others", "comedy": "Others",
+        }
         for root, source in roots:
             if not root.is_dir():
                 continue
@@ -5388,11 +5399,24 @@ class PremiumV2Bridge(QObject):
                         continue
                     key = str(resolved)
                     metadata = metadata_for(resolved)
+                    raw_category = str(metadata.get("category") or "").strip().casefold()
+                    category = category_aliases.get(raw_category, raw_category)
+                    if category not in MUSIC_CATEGORY_LABELS:
+                        category = next(
+                            (part.casefold() for part in reversed(path.parts)
+                             if part.casefold() in MUSIC_CATEGORY_LABELS),
+                            "universal",
+                        )
+                    role = str(metadata.get("role") or "music").strip().casefold()
+                    if role not in {"music", "cue"}:
+                        role = "music"
+                    category_label = category_display.get(category, "Others")
                     license_note = str(metadata.get("license_note") or metadata.get("source_note") or metadata.get("license") or "Unknown; verify rights before publishing")
                     found[key] = {"id": key, "title": str(metadata.get("title") or path.stem), "path": key,
                                   "source": source, "format": path.suffix.lower(),
                                   "size_bytes": size, "duration_seconds": metadata.get("duration_seconds"),
-                                  "licensing": license_note, "metadata": metadata}
+                                  "licensing": license_note, "category": category,
+                                  "category_label": category_label, "role": role, "metadata": metadata}
             except OSError:
                 log.exception("Could not scan sound asset folder %s", root)
         return sorted(found.values(), key=lambda row: (row["source"], row["title"].casefold()))
