@@ -70,6 +70,7 @@ class SoundDesignCatalogueTests(unittest.TestCase):
     def test_chapter_bgm_assignment_edit_clear_and_reload_are_project_isolated(self):
         track = _valid_wav(self.app_root / "Audio Library" / "track.wav")
         self.bridge_a.catalog = [{"path": str(track.resolve()), "title": "track"}]
+        host.PremiumV2Bridge._sound_chapter_bgm_save(self.bridge_a, {"strategy": "custom"})
         saved = host.PremiumV2Bridge._sound_chapter_bgm_save(self.bridge_a, {
                 "number": 1, "rule": "custom", "path": str(track), "volume": 0.2,
                 "start_offset": "after_10_seconds", "end_behavior": "continue_to_transition"})
