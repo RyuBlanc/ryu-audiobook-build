@@ -3610,6 +3610,7 @@
     soundPreviewKind = null;
     soundPreviewPath = null;
     $('soundWave')?.classList.remove('playing');
+    if ($('previewSelectedTrack')) $('previewSelectedTrack').textContent = '▶ Preview selected track';
   }
   function createSoundPreview(rawPath, kind, volume = 1) {
     const audio = new Audio(soundFileUrl(rawPath));
@@ -3623,6 +3624,7 @@
         soundPreviewKind = null;
         soundPreviewPath = null;
         $('soundWave')?.classList.remove('playing');
+        if (kind === 'music' && $('previewSelectedTrack')) $('previewSelectedTrack').textContent = '▶ Preview selected track';
       }
     };
     audio.onerror = () => message('The selected local audio file could not be played in the embedded preview.', true);
@@ -3684,7 +3686,7 @@
     const narration = Math.max(0, Math.min(1, Number($('narrationVolume')?.value ?? Math.round(Number(chapterBgmState.narration_volume ?? 1) * 100)) / 100));
     const cue = Math.max(0, Math.min(0.50, Number($('cueVolume')?.value ?? Math.round(Number(chapterBgmState.cue_volume ?? 0.25) * 100)) / 100));
     const result = await call('sound.save_manifest', {
-      path:chapterBased ? '' : (selectedSoundPath || chapterBgmState.default_path || ''),
+      path:chapterBased ? '' : (chapterBgmState.default_path || ''),
       enabled:chapterBgmState.bgm_enabled === true,
       volume, narration_volume:narration, cue_volume:cue,
       fade_in_seconds:fadeSeconds('bgmFadeIn'), fade_out_seconds:fadeSeconds('bgmFadeOut')
