@@ -5293,22 +5293,34 @@
     const rows = Array.isArray(loaded) ? loaded : [];
     const section = $('history');
     const filter = $('historyFilters')?.querySelector('button.active')?.textContent?.trim().toLowerCase() || 'all';
-    const host = $('historyFilters')?.parentElement;
+    const host = $('historyRecords');
+    const fromValue = $('historyFromDate')?.value || '';
+    const toValue = $('historyToDate')?.value || '';
+    const fromMs = fromValue ? Date.parse(fromValue + 'T00:00:00') : null;
+    const toMs = toValue ? Date.parse(toValue + 'T23:59:59.999') : null;
+    if (fromMs != null && toMs != null && fromMs > toMs) throw new Error('From date must be on or before To date.');
     const visible = rows.filter(j => {
       const state = String(j.state || '').toLowerCase();
-      if (filter === 'completed') return state === 'completed';
-      if (filter === 'running') return ['queued','running','pause_requested','paused','retrying'].includes(state);
-      if (filter === 'failed') return ['failed','cancelled'].includes(state);
+      if (filter === 'completed' && state !== 'completed') return false;
+      if (filter === 'running' && !['queued','running','pause_requested','paused','retrying','cancel_requested'].includes(state)) return false;
+      if (filter === 'failed' && !['failed','cancelled'].includes(state)) return false;
+      if (fromMs != null || toMs != null) {
+        const timestamp = j.completed_at || j.updated_at || j.started_at || j.queued_at || j.created_at || '';
+        const millis = Date.parse(String(timestamp));
+        if (!Number.isFinite(millis)) return false;
+        if (fromMs != null && millis < fromMs) return false;
+        if (toMs != null && millis > toMs) return false;
+      }
       return true;
     });
-    const signature = JSON.stringify({filter,rows:visible.map(j => [j.job_id,j.title,j.type,j.project_title,j.stage,j.message,j.state,j.elapsed_seconds,j.progress,j.error?.message])});
+    const signature = JSON.stringify({filter,fromValue,toValue,rows:visible.map(j => [j.job_id,j.title,j.type,j.project_title,j.stage,j.message,j.state,j.created_at,j.started_at,j.completed_at,j.elapsed_seconds,j.progress,j.error?.message])});
     if (section && host && section.dataset.historyRenderSignature === signature) return rows;
     if (section) section.querySelectorAll('[data-backend-history]').forEach(el => el.remove());
     if (host) {
       let empty = host.querySelector('[data-history-empty]');
       if (!visible.length) {
         if (!empty) { empty = document.createElement('p'); empty.dataset.historyEmpty='1'; empty.className='muted'; host.appendChild(empty); }
-        empty.textContent = 'No matching backend jobs yet.';
+        empty.textContent = 'No operation records match these filters.';
       } else if (empty) empty.remove();
       visible.forEach(j => {
         const row = document.createElement('div');
@@ -6426,6 +6438,11 @@
       }
     }, true);
     document.addEventListener('change', async e => {
+      if (e.target?.id === 'historyFromDate' || e.target?.id === 'historyToDate') {
+        e.stopImmediatePropagation();
+        refreshHistory().catch(error => message(error?.message || String(error), true));
+        return;
+      }
       if (e.target?.id === 'chapterStartOffset' || e.target?.id === 'chapterEndBehavior') {
         chapterBgmDraftDirty = true;
         return;
