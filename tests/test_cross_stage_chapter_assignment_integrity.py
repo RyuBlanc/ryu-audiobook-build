@@ -6,6 +6,7 @@ from pathlib import Path
 from app.core.project import Project
 from app.chapters.detector import Chapter
 from app.chapters.editor import ChapterEditor
+from app.ui.premium_v2_host import PremiumV2Bridge
 
 
 class CrossStageChapterAssignmentIntegrityTests(unittest.TestCase):
@@ -140,6 +141,110 @@ class CrossStageChapterAssignmentIntegrityTests(unittest.TestCase):
         self.assertEqual(item["speakers"], ["Mira", "Ren"])
         self.assertEqual(item["multi_speaker_mode"], "chorus")
         self.assertEqual(item["confidence"], 0.8)
+
+
+
+class PremiumV2BridgeSplitAssignmentIntegrityTests(unittest.TestCase):
+    def _split(self, project, payload):
+        bridge = object.__new__(PremiumV2Bridge)
+        with (
+            patch.object(PremiumV2Bridge, "_active_project", return_value=project),
+            patch.object(PremiumV2Bridge, "_mark_project_edited") as mark_edited,
+        ):
+            result = bridge._chapter_split(payload)
+        return result, mark_edited
+
+    def test_bridge_split_moves_assignments_with_text_and_remaps_offsets(self):
+        text = "Mira said, Wait here.\\n\\nRen answered, Go now."
+        left_line = "Wait here."
+        right_line = "Go now."
+        left_assignment = {
+            "start": text.index(left_line),
+            "end": text.index(left_line) + len(left_line),
+            "text": left_line,
+            "speaker": "Mira",
+            "source": "manual",
+        }
+        right_assignment = {
+            "start": text.index(right_line),
+            "end": text.index(right_line) + len(right_line),
+            "text": right_line,
+            "speaker": "Ren",
+            "speakers": ["Ren", "Mira"],
+            "multi_speaker_mode": "chorus",
+            "confidence": 1.0,
+            "source": "manual",
+        }
+        chapter = Chapter(1, "Scene", text, dialogue_assignments=[
+            left_assignment, right_assignment,
+        ])
+        project = SimpleNamespace(chapters=[chapter], save=Mock())
+        split_at = text.index("Ren answered")
+
+        result, mark_edited = self._split(project, {
+            "number": 1,
+            "split_at": split_at,
+            "text": text,
+            "title": "Scene",
+            "new_title": "Scene Continued",
+        })
+
+        self.assertEqual(len(project.chapters), 2)
+        left, right = project.chapters
+        self.assertEqual(left.text, "Mira said, Wait here.")
+        self.assertEqual(right.text, "Ren answered, Go now.")
+        self.assertEqual(left.dialogue_assignments, [left_assignment])
+        self.assertEqual(len(right.dialogue_assignments), 1)
+        moved = right.dialogue_assignments[0]
+        self.assertEqual(right.text[moved["start"]:moved["end"]], right_line)
+        self.assertEqual(moved["start"], right.text.index(right_line))
+        self.assertEqual(moved["end"], moved["start"] + len(right_line))
+        self.assertEqual(moved["speaker"], "Ren")
+        self.assertEqual(moved["speakers"], ["Ren", "Mira"])
+        self.assertEqual(moved["multi_speaker_mode"], "chorus")
+        self.assertEqual(moved["confidence"], 1.0)
+        self.assertEqual(result["new_number"], 2)
+        project.save.assert_called_once_with()
+        mark_edited.assert_called_once_with(project, 2)
+
+    def test_bridge_split_rejects_assignment_crossing_split_boundary_without_mutating_project(self):
+        text = "Mira said, Wait here.\\n\\nRen answered, Go now."
+        start = text.index("Wait here.")
+        end = text.index("Go now.") + len("Go now.")
+        crossing = {
+            "start": start,
+            "end": end,
+            "text": text[start:end],
+            "speakers": ["Mira", "Ren"],
+            "multi_speaker_mode": "chorus",
+            "source": "manual",
+        }
+        chapter = Chapter(1, "Scene", text, dialogue_assignments=[crossing.copy()])
+        project = SimpleNamespace(chapters=[chapter], save=Mock())
+        original_text = chapter.text
+        original_assignments = [item.copy() for item in chapter.dialogue_assignments]
+
+        bridge = object.__new__(PremiumV2Bridge)
+        with (
+            patch.object(PremiumV2Bridge, "_active_project", return_value=project),
+            patch.object(PremiumV2Bridge, "_mark_project_edited") as mark_edited,
+            self.assertRaisesRegex(ValueError, "assignment.*crosses the split boundary"),
+        ):
+            bridge._chapter_split({
+                "number": 1,
+                "split_at": text.index("Ren answered"),
+                "text": text,
+                "title": "Scene",
+                "new_title": "Scene Continued",
+            })
+
+        self.assertEqual(len(project.chapters), 1)
+        self.assertEqual(project.chapters[0].text, original_text)
+        self.assertEqual(project.chapters[0].dialogue_assignments, original_assignments)
+        project.save.assert_not_called()
+        mark_edited.assert_not_called()
+
+
 
 
 if __name__ == "__main__":

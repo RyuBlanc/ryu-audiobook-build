@@ -10,6 +10,7 @@ on:
       - fix/import-qa-speaker-hover-hardware
       - fix/stage-1-generation-stability
       - stage-2/import-integrity
+      - stage-2/import-integrity-post-stage1
       - stage-3/voice-studio-character-assignment
       - stage-4-pronunciation-sound-design
       - fix/installer-branding-accessibility

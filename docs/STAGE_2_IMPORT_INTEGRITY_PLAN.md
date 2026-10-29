@@ -1,7 +1,7 @@
 # Stage 2 Plan — Import Integrity, Text Cleanup, and Chapter Structure
 
-**Working branch:** `stage-2/import-integrity`  
-**Baseline:** Stage 1 merge commit `1fbb5e9ae897315bb5a5ca96d0a4ef68178f1e2a`  
+**Working branch:** `stage-2/import-integrity-post-stage1`  
+**Baseline:** Stage 1.10 artifact checkpoint #1637, commit `4c3ac39ee8b1664d76422bcaf8a7460b7df77635`  
 **Rule:** preserve the approved Premium V2 UI. Change backend behavior and tests; do not redesign the interface or report simulated completion.
 
 ## Goals and exit criteria
@@ -35,7 +35,7 @@
 2. Added import integrity regression tests for BOM handling, chapter boundary separation, watermark cleanup, persistence of review/skip flags, and failed source-copy cleanup.
 3. Added this branch to the Windows workflow trigger so these changes receive the full build/test/package pipeline.
 
-## Current status after Run #871
+## Prior Stage 2 evidence from the legacy branch
 
 Run #877 passed on final Stage 2 commit `05e03c14637bb4ff3fe8514a50101ebde0d2ab4b`, including added coverage for edited/reordered chapter persistence, invalid-source rejection, and repeated boilerplate cleanup. PR #17 was merged as `9aa1ba5cc9be0808d596c1e2c0618584433c9917`. Automated implementation and package gates passed; packaged-Windows acceptance remains explicitly outstanding.
 
@@ -50,3 +50,12 @@ Run #877 passed on final Stage 2 commit `05e03c14637bb4ff3fe8514a50101ebde0d2ab4
 ## 2026-10-24 reliability addendum
 
 Chapter selection flushes a queued autosave before navigation and blocks selection if save fails. Job polling and catalogue/list refreshes are guarded against overlaps/stale replies. Generation completion refreshes output metadata and History without rebuilding the Chapter editor. Target-Windows import/edit/save/reopen and real audio acceptance remain open.
+
+
+## Current Stage 2 execution — post-Stage 1.10 baseline
+
+- The new working branch is based on the exact successful Stage 1.10 checkpoint #1637. The older `stage-2/import-integrity` branch is retained unchanged because it diverged from the current Stage 1 line.
+- Stage 2 follows the repository's test-first rule: add a regression assertion, confirm it fails on the current implementation, make the minimal source fix, run the full regression suite, then create an artifact checkpoint only after the tests are green.
+- First active gap: the Premium V2 bridge's chapter-split handler does not keep saved dialogue/cast assignments with the passage they describe. The new regression tests require assignments wholly on the right side to move with corrected offsets and reject splits that cut through an assignment without mutating or saving the project.
+- No UI redesign is included. Existing source-import and chapter-fixture coverage remains in place and will not be redone without evidence of a regression.
+- Target-Windows import/edit/save/reopen acceptance remains a separate manual gate; passing CI does not claim that every real book has been accepted.
