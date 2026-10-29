@@ -5511,7 +5511,7 @@ class PremiumV2Bridge(QObject):
             path = str(state.get("background_audio_path") or state.get("background_audio_preferred_path") or "").strip()
         enabled = bool(payload.get("enabled", bool(path)))
         try:
-            volume = max(0.0, min(1.0, float(payload.get("volume", state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18)))
+            volume = max(0.0, min(1.0, float(payload.get("volume", state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18))))
             fade_in = max(0.0, min(30.0, float(payload.get("fade_in_seconds", state.get("background_audio_fade_in", 2.0)))))
             fade_out = max(0.0, min(30.0, float(payload.get("fade_out_seconds", state.get("background_audio_fade_out", 3.0)))))
         except (TypeError, ValueError):
