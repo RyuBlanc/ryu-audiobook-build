@@ -43,7 +43,7 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
         from app.ui.frontend_assets import FrontendAssetError, prepare_native_host_html
 
         prepared = prepare_native_host_html(
-            "<html><head></head><body></body></html><script>setTimeout(finish,1700)</script>",
+            "<html><head></head><body></body></html><script>setTimeout(finish,1700);</script>",
             base_url='file:///C:/Ryu & "Assets"/frontend/',
         )
         self.assertIn(
