@@ -5495,9 +5495,10 @@ class PremiumV2Bridge(QObject):
             return {"saved": True, "path": None, "mode": "off",
                     "fade_in_seconds": fade_in, "fade_out_seconds": fade_out}
         selected = Path(raw).expanduser().resolve()
-        valid = any(str(row["path"]) == str(selected) for row in self._sound_catalog({}))
-        if not selected.is_file() or not valid:
-            raise ValueError("Choose an audio file from the local Sound Design catalogue.")
+        catalog = {str(row["path"]): row for row in self._sound_catalog({})}
+        selected_row = catalog.get(str(selected))
+        if not selected.is_file() or selected_row is None or str(selected_row.get("role") or "music").casefold() == "cue":
+            raise ValueError("Choose a music track from the local Music Library catalogue.")
         try:
             volume = max(0.0, min(0.50, float(payload.get("volume", 0.18))))
             fade_in = max(0.0, min(30.0, float(payload.get("fade_in_seconds", state.get("background_audio_fade_in", 2.0)))))
@@ -5534,8 +5535,9 @@ class PremiumV2Bridge(QObject):
         catalog_paths = {str(row["path"]) for row in catalog}
         if enabled and path:
             selected = Path(path).expanduser().resolve()
-            if not selected.is_file() or str(selected) not in catalog_paths:
-                raise ValueError("Selected BGM is missing from the local sound library.")
+            selected_row = next((row for row in catalog if str(row["path"]) == str(selected)), None)
+            if not selected.is_file() or selected_row is None or str(selected_row.get("role") or "music").casefold() == "cue":
+                raise ValueError("Selected BGM is missing from the local music library.")
             state.update({"background_audio_path": str(selected), "background_audio_preferred_path": str(selected),
                           "background_audio_mode": "manual", "background_audio_enabled": True,
                           "background_audio_volume": volume})
@@ -5692,8 +5694,8 @@ class PremiumV2Bridge(QObject):
             selected = Path(raw_path).expanduser().resolve() if raw_path else None
             catalog = {str(row["path"]): row for row in self._sound_catalog({})}
             row = catalog.get(str(selected)) if selected else None
-            if selected is None or not selected.is_file() or row is None:
-                raise ValueError("Choose a custom track from the local Sound Design catalogue.")
+            if selected is None or not selected.is_file() or row is None or str(row.get("role") or "music").casefold() == "cue":
+                raise ValueError("Choose a music track from the local Music Library catalogue.")
             path, title = str(selected), str(row["title"])
         try:
             volume = max(0.0, min(0.50, float(payload.get("volume", 0.18))))
