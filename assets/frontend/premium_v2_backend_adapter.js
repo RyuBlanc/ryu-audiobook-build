@@ -3423,7 +3423,7 @@
     const defaultTrack = defaultPath
       ? sounds.find(track => String(track.path || '') === defaultPath && String(track.role || 'music').toLowerCase() !== 'cue')
       : null;
-    const defaultAvailable = Boolean(defaultPath && (chapterBgmState.default_available === true || defaultTrack));
+    const defaultAvailable = Boolean(defaultPath && chapterBgmState.default_available === true && defaultTrack);
     const activeChapterRows = Object.values(overrides).filter(item =>
       item && item.rule === 'custom' && item.path && item.available !== false &&
       sounds.some(track => String(track.path || '') === String(item.path) && String(track.role || 'music').toLowerCase() !== 'cue')
@@ -3433,7 +3433,7 @@
       const cue = cueAssignments[slot] || {};
       return masterEnabled && cue.available === true && Boolean(cue.path);
     });
-    const missingDefault = defaultPath && !defaultAvailable ? 1 : 0;
+    const missingDefault = !chapterBased && defaultPath && !defaultAvailable ? 1 : 0;
     const missingChapterTracks = Object.values(overrides).filter(item =>
       item && item.rule === 'custom' && (item.available === false || !item.path)
     ).length;

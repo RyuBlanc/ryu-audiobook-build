@@ -26,6 +26,18 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertNotIn("['opening','chapter','scene','closing']", self.adapter)
 
 
+
+    def test_sound_design_has_no_demo_seed_script_or_fake_summary_values(self):
+        self.assertNotIn("const state={bgm:true,defaultTrack:'Fantasy Kingdom'", self.html)
+        self.assertNotIn("renderTracks();renderChapters();renderChapterPicker();renderCues();updateSummary();", self.html)
+        for sample in ("Fantasy Kingdom", "Dragon Gate Intro", "Crystal Page Turn",
+                       "Tempest Closing Theme", "Narration + Fantasy Kingdom + 4 cues"):
+            self.assertNotIn(sample, self.sound_markup)
+        self.assertNotRegex(self.sound_markup, re.compile(r"scene.?transition", re.IGNORECASE))
+        self.assertIn('id="soundTrackGrid"><p class="muted">Loading local music library…</p>', self.sound_markup)
+        self.assertIn('id="cueGrid"><p class="muted">Loading local effects library…</p>', self.sound_markup)
+        self.assertIn("await hydratePhase([refreshSounds, refreshSoundCues, refreshChapterBgm]);", self.adapter)
+
     def test_voice_only_copy_and_master_toggle_match_saved_generation_contract(self):
         self.assertIn("Narration only; BGM and all story cues are disabled", self.sound_markup)
         self.assertNotIn("Keep narration and story cues only", self.sound_markup)
