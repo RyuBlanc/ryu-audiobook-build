@@ -196,6 +196,86 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("if cue is None or cue_gain <= 1e-9:", self.assembler)
         self.assertIn("return None", self.assembler[self.assembler.index("def apply_cue_level"):self.assembler.index("# Real local audio only", self.assembler.index("def apply_cue_level"))])
 
+    def test_chapter_bgm_filters_selected_track_panel_and_explicit_confirmation_are_connected(self):
+        for control in ("chapterBgmSearch", "chapterBgmSourceFilter", "chapterBgmCategoryFilter",
+                        "chapterSelectedTrackTitle", "chapterSelectedTrackMeta", "chapterSavedAssignment",
+                        "confirmChapterTrackSelection", "chapterSelectStatus"):
+            self.assertIn(f'id="{control}"', self.sound_markup)
+        for source in ("All", "Built-in", "Imported", "Fantasy adventure", "Battle &amp; warfare",
+                       "Mystery", "Horror", "Romance", "Sci-fi", "Calm narration", "Others"):
+            self.assertIn(source, self.sound_markup)
+        self.assertIn("soundMusicCategoryGroup(track)", self.adapter)
+        self.assertIn("soundMusicCategoryGroup(t) === selectedMusicCategory", self.adapter)
+        self.assertIn("categoryFilter === 'all' || soundMusicCategoryGroup(track) === categoryFilter", self.adapter)
+        self.assertIn("chapterBgmCandidateConfirmed = true;", self.adapter)
+        self.assertIn("await saveCurrentChapterBgmDraft(true);", self.adapter)
+        self.assertIn("chapterBgmCandidateConfirmed) {", self.adapter)
+        self.assertIn("Candidate only. Select confirms and saves this chapter assignment.", self.adapter)
+        self.assertRegex(self.html, r"\.chapter-bgm-editor\{[^}]*overflow-y:auto")
+        self.assertRegex(self.html, r"\.chapter-track-picker\{[^}]*overflow-y:auto")
+
+    def test_selecting_chapter_music_candidate_does_not_mark_saved_settings_dirty(self):
+        start = self.adapter.index("const chapterTrack = e.target.closest('#chapterTrackPicker [data-chapter-track]');")
+        end = self.adapter.index("if (e.target.closest('#confirmChapterTrackSelection'))", start)
+        candidate_handler = self.adapter[start:end]
+        self.assertIn("selectedBgmTrackPath = chapterTrack.dataset.chapterTrack;", candidate_handler)
+        self.assertIn("chapterBgmCandidateConfirmed = false;", candidate_handler)
+        self.assertNotIn("chapterBgmDraftDirty = true;", candidate_handler)
+        self.assertIn("Candidate only. Select confirms and saves this chapter assignment.", candidate_handler)
+        self.assertIn("if (rule === 'custom' && selectedBgmTrackPath !== (savedCurrent.path || null) && !chapterBgmCandidateConfirmed)", self.adapter)
+
+    def test_mix_summary_uses_selected_track_and_real_saved_state_labels(self):
+        mix = self.sound_markup[self.sound_markup.index('data-sound-view="mix"'):]
+        self.assertIn('<span>Selected book track</span>', mix)
+        self.assertIn('<span>Next chapter cue</span>', mix)
+        self.assertIn('id="mixSavedState"', mix)
+        self.assertNotIn('<span>Book default</span>', mix)
+        self.assertNotRegex(mix, r"Scene Cue|Scene transition cue")
+        self.assertIn('id="mixBgmVolume"', mix)
+        self.assertIn('max="50"', mix[mix.index('id="mixBgmVolume"') - 100:mix.index('id="mixBgmVolume"') + 150])
+        self.assertIn("setText('mixSavedState', anySoundDraft ? 'Unsaved changes' : (chapterBgmState.last_saved_at ? 'Saved' : 'Not saved'));", self.adapter)
+
+    def test_cue_autosave_is_debounced_serialized_and_preserves_newer_edits(self):
+        self.assertIn("function scheduleCueAutosave(delay = 650)", self.adapter)
+        self.assertIn("if (cueSavePromise) {", self.adapter)
+        self.assertIn("cueSaveQueued = true;", self.adapter)
+        self.assertIn("pendingCueAssignments[slot] === path", self.adapter)
+        self.assertIn("scheduleCueAutosave();", self.adapter)
+        self.assertIn("Cue changes autosaved.", self.adapter)
+        self.assertIn("Save failed. Unsaved cue changes have been retained; retry manually.", self.adapter)
+        clear_start = self.adapter.index("else if (soundButton.id === 'clearAllCues')")
+        clear_end = self.adapter.index("else if (soundButton.id === 'previewCueSequence')", clear_start)
+        self.assertIn("scheduleCueAutosave();", self.adapter[clear_start:clear_end])
+        save_start = self.adapter.index("else if (soundButton.id === 'saveCueChanges')")
+        save_end = self.adapter.index("else if (soundButton.id === 'playSelectedCue')", save_start)
+        self.assertIn("clearTimeout(cueSaveTimer)", self.adapter[save_start:save_end])
+        self.assertIn("savePendingCueChanges({source:'manual'})", self.adapter[save_start:save_end])
+
+    def test_generate_bgm_voice_only_toggle_is_connected_to_saved_sound_manifest(self):
+        self.assertIn('id="generate"', self.html)
+        generate = self.html[self.html.index('<section class="page" id="generate">'):self.html.index('<section class="page" id="player">')]
+        self.assertIn('data-bgm-enabled="true"', generate)
+        self.assertIn('data-bgm-enabled="false"', generate)
+        self.assertIn("e.target.closest('#sound [data-bgm-enabled], #generate [data-bgm-enabled]')", self.adapter)
+        self.assertIn("document.querySelectorAll('#sound [data-bgm-enabled], #generate [data-bgm-enabled]')", self.adapter)
+        start = self.adapter.index("const bgmMasterToggle = e.target.closest")
+        end = self.adapter.index("const chapterBgmItem =", start)
+        handler = self.adapter[start:end]
+        self.assertIn("await call('sound.save_manifest'", handler)
+        self.assertIn("manifest.updated_at", handler)
+        self.assertIn("Voice Only saved. Background music and all story cues are disabled", handler)
+        self.assertIn("await refreshSoundCues();", handler)
+
+    def test_production_handoff_refuses_unsaved_sound_state_and_confirms_manifest(self):
+        start = self.adapter.index("} else if (soundButton.id === 'applySoundToProduction')")
+        end = self.adapter.index("} else if (soundButton.id === 'saveChapterBgm')", start)
+        handoff = self.adapter[start:end]
+        self.assertIn("await savePendingCueChanges({source:'manual'});", handoff)
+        self.assertIn("cueChangesDirty || chapterBgmDraftDirty || mixLevelsDirty", handoff)
+        self.assertIn("The backend did not confirm saving the sound configuration.", handoff)
+        self.assertIn("manifest.updated_at", handoff)
+        self.assertLess(handoff.index("manifest.updated_at"), handoff.index("document.querySelector('[data-page=\"generate\"]')?.click();"))
+
 
 if __name__ == "__main__":
     unittest.main()
