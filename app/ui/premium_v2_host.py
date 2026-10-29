@@ -251,6 +251,10 @@ def _clean_pronunciation_entries(entries: list[dict[str, Any]], scope_type: str,
 
 def _effective_pronunciation_dictionary(state: dict[str, Any]) -> list[dict[str, Any]]:
     """Combine synthesis rules in Current book > matching Series > Global order."""
+    # Legacy projects default to On; the explicit project switch disables all
+    # dictionary replacement for both preview and final synthesis when Off.
+    if state.get("pronunciation_enabled", True) is False:
+        return []
     scoped: list[list[dict[str, Any]]] = []
     book_rows = state.get("pronunciation_dictionary")
     scoped.append(_clean_pronunciation_entries(
@@ -384,6 +388,8 @@ class PremiumV2Bridge(QObject):
                 "character.assign": self._character_assign,
                 "character.update": self._character_update,
                 "character.delete": self._character_delete,
+                "pronunciation.enabled.get": self._pronunciation_enabled_get,
+                "pronunciation.enabled.set": self._pronunciation_enabled_set,
                 "pronunciation.list": self._pronunciation_list,
                 "pronunciation.save": self._pronunciation_save,
                 "pronunciation.delete": self._pronunciation_delete,
@@ -511,6 +517,8 @@ class PremiumV2Bridge(QObject):
             "character.assign": True,
             "character.update": True,
             "character.delete": True,
+            "pronunciation.enabled.get": True,
+            "pronunciation.enabled.set": True,
             "pronunciation.list": True,
             "pronunciation.save": True,
             "pronunciation.delete": True,
@@ -3942,6 +3950,29 @@ class PremiumV2Bridge(QObject):
                          message=f"Found {len(suggestions)} pronunciation suggestion(s); none enabled automatically",
                          result={"suggestions": suggestions, "count": len(suggestions)})
         return {"job_id": job_id, "state": "completed", "suggestions": suggestions, "count": len(suggestions)}
+
+    def _pronunciation_enabled_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        project = self._active_project()
+        state = load_state(project.folder)
+        return {
+            "enabled": state.get("pronunciation_enabled", True) is not False,
+            "last_saved_at": state.get("pronunciation_enabled_saved_at"),
+            "project_folder": str(project.folder),
+        }
+
+    def _pronunciation_enabled_set(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raw = payload.get("enabled")
+        if not isinstance(raw, bool):
+            raise ValueError("Pronunciation On/Off must be a boolean value.")
+        project = self._active_project()
+        state = load_state(project.folder)
+        enabled = raw
+        saved_at = self._now()
+        state["pronunciation_enabled"] = enabled
+        state["pronunciation_enabled_saved_at"] = saved_at
+        state["modified_at"] = saved_at
+        save_state(project.folder, state)
+        return {"saved": True, "enabled": enabled, "updated_at": saved_at}
 
     def _production_generate_book(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._assert_no_active_model_lifecycle("start audiobook generation")
