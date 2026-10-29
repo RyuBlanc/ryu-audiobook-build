@@ -185,5 +185,30 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
         self.assertIn("expected build number", smoke.casefold())
 
 
+    def test_startup_keeps_native_splash_until_ready_without_numeric_percentage(self):
+        host = HOST.read_text(encoding="utf-8")
+        window_start = host.index("class PremiumV2Window(")
+        window_end = host.index("    def apply_window_size(", window_start)
+        window = host[window_start:window_end]
+        self.assertIn("self._loading_progress.setTextVisible(False)", window)
+        self.assertIn("self._loading_progress.setRange(0, 0)", window)
+        self.assertNotIn('self._loading_progress.setFormat("%p%")', window)
+
+        install_start = host.index("    def _install_bridge(self, ok: bool)")
+        install_end = host.index("    def _check_frontend_ready(", install_start)
+        install = host[install_start:install_end]
+        self.assertIn("self._web_stack.setCurrentWidget(self._loading_page)", install)
+        self.assertNotIn(
+            "self.web if self._uses_html_startup_loader else self._loading_page",
+            install,
+            "The WebEngine must not replace the native splash before frontend readiness.",
+        )
+
+        ready_start = host.index("    def _on_frontend_ready(self)")
+        ready_end = host.index("    def _retry_web_renderer(", ready_start)
+        self.assertIn("self._web_stack.setCurrentWidget(self.web)", host[ready_start:ready_end])
+
+
+
 if __name__ == "__main__":
     unittest.main()
