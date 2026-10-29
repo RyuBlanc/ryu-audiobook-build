@@ -3303,6 +3303,31 @@
     const picker=document.createElement('input'); picker.type='file'; picker.accept='.json,application/json';
     picker.onchange=async()=>{const file=picker.files?.[0];if(!file)return;if(file.size>10*1024*1024){message('Character Library imports are limited to 10 MB.',true);return;}try{const data=JSON.parse(await file.text()), rows=Array.isArray(data)?data:data?.characters;if(!Array.isArray(rows))throw new Error('JSON must be an array or contain a characters array.');const result=await call('character_library.import',{characters:rows});await refreshCharacterLibrary();message('Imported '+result.imported+' character(s) into the local Character Library.');}catch(error){message(error?.message||String(error),true);}}; picker.click();
   }
+  let pronunciationEnabled = true;
+  let pronunciationSettingEpoch = 0;
+  function renderPronunciationEnabled(enabled, savedAt = null) {
+    pronunciationEnabled = enabled !== false;
+    document.querySelectorAll('#pronunciation [data-pronunciation-enabled], #generate [data-pronunciation-enabled]').forEach(button => {
+      button.classList.toggle('active', (button.dataset.pronunciationEnabled === 'true') === pronunciationEnabled);
+    });
+    const label = pronunciationEnabled
+      ? 'Pronunciation On · only individually enabled rules are applied.'
+      : 'Pronunciation Off · no dictionary replacements are applied in preview or final generation.';
+    const studioStatus = $('pronunciationGlobalStatus');
+    const generateStatus = $('generatePronunciationStatus');
+    if (studioStatus) studioStatus.textContent = savedAt ? label + ' Saved.' : label;
+    if (generateStatus) generateStatus.textContent = savedAt ? label + ' Saved.' : label;
+  }
+  async function refreshPronunciationEnabled() {
+    const requestToken = ++pronunciationSettingEpoch;
+    const result = await call('pronunciation.enabled.get');
+    if (requestToken !== pronunciationSettingEpoch) return pronunciationEnabled;
+    if (!result || typeof result !== 'object' || typeof result.enabled !== 'boolean') {
+      throw new Error('The backend did not return the saved project pronunciation setting.');
+    }
+    renderPronunciationEnabled(result.enabled, result.last_saved_at || null);
+    return pronunciationEnabled;
+  }
   function pronunciationScopeKey(term) {
     return String(term.scope_type || 'current_book') + ':' + String(term.scope_id || '');
   }
@@ -3311,6 +3336,8 @@
     const loaded = await call('pronunciation.list');
     if (requestToken !== termsListEpoch) return terms;
     terms = Array.isArray(loaded) ? loaded : [];
+    await refreshPronunciationEnabled();
+    if (requestToken !== termsListEpoch) return terms;
     const list = $('pronDictionaryBody');
     if (list) list.innerHTML = terms.map(t => {
       const word = String(t.written_form || t.word || '');
@@ -5703,6 +5730,7 @@
     // any asynchronous backend initialization or real handler registration.
     suppressLegacyVoicePreviewHandlers();
     await call('app.get_info');
+    await refreshPronunciationEnabled();
     await refreshCurrentProjectCard();
     installProjectCardStatusObserver();
 
@@ -6447,6 +6475,27 @@
       }
     });
     document.addEventListener('click', async e => {
+      const pronunciationToggle = e.target.closest('#pronunciation [data-pronunciation-enabled], #generate [data-pronunciation-enabled]');
+      if (pronunciationToggle) {
+        e.preventDefault(); e.stopImmediatePropagation();
+        const enabled = pronunciationToggle.dataset.pronunciationEnabled === 'true';
+        try {
+          const result = await call('pronunciation.enabled.set', {enabled});
+          if (!result || result.saved !== true || result.enabled !== enabled || !result.updated_at) {
+            throw new Error('The backend did not confirm saving the pronunciation setting.');
+          }
+          renderPronunciationEnabled(enabled, result.updated_at);
+          message(enabled
+            ? 'Pronunciation On. Individually enabled dictionary rules will be applied in preview and final generation.'
+            : 'Pronunciation Off saved. No pronunciation replacements will be applied in preview or final generation.');
+        } catch (error) {
+          await refreshPronunciationEnabled().catch(() => {});
+          message(error?.message || String(error), true);
+        }
+        return;
+      }
+      const pronunciationPageNav = e.target.closest('[data-page="pronunciation"], [data-go="pronunciation"], [data-page="generate"], [data-go="generate"]');
+      if (pronunciationPageNav) refreshPronunciationEnabled().catch(error => message(error?.message || String(error), true));
       const soundTab = e.target.closest('#sound .sound-tabs [data-sound-tab]');
       if (soundTab) {
         e.preventDefault(); e.stopImmediatePropagation();
