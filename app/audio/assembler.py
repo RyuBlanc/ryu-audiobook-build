@@ -467,6 +467,9 @@ def assemble_m4b(
     effective_audio_mode = str(background_audio_mode or "manual").strip().casefold()
     if effective_audio_mode not in {"off", "auto", "manual"}:
         raise ValueError(f"Unsupported background audio mode: {background_audio_mode}")
+    # Enforce the product-wide master BGM ceiling at the final mixer boundary,
+    # including old projects and direct callers that bypass the UI/backend guard.
+    background_audio_volume = max(0.0, min(0.50, float(background_audio_volume)))
 
     # "custom" is the existing persisted key for the approved Chapter-Based
     # strategy. Keep accepting it for existing projects, but make the strategy
