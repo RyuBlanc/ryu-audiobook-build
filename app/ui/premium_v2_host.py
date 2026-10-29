@@ -3952,12 +3952,19 @@ class PremiumV2Bridge(QObject):
         return {"job_id": job_id, "state": "completed", "suggestions": suggestions, "count": len(suggestions)}
 
     def _pronunciation_enabled_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
-        project = self._active_project()
+        try:
+            project = self._active_project()
+        except ValueError:
+            # Opening the app without an active project must not fail startup;
+            # these controls are project-scoped and remain disabled until one opens.
+            return {"enabled": True, "last_saved_at": None, "project_folder": None,
+                    "has_active_project": False}
         state = load_state(project.folder)
         return {
             "enabled": state.get("pronunciation_enabled", True) is not False,
             "last_saved_at": state.get("pronunciation_enabled_saved_at"),
             "project_folder": str(project.folder),
+            "has_active_project": True,
         }
 
     def _pronunciation_enabled_set(self, payload: dict[str, Any]) -> dict[str, Any]:
