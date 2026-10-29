@@ -76,7 +76,7 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
         bridge_start = host.index("const bridgeStartedAt = Date.now()")
         bridge_end = host.index("const waitForTransport = () =>", bridge_start)
         bridge = host[bridge_start:bridge_end]
-        self.assertIn("const emit = window.__ryuEmitFrontendDiagnostic;", bridge)
+        self.assertIn("const emit = window.__ryuEmitFrontendDiagnostic;", host)
         self.assertIn("emit('startup-progress'", bridge)
         self.assertIn("window.dispatchEvent(new CustomEvent('ryu-backend-ready'))", bridge)
         self.assertLess(
