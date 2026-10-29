@@ -1,1 +1,1 @@
-
+Stage 1.10 artifact checkpoint: keep the native startup splash visible until Premium V2 frontend readiness; use an indeterminate loading indicator with no numeric percentage.
