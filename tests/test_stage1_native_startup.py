@@ -74,7 +74,7 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
     def test_bridge_iife_uses_the_exported_diagnostic_emitter(self):
         host = HOST.read_text(encoding="utf-8")
         bridge_start = host.index("const bridgeStartedAt = Date.now()")
-        bridge_end = host.index("const start = () => wire()", bridge_start)
+        bridge_end = host.index("const waitForTransport = () =>", bridge_start)
         bridge = host[bridge_start:bridge_end]
         self.assertIn("const emit = window.__ryuEmitFrontendDiagnostic;", bridge)
         self.assertIn("emit('startup-progress'", bridge)
