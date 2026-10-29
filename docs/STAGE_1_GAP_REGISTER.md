@@ -383,3 +383,9 @@ Production Pause/Cancel is generation-type guarded. Chapter switching saves a pe
 - Updated the test fixture to use the semicolon-free timer form and made the invalid-input case contain that timer so it specifically exercises missing-head rejection. The production matcher now accepts an optional semicolon and normalizes to the same output.
 - Next checkpoint: Build #1608 is queued on the diagnostic + file-backed loader candidate. Confirm exact HEAD, then inspect tests and packaged startup smoke before accepting any artifact.
 
+### Stage 1 full-suite and packaging policy — 29 October 2026
+- #1605 failed before packaging on a single HTML loader test/validator mismatch. That defect was corrected; do not report #1605 as a runtime WebChannel result.
+- #1606 separately exposed two regressions in the timer fixture/expected normalized output; those were corrected in subsequent commits.
+- #1608 (`762587f9def5ad57566e899ea9d0a23554a3e0eb`) is the current serialized artifact checkpoint. It is queued behind the preceding branch test run and must be verified by exact source SHA. Its package job should only execute after the full test suite passes.
+- Continue using the register's Stage 1 exit checklist, then do packaged app scenario coverage. Do not merge/release or start Stage 2 solely on unit-test success; the 22% bridge-ready bug must be shown fixed by the frozen EXE readiness marker and user-visible workspace transition.
+
