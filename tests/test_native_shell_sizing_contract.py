@@ -25,9 +25,20 @@ class NativeShellSizingContracts(unittest.TestCase):
         before_main = main[:main.index("def main()")]
         self.assertNotIn("from app.ui.premium_v2_host import", before_main)
         self.assertIn('os.environ.get("RYU_UI_MODE", "premium-v2")', main)
-        self.assertIn('if ui_mode in {"premium-v2", "html", "web"}:', main)
+        self.assertIn('if ui_mode == "native":', main)
         self.assertIn("window = PremiumV2Window()", main)
         self.assertIn("window = ProjectWorkflow()", main)
+
+        native_start = main.index('if ui_mode == "native":')
+        premium_start = main.index(
+            "from app.ui.premium_v2_host import PremiumV2Window, frontend_path"
+        )
+        native_branch = main[native_start:premium_start]
+        premium_end = main.index("window.setWindowIcon(app_icon)", premium_start)
+        premium_branch = main[premium_start:premium_end]
+        self.assertIn("window = ProjectWorkflow()", native_branch)
+        self.assertIn("window = PremiumV2Window()", premium_branch)
+        self.assertNotIn("ProjectWorkflow()", premium_branch)
 
     def test_native_window_applies_saved_size_before_first_display(self):
         main = (ROOT / "app/main.py").read_text(encoding="utf-8")
