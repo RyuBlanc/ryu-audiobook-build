@@ -128,6 +128,19 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
         self.assertIn("The Premium V2 startup smoke reported failure", workflow)
         self.assertNotIn("Start-Sleep -Seconds 12", workflow)
 
+    def test_packaged_startup_smoke_repeats_three_clean_launch_cycles(self):
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn(
+            "for ($launchAttempt = 1; $launchAttempt -le 3; $launchAttempt++)",
+            workflow,
+        )
+        self.assertIn(
+            '"RyuAudiobookStartupSmoke-$env:GITHUB_RUN_ID-$launchAttempt.json"',
+            workflow,
+        )
+        self.assertIn("Premium V2 startup readiness PASSED for launch", workflow)
+        self.assertIn("Remove-Item Env:RYU_STARTUP_SMOKE_MARKER -ErrorAction SilentlyContinue", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
