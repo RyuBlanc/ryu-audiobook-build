@@ -5949,7 +5949,6 @@ class PremiumV2Window(QMainWindow):
         # finish; use the native splash only if the HTML contract cannot be prepared.
         self._hosted_html_source: str | None = None
         self._hosted_html_base_url = QUrl.fromLocalFile(str(path.parent.resolve()) + os.sep)
-        self._hosted_html_temp_directory: tempfile.TemporaryDirectory | None = None
         self._hosted_html_path: Path | None = None
         self._uses_html_startup_loader = False
         try:
@@ -5961,12 +5960,12 @@ class PremiumV2Window(QMainWindow):
             # Keep the HTML in a real file URL. QWebEngineView.setHtml() routes
             # the entire document through a data URL; this multi-megabyte page
             # can exceed that route's size limit and leave WebChannel unresponsive.
-            self._hosted_html_temp_directory = tempfile.TemporaryDirectory(
-                prefix="ryu-premium-v2-"
-            )
-            self._hosted_html_path = (
-                Path(self._hosted_html_temp_directory.name) / path.name
-            )
+            # A stable per-user cache avoids setHtml()'s large data-URL path
+            # and keeps the file URL stable across launches for any remaining
+            # browser-local preferences. Always overwrite it from the packaged
+            # source so upgrades cannot leave stale HTML behind.
+            self._hosted_html_path = settings_root() / "frontend_cache" / path.name
+            self._hosted_html_path.parent.mkdir(parents=True, exist_ok=True)
             self._hosted_html_path.write_text(
                 self._hosted_html_source, encoding="utf-8"
             )
@@ -5974,9 +5973,6 @@ class PremiumV2Window(QMainWindow):
             self.web.load(QUrl.fromLocalFile(str(self._hosted_html_path.resolve())))
         except (OSError, FrontendAssetError):
             log.exception("Could not prepare the approved HTML startup loader; retaining native loading fallback")
-            if self._hosted_html_temp_directory is not None:
-                self._hosted_html_temp_directory.cleanup()
-            self._hosted_html_temp_directory = None
             self._hosted_html_path = None
             self._hosted_html_source = None
             self._uses_html_startup_loader = False
