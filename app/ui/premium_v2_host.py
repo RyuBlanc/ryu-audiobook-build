@@ -5433,6 +5433,7 @@ class PremiumV2Bridge(QObject):
             return {"cancelled": True, "imported": []}
         from app.audio.library import AUDIO_EXTENSIONS, probe_audio_duration_seconds
         extensions = AUDIO_EXTENSIONS
+        target_kind = str(payload.get("target_kind") or "cue").strip().casefold()
         target_root = app_root() / "Audio Library"
         target_root.mkdir(parents=True, exist_ok=True)
         imported = []
@@ -5441,13 +5442,19 @@ class PremiumV2Bridge(QObject):
             if not source.is_file() or source.suffix.lower() not in extensions:
                 raise ValueError(f"Unsupported or missing audio asset: {source.name}")
             duration_seconds = probe_audio_duration_seconds(source)
+            if target_kind != "music" and duration_seconds > 5.0:
+                raise ValueError(
+                    f"{source.name} is {duration_seconds:.1f} seconds long. "
+                    "Opening, next-chapter, and closing cue clips must be 5 seconds or shorter; "
+                    "import longer music into the Music Library and assign it as BGM."
+                )
             destination = target_root / source.name
             if destination.exists() and destination.resolve() != source:
                 destination = target_root / f"{source.stem}-{uuid.uuid4().hex[:8]}{source.suffix.lower()}"
             if source != destination.resolve():
                 shutil.copy2(source, destination)
             metadata_path = destination.with_name(destination.name + ".license.json")
-            metadata = {"role": "music" if str(payload.get("target_kind") or "").casefold() == "music" else "cue",
+            metadata = {"role": "music" if target_kind == "music" else "cue",
                         "category": str(payload.get("category") or "universal"),
                         "title": destination.stem, "original_filename": source.name,
                         "license_note": str(payload.get("license_note") or "User-imported; verify license before publishing"),
@@ -5487,11 +5494,11 @@ class PremiumV2Bridge(QObject):
         if not selected.is_file() or not valid:
             raise ValueError("Choose an audio file from the local Sound Design catalogue.")
         try:
-            volume = max(0.0, min(1.0, float(payload.get("volume", 0.18))))
+            volume = max(0.0, min(0.50, float(payload.get("volume", 0.18))))
             fade_in = max(0.0, min(30.0, float(payload.get("fade_in_seconds", state.get("background_audio_fade_in", 2.0)))))
             fade_out = max(0.0, min(30.0, float(payload.get("fade_out_seconds", state.get("background_audio_fade_out", 3.0)))))
         except (TypeError, ValueError):
-            raise ValueError("Background volume must be 0–100 percent and fades 0–30 seconds.")
+            raise ValueError("Background volume must be 0–50 percent and fades 0–30 seconds.")
         saved_at = self._now()
         state.update({"background_audio_path": str(selected), "background_audio_preferred_path": str(selected),
                       "background_audio_volume": volume, "background_audio_fade_in": fade_in,
@@ -5511,11 +5518,13 @@ class PremiumV2Bridge(QObject):
             path = str(state.get("background_audio_path") or state.get("background_audio_preferred_path") or "").strip()
         enabled = bool(payload.get("enabled", bool(path)))
         try:
-            volume = max(0.0, min(1.0, float(payload.get("volume", state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18))))
+            volume = max(0.0, min(0.50, float(payload.get("volume", state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18))))
+            narration_volume = max(0.0, min(1.0, float(payload.get("narration_volume", state.get("narration_audio_volume") if state.get("narration_audio_volume") is not None else 1.0))))
+            cue_volume = max(0.0, min(0.50, float(payload.get("cue_volume", state.get("sound_cue_volume") if state.get("sound_cue_volume") is not None else 0.25))))
             fade_in = max(0.0, min(30.0, float(payload.get("fade_in_seconds", state.get("background_audio_fade_in", 2.0)))))
             fade_out = max(0.0, min(30.0, float(payload.get("fade_out_seconds", state.get("background_audio_fade_out", 3.0)))))
         except (TypeError, ValueError):
-            raise ValueError("Background volume must be 0–100 percent and fades 0–30 seconds.")
+            raise ValueError("Background music and cue volume must be 0–50 percent, narration 0–100 percent, and fades 0–30 seconds.")
         catalog = self._sound_catalog({})
         catalog_paths = {str(row["path"]) for row in catalog}
         if enabled and path:
@@ -5540,6 +5549,8 @@ class PremiumV2Bridge(QObject):
                           "background_audio_mode": "off", "background_audio_enabled": False})
         state["background_audio_fade_in"] = fade_in
         state["background_audio_fade_out"] = fade_out
+        state["narration_audio_volume"] = narration_volume
+        state["sound_cue_volume"] = cue_volume
         chapter_overrides = state.get("chapter_bgm_overrides")
         if not isinstance(chapter_overrides, dict):
             chapter_overrides = {}
@@ -5553,7 +5564,8 @@ class PremiumV2Bridge(QObject):
         saved_at = self._now()
         state["sound_design_saved_at"] = saved_at
         state["sound_manifest"] = {"bgm_path": state.get("background_audio_path") or None,
-                                   "bgm_volume": volume, "fade_in_seconds": fade_in,
+                                   "bgm_volume": volume, "narration_volume": narration_volume,
+                                   "cue_volume": cue_volume, "fade_in_seconds": fade_in,
                                    "fade_out_seconds": fade_out,
                                    "enabled": bool(enabled and (state.get("background_audio_path") or has_valid_chapter_track)),
                                    "updated_at": saved_at}
@@ -5600,7 +5612,9 @@ class PremiumV2Bridge(QObject):
             "background_audio_mode": saved_mode,
             "bgm_enabled": bgm_enabled,
             "last_saved_at": last_saved_at,
-            "default_volume": float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18),
+            "default_volume": max(0.0, min(0.50, float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18))),
+            "narration_volume": max(0.0, min(1.0, float(state.get("narration_audio_volume") if state.get("narration_audio_volume") is not None else 1.0))),
+            "cue_volume": max(0.0, min(0.50, float(state.get("sound_cue_volume") if state.get("sound_cue_volume") is not None else 0.25))),
             "fade_in_seconds": float(state.get("background_audio_fade_in") if state.get("background_audio_fade_in") is not None else 2.0),
             "fade_out_seconds": float(state.get("background_audio_fade_out") if state.get("background_audio_fade_out") is not None else 3.0),
             "overrides": overrides,
@@ -5626,8 +5640,9 @@ class PremiumV2Bridge(QObject):
             if strategy not in {"same", "custom"}:
                 raise ValueError("Choose Same BGM or Chapter-Based BGM.")
             state["chapter_bgm_strategy"] = strategy
-            if strategy == "same":
-                state["chapter_bgm_overrides"] = {}
+            # Keep chapter assignments while Same BGM is active. The assembler
+            # ignores them in this strategy, but users must get them back when
+            # switching to Chapter-Based BGM again.
             # Strategy changes must respect the global BGM/Voice Only control.
             state["background_audio_enabled"] = master_enabled
             state["background_audio_mode"] = "manual" if master_enabled else "off"
