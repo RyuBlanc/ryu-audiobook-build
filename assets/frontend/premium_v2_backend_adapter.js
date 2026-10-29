@@ -3362,7 +3362,7 @@
     const loadedAssignments = await call('sound.cues.get');
     if (requestToken !== cueListEpoch) return cueAssignments;
     cueAssignments = loadedAssignments && typeof loadedAssignments === 'object' ? loadedAssignments : {};
-    const names = {opening:'openingCueName',chapter:'chapterCueName',scene:'sceneCueName',closing:'closingCueName'};
+    const names = {opening:'openingCueName',chapter:'chapterCueName',closing:'closingCueName'};
     for (const [slot,id] of Object.entries(names)) {
       const node = $(id);
       if (node) node.textContent = cueAssignments[slot]?.title || 'Not assigned';
@@ -3396,19 +3396,37 @@
     }
     if (!rows.some(ch => Number(ch.number) === Number(selectedBgmChapter))) selectedBgmChapter = Number(rows[0].number);
     const overrides = chapterBgmState.overrides || {};
+    const strategy = chapterBgmState.strategy || 'same';
+    const chapterBased = ['custom', 'chapter-based', 'chapter_based'].includes(strategy);
+    const ruleFor = row => {
+      let value = row.rule || (chapterBased ? 'none' : 'default');
+      // Legacy default overrides are not permitted to fall back to book music
+      // after the user selects the Chapter-Based strategy.
+      if (chapterBased && value === 'default') value = 'none';
+      return value;
+    };
     if (list) list.innerHTML = rows.map(ch => {
       const o = overrides[String(ch.number)] || {};
-      const rule = o.rule || 'default';
+      const rule = ruleFor(o);
       const label = rule === 'custom' ? (o.title || (o.available === false ? 'Missing custom track' : 'Custom track')) : rule === 'none' ? 'No BGM' : 'Book default';
       return '<button type="button" class="chapter-bgm-item ' + (Number(ch.number) === Number(selectedBgmChapter) ? 'active' : '') + (rule === 'custom' ? ' override' : '') + '" data-chapter-bgm="' + Number(ch.number) + '"><b>' + esc('Chapter ' + ch.number + ' · ' + ch.title) + '</b><small>' + esc(label) + '</small></button>';
     }).join('');
     const chapter = rows.find(ch => Number(ch.number) === Number(selectedBgmChapter)) || rows[0];
     const current = overrides[String(chapter.number)] || {};
-    const rule = current.rule || 'default';
-    selectedBgmTrackPath = current.path || null;
+    const rule = ruleFor(current);
+    selectedBgmTrackPath = rule === 'custom' ? (current.path || null) : null;
     if ($('chapterBgmTitle')) $('chapterBgmTitle').textContent = 'Chapter ' + chapter.number + ' · ' + chapter.title;
-    document.querySelectorAll('#sound [data-bgm-strategy]').forEach(b => b.classList.toggle('active', b.dataset.bgmStrategy === (chapterBgmState.strategy || 'same')));
+    const help = $('chapterBgmHelp');
+    if (help) help.textContent = chapterBased
+      ? 'Assign one track or choose No BGM. Unassigned chapters remain silent; the book-default track is ignored.'
+      : 'Same BGM uses the selected book-default track for every chapter. Switch to Chapter-Based BGM to assign chapter tracks.';
+    document.querySelectorAll('#sound [data-bgm-strategy]').forEach(b => b.classList.toggle('active', b.dataset.bgmStrategy === strategy));
     document.querySelectorAll('#sound .chapter-rule [data-chapter-rule]').forEach(b => b.classList.toggle('active', b.dataset.chapterRule === rule));
+    const defaultRuleButton = document.querySelector('#sound .chapter-rule [data-chapter-rule="default"]');
+    if (defaultRuleButton) defaultRuleButton.hidden = chapterBased;
+    document.querySelectorAll('#sound .chapter-bgm-editor .chapter-rule button, #sound #chapterVolume, #sound .chapter-mix-row select, #sound #saveChapterBgm').forEach(control => {
+      control.disabled = !chapterBased;
+    });
     if ($('chapterVolume')) $('chapterVolume').value = Math.round(Number(current.volume ?? chapterBgmState.default_volume ?? 0.18) * 100);
     const selects = document.querySelectorAll('#sound [data-sound-view="chapters"] .chapter-mix-row select');
     if (selects[0]) selects[0].selectedIndex = ({immediate:0,after_first_paragraph:1,after_10_seconds:2})[current.start_offset || 'immediate'] ?? 0;
@@ -3417,9 +3435,10 @@
       const visible = sounds;
       picker.innerHTML = visible.map(t => '<button type="button" class="chapter-track-option ' + (t.path === selectedBgmTrackPath ? 'active' : '') + '" data-chapter-track="' + esc(t.path) + '"><b>' + esc(t.title) + '</b><small>' + esc(t.source) + ' · ' + esc(t.format) + '</small></button>').join('') ||
         '<p class="muted">No local music tracks found. Import a licensed audio file first.</p>';
+      picker.querySelectorAll('button').forEach(control => { control.disabled = !chapterBased; });
     }
     const mixStrategy = $('mixStrategy');
-    if (mixStrategy) mixStrategy.textContent = chapterBgmState.strategy === 'custom' ? 'Chapter-based BGM' : 'Same BGM';
+    if (mixStrategy) mixStrategy.textContent = chapterBased ? 'Chapter-Based BGM' : 'Same BGM';
     const mixOverrides = $('mixOverrides');
     if (mixOverrides) mixOverrides.textContent = Object.values(overrides).filter(o => o.rule === 'custom' || o.rule === 'none').length + ' chapters';
   }
@@ -6055,7 +6074,10 @@
       if (e.target.closest('#saveChapterBgm')) {
         e.preventDefault(); e.stopImmediatePropagation();
         try {
-          const rule = document.querySelector('#sound .chapter-rule [data-chapter-rule].active')?.dataset.chapterRule || 'default';
+          const chapterBased = ['custom', 'chapter-based', 'chapter_based'].includes(chapterBgmState.strategy || 'same');
+          if (!chapterBased) throw new Error('Switch to Chapter-Based BGM before saving a chapter assignment.');
+          let rule = document.querySelector('#sound .chapter-rule [data-chapter-rule].active')?.dataset.chapterRule || 'none';
+          if (rule === 'default') rule = 'none';
           if (rule === 'custom' && !selectedBgmTrackPath) throw new Error('Choose a custom music track for this chapter first.');
           const selects = document.querySelectorAll('#sound [data-sound-view="chapters"] .chapter-mix-row select');
           const startOffset = ['immediate','after_first_paragraph','after_10_seconds'][selects[0]?.selectedIndex || 0];
