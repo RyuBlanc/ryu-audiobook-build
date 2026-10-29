@@ -236,9 +236,12 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         handler = source[start:end]
         self.assertIn('state["background_audio_mode"] = "manual"', handler)
         assembler = Path("app/audio/assembler.py").read_text(encoding="utf-8")
+        self.assertIn("chapter_bgm_strategy: str | None = None", assembler)
+        self.assertIn('effective_bgm_strategy == "chapter-based"', assembler)
+        self.assertIn('and effective_audio_mode == "manual"', assembler)
         self.assertIn(
-            'chapter_scoped_bgm = bool(effective_overrides) and effective_audio_mode == "manual"',
-            assembler,
+            'chapter_bgm_strategy=str(state.get("chapter_bgm_strategy") or ("custom" if state.get("chapter_bgm_overrides") else "same"))',
+            source,
         )
 
 
