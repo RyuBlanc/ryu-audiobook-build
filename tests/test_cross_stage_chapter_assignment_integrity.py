@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 from app.core.project import Project
 from app.chapters.detector import Chapter
@@ -147,17 +147,20 @@ class CrossStageChapterAssignmentIntegrityTests(unittest.TestCase):
 
 
 class PremiumV2BridgeSplitAssignmentIntegrityTests(unittest.TestCase):
+    def _bridge(self, project):
+        # Test the bridge handler directly without constructing a Qt QObject.
+        return SimpleNamespace(
+            _active_project=Mock(return_value=project),
+            _mark_project_edited=Mock(),
+        )
+
     def _split(self, project, payload):
-        bridge = object.__new__(PremiumV2Bridge)
-        with (
-            patch.object(PremiumV2Bridge, "_active_project", return_value=project),
-            patch.object(PremiumV2Bridge, "_mark_project_edited") as mark_edited,
-        ):
-            result = bridge._chapter_split(payload)
-        return result, mark_edited
+        bridge = self._bridge(project)
+        result = PremiumV2Bridge._chapter_split(bridge, payload)
+        return result, bridge._mark_project_edited
 
     def test_bridge_split_moves_assignments_with_text_and_remaps_offsets(self):
-        text = "Mira said, Wait here.\\n\\nRen answered, Go now."
+        text = "Mira said, Wait here.\n\nRen answered, Go now."
         left_line = "Wait here."
         right_line = "Go now."
         left_assignment = {
@@ -210,7 +213,7 @@ class PremiumV2BridgeSplitAssignmentIntegrityTests(unittest.TestCase):
         mark_edited.assert_called_once_with(project, 2)
 
     def test_bridge_split_rejects_assignment_crossing_split_boundary_without_mutating_project(self):
-        text = "Mira said, Wait here.\\n\\nRen answered, Go now."
+        text = "Mira said, Wait here.\n\nRen answered, Go now."
         start = text.index("Wait here.")
         end = text.index("Go now.") + len("Go now.")
         crossing = {
@@ -225,14 +228,10 @@ class PremiumV2BridgeSplitAssignmentIntegrityTests(unittest.TestCase):
         project = SimpleNamespace(chapters=[chapter], save=Mock())
         original_text = chapter.text
         original_assignments = [item.copy() for item in chapter.dialogue_assignments]
+        bridge = self._bridge(project)
 
-        bridge = object.__new__(PremiumV2Bridge)
-        with (
-            patch.object(PremiumV2Bridge, "_active_project", return_value=project),
-            patch.object(PremiumV2Bridge, "_mark_project_edited") as mark_edited,
-            self.assertRaisesRegex(ValueError, "assignment.*crosses the split boundary"),
-        ):
-            bridge._chapter_split({
+        with self.assertRaisesRegex(ValueError, "assignment.*crosses the split boundary"):
+            PremiumV2Bridge._chapter_split(bridge, {
                 "number": 1,
                 "split_at": text.index("Ren answered"),
                 "text": text,
@@ -244,9 +243,7 @@ class PremiumV2BridgeSplitAssignmentIntegrityTests(unittest.TestCase):
         self.assertEqual(project.chapters[0].text, original_text)
         self.assertEqual(project.chapters[0].dialogue_assignments, original_assignments)
         project.save.assert_not_called()
-        mark_edited.assert_not_called()
-
-
+        bridge._mark_project_edited.assert_not_called()
 
 
 if __name__ == "__main__":
