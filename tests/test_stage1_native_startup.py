@@ -178,6 +178,10 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
         )
         self.assertIn("$expectedBuild = [string]$env:GITHUB_RUN_NUMBER", smoke)
         self.assertIn("if ($startup.version -notmatch", smoke)
+        self.assertIn(
+            r'if ($startup.version -notmatch ("\bBuild\s+" + [regex]::Escape($expectedBuild) + "\b"))',
+            smoke,
+        )
         self.assertIn("expected build number", smoke.casefold())
 
 

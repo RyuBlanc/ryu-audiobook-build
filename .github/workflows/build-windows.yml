@@ -529,7 +529,7 @@ jobs:
                       throw "Startup marker for launch $launchAttempt/3 is missing version/build metadata."
                     }
                     $expectedBuild = [string]$env:GITHUB_RUN_NUMBER
-                    if ($startup.version -notmatch ("\\bBuild\\s+" + [regex]::Escape($expectedBuild) + "\\b")) {
+                    if ($startup.version -notmatch ("\bBuild\s+" + [regex]::Escape($expectedBuild) + "\b")) {
                       throw "Startup marker for launch $launchAttempt/3 reported an unexpected build number. Expected build number $expectedBuild; actual metadata: '$($startup.version)'."
                     }
                     $ready = $true
