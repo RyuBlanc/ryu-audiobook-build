@@ -3397,11 +3397,11 @@
         : (cue.available === true && cue.title ? cue.title : (cue.assigned || cue.missing ? 'Missing file' : 'Not assigned'));
     }
     const cueSaveState = $('cueSaveState');
-    if (cueSaveState) cueSaveState.textContent = cueChangesDirty
-      ? 'Unsaved cue changes — use Save Cue Changes to apply them to this book.'
-      : 'All cue changes saved.';
+    if (cueSaveState) cueSaveState.textContent = cueSaveInProgress
+      ? 'Saving cue changes…'
+      : (cueChangesDirty ? 'Unsaved cue changes — autosave is scheduled; Save Cue Changes saves immediately.' : 'All cue changes saved.');
     const cueSaveButton = $('saveCueChanges');
-    if (cueSaveButton) cueSaveButton.disabled = !cueChangesDirty;
+    if (cueSaveButton) cueSaveButton.disabled = !cueChangesDirty || cueSaveInProgress;
     if (selectedCuePath) {
       const selectedCue = sounds.find(track => String(track.path || '') === String(selectedCuePath));
       if ($('selectedCueTitle')) $('selectedCueTitle').textContent = selectedCue?.title || 'Selected cue';
@@ -3741,26 +3741,73 @@
       throw error;
     }
   }
-  async function savePendingCueChanges() {
-    const entries = Object.entries(pendingCueAssignments);
-    if (!entries.length) return false;
+  function scheduleCueAutosave(delay = 900) {
+    if (cueAutosaveTimer) clearTimeout(cueAutosaveTimer);
+    if (!cueChangesDirty) return;
     const status = $('cueSaveState');
-    if (status) status.textContent = 'Saving cue changes…';
+    if (status && !cueSaveInProgress) status.textContent = 'Unsaved cue changes — autosave scheduled; Save Cue Changes saves immediately.';
+    cueAutosaveTimer = setTimeout(() => {
+      cueAutosaveTimer = null;
+      savePendingCueChanges({automatic:true}).catch(error => {
+        message('Cue autosave failed. Your changes remain available to retry: ' + (error?.message || String(error)), true);
+        if (cueAutosaveRetryCount < 1 && cueChangesDirty) {
+          cueAutosaveRetryCount += 1;
+          scheduleCueAutosave(1800);
+        }
+      });
+    }, delay);
+  }
+  function savePendingCueChanges(options = {}) {
+    if (cueAutosaveTimer) {
+      clearTimeout(cueAutosaveTimer);
+      cueAutosaveTimer = null;
+    }
+    const operation = cueSaveQueue.catch(() => {}).then(() => savePendingCueChangesNow(options));
+    cueSaveQueue = operation.catch(() => {});
+    return operation;
+  }
+  async function savePendingCueChangesNow(options = {}) {
+    const entries = Object.entries(pendingCueAssignments);
+    if (!entries.length) {
+      cueChangesDirty = false;
+      const status = $('cueSaveState');
+      if (status) status.textContent = 'All cue changes saved.';
+      return true;
+    }
+    cueSaveInProgress = true;
+    const status = $('cueSaveState');
+    if (status) status.textContent = options.automatic ? 'Autosaving cue changes…' : 'Saving cue changes…';
     const button = $('saveCueChanges');
     if (button) button.disabled = true;
+    renderSoundMixSummary();
     try {
       for (const [slot, path] of entries) {
         await call('sound.cues.save', {slot, path:path || null});
-        delete pendingCueAssignments[slot];
+        // A user may replace this draft while the request is in flight. Delete
+        // only the exact value that was saved, never a newer draft for the slot.
+        if (Object.prototype.hasOwnProperty.call(pendingCueAssignments, slot) &&
+            pendingCueAssignments[slot] === path) {
+          delete pendingCueAssignments[slot];
+        }
       }
+      cueSaveInProgress = false;
       cueChangesDirty = Object.keys(pendingCueAssignments).length > 0;
+      if (!cueChangesDirty) cueAutosaveRetryCount = 0;
+      await refreshChapterBgm();
       await refreshSoundCues();
-      if (status) status.textContent = cueChangesDirty ? 'Some cue changes remain unsaved.' : 'All cue changes saved.';
+      if (status) status.textContent = cueChangesDirty
+        ? 'Some newer cue edits remain unsaved; autosave is scheduled.'
+        : 'All cue changes saved.';
+      if (button) button.disabled = !cueChangesDirty;
+      renderSoundMixSummary();
+      if (cueChangesDirty) scheduleCueAutosave(250);
       return !cueChangesDirty;
     } catch (error) {
+      cueSaveInProgress = false;
       cueChangesDirty = Object.keys(pendingCueAssignments).length > 0;
       if (status) status.textContent = 'Save failed. Unsaved cue changes have been retained.';
       if (button) button.disabled = !cueChangesDirty;
+      renderSoundMixSummary();
       throw error;
     }
   }
