@@ -389,3 +389,9 @@ Production Pause/Cancel is generation-type guarded. Chapter switching saves a pe
 - #1608 (`762587f9def5ad57566e899ea9d0a23554a3e0eb`) is the current serialized artifact checkpoint. It is queued behind the preceding branch test run and must be verified by exact source SHA. Its package job should only execute after the full test suite passes.
 - Continue using the register's Stage 1 exit checklist, then do packaged app scenario coverage. Do not merge/release or start Stage 2 solely on unit-test success; the 22% bridge-ready bug must be shown fixed by the frozen EXE readiness marker and user-visible workspace transition.
 
+### Stage 1 checkpoint #1608 test failure follow-up — 29 October 2026
+- The test job for #1608 completed with one error (`test_native_host_base_url_is_escaped_and_loader_contract_is_required`), not a package/runtime failure. The base-URL test fixture omitted the loader timer contract, so validation failed before it could exercise base-URL escaping.
+- Corrected that fixture to include `setTimeout(finish,1700)`; the separate missing-head test also includes the timer and specifically exercises the missing-head guard.
+- The earlier #1606 test additionally showed the source fixture expected the semicolon form while the normalized helper output deliberately omits it; that fixture is corrected too.
+- Continue full-suite, then the single authoritative artifact checkpoint. Avoid more interleaved test-only/diagnostic runs once the corrected checkpoint starts; verify every result by exact source SHA.
+
