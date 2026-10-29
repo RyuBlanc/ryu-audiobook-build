@@ -34,7 +34,7 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
         )
         self.assertIn("window.__ryuNativeHost = true;", prepared)
         self.assertIn(
-            "if (!window.__ryuNativeHost) setTimeout(finish,1700);",
+            "if (!window.__ryuNativeHost) setTimeout(finish,1700)",
             prepared,
         )
         self.assertIn('<div id="appLoader"></div>', prepared)
