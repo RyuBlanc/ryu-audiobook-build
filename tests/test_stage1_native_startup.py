@@ -72,12 +72,13 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
             wire.index("await call('app.get_info')"),
         )
 
-    def test_native_host_shows_webengine_html_loader_during_bridge_setup(self):
+    def test_native_host_keeps_splash_visible_during_bridge_setup(self):
         host = HOST.read_text(encoding="utf-8")
         install_start = host.index("def _install_bridge(self, ok: bool)")
         install_end = host.index("def _check_frontend_ready(", install_start)
         install = host[install_start:install_end]
-        self.assertIn("self.web if self._uses_html_startup_loader else self._loading_page", install)
+        self.assertIn("self._web_stack.setCurrentWidget(self._loading_page)", install)
+        self.assertNotIn("self.web if self._uses_html_startup_loader else self._loading_page", install)
         self.assertIn('self._hosted_html_path = settings_root() / "frontend_cache" / path.name', host)
         self.assertIn("self._hosted_html_path.write_text(", host)
         self.assertIn("self._hosted_html_source, encoding=\"utf-8\"", host)
