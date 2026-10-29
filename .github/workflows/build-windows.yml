@@ -18,6 +18,8 @@ concurrency:
 
 jobs:
   build:
+    # Cleanup-only commits must not publish a stale main-branch application package.
+    if: ${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message || '', '[maintenance] Actions Storage Cleanup') }}
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
