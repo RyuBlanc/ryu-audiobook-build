@@ -3417,7 +3417,8 @@
     const visible = sounds.filter(t => {
       const text = (t.title + ' ' + t.source + ' ' + t.format).toLowerCase();
       const source = String(t.source || '').toLowerCase();
-      return (!query || text.includes(query)) &&
+      const isCue = String(t.role || t.metadata?.role || 'music').toLowerCase() === 'cue';
+      return isCue && (!query || text.includes(query)) &&
         (sourceFilter === 'all' || (sourceFilter === 'built-in' && source.includes('bundled')) ||
          (sourceFilter === 'imported' && source.includes('imported')));
     });
