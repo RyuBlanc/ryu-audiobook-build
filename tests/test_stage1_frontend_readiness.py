@@ -117,11 +117,14 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
         self.assertIn("self._loading_logo.setPixmap(", window)
         self.assertIn('self._loading_progress = QProgressBar(self._loading_page)', window)
         self.assertIn('self._loading_progress.setObjectName("startupProgress")', window)
-        self.assertIn('self._loading_progress.setFormat("%p%")', window)
+        self.assertIn("self._loading_progress.setTextVisible(False)", window)
+        self.assertIn("self._loading_progress.setRange(0, 0)", window)
+        self.assertNotIn('self._loading_progress.setFormat("%p%")', window)
+        self.assertNotIn("self._loading_progress.setValue(", window)
         self.assertIn("self._update_startup_progress", window)
 
 
-    def test_startup_percentage_order_matches_real_bridge_milestones(self):
+    def test_startup_milestones_keep_bridge_watchdog_order_without_visible_percentages(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         install_start = host.index("    def _install_bridge(self, ok: bool)")
         install_end = host.index("    def _check_frontend_ready(", install_start)
@@ -155,9 +158,9 @@ class PremiumV2FrontendAssetTests(unittest.TestCase):
         updater = host[updater_start:updater_end]
         self.assertIn("self._set_loading_status(message)", updater)
         self.assertIn("self._startup_progress_value = max(self._startup_progress_value, value)", updater)
-        self.assertIn("self._loading_progress.setValue(self._startup_progress_value)", updater)
         self.assertIn("self._loading_progress.setRange(0, 0)", updater)
-        self.assertIn("self._loading_progress.setRange(0, 100)", updater)
+        self.assertNotIn("self._loading_progress.setValue(", updater)
+        self.assertNotIn("self._loading_progress.setRange(0, 100)", updater)
         self.assertIn("self._frontend_watchdog.start(120000)", updater)
 
 
