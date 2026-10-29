@@ -3577,7 +3577,7 @@
     if (selects[0]) selects[0].selectedIndex = ({immediate:0,after_first_paragraph:1,after_10_seconds:2})[current.start_offset || 'immediate'] ?? 0;
     if (selects[1]) selects[1].selectedIndex = ({fade_before_end:0,continue_to_transition:1,stop_immediately:2})[current.end_behavior || 'fade_before_end'] ?? 0;
     if (picker) {
-      const visible = sounds;
+      const visible = sounds.filter(t => String(t.role || t.metadata?.role || 'music').toLowerCase() !== 'cue');
       picker.innerHTML = visible.map(t => '<button type="button" class="chapter-track-option ' + (t.path === selectedBgmTrackPath ? 'active' : '') + '" data-chapter-track="' + esc(t.path) + '"><b>' + esc(t.title) + '</b><small>' + esc(t.source) + ' · ' + esc(t.format) + '</small></button>').join('') ||
         '<p class="muted">No local music tracks found. Import a licensed audio file first.</p>';
       picker.querySelectorAll('button').forEach(control => { control.disabled = !chapterBased; });
@@ -6605,7 +6605,7 @@
             await savePendingCueChanges();
             const chapterBased = ['custom', 'chapter-based', 'chapter_based', 'chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
             await call('sound.save_manifest', {
-              path:chapterBased ? '' : (selectedSoundPath || chapterBgmState.default_path || ''),
+              path:chapterBased ? '' : (chapterBgmState.default_path || ''),
               enabled:Boolean(chapterBgmState.bgm_enabled),
               volume:Math.max(0,Math.min(0.50,Number($('advancedMusicVolume')?.value ?? Math.round(Number(chapterBgmState.default_volume ?? 0.18) * 100))/100)),
               narration_volume:Number($('narrationVolume')?.value ?? Math.round(Number(chapterBgmState.narration_volume ?? 1) * 100))/100,
@@ -6619,13 +6619,12 @@
           } else if (soundButton.id === 'saveChapterBgm') {
             await saveCurrentChapterBgmDraft(true);
           } else if (soundButton.id === 'clearAllCues') {
-            await call('sound.cues.clear');
             pendingCueSlot = null;
             pendingCueAssignments = Object.create(null);
-            cueChangesDirty = false;
+            for (const slot of ['opening','chapter','closing']) pendingCueAssignments[slot] = null;
+            cueChangesDirty = true;
             await refreshSoundCues();
-            await refreshChapterBgm();
-            message('Opening, next-chapter, and closing cue assignments cleared.');
+            message('Clear-all is staged. Choose Save Cue Changes to remove the three saved cue assignments.');
           } else if (soundButton.id === 'previewCueSequence') {
             const sequence = ['opening','chapter','closing'].map(slot => cueAssignments[slot]?.path).filter(Boolean);
             if (!sequence.length) throw new Error('Assign at least one saved cue before previewing the sequence.');
