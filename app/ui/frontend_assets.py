@@ -5,6 +5,7 @@ can be regression-tested without launching a WebEngine window.
 """
 from __future__ import annotations
 
+import html
 import re
 from pathlib import Path
 
@@ -46,13 +47,13 @@ def premium_v2_logo_candidates(frontend_file: Path) -> tuple[Path, ...]:
     )
 
 
-def prepare_native_host_html(source: str) -> str:
-    """Keep the approved HTML loader visible until the native bridge is ready.
+def prepare_native_host_html(source: str, base_url: str | None = None) -> str:
+    """Prepare the approved loader for file-backed desktop startup.
 
-    Browser/prototype runs retain the existing timed loader dismissal. The
-    packaged desktop host sets a marker before the HTML executes and guards the
-    timer, letting the original HTML loader remain visible while Qt WebChannel
-    connects and required local workspace data hydrates.
+    The packaged host writes this transformed source to a temporary HTML file
+    rather than QWebEngineView.setHtml(), whose data-URL path can reject large
+    documents. The explicit base URL keeps relative assets resolved against the
+    original frontend asset directory.
     """
     if not isinstance(source, str) or not source.strip():
         raise FrontendAssetError("Premium V2 HTML is empty or unreadable.")
@@ -69,9 +70,24 @@ def prepare_native_host_html(source: str) -> str:
             "the native host will not silently substitute a different loading UI."
         )
 
+    base_markup = ""
+    if base_url:
+        escaped_base = html.escape(str(base_url).strip(), quote=True)
+        if not escaped_base:
+            raise FrontendAssetError("The Premium V2 asset base URL is empty.")
+        base_markup = f'<base href="{escaped_base}">\n'
+
+    def inject_native_setup(match: re.Match[str]) -> str:
+        return (
+            match.group(1)
+            + "\n"
+            + base_markup
+            + "<script>window.__ryuNativeHost = true;</script>"
+        )
+
     source, head_count = re.subn(
         r"(<head\b[^>]*>)",
-        r"\1\n<script>window.__ryuNativeHost = true;</script>",
+        inject_native_setup,
         source,
         count=1,
         flags=re.IGNORECASE,
