@@ -502,7 +502,9 @@ def assemble_m4b(
             ]
 
         def apply_cue_level(cue: Path | None, label: str) -> Path | None:
-            if cue is None:
+            # A zero cue level disables the cue altogether; do not insert a
+            # silent clip that shifts narration timing in preview or final output.
+            if cue is None or cue_gain <= 1e-9:
                 return None
             return _scale_audio_gain(cue, temp_dir / f"{label}-level.m4a", cue_gain, audio_bitrate)
 
