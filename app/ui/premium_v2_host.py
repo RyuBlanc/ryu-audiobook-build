@@ -5511,6 +5511,9 @@ class PremiumV2Bridge(QObject):
         stored = state.get("chapter_bgm_overrides")
         if not isinstance(stored, dict):
             stored = {}
+        saved_strategy = str(
+            state.get("chapter_bgm_strategy") or ("custom" if stored else "same")
+        ).strip().lower()
         overrides: dict[str, dict[str, Any]] = {}
         for key, value in stored.items():
             if not isinstance(value, dict):
@@ -5523,7 +5526,7 @@ class PremiumV2Bridge(QObject):
             row["available"] = bool(track) if row.get("rule") == "custom" else True
             overrides[str(key)] = row
         return {
-            "strategy": str(state.get("chapter_bgm_strategy") or "same"),
+            "strategy": saved_strategy,
             "default_path": state.get("background_audio_path") or None,
             "default_volume": float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18),
             "fade_in_seconds": float(state.get("background_audio_fade_in") if state.get("background_audio_fade_in") is not None else 2.0),
@@ -5538,8 +5541,10 @@ class PremiumV2Bridge(QObject):
         state = load_state(project.folder)
         strategy = str(payload.get("strategy") or "").strip().lower()
         if strategy:
+            if strategy in {"chapter-based", "chapter_based", "chapter"}:
+                strategy = "custom"
             if strategy not in {"same", "custom"}:
-                raise ValueError("Choose Same BGM or Chapter-based BGM.")
+                raise ValueError("Choose Same BGM or Chapter-Based BGM.")
             state["chapter_bgm_strategy"] = strategy
             if strategy == "same":
                 state["chapter_bgm_overrides"] = {}
@@ -5559,9 +5564,18 @@ class PremiumV2Bridge(QObject):
         chapter = next((item for item in project.chapters if item.number == number), None)
         if chapter is None:
             raise ValueError("The selected chapter no longer exists. Refresh Chapter Studio.")
-        rule = str(payload.get("rule") or "default").strip().lower()
-        if rule not in {"default", "custom", "none"}:
-            raise ValueError("Choose book default, custom BGM, or no BGM.")
+        saved_strategy = str(
+            state.get("chapter_bgm_strategy") or ("custom" if state.get("chapter_bgm_overrides") else "same")
+        ).strip().lower()
+        if saved_strategy not in {"custom", "chapter-based", "chapter_based", "chapter"}:
+            raise ValueError("Switch to Chapter-Based BGM before saving a chapter assignment.")
+        rule = str(payload.get("rule") or "none").strip().lower()
+        # Migrate stale legacy "default" selections to silence under
+        # Chapter-Based BGM; book-default fallback is not allowed in this mode.
+        if rule == "default":
+            rule = "none"
+        if rule not in {"custom", "none"}:
+            raise ValueError("Choose a custom track or No BGM for this chapter.")
         path = None
         title = None
         if rule == "custom":
