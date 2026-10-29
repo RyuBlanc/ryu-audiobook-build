@@ -5409,7 +5409,10 @@ class PremiumV2Bridge(QObject):
                              if part.casefold() in MUSIC_CATEGORY_LABELS),
                             "universal",
                         )
-                    role = str(metadata.get("role") or "music").strip().casefold()
+                    role_value = str(metadata.get("role") or "music").strip().casefold()
+                    # Bundled starter cues persist their slot kind (opening/page/ending)
+                    # as role metadata. Normalize those to the shared cue catalogue role.
+                    role = "cue" if role_value in {"opening", "page", "ending", "closing", "chapter"} else role_value
                     if role not in {"music", "cue"}:
                         role = "music"
                     category_label = category_display.get(category, "Others")
@@ -5646,6 +5649,15 @@ class PremiumV2Bridge(QObject):
             # Keep chapter assignments while Same BGM is active. The assembler
             # ignores them in this strategy, but users must get them back when
             # switching to Chapter-Based BGM again.
+            # Restore the separately saved book-default track when returning to
+            # Same BGM; Chapter-Based mode clears the active path but keeps the preference.
+            if strategy == "same":
+                preferred = str(state.get("background_audio_path") or state.get("background_audio_preferred_path") or "").strip()
+                catalog_paths = {str(row["path"]) for row in self._sound_catalog({})}
+                if master_enabled and preferred and preferred in catalog_paths and Path(preferred).is_file():
+                    state["background_audio_path"] = preferred
+                else:
+                    state["background_audio_path"] = ""
             # Strategy changes must respect the global BGM/Voice Only control.
             state["background_audio_enabled"] = master_enabled
             state["background_audio_mode"] = "manual" if master_enabled else "off"
