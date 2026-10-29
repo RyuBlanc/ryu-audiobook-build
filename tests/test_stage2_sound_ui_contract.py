@@ -9,6 +9,10 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
     def setUp(self):
         self.html = Path("assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
         self.adapter = Path("assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assembler = Path("app/audio/assembler.py").read_text(encoding="utf-8")
+        self.manager = Path("app/tts/manager.py").read_text(encoding="utf-8")
+        self.preview = Path("app/ui/full_book_preview.py").read_text(encoding="utf-8")
         start = self.html.index('<section class="page" id="sound">')
         end = self.html.index('<section class="page" id="generate">', start)
         self.sound_markup = self.html[start:end]
@@ -79,6 +83,72 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn('data-assign-cue="opening"', self.sound_markup)
         self.assertIn('data-assign-cue="chapter"', self.sound_markup)
         self.assertIn('data-assign-cue="closing"', self.sound_markup)
+
+    def test_all_sound_design_views_have_working_tab_navigation(self):
+        for view in ("music", "chapters", "cues", "mix"):
+            self.assertIn(f'data-sound-tab="{view}"', self.sound_markup)
+            self.assertIn(f'data-sound-view="{view}"', self.sound_markup)
+        self.assertIn("const soundTab = e.target.closest('#sound .sound-tabs [data-sound-tab]');", self.adapter)
+        self.assertIn("document.querySelectorAll('#sound .sound-view[data-sound-view]')", self.adapter)
+        self.assertIn("if (nextView === 'music') await refreshSounds();", self.adapter)
+        self.assertIn("else if (nextView === 'chapters') await refreshChapterBgm();", self.adapter)
+        self.assertIn("else if (nextView === 'cues') await refreshSoundCues();", self.adapter)
+
+    def test_chapter_bgm_assignments_survive_strategy_switch(self):
+        start = self.host.index("    def _sound_chapter_bgm_save(")
+        end = self.host.index("    def _sound_cues_get(", start)
+        method = self.host[start:end]
+        self.assertIn('state["chapter_bgm_strategy"] = strategy', method)
+        self.assertNotIn('state["chapter_bgm_overrides"] = {}', method)
+        self.assertIn("await saveCurrentChapterBgmDraft();", self.adapter)
+        self.assertIn("chapter assignments were preserved for switching back.", self.adapter)
+        self.assertIn("await saveCurrentChapterBgmDraft();\n            await savePendingCueChanges();", self.adapter)
+
+    def test_master_and_chapter_bgm_gains_are_capped_at_50_percent(self):
+        start = self.host.index("    def _sound_assign(")
+        end = self.host.index("    def _sound_save_manifest(", start)
+        assign = self.host[start:end]
+        start = self.host.index("    def _sound_save_manifest(")
+        end = self.host.index("    def _sound_chapter_bgm_get(", start)
+        manifest = self.host[start:end]
+        self.assertIn("min(0.50, float(payload.get(\"volume\", 0.18)))", assign)
+        self.assertIn("min(0.50, float(payload.get(\"volume\"", manifest)
+        self.assertIn("background_audio_volume = max(0.0, min(0.50, float(background_audio_volume)))", self.assembler)
+        self.assertIn("gain = max(0.0, min(0.50, float(volume)))", self.assembler)
+        self.assertIn("self.background_audio_volume = max(0.0, min(0.50, float(background_audio_volume)))", self.manager)
+        self.assertIn('max="50" min="0" type="range" value="18"', self.sound_markup)
+
+    def test_selected_cue_playback_and_explicit_save_are_interactive(self):
+        for control in ('playSelectedCue', 'pauseSelectedCue', 'replaySelectedCue', 'saveCueChanges'):
+            self.assertIn(f'id="{control}"', self.sound_markup)
+            self.assertIn(f"soundButton.id === '{control}'", self.adapter)
+        self.assertIn("pendingCueAssignments[pendingCueSlot] = path", self.adapter)
+        self.assertIn("await call('sound.cues.save', {slot, path:path || null})", self.adapter)
+        self.assertIn("Use Save Cue Changes to persist this assignment.", self.adapter)
+        self.assertIn("soundPreviewKind === 'cue' && soundPreviewPath === selectedCuePath", self.adapter)
+        self.assertIn("soundPreviewKind === 'music' && soundPreviewPath === track.path", self.adapter)
+
+    def test_narration_and_cue_levels_are_saved_and_used_in_rendering(self):
+        for control in ('narrationVolume', 'cueVolume', 'mixNarrationSignal'):
+            self.assertIn(f'id="{control}"', self.sound_markup)
+        self.assertIn('state["narration_audio_volume"] = narration_volume', self.host)
+        self.assertIn('state["sound_cue_volume"] = cue_volume', self.host)
+        self.assertIn("narration_volume=self.narration_volume", self.manager)
+        self.assertIn("cue_audio_volume=self.cue_audio_volume", self.manager)
+        self.assertIn("narration_gain = max(0.0, min(1.0, float(narration_volume)))", self.assembler)
+        self.assertIn("cue_gain = max(0.0, min(0.50, float(cue_audio_volume)))", self.assembler)
+        self.assertIn("narration_volume=float(state.get(\"narration_audio_volume\")", self.host)
+        self.assertIn("cue_audio_volume=float(state.get(\"sound_cue_volume\")", self.preview)
+        self.assertIn("await saveCurrentChapterBgmDraft();\n            await savePendingCueChanges();", self.adapter)
+
+    def test_cue_import_rejects_long_clips_and_keeps_music_import_available(self):
+        start = self.host.index("    def _sound_import(")
+        end = self.host.index("    def _sound_assign(", start)
+        method = self.host[start:end]
+        self.assertIn("duration_seconds > 5.0", method)
+        self.assertIn("import longer music into the Music Library and assign it as BGM", method)
+        self.assertIn("target_kind: soundButton.id === 'importMusicTracks' ? 'music' : 'cue'", self.adapter)
+
 
 
 if __name__ == "__main__":
