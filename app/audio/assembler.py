@@ -416,7 +416,6 @@ def assemble_m4b(
     opening_cue_path: Path | str | None = None,
     page_turn_cue_path: Path | str | None = None,
     ending_cue_path: Path | str | None = None,
-    scene_transition_cue_path: Path | str | None = None,
     chapter_bgm_overrides: dict[str, dict] | None = None,
     chapter_bgm_strategy: str | None = None,
 ) -> Path:
@@ -539,15 +538,6 @@ def assemble_m4b(
                         cue_offset_by_chapter[index] = _duration_ms(cue)
                         _concat_audio_files(cue, current_audio, prefixed, audio_bitrate)
                         current_audio = prefixed
-                if index > 1 and scene_transition_cue_path:
-                    scene_cue = _resolve_cue_audio(temp_dir, "scene", "library", variation, mood, scene_transition_cue_path)
-                    scene_cue = apply_cue_level(scene_cue, f"auto-scene-cue-{index:05d}")
-                    if scene_cue is not None:
-                        scene_prefixed = temp_dir / f"auto-real-scene-cue-{index:05d}.m4a"
-                        _concat_audio_files(scene_cue, current_audio, scene_prefixed, audio_bitrate)
-                        cue_offset_by_chapter[index] = cue_offset_by_chapter.get(index, 0) + _duration_ms(scene_cue)
-                        current_audio = scene_prefixed
-
                 duration_ms = _duration_ms(current_audio)
                 duration_seconds = max(0.1, duration_ms / 1000.0)
                 music_gain = max(0.0, min(0.50, float(background_audio_volume)))
