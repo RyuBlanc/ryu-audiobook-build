@@ -6369,12 +6369,18 @@
       if (e.target?.id === 'librarySearch') {
         e.stopImmediatePropagation();
         scheduleLibrarySearchRefresh();
-      } else if (e.target?.id === 'advancedMusicVolume') {
+      } else if (e.target?.id === 'advancedMusicVolume' || e.target?.id === 'mixBgmVolume') {
         e.stopImmediatePropagation();
         mixLevelsDirty = true;
-        const valueNode = $('advancedMusicVolumeValue');
-        if (valueNode) valueNode.textContent = Math.round(Number(e.target.value || 0)) + '%';
+        const value = String(Math.max(0, Math.min(50, Number(e.target.value || 0))));
+        if ($('advancedMusicVolume')) $('advancedMusicVolume').value = value;
+        if ($('mixBgmVolume')) $('mixBgmVolume').value = value;
+        if ($('advancedMusicVolumeValue')) $('advancedMusicVolumeValue').textContent = Math.round(Number(value)) + '%';
+        if ($('mixBgmVolumeValue')) $('mixBgmVolumeValue').textContent = Math.round(Number(value)) + '%';
         renderSoundMixSummary();
+      } else if (e.target?.id === 'chapterBgmSearch') {
+        e.stopImmediatePropagation();
+        scheduleChapterBgmSearchRefresh();
       } else if (e.target?.id === 'chapterVolume') {
         e.stopImmediatePropagation();
         chapterBgmDraftDirty = true;
@@ -6401,11 +6407,16 @@
       }
     }, true);
     document.addEventListener('change', async e => {
+      if (e.target?.id === 'chapterBgmCategoryFilter') {
+        e.stopImmediatePropagation();
+        renderChapterBgm();
+        return;
+      }
       if (e.target?.id === 'chapterStartOffset' || e.target?.id === 'chapterEndBehavior') {
         chapterBgmDraftDirty = true;
         return;
       }
-      if (['advancedMusicVolume','narrationVolume','cueVolume'].includes(e.target?.id)) {
+      if (['advancedMusicVolume','mixBgmVolume','narrationVolume','cueVolume'].includes(e.target?.id)) {
         e.stopImmediatePropagation();
         mixLevelsDirty = true;
         try {
