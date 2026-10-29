@@ -1,7 +1,9 @@
 """Cross-stage regressions for cast assignment integrity during chapter editing."""
-import unittest
 import tempfile
+import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from app.core.project import Project
 from app.chapters.detector import Chapter
