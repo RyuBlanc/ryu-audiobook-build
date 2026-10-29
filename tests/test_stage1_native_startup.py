@@ -39,6 +39,20 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
         )
         self.assertIn('<div id="appLoader"></div>', prepared)
 
+    def test_native_host_base_url_is_escaped_and_loader_contract_is_required(self):
+        from app.ui.frontend_assets import FrontendAssetError, prepare_native_host_html
+
+        prepared = prepare_native_host_html(
+            "<html><head></head><body></body></html>",
+            base_url='file:///C:/Ryu & "Assets"/frontend/',
+        )
+        self.assertIn(
+            '<base href="file:///C:/Ryu &amp; &quot;Assets&quot;/frontend/">',
+            prepared,
+        )
+        with self.assertRaises(FrontendAssetError):
+            prepare_native_host_html("<html><head></head><body></body></html>")
+
     def test_adapter_does_not_remove_html_loader_before_required_hydration(self):
         adapter = ADAPTER.read_text(encoding="utf-8")
         wire_start = adapter.index("async function wire()")
