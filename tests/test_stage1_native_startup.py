@@ -167,7 +167,7 @@ class Stage1NativeStartupAcceptanceTests(unittest.TestCase):
             'for ($launchAttempt = 1; $launchAttempt -le 3; $launchAttempt++)'
         )
         smoke_end = workflow.index(
-            "\\n      - name: Verify bundled voice assets and critical modules",
+            "\n      - name: Verify bundled voice assets and critical modules",
             smoke_start,
         )
         smoke = workflow[smoke_start:smoke_end]
