@@ -170,6 +170,32 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn('str(row.get("role") or "music").casefold() != "cue"', method)
         self.assertIn("if float(duration_seconds) > 5.0:", method)
 
+    def test_cue_assets_cannot_be_used_as_book_or_chapter_bgm(self):
+        self.assertIn('selected_row.get("role") or "music").casefold() == "cue"', self.host)
+        self.assertIn('selected_row.get("role") or "music").casefold() == "cue"', self.host)
+        self.assertIn('str(row.get("role") or "music").casefold() == "cue"', self.host)
+        self.assertIn("String(t.role || t.metadata?.role || 'music').toLowerCase() !== 'cue'", self.adapter)
+        self.assertIn("const isCue = String(t.role || t.metadata?.role || 'music').toLowerCase() === 'cue';", self.adapter)
+
+    def test_selected_music_track_does_not_replace_saved_default_on_handoff(self):
+        start = self.adapter.index("} else if (soundButton.id === 'applySoundToProduction')")
+        end = self.adapter.index("} else if (soundButton.id === 'saveChapterBgm')", start)
+        handoff = self.adapter[start:end]
+        self.assertIn("path:chapterBased ? '' : (chapterBgmState.default_path || '')", handoff)
+        self.assertNotIn("selectedSoundPath || chapterBgmState.default_path", handoff)
+
+    def test_clear_all_cues_requires_explicit_save(self):
+        start = self.adapter.index("} else if (soundButton.id === 'clearAllCues')")
+        end = self.adapter.index("} else if (soundButton.id === 'previewCueSequence')", start)
+        handler = self.adapter[start:end]
+        self.assertIn("for (const slot of ['opening','chapter','closing']) pendingCueAssignments[slot] = null;", handler)
+        self.assertIn("Choose Save Cue Changes", handler)
+        self.assertNotIn("call('sound.cues.clear')", handler)
+
+    def test_zero_cue_level_does_not_add_silent_audio_duration(self):
+        self.assertIn("if cue is None or cue_gain <= 1e-9:", self.assembler)
+        self.assertIn("return None", self.assembler[self.assembler.index("def apply_cue_level"):self.assembler.index("# Real local audio only", self.assembler.index("def apply_cue_level"))])
+
 
 if __name__ == "__main__":
     unittest.main()
