@@ -30,7 +30,7 @@ class Stage2BgmStrategyTests(unittest.TestCase):
                 commands.append(command)
                 destination = Path(command[-1])
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_bytes(b"fixture encoded audio")
+                destination.write_bytes(b"F" * 2048)
 
             with (
                 patch.object(assembler, "assemble_chapter", return_value=narration),
