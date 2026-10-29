@@ -404,3 +404,8 @@ Production Pause/Cancel is generation-type guarded. Chapter switching saves a pe
 - Corrected the negative case to omit the `<head>` while retaining `setTimeout(finish,1700)`, so the test now exercises the intended missing-head validation branch.
 - Candidate commit `663cedda737941c398825cdbeb92a14126421924` triggers a new test run. After a green full suite, run the artifact checkpoint and evaluate the actual packaged startup gate. Stage 1 remains open.
 
+### Stage 1 negative-fixture correction — 29 October 2026
+- The #1615 test run failed only the new `assertRaises(FrontendAssetError)` assertion because the input still contained a valid `<head>`. This was a faulty negative fixture, not evidence of an application runtime regression.
+- Commit `f0ddd456f43b51d752e2a654370c4cb7c917270f` adds the semicolon form to that missing-head input so the loader-normalization stage passes and the call tests the expected missing-head error.
+- The newer `[artifact-checkpoint]` run will test this exact fixture and the packaged startup gate. The earlier run is not considered a pass.
+
