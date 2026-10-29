@@ -395,3 +395,7 @@ Production Pause/Cancel is generation-type guarded. Chapter switching saves a pe
 - The earlier #1606 test additionally showed the source fixture expected the semicolon form while the normalized helper output deliberately omits it; that fixture is corrected too.
 - Continue full-suite, then the single authoritative artifact checkpoint. Avoid more interleaved test-only/diagnostic runs once the corrected checkpoint starts; verify every result by exact source SHA.
 
+### Stage 1 follow-up — base URL fixture source form
+- The active #1613 run uses commit `70e21f1404cff6b44d8e7c573f495deccdabd0ff`. While it was queued/running, another fixture detail was identified: the escaped base-URL test includes the timer but uses the semicolon-free spelling while the helper currently normalizes both spellings. To make this test specifically exercise normalization and avoid another source-form mismatch, changed its input to the semicolon-terminated spelling.
+- Source commit with that test-only correction: `2c089336968f42bd23023e9d0f59f076e57da659`. Verify the newest run by SHA, not an earlier cancelled/superseded run.
+
