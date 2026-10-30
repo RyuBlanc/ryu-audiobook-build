@@ -262,7 +262,9 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
 
     def test_bundled_cue_roles_are_normalized_and_not_shown_as_music(self):
         self.assertIn('role = "cue" if role_value in {"cue", "opening", "page", "ending", "closing", "chapter"} else role_value', self.host)
-        self.assertIn('metadata.get("role") or bundled_entry.get("type") or "music"', self.host)
+        self.assertIn('metadata.get("role") or bundled_entry.get("type") or ""', self.host)
+        self.assertIn("role = audio_asset_role(resolved)", self.host)
+        self.assertIn("Skipping audio asset with unreadable metadata", self.host)
         self.assertIn("function isCueSoundAsset(track)", self.adapter)
         self.assertIn("const isCue = isCueSoundAsset(t);", self.adapter)
         self.assertIn("return isCue && (!query || text.includes(query))", self.adapter)
