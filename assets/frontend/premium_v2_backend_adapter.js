@@ -3742,7 +3742,7 @@
 
     const selectedVolumes = chapterBased
       ? activeChapterRows.map(item => Number(item.volume ?? chapterBgmState.default_volume ?? 0.18))
-      : (hasActiveBgm ? [Number(chapterBgmState.default_volume ?? 0.18)] : []);
+      : (hasActiveBgm ? [bgmLevel] : []);
     const averageVolume = selectedVolumes.length
       ? selectedVolumes.reduce((sum, volume) => sum + (Number.isFinite(volume) ? volume : 0), 0) / selectedVolumes.length
       : 0;

@@ -475,6 +475,17 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("setText('advancedMusicVolumeValue', Math.round(bgmLevel * 100) + '%');", summary)
         self.assertIn("await saveSoundMixLevels(true);", self.adapter)
 
+
+    def test_mix_summary_uses_live_master_level_only_for_same_bgm_strategy(self):
+        start = self.adapter.index("function renderSoundMixSummary()")
+        end = self.adapter.index("function renderChapterBgm()", start)
+        summary = self.adapter[start:end]
+        self.assertIn("const bgmLevel = Math.max(0, Math.min(0.50, Number(bgmLevelInput?.value ?? storedBgm * 100) / 100));", summary)
+        self.assertIn("? activeChapterRows.map(item => Number(item.volume ?? chapterBgmState.default_volume ?? 0.18))", summary)
+        self.assertIn(": (hasActiveBgm ? [bgmLevel] : [])", summary)
+        self.assertIn("setText('mixBgmVolumeValue',", summary)
+        self.assertIn("musicWidth = masterEnabled && hasActiveBgm", summary)
+
     def test_zero_cue_level_does_not_add_silent_audio_duration(self):
         self.assertIn("if cue is None or cue_gain <= 1e-9:", self.assembler)
         self.assertIn("return None", self.assembler[self.assembler.index("def apply_cue_level"):self.assembler.index("# Real local audio only", self.assembler.index("def apply_cue_level"))])
