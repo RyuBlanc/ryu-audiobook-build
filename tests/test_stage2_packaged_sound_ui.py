@@ -133,7 +133,7 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
             'const builtInSource = document.querySelector(\'#soundSourceFilter [data-source="built-in"]\');',
             script,
         )
-        self.assertIn("must(musicButtons().length > 0", script)
+        self.assertIn("if (musicButtons().length === 0)", script)
 
     def test_windows_package_job_runs_the_real_frozen_executable_acceptance(self):
         workflow = (ROOT / ".github/workflows/build-windows.yml").read_text(encoding="utf-8")
