@@ -271,7 +271,7 @@ def _run(args: argparse.Namespace) -> int:
         }, ensure_ascii=False, indent=2), encoding="utf-8")
         (chapter_dir / "chunk_manifest.json").write_text(json.dumps({
             "chunks": [
-                {"file": first_chunk, "text": chapter["text"].split("\n\n", 1)[0] + "\\n\\n"},
+                {"file": first_chunk, "text": chapter["text"].split("\n\n", 1)[0] + "\n\n"},
                 {"file": second_chunk, "text": chapter["text"].split("\n\n", 1)[-1]},
             ],
         }, ensure_ascii=False, indent=2), encoding="utf-8")
