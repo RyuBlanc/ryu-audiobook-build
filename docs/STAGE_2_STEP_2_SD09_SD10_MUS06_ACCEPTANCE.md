@@ -79,3 +79,12 @@ This checkpoint covers only `SD-09`, `SD-10`, and `MUS-06`, plus the retained Mu
 ## Latest regression gate
 
 Run #1746 passed on 68c4afb: JavaScript syntax passed; 843 tests passed in 37.083s. Runs #1744 and #1745 failed on an obsolete test assertion; #1745 did not reach the Windows build. Packaged verification remains pending.
+
+## Music/Cue cross-refresh race — Runs #1747–#1749
+
+- [#1747](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41071765068) built and verified the frozen executable and bundled Piper/Kokoro assets successfully, but packaged acceptance failed at the Built-in Music filter. The native catalogue still contained 34 rows (32 bundled, 2 imported; 28 music and 6 cue), while the rendered Music grid had zero rows. Installer packaging was correctly skipped after this acceptance failure.
+- Root cause identified from the UI event flow and request guards: `refreshSounds()` and `refreshSoundCues()` shared `soundListEpoch`. The import handler refreshes the Music catalogue and then the Cue library; a source/category refresh can overlap that sequence. The Cue refresh incremented the Music grid epoch and caused the in-flight Music render to return before rebuilding the DOM. The row-count repair alone could not repair a render cancelled before the DOM update.
+- Production fix: commit `76000f9b56958b3d7ca09b0eea2f92a90d6d306b` gives cue refreshes their own `cueListEpoch`, retains the fresh native catalogue + cue-assignment load, and no longer advances or checks the Music Library render epoch. The packaged failure diagnostics now also report grid existence, signature, row count and visible text.
+- [#1748](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41074194154) found one overly broad assertion in the new test: it searched for the name `soundListEpoch` even in an explanatory comment. It did not report a JavaScript syntax or application failure. The test was narrowed to forbid the actual shared-epoch operations rather than the comment.
+- [#1749](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41074552773) passed on `c747fc67b68f5b88990c44f7e597a12eeb7ddb1c`: JavaScript syntax validation passed; **843 tests passed in 40.789 seconds**.
+- Next gate: run the frozen Windows artifact acceptance on the green-tested source. Do not close `SD-09`, `SD-10`, or `MUS-06` until the Built-in/Imported/All/Fantasy Music filters, cue cards, and actual cue/music playback all pass in the frozen executable.
