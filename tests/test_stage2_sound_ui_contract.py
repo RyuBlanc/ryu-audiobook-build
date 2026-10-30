@@ -234,10 +234,11 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
 
     def test_cue_assets_cannot_be_used_as_book_or_chapter_bgm(self):
         self.assertIn('selected_row.get("role") or "music").casefold() == "cue"', self.host)
-        self.assertIn('selected_row.get("role") or "music").casefold() == "cue"', self.host)
         self.assertIn('str(row.get("role") or "music").casefold() == "cue"', self.host)
-        self.assertIn("String(t.role || t.metadata?.role || 'music').toLowerCase() !== 'cue'", self.adapter)
-        self.assertIn("const isCue = String(t.role || t.metadata?.role || 'music').toLowerCase() === 'cue';", self.adapter)
+        self.assertIn("const role = String(t.role || metadata.role || 'music').toLowerCase();", self.adapter)
+        self.assertIn("const matchesMusicType = role !== 'cue';", self.adapter)
+        self.assertIn("String(track.role || track.metadata?.role || 'music').toLowerCase() !== 'cue'", self.adapter)
+        self.assertIn("String(track.role || track.metadata?.role || 'music').toLowerCase() === 'cue'", self.adapter)
 
     def test_selected_music_track_does_not_replace_saved_default_on_handoff(self):
         start = self.adapter.index("} else if (soundButton.id === 'applySoundToProduction')")
