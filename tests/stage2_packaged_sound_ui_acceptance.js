@@ -85,19 +85,50 @@
     const originalInvoke = bridge.invoke.bind(bridge);
     const originalBootstrap = typeof bridge.bootstrap === "function"
       ? bridge.bootstrap.bind(bridge) : function () { return Promise.resolve({}); };
+    const importedMusicCategories = new Set();
     const wrappedBridge = Object.freeze({
       invoke: function (command, payload) {
         const request = Object.assign({}, payload || {});
         if (command === "sound.import" && request.target_kind === "music" &&
             (!Array.isArray(request.paths) || !request.paths.length)) {
-          request.paths = Array.isArray(config.music_paths) ? config.music_paths.slice() : [];
-          if (!request.paths.length) throw new Error("No generated Music Library fixture paths were provided.");
+          const category = String(request.category || "universal");
+          if (category === String(config.expected_category || "fantasy") && !importedMusicCategories.has(category)) {
+            request.paths = Array.isArray(config.music_paths) ? config.music_paths.slice() : [];
+          } else {
+            const fixture = (config.category_imports || []).find(item =>
+              String(item.category) === category && !importedMusicCategories.has(category));
+            request.paths = fixture ? [fixture.path] : [];
+          }
+          if (!request.paths.length) throw new Error("No unused Music Library fixture was configured for category " + category + ".");
+          importedMusicCategories.add(category);
         } else if (command === "sound.import" && request.target_kind === "cue" &&
             (!Array.isArray(request.paths) || !request.paths.length)) {
-          request.paths = Array.isArray(config.cue_paths) ? config.cue_paths.slice() : [];
-          if (!request.paths.length) throw new Error("No generated cue fixture paths were provided.");
+          if (config.reject_long_cue_import === true) {
+            config.reject_long_cue_import = false;
+            request.paths = [String(config.long_cue_path || "")];
+          } else {
+            request.paths = Array.isArray(config.cue_paths) ? config.cue_paths.slice() : [];
+          }
+          if (!request.paths.length || !request.paths[0]) throw new Error("No generated cue fixture paths were provided.");
         }
-        return originalInvoke(command, request);
+        if (command === "sound.cues.save" && config.reject_next_cue_save === true) {
+          config.reject_next_cue_save = false;
+          return Promise.resolve({success:false,error:{message:"Deterministic packaged-acceptance cue-save failure."}});
+        }
+        if (command === "sound.save_manifest" && config.fail_next_manifest_save === true) {
+          config.fail_next_manifest_save = false;
+          return Promise.resolve({success:false,error:{message:"Deterministic packaged-acceptance manifest-save failure."}});
+        }
+        const result = originalInvoke(command, request);
+        if (command === "sound.preview_book") {
+          return Promise.resolve(result).then(response => {
+            if (response && response.success === true && response.data && response.data.job_id) {
+              window.__RYU_SOUND_UI_ACCEPTANCE_PREVIEW_JOB_ID__ = response.data.job_id;
+            }
+            return response;
+          });
+        }
+        return result;
       },
       bootstrap: originalBootstrap
     });
@@ -106,10 +137,54 @@
     });
     record("native_bridge", true, "Real Qt WebChannel bridge connected; the UI import action delegates to the native backend.");
 
+    if (config.phase === "restart") {
+      const catalogue = await invoke("sound.catalog", {});
+      const saved = await invoke("sound.chapter_bgm.get", {});
+      const cues = await invoke("sound.cues.get", {});
+      const expectedMusicPaths = (config.track_paths || []).concat((config.category_imports || []).map(item => item.path));
+      const missingTracks = expectedMusicPaths.filter(path =>
+        !Array.isArray(catalogue) || !catalogue.some(track => String(track.path || "") === String(path) &&
+          String(track.role || "").toLowerCase() === "music"));
+      must(missingTracks.length === 0, "Imported Music Library files disappeared after app restart: " + missingTracks.join(", "));
+      must(saved && saved.strategy === "custom" && Array.isArray(saved.chapters) && saved.chapters.length === 3,
+        "Chapter-Based strategy or three chapter records were not restored after restart.");
+      must(String(saved.default_path || "") === String(config.track_paths[0]),
+        "The saved book-default preference was not retained for switching back to Same BGM.");
+      must(saved.bgm_enabled === true &&
+        Math.abs(Number(saved.default_volume) - 0.42) < 0.005 &&
+        Math.abs(Number(saved.narration_volume) - 0.82) < 0.005 &&
+        Math.abs(Number(saved.cue_volume) - 0.30) < 0.005,
+        "BGM, narration or cue levels changed across the application restart.");
+      const overrides = saved.overrides || {};
+      must(overrides["1"] && overrides["1"].rule === "custom" &&
+        String(overrides["1"].path || "") === String(config.track_paths[0]) &&
+        Math.abs(Number(overrides["1"].volume) - 0.37) < 0.005 &&
+        overrides["1"].start_offset === "after_first_paragraph" &&
+        overrides["1"].end_behavior === "continue_to_transition",
+        "Chapter One's track, volume, paragraph offset or end policy was not restored.");
+      must(overrides["2"] && overrides["2"].rule === "custom" &&
+        String(overrides["2"].path || "") === String(config.track_paths[1]) &&
+        Math.abs(Number(overrides["2"].volume) - 0.29) < 0.005 &&
+        overrides["2"].start_offset === "after_10_seconds" &&
+        overrides["2"].end_behavior === "stop_immediately",
+        "Chapter Two's track, volume, start offset or end policy was not restored.");
+      must(overrides["3"] && overrides["3"].rule === "none",
+        "Chapter Three's explicit No BGM rule was not restored.");
+      must(String(cues.opening && cues.opening.path || "") === String(config.cue_paths[1]) &&
+        String(cues.chapter && cues.chapter.path || "") === String(config.cue_paths[1]) &&
+        String(cues.closing && cues.closing.path || "") === String(config.cue_paths[0]),
+        "Opening, Next Chapter or Closing cue assignments were not restored.");
+      record("application_restart_music_library_persistence", true, "All imported Music Library assets and categories remained available after a new frozen-app process.");
+      record("application_restart_chapter_bgm_persistence", true, "Strategy, default preference, assignments, No BGM, offsets, end policies and chapter volume survived restart.");
+      record("application_restart_mix_and_cue_persistence", true, "Narration/BGM/cue levels and all three cue slots survived restart.");
+      publish("passed");
+      return;
+    }
+
     const initial = await invoke("sound.chapter_bgm.get", {});
-    must(initial && Array.isArray(initial.chapters) && initial.chapters.length >= 2,
-      "The isolated two-chapter acceptance project did not load.");
-    record("active_project", true, "The packaged app loaded an isolated project with two real chapter records.");
+    must(initial && Array.isArray(initial.chapters) && initial.chapters.length === 3,
+      "The isolated three-chapter acceptance project did not load.");
+    record("active_project", true, "The packaged app loaded a three-chapter project with real saved narration fixtures.");
 
     must(typeof window.go === "function", "The Premium V2 navigation function is unavailable.");
     window.go('sound');
@@ -117,6 +192,12 @@
       const page = document.querySelector("#sound");
       return page && page.classList.contains("active");
     }, 12000);
+
+    const pageHead = document.querySelector("#sound > .page-head");
+    must(pageHead && !pageHead.querySelector("#soundPreviewBook") &&
+      !pageHead.querySelector("#saveSoundPresetAdvanced"),
+      "A removed top-right Sound Design preview or advanced preset action reappeared.");
+    record("sd01_removed_top_right_actions", true, "The removed top-right preview and advanced preset actions remain absent in the frozen UI.");
 
     for (const view of ["music", "chapters", "cues", "mix"]) {
       const tab = document.querySelector('#sound .sound-tabs [data-sound-tab="' + view + '"]');
@@ -283,7 +364,10 @@
     record("music_track_selection", true, "Selected Track displays the real imported track name, source, WAV format, and duration.");
 
     const volume = document.querySelector("#advancedMusicVolume");
+    const initialMixState = await invoke("sound.chapter_bgm.get", {});
     must(volume && Number(volume.max) === 50, "The BGM slider does not enforce the 50 percent maximum.");
+    must(volume.value === "18" && Math.abs(Number(initialMixState.default_volume) - 0.18) < 0.005,
+      "The documented 18% master BGM default was not hydrated from saved project data.");
     // Match an actual user edit: the production summary deliberately hydrates
     // the last saved value when this control is not focused. Keep it focused
     // through input/change so that summary refreshes preserve the live edit.
@@ -365,6 +449,16 @@
     }, 8000);
     const importCues = document.querySelector("#importCueClips");
     must(importCues && !importCues.disabled, "Import effect clips control is missing or disabled.");
+    config.reject_long_cue_import = true;
+    importCues.click();
+    await waitFor("six-second cue rejection", function () {
+      return document.querySelector("#toasts")?.textContent.includes("5 seconds or shorter");
+    }, 10000);
+    const afterLongCueAttempt = await invoke("sound.catalog", {});
+    must(!afterLongCueAttempt.some(track => String(track.path || "").includes("CUE_TOO_LONG")),
+      "A cue longer than five seconds was accepted into the native cue catalogue.");
+    record("cue_import_rejects_over_five_seconds", true,
+      "The real cue-import action rejected a six-second audio fixture and did not add it to the catalogue.");
     importCues.click();
     let cueCatalog = [];
     await waitFor("two imported cue fixtures", async function () {
@@ -383,6 +477,32 @@
       "Imported cue catalogue records do not contain their real source and format information.");
     must(!visibleHas(config.cue_track_titles[0]) && !visibleHas(config.cue_track_titles[1]),
       "A cue asset leaked into the Music Library track grid.");
+    const cueSourceAll = document.querySelector('#cueSourceFilter [data-cue-source="all"]');
+    const cueSourceBuiltIn = document.querySelector('#cueSourceFilter [data-cue-source="built-in"]');
+    const cueSourceImported = document.querySelector('#cueSourceFilter [data-cue-source="imported"]');
+    must(cueSourceAll && cueSourceBuiltIn && cueSourceImported, "Cue source filters are incomplete.");
+    cueSourceBuiltIn.click();
+    await waitFor("Built-in cue source results", function () {
+      const rows = Array.from(document.querySelectorAll("#cueGrid [data-cue-path]"));
+      return rows.length > 0 && rows.every(card => card.textContent.includes("Bundled with application")) &&
+        !rows.some(card => card.textContent.includes(config.cue_track_titles[0]) ||
+          card.textContent.includes(config.cue_track_titles[1]));
+    }, 12000);
+    cueSourceImported.click();
+    await waitFor("Imported cue source results", function () {
+      const rows = Array.from(document.querySelectorAll("#cueGrid [data-cue-path]"));
+      return rows.length === 2 && rows.every(card => card.textContent.includes("Imported locally")) &&
+        rows.some(card => String(card.dataset.cuePath || "") === String(cueAlpha.path)) &&
+        rows.some(card => String(card.dataset.cuePath || "") === String(cueBeta.path));
+    }, 12000);
+    cueSourceAll.click();
+    await waitFor("All cue source results", function () {
+      const rows = Array.from(document.querySelectorAll("#cueGrid [data-cue-path]"));
+      return rows.some(card => String(card.dataset.cuePath || "") === String(cueAlpha.path)) &&
+        rows.some(card => String(card.dataset.cuePath || "") === String(cueBeta.path)) &&
+        rows.some(card => card.textContent.includes("Bundled with application"));
+    }, 12000);
+    record("cue_library_source_classification", true, "Built-in, Imported and All cue filters returned only the correct real cue assets.");
     try {
       await waitFor("two imported cue cards to render", function () {
         const rows = Array.from(document.querySelectorAll("#cueGrid [data-cue-path]"));
