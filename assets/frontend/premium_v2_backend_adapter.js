@@ -3437,6 +3437,23 @@
     const loaded = await call('sound.catalog');
     if (requestToken !== soundListEpoch) return sounds;
     sounds = Array.isArray(loaded) ? loaded : [];
+    const selectedMusicTrack = selectedSoundPath
+      ? sounds.find(track => String(track.path || '') === String(selectedSoundPath) && isMusicSoundAsset(track))
+      : null;
+    if (!selectedMusicTrack) {
+      const stalePath = String(selectedSoundPath || '');
+      if (stalePath && soundPreviewAudio && soundPreviewKind === 'music' && soundPreviewPath === stalePath) {
+        stopSoundPreview();
+      }
+      selectedSoundPath = null;
+      if ($('selectedSoundTitle')) $('selectedSoundTitle').textContent = 'No track selected';
+      if ($('selectedSoundMeta')) $('selectedSoundMeta').textContent = stalePath
+        ? 'The previously selected music track is no longer available. Select another track from the refreshed library.'
+        : 'Select a track from the local catalogue.';
+      if ($('previewSelectedTrack')) $('previewSelectedTrack').disabled = true;
+    } else if ($('previewSelectedTrack')) {
+      $('previewSelectedTrack').disabled = false;
+    }
     const grid = $('soundTrackGrid');
     const query = ($('soundTrackSearch')?.value || '').trim().toLowerCase();
     const sourceFilter = document.querySelector('#soundSourceFilter [data-source].active')?.dataset.source || 'all';
@@ -3495,6 +3512,16 @@
           : 'Unsaved cue changes — use Save Cue Changes to persist them.');
     const cueSaveButton = $('saveCueChanges');
     if (cueSaveButton) cueSaveButton.disabled = !cueChangesDirty;
+    if (selectedCuePath && !sounds.some(track =>
+      String(track.path || '') === String(selectedCuePath) && isCueSoundAsset(track))) {
+      const stalePath = String(selectedCuePath);
+      if (soundPreviewAudio && soundPreviewKind === 'cue' && soundPreviewPath === stalePath) {
+        stopSoundPreview();
+      }
+      selectedCuePath = null;
+      if ($('selectedCueTitle')) $('selectedCueTitle').textContent = 'No cue selected';
+      if ($('selectedCueMeta')) $('selectedCueMeta').textContent = 'The previously selected cue is no longer available. Select another cue from the refreshed library.';
+    }
     if (selectedCuePath) {
       const selectedCue = sounds.find(track => String(track.path || '') === String(selectedCuePath));
       if ($('selectedCueTitle')) $('selectedCueTitle').textContent = selectedCue?.title || 'Selected cue';
@@ -3937,7 +3964,16 @@
         if (kind === 'music' && $('previewSelectedTrack')) $('previewSelectedTrack').textContent = '▶ Preview selected track';
       }
     };
-    audio.onerror = () => message('The selected local audio file could not be played in the embedded preview.', true);
+    audio.onerror = () => {
+      if (soundPreviewAudio === audio) {
+        soundPreviewAudio = null;
+        soundPreviewKind = null;
+        soundPreviewPath = null;
+        $('soundWave')?.classList.remove('playing');
+        if (kind === 'music' && $('previewSelectedTrack')) $('previewSelectedTrack').textContent = '▶ Preview selected track';
+      }
+      message('The selected local audio file could not be played in the embedded preview.', true);
+    };
     return audio;
   }
   async function saveCurrentChapterBgmDraft(force = false) {
@@ -6701,6 +6737,7 @@
         return;
       }
       selectedSoundPath = String(track.path);
+      if ($('previewSelectedTrack')) $('previewSelectedTrack').disabled = false;
       // Do not leave a previously selected track playing behind the new
       // Selected Track panel. The user can explicitly preview the new track.
       if (soundPreviewAudio &&

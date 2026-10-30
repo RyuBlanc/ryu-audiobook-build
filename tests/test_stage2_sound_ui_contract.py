@@ -473,6 +473,33 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("soundPreviewKind = kind;", self.adapter)
         self.assertIn("soundPreviewPath = String(rawPath || '');", self.adapter)
 
+    def test_missing_selected_music_or_cue_clears_only_its_stale_preview(self):
+        refresh_music_start = self.adapter.index("async function refreshSounds()")
+        refresh_music_end = self.adapter.index("async function refreshSoundCues()", refresh_music_start)
+        refresh_music = self.adapter[refresh_music_start:refresh_music_end]
+        self.assertIn("const selectedMusicTrack = selectedSoundPath", refresh_music)
+        self.assertIn("isMusicSoundAsset(track)", refresh_music)
+        self.assertIn("if (!selectedMusicTrack)", refresh_music)
+        self.assertIn("The previously selected music track is no longer available", refresh_music)
+        self.assertIn("$('previewSelectedTrack').disabled = true;", refresh_music)
+        refresh_cue_start = self.adapter.index("async function refreshSoundCues()")
+        refresh_cue_end = self.adapter.index("function chapterMusicCategoryGroup", refresh_cue_start)
+        refresh_cues = self.adapter[refresh_cue_start:refresh_cue_end]
+        self.assertIn("isCueSoundAsset(track)", refresh_cues)
+        self.assertIn("The previously selected cue is no longer available", refresh_cues)
+        self.assertIn("soundPreviewKind === 'cue' && soundPreviewPath === stalePath", refresh_cues)
+
+    def test_local_preview_media_error_releases_only_the_failed_audio_instance(self):
+        start = self.adapter.index("function createSoundPreview(")
+        end = self.adapter.index("async function saveCurrentChapterBgmDraft", start)
+        preview = self.adapter[start:end]
+        error_handler = preview[preview.index("audio.onerror ="):]
+        self.assertIn("if (soundPreviewAudio === audio)", error_handler)
+        self.assertIn("soundPreviewAudio = null;", error_handler)
+        self.assertIn("soundPreviewKind = null;", error_handler)
+        self.assertIn("soundPreviewPath = null;", error_handler)
+        self.assertIn("message('The selected local audio file could not be played in the embedded preview.', true);", error_handler)
+
     def test_chapter_bgm_scroll_and_selected_track_panel_readability(self):
         self.assertIn(".chapter-bgm-list{display:grid;align-content:start;gap:6px;max-height:620px;overflow:auto}", self.html)
         self.assertIn("'#sound #chapterBgmSelectedTrackPanel .chapter-bgm-select-eyebrow{color:#e6c85f}'", self.adapter)
