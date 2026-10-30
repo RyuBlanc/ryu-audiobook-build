@@ -62,7 +62,10 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         with self.assertRaisesRegex(FileNotFoundError, "Reassign it in Sound Design"):
             library.validate_saved_audio_paths({"opening_cue_path": str(self.root / "deleted.wav")})
         unsupported = self.root / "cue.exe"; unsupported.write_bytes(b"fake")
-        with self.assertRaisesRegex(ValueError, "Unsupported audio format"):
+        unsupported.with_name(unsupported.name + ".license.json").write_text(
+            json.dumps({"role":"cue","category":"ending"}), encoding="utf-8"
+        )
+        with self.assertRaisesRegex(ValueError, "unsupported audio format"):
             library.validate_saved_audio_paths({"ending_cue_path": str(unsupported)})
         broken = self.root / "broken.mp3"; broken.write_bytes(b"not mp3")
         with self.assertRaisesRegex(ValueError, "unreadable|duration"):

@@ -348,6 +348,8 @@ def validate_saved_audio_paths(state):
   path=Path(str(raw)).expanduser()
   if not path.is_file():
    raise FileNotFoundError(f"Saved {label} is missing: {path}. Reassign it in Sound Design.")
+  if path.suffix.casefold() not in AUDIO_EXTENSIONS:
+   raise ValueError(f"Saved {label} has an unsupported audio format: {path}. Reassign it in Sound Design.")
   actual_role=audio_asset_role(path)
   if actual_role != expected_role:
    if expected_role=="cue":

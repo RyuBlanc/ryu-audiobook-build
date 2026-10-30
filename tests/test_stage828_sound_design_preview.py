@@ -435,6 +435,9 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             cue = Path(temporary) / "opening.wav"
             cue.write_bytes(b"cue")
+            cue.with_name(cue.name + ".license.json").write_text(
+                json.dumps({"role":"cue","category":"opening"}), encoding="utf-8"
+            )
             with patch("app.audio.library.probe_audio_duration_seconds", return_value=5.1):
                 with self.assertRaisesRegex(ValueError, "Fixed cue clips must be 5 seconds or shorter"):
                     validate_saved_audio_paths({
