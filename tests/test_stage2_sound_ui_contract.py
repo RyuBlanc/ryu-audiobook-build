@@ -42,10 +42,26 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn('id="cueGrid"><p class="muted">Loading local effects library…</p>', self.sound_markup)
         self.assertIn("await hydratePhase([refreshSounds, refreshSoundCues, refreshChapterBgm]);", self.adapter)
 
+    def test_production_studio_generation_toggle_shares_saved_sound_design_state(self):
+        start = self.html.index('<section class="page" id="generate">')
+        status = self.html.index('id="productionSoundReady"', start)
+        production_markup = self.html[start:status + 120]
+        self.assertIn('data-bgm-enabled="true"', production_markup)
+        self.assertIn('data-bgm-enabled="false"', production_markup)
+        self.assertIn('aria-label="Generation audio mode"', production_markup)
+        self.assertNotIn('>✓ Synced</b>', production_markup)
+        self.assertIn("document.querySelectorAll('#sound [data-bgm-enabled], #generate [data-bgm-enabled]')", self.adapter)
+        self.assertIn("e.target.closest('#sound [data-bgm-enabled], #generate [data-bgm-enabled]')", self.adapter)
+        self.assertIn("await saveSoundManifest({path, enabled});", self.adapter)
+        self.assertIn("const productionSoundReady = $('productionSoundReady');", self.adapter)
+        self.assertIn("Unsaved sound changes", self.adapter)
+        self.assertIn("missing audio asset", self.adapter)
+        self.assertIn("Voice Only synced", self.adapter)
+
     def test_voice_only_copy_and_master_toggle_match_saved_generation_contract(self):
         self.assertIn("Narration only; BGM and all story cues are disabled", self.sound_markup)
         self.assertNotIn("Keep narration and story cues only", self.sound_markup)
-        self.assertIn("const bgmMasterToggle = e.target.closest('#sound [data-bgm-enabled]');", self.adapter)
+        self.assertIn("const bgmMasterToggle = e.target.closest('#sound [data-bgm-enabled], #generate [data-bgm-enabled]');", self.adapter)
         self.assertIn("call('sound.save_manifest'", self.adapter)
         self.assertIn("Voice Only saved. Background music and all story cues are disabled", self.adapter)
 

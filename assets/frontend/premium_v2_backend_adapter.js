@@ -3662,7 +3662,7 @@
     };
     const overrides = chapterBgmState.overrides && typeof chapterBgmState.overrides === 'object'
       ? chapterBgmState.overrides : {};
-    const chapterBased = ['custom', 'chapter-based', 'chapter_based'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
+    const chapterBased = ['custom', 'chapter-based', 'chapter_based', 'chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
     const masterEnabled = chapterBgmState.bgm_enabled === true;
     const bgmLevelInput = $('advancedMusicVolume');
     const narrationInput = $('narrationVolume');
@@ -3683,7 +3683,7 @@
     setText('cueVolumeValue', Math.round(cueLevel * 100) + '%');
     setText('mixLevelsSaveState', mixLevelsDirty
       ? 'Unsaved mix level changes — release the slider to save them.'
-      : 'Narration and cue levels are saved with the mix.');
+      : 'Narration, BGM and cue levels are saved with the mix.');
     const defaultPath = String(chapterBgmState.default_path || '').trim();
     const defaultTrack = defaultPath
       ? sounds.find(track => String(track.path || '') === defaultPath && isMusicSoundAsset(track))
@@ -3763,7 +3763,8 @@
         : (activeCueSlots.length ? 'Narration + cues · no BGM track assigned' : 'Narration only · no BGM track assigned'));
     setText('soundPreviewPath', outputDescription);
     setText('soundFinalRenderPath', 'Uses the same saved sound settings');
-    setText('soundMissingFiles', String(missingCount));
+    const activeMissingCount = masterEnabled ? missingCount : 0;
+    setText('soundMissingFiles', String(activeMissingCount));
     const savedAt = chapterBgmState.last_saved_at;
     let savedLabel = 'Not saved yet';
     if (savedAt) {
@@ -3771,8 +3772,10 @@
       savedLabel = Number.isNaN(date.getTime()) ? String(savedAt) : date.toLocaleString();
     }
     setText('soundLastSaved', savedLabel);
-    document.querySelectorAll('#sound [data-bgm-enabled]').forEach(button => {
-      button.classList.toggle('active', (button.dataset.bgmEnabled === 'true') === masterEnabled);
+    document.querySelectorAll('#sound [data-bgm-enabled], #generate [data-bgm-enabled]').forEach(button => {
+      const selected = (button.dataset.bgmEnabled === 'true') === masterEnabled;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-pressed', selected ? 'true' : 'false');
     });
     const productionMusicLabel = !masterEnabled
       ? 'Voice Only · BGM disabled'
@@ -3784,6 +3787,27 @@
     setText('productionMusicSummary', productionMusicLabel);
     setText('productionPreviewMix', outputDescription);
     setText('productionFinalMix', !masterEnabled ? 'Voice Only' : (chapterBased ? 'Chapter-Based BGM' : 'Same BGM'));
+    const productionSoundReady = $('productionSoundReady');
+    if (productionSoundReady) {
+      const hasUnsavedChanges = chapterBgmDraftDirty || cueChangesDirty || mixLevelsDirty ||
+        Object.keys(pendingCueAssignments).length > 0;
+      if (hasUnsavedChanges) {
+        productionSoundReady.textContent = 'Unsaved sound changes';
+        productionSoundReady.style.color = 'var(--amber)';
+      } else if (activeMissingCount > 0) {
+        productionSoundReady.textContent = activeMissingCount + ' missing audio asset' + (activeMissingCount === 1 ? '' : 's');
+        productionSoundReady.style.color = 'var(--danger)';
+      } else if (masterEnabled && !hasActiveBgm && activeCueSlots.length === 0) {
+        productionSoundReady.textContent = 'No BGM or cues assigned';
+        productionSoundReady.style.color = 'var(--amber)';
+      } else if (savedAt) {
+        productionSoundReady.textContent = masterEnabled ? '✓ Synced' : '✓ Voice Only synced';
+        productionSoundReady.style.color = 'var(--green)';
+      } else {
+        productionSoundReady.textContent = 'Not saved yet';
+        productionSoundReady.style.color = 'var(--muted)';
+      }
+    }
   }
   function renderChapterBgm() {
     ensureChapterBgmControls();
@@ -6806,11 +6830,11 @@
       }
     }, true);
     document.addEventListener('click', async e => {
-      const bgmMasterToggle = e.target.closest('#sound [data-bgm-enabled]');
+      const bgmMasterToggle = e.target.closest('#sound [data-bgm-enabled], #generate [data-bgm-enabled]');
       if (bgmMasterToggle) {
         e.preventDefault(); e.stopImmediatePropagation();
         const enabled = bgmMasterToggle.dataset.bgmEnabled === 'true';
-        const chapterBased = ['custom', 'chapter-based', 'chapter_based'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
+        const chapterBased = ['custom', 'chapter-based', 'chapter_based', 'chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
         const defaultPath = String(chapterBgmState.default_path || '').trim();
         const path = chapterBased ? '' : defaultPath;
         try {
