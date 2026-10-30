@@ -183,7 +183,34 @@
       return builtInSource.classList.contains("active") &&
         !visibleHas(config.track_titles[0]) && !visibleHas(config.track_titles[1]);
     }, 10000);
-    must(musicButtons().length > 0, "Packaged starter music is missing from the Built-in filter.");
+    if (musicButtons().length === 0) {
+      const diagnosticCatalog = await invoke("sound.catalog", {});
+      const sourceCounts = {};
+      const categoryCounts = {};
+      const roleCounts = {};
+      const examples = [];
+      for (const track of Array.isArray(diagnosticCatalog) ? diagnosticCatalog : []) {
+        const metadata = track && typeof track.metadata === "object" ? track.metadata : {};
+        const role = String(track?.role || metadata.role || "music").trim().toLowerCase();
+        const source = String(track?.source || "(missing source)");
+        const category = String(track?.category || metadata.category || "(missing category)");
+        sourceCounts[source] = (sourceCounts[source] || 0) + 1;
+        categoryCounts[category] = (categoryCounts[category] || 0) + 1;
+        roleCounts[role] = (roleCounts[role] || 0) + 1;
+        if (examples.length < 14 && (role !== "cue" || source.toLowerCase().includes("bundled"))) {
+          examples.push({title:track?.title,source,category,role,path:String(track?.path || "").slice(-100)});
+        }
+      }
+      const activeCategory = document.querySelector('#sound .sound-categories-list [data-music-category].active')?.dataset.musicCategory || "(none)";
+      const activeSource = document.querySelector('#soundSourceFilter [data-source].active')?.dataset.source || "(none)";
+      throw new Error("Packaged starter music is missing from the Built-in filter. Runtime catalogue diagnostics: " +
+        JSON.stringify({
+          catalogCount:Array.isArray(diagnosticCatalog) ? diagnosticCatalog.length : -1,
+          sourceCounts, categoryCounts, roleCounts, examples,
+          activeCategory, activeSource,
+          renderedMusicRows:musicButtons().map(rowText).slice(0,8)
+        }));
+    }
     importedSource.click();
     await waitFor("Imported source filter", function () {
       return importedSource.classList.contains("active") &&
