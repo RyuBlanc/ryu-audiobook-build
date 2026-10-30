@@ -1094,7 +1094,13 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         sound = adapter[sound_start:sound_end]
         self.assertIn("const requestToken = ++soundListEpoch;", sound)
         self.assertIn("if (requestToken !== soundListEpoch) return sounds;", sound)
-        self.assertIn("grid.dataset.soundListSignature !== signature", sound)
+        self.assertIn("const expectedTrackCount = visible.length;", sound)
+        self.assertIn("const renderedTrackCount = grid ? grid.querySelectorAll('[data-select-sound]').length : 0;", sound)
+        self.assertIn("const renderedSignature = grid?.dataset.soundListSignature || '';", sound)
+        self.assertIn("renderedSignature !== signature", sound)
+        self.assertIn("renderedTrackCount !== expectedTrackCount", sound)
+        self.assertIn("if (gridNeedsRepair)", sound)
+        self.assertIn("grid.dataset.soundListSignature = signature;", sound)
 
     def test_character_refresh_renders_live_project_data_without_demo_cast_values(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(
