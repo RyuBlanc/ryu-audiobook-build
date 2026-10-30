@@ -6459,7 +6459,7 @@ class PremiumV2Window(QMainWindow):
             if not script.strip():
                 raise ValueError("The packaged Sound Design acceptance JavaScript is empty.")
             timeout = float(os.environ.get("RYU_SOUND_UI_ACCEPTANCE_TIMEOUT_SECONDS") or 150)
-            self._sound_ui_acceptance_timeout_seconds = max(30.0, min(300.0, timeout))
+            self._sound_ui_acceptance_timeout_seconds = max(30.0, min(900.0, timeout))
             self._sound_ui_acceptance_started_at = time.monotonic()
             self._sound_ui_acceptance_poll_in_flight = False
             self._sound_ui_acceptance_finished = False
