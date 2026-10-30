@@ -6659,7 +6659,36 @@
     // Import buttons are handled once by the delegated Sound Design handler below.
     // Import buttons are handled once by the delegated Sound Design handler below.
     document.querySelectorAll('#cueSourceFilter [data-cue-source]').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('#cueSourceFilter [data-cue-source]').forEach(x => x.classList.toggle('active', x === button)); refreshSoundCues().catch(e => message(e.message, true)); }));
-    if ($('soundTrackGrid')) $('soundTrackGrid').addEventListener('click', e=>{const b=e.target.closest('[data-select-sound]');if(!b)return;selectedSoundPath=b.dataset.selectSound;if($('selectedSoundTitle'))$('selectedSoundTitle').textContent=sounds.find(t=>t.path===selectedSoundPath)?.title||'Selected track';if($('selectedSoundMeta'))$('selectedSoundMeta').textContent='Selected from the local catalogue';message('Selected sound track. Save it to the active book to apply it.');});
+    if ($('soundTrackGrid')) $('soundTrackGrid').addEventListener('click', e => {
+      const button = e.target.closest('[data-select-sound]');
+      if (!button) return;
+      const requestedPath = String(button.dataset.selectSound || '');
+      const track = sounds.find(item => String(item.path || '') === requestedPath);
+      if (!track) {
+        message('That Music Library track is no longer available. Refresh the library and select another track.', true);
+        refreshSounds().catch(error => message(error?.message || String(error), true));
+        return;
+      }
+      selectedSoundPath = String(track.path);
+      // Do not leave a previously selected track playing behind the new
+      // Selected Track panel. The user can explicitly preview the new track.
+      if (soundPreviewAudio && soundPreviewKind === 'music' && soundPreviewPath !== selectedSoundPath) {
+        stopSoundPreview();
+      }
+      if ($('selectedSoundTitle')) $('selectedSoundTitle').textContent = String(track.title || 'Selected track');
+      if ($('selectedSoundMeta')) {
+        const duration = Number(track.duration_seconds);
+        const details = [
+          track.category_label || track.category || 'Others',
+          track.source || 'Local catalogue',
+          track.format || 'Audio',
+          Number.isFinite(duration) && duration > 0 ? duration.toFixed(1) + ' sec' : '',
+          track.size_bytes ? Math.round(Number(track.size_bytes) / 1024) + ' KB' : ''
+        ].filter(Boolean);
+        $('selectedSoundMeta').textContent = details.join(' · ');
+      }
+      message('Selected ' + (track.title || 'sound track') + '. Preview it or save it as the active book default.');
+    });
     // setBookDefaultTrack is handled by the single delegated backend listener.
     // saveSoundPresetAdvanced is handled by the single delegated backend listener.
     ['mainPlay','miniPlay'].forEach(id=>{if($(id))$(id).onclick=act(openPlayer);});

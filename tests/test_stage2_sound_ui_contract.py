@@ -428,6 +428,34 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("aria-pressed", self.adapter)
         self.assertNotIn('class="cue-track card"', self.adapter)
 
+
+    def test_music_library_selected_track_panel_and_preview_follow_current_track(self):
+        selection_start = self.adapter.index("if ($('soundTrackGrid')) $('soundTrackGrid').addEventListener('click'")
+        selection_end = self.adapter.index("function refreshSoundCues()", selection_start)
+        selection = self.adapter[selection_start:selection_end]
+        self.assertIn("const track = sounds.find(item => String(item.path || '') === requestedPath);", selection)
+        self.assertIn("track.category_label || track.category || 'Others'", selection)
+        self.assertIn("track.source || 'Local catalogue'", selection)
+        self.assertIn("track.format || 'Audio'", selection)
+        self.assertIn("soundPreviewKind === 'music' && soundPreviewPath !== selectedSoundPath", selection)
+        self.assertIn("stopSoundPreview();", selection)
+        start = self.adapter.index("} else if (soundButton.id === 'previewSelectedTrack')")
+        end = self.adapter.index("} else if (soundButton.id === 'setBookDefaultTrack')", start)
+        preview = self.adapter[start:end]
+        self.assertIn("soundPreviewKind === 'music' && soundPreviewPath === track.path", preview)
+        self.assertIn("if (soundPreviewAudio.paused) await soundPreviewAudio.play();", preview)
+        self.assertIn("else soundPreviewAudio.pause();", preview)
+        self.assertIn("createSoundPreview(track.path, 'music'", preview)
+        self.assertIn("soundPreviewAudio = audio;", self.adapter)
+        self.assertIn("soundPreviewKind = kind;", self.adapter)
+        self.assertIn("soundPreviewPath = String(rawPath || '');", self.adapter)
+
+    def test_chapter_bgm_scroll_and_selected_track_panel_readability(self):
+        self.assertIn(".chapter-bgm-list{display:grid;align-content:start;gap:6px;max-height:620px;overflow:auto}", self.html)
+        self.assertIn("'#sound #chapterBgmSelectedTrackPanel .chapter-bgm-select-eyebrow{color:#e6c85f}'", self.adapter)
+        self.assertIn("'#sound #chapterBgmSelectedTrackPanel h2{font-size:1.15rem;line-height:1.35;margin:10px 0}'", self.adapter)
+        self.assertIn("Candidate only — press Select to save it for Chapter ", self.adapter)
+
     def test_zero_cue_level_does_not_add_silent_audio_duration(self):
         self.assertIn("if cue is None or cue_gain <= 1e-9:", self.assembler)
         self.assertIn("return None", self.assembler[self.assembler.index("def apply_cue_level"):self.assembler.index("# Real local audio only", self.assembler.index("def apply_cue_level"))])
