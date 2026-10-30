@@ -294,6 +294,10 @@ def _resolve_cue_audio(
     custom_path: Path | str | None,
 ) -> Path | None:
     """Resolve a real imported cue; never synthesize a placeholder."""
+    # Empty fixed slots stay empty; the library is a picker, not an implicit
+    # fallback source for unassigned Opening / Next Chapter / Closing cues.
+    if not custom_path:
+        return None
     from app.audio.library import resolve_cue_track
     return resolve_cue_track(kind, selected_path=custom_path,
                              seed_text=f"{kind}|{mood}|{int(variation_index)}")
@@ -531,7 +535,7 @@ def assemble_m4b(
                 if chapter_transition_sound:
                     cue_kind = "opening" if index == 1 else "page"
                     selected_cue = opening_cue_path if cue_kind == "opening" else page_turn_cue_path
-                    # A missing explicit path means use the imported library cue.
+                    # Render only the saved assignment for this fixed cue slot.
                     cue = _resolve_cue_audio(temp_dir, cue_kind, "library", variation, mood, selected_cue)
                     cue = apply_cue_level(cue, f"auto-cue-{index:05d}")
                     if cue is not None:
@@ -539,15 +543,6 @@ def assemble_m4b(
                         cue_offset_by_chapter[index] = _duration_ms(cue)
                         _concat_audio_files(cue, current_audio, prefixed, audio_bitrate)
                         current_audio = prefixed
-                if index > 1 and scene_transition_cue_path:
-                    scene_cue = _resolve_cue_audio(temp_dir, "scene", "library", variation, mood, scene_transition_cue_path)
-                    scene_cue = apply_cue_level(scene_cue, f"auto-scene-cue-{index:05d}")
-                    if scene_cue is not None:
-                        scene_prefixed = temp_dir / f"auto-real-scene-cue-{index:05d}.m4a"
-                        _concat_audio_files(scene_cue, current_audio, scene_prefixed, audio_bitrate)
-                        cue_offset_by_chapter[index] = cue_offset_by_chapter.get(index, 0) + _duration_ms(scene_cue)
-                        current_audio = scene_prefixed
-
                 duration_ms = _duration_ms(current_audio)
                 duration_seconds = max(0.1, duration_ms / 1000.0)
                 music_gain = max(0.0, min(0.50, float(background_audio_volume)))
@@ -603,7 +598,7 @@ def assemble_m4b(
                 cue_offset_by_chapter[index]=0
                 kind="opening" if index==1 else "page"
                 selected_cue=opening_cue_path if kind=="opening" else page_turn_cue_path
-                # Fall back to the imported library when no custom cue is selected.
+                # An unassigned Opening / Next Chapter slot remains silent.
                 cue=_resolve_cue_audio(temp_dir,kind,"library",variation,mood,selected_cue)
                 cue=apply_cue_level(cue, f"manual-cue-{index:05d}")
                 if cue is not None:
@@ -621,8 +616,9 @@ def assemble_m4b(
                 cued_chapters.append(current_audio)
             chapters=cued_chapters
 
-        # Fixed Scene Transition assignment is not supported in Version 1.
-        # Contextual story-aware effects remain independent and are handled below.
+        # Version 1 supports exactly three fixed cue slots. The legacy
+        # scene_transition_cue_path argument remains accepted for compatibility,
+        # but is deliberately ignored; contextual story effects are separate.
 
         # Story-aware SFX are aligned to the source text inside each generated
         # chunk. Only explicit phrases trigger effects; cues are volume-limited,

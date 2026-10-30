@@ -69,6 +69,22 @@ class Stage2BgmStrategyTests(unittest.TestCase):
             "Chapter-based BGM must be silent for unassigned chapters; it must not mix the book default.",
         )
 
+    def test_generation_manager_keeps_explicit_saved_strategy_with_preserved_assignments(self):
+        from app.tts.manager import GenerationManager
+
+        same = GenerationManager(
+            provider=object(), voice="narrator", chapters=[], project_audio_root=Path("."),
+            chapter_bgm_overrides={"1": {"rule": "custom", "path": "preserved"}},
+            chapter_bgm_strategy="same",
+        )
+        chapter = GenerationManager(
+            provider=object(), voice="narrator", chapters=[], project_audio_root=Path("."),
+            chapter_bgm_overrides={},
+            chapter_bgm_strategy="custom",
+        )
+        self.assertEqual(same.chapter_bgm_strategy, "same")
+        self.assertEqual(chapter.chapter_bgm_strategy, "chapter-based")
+
     def test_same_bgm_ignores_stale_chapter_overrides(self):
         overrides = {
             "1": {

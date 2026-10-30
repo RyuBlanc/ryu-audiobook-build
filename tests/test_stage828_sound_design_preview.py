@@ -33,7 +33,7 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
             "background_audio_mode=", "background_audio_path=", "background_audio_volume=",
             "ambience_audio_path=", "ambience_audio_volume=", "chapter_transition_sound=",
             "opening_cue_path=", "page_turn_cue_path=",
-            "ending_cue_path=", "chapter_bgm_overrides=",
+            "ending_cue_path=", "chapter_bgm_overrides=", "chapter_bgm_strategy=",
         ):
             self.assertIn(setting, source)
 
@@ -51,9 +51,12 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         preview = Path("app/ui/full_book_preview.py").read_text(encoding="utf-8")
 
-        block_start = assembler.index("# Fixed Scene Transition assignment")
-        block_end = assembler.index("# Story-aware SFX", block_start)
-        self.assertNotIn("scene_transition_cue_path", assembler[block_start:block_end])
+        self.assertNotIn("if index > 1 and scene_transition_cue_path", assembler)
+        library = Path("app/audio/library.py").read_text(encoding="utf-8")
+        start = library.index("def validate_saved_audio_paths(")
+        end = library.index("def resolve_cue_track(", start)
+        self.assertNotIn("scene_transition_cue_path", library[start:end])
+        self.assertIn("scene_transition_cue_path: Path | str | None = None", assembler)
         self.assertIn('if slot not in {"opening", "chapter", "closing"}:', host)
         self.assertNotIn("scene_transition_cue_path=Path(state[", host)
         self.assertNotIn("scene_transition_cue_path=Path(str(state[", preview)
@@ -214,6 +217,92 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
             missing = Path(temporary) / "deleted-opening-cue.wav"
             with self.assertRaisesRegex(FileNotFoundError, "Selected audiobook cue no longer exists"):
                 resolve_cue_track("opening", selected_path=missing)
+
+
+    def test_unassigned_fixed_cue_slot_never_falls_back_to_library_defaults(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from unittest.mock import patch
+        from app.audio import assembler
+
+        with TemporaryDirectory() as temporary:
+            with patch("app.audio.library.resolve_cue_track") as resolve:
+                result = assembler._resolve_cue_audio(
+                    Path(temporary), "page", "library", 0, "mystery", None
+                )
+            self.assertIsNone(result)
+            resolve.assert_not_called()
+
+    def test_active_fixed_cues_are_probed_and_rejected_above_five_seconds(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from unittest.mock import patch
+        from app.audio.library import validate_saved_audio_paths
+
+        with TemporaryDirectory() as temporary:
+            cue = Path(temporary) / "opening.wav"
+            cue.write_bytes(b"cue")
+            with patch("app.audio.library.probe_audio_duration_seconds", return_value=5.1):
+                with self.assertRaisesRegex(ValueError, "Fixed cue clips must be 5 seconds or shorter"):
+                    validate_saved_audio_paths({
+                        "background_audio_mode": "manual",
+                        "background_audio_enabled": True,
+                        "opening_cue_path": str(cue),
+                    })
+
+    def test_voice_only_ignores_retained_inactive_audio_and_legacy_scene_path(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from app.audio.library import validate_saved_audio_paths
+
+        with TemporaryDirectory() as temporary:
+            missing = Path(temporary) / "deleted-audio.wav"
+            validate_saved_audio_paths({
+                "background_audio_mode": "off",
+                "background_audio_enabled": False,
+                "background_audio_path": str(missing),
+                "background_audio_preferred_path": str(missing),
+                "opening_cue_path": str(missing),
+                "page_turn_cue_path": str(missing),
+                "ending_cue_path": str(missing),
+                "scene_transition_cue_path": str(missing),
+                "chapter_bgm_strategy": "custom",
+                "chapter_bgm_overrides": {"2": {"rule": "custom", "path": str(missing)}},
+            })
+
+    def test_preflight_checks_only_the_active_bgm_strategy(self):
+        from tempfile import TemporaryDirectory
+        from pathlib import Path
+        from unittest.mock import patch
+        from app.audio.library import validate_saved_audio_paths
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            book_track = root / "book.wav"
+            chapter_track = root / "chapter.wav"
+            book_track.write_bytes(b"book")
+            chapter_track.write_bytes(b"chapter")
+            missing_chapter = root / "deleted-chapter.wav"
+            missing_book = root / "deleted-book.wav"
+            with patch("app.audio.library.probe_audio_duration_seconds", return_value=30.0) as probe:
+                validate_saved_audio_paths({
+                    "background_audio_mode": "manual",
+                    "background_audio_enabled": True,
+                    "chapter_bgm_strategy": "same",
+                    "background_audio_path": str(book_track),
+                    "chapter_bgm_overrides": {"4": {"rule": "custom", "path": str(missing_chapter)}},
+                })
+                self.assertEqual([call.args[0] for call in probe.call_args_list], [book_track])
+                probe.reset_mock()
+                validate_saved_audio_paths({
+                    "background_audio_mode": "manual",
+                    "background_audio_enabled": True,
+                    "chapter_bgm_strategy": "custom",
+                    "background_audio_path": "",
+                    "background_audio_preferred_path": str(missing_book),
+                    "chapter_bgm_overrides": {"4": {"rule": "custom", "path": str(chapter_track)}},
+                })
+                self.assertEqual([call.args[0] for call in probe.call_args_list], [chapter_track])
 
     def test_chapter_bgm_end_behaviors_have_distinct_fade_policies(self):
         from app.audio.assembler import _chapter_bgm_fade_out

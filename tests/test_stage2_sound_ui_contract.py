@@ -95,6 +95,49 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("else if (nextView === 'cues') await refreshSoundCues();", self.adapter)
         self.assertIn("else if (nextView === 'mix')", self.adapter)
 
+
+    def test_screen_by_screen_sound_design_controls_are_connected(self):
+        views = ("music", "chapters", "cues", "mix")
+        panes = {}
+        for index, view in enumerate(views):
+            marker = f'data-sound-view="{view}"'
+            position = self.sound_markup.index(marker)
+            pane_start = self.sound_markup.rfind('<div class="sound-view', 0, position)
+            if index + 1 < len(views):
+                next_marker = f'data-sound-view="{views[index + 1]}"'
+                next_position = self.sound_markup.index(next_marker)
+                pane_end = self.sound_markup.rfind('<div class="sound-view', 0, next_position)
+            else:
+                pane_end = len(self.sound_markup)
+            panes[view] = self.sound_markup[pane_start:pane_end]
+
+        for control in ("soundTrackGrid", "soundTrackSearch", "soundSourceFilter",
+                        "musicImportCategory", "previewSelectedTrack", "advancedMusicVolume",
+                        "setBookDefaultTrack"):
+            self.assertIn('id="' + control + '"', panes["music"])
+        for control in ("chapterBgmList", "chapterBgmTitle", "chapterTrackPicker",
+                        "chapterVolume", "chapterStartOffset", "chapterEndBehavior",
+                        "saveChapterBgm"):
+            self.assertIn('id="' + control + '"', panes["chapters"])
+        for control in ("cueGrid", "openingCueName", "chapterCueName", "closingCueName",
+                        "selectedCueTitle", "playSelectedCue", "pauseSelectedCue",
+                        "replaySelectedCue", "saveCueChanges", "clearAllCues"):
+            self.assertIn('id="' + control + '"', panes["cues"])
+        for control in ("narrationVolume", "cueVolume", "mixBgmStatus", "mixStrategy",
+                        "mixOverrides", "mixOpening", "mixChapterCue", "mixClosing"):
+            self.assertIn('id="' + control + '"', panes["mix"])
+
+        self.assertIn("e.target.closest('#soundSourceFilter [data-source]')", self.adapter)
+        self.assertIn("e.target.closest('#sound .sound-categories-list [data-music-category]')", self.adapter)
+        self.assertIn("e.target.closest('#chapterBgmSourceFilter [data-chapter-source]')", self.adapter)
+        self.assertIn("e.target.closest('#chapterBgmCategoryFilter [data-chapter-category]')", self.adapter)
+        self.assertIn("e.target.closest('#cueSourceFilter [data-cue-source]')", self.adapter)
+        self.assertIn("call('sound.import'", self.adapter)
+        self.assertIn("call('sound.chapter_bgm.save'", self.adapter)
+        self.assertIn("call('sound.cues.save'", self.adapter)
+        self.assertIn("saveSoundMixLevels(true)", self.adapter)
+        self.assertIn("setText('productionMusicSummary', productionMusicLabel)", self.adapter)
+
     def test_sound_tab_navigation_preempts_legacy_prototype_handlers(self):
         # The earlier test checked only that a handler string existed. The installed
         # app also runs the approved reference HTML's prototype listeners, so the

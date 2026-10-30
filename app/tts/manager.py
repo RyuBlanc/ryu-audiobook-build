@@ -63,6 +63,7 @@ class GenerationManager:
         ending_cue_path: Path | None = None,
         scene_transition_cue_path: Path | None = None,
         chapter_bgm_overrides: dict[str, dict] | None = None,
+        chapter_bgm_strategy: str | None = None,
     ) -> None:
         self.provider = provider
         self.voice = voice
@@ -99,8 +100,18 @@ class GenerationManager:
         self.opening_cue_path = Path(opening_cue_path) if opening_cue_path else None
         self.page_turn_cue_path = Path(page_turn_cue_path) if page_turn_cue_path else None
         self.ending_cue_path = Path(ending_cue_path) if ending_cue_path else None
-        self.scene_transition_cue_path = Path(scene_transition_cue_path) if scene_transition_cue_path else None
+        # scene_transition_cue_path remains accepted as a legacy no-op argument.
         self.chapter_bgm_overrides = dict(chapter_bgm_overrides or {})
+        raw_bgm_strategy = str(
+            chapter_bgm_strategy if chapter_bgm_strategy is not None
+            else ("custom" if self.chapter_bgm_overrides else "same")
+        ).strip().casefold()
+        if raw_bgm_strategy in {"same", "same-bgm", "same_bgm"}:
+            self.chapter_bgm_strategy = "same"
+        elif raw_bgm_strategy in {"custom", "chapter-based", "chapter_based", "chapter"}:
+            self.chapter_bgm_strategy = "chapter-based"
+        else:
+            raise ValueError(f"Unsupported chapter BGM strategy: {chapter_bgm_strategy}")
         self.cancel_event = Event()
         self.pause_event = Event()
         self._thread: Thread | None = None
@@ -429,8 +440,8 @@ class GenerationManager:
                     opening_cue_path=self.opening_cue_path,
                     page_turn_cue_path=self.page_turn_cue_path,
                     ending_cue_path=self.ending_cue_path,
-                    scene_transition_cue_path=self.scene_transition_cue_path,
                     chapter_bgm_overrides=self.chapter_bgm_overrides,
+                    chapter_bgm_strategy=self.chapter_bgm_strategy,
                 )
                 self._emit(len(self.chapters), len(self.chapters), 1, "m4b-complete")
                 # Only delete intermediate files after the final M4B has been

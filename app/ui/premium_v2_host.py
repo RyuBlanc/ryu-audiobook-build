@@ -4037,6 +4037,11 @@ class PremiumV2Bridge(QObject):
                     "narrator": profile.name, "publisher": str(state.get("publisher") or ""),
                     "series": str(state.get("series") or ""), "language": str(state.get("language") or ""),
                     "year": str(state.get("year") or ""), "genre": str(state.get("genre") or "")}
+        chapter_bgm_strategy = str(
+            state.get("chapter_bgm_strategy") or
+            ("custom" if state.get("chapter_bgm_overrides") else "same")
+        ).strip().casefold()
+        chapter_based_bgm = chapter_bgm_strategy in {"custom", "chapter-based", "chapter_based", "chapter"}
         manager = GenerationManager(
             provider, voice, chapters, project.folder / "working_audio",
             on_progress=lambda *args: self._generation_progress(job_id, *args),
@@ -4045,7 +4050,10 @@ class PremiumV2Bridge(QObject):
             narration_speed=float(state.get("narration_speed") or 0.90),
             pacing_profile=str(state.get("pacing_profile") or "natural"),
             metadata=metadata, bitrate=bitrate,
-            background_audio_path=Path(state["background_audio_path"]) if state.get("background_audio_path") else None,
+            background_audio_path=(
+                Path(state["background_audio_path"])
+                if state.get("background_audio_path") and not chapter_based_bgm else None
+            ),
             background_audio_volume=float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18),
             narration_volume=float(state.get("narration_audio_volume") if state.get("narration_audio_volume") is not None else 1.0),
             cue_audio_volume=float(state.get("sound_cue_volume") if state.get("sound_cue_volume") is not None else 0.25),
@@ -4064,7 +4072,7 @@ class PremiumV2Bridge(QObject):
             page_turn_cue_path=Path(state["page_turn_cue_path"]) if state.get("page_turn_cue_path") else None,
             ending_cue_path=Path(state["ending_cue_path"]) if state.get("ending_cue_path") else None,
             chapter_bgm_overrides=state.get("chapter_bgm_overrides") if isinstance(state.get("chapter_bgm_overrides"), dict) else {},
-            chapter_bgm_strategy=str(state.get("chapter_bgm_strategy") or ("custom" if state.get("chapter_bgm_overrides") else "same")),
+            chapter_bgm_strategy=chapter_bgm_strategy,
         )
         with self._jobs_lock:
             self._generators[job_id] = manager
@@ -5798,9 +5806,9 @@ class PremiumV2Bridge(QObject):
             if not selected.is_file() or row is None or str(row.get("role") or "music").casefold() != "cue":
                 raise ValueError("Choose a cue clip from the local Sound Design cue catalogue.")
             from app.audio.library import probe_audio_duration_seconds
-            duration_seconds = row.get("duration_seconds")
-            if duration_seconds is None:
-                duration_seconds = probe_audio_duration_seconds(selected)
+            # Metadata can be stale after a file is replaced; check the actual
+            # audio selected for this fixed slot before writing the book state.
+            duration_seconds = probe_audio_duration_seconds(selected)
             if float(duration_seconds) > 5.0:
                 raise ValueError("Opening, next-chapter, and closing cue clips must be 5 seconds or shorter. Import longer tracks into Music Library and assign them as BGM.")
             selected_path, selected_title = str(selected), str(row["title"])
@@ -5816,8 +5824,8 @@ class PremiumV2Bridge(QObject):
         cues[slot] = selected_path
         state["sound_cues"] = {key: cues.get(key) for key in ("opening", "chapter", "closing")}
         state["chapter_transition_sound"] = any(cues.get(key) for key in ("opening", "chapter", "closing"))
-        # Keep the legacy fields synchronized with the saved cue manifest; the
-        # production assembler consumes all four cue paths, including scene transitions.
+        # Retire the historical fourth fixed cue from existing project state.
+        state["scene_transition_cue_path"] = None
         if slot == "opening":
             state["opening_cue_path"] = selected_path
         elif slot == "chapter":

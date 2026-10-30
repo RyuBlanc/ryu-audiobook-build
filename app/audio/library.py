@@ -272,43 +272,72 @@ def resolve_music_track(mood,selected_track=None,*,seed_text=""):
  return candidates[_seed_index(seed_text,len(candidates))].path
 
 def validate_saved_audio_paths(state):
- """Fail clearly when saved assignments are missing, unsupported, or unreadable."""
- fields=(
-  ("background_audio_path","book background music"),
-  ("ambience_audio_path","book ambience"),
+ """Validate only sound assets active under the saved strategy and master switch."""
+ overrides_value=state.get("chapter_bgm_overrides")
+ overrides=overrides_value if isinstance(overrides_value,dict) else {}
+ raw_mode=state.get("background_audio_mode")
+ if raw_mode is None:
+  raw_mode="manual" if (
+   state.get("background_audio_path") or state.get("background_audio_preferred_path")
+   or state.get("opening_cue_path") or state.get("page_turn_cue_path")
+   or state.get("ending_cue_path") or overrides
+  ) else "off"
+ audio_mode=str(raw_mode or "off").strip().casefold()
+ if audio_mode not in {"off","auto","manual"}:
+  raise ValueError(f"Unsupported background audio mode: {audio_mode}")
+ strategy=str(state.get("chapter_bgm_strategy") or ("custom" if overrides else "same")).strip().casefold()
+ chapter_based=strategy in {"custom","chapter-based","chapter_based","chapter"}
+ if strategy not in {"same","same-bgm","same_bgm","custom","chapter-based","chapter_based","chapter"}:
+  raise ValueError(f"Unsupported chapter BGM strategy: {strategy}")
+ audio_enabled=audio_mode!="off" and bool(state.get("background_audio_enabled",True))
+ if not audio_enabled:
+  # Voice Only retains preferences for later re-enabling; inactive files must
+  # not block narration-only preview or final generation.
+  return
+
+ fields=[]
+ if audio_mode=="manual":
+  if chapter_based:
+   for chapter,override in overrides.items():
+    if not isinstance(override,dict) or str(override.get("rule") or "").casefold()!="custom":
+     continue
+    raw=override.get("path")
+    if not raw:
+     raise ValueError(f"Chapter {chapter} uses custom BGM but no track is saved. Reassign it in Sound Design.")
+    fields.append((raw,"custom BGM for chapter "+str(chapter),None))
+  else:
+   book_path=state.get("background_audio_path") or state.get("background_audio_preferred_path")
+   if book_path:
+    fields.append((book_path,"book background music",None))
+   ambience=state.get("ambience_audio_path")
+   if ambience:
+    fields.append((ambience,"book ambience",None))
+ elif audio_mode=="auto":
+  auto_path=state.get("auto_music_track_path")
+  if auto_path:
+   fields.append((auto_path,"automatic BGM selection",None))
+
+ for key,label in (
   ("opening_cue_path","opening cue"),
-  ("page_turn_cue_path","chapter transition cue"),
-  ("scene_transition_cue_path","scene transition cue"),
+  ("page_turn_cue_path","next-chapter cue"),
   ("ending_cue_path","closing cue"),
- )
- for key,label in fields:
+ ):
   raw=state.get(key)
-  if not raw: continue
+  if raw:
+   fields.append((raw,label,5.0))
+
+ for raw,label,max_duration in fields:
   path=Path(str(raw)).expanduser()
   if not path.is_file():
    raise FileNotFoundError(f"Saved {label} is missing: {path}. Reassign it in Sound Design.")
-  try: probe_audio_duration_seconds(path)
+  try:
+   duration=probe_audio_duration_seconds(path)
   except (ValueError,RuntimeError) as exc:
    raise ValueError(f"Saved {label} is unreadable: {exc}. Reassign it in Sound Design.") from exc
- auto_path=state.get("auto_music_track_path")
- if auto_path and str(state.get("background_audio_mode") or "off").casefold()=="auto":
-  try: probe_audio_duration_seconds(Path(str(auto_path)).expanduser())
-  except (FileNotFoundError,ValueError,RuntimeError) as exc:
-   raise type(exc)(f"Saved automatic BGM selection is invalid: {exc}. Reassign it in Sound Design.") from exc
- overrides=state.get("chapter_bgm_overrides")
- if isinstance(overrides,dict):
-  for chapter,override in overrides.items():
-   if not isinstance(override,dict) or str(override.get("rule") or "").casefold()!="custom": continue
-   raw=override.get("path")
-   if not raw:
-    raise ValueError(f"Chapter {chapter} uses custom BGM but no track is saved. Reassign it in Sound Design.")
-   path=Path(str(raw)).expanduser()
-   if not path.is_file():
-    raise FileNotFoundError(f"Saved custom BGM for chapter {chapter} is missing: {path}. Reassign it in Sound Design.")
-   try: probe_audio_duration_seconds(path)
-   except (ValueError,RuntimeError) as exc:
-    raise ValueError(f"Saved custom BGM for chapter {chapter} is unreadable: {exc}. Reassign it in Sound Design.") from exc
-
+  if max_duration is not None and duration>max_duration:
+   raise ValueError(
+    f"Saved {label} is {duration:.1f} seconds long. Fixed cue clips must be 5 seconds or shorter; reassign it in Sound Design."
+   )
 def resolve_cue_track(kind,selected_path=None,*,seed_text=""):
  if selected_path:
   p=Path(selected_path).expanduser()
