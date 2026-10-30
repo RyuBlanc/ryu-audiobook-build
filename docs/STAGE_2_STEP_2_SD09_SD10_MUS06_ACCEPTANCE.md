@@ -34,12 +34,20 @@ This avoids accepting an empty/intermediate render frame as a successful filter 
 
 The runner is standard-library-only so it does not depend on the setup-python toolcache that can be removed during the Windows build's private Python bootstrap. The workflow probes and uses the verified private Python interpreter for this step.
 
-## Regression evidence before this artifact checkpoint
+## Regression evidence — corrected slider acceptance
 
 - Branch: `stage-2/sound-design-music-library-post-stage1`
+- Tested commit: `624eda83894034c1fb68f45f13bb54dfa4609bfe`
+- Workflow run: [#1740 — corrected slider regression](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41063388760)
+- Result: **841 tests passed**; frontend JavaScript syntax validation passed.
+- The new regression contract verifies that the packaged acceptance driver focuses the actual BGM range control before editing, retains focus through the input event, and confirms both the visible and backend-saved value remain at 42%.
+- The workflow's Windows `build` job was skipped on #1740 because that commit did not carry the `[artifact-checkpoint]` marker. The next checkpoint must therefore run the full Windows build and packaged acceptance on the exact new commit.
+
+## Earlier regression baseline
+
 - Tested commit: `6696c164c152e9ae59a575578920aa8826c51449`
 - Workflow run: [#1737 — Step 2 regression](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41051159974)
-- Result: **840 tests passed**; frontend JavaScript syntax validation passed.
+- Result: **840 tests passed** before the focused-slider regression contract was added.
 
 ## Evidence still required
 
