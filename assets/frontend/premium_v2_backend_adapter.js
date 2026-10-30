@@ -323,6 +323,14 @@
     const node = $(id);
     if (node?.parentNode) node.replaceWith(node.cloneNode(true));
   });
+  // The legacy reference HTML attaches prototype handlers to the Sound Design tab strip.
+  // Remove those handlers while preserving the approved markup and current active classes.
+  const legacySoundTabs = document.querySelector('#sound .sound-tabs');
+  if (legacySoundTabs?.parentNode) {
+    const cleanSoundTabs = legacySoundTabs.cloneNode(true);
+    cleanSoundTabs.querySelectorAll('[onclick]').forEach(button => button.removeAttribute('onclick'));
+    legacySoundTabs.replaceWith(cleanSoundTabs);
+  }
   if ($('musicImportInput')) $('musicImportInput').onchange = null;
   if ($('cueImportInput')) $('cueImportInput').onchange = null;
   const fadeSeconds = id => {
@@ -6327,28 +6335,32 @@
         }
       }
     });
+    // Handle Sound Design tab clicks in capture phase. This wins over legacy
+    // target/bubble handlers in the reference HTML so navigation uses live backend state.
     document.addEventListener('click', async e => {
-      const soundTab = e.target.closest('#sound .sound-tabs [data-sound-tab]');
-      if (soundTab) {
-        e.preventDefault(); e.stopImmediatePropagation();
-        const nextView = soundTab.dataset.soundTab;
-        const currentView = document.querySelector('#sound .sound-tabs [data-sound-tab].active')?.dataset.soundTab || 'music';
-        try {
-          if (currentView === 'chapters' && chapterBgmDraftDirty) await saveCurrentChapterBgmDraft();
-          document.querySelectorAll('#sound .sound-tabs [data-sound-tab]').forEach(button => button.classList.toggle('active', button === soundTab));
-          document.querySelectorAll('#sound .sound-view[data-sound-view]').forEach(view => view.classList.toggle('active', view.dataset.soundView === nextView));
-          if (nextView === 'music') await refreshSounds();
-          else if (nextView === 'chapters') await refreshChapterBgm();
-          else if (nextView === 'cues') await refreshSoundCues();
-          else if (nextView === 'mix') {
-            await refreshChapterBgm();
-            renderSoundMixSummary();
-          }
-        } catch (error) {
-          message(error?.message || String(error), true);
+      const soundTab = e.target?.closest?.('#sound .sound-tabs [data-sound-tab]');
+      if (!soundTab) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const nextView = String(soundTab.dataset.soundTab || '');
+      if (!['music', 'chapters', 'cues', 'mix'].includes(nextView)) return;
+      const currentView = document.querySelector('#sound .sound-tabs [data-sound-tab].active')?.dataset.soundTab || 'music';
+      try {
+        if (currentView === 'chapters' && chapterBgmDraftDirty) await saveCurrentChapterBgmDraft();
+        document.querySelectorAll('#sound .sound-tabs [data-sound-tab]').forEach(button => button.classList.toggle('active', button === soundTab));
+        document.querySelectorAll('#sound .sound-view[data-sound-view]').forEach(view => view.classList.toggle('active', view.dataset.soundView === nextView));
+        if (nextView === 'music') await refreshSounds();
+        else if (nextView === 'chapters') await refreshChapterBgm();
+        else if (nextView === 'cues') await refreshSoundCues();
+        else if (nextView === 'mix') {
+          await refreshChapterBgm();
+          renderSoundMixSummary();
         }
-        return;
+      } catch (error) {
+        message(error?.message || String(error), true);
       }
+    }, true);
+    document.addEventListener('click', async e => {
       const bgmMasterToggle = e.target.closest('#sound [data-bgm-enabled]');
       if (bgmMasterToggle) {
         e.preventDefault(); e.stopImmediatePropagation();
