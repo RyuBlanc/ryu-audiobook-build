@@ -1,8 +1,7 @@
-"""Packaged Windows Sound Design acceptance gate contract tests."""
+"""Regression contracts for packaged Stage 2 Sound Design acceptance."""
 
 from pathlib import Path
 import unittest
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -10,18 +9,25 @@ ROOT = Path(__file__).resolve().parents[1]
 class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
     def test_acceptance_hook_is_opt_in_and_attached_to_real_frontend_readiness(self):
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
-        self.assertIn('self._start_sound_ui_acceptance()', host)
-        self.assertIn('RYU_SOUND_UI_ACCEPTANCE_SCRIPT', host)
-        self.assertIn('RYU_SOUND_UI_ACCEPTANCE_CONFIG', host)
-        self.assertIn('RYU_SOUND_UI_ACCEPTANCE_MARKER', host)
-        self.assertIn('window.__RYU_SOUND_UI_ACCEPTANCE_RESULT__', host)
-        self.assertIn('QTimer(self)', host)
+        self.assertIn("self._start_sound_ui_acceptance()", host)
+        self.assertIn("RYU_SOUND_UI_ACCEPTANCE_SCRIPT", host)
+        self.assertIn("RYU_SOUND_UI_ACCEPTANCE_CONFIG", host)
+        self.assertIn("RYU_SOUND_UI_ACCEPTANCE_MARKER", host)
+        self.assertIn("window.__RYU_SOUND_UI_ACCEPTANCE_RESULT__", host)
+        self.assertIn("QTimer(self)", host)
+        # No acceptance variables are set in normal launches. The hook must return
+        # before changing any UI, backend state, or event loop behavior.
+        start = host.index("def _start_sound_ui_acceptance")
+        finish = host.index("def _poll_sound_ui_acceptance", start)
+        hook = host[start:finish]
+        self.assertLess(hook.index("if not any((script_value, config_value, marker_value))"), hook.index("try:"))
+        self.assertIn("return", hook[hook.index("if not any((script_value, config_value, marker_value))"):])
 
     def test_browser_driver_uses_real_music_library_controls_and_bridge(self):
         script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
         for required in (
             "window.go('sound')",
-            "#sound .sound-tabs [data-sound-tab]",
+            "[data-sound-tab=\"' + view + '\"]",
             "#musicImportCategory",
             "#importMusicTracks",
             "sound.import",
@@ -34,6 +40,7 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
             "#setBookDefaultTrack",
             "sound.chapter_bgm.get",
             "Pause selected track",
+            "candidate_selection_does_not_overwrite_default",
         ):
             self.assertIn(required, script)
 
@@ -49,6 +56,8 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
             "RYU_SOUND_UI_ACCEPTANCE_MARKER",
             "QTWEBENGINE_CHROMIUM_FLAGS",
             "validate_saved_music_state",
+            "settings.setValue(\"project/active_folder\", str(project_folder.resolve()))",
+            "settings.setValue(\"project/active_folder\", previous_active)",
         ):
             self.assertIn(required, helper)
 
