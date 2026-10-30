@@ -516,10 +516,13 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         library = Path("app/audio/library.py").read_text(encoding="utf-8")
         self.assertIn("def effective_background_audio_mode(state):", library)
         self.assertIn("audio_mode=effective_background_audio_mode(state)", library)
-        for source in (host, preview):
-            self.assertIn("effective_background_audio_mode, validate_saved_audio_paths", source)
-            self.assertIn("background_audio_mode = effective_background_audio_mode(state)", source)
-            self.assertIn("background_audio_mode=background_audio_mode,", source)
+        self.assertIn("effective_background_audio_mode, validate_saved_audio_paths", host)
+        self.assertIn("from app.audio.library import validate_saved_audio_paths", preview)
+        self.assertIn("from app.audio.library import effective_background_audio_mode", preview)
+        self.assertIn("background_audio_mode = effective_background_audio_mode(state)", host)
+        self.assertIn("background_audio_mode = effective_background_audio_mode(state)", preview)
+        self.assertIn("background_audio_mode=background_audio_mode,", host)
+        self.assertIn("background_audio_mode=background_audio_mode,", preview)
 
     def test_preflight_checks_only_the_active_bgm_strategy(self):
         from tempfile import TemporaryDirectory

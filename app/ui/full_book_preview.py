@@ -14,8 +14,7 @@ def start_full_book_preview(host) -> dict[str, Any]:
     project = host._active_project()
     from app.core.state import load_state
     state = load_state(project.folder)
-    from app.audio.library import effective_background_audio_mode, validate_saved_audio_paths
-    background_audio_mode = effective_background_audio_mode(state)
+    from app.audio.library import validate_saved_audio_paths
     validate_saved_audio_paths(state)
     chapters = sorted(project.chapters, key=lambda chapter: chapter.number)
     if not chapters:
@@ -89,6 +88,8 @@ def start_full_book_preview(host) -> dict[str, Any]:
 def _render_full_book_preview(host, job_id, project, chapter_dirs, chapter_titles,
                               output, title, author, metadata, bitrate, state, cancel_event=None) -> None:
     from app.tts.preview import PreviewCancelledError
+    from app.audio.library import effective_background_audio_mode
+    background_audio_mode = effective_background_audio_mode(state)
     try:
         from app.audio.assembler import assemble_m4b, _duration_ms
 
