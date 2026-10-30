@@ -42,6 +42,41 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn('id="cueGrid"><p class="muted">Loading local effects library…</p>', self.sound_markup)
         self.assertIn("await hydratePhase([refreshSounds, refreshSoundCues, refreshChapterBgm]);", self.adapter)
 
+    def test_mix_and_production_readiness_report_overall_save_state_truthfully(self):
+        self.assertIn('id="mixOverallSaveState"', self.sound_markup)
+        for status in (
+            "Saving sound configuration…",
+            "Unsaved sound changes — save before opening Production Studio.",
+            "Saved configuration has ",
+            "All sound settings saved.",
+            "Sound configuration has not been saved yet.",
+        ):
+            self.assertIn(status, self.adapter)
+        self.assertIn("const soundSaveInFlight = Boolean(", self.adapter)
+        self.assertIn("chapterBgmSavePromise || cueSavePromise || mixLevelsSavePromise ||", self.adapter)
+        self.assertIn("soundManifestSavePromise || chapterStrategySavePromise", self.adapter)
+        self.assertIn("productionSoundReady.textContent = 'Saving sound settings…';", self.adapter)
+        self.assertIn("const hasUnsavedSoundChanges =", self.adapter)
+        self.assertIn("Object.keys(soundManifestPendingOverrides).length > 0", self.adapter)
+
+    def test_global_bgm_toggle_flushes_drafts_before_persisting_mode(self):
+        start = self.adapter.index("const bgmMasterToggle = e.target.closest('#sound [data-bgm-enabled], #generate [data-bgm-enabled]');")
+        end = self.adapter.index("const chapterBgmItem = e.target.closest('#chapterBgmList [data-chapter-bgm]');", start)
+        handler = self.adapter[start:end]
+        ordered = (
+            "if (chapterStrategySavePromise) await chapterStrategySavePromise;",
+            "await saveCurrentChapterBgmDraft();",
+            "await savePendingCueChanges();",
+            "await saveSoundMixLevels(true);",
+            "await saveSoundManifest({path, enabled});",
+            "await refreshChapterBgm();",
+            "await refreshSoundCues();",
+        )
+        positions = [handler.index(item) for item in ordered]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("let chapterStrategySavePromise = null;", self.adapter)
+        self.assertIn("chapterStrategySavePromise = runSave;", self.adapter)
+
     def test_production_studio_generation_toggle_shares_saved_sound_design_state(self):
         start = self.html.index('<section class="page" id="generate">')
         status = self.html.index('id="productionSoundReady"', start)

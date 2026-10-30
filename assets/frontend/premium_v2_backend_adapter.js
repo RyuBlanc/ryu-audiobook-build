@@ -264,6 +264,7 @@
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, selectedCuePath = null, pendingCueSlot = null, pendingCueAssignments = Object.create(null), cueChangesDirty = false, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null, chapterBgmDraftDirty = false, mixLevelsDirty = false, soundPreviewKind = null, soundPreviewPath = null;
   let chapterBgmCandidateTrackPath = null, chapterBgmCandidateChapter = null, chapterBgmSavePromise = null, cueSavePromise = null;
+  let chapterStrategySavePromise = null;
   let chapterBgmAutoSaveTimer = null, cueAutoSaveTimer = null, chapterBgmDraftRevision = 0;
   let mixLevelsRevision = 0, mixLevelsSavePromise = null;
   let soundManifestSavePromise = null, soundManifestSaveRevision = 0, soundManifestPendingOverrides = Object.create(null);
@@ -3799,6 +3800,21 @@
       savedLabel = Number.isNaN(date.getTime()) ? String(savedAt) : date.toLocaleString();
     }
     setText('soundLastSaved', savedLabel);
+    const soundSaveInFlight = Boolean(
+      chapterBgmSavePromise || cueSavePromise || mixLevelsSavePromise ||
+      soundManifestSavePromise || chapterStrategySavePromise
+    );
+    const hasUnsavedSoundChanges = chapterBgmDraftDirty || cueChangesDirty || mixLevelsDirty ||
+      cueClearAllStaged || Object.keys(pendingCueAssignments).length > 0 ||
+      Object.keys(soundManifestPendingOverrides).length > 0;
+    const overallSaveState = soundSaveInFlight
+      ? 'Saving sound configuration…'
+      : hasUnsavedSoundChanges
+        ? 'Unsaved sound changes — save before opening Production Studio.'
+        : activeMissingCount > 0
+          ? 'Saved configuration has ' + activeMissingCount + ' missing active audio asset' + (activeMissingCount === 1 ? '' : 's') + '.'
+          : (savedAt ? 'All sound settings saved.' : 'Sound configuration has not been saved yet.');
+    setText('mixOverallSaveState', overallSaveState);
     document.querySelectorAll('#sound [data-bgm-enabled], #generate [data-bgm-enabled]').forEach(button => {
       const selected = (button.dataset.bgmEnabled === 'true') === masterEnabled;
       button.classList.toggle('active', selected);
@@ -3816,9 +3832,10 @@
     setText('productionFinalMix', !masterEnabled ? 'Voice Only' : (chapterBased ? 'Chapter-Based BGM' : 'Same BGM'));
     const productionSoundReady = $('productionSoundReady');
     if (productionSoundReady) {
-      const hasUnsavedChanges = chapterBgmDraftDirty || cueChangesDirty || mixLevelsDirty ||
-        Object.keys(pendingCueAssignments).length > 0;
-      if (hasUnsavedChanges) {
+      if (soundSaveInFlight) {
+        productionSoundReady.textContent = 'Saving sound settings…';
+        productionSoundReady.style.color = 'var(--muted)';
+      } else if (hasUnsavedSoundChanges) {
         productionSoundReady.textContent = 'Unsaved sound changes';
         productionSoundReady.style.color = 'var(--amber)';
       } else if (activeMissingCount > 0) {
@@ -6870,14 +6887,18 @@
       const bgmMasterToggle = e.target.closest('#sound [data-bgm-enabled], #generate [data-bgm-enabled]');
       if (bgmMasterToggle) {
         e.preventDefault(); e.stopImmediatePropagation();
-        const enabled = bgmMasterToggle.dataset.bgmEnabled === 'true';
-        const chapterBased = ['custom', 'chapter-based', 'chapter_based', 'chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
-        const defaultPath = String(chapterBgmState.default_path || '').trim();
-        const path = chapterBased ? '' : defaultPath;
         try {
-          const savedMixRevision = mixLevelsRevision;
+          // Complete any active strategy change before resolving the effective
+          // BGM policy, then flush drafts before writing the shared global mode.
+          if (chapterStrategySavePromise) await chapterStrategySavePromise;
+          await saveCurrentChapterBgmDraft();
+          await savePendingCueChanges();
+          await saveSoundMixLevels(true);
+          const enabled = bgmMasterToggle.dataset.bgmEnabled === 'true';
+          const chapterBased = ['custom', 'chapter-based', 'chapter_based', 'chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
+          const defaultPath = String(chapterBgmState.default_path || '').trim();
+          const path = chapterBased ? '' : defaultPath;
           await saveSoundManifest({path, enabled});
-          if (savedMixRevision === mixLevelsRevision) mixLevelsDirty = false;
           await refreshChapterBgm();
           await refreshSoundCues();
           message(enabled
@@ -6905,14 +6926,25 @@
       if (chapterStrategy) {
         e.preventDefault(); e.stopImmediatePropagation();
         try {
-          await saveCurrentChapterBgmDraft();
-          await call('sound.chapter_bgm.save', {strategy:chapterStrategy.dataset.bgmStrategy});
-          chapterBgmCandidateChapter = null;
-          chapterBgmCandidateTrackPath = null;
-          await refreshChapterBgm();
-          message(chapterBgmState.strategy === 'same'
-            ? 'Same book-wide BGM strategy saved; chapter assignments were preserved for switching back.'
-            : 'Chapter-based BGM strategy enabled; saved chapter assignments are available.');
+          if (chapterStrategySavePromise) await chapterStrategySavePromise;
+          const runSave = (async () => {
+            await saveCurrentChapterBgmDraft();
+            await call('sound.chapter_bgm.save', {strategy:chapterStrategy.dataset.bgmStrategy});
+            chapterBgmCandidateChapter = null;
+            chapterBgmCandidateTrackPath = null;
+            await refreshChapterBgm();
+            message(chapterBgmState.strategy === 'same'
+              ? 'Same book-wide BGM strategy saved; chapter assignments were preserved for switching back.'
+              : 'Chapter-based BGM strategy enabled; saved chapter assignments are available.');
+          })();
+          chapterStrategySavePromise = runSave;
+          renderSoundMixSummary();
+          try {
+            await runSave;
+          } finally {
+            if (chapterStrategySavePromise === runSave) chapterStrategySavePromise = null;
+            renderSoundMixSummary();
+          }
         } catch (err) { message(err?.message || String(err), true); }
         return;
       }
