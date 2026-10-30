@@ -299,7 +299,7 @@ def _run(args: argparse.Namespace) -> int:
     marker = temp_root / "acceptance-result.json"
     config = temp_root / "acceptance-fixtures.json"
     category_imports = [
-        {key: item["category"], "filter": item["filter"], "title": item["title"],
+        {"category": item["category"], "filter": item["filter"], "title": item["title"],
          "path": str((audio_root / item["source"].name).resolve())}
         for item in category_sources
     ]
