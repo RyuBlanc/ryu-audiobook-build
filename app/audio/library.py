@@ -164,6 +164,23 @@ def metadata_for(path):
  except (OSError,ValueError,TypeError) as exc:
   raise ValueError(f"Audio metadata for {Path(path).name} could not be read: {exc}") from exc
 
+def audio_asset_role(path):
+ """Resolve the persisted role of a local asset, including starter cue aliases.
+
+ Imported audio has a sidecar role. Older role-less paths remain Music Library
+ assets unless their canonical location is under Audio Library/cues.
+ """
+ metadata=metadata_for(path)
+ raw_role=str(metadata.get("role") or "").strip().casefold()
+ if raw_role in {"cue","opening","page","chapter","ending","closing"}:
+  return "cue"
+ parts=[part.casefold() for part in Path(path).expanduser().parts]
+ if "cues" in parts:
+  cue_index=parts.index("cues")
+  if cue_index+1 < len(parts) and parts[cue_index+1] in {"opening","page","ending"}:
+   return "cue"
+ return "music"
+
 def license_note_for(path):
  data=metadata_for(path)
  return str(data.get("license_note") or data.get("source_note") or data.get("license") or "")
@@ -272,7 +289,7 @@ def resolve_music_track(mood,selected_track=None,*,seed_text=""):
  return candidates[_seed_index(seed_text,len(candidates))].path
 
 def validate_saved_audio_paths(state):
- """Validate only sound assets active under the saved strategy and master switch."""
+ """Validate active saved assets and enforce Music Library / cue role separation."""
  overrides_value=state.get("chapter_bgm_overrides")
  overrides=overrides_value if isinstance(overrides_value,dict) else {}
  raw_mode=state.get("background_audio_mode")
@@ -305,18 +322,18 @@ def validate_saved_audio_paths(state):
     raw=override.get("path")
     if not raw:
      raise ValueError(f"Chapter {chapter} uses custom BGM but no track is saved. Reassign it in Sound Design.")
-    fields.append((raw,"custom BGM for chapter "+str(chapter),None))
+    fields.append((raw,"custom BGM for chapter "+str(chapter),None,"music"))
   else:
    book_path=state.get("background_audio_path") or state.get("background_audio_preferred_path")
    if book_path:
-    fields.append((book_path,"book background music",None))
+    fields.append((book_path,"book background music",None,"music"))
    ambience=state.get("ambience_audio_path")
    if ambience:
-    fields.append((ambience,"book ambience",None))
+    fields.append((ambience,"book ambience",None,"music"))
  elif audio_mode=="auto":
   auto_path=state.get("auto_music_track_path")
   if auto_path:
-   fields.append((auto_path,"automatic BGM selection",None))
+   fields.append((auto_path,"automatic BGM selection",None,"music"))
 
  for key,label in (
   ("opening_cue_path","opening cue"),
@@ -325,12 +342,17 @@ def validate_saved_audio_paths(state):
  ):
   raw=state.get(key)
   if raw:
-   fields.append((raw,label,5.0))
+   fields.append((raw,label,5.0,"cue"))
 
- for raw,label,max_duration in fields:
+ for raw,label,max_duration,expected_role in fields:
   path=Path(str(raw)).expanduser()
   if not path.is_file():
    raise FileNotFoundError(f"Saved {label} is missing: {path}. Reassign it in Sound Design.")
+  actual_role=audio_asset_role(path)
+  if actual_role != expected_role:
+   if expected_role=="cue":
+    raise ValueError(f"Saved {label} is a Music Library track, not a cue asset. Reassign it from Opening & Cues.")
+   raise ValueError(f"Saved {label} is a cue asset, not a Music Library track. Reassign it from Music Library.")
   try:
    duration=probe_audio_duration_seconds(path)
   except (ValueError,RuntimeError) as exc:

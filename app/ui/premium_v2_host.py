@@ -5647,15 +5647,18 @@ class PremiumV2Bridge(QObject):
             row = dict(value)
             raw_path = str(row.get("path") or "")
             track = catalog.get(raw_path)
-            available = bool(track and Path(raw_path).is_file())
+            available = bool(track and str(track.get("role") or "music").casefold() != "cue" and Path(raw_path).is_file())
             row["path"] = raw_path if available else None
             row["title"] = track["title"] if available else None
             row["available"] = available if row.get("rule") == "custom" else True
             overrides[str(key)] = row
+        default_track = catalog.get(default_path)
+        default_available = bool(default_track and str(default_track.get("role") or "music").casefold() != "cue"
+                                 and Path(default_path).is_file())
         return {
             "strategy": saved_strategy,
             "default_path": default_path or None,
-            "default_available": bool(default_path and default_path in catalog and Path(default_path).is_file()),
+            "default_available": default_available,
             "background_audio_mode": saved_mode,
             "bgm_enabled": bgm_enabled,
             "last_saved_at": last_saved_at,
@@ -5801,7 +5804,8 @@ class PremiumV2Bridge(QObject):
             raw = cues.get(slot)
             path = str(raw).strip() if raw else ""
             row = catalog.get(path)
-            available = bool(row and path and Path(path).is_file())
+            available = bool(row and str(row.get("role") or "music").casefold() == "cue"
+                             and path and Path(path).is_file())
             result[slot] = {"path": path if available else None,
                             "title": row["title"] if available else None,
                             "available": available, "assigned": bool(path),

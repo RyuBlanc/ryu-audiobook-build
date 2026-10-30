@@ -344,6 +344,63 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "uses custom BGM but no track is saved"):
                 validate_saved_audio_paths({"chapter_bgm_overrides": {"4": {"rule": "custom"}}})
 
+
+    def test_saved_music_and_fixed_cue_roles_are_enforced_at_generation_preflight(self):
+        import json
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.audio.library import validate_saved_audio_paths
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            music = root / "music.wav"
+            cue = root / "opening.wav"
+            music.write_bytes(b"music")
+            cue.write_bytes(b"cue")
+            music.with_name(music.name + ".license.json").write_text(
+                json.dumps({"role":"music","category":"calm"}), encoding="utf-8"
+            )
+            cue.with_name(cue.name + ".license.json").write_text(
+                json.dumps({"role":"opening","category":"opening"}), encoding="utf-8"
+            )
+            with patch("app.audio.library.probe_audio_duration_seconds", return_value=2.0):
+                with self.assertRaisesRegex(ValueError, "cue asset, not a Music Library track"):
+                    validate_saved_audio_paths({
+                        "background_audio_mode":"manual", "background_audio_enabled":True,
+                        "chapter_bgm_strategy":"same", "background_audio_path":str(cue),
+                    })
+                with self.assertRaisesRegex(ValueError, "Music Library track, not a cue asset"):
+                    validate_saved_audio_paths({
+                        "background_audio_mode":"manual", "background_audio_enabled":True,
+                        "opening_cue_path":str(music),
+                    })
+                with self.assertRaisesRegex(ValueError, "cue asset, not a Music Library track"):
+                    validate_saved_audio_paths({
+                        "background_audio_mode":"manual", "background_audio_enabled":True,
+                        "chapter_bgm_strategy":"custom",
+                        "chapter_bgm_overrides":{"3":{"rule":"custom","path":str(cue)}},
+                    })
+
+    def test_roleless_legacy_audio_remains_music_but_cannot_be_a_fixed_cue(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.audio.library import audio_asset_role, validate_saved_audio_paths
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            legacy_music = root / "legacy-book-bed.wav"
+            legacy_music.write_bytes(b"music")
+            legacy_cue = root / "legacy-opening.wav"
+            legacy_cue.write_bytes(b"cue")
+            self.assertEqual(audio_asset_role(legacy_music), "music")
+            self.assertEqual(audio_asset_role(legacy_cue), "music")
+            with patch("app.audio.library.probe_audio_duration_seconds", return_value=2.0):
+                with self.assertRaisesRegex(ValueError, "Music Library track, not a cue asset"):
+                    validate_saved_audio_paths({
+                        "background_audio_mode":"manual", "background_audio_enabled":True,
+                        "opening_cue_path":str(legacy_cue),
+                    })
+
     def test_explicit_missing_cue_does_not_silently_fall_back_to_another_track(self):
         from tempfile import TemporaryDirectory
         from pathlib import Path

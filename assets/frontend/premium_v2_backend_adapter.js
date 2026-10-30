@@ -3486,9 +3486,13 @@
         : (cue.available === true && cue.title ? cue.title : (cue.assigned || cue.missing ? 'Missing file' : 'Not assigned'));
     }
     const cueSaveState = $('cueSaveState');
-    if (cueSaveState) cueSaveState.textContent = cueChangesDirty
-      ? 'Unsaved cue changes — use Save Cue Changes to apply them to this book.'
-      : 'All cue changes saved.';
+    if (cueSaveState) cueSaveState.textContent = !cueChangesDirty
+      ? 'All cue changes saved.'
+      : cueClearAllStaged
+        ? 'Clear All is staged. Press Save Cue Changes to remove the three saved assignments.'
+        : (Object.keys(pendingCueAssignments).length
+          ? 'Unsaved cue changes — saving automatically shortly. Use Save Cue Changes to save now.'
+          : 'Unsaved cue changes — use Save Cue Changes to persist them.');
     const cueSaveButton = $('saveCueChanges');
     if (cueSaveButton) cueSaveButton.disabled = !cueChangesDirty;
     if (selectedCuePath) {

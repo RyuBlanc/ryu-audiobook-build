@@ -233,6 +233,8 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("await call('sound.cues.save', {slot, path:path || null})", self.adapter)
         self.assertIn("It will save automatically; use Save Cue Changes to save now.", self.adapter)
         self.assertIn("function scheduleCueAutoSave()", self.adapter)
+        self.assertIn("Clear All is staged. Press Save Cue Changes to remove the three saved assignments.", self.adapter)
+        self.assertIn("Unsaved cue changes — saving automatically shortly. Use Save Cue Changes to save now.", self.adapter)
         self.assertIn("soundPreviewKind === 'cue' && soundPreviewPath === selectedCuePath", self.adapter)
         self.assertIn("soundPreviewKind === 'music' && soundPreviewPath === track.path", self.adapter)
 
@@ -271,6 +273,18 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn('preferred = str(state.get("background_audio_preferred_path") or state.get("background_audio_path") or "").strip()', method)
         self.assertIn("if master_enabled and preferred and preferred in catalog_paths and Path(preferred).is_file():", method)
         self.assertIn('state["background_audio_path"] = preferred', method)
+
+
+    def test_saved_sound_readouts_reject_wrong_asset_roles(self):
+        start = self.host.index("    def _sound_chapter_bgm_get(")
+        end = self.host.index("    def _sound_chapter_bgm_save(", start)
+        chapter_read = self.host[start:end]
+        self.assertIn('str(track.get("role") or "music").casefold() != "cue"', chapter_read)
+        self.assertIn("default_available = bool(default_track", chapter_read)
+        cue_start = self.host.index("    def _sound_cues_get(")
+        cue_end = self.host.index("    def _sound_cues_save(", cue_start)
+        cue_read = self.host[cue_start:cue_end]
+        self.assertIn('str(row.get("role") or "music").casefold() == "cue"', cue_read)
 
     def test_cue_assignment_rejects_music_and_long_assets(self):
         start = self.host.index("    def _sound_cues_save(")
