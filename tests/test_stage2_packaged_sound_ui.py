@@ -55,8 +55,12 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
             "winreg.QueryValueEx",
             "winreg.SetValueEx",
             "winreg.DeleteValue",
-            "Project(",
-            "Chapter(",
+            "project.json",
+            "chapters.json",
+            "dialogue_assignments",
+            "review_status",
+            "skip_for_generation",
+            "Path.home() / \"Ryu's Audiobook\"",
             "write_tone_fixture",
             "RYU_SOUND_UI_ACCEPTANCE_SCRIPT",
             "RYU_SOUND_UI_ACCEPTANCE_CONFIG",
@@ -69,6 +73,9 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         ):
             self.assertIn(required, helper)
         self.assertNotIn("from PySide6.QtCore import QSettings", helper)
+        self.assertNotIn("from app.chapters.detector import Chapter", helper)
+        self.assertNotIn("from app.core.project import Project", helper)
+        self.assertNotIn("from app.core.state import save_state", helper)
 
     def test_packaged_driver_proves_real_music_and_cue_playback_and_cue_card_readability(self):
         script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")

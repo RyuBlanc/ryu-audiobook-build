@@ -105,11 +105,6 @@ def validate_imported_audio_metadata(music_paths: list[Path], cue_paths: list[Pa
 
 def _run(args: argparse.Namespace) -> int:
     repo_root = Path(__file__).resolve().parents[1]
-    sys.path.insert(0, str(repo_root))
-    from app.chapters.detector import Chapter
-    from app.core.paths import audio_library_root, library_root
-    from app.core.project import Project
-    from app.core.state import save_state
 
     exe = Path(args.exe).expanduser().resolve()
     script = Path(args.script).expanduser().resolve()
@@ -133,7 +128,11 @@ def _run(args: argparse.Namespace) -> int:
     write_tone_fixture(cue_alpha_source, 880.0, duration_seconds=4.0)
     write_tone_fixture(cue_beta_source, 990.0, duration_seconds=4.0)
 
-    audio_root = audio_library_root()
+    # Keep test fixtures inside the app's default user-data layout. This
+    # hosted Windows profile is clean and has no user-selected storage roots.
+    app_root = Path.home() / "Ryu's Audiobook"
+    audio_root = app_root / "Audio Library"
+    audio_root.mkdir(parents=True, exist_ok=True)
     music_imported_paths = [audio_root / alpha_source.name, audio_root / beta_source.name]
     cue_paths = [audio_root / cue_alpha_source.name, audio_root / cue_beta_source.name]
     imported_paths = music_imported_paths + cue_paths
@@ -141,17 +140,31 @@ def _run(args: argparse.Namespace) -> int:
         if path.exists() or path.with_name(path.name + ".license.json").exists():
             raise FileExistsError(f"Unique acceptance fixture unexpectedly exists already: {path}")
 
-    project_folder = library_root() / f"Stage 2 UI Acceptance {token}"
-    Project(
-        f"Stage 2 UI Acceptance {token}",
-        project_folder,
-        None,
-        [
-            Chapter(1, "Acceptance Chapter One", "A short test passage for the packaged Music Library acceptance."),
-            Chapter(2, "Acceptance Chapter Two", "A second passage verifies that the project has real chapter context."),
-        ],
-    ).save()
-    save_state(project_folder, {
+    project_folder = app_root / "Library" / f"Stage 2 UI Acceptance {token}"
+    project_folder.mkdir(parents=True, exist_ok=False)
+    project_title = f"Stage 2 UI Acceptance {token}"
+    (project_folder / "project.json").write_text(json.dumps({
+        "title": project_title, "source_file": None,
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    (project_folder / "chapters.json").write_text(json.dumps([
+        {
+            "number": 1,
+            "title": "Acceptance Chapter One",
+            "text": "A short test passage for the packaged Music Library acceptance.",
+            "dialogue_assignments": [],
+            "review_status": "needs_review",
+            "skip_for_generation": False,
+        },
+        {
+            "number": 2,
+            "title": "Acceptance Chapter Two",
+            "text": "A second passage verifies that the project has real chapter context.",
+            "dialogue_assignments": [],
+            "review_status": "needs_review",
+            "skip_for_generation": False,
+        },
+    ], ensure_ascii=False, indent=2), encoding="utf-8")
+    (project_folder / "state.json").write_text(json.dumps({
         "status": "new",
         "background_audio_path": "",
         "background_audio_preferred_path": "",
@@ -159,7 +172,7 @@ def _run(args: argparse.Namespace) -> int:
         "background_audio_enabled": False,
         "background_audio_volume": 0.18,
         "chapter_bgm_strategy": "same",
-    })
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
 
     previous_active = get_active_project_setting()
     set_active_project_setting(str(project_folder.resolve()))
