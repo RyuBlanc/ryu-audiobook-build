@@ -88,15 +88,14 @@
     const wrappedBridge = Object.freeze({
       invoke: function (command, payload) {
         const request = Object.assign({}, payload || {});
-        if (command === "sound.import" &&
+        if (command === "sound.import" && request.target_kind === "music" &&
             (!Array.isArray(request.paths) || !request.paths.length)) {
-          if (request.target_kind === "music") {
-            request.paths = Array.isArray(config.music_paths) ? config.music_paths.slice() : [];
-            if (!request.paths.length) throw new Error("No generated Music Library fixture paths were provided.");
-          } else if (request.target_kind === "cue") {
-            request.paths = Array.isArray(config.cue_paths) ? config.cue_paths.slice() : [];
-            if (!request.paths.length) throw new Error("No generated cue fixture paths were provided.");
-          }
+          request.paths = Array.isArray(config.music_paths) ? config.music_paths.slice() : [];
+          if (!request.paths.length) throw new Error("No generated Music Library fixture paths were provided.");
+        } else if (command === "sound.import" && request.target_kind === "cue" &&
+            (!Array.isArray(request.paths) || !request.paths.length)) {
+          request.paths = Array.isArray(config.cue_paths) ? config.cue_paths.slice() : [];
+          if (!request.paths.length) throw new Error("No generated cue fixture paths were provided.");
         }
         return originalInvoke(command, request);
       },
