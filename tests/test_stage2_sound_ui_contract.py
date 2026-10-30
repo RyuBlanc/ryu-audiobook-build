@@ -51,8 +51,8 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
 
     def test_mix_summary_values_are_loaded_from_backend_not_demo_defaults(self):
         self.assertIn("function renderSoundMixSummary()", self.adapter)
-        for field in ("mixBgmStatus", "mixDefaultTrack", "mixStrategy", "mixOverrides",
-                      "mixOpening", "mixChapterCue", "mixClosing", "soundPreviewPath",
+        for field in ("mixBgmStatus", "mixStrategy", "mixOverrides", "mixEffectiveTracks",
+                      "mixBgmVolumeValue", "mixOpening", "mixChapterCue", "mixClosing", "soundPreviewPath",
                       "soundFinalRenderPath", "soundMissingFiles", "soundLastSaved"):
             self.assertIn("setText('" + field + "'", self.adapter)
         self.assertIn('id="soundMissingFiles"', self.sound_markup)
@@ -136,6 +136,42 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("gain = max(0.0, min(0.50, float(volume)))", self.assembler)
         self.assertIn("self.background_audio_volume = max(0.0, min(0.50, float(background_audio_volume)))", self.manager)
         self.assertIn('max="50" min="0" type="range" value="18"', self.sound_markup)
+
+    def test_chapter_bgm_uses_real_source_and_category_filters(self):
+        for source in ("all", "built-in", "imported"):
+            self.assertIn(f'data-chapter-source="{source}"', self.adapter)
+        for category in ("all", "fantasy-adventure", "battle-warfare", "mystery",
+                         "horror", "romance", "sci-fi", "calm-narration", "others"):
+            self.assertIn(f'data-chapter-category="{category}"', self.adapter)
+        self.assertIn("chapterMusicCategoryGroup(track) === categoryFilter", self.adapter)
+        self.assertIn("source.includes('bundled')", self.adapter)
+        self.assertIn("source.includes('imported')", self.adapter)
+        self.assertIn("data-chapter-category", self.adapter)
+        self.assertIn("chapterTrackListSignature", self.adapter)
+
+    def test_chapter_track_selection_requires_explicit_confirmation(self):
+        self.assertIn("panel.id = 'chapterBgmSelectedTrackPanel'", self.adapter)
+        self.assertIn('SELECT TRACK', self.adapter)
+        self.assertIn('id="confirmChapterBgmTrack"', self.adapter)
+        self.assertIn("chapterBgmCandidateTrackPath = chapterTrack.dataset.chapterTrack", self.adapter)
+        self.assertIn("await saveCurrentChapterBgmDraft(true)", self.adapter)
+        self.assertNotIn("selectedBgmTrackPath = chapterTrack.dataset.chapterTrack", self.adapter)
+        self.assertIn("Candidate only — press Select to save it", self.adapter)
+
+    def test_mix_summary_removes_book_default_row_and_shows_effective_tracks_and_numeric_bgm_level(self):
+        self.assertIn("if (defaultRow?.parentElement === statusGrid) defaultRow.remove();", self.adapter)
+        self.assertIn("row.innerHTML = '<span>Effective track(s)</span><b id=\"mixEffectiveTracks\">Loading saved tracks…</b>';", self.adapter)
+        self.assertIn("setText('mixEffectiveTracks', effectiveLabel)", self.adapter)
+        self.assertIn("setText('mixBgmVolumeValue',", self.adapter)
+        self.assertIn("BGM level (0–50%)", self.adapter)
+        self.assertIn("const effectiveTrackPaths = chapterBased", self.adapter)
+
+    def test_chapter_and_cue_saves_serialize_and_preserve_newer_drafts(self):
+        self.assertIn("if (chapterBgmSavePromise) return chapterBgmSavePromise;", self.adapter)
+        self.assertIn("if (cueSavePromise) return cueSavePromise;", self.adapter)
+        self.assertIn("pendingCueAssignments[slot] === path", self.adapter)
+        self.assertIn("while (Object.keys(pendingCueAssignments).length)", self.adapter)
+        self.assertIn("chapterBgmDraftDirty = true;", self.adapter)
 
     def test_selected_cue_playback_and_explicit_save_are_interactive(self):
         for control in ('playSelectedCue', 'pauseSelectedCue', 'replaySelectedCue', 'saveCueChanges'):
