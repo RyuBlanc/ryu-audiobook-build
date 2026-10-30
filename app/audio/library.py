@@ -280,7 +280,8 @@ def validate_saved_audio_paths(state):
   raw_mode="manual" if (
    state.get("background_audio_path") or state.get("background_audio_preferred_path")
    or state.get("opening_cue_path") or state.get("page_turn_cue_path")
-   or state.get("ending_cue_path") or overrides
+   or state.get("ending_cue_path") or state.get("ambience_audio_path")
+   or state.get("auto_music_track_path") or overrides
   ) else "off"
  audio_mode=str(raw_mode or "off").strip().casefold()
  if audio_mode not in {"off","auto","manual"}:

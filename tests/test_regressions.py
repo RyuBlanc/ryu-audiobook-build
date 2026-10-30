@@ -2158,7 +2158,7 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(detect_chapter_mood("The Battlefield", "Swords clashed in the battle."), "action")
         self.assertEqual(detect_chapter_mood("A New Quest", "A wizard cast a magic spell."), "fantasy")
 
-    def test_auto_music_and_transition_cue_use_imported_real_audio_per_chapter(self):
+    def test_auto_music_does_not_insert_unassigned_fixed_cue_defaults(self):
         from unittest.mock import patch
         from app.audio.library import import_audio_files
         from app.audio.assembler import _duration_ms
@@ -2214,10 +2214,10 @@ class RegressionTests(unittest.TestCase):
             self.assertTrue(output.exists())
             self.assertGreater(output.stat().st_size, 1024)
             self.assertIn("automatic-real-audio-design", progress)
-            # Six seconds of speech plus opening, page-turn and closing cues
-            # chapter; allow for AAC encoder padding and container time-base rounding.
-            self.assertGreaterEqual(_duration_ms(output), 10000)
-            self.assertLessEqual(_duration_ms(output), 11000)
+            # No fixed cue was selected for this book. The local catalogue may
+            # contain defaults, but they must not be inserted into the final mix.
+            self.assertGreaterEqual(_duration_ms(output), 5800)
+            self.assertLessEqual(_duration_ms(output), 6500)
             self.assertGreaterEqual(_probe_audio_bitrate_kbps(output), 128)
 
     def test_story_events_detect_clear_actions_but_not_metaphors(self):
@@ -2319,7 +2319,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('story_effects_enabled: bool = False', manager)
         self.assertIn('if story_effects_enabled:', assembler)
 
-    def test_manual_music_still_gets_real_chapter_transition_cues(self):
+    def test_manual_music_renders_only_explicitly_assigned_fixed_cues(self):
         from unittest.mock import patch
         from app.audio.library import import_audio_files
         from app.audio.assembler import _duration_ms
@@ -2362,6 +2362,9 @@ class RegressionTests(unittest.TestCase):
                     chapter_transition_sound=True,
                     background_audio_fade_in=0.3,
                     background_audio_fade_out=0.3,
+                    opening_cue_path=opening,
+                    page_turn_cue_path=page_turn,
+                    ending_cue_path=ending,
                 )
             self.assertEqual(result, output)
             self.assertIn("mixed-background-audio", progress)

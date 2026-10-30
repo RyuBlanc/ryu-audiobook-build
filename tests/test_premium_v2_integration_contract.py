@@ -431,7 +431,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn('if value not in {10, 30, 60, 90}:', self.host)
         self.assertIn('Preview duration must be 10, 30, 60, or 90 seconds.', self.host)
 
-    def test_chapter_bgm_and_scene_cues_reach_final_assembly(self):
+    def test_chapter_bgm_and_three_fixed_cue_slots_reach_final_assembly(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         assembler = (ROOT / "app" / "audio" / "assembler.py").read_text(encoding="utf-8")
         manager = (ROOT / "app" / "tts" / "manager.py").read_text(encoding="utf-8")
@@ -445,8 +445,10 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("chapter_bgm_overrides: dict[str, dict] | None = None", assembler)
         self.assertIn("mixed-chapter-background-audio", assembler)
         self.assertIn("scene_transition_cue_path: Path | str | None = None", assembler)
-        self.assertIn("auto-real-scene-cue-", assembler)
-        self.assertIn("scene_transition_cue_path=self.scene_transition_cue_path", manager)
+        self.assertNotIn("auto-real-scene-cue-", assembler)
+        self.assertNotIn("if index > 1 and scene_transition_cue_path", assembler)
+        self.assertIn("chapter_bgm_strategy=self.chapter_bgm_strategy", manager)
+        self.assertNotIn("scene_transition_cue_path=self.scene_transition_cue_path", manager)
 
     def test_performance_screen_never_displays_unmeasured_hardware_as_fact(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
@@ -467,7 +469,10 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertNotIn("message(result.generation_supported ? 'Cue assignment saved to this book.' :", adapter)
         self.assertNotIn("Scene transition cue saved to this book and will be included during audiobook assembly.", adapter)
         self.assertNotIn("current audiobook assembly does not yet render a separate scene cue", adapter)
-        self.assertIn("scene_transition_cue_path=self.scene_transition_cue_path", (ROOT / "app" / "tts" / "manager.py").read_text(encoding="utf-8"))
+        manager = (ROOT / "app" / "tts" / "manager.py").read_text(encoding="utf-8")
+        self.assertIn("scene_transition_cue_path: Path | None = None", manager)
+        self.assertNotIn("scene_transition_cue_path=self.scene_transition_cue_path", manager)
+        self.assertIn("chapter_bgm_strategy=self.chapter_bgm_strategy", manager)
 
     def test_sound_cue_assignments_are_allowlisted_and_persisted(self):
         for command, method in (

@@ -325,7 +325,7 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         self.assertIn('effective_bgm_strategy == "chapter-based"', assembler)
         self.assertIn('and effective_audio_mode == "manual"', assembler)
         self.assertIn(
-            'chapter_bgm_strategy=str(state.get("chapter_bgm_strategy") or ("custom" if state.get("chapter_bgm_overrides") else "same"))',
+            "chapter_bgm_strategy=chapter_bgm_strategy,",
             source,
         )
 
