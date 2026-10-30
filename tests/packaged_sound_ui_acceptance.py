@@ -13,6 +13,43 @@ import sys
 import tempfile
 import uuid
 import wave
+import winreg
+
+
+_SETTINGS_PROJECT_KEY = r"Software\RyuBlanc\Ryu's Audiobook\project"
+_ACTIVE_PROJECT_VALUE = "active_folder"
+
+
+def get_active_project_setting() -> str | None:
+    """Read the app's QSettings active-project value from its Windows registry key."""
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, _SETTINGS_PROJECT_KEY, 0, winreg.KEY_QUERY_VALUE
+        ) as key:
+            value, _value_type = winreg.QueryValueEx(key, _ACTIVE_PROJECT_VALUE)
+    except FileNotFoundError:
+        return None
+    return str(value).strip() or None
+
+
+def set_active_project_setting(value: str | None) -> None:
+    """Set/remove the same NativeFormat value read by QSettings in the desktop app."""
+    if value:
+        with winreg.CreateKeyEx(
+            winreg.HKEY_CURRENT_USER, _SETTINGS_PROJECT_KEY, 0, winreg.KEY_SET_VALUE
+        ) as key:
+            winreg.SetValueEx(key, _ACTIVE_PROJECT_VALUE, 0, winreg.REG_SZ, str(value))
+        return
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, _SETTINGS_PROJECT_KEY, 0, winreg.KEY_SET_VALUE
+        ) as key:
+            try:
+                winreg.DeleteValue(key, _ACTIVE_PROJECT_VALUE)
+            except FileNotFoundError:
+                pass
+    except FileNotFoundError:
+        pass
 
 
 def write_tone_fixture(path: Path, frequency_hz: float, duration_seconds: float = 12.0) -> None:
@@ -69,7 +106,6 @@ def validate_imported_audio_metadata(music_paths: list[Path], cue_paths: list[Pa
 def _run(args: argparse.Namespace) -> int:
     repo_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo_root))
-    from PySide6.QtCore import QSettings
     from app.chapters.detector import Chapter
     from app.core.paths import audio_library_root, library_root
     from app.core.project import Project
@@ -125,10 +161,8 @@ def _run(args: argparse.Namespace) -> int:
         "chapter_bgm_strategy": "same",
     })
 
-    settings = QSettings("RyuBlanc", "Ryu's Audiobook")
-    previous_active = settings.value("project/active_folder", None)
-    settings.setValue("project/active_folder", str(project_folder.resolve()))
-    settings.sync()
+    previous_active = get_active_project_setting()
+    set_active_project_setting(str(project_folder.resolve()))
 
     marker = temp_root / "acceptance-result.json"
     config = temp_root / "acceptance-fixtures.json"
@@ -204,11 +238,7 @@ def _run(args: argparse.Namespace) -> int:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 pass
-        if previous_active:
-            settings.setValue("project/active_folder", previous_active)
-        else:
-            settings.remove("project/active_folder")
-        settings.sync()
+        set_active_project_setting(previous_active)
         for path in imported_paths:
             path.unlink(missing_ok=True)
             path.with_name(path.name + ".license.json").unlink(missing_ok=True)

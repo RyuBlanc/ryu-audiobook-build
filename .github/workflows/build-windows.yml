@@ -617,10 +617,17 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $pythonExe = $env:RYU_CI_PYTHON_EXE
-          if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
-            throw "The previously validated CI Python interpreter is unavailable for packaged Sound Design acceptance: $pythonExe"
+          $privatePython = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap\python312\python.exe'
+          $pythonExe = $privatePython
+          if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            $pythonExe = $env:RYU_CI_PYTHON_EXE
           }
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "Neither the durable private Python nor the setup-python interpreter is available for packaged Sound Design acceptance. Private=$privatePython; CI=$($env:RYU_CI_PYTHON_EXE)"
+          }
+          Write-Host "Using durable acceptance Python: $pythonExe"
+          & $pythonExe -c "import sys, winreg; print('Acceptance Python=' + sys.executable); print(sys.version)"
+          if ($LASTEXITCODE -ne 0) { throw "The selected acceptance Python could not import its Windows registry module (exit $LASTEXITCODE)." }
           $env:PYTHONPATH = (Get-Location).Path
           $env:PYTHONDONTWRITEBYTECODE = '1'
           & $pythonExe -B 'tests\packaged_sound_ui_acceptance.py' --exe "dist\Ryu's Audiobook\Ryu's Audiobook.exe" --script 'tests\stage2_packaged_sound_ui_acceptance.js'
