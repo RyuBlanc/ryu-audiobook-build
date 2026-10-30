@@ -3514,8 +3514,13 @@
     const signature = JSON.stringify({query,sourceFilter,rows:visible.map(t => [t.path,t.title,t.source,t.format,t.size_bytes])});
     if (grid.dataset.cueListSignature !== signature) {
       grid.dataset.cueListSignature = signature;
-      grid.innerHTML = visible.map(t => '<button type="button" class="cue-track card" data-cue-path="' + esc(t.path) + '"><b>' + esc(t.title) + '</b><small>' + esc(t.source) + ' · ' + esc(t.format) + '</small></button>').join('') ||
-        '<p class="muted">No matching local cue clips. Import licensed audio clips to use them here.</p>';
+      grid.innerHTML = visible.map(t => {
+        const selected = String(t.path || '') === String(selectedCuePath || '');
+        return '<button type="button" class="cue-card card' + (selected ? ' selected' : '') +
+          '" data-cue-path="' + esc(t.path) + '" title="' + esc(t.title) + '" aria-pressed="' +
+          (selected ? 'true' : 'false') + '"><h3>' + esc(t.title) + '</h3><p>' +
+          esc(t.source || 'Local catalogue') + ' · ' + esc(t.format || '') + '</p></button>';
+      }).join('') || '<p class="muted">No matching local cue clips. Import licensed audio clips to use them here.</p>';
     }
     return cueAssignments;
   }
@@ -6968,7 +6973,11 @@
         if ($('selectedCueMeta')) $('selectedCueMeta').textContent = selectedCue
           ? String(selectedCue.source || 'Local catalogue') + ' · ' + String(selectedCue.format || '')
           : 'Selected cue from the local catalogue';
-        document.querySelectorAll('#cueGrid [data-cue-path]').forEach(button => button.classList.toggle('active', button.dataset.cuePath === path));
+        document.querySelectorAll('#cueGrid [data-cue-path]').forEach(button => {
+          const selected = button.dataset.cuePath === path;
+          button.classList.toggle('selected', selected);
+          button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+        });
         if (pendingCueSlot) {
           pendingCueAssignments[pendingCueSlot] = path;
           cueChangesDirty = true;

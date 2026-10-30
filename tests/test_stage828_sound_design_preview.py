@@ -94,6 +94,65 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
             self.assertIn("duration=first", filters)
             self.assertEqual(args[args.index("-t") + 1], "20.000")
 
+
+    def test_after_first_paragraph_waits_for_every_audio_chunk_of_a_long_paragraph(self):
+        import json
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.audio import assembler
+
+        with TemporaryDirectory() as temporary:
+            chapter_dir = Path(temporary)
+            chunk_dir = chapter_dir / "chunks"
+            chunk_dir.mkdir()
+            first, second, boundary, next_chunk = (
+                chunk_dir / "00001.wav", chunk_dir / "00002.wav",
+                chunk_dir / "00003.wav", chunk_dir / "00004.wav"
+            )
+            for path in (first, second, boundary, next_chunk):
+                path.write_bytes(b"chunk")
+            (chapter_dir / "narration.json").write_text(
+                json.dumps({"narration_text": "A long first paragraph with several sentences. " * 12 +
+                            "\\n\\nA second paragraph starts here."}),
+                encoding="utf-8",
+            )
+            (chapter_dir / "chunk_manifest.json").write_text(json.dumps({"chunks": [
+                {"file": first.name, "text": "A long first paragraph with several sentences."},
+                {"file": second.name, "text": "The first paragraph continues with more sentences."},
+                {"file": boundary.name, "text": "The first paragraph ends here.\\n\\n"},
+                {"file": next_chunk.name, "text": "A second paragraph starts here."},
+            ]}), encoding="utf-8")
+            with patch.object(assembler, "_duration_ms", side_effect=[1200, 900, 1400]):
+                offset = assembler._chapter_first_paragraph_offset_ms(chapter_dir)
+            self.assertEqual(offset, 3500)
+
+    def test_after_first_paragraph_uses_narration_text_boundary_when_dialogue_chunks_have_no_marker(self):
+        import json
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.audio import assembler
+
+        with TemporaryDirectory() as temporary:
+            chapter_dir = Path(temporary)
+            chunk_dir = chapter_dir / "chunks"
+            chunk_dir.mkdir()
+            paths = [chunk_dir / f"{index:05d}.wav" for index in range(1, 4)]
+            for path in paths:
+                path.write_bytes(b"chunk")
+            first_paragraph = "This first paragraph contains several dialogue turns."
+            (chapter_dir / "narration.json").write_text(
+                json.dumps({"narration_text": first_paragraph + "\\n\\nA second paragraph follows."}),
+                encoding="utf-8",
+            )
+            (chapter_dir / "chunk_manifest.json").write_text(json.dumps({"chunks": [
+                {"file": paths[0].name, "text": "This first paragraph"},
+                {"file": paths[1].name, "text": "contains several dialogue turns."},
+                {"file": paths[2].name, "text": "A second paragraph follows."},
+            ]}), encoding="utf-8")
+            with patch.object(assembler, "_duration_ms", side_effect=[700, 850]):
+                offset = assembler._chapter_first_paragraph_offset_ms(chapter_dir)
+            self.assertEqual(offset, 1550)
+
     def test_zero_volume_chapter_bgm_does_not_reencode_narration(self):
         from tempfile import TemporaryDirectory
         from unittest.mock import patch

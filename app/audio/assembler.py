@@ -356,6 +356,53 @@ def _mix_chapter_bgm(
 
 
 
+def _chapter_first_paragraph_offset_ms(chapter_dir: Path) -> int:
+    """Return the audio boundary after the first source paragraph, not merely the first WAV chunk."""
+    try:
+        manifest = json.loads((chapter_dir / "chunk_manifest.json").read_text(encoding="utf-8"))
+        chunks = manifest.get("chunks") or []
+        narration = json.loads((chapter_dir / "narration.json").read_text(encoding="utf-8"))
+        narration_text = str(narration.get("narration_text") or "")
+        first_paragraph = re.split(r"\r?\n[ \t]*\r?\n+", narration_text, maxsplit=1)[0]
+        first_paragraph_chars = len(" ".join(first_paragraph.split()))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 0
+    if not isinstance(chunks, list) or not chunks:
+        return 0
+
+    elapsed_ms = 0
+    consumed_chars = 0
+    for item in chunks:
+        if not isinstance(item, dict):
+            continue
+        filename = Path(str(item.get("file") or "")).name
+        if not filename:
+            return 0
+        chunk_path = chapter_dir / "chunks" / filename
+        if not chunk_path.is_file():
+            return 0
+        try:
+            elapsed_ms += max(0, int(_duration_ms(chunk_path)))
+        except (OSError, ValueError, RuntimeError, TypeError):
+            return 0
+
+        chunk_text = str(item.get("text") or "")
+        normalized_text = " ".join(chunk_text.split())
+        if normalized_text:
+            consumed_chars += len(normalized_text) + (1 if consumed_chars else 0)
+        # Paragraph markers are retained by split_for_pacing. If a provider
+        # split a long paragraph across multiple WAVs, accumulate every chunk
+        # through the one containing its end. The narration text length is a
+        # fallback for dialogue chunks that do not carry the blank-line marker.
+        if re.search(r"\r?\n[ \t]*\r?\n", chunk_text):
+            return elapsed_ms
+        if first_paragraph_chars and consumed_chars >= first_paragraph_chars:
+            return elapsed_ms
+    # A one-paragraph chapter has no following boundary; its first paragraph
+    # ends at the end of the chapter, so the offset is the accumulated duration.
+    return elapsed_ms
+
+
 def _chapter_bgm_fade_out(end_behavior: str, configured_fade_out: float) -> float:
     """Resolve chapter BGM tail policy to a distinct, bounded fade duration.
 
@@ -817,14 +864,7 @@ def assemble_m4b(
                 if start_offset == "after_10_seconds":
                     offset_ms = 10_000
                 elif start_offset == "after_first_paragraph":
-                    try:
-                        manifest = json.loads((chapter_dir / "chunk_manifest.json").read_text(encoding="utf-8"))
-                        first_chunk = (manifest.get("chunks") or [])[0]
-                        chunk_path = chapter_dir / "chunks" / str(first_chunk.get("file") or "")
-                        if chunk_path.is_file():
-                            offset_ms = _duration_ms(chunk_path)
-                    except (OSError, ValueError, TypeError, IndexError):
-                        offset_ms = 0
+                    offset_ms = _chapter_first_paragraph_offset_ms(chapter_dir)
                 behavior = str(override.get("end_behavior") or "fade_before_end").strip().lower()
                 fade_out = _chapter_bgm_fade_out(behavior, background_audio_fade_out)
                 mixed = temp_dir / f"chapter-bgm-{chapter_index:05d}.m4a"

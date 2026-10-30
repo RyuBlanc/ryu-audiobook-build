@@ -5578,12 +5578,14 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Background music and cue volume must be 0–50 percent, narration 0–100 percent, and fades 0–30 seconds.")
         catalog = self._sound_catalog({})
         catalog_paths = {str(row["path"]) for row in catalog}
-        active_bgm_path, preferred_bgm_path = _sound_manifest_bgm_paths(state, path, enabled)
+        manifest_path = path
         if enabled and path:
             selected = Path(path).expanduser().resolve()
             selected_row = next((row for row in catalog if str(row["path"]) == str(selected)), None)
             if not selected.is_file() or selected_row is None or str(selected_row.get("role") or "music").casefold() == "cue":
                 raise ValueError("Selected BGM is missing from the local music library.")
+            manifest_path = str(selected)
+        active_bgm_path, preferred_bgm_path = _sound_manifest_bgm_paths(state, manifest_path, enabled)
         state.update({
             "background_audio_path": active_bgm_path,
             "background_audio_preferred_path": preferred_bgm_path,

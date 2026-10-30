@@ -404,6 +404,15 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn('"background_audio_path": active_bgm_path', method)
         self.assertIn('"background_audio_preferred_path": preferred_bgm_path', method)
 
+
+    def test_cue_cards_use_readable_styles_and_accessible_selection_state(self):
+        self.assertIn(".cue-grid .cue-card{", self.html)
+        self.assertIn("overflow-wrap:anywhere", self.html)
+        self.assertIn("class=\"cue-card card", self.adapter)
+        self.assertIn("classList.toggle('selected', selected)", self.adapter)
+        self.assertIn("aria-pressed", self.adapter)
+        self.assertNotIn('class="cue-track card"', self.adapter)
+
     def test_zero_cue_level_does_not_add_silent_audio_duration(self):
         self.assertIn("if cue is None or cue_gain <= 1e-9:", self.assembler)
         self.assertIn("return None", self.assembler[self.assembler.index("def apply_cue_level"):self.assembler.index("# Real local audio only", self.assembler.index("def apply_cue_level"))])
