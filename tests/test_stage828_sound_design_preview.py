@@ -140,7 +140,7 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
             chunk = chunk_dir / "00001.wav"
             chunk.write_bytes(b"chunk")
             (chapter_dir / "narration.json").write_text(
-                json.dumps({"narration_text":"First paragraph.\\n\\nSecond paragraph."}),
+                json.dumps({"narration_text":"First paragraph.\n\nSecond paragraph."}),
                 encoding="utf-8",
             )
             (chapter_dir / "chunk_manifest.json").write_text(json.dumps({"chunks":[
