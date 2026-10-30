@@ -4188,6 +4188,29 @@
       if (mixLevelsSavePromise === runSave) mixLevelsSavePromise = null;
     }
   }
+  async function flushSoundDesignState({requireExplicitCueClear = false} = {}) {
+    // A single transaction is shared by preview, Production handoff and final
+    // generation. Never let one of these paths start against a stale draft.
+    if (requireExplicitCueClear && cueClearAllStaged) {
+      throw new Error('Clear All is staged. Press Save Cue Changes before generating a Sound Design preview.');
+    }
+    if (chapterStrategySavePromise) await chapterStrategySavePromise;
+    await saveCurrentChapterBgmDraft();
+    await savePendingCueChanges();
+    await saveSoundMixLevels(true);
+    await refreshChapterBgm();
+    await refreshSoundCues();
+    const unresolved = chapterBgmDraftDirty || cueChangesDirty || mixLevelsDirty ||
+      cueClearAllStaged || Object.keys(pendingCueAssignments).length > 0 ||
+      Object.keys(soundManifestPendingOverrides).length > 0 ||
+      Boolean(chapterBgmSavePromise || cueSavePromise || mixLevelsSavePromise ||
+        soundManifestSavePromise || chapterStrategySavePromise);
+    if (unresolved) {
+      throw new Error('Sound Design changes are still saving or unsaved. Preview or production was not started.');
+    }
+    renderSoundMixSummary();
+    return true;
+  }
   function scheduleLibrarySearchRefresh() {
     if (librarySearchTimer) clearTimeout(librarySearchTimer);
     librarySearchTimer = setTimeout(() => {
@@ -6665,7 +6688,14 @@
       if(result.cancelled){message('Preview save cancelled.');return;}
       message('Voice preview saved to '+result.path);
     });
-    if ($('startGenerate')) $('startGenerate').onclick=act(async()=>{const data=await call('production.generate_book',{profile_name:selectedVoice||$('profileName')?.value,bitrate:256});await monitorJob(data.job_id);});
+    if ($('startGenerate')) $('startGenerate').onclick=act(async()=>{
+      await flushSoundDesignState();
+      const data = await call('production.generate_book', {
+        profile_name:selectedVoice || $('profileName')?.value,
+        bitrate:256
+      });
+      await monitorJob(data.job_id);
+    });
     if ($('pauseGenerate')) $('pauseGenerate').onclick=act(async()=>{if(!activeJob||activeJobType!=='audiobook-generation')throw new Error('There is no active audiobook generation job to pause.');await call('job.pause',{job_id:activeJob});await refreshJobs();});
     if ($('cancelJob')) $('cancelJob').onclick=act(async()=>{if(!activeJob||activeJobType!=='audiobook-generation')throw new Error('There is no active audiobook generation job to cancel.');await call('job.cancel',{job_id:activeJob});await refreshJobs();});
     ['analyzeCharacters','runAiAnalysis'].forEach(id=>{if($(id))$(id).onclick=act(async()=>{const data=await call('character.analyze');await monitorJob(data.job_id,refreshCharacters);});});
@@ -6888,12 +6918,7 @@
       if (bgmMasterToggle) {
         e.preventDefault(); e.stopImmediatePropagation();
         try {
-          // Complete any active strategy change before resolving the effective
-          // BGM policy, then flush drafts before writing the shared global mode.
-          if (chapterStrategySavePromise) await chapterStrategySavePromise;
-          await saveCurrentChapterBgmDraft();
-          await savePendingCueChanges();
-          await saveSoundMixLevels(true);
+          await flushSoundDesignState();
           const enabled = bgmMasterToggle.dataset.bgmEnabled === 'true';
           const chapterBased = ['custom', 'chapter-based', 'chapter_based', 'chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
           const defaultPath = String(chapterBgmState.default_path || '').trim();
@@ -7192,11 +7217,7 @@
             await refreshChapterBgm();
             message('Book default background track saved.');
           } else if (soundButton.id === 'applySoundToProduction') {
-            await saveCurrentChapterBgmDraft();
-            await savePendingCueChanges();
-            await saveSoundMixLevels(true);
-            await refreshChapterBgm();
-            await refreshSoundCues();
+            await flushSoundDesignState();
             document.querySelector('[data-page="generate"]')?.click();
           } else if (soundButton.id === 'saveChapterBgm') {
             await saveCurrentChapterBgmDraft(true);
@@ -7228,12 +7249,7 @@
             message('Playing assigned cue clips in book order.');
 
           } else if (soundButton.id === 'soundPreviewBook') {
-            if (cueClearAllStaged) {
-              throw new Error('Clear All is staged. Press Save Cue Changes before generating a Sound Design preview.');
-            }
-            await saveCurrentChapterBgmDraft();
-            await savePendingCueChanges();
-            await saveSoundMixLevels(true);
+            await flushSoundDesignState({requireExplicitCueClear:true});
             stopSoundPreview();
             const started = await call('sound.preview_book');
             message('Generating the full-book mix preview from saved chapter narration…');

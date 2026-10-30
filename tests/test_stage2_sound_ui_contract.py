@@ -63,19 +63,44 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         start = self.adapter.index("const bgmMasterToggle = e.target.closest('#sound [data-bgm-enabled], #generate [data-bgm-enabled]');")
         end = self.adapter.index("const chapterBgmItem = e.target.closest('#chapterBgmList [data-chapter-bgm]');", start)
         handler = self.adapter[start:end]
+        self.assertIn("await flushSoundDesignState();", handler)
+        self.assertIn("await saveSoundManifest({path, enabled});", handler)
+        self.assertLess(handler.index("await flushSoundDesignState();"), handler.index("await saveSoundManifest({path, enabled});"))
+        self.assertIn("let chapterStrategySavePromise = null;", self.adapter)
+        self.assertIn("chapterStrategySavePromise = runSave;", self.adapter)
+
+    def test_shared_sound_flush_saves_and_verifies_all_drafts(self):
+        start = self.adapter.index("async function flushSoundDesignState(")
+        end = self.adapter.index("function scheduleLibrarySearchRefresh()", start)
+        helper = self.adapter[start:end]
         ordered = (
             "if (chapterStrategySavePromise) await chapterStrategySavePromise;",
             "await saveCurrentChapterBgmDraft();",
             "await savePendingCueChanges();",
             "await saveSoundMixLevels(true);",
-            "await saveSoundManifest({path, enabled});",
             "await refreshChapterBgm();",
             "await refreshSoundCues();",
+            "if (unresolved)",
         )
-        positions = [handler.index(item) for item in ordered]
+        positions = [helper.index(item) for item in ordered]
         self.assertEqual(positions, sorted(positions))
-        self.assertIn("let chapterStrategySavePromise = null;", self.adapter)
-        self.assertIn("chapterStrategySavePromise = runSave;", self.adapter)
+        self.assertIn("Object.keys(soundManifestPendingOverrides).length > 0", helper)
+        self.assertIn("Sound Design changes are still saving or unsaved", helper)
+
+    def test_production_handoff_and_final_generation_flush_sound_design(self):
+        handoff_start = self.adapter.index("soundButton.id === 'applySoundToProduction'")
+        handoff_end = self.adapter.index("soundButton.id === 'saveChapterBgm'", handoff_start)
+        handoff = self.adapter[handoff_start:handoff_end]
+        self.assertIn("await flushSoundDesignState();", handoff)
+        preview_start = self.adapter.index("soundButton.id === 'soundPreviewBook'")
+        preview_end = self.adapter.index("if (!finished) throw new Error('Sound Design preview timed out.", preview_start)
+        preview = self.adapter[preview_start:preview_end]
+        self.assertIn("await flushSoundDesignState({requireExplicitCueClear:true});", preview)
+        generation_start = self.adapter.index("if ($('startGenerate'))")
+        generation_end = self.adapter.index("if ($('pauseGenerate'))", generation_start)
+        generation = self.adapter[generation_start:generation_end]
+        self.assertIn("await flushSoundDesignState();", generation)
+        self.assertLess(generation.index("await flushSoundDesignState();"), generation.index("call('production.generate_book'"))
 
     def test_production_studio_generation_toggle_shares_saved_sound_design_state(self):
         start = self.html.index('<section class="page" id="generate">')
@@ -408,10 +433,9 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         start = self.adapter.index("soundButton.id === 'soundPreviewBook'")
         end = self.adapter.index("} catch (err) { message", start)
         preview = self.adapter[start:end]
-        self.assertIn("if (cueClearAllStaged)", preview)
-        self.assertIn("await saveCurrentChapterBgmDraft();", preview)
-        self.assertIn("await savePendingCueChanges();", preview)
-        self.assertIn("await saveSoundMixLevels(true);", preview)
+        self.assertIn("await flushSoundDesignState({requireExplicitCueClear:true});", preview)
+        self.assertIn("async function flushSoundDesignState", self.adapter)
+        self.assertIn("if (requireExplicitCueClear && cueClearAllStaged)", self.adapter)
 
     def test_active_music_and_cue_preview_levels_follow_volume_sliders(self):
         self.assertIn("soundPreviewKind === 'music'", self.adapter)
