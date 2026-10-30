@@ -433,14 +433,19 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
 
     def test_music_library_selected_track_panel_and_preview_follow_current_track(self):
         selection_start = self.adapter.index("if ($('soundTrackGrid')) $('soundTrackGrid').addEventListener('click'")
-        selection_end = self.adapter.index("function refreshSoundCues()", selection_start)
+        selection_end = self.adapter.index("async function refreshSoundCues()", selection_start)
         selection = self.adapter[selection_start:selection_end]
         self.assertIn("const track = sounds.find(item => String(item.path || '') === requestedPath);", selection)
         self.assertIn("track.category_label || track.category || 'Others'", selection)
         self.assertIn("track.source || 'Local catalogue'", selection)
         self.assertIn("track.format || 'Audio'", selection)
-        self.assertIn("soundPreviewKind === 'music' && soundPreviewPath !== selectedSoundPath", selection)
+        self.assertIn("(soundPreviewKind !== 'music' || soundPreviewPath !== selectedSoundPath)", selection)
         self.assertIn("stopSoundPreview();", selection)
+        cue_start = self.adapter.index("const cueTrack = e.target.closest('#cueGrid [data-cue-path]')")
+        cue_end = self.adapter.index("const soundButton = e.target.closest", cue_start)
+        cue_selection = self.adapter[cue_start:cue_end]
+        self.assertIn("(soundPreviewKind !== 'cue' || soundPreviewPath !== String(path))", cue_selection)
+        self.assertIn("stopSoundPreview();", cue_selection)
         start = self.adapter.index("} else if (soundButton.id === 'previewSelectedTrack')")
         end = self.adapter.index("} else if (soundButton.id === 'setBookDefaultTrack')", start)
         preview = self.adapter[start:end]

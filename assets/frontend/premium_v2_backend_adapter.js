@@ -6672,7 +6672,8 @@
       selectedSoundPath = String(track.path);
       // Do not leave a previously selected track playing behind the new
       // Selected Track panel. The user can explicitly preview the new track.
-      if (soundPreviewAudio && soundPreviewKind === 'music' && soundPreviewPath !== selectedSoundPath) {
+      if (soundPreviewAudio &&
+          (soundPreviewKind !== 'music' || soundPreviewPath !== selectedSoundPath)) {
         stopSoundPreview();
       }
       if ($('selectedSoundTitle')) $('selectedSoundTitle').textContent = String(track.title || 'Selected track');
@@ -7000,6 +7001,10 @@
       if (cueTrack) {
         e.preventDefault(); e.stopImmediatePropagation();
         const path = cueTrack.dataset.cuePath;
+        if (soundPreviewAudio &&
+            (soundPreviewKind !== 'cue' || soundPreviewPath !== String(path))) {
+          stopSoundPreview();
+        }
         selectedCuePath = path;
         const selectedCue = sounds.find(track => String(track.path || '') === String(path));
         if ($('selectedCueTitle')) $('selectedCueTitle').textContent = selectedCue?.title || 'Selected cue';
