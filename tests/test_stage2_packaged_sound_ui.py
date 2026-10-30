@@ -125,7 +125,7 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
             "catalogCount:",
             "activeCategory",
             "activeSource",
-            "renderedMusicRows",
+            "renderedRows",
             "Packaged starter music is missing from the Built-in filter.",
         ):
             self.assertIn(required, script)
