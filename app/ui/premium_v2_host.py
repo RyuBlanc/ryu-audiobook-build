@@ -5397,7 +5397,7 @@ class PremiumV2Bridge(QObject):
         return {"opened": True, "path": str(folder.resolve())}
 
     def _sound_catalog(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        from app.audio.library import AUDIO_EXTENSIONS, MUSIC_CATEGORY_LABELS, metadata_for
+        from app.audio.library import AUDIO_EXTENSIONS, MUSIC_CATEGORY_LABELS, audio_asset_role, metadata_for
         local_root = app_root() / "Audio Library"
         bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])) / "assets" / "starter_audio"
         roots = [(local_root, "Imported locally")]
@@ -5455,7 +5455,13 @@ class PremiumV2Bridge(QObject):
                     if size <= 0:
                         continue
                     key = str(resolved)
-                    metadata = metadata_for(resolved)
+                    try:
+                        metadata = metadata_for(resolved)
+                    except (OSError, ValueError, TypeError) as exc:
+                        # A corrupt sidecar must not take down the entire library.
+                        # Keep the source file untouched and omit only this invalid record.
+                        log.warning("Skipping audio asset with unreadable metadata %s: %s", resolved, exc)
+                        continue
                     bundled_entry = bundle_entries.get(key, {}) if source == "Bundled with application" else {}
                     raw_category = str(
                         metadata.get("category") or bundled_entry.get("category") or ""
@@ -5468,9 +5474,12 @@ class PremiumV2Bridge(QObject):
                             "universal",
                         )
                     role_value = str(
-                        metadata.get("role") or bundled_entry.get("type") or "music"
+                        metadata.get("role") or bundled_entry.get("type") or ""
                     ).strip().casefold()
-                    role = "cue" if role_value in {"cue", "opening", "page", "ending", "closing", "chapter"} else role_value
+                    if role_value:
+                        role = "cue" if role_value in {"cue", "opening", "page", "ending", "closing", "chapter"} else role_value
+                    else:
+                        role = audio_asset_role(resolved)
                     if role not in {"music", "cue"}:
                         role = "music"
 

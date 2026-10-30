@@ -270,4 +270,20 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         bundled_only_row = next(row for row in rows if row["title"] == "Bundle Only")
         self.assertEqual(bundled_only_row["source"], "Bundled with application")
 
+
+    def test_roleless_assets_in_canonical_cue_folders_remain_cues(self):
+        cue = _valid_wav(self.app_root / "Audio Library" / "cues" / "opening" / "legacy-opening.wav")
+        rows = host.PremiumV2Bridge._sound_catalog(self.bridge_a, {})
+        row = next(item for item in rows if item["path"] == str(cue.resolve()))
+        self.assertEqual(row["role"], "cue")
+
+    def test_corrupt_audio_sidecar_does_not_abort_the_rest_of_the_catalogue(self):
+        corrupt = _valid_wav(self.app_root / "Audio Library" / "music" / "calm" / "bad-sidecar.wav")
+        corrupt.with_name(corrupt.name + ".license.json").write_text("{not-json", encoding="utf-8")
+        valid = _valid_wav(self.app_root / "Audio Library" / "music" / "romance" / "valid-track.wav")
+        rows = host.PremiumV2Bridge._sound_catalog(self.bridge_a, {})
+        paths = {row["path"] for row in rows}
+        self.assertNotIn(str(corrupt.resolve()), paths)
+        self.assertIn(str(valid.resolve()), paths)
+
 if __name__ == "__main__": unittest.main()
