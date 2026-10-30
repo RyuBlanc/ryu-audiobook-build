@@ -133,7 +133,7 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
             'const builtInSource = document.querySelector(\'#soundSourceFilter [data-source="built-in"]\');',
             script,
         )
-        self.assertIn("if (musicButtons().length === 0)", script)
+        self.assertIn("catch (filterError)", script)
 
     def test_packaged_driver_waits_for_rendered_source_filter_results_not_only_button_state(self):
         script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
