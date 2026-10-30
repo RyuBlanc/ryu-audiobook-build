@@ -97,3 +97,8 @@ Run #1746 passed on 68c4afb: JavaScript syntax passed; 843 tests passed in 37.08
 - [#1751](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41076814352) passed on `79d1f81e6c03ae00949b3539eedae8e7909dd871`: frontend JavaScript syntax passed; **844 tests passed in 24.362 seconds**.
 - Frozen Windows verification of cue cards and playback remains pending; a new artifact-checkpoint run is required. The current successful Music Library checks must remain in the combined gate.
 
+## Cue-card render-wait test gate — Run #1752
+
+- [#1752](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41077106695) passed on the test-only driver correction parent `79d1f81e6c03ae00949b3539eedae8e7909dd871`: frontend JavaScript syntax passed; **844 tests passed in 39.942 seconds**.
+- The packaged acceptance script now waits for both imported cue fixture paths to appear in `#cueGrid` before inspecting card layout/selection/playback. If that wait expires, the script emits catalogue role counts and cue-grid diagnostics to determine whether the remaining issue is a real renderer defect.
+- This was the regression-only run. A full Windows artifact checkpoint is required to determine whether the cue-card and real cue playback steps pass in the frozen executable.
