@@ -6,6 +6,81 @@ import unittest
 
 
 class Stage2SoundDesignUiContractTests(unittest.TestCase):
+    @staticmethod
+    def _extract_js_braced_block(source: str, opening_brace: int) -> str:
+        """Extract a JavaScript block without counting braces in strings/comments."""
+        if opening_brace < 0 or opening_brace >= len(source) or source[opening_brace] != "{":
+            raise AssertionError("JavaScript block opening brace was not found.")
+
+        depth = 0
+        quote = None
+        escaped = False
+        line_comment = False
+        block_comment = False
+        index = opening_brace
+
+        while index < len(source):
+            char = source[index]
+            next_char = source[index + 1] if index + 1 < len(source) else ""
+
+            if line_comment:
+                if ord(char) == 10:
+                    line_comment = False
+            elif block_comment:
+                if char == "*" and next_char == "/":
+                    block_comment = False
+                    index += 1
+            elif quote:
+                if escaped:
+                    escaped = False
+                elif ord(char) == 92:
+                    escaped = True
+                elif char == quote:
+                    quote = None
+            elif char in ("'", chr(34), chr(96)):
+                quote = char
+            elif char == "/" and next_char == "/":
+                line_comment = True
+                index += 1
+            elif char == "/" and next_char == "*":
+                block_comment = True
+                index += 1
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return source[opening_brace:index + 1]
+
+            index += 1
+
+        raise AssertionError("JavaScript block is not closed.")
+
+    @classmethod
+    def _extract_js_function(cls, source: str, declaration: str) -> str:
+        """Extract one complete JavaScript function without next-declaration slicing."""
+        start = source.find(declaration)
+        if start < 0:
+            raise AssertionError(f"JavaScript function was not found: {declaration}")
+        body_marker = source.find(") {", start)
+        if body_marker < 0:
+            raise AssertionError(f"JavaScript function body was not found: {declaration}")
+        return cls._extract_js_braced_block(source, body_marker + 2)
+
+    @classmethod
+    def _extract_js_branch(cls, source: str, declaration: str, condition: str) -> str:
+        """Extract a click-handler branch even when sibling branches are reordered."""
+        start = source.find(declaration)
+        if start < 0:
+            raise AssertionError(f"JavaScript handler declaration was not found: {declaration}")
+        condition_start = source.find(condition, start)
+        if condition_start < 0:
+            raise AssertionError(f"JavaScript handler condition was not found: {condition}")
+        opening_brace = source.find("{", condition_start + len(condition))
+        if opening_brace < 0:
+            raise AssertionError(f"JavaScript handler body was not found: {condition}")
+        return cls._extract_js_braced_block(source, opening_brace)
+
     def setUp(self):
         self.html = Path("assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
         self.adapter = Path("assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
@@ -241,13 +316,18 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertNotIn('state["chapter_bgm_overrides"] = {}', method)
         self.assertIn("await saveCurrentChapterBgmDraft();", self.adapter)
         self.assertIn("chapter assignments were preserved for switching back.", self.adapter)
-        strategy_start = self.adapter.index("const chapterStrategy = e.target.closest('#sound [data-bgm-strategy]');")
-        strategy_end = self.adapter.index("const chapterBgmItem = e.target.closest('#chapterBgmList [data-chapter-bgm]');", strategy_start)
-        strategy_handler = self.adapter[strategy_start:strategy_end]
+        strategy_handler = self._extract_js_branch(
+            self.adapter,
+            "const chapterStrategy = e.target.closest('#sound [data-bgm-strategy]');",
+            "if (chapterStrategy)",
+        )
         self.assertIn("await saveCurrentChapterBgmDraft();", strategy_handler)
-        flush_start = self.adapter.index("async function flushSoundDesignState(")
-        flush_end = self.adapter.index("function scheduleLibrarySearchRefresh()", flush_start)
-        flush_helper = self.adapter[flush_start:flush_end]
+        self.assertIn("await call('sound.chapter_bgm.save', {strategy:chapterStrategy.dataset.bgmStrategy});", strategy_handler)
+        self.assertLess(
+            strategy_handler.index("await saveCurrentChapterBgmDraft();"),
+            strategy_handler.index("await call('sound.chapter_bgm.save', {strategy:chapterStrategy.dataset.bgmStrategy});"),
+        )
+        flush_helper = self._extract_js_function(self.adapter, "async function flushSoundDesignState(")
         self.assertIn("await saveCurrentChapterBgmDraft();", flush_helper)
         self.assertIn("await savePendingCueChanges();", flush_helper)
         self.assertLess(flush_helper.index("await saveCurrentChapterBgmDraft();"), flush_helper.index("await savePendingCueChanges();"))
@@ -334,9 +414,7 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("cue_gain = max(0.0, min(0.50, float(cue_audio_volume)))", self.assembler)
         self.assertIn("narration_volume=float(state.get(\"narration_audio_volume\")", self.host)
         self.assertIn("cue_audio_volume=float(state.get(\"sound_cue_volume\")", self.preview)
-        flush_start = self.adapter.index("async function flushSoundDesignState(")
-        flush_end = self.adapter.index("function scheduleLibrarySearchRefresh()", flush_start)
-        flush_helper = self.adapter[flush_start:flush_end]
+        flush_helper = self._extract_js_function(self.adapter, "async function flushSoundDesignState(")
         self.assertIn("await saveCurrentChapterBgmDraft();", flush_helper)
         self.assertIn("await savePendingCueChanges();", flush_helper)
         self.assertIn("await saveSoundMixLevels(true);", flush_helper)
@@ -403,9 +481,7 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         end = self.adapter.index("} else if (soundButton.id === 'saveChapterBgm')", start)
         handoff = self.adapter[start:end]
         self.assertIn("await flushSoundDesignState();", handoff)
-        flush_start = self.adapter.index("async function flushSoundDesignState(")
-        flush_end = self.adapter.index("function scheduleLibrarySearchRefresh()", flush_start)
-        flush_helper = self.adapter[flush_start:flush_end]
+        flush_helper = self._extract_js_function(self.adapter, "async function flushSoundDesignState(")
         self.assertIn("await saveSoundMixLevels(true);", flush_helper)
         self.assertIn("path:chapterBased ? '' : (chapterBgmState.default_path || '')", self.adapter)
         self.assertNotIn("selectedSoundPath || chapterBgmState.default_path", handoff)
