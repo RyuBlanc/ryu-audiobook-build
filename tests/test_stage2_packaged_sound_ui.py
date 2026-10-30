@@ -115,6 +115,26 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         ):
             self.assertIn(required, helper)
 
+    def test_built_in_filter_failure_captures_native_catalogue_source_diagnostics(self):
+        script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        for required in (
+            'const diagnosticCatalog = await invoke("sound.catalog", {});',
+            "sourceCounts",
+            "categoryCounts",
+            "roleCounts",
+            "catalogCount:",
+            "activeCategory",
+            "activeSource",
+            "renderedMusicRows",
+            "Packaged starter music is missing from the Built-in filter.",
+        ):
+            self.assertIn(required, script)
+        self.assertIn(
+            'const builtInSource = document.querySelector(\'#soundSourceFilter [data-source="built-in"]\');',
+            script,
+        )
+        self.assertIn("must(musicButtons().length > 0", script)
+
     def test_windows_package_job_runs_the_real_frozen_executable_acceptance(self):
         workflow = (ROOT / ".github/workflows/build-windows.yml").read_text(encoding="utf-8")
         self.assertIn("Run packaged Sound Design Music Library acceptance", workflow)
