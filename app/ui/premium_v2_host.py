@@ -6428,6 +6428,122 @@ class PremiumV2Window(QMainWindow):
             self._web_stack.setCurrentWidget(self.web)
         log.info("Premium V2 frontend and native backend bridge are ready")
         self._write_startup_smoke_marker("ready")
+        self._start_sound_ui_acceptance()
+
+    def _start_sound_ui_acceptance(self) -> None:
+        """Run an opt-in real WebEngine/desktop-bridge acceptance check in CI only."""
+        script_value = str(os.environ.get("RYU_SOUND_UI_ACCEPTANCE_SCRIPT") or "").strip()
+        config_value = str(os.environ.get("RYU_SOUND_UI_ACCEPTANCE_CONFIG") or "").strip()
+        marker_value = str(os.environ.get("RYU_SOUND_UI_ACCEPTANCE_MARKER") or "").strip()
+        if not any((script_value, config_value, marker_value)):
+            return
+        if getattr(self, "_sound_ui_acceptance_started", False):
+            return
+        self._sound_ui_acceptance_started = True
+        if not all((script_value, config_value, marker_value)):
+            self._finish_sound_ui_acceptance({
+                "status": "failed",
+                "errors": ["All three RYU_SOUND_UI_ACCEPTANCE_* paths must be provided."],
+            })
+            return
+        try:
+            script_path = Path(script_value).expanduser().resolve()
+            config_path = Path(config_value).expanduser().resolve()
+            self._sound_ui_acceptance_marker_path = Path(marker_value).expanduser().resolve()
+            if not script_path.is_file() or not config_path.is_file():
+                raise FileNotFoundError("The packaged Sound Design acceptance script or fixture configuration is missing.")
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            if not isinstance(config, dict):
+                raise ValueError("The packaged Sound Design acceptance fixture configuration must be a JSON object.")
+            script = script_path.read_text(encoding="utf-8")
+            if not script.strip():
+                raise ValueError("The packaged Sound Design acceptance JavaScript is empty.")
+            timeout = float(os.environ.get("RYU_SOUND_UI_ACCEPTANCE_TIMEOUT_SECONDS") or 150)
+            self._sound_ui_acceptance_timeout_seconds = max(30.0, min(300.0, timeout))
+            self._sound_ui_acceptance_started_at = time.monotonic()
+            self._sound_ui_acceptance_poll_in_flight = False
+            self._sound_ui_acceptance_finished = False
+            prelude = "window.__RYU_SOUND_UI_ACCEPTANCE_CONFIG__ = " + json.dumps(
+                config, ensure_ascii=True, separators=(",", ":")
+            ) + ";\n"
+            self.web.page().runJavaScript(prelude + script)
+            self._sound_ui_acceptance_timer = QTimer(self)
+            self._sound_ui_acceptance_timer.setInterval(400)
+            self._sound_ui_acceptance_timer.timeout.connect(self._poll_sound_ui_acceptance)
+            self._sound_ui_acceptance_timer.start()
+            log.info("Packaged Sound Design UI acceptance driver injected.")
+        except Exception as exc:
+            log.exception("Could not start packaged Sound Design UI acceptance.")
+            self._finish_sound_ui_acceptance({
+                "status": "failed",
+                "errors": [f"Could not start the acceptance driver: {exc}"],
+            })
+
+    def _poll_sound_ui_acceptance(self) -> None:
+        """Collect the browser driver's explicit result without blocking Qt's event loop."""
+        if getattr(self, "_sound_ui_acceptance_finished", False):
+            return
+        started = float(getattr(self, "_sound_ui_acceptance_started_at", time.monotonic()))
+        timeout = float(getattr(self, "_sound_ui_acceptance_timeout_seconds", 150.0))
+        if time.monotonic() - started > timeout:
+            self._finish_sound_ui_acceptance({
+                "status": "failed",
+                "errors": [f"Browser acceptance did not finish within {timeout:.0f} seconds."],
+            })
+            return
+        if getattr(self, "_sound_ui_acceptance_poll_in_flight", False):
+            return
+        self._sound_ui_acceptance_poll_in_flight = True
+
+        def received(value: Any) -> None:
+            self._sound_ui_acceptance_poll_in_flight = False
+            if self._sound_ui_acceptance_finished or value in (None, "", "null"):
+                return
+            try:
+                result = json.loads(value) if isinstance(value, str) else value
+                if not isinstance(result, dict) or result.get("status") not in {"passed", "failed"}:
+                    return
+                self._finish_sound_ui_acceptance(result)
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                self._finish_sound_ui_acceptance({
+                    "status": "failed",
+                    "errors": [f"Browser acceptance returned unreadable result data: {exc}"],
+                })
+
+        self.web.page().runJavaScript(
+            "JSON.stringify(window.__RYU_SOUND_UI_ACCEPTANCE_RESULT__ || null)",
+            received,
+        )
+
+    def _finish_sound_ui_acceptance(self, result: dict[str, Any]) -> None:
+        """Persist the UI test result and terminate this dedicated CI app process."""
+        if getattr(self, "_sound_ui_acceptance_finished", False):
+            return
+        self._sound_ui_acceptance_finished = True
+        payload = dict(result or {})
+        payload.setdefault("version", full_version())
+        payload.setdefault("frontend", "Premium V2")
+        status = "passed" if payload.get("status") == "passed" else "failed"
+        payload["status"] = status
+        marker_path = getattr(self, "_sound_ui_acceptance_marker_path", None)
+        try:
+            if marker_path is None:
+                marker_value = str(os.environ.get("RYU_SOUND_UI_ACCEPTANCE_MARKER") or "").strip()
+                marker_path = Path(marker_value).expanduser().resolve() if marker_value else None
+            if marker_path is None:
+                raise ValueError("The packaged Sound Design acceptance marker path is not configured.")
+            marker_path.parent.mkdir(parents=True, exist_ok=True)
+            marker_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            log.exception("Could not persist packaged Sound Design acceptance result.")
+            status = "failed"
+        timer = getattr(self, "_sound_ui_acceptance_timer", None)
+        if timer is not None:
+            timer.stop()
+        log.info("Packaged Sound Design UI acceptance %s: %s", status, payload)
+        app = QApplication.instance()
+        if app is not None:
+            QTimer.singleShot(100, lambda: app.exit(0 if status == "passed" else 1))
 
     def _retry_web_renderer(self) -> None:
         # Keep the native loading surface visible during reload. Switching to the

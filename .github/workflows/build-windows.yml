@@ -73,6 +73,8 @@ jobs:
           }
           & $nodeExe --check 'assets\frontend\premium_v2_backend_adapter.js'
           if ($LASTEXITCODE -ne 0) { throw "Premium V2 backend adapter JavaScript syntax validation failed with exit code $LASTEXITCODE." }
+          & $nodeExe --check 'tests\stage2_packaged_sound_ui_acceptance.js'
+          if ($LASTEXITCODE -ne 0) { throw "Packaged Sound Design acceptance JavaScript syntax validation failed with exit code $LASTEXITCODE." }
           & $nodeExe --check 'installer\ryu_installer.js'
           if ($LASTEXITCODE -ne 0) { throw "Installer JavaScript syntax validation failed with exit code $LASTEXITCODE." }
 
@@ -110,6 +112,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Installer JavaScript syntax validation failed with exit code $LASTEXITCODE." }
           & $nodeExe --check 'assets\frontend\premium_v2_backend_adapter.js'
           if ($LASTEXITCODE -ne 0) { throw "Premium V2 backend adapter syntax validation failed with exit code $LASTEXITCODE." }
+          & $nodeExe --check 'tests\stage2_packaged_sound_ui_acceptance.js'
+          if ($LASTEXITCODE -ne 0) { throw "Packaged Sound Design acceptance JavaScript syntax validation failed with exit code $LASTEXITCODE." }
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -607,6 +611,20 @@ jobs:
           }
           Write-Host "Bundled real starter audio verified: BGM=$($starterMusic.Count), with opening/page-turn/closing cue categories."
           Write-Host 'Critical application modules were already exercised by the frozen EXE self-test.'
+
+      - name: Run packaged Sound Design Music Library acceptance
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = $env:RYU_CI_PYTHON_EXE
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "The previously validated CI Python interpreter is unavailable for packaged Sound Design acceptance: $pythonExe"
+          }
+          $env:PYTHONPATH = (Get-Location).Path
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B 'tests\packaged_sound_ui_acceptance.py' --exe "dist\Ryu's Audiobook\Ryu's Audiobook.exe" --script 'tests\stage2_packaged_sound_ui_acceptance.js'
+          if ($LASTEXITCODE -ne 0) { throw "Packaged Sound Design Music Library acceptance failed with exit code $LASTEXITCODE." }
 
       - name: Install Inno Setup
         shell: pwsh
