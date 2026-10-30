@@ -129,19 +129,24 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         self.assertLess(refresh.index("gridNeedsRepair"), refresh.index("grid.innerHTML = visible.map"))
         self.assertIn("grid.dataset.soundListSignature = signature;", refresh)
 
-    def test_cue_library_refresh_loads_a_fresh_shared_catalogue_before_rendering(self):
+    def test_cue_library_refresh_loads_fresh_catalogue_without_invalidating_music_grid(self):
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
-        start = adapter.index("async function refreshSoundCues()")
-        end = adapter.index("function chapterMusicCategoryGroup", start)
-        refresh = adapter[start:end]
-        self.assertIn("const catalogRequestToken = ++soundListEpoch;", refresh)
-        self.assertIn("const [loadedCatalog, loadedAssignments] = await Promise.all([", refresh)
-        self.assertIn("call('sound.catalog')", refresh)
-        self.assertIn("call('sound.cues.get')", refresh)
-        self.assertIn("if (catalogRequestToken !== soundListEpoch || requestToken !== cueListEpoch) return cueAssignments;", refresh)
-        self.assertIn("sounds = Array.isArray(loadedCatalog) ? loadedCatalog : [];", refresh)
-        self.assertLess(refresh.index("call('sound.catalog')"), refresh.index("const visible = sounds.filter"))
-        self.assertIn("isCueSoundAsset(t)", refresh)
+        music_start = adapter.index("async function refreshSounds()")
+        cue_start = adapter.index("async function refreshSoundCues()", music_start)
+        cue_end = adapter.index("function chapterMusicCategoryGroup", cue_start)
+        music_refresh = adapter[music_start:cue_start]
+        cue_refresh = adapter[cue_start:cue_end]
+        self.assertIn("const requestToken = ++soundListEpoch;", music_refresh)
+        self.assertIn("if (requestToken !== soundListEpoch) return sounds;", music_refresh)
+        self.assertIn("const requestToken = ++cueListEpoch;", cue_refresh)
+        self.assertNotIn("soundListEpoch", cue_refresh)
+        self.assertIn("const [loadedCatalog, loadedAssignments] = await Promise.all([", cue_refresh)
+        self.assertIn("call('sound.catalog')", cue_refresh)
+        self.assertIn("call('sound.cues.get')", cue_refresh)
+        self.assertIn("if (requestToken !== cueListEpoch) return cueAssignments;", cue_refresh)
+        self.assertIn("sounds = Array.isArray(loadedCatalog) ? loadedCatalog : [];", cue_refresh)
+        self.assertLess(cue_refresh.index("call('sound.catalog')"), cue_refresh.index("const visible = sounds.filter"))
+        self.assertIn("isCueSoundAsset(t)", cue_refresh)
 
     def test_packaged_volume_interaction_focuses_the_real_slider_before_editing(self):
         script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")

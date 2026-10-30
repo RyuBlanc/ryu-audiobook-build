@@ -202,6 +202,7 @@
         roleCounts[role] = (roleCounts[role] || 0) + 1;
       }
       const renderedRows = musicButtons().map(rowText);
+      const diagnosticGrid = document.querySelector("#soundTrackGrid");
       throw new Error("Built-in filter did not settle on bundled music rows. " +
         JSON.stringify({
           cause:String(filterError),
@@ -209,6 +210,10 @@
           sourceCounts, categoryCounts, roleCounts,
           activeCategory:document.querySelector('#sound .sound-categories-list [data-music-category].active')?.dataset.musicCategory || "(none)",
           activeSource:document.querySelector('#soundSourceFilter [data-source].active')?.dataset.source || "(none)",
+          gridExists:Boolean(diagnosticGrid),
+          gridSignature:diagnosticGrid?.dataset.soundListSignature || "(missing)",
+          gridRowCount:musicButtons().length,
+          gridText:String(diagnosticGrid?.textContent || "").trim().slice(0,400),
           renderedRows:renderedRows.slice(0,12)
         }));
     }

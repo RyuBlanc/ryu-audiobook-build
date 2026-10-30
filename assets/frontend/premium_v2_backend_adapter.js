@@ -3501,12 +3501,14 @@
     // imports can happen while the Music view is hidden, and another refresh may
     // supersede the shared array before this renderer runs.
     const requestToken = ++cueListEpoch;
-    const catalogRequestToken = ++soundListEpoch;
+    // Cue refreshes have their own request epoch. Do not advance soundListEpoch:
+    // that epoch owns Music Library grid renders, and cue refreshes may overlap a
+    // source/category refresh triggered immediately after a music import.
     const [loadedCatalog, loadedAssignments] = await Promise.all([
       call('sound.catalog'),
       call('sound.cues.get')
     ]);
-    if (catalogRequestToken !== soundListEpoch || requestToken !== cueListEpoch) return cueAssignments;
+    if (requestToken !== cueListEpoch) return cueAssignments;
     sounds = Array.isArray(loadedCatalog) ? loadedCatalog : [];
     if (requestToken !== cueListEpoch) return cueAssignments;
     cueAssignments = loadedAssignments && typeof loadedAssignments === 'object' ? loadedAssignments : {};
