@@ -75,3 +75,7 @@ The runner is standard-library-only so it does not depend on the setup-python to
 ## Scope protection
 
 This checkpoint covers only `SD-09`, `SD-10`, and `MUS-06`, plus the retained Music Library prerequisite checks described above. It does **not** mark the remaining SD/MUS requirements, Production handoff, the complete 24-item register, or Version 1.2.0 as complete. Later work-order steps remain in scope and must retain their original requirement IDs and behavior.
+
+## Latest regression gate
+
+Run #1746 passed on 68c4afb: JavaScript syntax passed; 843 tests passed in 37.083s. Runs #1744 and #1745 failed on an obsolete test assertion; #1745 did not reach the Windows build. Packaged verification remains pending.
