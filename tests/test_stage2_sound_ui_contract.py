@@ -137,6 +137,13 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("self.background_audio_volume = max(0.0, min(0.50, float(background_audio_volume)))", self.manager)
         self.assertIn('max="50" min="0" type="range" value="18"', self.sound_markup)
 
+    def test_chapter_controls_remove_legacy_prototype_handlers(self):
+        self.assertIn("'saveCueChanges','chapterBgmList','chapterTrackPicker'].forEach(id => {", self.adapter)
+        self.assertIn("['#sound .chapter-bgm-strategy', '#sound .chapter-rule'].forEach(selector => {", self.adapter)
+        self.assertIn("const cleanNode = node.cloneNode(true);", self.adapter)
+        self.assertIn("cleanNode.querySelectorAll('[onclick]').forEach(button => button.removeAttribute('onclick'));", self.adapter)
+        self.assertIn("node.replaceWith(cleanNode);", self.adapter)
+
     def test_chapter_bgm_uses_real_source_and_category_filters(self):
         for source in ("all", "built-in", "imported"):
             self.assertIn(f'data-chapter-source="{source}"', self.adapter)
