@@ -102,3 +102,11 @@ Run #1746 passed on 68c4afb: JavaScript syntax passed; 843 tests passed in 37.08
 - [#1752](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41077106695) passed on the test-only driver correction parent `79d1f81e6c03ae00949b3539eedae8e7909dd871`: frontend JavaScript syntax passed; **844 tests passed in 39.942 seconds**.
 - The packaged acceptance script now waits for both imported cue fixture paths to appear in `#cueGrid` before inspecting card layout/selection/playback. If that wait expires, the script emits catalogue role counts and cue-grid diagnostics to determine whether the remaining issue is a real renderer defect.
 - This was the regression-only run. A full Windows artifact checkpoint is required to determine whether the cue-card and real cue playback steps pass in the frozen executable.
+
+## Consolidated Stage 2 acceptance gate — regression baseline
+
+- The expanded packaged Stage 2 runner now creates a three-chapter project with saved paragraph-aligned narration chunks, two Music Library tracks, one imported track for each remaining supported category, two fixed cue fixtures and a six-second invalid cue fixture. It exercises Music Library filtering/imports, Chapter BGM strategy and explicit assignments/timing/volumes, cue slot save/clear/failure retry, Mix values, full-book previews, Voice Only, Production handoff/save failure, project switching and a second frozen-app process restart.
+- The restart phase reads the saved native catalogue/project state in a newly launched frozen executable. The runner independently validates the JSON state, chapter assignments/timing/end policies, three cue slots, mix levels, imported asset metadata and project cleanup.
+- The slider regression assertion was corrected to match the actual configured value expression while preserving the required order: focus, value edit, input and change. No production code changed in this correction.
+- Regression baseline: [#1763](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41147418738) passed on `3a2ab79b12e883dc55ed9f3fee2bdd9ad7762286`: frontend JavaScript syntax validation passed and **844 tests passed in 37.141 seconds**.
+- The next artifact checkpoint must pass the entire expanded packaged workflow and restart phase before SD/MUS closure is considered.
