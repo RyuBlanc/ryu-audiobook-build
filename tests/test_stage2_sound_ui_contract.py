@@ -241,7 +241,16 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertNotIn('state["chapter_bgm_overrides"] = {}', method)
         self.assertIn("await saveCurrentChapterBgmDraft();", self.adapter)
         self.assertIn("chapter assignments were preserved for switching back.", self.adapter)
-        self.assertIn("await saveCurrentChapterBgmDraft();\n            await savePendingCueChanges();", self.adapter)
+        strategy_start = self.adapter.index("const chapterStrategy = e.target.closest('#sound [data-bgm-strategy]');")
+        strategy_end = self.adapter.index("const chapterBgmItem = e.target.closest('#chapterBgmList [data-chapter-bgm]');", strategy_start)
+        strategy_handler = self.adapter[strategy_start:strategy_end]
+        self.assertIn("await saveCurrentChapterBgmDraft();", strategy_handler)
+        flush_start = self.adapter.index("async function flushSoundDesignState(")
+        flush_end = self.adapter.index("function scheduleLibrarySearchRefresh()", flush_start)
+        flush_helper = self.adapter[flush_start:flush_end]
+        self.assertIn("await saveCurrentChapterBgmDraft();", flush_helper)
+        self.assertIn("await savePendingCueChanges();", flush_helper)
+        self.assertLess(flush_helper.index("await saveCurrentChapterBgmDraft();"), flush_helper.index("await savePendingCueChanges();"))
 
     def test_master_and_chapter_bgm_gains_are_capped_at_50_percent(self):
         start = self.host.index("    def _sound_assign(")
@@ -325,7 +334,13 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("cue_gain = max(0.0, min(0.50, float(cue_audio_volume)))", self.assembler)
         self.assertIn("narration_volume=float(state.get(\"narration_audio_volume\")", self.host)
         self.assertIn("cue_audio_volume=float(state.get(\"sound_cue_volume\")", self.preview)
-        self.assertIn("await saveCurrentChapterBgmDraft();\n            await savePendingCueChanges();", self.adapter)
+        flush_start = self.adapter.index("async function flushSoundDesignState(")
+        flush_end = self.adapter.index("function scheduleLibrarySearchRefresh()", flush_start)
+        flush_helper = self.adapter[flush_start:flush_end]
+        self.assertIn("await saveCurrentChapterBgmDraft();", flush_helper)
+        self.assertIn("await savePendingCueChanges();", flush_helper)
+        self.assertIn("await saveSoundMixLevels(true);", flush_helper)
+        self.assertLess(flush_helper.index("await savePendingCueChanges();"), flush_helper.index("await saveSoundMixLevels(true);"))
 
     def test_cue_import_rejects_long_clips_and_keeps_music_import_available(self):
         start = self.host.index("    def _sound_import(")
@@ -387,7 +402,11 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         start = self.adapter.index("} else if (soundButton.id === 'applySoundToProduction')")
         end = self.adapter.index("} else if (soundButton.id === 'saveChapterBgm')", start)
         handoff = self.adapter[start:end]
-        self.assertIn("await saveSoundMixLevels(true);", handoff)
+        self.assertIn("await flushSoundDesignState();", handoff)
+        flush_start = self.adapter.index("async function flushSoundDesignState(")
+        flush_end = self.adapter.index("function scheduleLibrarySearchRefresh()", flush_start)
+        flush_helper = self.adapter[flush_start:flush_end]
+        self.assertIn("await saveSoundMixLevels(true);", flush_helper)
         self.assertIn("path:chapterBased ? '' : (chapterBgmState.default_path || '')", self.adapter)
         self.assertNotIn("selectedSoundPath || chapterBgmState.default_path", handoff)
 
