@@ -5374,8 +5374,9 @@ class PremiumV2Bridge(QObject):
             roots.append((bundled, "Bundled with application"))
         found: dict[str, dict[str, Any]] = {}
         category_aliases = {
-            "fantasy adventure": "fantasy", "battle & warfare": "action",
-            "calm narration": "calm", "others": "emotional",
+            "fantasy adventure": "fantasy", "fantasy-adventure": "fantasy",
+            "battle & warfare": "action", "battle-warfare": "action", "battle warfare": "action",
+            "calm narration": "calm", "calm-narration": "calm", "others": "emotional",
         }
         category_display = {
             "fantasy": "Fantasy adventure", "adventure": "Fantasy adventure",
@@ -5436,9 +5437,22 @@ class PremiumV2Bridge(QObject):
             paths = selected
         if not paths:
             return {"cancelled": True, "imported": []}
-        from app.audio.library import AUDIO_EXTENSIONS, probe_audio_duration_seconds
+        from app.audio.library import AUDIO_EXTENSIONS, MUSIC_CATEGORY_LABELS, probe_audio_duration_seconds
         extensions = AUDIO_EXTENSIONS
         target_kind = str(payload.get("target_kind") or "cue").strip().casefold()
+        if target_kind not in {"music", "cue"}:
+            raise ValueError("Choose either Music Library or Opening & Cues as the import destination.")
+        category = str(payload.get("category") or "universal").strip().casefold()
+        category_aliases = {
+            "fantasy adventure": "fantasy", "fantasy-adventure": "fantasy",
+            "battle & warfare": "action", "battle-warfare": "action",
+            "calm narration": "calm", "calm-narration": "calm", "others": "emotional",
+        }
+        category = category_aliases.get(category, category)
+        if target_kind == "music" and category not in MUSIC_CATEGORY_LABELS:
+            raise ValueError("Choose one of the supported Music Library categories.")
+        if target_kind == "cue":
+            category = "universal"
         target_root = app_root() / "Audio Library"
         target_root.mkdir(parents=True, exist_ok=True)
         imported = []
@@ -5460,7 +5474,7 @@ class PremiumV2Bridge(QObject):
                 shutil.copy2(source, destination)
             metadata_path = destination.with_name(destination.name + ".license.json")
             metadata = {"role": "music" if target_kind == "music" else "cue",
-                        "category": str(payload.get("category") or "universal"),
+                        "category": category,
                         "title": destination.stem, "original_filename": source.name,
                         "license_note": str(payload.get("license_note") or "User-imported; verify license before publishing"),
                         "duration_seconds": duration_seconds, "imported_at": self._now()}
@@ -5654,12 +5668,21 @@ class PremiumV2Bridge(QObject):
             # Restore the separately saved book-default track when returning to
             # Same BGM; Chapter-Based mode clears the active path but keeps the preference.
             if strategy == "same":
-                preferred = str(state.get("background_audio_path") or state.get("background_audio_preferred_path") or "").strip()
+                preferred = str(state.get("background_audio_preferred_path") or state.get("background_audio_path") or "").strip()
                 catalog_paths = {str(row["path"]) for row in self._sound_catalog({})}
+                if preferred:
+                    state["background_audio_preferred_path"] = preferred
                 if master_enabled and preferred and preferred in catalog_paths and Path(preferred).is_file():
                     state["background_audio_path"] = preferred
                 else:
                     state["background_audio_path"] = ""
+            else:
+                # Chapter-Based BGM is mutually exclusive with the book default.
+                # Preserve the preference for switching back, but never leave it
+                # active in the generation path while chapter-specific BGM is selected.
+                preferred = str(state.get("background_audio_preferred_path") or state.get("background_audio_path") or "").strip()
+                state["background_audio_preferred_path"] = preferred
+                state["background_audio_path"] = ""
             # Strategy changes must respect the global BGM/Voice Only control.
             state["background_audio_enabled"] = master_enabled
             state["background_audio_mode"] = "manual" if master_enabled else "off"

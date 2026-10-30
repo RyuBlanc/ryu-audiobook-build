@@ -264,10 +264,87 @@
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, selectedCuePath = null, pendingCueSlot = null, pendingCueAssignments = Object.create(null), cueChangesDirty = false, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null, chapterBgmDraftDirty = false, mixLevelsDirty = false, soundPreviewKind = null, soundPreviewPath = null;
   let chapterBgmCandidateTrackPath = null, chapterBgmCandidateChapter = null, chapterBgmSavePromise = null, cueSavePromise = null;
+  let chapterBgmAutoSaveTimer = null, cueAutoSaveTimer = null, chapterBgmDraftRevision = 0;
+  let mixLevelsRevision = 0, mixLevelsSavePromise = null;
+  let soundManifestSavePromise = null, soundManifestSaveRevision = 0, soundManifestPendingOverrides = Object.create(null);
+  let cueClearAllStaged = false;
   let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0, projectListEpoch = 0, characterListEpoch = 0, termsListEpoch = 0, soundListEpoch = 0, historyListEpoch = 0, librarySearchTimer = null, soundSearchTimer = null;
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
   let activeProjectCardFolder = null, projectCardStatusObserver = null;
   let activeProjectCardEpoch = 0;
+  const soundCategoryGroups = Object.freeze({
+    'fantasy':'fantasy-adventure', 'adventure':'fantasy-adventure',
+    'fantasy-adventure':'fantasy-adventure', 'fantasy adventure':'fantasy-adventure',
+    'action':'battle-warfare', 'battle':'battle-warfare',
+    'battle-warfare':'battle-warfare', 'battle & warfare':'battle-warfare',
+    'battle warfare':'battle-warfare',
+    'mystery':'mystery', 'horror':'horror', 'romance':'romance', 'sci-fi':'sci-fi',
+    'calm':'calm-narration', 'universal':'calm-narration',
+    'calm-narration':'calm-narration', 'calm narration':'calm-narration',
+    'emotional':'others', 'others':'others', 'slice-of-life':'others', 'comedy':'others'
+  });
+  function soundCategoryGroup(track) {
+    const metadata = track && typeof track === 'object' && track.metadata && typeof track.metadata === 'object'
+      ? track.metadata : {};
+    const raw = typeof track === 'string'
+      ? track : (track?.category || metadata.category || track?.category_label || 'universal');
+    const category = String(raw).trim().toLowerCase().replace(/_/g, '-').replace(/\\s+/g, ' ');
+    return soundCategoryGroups[category] || 'others';
+  }
+  function soundAssetRole(track) {
+    const metadata = track && typeof track === 'object' && track.metadata && typeof track.metadata === 'object'
+      ? track.metadata : {};
+    const role = String(track?.role || metadata.role || 'music').trim().toLowerCase();
+    return ['opening','page','ending','closing','chapter'].includes(role) ? 'cue' : role;
+  }
+  function isCueSoundAsset(track) { return soundAssetRole(track) === 'cue'; }
+  function isMusicSoundAsset(track) { return !isCueSoundAsset(track); }
+  function soundSourceKind(track) {
+    const source = String(track?.source || '').trim().toLowerCase();
+    if (source.includes('bundled') || source.includes('built-in') || source.includes('built in') || source.includes('starter')) return 'built-in';
+    if (source.includes('imported') || source.includes('local import')) return 'imported';
+    return 'unknown';
+  }
+  function markMixLevelsDirty() {
+    mixLevelsDirty = true;
+    mixLevelsRevision += 1;
+    soundManifestSaveRevision += 1;
+  }
+  function setChapterBgmSaveStatus(value) {
+    const status = $('chapterBgmSaveState');
+    if (status) status.textContent = String(value || '');
+  }
+  function scheduleChapterBgmAutoSave() {
+    if (chapterBgmAutoSaveTimer) clearTimeout(chapterBgmAutoSaveTimer);
+    chapterBgmAutoSaveTimer = null;
+    if (!chapterBgmDraftDirty) return;
+    const chapterBased = ['custom','chapter-based','chapter_based','chapter'].includes(
+      String(chapterBgmState.strategy || 'same').toLowerCase()
+    );
+    if (!chapterBased) return;
+    const activeRule = document.querySelector('#sound .chapter-rule [data-chapter-rule].active')?.dataset.chapterRule || 'none';
+    if (activeRule === 'custom' && !selectedBgmTrackPath) {
+      setChapterBgmSaveStatus('Choose a track and press Select before this chapter assignment can be saved.');
+      return;
+    }
+    setChapterBgmSaveStatus('Unsaved chapter changes — saving automatically shortly.');
+    chapterBgmAutoSaveTimer = setTimeout(async () => {
+      chapterBgmAutoSaveTimer = null;
+      try {
+        const saved = await saveCurrentChapterBgmDraft();
+        if (saved) message('Chapter BGM changes saved automatically.');
+      } catch (error) {
+        setChapterBgmSaveStatus('Save failed. Unsaved chapter changes have been retained.');
+        message(error?.message || String(error), true);
+      }
+    }, 700);
+  }
+  function markChapterBgmDraftDirty() {
+    chapterBgmDraftDirty = true;
+    chapterBgmDraftRevision += 1;
+    setChapterBgmSaveStatus('Unsaved chapter changes.');
+    scheduleChapterBgmAutoSave();
+  }
   const resumeCheckpointKey = 'ryu.project.resume-checkpoints.v1';
   const resumeStages = new Set(['import','chapters','narrator','characters','sound','production','player']);
   const resumeStageRoutes = {
@@ -3364,27 +3441,20 @@
     const query = ($('soundTrackSearch')?.value || '').trim().toLowerCase();
     const sourceFilter = document.querySelector('#soundSourceFilter [data-source].active')?.dataset.source || 'all';
     const selectedMusicCategory = document.querySelector('#sound .sound-categories-list [data-music-category].active')?.dataset.musicCategory || 'all';
-    const categoryGroup = track => {
-      const metadata = track.metadata && typeof track.metadata === 'object' ? track.metadata : {};
-      const category = String(track.category || track.metadata?.category || 'universal').trim().toLowerCase();
-      if (['fantasy','adventure'].includes(category)) return 'fantasy-adventure';
-      if (category === 'action') return 'battle-warfare';
-      if (['mystery','horror','romance','sci-fi'].includes(category)) return category;
-      if (['calm','universal'].includes(category)) return 'calm-narration';
-      return 'others';
-    };
+    const categoryGroup = soundCategoryGroup;
     const visible = sounds.filter(t => {
       const metadata = t.metadata && typeof t.metadata === 'object' ? t.metadata : {};
-      const role = String(t.role || metadata.role || 'music').toLowerCase();
+      const role = soundAssetRole(t);
       const searchable = [
         t.title, t.source, t.format, t.category, t.category_label,
         metadata.category, metadata.tags, metadata.mood, metadata.original_filename
       ].map(value => Array.isArray(value) ? value.join(' ') : String(value ?? '')).join(' ').toLowerCase();
       const matchesMusicType = role !== 'cue';
       const matchesQuery = !query || searchable.includes(query);
+      const sourceKind = soundSourceKind(t);
       const matchesSource = sourceFilter === 'all' ||
-        (sourceFilter === 'built-in' && String(t.source).toLowerCase().includes('bundled')) ||
-        (sourceFilter === 'imported' && String(t.source).toLowerCase().includes('imported'));
+        (sourceFilter === 'built-in' && sourceKind === 'built-in') ||
+        (sourceFilter === 'imported' && sourceKind === 'imported');
       const matchesCategory = selectedMusicCategory === 'all' || categoryGroup(t) === selectedMusicCategory;
       return matchesMusicType && matchesQuery && matchesSource && matchesCategory;
     });
@@ -3435,11 +3505,11 @@
     const sourceFilter = document.querySelector('#cueSourceFilter [data-cue-source].active')?.dataset.cueSource || 'all';
     const visible = sounds.filter(t => {
       const text = (t.title + ' ' + t.source + ' ' + t.format).toLowerCase();
-      const source = String(t.source || '').toLowerCase();
-      const isCue = String(t.role || t.metadata?.role || 'music').toLowerCase() === 'cue';
+      const sourceKind = soundSourceKind(t);
+      const isCue = isCueSoundAsset(t);
       return isCue && (!query || text.includes(query)) &&
-        (sourceFilter === 'all' || (sourceFilter === 'built-in' && source.includes('bundled')) ||
-         (sourceFilter === 'imported' && source.includes('imported')));
+        (sourceFilter === 'all' || (sourceFilter === 'built-in' && sourceKind === 'built-in') ||
+         (sourceFilter === 'imported' && sourceKind === 'imported'));
     });
     const signature = JSON.stringify({query,sourceFilter,rows:visible.map(t => [t.path,t.title,t.source,t.format,t.size_bytes])});
     if (grid.dataset.cueListSignature !== signature) {
@@ -3449,14 +3519,7 @@
     }
     return cueAssignments;
   }
-  function chapterMusicCategoryGroup(track) {
-    const category = String(track?.category || track?.metadata?.category || 'universal').trim().toLowerCase();
-    if (['fantasy', 'adventure', 'fantasy-adventure', 'fantasy adventure'].includes(category)) return 'fantasy-adventure';
-    if (['action', 'battle', 'battle-warfare', 'battle & warfare'].includes(category)) return 'battle-warfare';
-    if (['mystery', 'horror', 'romance', 'sci-fi'].includes(category)) return category;
-    if (['calm', 'universal', 'calm-narration', 'calm narration'].includes(category)) return 'calm-narration';
-    return 'others';
-  }
+  function chapterMusicCategoryGroup(track) { return soundCategoryGroup(track); }
   function ensureChapterBgmControls() {
     const picker = $('chapterTrackPicker');
     if (!picker) return;
@@ -3479,6 +3542,17 @@
         '<button type="button" data-chapter-category="calm-narration">Calm narration</button>' +
         '<button type="button" data-chapter-category="others">Others</button></div></div>';
       editor.insertBefore(filters, picker);
+    }
+    if (editor && !$('chapterBgmSaveState')) {
+      const status = document.createElement('p');
+      status.id = 'chapterBgmSaveState';
+      status.className = 'muted';
+      status.setAttribute('role', 'status');
+      status.setAttribute('aria-live', 'polite');
+      status.textContent = 'Saved chapter assignments load from this book.';
+      const saveButton = $('saveChapterBgm');
+      if (saveButton && saveButton.parentElement === editor) saveButton.insertAdjacentElement('beforebegin', status);
+      else editor.appendChild(status);
     }
     const layout = picker.closest('.chapter-bgm-layout');
     if (layout) {
@@ -3524,7 +3598,7 @@
     const state = $('selectedChapterBgmTrackState');
     const button = $('confirmChapterBgmTrack');
     const candidate = sounds.find(track => String(track.path || '') === String(chapterBgmCandidateTrackPath || '') &&
-      String(track.role || track.metadata?.role || 'music').toLowerCase() !== 'cue');
+      isMusicSoundAsset(track));
     const chapterBased = ['custom', 'chapter-based', 'chapter_based', 'chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
     if (title) title.textContent = candidate?.title || 'No track selected';
     if (meta) meta.textContent = candidate
@@ -3596,12 +3670,12 @@
       : 'Narration and cue levels are saved with the mix.');
     const defaultPath = String(chapterBgmState.default_path || '').trim();
     const defaultTrack = defaultPath
-      ? sounds.find(track => String(track.path || '') === defaultPath && String(track.role || 'music').toLowerCase() !== 'cue')
+      ? sounds.find(track => String(track.path || '') === defaultPath && isMusicSoundAsset(track))
       : null;
     const defaultAvailable = Boolean(defaultPath && chapterBgmState.default_available === true && defaultTrack);
     const activeChapterRows = Object.values(overrides).filter(item =>
       item && item.rule === 'custom' && item.path && item.available !== false &&
-      sounds.some(track => String(track.path || '') === String(item.path) && String(track.role || 'music').toLowerCase() !== 'cue')
+      sounds.some(track => String(track.path || '') === String(item.path) && isMusicSoundAsset(track))
     );
     const hasActiveBgm = chapterBased ? activeChapterRows.length > 0 : Boolean(defaultAvailable && defaultTrack);
     const activeCueSlots = ['opening','chapter','closing'].filter(slot => {
@@ -3738,7 +3812,7 @@
       const query = String($('chapterTrackSearch')?.value || '').trim().toLowerCase();
       const sourceFilter = document.querySelector('#chapterBgmSourceFilter [data-chapter-source].active')?.dataset.chapterSource || 'all';
       const categoryFilter = document.querySelector('#chapterBgmCategoryFilter [data-chapter-category].active')?.dataset.chapterCategory || 'all';
-      const allMusicTracks = sounds.filter(track => String(track.role || track.metadata?.role || 'music').toLowerCase() !== 'cue');
+      const allMusicTracks = sounds.filter(track => isMusicSoundAsset(track));
       const visible = allMusicTracks.filter(track => {
         const metadata = track.metadata && typeof track.metadata === 'object' ? track.metadata : {};
         const source = String(track.source || '').toLowerCase();
@@ -3817,6 +3891,8 @@
     return audio;
   }
   async function saveCurrentChapterBgmDraft(force = false) {
+    if (chapterBgmAutoSaveTimer) clearTimeout(chapterBgmAutoSaveTimer);
+    chapterBgmAutoSaveTimer = null;
     if (chapterBgmSavePromise) return chapterBgmSavePromise;
     if (!chapterBgmDraftDirty && !force) return false;
     const strategy = String(chapterBgmState.strategy || 'same').toLowerCase();
@@ -3826,17 +3902,6 @@
       throw new Error('Switch to Chapter-Based BGM before saving a chapter assignment.');
     }
     if (!selectedBgmChapter) throw new Error('Choose a chapter before saving its BGM assignment.');
-    let rule = document.querySelector('#sound .chapter-rule [data-chapter-rule].active')?.dataset.chapterRule || 'none';
-    if (rule === 'default') rule = 'none';
-    if (rule === 'custom' && !selectedBgmTrackPath) throw new Error('Choose a track and press Select before saving a custom chapter assignment.');
-    const chapterNumber = Number(selectedBgmChapter);
-    const selects = document.querySelectorAll('#sound [data-sound-view="chapters"] .chapter-mix-row select');
-    const payload = {
-      number:chapterNumber, rule, path:rule === 'custom' ? selectedBgmTrackPath : null,
-      volume:Math.max(0, Math.min(0.50, Number($('chapterVolume')?.value ?? 18)/100)),
-      start_offset:['immediate','after_first_paragraph','after_10_seconds'][selects[0]?.selectedIndex || 0],
-      end_behavior:['fade_before_end','continue_to_transition','stop_immediately'][selects[1]?.selectedIndex || 0]
-    };
     const controls = Array.from(document.querySelectorAll(
       '#sound [data-bgm-strategy], #chapterBgmList button, #chapterTrackPicker button, ' +
       '#chapterBgmFilterControls input, #chapterBgmFilterControls button, ' +
@@ -3846,13 +3911,37 @@
     const priorDisabled = controls.map(control => control.disabled);
     const runSave = (async () => {
       controls.forEach(control => { control.disabled = true; });
+      setChapterBgmSaveStatus('Saving chapter BGM assignment…');
       try {
-        await call('sound.chapter_bgm.save', payload);
-        chapterBgmDraftDirty = false;
-        await refreshChapterBgm();
-        return true;
+        while (true) {
+          const revision = chapterBgmDraftRevision;
+          let rule = document.querySelector('#sound .chapter-rule [data-chapter-rule].active')?.dataset.chapterRule || 'none';
+          if (rule === 'default') rule = 'none';
+          if (rule === 'custom' && !selectedBgmTrackPath) {
+            throw new Error('Choose a track and press Select before saving a custom chapter assignment.');
+          }
+          const chapterNumber = Number(selectedBgmChapter);
+          const selects = document.querySelectorAll('#sound [data-sound-view="chapters"] .chapter-mix-row select');
+          const payload = {
+            number:chapterNumber, rule, path:rule === 'custom' ? selectedBgmTrackPath : null,
+            volume:Math.max(0, Math.min(0.50, Number($('chapterVolume')?.value ?? 18)/100)),
+            start_offset:['immediate','after_first_paragraph','after_10_seconds'][selects[0]?.selectedIndex || 0],
+            end_behavior:['fade_before_end','continue_to_transition','stop_immediately'][selects[1]?.selectedIndex || 0]
+          };
+          await call('sound.chapter_bgm.save', payload);
+          if (revision !== chapterBgmDraftRevision) continue;
+          chapterBgmDraftDirty = false;
+          await refreshChapterBgm();
+          if (revision !== chapterBgmDraftRevision) {
+            chapterBgmDraftDirty = true;
+            continue;
+          }
+          setChapterBgmSaveStatus('Chapter assignment saved.');
+          return true;
+        }
       } catch (error) {
         chapterBgmDraftDirty = true;
+        setChapterBgmSaveStatus('Save failed. Unsaved chapter changes have been retained.');
         throw error;
       } finally {
         controls.forEach((control, index) => { control.disabled = priorDisabled[index]; });
@@ -3865,7 +3954,28 @@
       if (chapterBgmSavePromise === runSave) chapterBgmSavePromise = null;
     }
   }
+  function scheduleCueAutoSave() {
+    if (cueAutoSaveTimer) clearTimeout(cueAutoSaveTimer);
+    cueAutoSaveTimer = null;
+    if (cueClearAllStaged || !Object.keys(pendingCueAssignments).length) return;
+    const status = $('cueSaveState');
+    if (status) status.textContent = 'Unsaved cue changes — saving automatically shortly. Use Save Cue Changes to save now.';
+    cueAutoSaveTimer = setTimeout(async () => {
+      cueAutoSaveTimer = null;
+      try {
+        const saved = await savePendingCueChanges();
+        if (saved) {
+          await refreshChapterBgm();
+          message('Cue changes saved automatically.');
+        }
+      } catch (error) {
+        message(error?.message || String(error), true);
+      }
+    }, 700);
+  }
   async function savePendingCueChanges() {
+    if (cueAutoSaveTimer) clearTimeout(cueAutoSaveTimer);
+    cueAutoSaveTimer = null;
     if (cueSavePromise) return cueSavePromise;
     if (!Object.keys(pendingCueAssignments).length) return false;
     const runSave = (async () => {
@@ -3874,8 +3984,8 @@
       if (status) status.textContent = 'Saving cue changes…';
       if (button) button.disabled = true;
       try {
-        // Drain the pending map until it is empty. If the user changes a slot while
-        // another slot is saving, the newer value is kept and saved in the next pass.
+        // Drain changes until empty. A newer value selected during an in-flight
+        // request remains queued and is written on the next pass.
         while (Object.keys(pendingCueAssignments).length) {
           const entries = Object.entries(pendingCueAssignments);
           for (const [slot, path] of entries) {
@@ -3889,6 +3999,7 @@
           await refreshSoundCues();
         }
         cueChangesDirty = false;
+        cueClearAllStaged = false;
         if (status) status.textContent = 'All cue changes saved.';
         return true;
       } catch (error) {
@@ -3906,7 +4017,7 @@
       if (cueSavePromise === runSave) cueSavePromise = null;
     }
   }
-  async function saveSoundMixLevels() {
+  function currentSoundManifestPayload() {
     const chapterBased = ['custom','chapter-based','chapter_based','chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
     const currentVolume = $('advancedMusicVolume')?.value;
     const volume = currentVolume == null
@@ -3914,16 +4025,65 @@
       : Math.max(0, Math.min(0.50, Number(currentVolume) / 100));
     const narration = Math.max(0, Math.min(1, Number($('narrationVolume')?.value ?? Math.round(Number(chapterBgmState.narration_volume ?? 1) * 100)) / 100));
     const cue = Math.max(0, Math.min(0.50, Number($('cueVolume')?.value ?? Math.round(Number(chapterBgmState.cue_volume ?? 0.25) * 100)) / 100));
-    const result = await call('sound.save_manifest', {
+    return {
       path:chapterBased ? '' : (chapterBgmState.default_path || ''),
       enabled:chapterBgmState.bgm_enabled === true,
       volume, narration_volume:narration, cue_volume:cue,
       fade_in_seconds:fadeSeconds('bgmFadeIn'), fade_out_seconds:fadeSeconds('bgmFadeOut')
-    });
-    mixLevelsDirty = false;
-    await refreshChapterBgm();
-    renderSoundMixSummary();
-    return result;
+    };
+  }
+  async function saveSoundManifest(overrides = {}) {
+    Object.assign(soundManifestPendingOverrides, overrides || {});
+    soundManifestSaveRevision += 1;
+    if (soundManifestSavePromise) return soundManifestSavePromise;
+    const runSave = (async () => {
+      let result = null;
+      let savedRevision = -1;
+      while (savedRevision !== soundManifestSaveRevision) {
+        const revision = soundManifestSaveRevision;
+        result = await call('sound.save_manifest', {
+          ...currentSoundManifestPayload(),
+          ...soundManifestPendingOverrides
+        });
+        savedRevision = revision;
+      }
+      soundManifestPendingOverrides = Object.create(null);
+      return result;
+    })();
+    soundManifestSavePromise = runSave;
+    try {
+      return await runSave;
+    } finally {
+      if (soundManifestSavePromise === runSave) soundManifestSavePromise = null;
+    }
+  }
+  async function saveSoundMixLevels(force = false) {
+    if (!mixLevelsDirty && !force) return false;
+    if (mixLevelsSavePromise) return mixLevelsSavePromise;
+    const runSave = (async () => {
+      let result = null;
+      while (true) {
+        const revision = mixLevelsRevision;
+        result = await saveSoundManifest();
+        if (revision === mixLevelsRevision) {
+          if (result && typeof result === 'object') {
+            chapterBgmState.default_volume = Number(result.bgm_volume ?? chapterBgmState.default_volume ?? 0.18);
+            chapterBgmState.narration_volume = Number(result.narration_volume ?? chapterBgmState.narration_volume ?? 1);
+            chapterBgmState.cue_volume = Number(result.cue_volume ?? chapterBgmState.cue_volume ?? 0.25);
+            chapterBgmState.last_saved_at = result.updated_at || chapterBgmState.last_saved_at;
+          }
+          mixLevelsDirty = false;
+          renderSoundMixSummary();
+          return result;
+        }
+      }
+    })();
+    mixLevelsSavePromise = runSave;
+    try {
+      return await runSave;
+    } finally {
+      if (mixLevelsSavePromise === runSave) mixLevelsSavePromise = null;
+    }
   }
   function scheduleLibrarySearchRefresh() {
     if (librarySearchTimer) clearTimeout(librarySearchTimer);
@@ -6508,24 +6668,30 @@
         scheduleLibrarySearchRefresh();
       } else if (e.target?.id === 'advancedMusicVolume') {
         e.stopImmediatePropagation();
-        mixLevelsDirty = true;
+        markMixLevelsDirty();
+        if (soundPreviewAudio && soundPreviewKind === 'music') {
+          soundPreviewAudio.volume = Math.max(0, Math.min(0.50, Number(e.target.value || 0) / 100));
+        }
         const valueNode = $('advancedMusicVolumeValue');
         if (valueNode) valueNode.textContent = Math.round(Number(e.target.value || 0)) + '%';
         renderSoundMixSummary();
       } else if (e.target?.id === 'chapterVolume') {
         e.stopImmediatePropagation();
-        chapterBgmDraftDirty = true;
+        markChapterBgmDraftDirty();
         const valueNode = $('chapterVolumeValue');
         if (valueNode) valueNode.textContent = Math.round(Number(e.target.value || 0)) + '%';
       } else if (e.target?.id === 'narrationVolume') {
         e.stopImmediatePropagation();
-        mixLevelsDirty = true;
+        markMixLevelsDirty();
         const valueNode = $('narrationVolumeValue');
         if (valueNode) valueNode.textContent = Math.round(Number(e.target.value || 0)) + '%';
         renderSoundMixSummary();
       } else if (e.target?.id === 'cueVolume') {
         e.stopImmediatePropagation();
-        mixLevelsDirty = true;
+        markMixLevelsDirty();
+        if (soundPreviewAudio && ['cue','cue-sequence'].includes(soundPreviewKind)) {
+          soundPreviewAudio.volume = Math.max(0, Math.min(0.50, Number(e.target.value || 0) / 100));
+        }
         const valueNode = $('cueVolumeValue');
         if (valueNode) valueNode.textContent = Math.round(Number(e.target.value || 0)) + '%';
         renderSoundMixSummary();
@@ -6542,12 +6708,12 @@
     }, true);
     document.addEventListener('change', async e => {
       if (e.target?.id === 'chapterStartOffset' || e.target?.id === 'chapterEndBehavior') {
-        chapterBgmDraftDirty = true;
+        markChapterBgmDraftDirty();
         return;
       }
       if (['advancedMusicVolume','narrationVolume','cueVolume'].includes(e.target?.id)) {
         e.stopImmediatePropagation();
-        mixLevelsDirty = true;
+        markMixLevelsDirty();
         try {
           await saveSoundMixLevels();
           message('Narration, cue, and BGM levels saved for preview and final generation.');
@@ -6591,19 +6757,10 @@
         const chapterBased = ['custom', 'chapter-based', 'chapter_based'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
         const defaultPath = String(chapterBgmState.default_path || '').trim();
         const path = chapterBased ? '' : defaultPath;
-        const currentVolume = $('advancedMusicVolume')?.value;
-        const volume = currentVolume == null
-          ? Math.max(0, Math.min(0.50, Number(chapterBgmState.default_volume ?? 0.18)))
-          : Math.max(0, Math.min(0.50, Number(currentVolume) / 100));
         try {
-          await call('sound.save_manifest', {
-            path, enabled, volume,
-            narration_volume:Number($('narrationVolume')?.value ?? Math.round(Number(chapterBgmState.narration_volume ?? 1) * 100))/100,
-            cue_volume:Number($('cueVolume')?.value ?? Math.round(Number(chapterBgmState.cue_volume ?? 0.25) * 100))/100,
-            fade_in_seconds:fadeSeconds('bgmFadeIn'),
-            fade_out_seconds:fadeSeconds('bgmFadeOut')
-          });
-          mixLevelsDirty = false;
+          const savedMixRevision = mixLevelsRevision;
+          await saveSoundManifest({path, enabled});
+          if (savedMixRevision === mixLevelsRevision) mixLevelsDirty = false;
           await refreshChapterBgm();
           await refreshSoundCues();
           message(enabled
@@ -6646,7 +6803,7 @@
       if (chapterRuleButton) {
         e.preventDefault(); e.stopImmediatePropagation();
         document.querySelectorAll('#sound .chapter-rule [data-chapter-rule]').forEach(b => b.classList.toggle('active', b === chapterRuleButton));
-        chapterBgmDraftDirty = true;
+        markChapterBgmDraftDirty();
         return;
       }
       const chapterSourceFilter = e.target.closest('#chapterBgmSourceFilter [data-chapter-source]');
@@ -6678,14 +6835,14 @@
         try {
           const chapterBased = ['custom','chapter-based','chapter_based','chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
           const candidate = sounds.find(track => String(track.path || '') === String(chapterBgmCandidateTrackPath || '') &&
-            String(track.role || track.metadata?.role || 'music').toLowerCase() !== 'cue');
+            isMusicSoundAsset(track));
           if (!chapterBased) throw new Error('Switch to Chapter-Based BGM before assigning a chapter track.');
           if (!candidate) throw new Error('Select an available music track first.');
           if (!selectedBgmChapter) throw new Error('Choose a chapter before assigning its BGM.');
           selectedBgmTrackPath = String(candidate.path);
           document.querySelectorAll('#sound .chapter-rule [data-chapter-rule]').forEach(button =>
             button.classList.toggle('active', button.dataset.chapterRule === 'custom'));
-          chapterBgmDraftDirty = true;
+          markChapterBgmDraftDirty();
           await saveCurrentChapterBgmDraft(true);
           message('Saved ' + candidate.title + ' as the BGM for Chapter ' + selectedBgmChapter + '.');
         } catch (error) {
@@ -6808,7 +6965,8 @@
           const slot = pendingCueSlot;
           pendingCueSlot = null;
           await refreshSoundCues();
-          message('Draft cue selected for ' + slot + '. Use Save Cue Changes to persist this assignment.');
+          scheduleCueAutoSave();
+          message('Draft cue selected for ' + slot + '. It will save automatically; use Save Cue Changes to save now.');
         } else {
           message('Cue clip selected. Play it here, or choose Change beside a cue slot and then Save Cue Changes.');
         }
@@ -6871,32 +7029,29 @@
             }
           } else if (soundButton.id === 'setBookDefaultTrack') {
             if (!selectedSoundPath) throw new Error('Select a track from the local sound catalogue first.');
-            await call('sound.assign', {path:selectedSoundPath,volume:Math.max(0,Math.min(0.50,Number($('advancedMusicVolume')?.value ?? 18)/100)),fade_in_seconds:fadeSeconds('bgmFadeIn'),fade_out_seconds:fadeSeconds('bgmFadeOut')});
+            const savedMixRevision = mixLevelsRevision;
+            await saveSoundManifest({path:selectedSoundPath, enabled:true});
+            if (savedMixRevision === mixLevelsRevision) mixLevelsDirty = false;
             await refreshChapterBgm();
             message('Book default background track saved.');
           } else if (soundButton.id === 'applySoundToProduction') {
             await saveCurrentChapterBgmDraft();
             await savePendingCueChanges();
-            const chapterBased = ['custom', 'chapter-based', 'chapter_based', 'chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
-            await call('sound.save_manifest', {
-              path:chapterBased ? '' : (chapterBgmState.default_path || ''),
-              enabled:Boolean(chapterBgmState.bgm_enabled),
-              volume:Math.max(0,Math.min(0.50,Number($('advancedMusicVolume')?.value ?? Math.round(Number(chapterBgmState.default_volume ?? 0.18) * 100))/100)),
-              narration_volume:Number($('narrationVolume')?.value ?? Math.round(Number(chapterBgmState.narration_volume ?? 1) * 100))/100,
-              cue_volume:Number($('cueVolume')?.value ?? Math.round(Number(chapterBgmState.cue_volume ?? 0.25) * 100))/100,
-              fade_in_seconds:fadeSeconds('bgmFadeIn'),fade_out_seconds:fadeSeconds('bgmFadeOut')
-            });
-            mixLevelsDirty = false;
+            await saveSoundMixLevels(true);
             await refreshChapterBgm();
             await refreshSoundCues();
             document.querySelector('[data-page="generate"]')?.click();
           } else if (soundButton.id === 'saveChapterBgm') {
             await saveCurrentChapterBgmDraft(true);
           } else if (soundButton.id === 'clearAllCues') {
+            if (cueAutoSaveTimer) clearTimeout(cueAutoSaveTimer);
+            cueAutoSaveTimer = null;
+            if (cueSavePromise) await cueSavePromise;
             pendingCueSlot = null;
             pendingCueAssignments = Object.create(null);
             for (const slot of ['opening','chapter','closing']) pendingCueAssignments[slot] = null;
             cueChangesDirty = true;
+            cueClearAllStaged = true;
             await refreshSoundCues();
             message('Clear-all is staged. Choose Save Cue Changes to remove the three saved cue assignments.');
           } else if (soundButton.id === 'previewCueSequence') {
@@ -6916,6 +7071,12 @@
             message('Playing assigned cue clips in book order.');
 
           } else if (soundButton.id === 'soundPreviewBook') {
+            if (cueClearAllStaged) {
+              throw new Error('Clear All is staged. Press Save Cue Changes before generating a Sound Design preview.');
+            }
+            await saveCurrentChapterBgmDraft();
+            await savePendingCueChanges();
+            await saveSoundMixLevels(true);
             stopSoundPreview();
             const started = await call('sound.preview_book');
             message('Generating the full-book mix preview from saved chapter narration…');

@@ -151,8 +151,8 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
                          "horror", "romance", "sci-fi", "calm-narration", "others"):
             self.assertIn(f'data-chapter-category="{category}"', self.adapter)
         self.assertIn("chapterMusicCategoryGroup(track) === categoryFilter", self.adapter)
-        self.assertIn("source.includes('bundled')", self.adapter)
-        self.assertIn("source.includes('imported')", self.adapter)
+        self.assertIn("soundSourceKind(track) === 'built-in'", self.adapter)
+        self.assertIn("soundSourceKind(track) === 'imported'", self.adapter)
         self.assertIn("data-chapter-category", self.adapter)
         self.assertIn("chapterTrackListSignature", self.adapter)
 
@@ -186,7 +186,8 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
             self.assertIn(f"soundButton.id === '{control}'", self.adapter)
         self.assertIn("pendingCueAssignments[pendingCueSlot] = path", self.adapter)
         self.assertIn("await call('sound.cues.save', {slot, path:path || null})", self.adapter)
-        self.assertIn("Use Save Cue Changes to persist this assignment.", self.adapter)
+        self.assertIn("It will save automatically; use Save Cue Changes to save now.", self.adapter)
+        self.assertIn("function scheduleCueAutoSave()", self.adapter)
         self.assertIn("soundPreviewKind === 'cue' && soundPreviewPath === selectedCuePath", self.adapter)
         self.assertIn("soundPreviewKind === 'music' && soundPreviewPath === track.path", self.adapter)
 
@@ -214,7 +215,8 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
 
     def test_bundled_cue_roles_are_normalized_and_not_shown_as_music(self):
         self.assertIn('role = "cue" if role_value in {"opening", "page", "ending", "closing", "chapter"} else role_value', self.host)
-        self.assertIn("const isCue = String(t.role || t.metadata?.role || 'music').toLowerCase() === 'cue';", self.adapter)
+        self.assertIn("function isCueSoundAsset(track)", self.adapter)
+        self.assertIn("const isCue = isCueSoundAsset(t);", self.adapter)
         self.assertIn("return isCue && (!query || text.includes(query))", self.adapter)
 
     def test_returning_to_same_bgm_restores_saved_book_default_track(self):
@@ -235,16 +237,20 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
     def test_cue_assets_cannot_be_used_as_book_or_chapter_bgm(self):
         self.assertIn('selected_row.get("role") or "music").casefold() == "cue"', self.host)
         self.assertIn('str(row.get("role") or "music").casefold() == "cue"', self.host)
-        self.assertIn("const role = String(t.role || metadata.role || 'music').toLowerCase();", self.adapter)
+        self.assertIn("function soundAssetRole(track)", self.adapter)
+        self.assertIn("function isCueSoundAsset(track)", self.adapter)
+        self.assertIn("function isMusicSoundAsset(track)", self.adapter)
+        self.assertIn("const role = soundAssetRole(t);", self.adapter)
         self.assertIn("const matchesMusicType = role !== 'cue';", self.adapter)
-        self.assertIn("String(track.role || track.metadata?.role || 'music').toLowerCase() !== 'cue'", self.adapter)
-        self.assertIn("String(track.role || track.metadata?.role || 'music').toLowerCase() === 'cue'", self.adapter)
+        self.assertIn("const allMusicTracks = sounds.filter(isMusicSoundAsset);", self.adapter)
+        self.assertIn("const isCue = isCueSoundAsset(t);", self.adapter)
 
     def test_selected_music_track_does_not_replace_saved_default_on_handoff(self):
         start = self.adapter.index("} else if (soundButton.id === 'applySoundToProduction')")
         end = self.adapter.index("} else if (soundButton.id === 'saveChapterBgm')", start)
         handoff = self.adapter[start:end]
-        self.assertIn("path:chapterBased ? '' : (chapterBgmState.default_path || '')", handoff)
+        self.assertIn("await saveSoundMixLevels(true);", handoff)
+        self.assertIn("path:chapterBased ? '' : (chapterBgmState.default_path || '')", self.adapter)
         self.assertNotIn("selectedSoundPath || chapterBgmState.default_path", handoff)
 
     def test_clear_all_cues_requires_explicit_save(self):
@@ -254,6 +260,64 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("for (const slot of ['opening','chapter','closing']) pendingCueAssignments[slot] = null;", handler)
         self.assertIn("Choose Save Cue Changes", handler)
         self.assertNotIn("call('sound.cues.clear')", handler)
+
+
+    def test_music_and_chapter_bgm_use_shared_category_and_source_normalization(self):
+        self.assertIn("function soundCategoryGroup(track)", self.adapter)
+        self.assertIn("const categoryGroup = soundCategoryGroup;", self.adapter)
+        self.assertIn("function chapterMusicCategoryGroup(track) { return soundCategoryGroup(track); }", self.adapter)
+        self.assertIn("function soundSourceKind(track)", self.adapter)
+        self.assertIn("soundSourceKind(t) === 'built-in'", self.adapter)
+        self.assertIn("soundSourceKind(track) === 'imported'", self.adapter)
+        for alias in ("fantasy-adventure", "battle-warfare", "calm-narration", "others"):
+            self.assertIn("'" + alias + "'", self.adapter)
+
+    def test_chapter_and_cue_edits_autosave_without_overwriting_newer_drafts(self):
+        self.assertIn("function markChapterBgmDraftDirty()", self.adapter)
+        self.assertIn("function scheduleChapterBgmAutoSave()", self.adapter)
+        self.assertIn("chapterBgmDraftRevision", self.adapter)
+        self.assertIn("if (revision !== chapterBgmDraftRevision) continue;", self.adapter)
+        self.assertIn("function scheduleCueAutoSave()", self.adapter)
+        self.assertIn("while (Object.keys(pendingCueAssignments).length)", self.adapter)
+        self.assertIn("pendingCueAssignments[slot] === path", self.adapter)
+        self.assertIn("cueClearAllStaged = true;", self.adapter)
+
+    def test_sound_manifest_queue_persists_latest_slider_values(self):
+        self.assertIn("async function saveSoundManifest(overrides = {})", self.adapter)
+        self.assertIn("while (savedRevision !== soundManifestSaveRevision)", self.adapter)
+        self.assertIn("async function saveSoundMixLevels(force = false)", self.adapter)
+        self.assertIn("if (revision === mixLevelsRevision)", self.adapter)
+        self.assertIn("await saveSoundMixLevels(true);", self.adapter)
+
+    def test_full_book_mix_preview_flushes_current_sound_design_drafts(self):
+        start = self.adapter.index("soundButton.id === 'soundPreviewBook'")
+        end = self.adapter.index("soundButton.id === 'applySoundToProduction'", start)
+        preview = self.adapter[start:end]
+        self.assertIn("if (cueClearAllStaged)", preview)
+        self.assertIn("await saveCurrentChapterBgmDraft();", preview)
+        self.assertIn("await savePendingCueChanges();", preview)
+        self.assertIn("await saveSoundMixLevels(true);", preview)
+
+    def test_active_music_and_cue_preview_levels_follow_volume_sliders(self):
+        self.assertIn("soundPreviewKind === 'music'", self.adapter)
+        self.assertIn("soundPreviewAudio.volume = Math.max(0, Math.min(0.50, Number(e.target.value || 0) / 100));", self.adapter)
+        self.assertIn("['cue','cue-sequence'].includes(soundPreviewKind)", self.adapter)
+
+    def test_host_normalizes_music_categories_and_clears_inactive_book_default(self):
+        catalogue_start = self.host.index("    def _sound_catalog(")
+        import_start = self.host.index("    def _sound_import(", catalogue_start)
+        catalogue = self.host[catalogue_start:import_start]
+        for alias in ("fantasy-adventure", "battle-warfare", "calm-narration"):
+            self.assertIn('"' + alias + '"', catalogue)
+        import_end = self.host.index("    def _sound_assign(", import_start)
+        import_method = self.host[import_start:import_end]
+        self.assertIn('if target_kind not in {"music", "cue"}:', import_method)
+        self.assertIn("category not in MUSIC_CATEGORY_LABELS", import_method)
+        strategy_start = self.host.index("    def _sound_chapter_bgm_save(")
+        strategy_end = self.host.index("    def _sound_cues_get(", strategy_start)
+        strategy = self.host[strategy_start:strategy_end]
+        self.assertIn('state["background_audio_path"] = ""', strategy)
+        self.assertIn('state["background_audio_preferred_path"] = preferred', strategy)
 
     def test_zero_cue_level_does_not_add_silent_audio_duration(self):
         self.assertIn("if cue is None or cue_gain <= 1e-9:", self.assembler)
