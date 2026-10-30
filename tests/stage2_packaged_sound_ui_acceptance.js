@@ -279,15 +279,25 @@
 
     const volume = document.querySelector("#advancedMusicVolume");
     must(volume && Number(volume.max) === 50, "The BGM slider does not enforce the 50 percent maximum.");
+    // Match an actual user edit: the production summary deliberately hydrates
+    // the last saved value when this control is not focused. Keep it focused
+    // through input/change so that summary refreshes preserve the live edit.
+    volume.focus();
+    must(document.activeElement === volume, "The BGM range control did not receive focus before editing.");
     volume.value = String(config.expected_volume * 100);
     volume.dispatchEvent(new Event("input", { bubbles: true }));
+    must(document.activeElement === volume, "The BGM range control lost focus during its input update.");
+    must(volume.value === "42" &&
+      document.querySelector("#advancedMusicVolumeValue").textContent.trim() === "42%",
+      "The BGM slider's live value did not remain at 42% after the input update.");
     volume.dispatchEvent(new Event("change", { bubbles: true }));
     await waitFor("42 percent BGM value save", async function () {
       const saved = await invoke("sound.chapter_bgm.get", {});
       return Math.abs(Number(saved.default_volume) - config.expected_volume) < 0.005;
     }, 15000);
-    must(document.querySelector("#advancedMusicVolumeValue").textContent.trim() === "42%",
-      "The BGM slider's visible percentage did not update to 42%.");
+    must(volume.value === "42" &&
+      document.querySelector("#advancedMusicVolumeValue").textContent.trim() === "42%",
+      "The saved BGM slider value is not still visibly 42%.");
     record("music_volume_control", true, "BGM volume maximum remained 50%; 42% was shown and saved through the app.");
 
     const preview = document.querySelector("#previewSelectedTrack");
