@@ -320,7 +320,7 @@
   ['importMusicTracks','importCueClips','previewSelectedTrack','setBookDefaultTrack',
    'saveChapterBgm','previewCueSequence','clearAllCues','soundPreviewBook',
    'applySoundToProduction','advancedMusicVolume','playSelectedCue','pauseSelectedCue',
-   'replaySelectedCue','saveCueChanges'].forEach(id => {
+   'replaySelectedCue','saveCueChanges','chapterBgmList','chapterTrackPicker'].forEach(id => {
     const node = $(id);
     if (node?.parentNode) node.replaceWith(node.cloneNode(true));
   });
@@ -332,6 +332,16 @@
     cleanSoundTabs.querySelectorAll('[onclick]').forEach(button => button.removeAttribute('onclick'));
     legacySoundTabs.replaceWith(cleanSoundTabs);
   }
+  // Chapter strategy/rule controls also exist in the prototype HTML. Replace their
+  // nodes so old direct/inline listeners cannot compete with the backend adapter.
+  ['#sound .chapter-bgm-strategy', '#sound .chapter-rule'].forEach(selector => {
+    const node = document.querySelector(selector);
+    if (node?.parentNode) {
+      const cleanNode = node.cloneNode(true);
+      cleanNode.querySelectorAll('[onclick]').forEach(button => button.removeAttribute('onclick'));
+      node.replaceWith(cleanNode);
+    }
+  });
   if ($('musicImportInput')) $('musicImportInput').onchange = null;
   if ($('cueImportInput')) $('cueImportInput').onchange = null;
   const fadeSeconds = id => {
