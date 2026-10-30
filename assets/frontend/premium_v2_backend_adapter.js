@@ -3488,8 +3488,18 @@
     return sounds;
   }
   async function refreshSoundCues() {
+    // The cue library shares the native sound catalogue with Music Library. Load
+    // that catalogue here rather than relying on a prior Music-tab refresh; cue
+    // imports can happen while the Music view is hidden, and another refresh may
+    // supersede the shared array before this renderer runs.
     const requestToken = ++cueListEpoch;
-    const loadedAssignments = await call('sound.cues.get');
+    const catalogRequestToken = ++soundListEpoch;
+    const [loadedCatalog, loadedAssignments] = await Promise.all([
+      call('sound.catalog'),
+      call('sound.cues.get')
+    ]);
+    if (catalogRequestToken !== soundListEpoch || requestToken !== cueListEpoch) return cueAssignments;
+    sounds = Array.isArray(loadedCatalog) ? loadedCatalog : [];
     if (requestToken !== cueListEpoch) return cueAssignments;
     cueAssignments = loadedAssignments && typeof loadedAssignments === 'object' ? loadedAssignments : {};
     const names = {opening:'openingCueName',chapter:'chapterCueName',closing:'closingCueName'};

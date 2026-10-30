@@ -115,6 +115,20 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         ):
             self.assertIn(required, helper)
 
+    def test_cue_library_refresh_loads_a_fresh_shared_catalogue_before_rendering(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("async function refreshSoundCues()")
+        end = adapter.index("function chapterMusicCategoryGroup", start)
+        refresh = adapter[start:end]
+        self.assertIn("const catalogRequestToken = ++soundListEpoch;", refresh)
+        self.assertIn("const [loadedCatalog, loadedAssignments] = await Promise.all([", refresh)
+        self.assertIn("call('sound.catalog')", refresh)
+        self.assertIn("call('sound.cues.get')", refresh)
+        self.assertIn("if (catalogRequestToken !== soundListEpoch || requestToken !== cueListEpoch) return cueAssignments;", refresh)
+        self.assertIn("sounds = Array.isArray(loadedCatalog) ? loadedCatalog : [];", refresh)
+        self.assertLess(refresh.index("call('sound.catalog')"), refresh.index("const visible = sounds.filter"))
+        self.assertIn("isCueSoundAsset(t)", refresh)
+
     def test_packaged_volume_interaction_focuses_the_real_slider_before_editing(self):
         script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
         start = script.index('const volume = document.querySelector("#advancedMusicVolume");')
