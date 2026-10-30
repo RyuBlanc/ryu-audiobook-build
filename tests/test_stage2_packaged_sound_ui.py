@@ -115,6 +115,20 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         ):
             self.assertIn(required, helper)
 
+    def test_music_grid_repairs_stale_dom_even_when_catalogue_signature_is_unchanged(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("async function refreshSounds()")
+        end = adapter.index("async function refreshSoundCues()", start)
+        refresh = adapter[start:end]
+        self.assertIn("const expectedTrackCount = visible.length;", refresh)
+        self.assertIn("const renderedTrackCount = grid ? grid.querySelectorAll('[data-select-sound]').length : 0;", refresh)
+        self.assertIn("renderedSignature !== signature", refresh)
+        self.assertIn("renderedTrackCount !== expectedTrackCount", refresh)
+        self.assertIn("(expectedTrackCount > 0 && renderedTrackCount === 0)", refresh)
+        self.assertIn("if (gridNeedsRepair)", refresh)
+        self.assertLess(refresh.index("gridNeedsRepair"), refresh.index("grid.innerHTML = visible.map"))
+        self.assertIn("grid.dataset.soundListSignature = signature;", refresh)
+
     def test_cue_library_refresh_loads_a_fresh_shared_catalogue_before_rendering(self):
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         start = adapter.index("async function refreshSoundCues()")

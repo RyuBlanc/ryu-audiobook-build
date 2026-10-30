@@ -3480,7 +3480,15 @@
       query, sourceFilter, selectedMusicCategory,
       rows: visible.map(t => [t.path,t.title,t.source,t.format,t.size_bytes,t.category])
     });
-    if (grid && grid.dataset.soundListSignature !== signature) {
+    const expectedTrackCount = visible.length;
+    const renderedTrackCount = grid ? grid.querySelectorAll('[data-select-sound]').length : 0;
+    const renderedSignature = grid?.dataset.soundListSignature || '';
+    const gridNeedsRepair = Boolean(grid) && (
+      renderedSignature !== signature ||
+      renderedTrackCount !== expectedTrackCount ||
+      (expectedTrackCount > 0 && renderedTrackCount === 0)
+    );
+    if (gridNeedsRepair) {
       grid.dataset.soundListSignature = signature;
       grid.innerHTML = visible.map(t => '<article class="sound-track card"><div class="sound-track-info"><b>' + esc(t.title) + '</b><small>' + esc(t.category_label || t.category || 'Others') + ' · ' + esc(t.source) + ' · ' + esc(t.format) + ' · ' + Math.round(Number(t.size_bytes || 0)/1024) + ' KB</small></div><button class="btn small secondary" data-select-sound="' + esc(t.path) + '">Select</button></article>').join('') || '<p class="muted">No tracks match these filters. Try All, another category, or import a licensed audio file.</p>';
     }
