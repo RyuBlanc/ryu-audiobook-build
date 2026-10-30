@@ -51,6 +51,15 @@ The runner is standard-library-only so it does not depend on the setup-python to
 - Fix commit: `6045dee0ab50f11f8fe9b252d4df927cd2b4614b` — `refreshSoundCues()` now loads `sound.catalog` and `sound.cues.get` together and checks the catalogue/cue request epochs before publishing/rendering. A regression contract was added in `tests/test_stage2_packaged_sound_ui.py`.
 - The code change is committed, but it is **not verified in the frozen executable yet**. Run #1742 is the normal push validation; because its commit message lacks `[artifact-checkpoint]`, its Windows build is not enabled. A subsequent artifact-checkpoint run is required before the cue issue can be called resolved.
 
+## Music Library stale-grid regression — Run #1743 follow-up
+
+- Failed packaged run: [#1743](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41068423673), commit `82f16028e5d88239b32ccc5cee2ba3049d0b0196`.
+- Windows executable build, frozen self-test, three Premium V2 startups, bundled Piper/Kokoro assets, and the packaged acceptance launch all passed.
+- Packaged acceptance stopped at the first Music Library source filter. Native catalogue diagnostics showed 34 valid records: 32 `Bundled with application`, 2 `Imported locally`; role counts were 28 music and 6 cue. The Built-in filter button was active, but the Music Library grid contained zero rendered Select rows. This is a UI render/cache failure, not a missing native catalogue.
+- Fix commit: `810314b6225dcf48bf2f0a7d8cb604a333f0a66f` — Music Library refresh now validates the actual rendered Select-row count against the filtered catalogue, and rebuilds the grid if the DOM is empty or incomplete even when the data signature is unchanged. A regression contract covers the stale-DOM case.
+- The cue-library fresh-catalogue correction from `6045dee0ab50f11f8fe9b252d4df927cd2b4614b` is retained.
+- The fix remains **pending frozen-app verification** until a new artifact-checkpoint run passes the Music source filters and proceeds through the cue-card/playback assertions.
+
 ## Earlier regression baseline
 
 - Tested commit: `6696c164c152e9ae59a575578920aa8826c51449`
