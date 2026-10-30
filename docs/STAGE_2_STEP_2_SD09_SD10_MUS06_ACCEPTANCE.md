@@ -43,6 +43,14 @@ The runner is standard-library-only so it does not depend on the setup-python to
 - The new regression contract verifies that the packaged acceptance driver focuses the actual BGM range control before editing, retains focus through the input event, and confirms both the visible and backend-saved value remain at 42%.
 - The workflow's Windows `build` job was skipped on #1740 because that commit did not carry the `[artifact-checkpoint]` marker. The next checkpoint must therefore run the full Windows build and packaged acceptance on the exact new commit.
 
+## Cue-library refresh regression — Run #1741 follow-up
+
+- Failed packaged run: [#1741](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41064878700), commit `93ec222f6d340eb4e6710f4d5e8f7eaf3b8dc377`.
+- The Windows executable build, frozen startup checks, and Music Library checks passed, including the corrected 42% save and real music preview transport. The first cue failure was that the two imported cue cards were absent from `#cueGrid`; cue playback checks were not reached.
+- The native import/catalogue path had already returned both cue fixture records with `role="cue"`, `source="Imported locally"`, and `.wav` format. The renderer's `refreshSoundCues()` depended on the shared `sounds` array having been populated by a separate Music Library refresh.
+- Fix commit: `6045dee0ab50f11f8fe9b252d4df927cd2b4614b` — `refreshSoundCues()` now loads `sound.catalog` and `sound.cues.get` together and checks the catalogue/cue request epochs before publishing/rendering. A regression contract was added in `tests/test_stage2_packaged_sound_ui.py`.
+- The code change is committed, but it is **not verified in the frozen executable yet**. Run #1742 is the normal push validation; because its commit message lacks `[artifact-checkpoint]`, its Windows build is not enabled. A subsequent artifact-checkpoint run is required before the cue issue can be called resolved.
+
 ## Earlier regression baseline
 
 - Tested commit: `6696c164c152e9ae59a575578920aa8826c51449`
