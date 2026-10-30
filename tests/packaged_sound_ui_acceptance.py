@@ -61,7 +61,8 @@ def validate_imported_audio_metadata(music_paths: list[Path], cue_paths: list[Pa
         if not path.is_file() or not sidecar.is_file():
             raise AssertionError(f"Imported cue asset or metadata is missing: {path}")
         metadata = json.loads(sidecar.read_text(encoding="utf-8"))
-        if metadata.get("role") != "cue" or metadata.get("category") != "universal":
+        expected_cue_metadata = {"role": "cue", "category": "universal"}
+        if any(metadata.get(key) != value for key, value in expected_cue_metadata.items()):
             raise AssertionError(f"Imported cue metadata mismatch for {path.name}: {metadata!r}")
 
 
