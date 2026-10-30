@@ -427,6 +427,7 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
             resolve.assert_not_called()
 
     def test_active_fixed_cues_are_probed_and_rejected_above_five_seconds(self):
+        import json
         from tempfile import TemporaryDirectory
         from pathlib import Path
         from unittest.mock import patch
