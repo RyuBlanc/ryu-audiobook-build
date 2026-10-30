@@ -113,20 +113,20 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
                 path.write_bytes(b"chunk")
             (chapter_dir / "narration.json").write_text(
                 json.dumps({"narration_text": "A long first paragraph with several sentences. " * 12 +
-                            "\\n\\nA second paragraph starts here."}),
+                            "\n\nA second paragraph starts here."}),
                 encoding="utf-8",
             )
             (chapter_dir / "chunk_manifest.json").write_text(json.dumps({"chunks": [
                 {"file": first.name, "text": "A long first paragraph with several sentences."},
                 {"file": second.name, "text": "The first paragraph continues with more sentences."},
-                {"file": boundary.name, "text": "The first paragraph ends here.\\n\\n"},
+                {"file": boundary.name, "text": "The first paragraph ends here.\n\n"},
                 {"file": next_chunk.name, "text": "A second paragraph starts here."},
             ]}), encoding="utf-8")
             with patch.object(assembler, "_duration_ms", side_effect=[1200, 900, 1400]):
                 offset = assembler._chapter_first_paragraph_offset_ms(chapter_dir)
             self.assertEqual(offset, 3500)
 
-    def test_after_first_paragraph_uses_narration_text_boundary_when_dialogue_chunks_have_no_marker(self):
+    def test_legacy_multi_paragraph_audio_without_saved_boundary_is_not_guessed(self):
         import json
         from tempfile import TemporaryDirectory
         from unittest.mock import patch
@@ -141,7 +141,7 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
                 path.write_bytes(b"chunk")
             first_paragraph = "This first paragraph contains several dialogue turns."
             (chapter_dir / "narration.json").write_text(
-                json.dumps({"narration_text": first_paragraph + "\\n\\nA second paragraph follows."}),
+                json.dumps({"narration_text": first_paragraph + "\n\nA second paragraph follows."}),
                 encoding="utf-8",
             )
             (chapter_dir / "chunk_manifest.json").write_text(json.dumps({"chunks": [
@@ -151,7 +151,87 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
             ]}), encoding="utf-8")
             with patch.object(assembler, "_duration_ms", side_effect=[700, 850]):
                 offset = assembler._chapter_first_paragraph_offset_ms(chapter_dir)
-            self.assertEqual(offset, 1550)
+            self.assertIsNone(offset)
+
+
+    def test_generation_plan_preserves_paragraph_boundary_when_chapter_bgm_requests_it(self):
+        import json
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from app.tts.generator import prepare_chapter_plan
+
+        class PlanningProvider:
+            recommended_chunk_chars = 1400
+            recommended_chunk_sentences = 8
+            split_on_expression_change = False
+
+            def split_for_cast(self, text, voice, dialogue_assignments=None):
+                return [(text, voice)]
+
+        chapter_text = (
+            "The first paragraph contains its opening sentence. "
+            "It contains its closing sentence.\n\n"
+            "The second paragraph must be in a different TTS chunk."
+        )
+        chapter = SimpleNamespace(number=1, title="Paragraph boundary", text=chapter_text, dialogue_assignments=[])
+        with TemporaryDirectory() as temporary:
+            plan = prepare_chapter_plan(
+                chapter, PlanningProvider(), "narrator", Path(temporary),
+                preserve_paragraph_boundaries=True,
+            )
+            chunks = list(plan.chunks_with_voices)
+            self.assertEqual(len(chunks), 2)
+            self.assertTrue(chunks[0][0].endswith("\n\n"))
+            self.assertTrue(chunks[1][0].startswith("The second paragraph"))
+            manifest = json.loads((plan.chapter_dir / "chunk_manifest.json").read_text(encoding="utf-8"))
+            self.assertTrue(manifest["chunks"][0]["text"].endswith("\n\n"))
+
+    def test_chapter_bgm_boundary_policy_is_limited_to_custom_chapter_based_assignments(self):
+        from types import SimpleNamespace
+        from app.tts.manager import GenerationManager
+
+        chapter = SimpleNamespace(number=1)
+        custom = GenerationManager(
+            provider=object(), voice="narrator", chapters=[chapter], project_audio_root=Path("."),
+            chapter_bgm_strategy="custom",
+            chapter_bgm_overrides={"1": {"rule":"custom", "start_offset":"after_first_paragraph"}},
+        )
+        immediate = GenerationManager(
+            provider=object(), voice="narrator", chapters=[chapter], project_audio_root=Path("."),
+            chapter_bgm_strategy="custom",
+            chapter_bgm_overrides={"1": {"rule":"custom", "start_offset":"immediate"}},
+        )
+        same = GenerationManager(
+            provider=object(), voice="narrator", chapters=[chapter], project_audio_root=Path("."),
+            chapter_bgm_strategy="same",
+            chapter_bgm_overrides={"1": {"rule":"custom", "start_offset":"after_first_paragraph"}},
+        )
+        self.assertTrue(custom._chapter_requires_paragraph_boundary(chapter))
+        self.assertFalse(immediate._chapter_requires_paragraph_boundary(chapter))
+        self.assertFalse(same._chapter_requires_paragraph_boundary(chapter))
+
+
+    def test_after_first_paragraph_rejects_old_merged_chunk_instead_of_guessing(self):
+        import json
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.audio import assembler
+
+        with TemporaryDirectory() as temporary:
+            chapter_dir = Path(temporary)
+            chunk_dir = chapter_dir / "chunks"
+            chunk_dir.mkdir()
+            chunk = chunk_dir / "00001.wav"
+            chunk.write_bytes(b"chunk")
+            (chapter_dir / "narration.json").write_text(
+                json.dumps({"narration_text":"First paragraph.\n\nSecond paragraph."}),
+                encoding="utf-8",
+            )
+            (chapter_dir / "chunk_manifest.json").write_text(json.dumps({"chunks":[
+                {"file":chunk.name,"text":"First paragraph.\n\nSecond paragraph."}
+            ]}), encoding="utf-8")
+            with patch.object(assembler, "_duration_ms", return_value=5000):
+                self.assertIsNone(assembler._chapter_first_paragraph_offset_ms(chapter_dir))
 
     def test_zero_volume_chapter_bgm_does_not_reencode_narration(self):
         from tempfile import TemporaryDirectory

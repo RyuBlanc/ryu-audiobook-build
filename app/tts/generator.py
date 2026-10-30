@@ -111,6 +111,7 @@ def prepare_chapter_plan(
     pronunciation_dictionary: list[dict] | None = None,
     narration_speed: float = 0.90,
     pacing_profile: str = "natural",
+    preserve_paragraph_boundaries: bool = False,
 ) -> ChapterPlan:
     """Prepare deterministic chapter chunks and identify resumable work.
 
@@ -152,13 +153,25 @@ def prepare_chapter_plan(
         ]
 
     chunks_with_voices: list[tuple[str, str | list[str] | None]] = []
+    first_paragraph = re.split(r"\r?\n[ \t]*\r?\n+", narration.narration_text, maxsplit=1)[0]
+    first_paragraph_chars = len(" ".join(first_paragraph.split()))
+    consumed_source_chars = 0
     for chunk_text, chunk_voice in raw_chunks_with_voices:
+        # A cast-aware provider can split one source paragraph across several
+        # speaker parts. Enable the force only on the part that reaches the
+        # first paragraph's cumulative text boundary.
+        normalized_part = " ".join(str(chunk_text).split())
+        consumed_source_chars += len(normalized_part) + (1 if consumed_source_chars else 0)
+        preserve_this_part = bool(
+            preserve_paragraph_boundaries and consumed_source_chars >= first_paragraph_chars
+        )
         # Resolve saved dialogue offsets before replacements can change character counts.
         paced_chunks = split_for_pacing(
             chunk_text,
             max_chars=int(getattr(provider, "recommended_chunk_chars", 1400)),
             max_sentences=int(getattr(provider, "recommended_chunk_sentences", 2)),
             split_on_expression_change=bool(getattr(provider, "split_on_expression_change", False)),
+            force_paragraph_boundaries=preserve_this_part,
         )
         for item in paced_chunks:
             prepared_item, _rule_counts = apply_pronunciation_dictionary_with_counts(item, pronunciation_dictionary)
@@ -273,6 +286,7 @@ def generate_chapter(
     pronunciation_dictionary: list[dict] | None = None,
     narration_speed: float = 0.90,
     pacing_profile: str = "natural",
+    preserve_paragraph_boundaries: bool = False,
 ) -> GenerationResult:
     plan = prepare_chapter_plan(
         chapter,
@@ -282,6 +296,7 @@ def generate_chapter(
         pronunciation_dictionary=pronunciation_dictionary,
         narration_speed=narration_speed,
         pacing_profile=pacing_profile,
+        preserve_paragraph_boundaries=preserve_paragraph_boundaries,
     )
     chapter_dir = plan.chapter_dir
     chunks_dir = chapter_dir / "chunks"

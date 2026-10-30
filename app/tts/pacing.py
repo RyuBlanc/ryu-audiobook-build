@@ -124,6 +124,7 @@ def split_for_pacing(
     max_chars: int = 1400,
     max_sentences: int = 2,
     split_on_expression_change: bool = False,
+    force_paragraph_boundaries: bool = False,
 ) -> list[str]:
     """Split narration while preserving headings, paragraph boundaries and dialogue turns."""
     text = str(text or "").strip()
@@ -251,7 +252,10 @@ def split_for_pacing(
                 line_chunk.append((piece, paragraph_id, False))
                 line_chars += len(piece) + (1 if line_chars else 0)
             if line_chunk:
-                chunks.append(joined(line_chunk))
+                chunks.append(joined(
+                    line_chunk,
+                    mark_paragraph_end=bool(force_paragraph_boundaries and ends_paragraph),
+                ))
             continue
 
         separator = (
@@ -277,10 +281,13 @@ def split_for_pacing(
         current_chars += len(value) + (len(separator) if current_chars else 0)
         if value.rstrip().endswith(("…", "...")):
             flush(mark_paragraph_end=ends_paragraph)
+        elif force_paragraph_boundaries and ends_paragraph:
+            # This is enabled only for chapters whose BGM start offset needs an
+            # exact paragraph boundary. Ordinary TTS chunking is unchanged.
+            flush(mark_paragraph_end=True)
 
-        # A paragraph-ending unit is held briefly to see whether the next
-        # paragraph fits in this chunk. If it does not, flush() writes an
-        # invisible-to-speech blank-line marker consumed by pause_after_ms().
+        # Without the opt-in above, a paragraph-ending unit is held briefly
+        # to see whether the next paragraph fits in this chunk.
 
     # End-of-chapter silence is handled by chapter assembly/player transitions,
     # not by adding a silent tail to the final audio segment.

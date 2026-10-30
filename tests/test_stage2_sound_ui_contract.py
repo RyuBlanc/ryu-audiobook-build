@@ -400,7 +400,7 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         method_start = self.host.index("    def _sound_save_manifest(")
         method_end = self.host.index("    def _sound_chapter_bgm_get(", method_start)
         method = self.host[method_start:method_end]
-        self.assertIn("_sound_manifest_bgm_paths(state, path, enabled)", method)
+        self.assertIn("_sound_manifest_bgm_paths(state, manifest_path, enabled)", method)
         self.assertIn('"background_audio_path": active_bgm_path', method)
         self.assertIn('"background_audio_preferred_path": preferred_bgm_path', method)
 

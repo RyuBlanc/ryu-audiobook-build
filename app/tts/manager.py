@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from threading import Thread, Event
 import time
+import re
 from typing import Callable
 import shutil
 
@@ -258,6 +259,16 @@ class GenerationManager:
                 except Exception:
                     pass
 
+    def _chapter_requires_paragraph_boundary(self, chapter: Chapter) -> bool:
+        if self.chapter_bgm_strategy != "chapter-based":
+            return False
+        override = self.chapter_bgm_overrides.get(str(chapter.number), {})
+        return bool(
+            isinstance(override, dict)
+            and str(override.get("rule") or "").casefold() == "custom"
+            and str(override.get("start_offset") or "immediate").casefold() == "after_first_paragraph"
+        )
+
     def _run_body(self, output_path: Path | None, title: str, author: str, cover: Path | None, metadata: dict[str, str]) -> None:
         # This directory is deliberately called working: it is not the user's
         # audiobook library and can be removed after a successful package build.
@@ -289,12 +300,22 @@ class GenerationManager:
                 raw_parts = [(chunk, self.voice) for chunk in split_text(narration_text)]
             from app.tts.pacing import split_for_pacing
             chapter_units: list[int] = []
+            preserve_paragraph_boundaries = self._chapter_requires_paragraph_boundary(chapter)
+            first_paragraph = re.split(r"\r?\n[ \t]*\r?\n+", narration_text, maxsplit=1)[0]
+            first_paragraph_chars = len(" ".join(first_paragraph.split()))
+            consumed_source_chars = 0
             for part, _part_voice in raw_parts:
+                normalized_part = " ".join(str(part).split())
+                consumed_source_chars += len(normalized_part) + (1 if consumed_source_chars else 0)
+                preserve_this_part = bool(
+                    preserve_paragraph_boundaries and consumed_source_chars >= first_paragraph_chars
+                )
                 for paced in split_for_pacing(
                     part,
                     max_chars=int(getattr(self.provider, "recommended_chunk_chars", 1400)),
                     max_sentences=int(getattr(self.provider, "recommended_chunk_sentences", 2)),
                     split_on_expression_change=bool(getattr(self.provider, "split_on_expression_change", False)),
+                    force_paragraph_boundaries=preserve_this_part,
                 ):
                     paced, rule_counts = apply_pronunciation_dictionary_with_counts(paced, self.pronunciation_dictionary)
                     for written, count in rule_counts.items():
@@ -352,6 +373,7 @@ class GenerationManager:
                     pronunciation_dictionary=self.pronunciation_dictionary,
                     narration_speed=self.narration_speed,
                     pacing_profile=self.pacing_profile,
+                    preserve_paragraph_boundaries=self._chapter_requires_paragraph_boundary(chapter),
                 )
                 if result.chunks_completed != result.chunks_total:
                     raise RuntimeError("Chapter generation is incomplete.")
