@@ -383,10 +383,39 @@
       "Imported cue catalogue records do not contain their real source and format information.");
     must(!visibleHas(config.cue_track_titles[0]) && !visibleHas(config.cue_track_titles[1]),
       "A cue asset leaked into the Music Library track grid.");
+    try {
+      await waitFor("two imported cue cards to render", function () {
+        const rows = Array.from(document.querySelectorAll("#cueGrid [data-cue-path]"));
+        return rows.some(card => String(card.dataset.cuePath || "") === String(cueAlpha.path)) &&
+          rows.some(card => String(card.dataset.cuePath || "") === String(cueBeta.path));
+      }, 15000);
+    } catch (renderError) {
+      const diagnosticCueCatalog = await invoke("sound.catalog", {});
+      const cueRoleCounts = {};
+      for (const track of Array.isArray(diagnosticCueCatalog) ? diagnosticCueCatalog : []) {
+        const role = String(track?.role || track?.metadata?.role || "music").trim().toLowerCase();
+        cueRoleCounts[role] = (cueRoleCounts[role] || 0) + 1;
+      }
+      const diagnosticCueGrid = document.querySelector("#cueGrid");
+      const visibleCueRows = Array.from(document.querySelectorAll("#cueGrid [data-cue-path]"));
+      throw new Error("Imported cue cards did not render after native catalogue import. " +
+        JSON.stringify({
+          cause:String(renderError),
+          catalogCount:Array.isArray(diagnosticCueCatalog) ? diagnosticCueCatalog.length : -1,
+          cueRoleCounts,
+          expectedCuePaths:[cueAlpha.path,cueBeta.path],
+          renderedCuePaths:visibleCueRows.map(card => card.dataset.cuePath),
+          gridExists:Boolean(diagnosticCueGrid),
+          gridSignature:diagnosticCueGrid?.dataset.cueListSignature || "(missing)",
+          gridText:String(diagnosticCueGrid?.textContent || "").trim().slice(0,500),
+          activeSource:document.querySelector('#cueSourceFilter [data-cue-source].active')?.dataset.cueSource || "(none)",
+          search:String(document.querySelector("#cueSearch")?.value || "")
+        }));
+    }
     const cueCards = Array.from(document.querySelectorAll("#cueGrid [data-cue-path]"));
     const cueCardAlpha = cueCards.find(card => String(card.dataset.cuePath || "") === String(cueAlpha.path));
     const cueCardBeta = cueCards.find(card => String(card.dataset.cuePath || "") === String(cueBeta.path));
-    must(cueCardAlpha && cueCardBeta, "The imported cue cards are not rendered in the Opening & Cues library.");
+    must(cueCardAlpha && cueCardBeta, "The two imported cue cards did not remain rendered after the cue-grid wait.");
 
     function inspectCueCard(card, track) {
       const title = card.querySelector("h3");

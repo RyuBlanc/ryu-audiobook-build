@@ -102,6 +102,14 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         ):
             self.assertIn(required, script)
 
+    def test_packaged_driver_waits_for_imported_cue_cards_and_reports_render_diagnostics(self):
+        script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        self.assertIn('await waitFor("two imported cue cards to render"', script)
+        self.assertIn("Imported cue cards did not render after native catalogue import.", script)
+        self.assertIn("renderedCuePaths", script)
+        self.assertIn("gridSignature", script)
+        self.assertIn("cueRoleCounts", script)
+
     def test_packaged_runner_provisions_and_validates_separate_cue_fixtures(self):
         helper = (ROOT / "tests/packaged_sound_ui_acceptance.py").read_text(encoding="utf-8")
         for required in (
