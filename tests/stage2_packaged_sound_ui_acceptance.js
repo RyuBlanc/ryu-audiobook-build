@@ -3,6 +3,14 @@
   const checks = {};
   const errors = [];
   const pauseLabel = "Pause selected track";
+  const NativeAudio = window.Audio;
+  window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ = [];
+  window.Audio = function (src) {
+    const audio = new NativeAudio(src);
+    window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__.push(audio);
+    return audio;
+  };
+  window.Audio.prototype = NativeAudio.prototype;
   const sleep = ms => new Promise(resolve => window.setTimeout(resolve, ms));
   function record(name, passed, detail) {
     checks[name] = String(detail || (passed ? "passed" : "failed"));
@@ -36,6 +44,35 @@
     return musicButtons().find(button => String(button.dataset.selectSound || "") === String(path || ""));
   }
   function visibleHas(title) { return musicButtons().some(button => rowText(button).includes(title)); }
+  function latestAcceptanceAudio() {
+    const rows = window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__ || [];
+    return rows.length ? rows[rows.length - 1] : null;
+  }
+  function audioUsesPath(audio, path) {
+    if (!audio || !path) return false;
+    const fileName = String(path).replace(/\\/g, "/").split("/").pop().toLowerCase();
+    let source = String(audio.currentSrc || audio.src || "").toLowerCase();
+    try { source = decodeURIComponent(source); } catch (_) {}
+    return Boolean(fileName && source.includes(fileName));
+  }
+  async function waitForRealPlayback(label, path) {
+    let observed = null;
+    await waitFor(label, function () {
+      observed = latestAcceptanceAudio();
+      return Boolean(observed && audioUsesPath(observed, path) &&
+        observed.readyState >= 2 && observed.currentTime > 0.05 &&
+        !observed.paused && !observed.error);
+    }, 12000);
+    return observed;
+  }
+  async function waitForPausedAudio(label, audio) {
+    await waitFor(label, function () { return Boolean(audio && audio.paused); }, 5000);
+    const pausedAt = Number(audio.currentTime || 0);
+    await sleep(300);
+    must(audio.paused && Math.abs(Number(audio.currentTime || 0) - pausedAt) <= 0.12,
+      label + ": media time continued advancing after Pause.");
+    return pausedAt;
+  }
   function publish(status) {
     window.__RYU_SOUND_UI_ACCEPTANCE_RESULT__ = {
       status: status, checks: checks, errors: errors, completed_at: new Date().toISOString()
@@ -51,10 +88,15 @@
     const wrappedBridge = Object.freeze({
       invoke: function (command, payload) {
         const request = Object.assign({}, payload || {});
-        if (command === "sound.import" && request.target_kind === "music" &&
+        if (command === "sound.import" &&
             (!Array.isArray(request.paths) || !request.paths.length)) {
-          request.paths = Array.isArray(config.music_paths) ? config.music_paths.slice() : [];
-          if (!request.paths.length) throw new Error("No generated Music Library fixture paths were provided.");
+          if (request.target_kind === "music") {
+            request.paths = Array.isArray(config.music_paths) ? config.music_paths.slice() : [];
+            if (!request.paths.length) throw new Error("No generated Music Library fixture paths were provided.");
+          } else if (request.target_kind === "cue") {
+            request.paths = Array.isArray(config.cue_paths) ? config.cue_paths.slice() : [];
+            if (!request.paths.length) throw new Error("No generated cue fixture paths were provided.");
+          }
         }
         return originalInvoke(command, request);
       },
@@ -182,7 +224,12 @@
       const title = document.querySelector("#selectedSoundTitle");
       return title && title.textContent.includes(config.track_titles[0]);
     }, 8000);
-    record("music_track_selection", true, "Selecting a library track updated the Selected Track details.");
+    const musicMeta = document.querySelector("#selectedSoundMeta");
+    must(musicMeta && musicMeta.textContent.includes("Imported locally") &&
+      musicMeta.textContent.toLowerCase().includes(".wav") &&
+      musicMeta.textContent.includes("12.0 sec"),
+      "The Selected Track panel did not display Alpha's actual source, format, and duration.");
+    record("music_track_selection", true, "Selected Track displays the real imported track name, source, WAV format, and duration.");
 
     const volume = document.querySelector("#advancedMusicVolume");
     must(volume && Number(volume.max) === 50, "The BGM slider does not enforce the 50 percent maximum.");
@@ -200,12 +247,19 @@
     const preview = document.querySelector("#previewSelectedTrack");
     must(preview && !preview.disabled, "Preview Selected Track is disabled after selecting music.");
     preview.click();
-    await waitFor("Alpha audio preview playback", function () { return preview.textContent.includes(pauseLabel); }, 10000);
+    const alphaAudio = await waitForRealPlayback("Alpha audio media playback", alpha.path);
+    await waitFor("Alpha preview playback control", function () {
+      return preview.textContent.includes(pauseLabel);
+    }, 10000);
     preview.click();
-    await waitFor("Alpha audio preview pause", function () { return !preview.textContent.includes(pauseLabel); }, 5000);
+    const alphaPausedAt = await waitForPausedAudio("Alpha music pause", alphaAudio);
     preview.click();
-    await waitFor("Alpha audio preview resume", function () { return preview.textContent.includes(pauseLabel); }, 10000);
-    record("music_audio_preview_play_pause_resume", true, "A real imported WAV played, paused, and resumed in the packaged WebEngine player.");
+    await waitFor("Alpha audio preview resume", function () {
+      return preview.textContent.includes(pauseLabel) && !alphaAudio.paused &&
+        alphaAudio.currentTime > alphaPausedAt + 0.05;
+    }, 10000);
+    record("music_audio_preview_play_pause_resume", true,
+      "The imported WAV decoded and advanced in WebEngine; pause stopped media time and resume continued the same file.");
 
     betaButton = findTrackButton(beta.path);
     must(betaButton, "Beta disappeared from the catalogue before switching preview.");
@@ -213,11 +267,14 @@
     await waitFor("Beta selected-track details and stopped prior preview", function () {
       const title = document.querySelector("#selectedSoundTitle");
       return title && title.textContent.includes(config.track_titles[1]) &&
-        !preview.textContent.includes(pauseLabel);
+        alphaAudio.paused && !preview.textContent.includes(pauseLabel);
     }, 8000);
     preview.click();
-    await waitFor("Beta audio preview playback", function () { return preview.textContent.includes(pauseLabel); }, 10000);
-    record("music_preview_track_switch", true, "Selecting Beta stopped Alpha; Beta then played through the same packaged preview control.");
+    const betaAudio = await waitForRealPlayback("Beta audio media playback", beta.path);
+    must(betaAudio !== alphaAudio && audioUsesPath(betaAudio, beta.path),
+      "Switching to Beta did not create playback from Beta's own audio file.");
+    record("music_preview_track_switch", true,
+      "Selecting Beta stopped Alpha; the next actual media element used Beta's local WAV file.");
 
     alphaButton = findTrackButton(alpha.path);
     must(alphaButton, "Alpha disappeared before explicit default save.");
@@ -238,6 +295,106 @@
     must(String(afterCandidate.default_path || "") === String(alpha.path),
       "Selecting Beta silently replaced the saved Alpha book default.");
     record("candidate_selection_does_not_overwrite_default", true, "Selecting Beta changed the candidate panel but left the saved Alpha book default unchanged.");
+
+
+    document.querySelector('#sound .sound-tabs [data-sound-tab="cues"]').click();
+    await waitFor("Opening & Cues view", function () {
+      const view = document.querySelector('#sound .sound-view[data-sound-view="cues"]');
+      return view && view.classList.contains("active");
+    }, 8000);
+    const importCues = document.querySelector("#importCueClips");
+    must(importCues && !importCues.disabled, "Import effect clips control is missing or disabled.");
+    importCues.click();
+    let cueCatalog = [];
+    await waitFor("two imported cue fixtures", async function () {
+      cueCatalog = await invoke("sound.catalog", {});
+      const matches = (config.cue_track_titles || []).map(title => cueCatalog.find(track =>
+        track.title === title && String(track.role || "").toLowerCase() === "cue"));
+      return matches.length === 2 && matches.every(Boolean);
+    }, 30000);
+    const cueAlpha = cueCatalog.find(track => track.title === config.cue_track_titles[0] &&
+      String(track.role || "").toLowerCase() === "cue");
+    const cueBeta = cueCatalog.find(track => track.title === config.cue_track_titles[1] &&
+      String(track.role || "").toLowerCase() === "cue");
+    must(cueAlpha && cueBeta, "The imported cue clips are missing from the native cue catalogue.");
+    must(cueAlpha.source === "Imported locally" && cueBeta.source === "Imported locally" &&
+      cueAlpha.format === ".wav" && cueBeta.format === ".wav",
+      "Imported cue catalogue records do not contain their real source and format information.");
+    must(!visibleHas(config.cue_track_titles[0]) && !visibleHas(config.cue_track_titles[1]),
+      "A cue asset leaked into the Music Library track grid.");
+    const cueCards = Array.from(document.querySelectorAll("#cueGrid [data-cue-path]"));
+    const cueCardAlpha = cueCards.find(card => String(card.dataset.cuePath || "") === String(cueAlpha.path));
+    const cueCardBeta = cueCards.find(card => String(card.dataset.cuePath || "") === String(cueBeta.path));
+    must(cueCardAlpha && cueCardBeta, "The imported cue cards are not rendered in the Opening & Cues library.");
+
+    function inspectCueCard(card, track) {
+      const title = card.querySelector("h3");
+      const metadata = card.querySelector("p");
+      must(title && metadata, "A cue card is missing its title or metadata element.");
+      must(title.textContent.trim() === track.title, "Cue card title does not match the selected catalogue record.");
+      must(metadata.textContent.includes("Imported locally") && metadata.textContent.includes(".wav"),
+        "Cue card metadata does not show the actual source and audio format.");
+      const cardRect = card.getBoundingClientRect();
+      const titleRect = title.getBoundingClientRect();
+      const metadataRect = metadata.getBoundingClientRect();
+      must(titleRect.width > 0 && metadataRect.width > 0 &&
+        titleRect.bottom <= metadataRect.top + 1 &&
+        metadataRect.bottom <= cardRect.bottom + 1,
+        "Cue card title and metadata overlap or extend outside the card.");
+    }
+    inspectCueCard(cueCardAlpha, cueAlpha);
+    inspectCueCard(cueCardBeta, cueBeta);
+    cueCardAlpha.click();
+    await waitFor("selected cue title and metadata", function () {
+      const title = document.querySelector("#selectedCueTitle");
+      const meta = document.querySelector("#selectedCueMeta");
+      return title && title.textContent.trim() === cueAlpha.title &&
+        meta && meta.textContent.includes("Imported locally") && meta.textContent.includes(".wav");
+    }, 8000);
+    must(cueCardAlpha.getAttribute("aria-pressed") === "true" &&
+      cueCardAlpha.classList.contains("selected"),
+      "The selected cue card does not show its selected state.");
+    record("cue_card_readability_and_selected_track_details", true,
+      "Cue title, source, WAV format, selected state and non-overlapping title/metadata layout match the real imported catalogue record.");
+
+    const playCue = document.querySelector("#playSelectedCue");
+    const pauseCue = document.querySelector("#pauseSelectedCue");
+    const replayCue = document.querySelector("#replaySelectedCue");
+    must(playCue && pauseCue && replayCue, "Cue Play, Pause or Replay control is missing.");
+    playCue.click();
+    const cueAlphaAudio = await waitForRealPlayback("Alpha cue media playback", cueAlpha.path);
+    pauseCue.click();
+    const cuePausedAt = await waitForPausedAudio("Alpha cue pause", cueAlphaAudio);
+    playCue.click();
+    await waitFor("Alpha cue resume", function () {
+      return !cueAlphaAudio.paused && cueAlphaAudio.currentTime > cuePausedAt + 0.05;
+    }, 8000);
+    const beforeReplay = window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__.length;
+    replayCue.click();
+    await waitFor("Alpha cue replay creates a new selected-file media element", function () {
+      const audio = latestAcceptanceAudio();
+      return window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__.length > beforeReplay &&
+        audio && audioUsesPath(audio, cueAlpha.path) && audio.readyState >= 2 &&
+        !audio.paused && audio.currentTime < 0.75;
+    }, 10000);
+    const replayedCueAudio = latestAcceptanceAudio();
+    must(!replayedCueAudio.paused && audioUsesPath(replayedCueAudio, cueAlpha.path),
+      "Replay did not restart the individually selected Alpha cue.");
+
+    cueCardBeta.click();
+    await waitFor("Beta cue selection stops Alpha", function () {
+      const title = document.querySelector("#selectedCueTitle");
+      return title && title.textContent.trim() === cueBeta.title && replayedCueAudio.paused &&
+        cueCardBeta.getAttribute("aria-pressed") === "true";
+    }, 8000);
+    playCue.click();
+    const cueBetaAudio = await waitForRealPlayback("Beta cue media playback", cueBeta.path);
+    must(cueBetaAudio !== replayedCueAudio && audioUsesPath(cueBetaAudio, cueBeta.path),
+      "Selecting Beta did not switch the cue preview to Beta's actual audio file.");
+    record("cue_audio_preview_play_pause_replay", true,
+      "The selected cue's real media source played, paused, resumed and replayed from the beginning.");
+    record("cue_preview_track_switch", true,
+      "Selecting Beta stopped Alpha and the Play action opened Beta's own audio file.");
 
     publish("passed");
   } catch (error) {

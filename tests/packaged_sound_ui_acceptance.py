@@ -47,6 +47,25 @@ def validate_saved_music_state(state_path: Path, expected_path: Path, expected_v
     return data
 
 
+def validate_imported_audio_metadata(music_paths: list[Path], cue_paths: list[Path]) -> None:
+    """Verify imported Music and cue assets retain their distinct catalogue roles."""
+    for path in music_paths:
+        sidecar = path.with_name(path.name + ".license.json")
+        if not path.is_file() or not sidecar.is_file():
+            raise AssertionError(f"Imported music asset or metadata is missing: {path}")
+        metadata = json.loads(sidecar.read_text(encoding="utf-8"))
+        if metadata.get("role") != "music" or metadata.get("category") != "fantasy":
+            raise AssertionError(f"Imported music metadata mismatch for {path.name}: {metadata!r}")
+    for path in cue_paths:
+        sidecar = path.with_name(path.name + ".license.json")
+        if not path.is_file() or not sidecar.is_file():
+            raise AssertionError(f"Imported cue asset or metadata is missing: {path}")
+        expected = {"role": "cue", "category": "universal"}
+        if metadata := json.loads(sidecar.read_text(encoding="utf-8")):
+            if metadata.get("role") != expected["role"] or metadata.get("category") != expected["category"]:
+                raise AssertionError(f"Imported cue metadata mismatch for {path.name}: {metadata!r}")
+
+
 def _run(args: argparse.Namespace) -> int:
     repo_root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo_root))
@@ -67,13 +86,21 @@ def _run(args: argparse.Namespace) -> int:
     token = uuid.uuid4().hex[:12].upper()
     alpha_title = f"RYU_ACCEPTANCE_{token}_ALPHA"
     beta_title = f"RYU_ACCEPTANCE_{token}_BETA"
+    cue_alpha_title = f"RYU_ACCEPTANCE_{token}_CUE_ALPHA"
+    cue_beta_title = f"RYU_ACCEPTANCE_{token}_CUE_BETA"
     alpha_source = temp_root / f"{alpha_title}.wav"
     beta_source = temp_root / f"{beta_title}.wav"
+    cue_alpha_source = temp_root / f"{cue_alpha_title}.wav"
+    cue_beta_source = temp_root / f"{cue_beta_title}.wav"
     write_tone_fixture(alpha_source, 440.0)
     write_tone_fixture(beta_source, 660.0)
+    write_tone_fixture(cue_alpha_source, 880.0, duration_seconds=4.0)
+    write_tone_fixture(cue_beta_source, 990.0, duration_seconds=4.0)
 
     audio_root = audio_library_root()
-    imported_paths = [audio_root / alpha_source.name, audio_root / beta_source.name]
+    music_imported_paths = [audio_root / alpha_source.name, audio_root / beta_source.name]
+    cue_paths = [audio_root / cue_alpha_source.name, audio_root / cue_beta_source.name]
+    imported_paths = music_imported_paths + cue_paths
     for path in imported_paths:
         if path.exists() or path.with_name(path.name + ".license.json").exists():
             raise FileExistsError(f"Unique acceptance fixture unexpectedly exists already: {path}")
@@ -108,6 +135,8 @@ def _run(args: argparse.Namespace) -> int:
     config.write_text(json.dumps({
         "music_paths": [str(alpha_source.resolve()), str(beta_source.resolve())],
         "track_titles": [alpha_title, beta_title],
+        "cue_paths": [str(cue_alpha_source.resolve()), str(cue_beta_source.resolve())],
+        "cue_track_titles": [cue_alpha_title, cue_beta_title],
         "expected_category": "fantasy",
         "expected_volume": 0.42,
     }, ensure_ascii=True, indent=2), encoding="utf-8")
@@ -157,21 +186,16 @@ def _run(args: argparse.Namespace) -> int:
         if process.returncode != 0:
             raise RuntimeError(f"Packaged app returned exit code {process.returncode} after reporting success.")
 
-        validate_saved_music_state(project_folder / "state.json", imported_paths[0], expected_volume=0.42)
-        for track_path in imported_paths:
-            sidecar = track_path.with_name(track_path.name + ".license.json")
-            if not sidecar.is_file():
-                raise AssertionError(f"Imported music metadata sidecar is missing: {sidecar}")
-            metadata = json.loads(sidecar.read_text(encoding="utf-8"))
-            if metadata.get("role") != "music" or metadata.get("category") != "fantasy":
-                raise AssertionError(f"Imported track metadata did not retain Music/Fantasy values: {metadata!r}")
+        validate_saved_music_state(project_folder / "state.json", music_imported_paths[0], expected_volume=0.42)
+        validate_imported_audio_metadata(music_imported_paths, cue_paths)
 
         print("PACKAGED SOUND DESIGN UI ACCEPTANCE PASSED")
         for name, detail in (result.get("checks") or {}).items():
             print(f"[PASS] {name}: {detail}")
         print("[PASS] The project state retained Alpha as default after Beta was selected.")
         print("[PASS] The project state retained the 42% BGM level.")
-        print("[PASS] Both imported files retained Music role and Fantasy category metadata.")
+        print("[PASS] Both music fixtures retained Music role and Fantasy category metadata.")
+        print("[PASS] Both cue fixtures retained Cue role and Universal category metadata.")
         return 0
     finally:
         if process is not None and process.poll() is None:
