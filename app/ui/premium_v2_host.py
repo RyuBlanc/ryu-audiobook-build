@@ -5398,12 +5398,34 @@ class PremiumV2Bridge(QObject):
 
     def _sound_catalog(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
         from app.audio.library import AUDIO_EXTENSIONS, MUSIC_CATEGORY_LABELS, metadata_for
-        extensions = AUDIO_EXTENSIONS
-        roots = [(app_root() / "Audio Library", "Imported locally")]
+        local_root = app_root() / "Audio Library"
         bundled = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])) / "assets" / "starter_audio"
+        roots = [(local_root, "Imported locally")]
+        bundle_entries: dict[str, dict[str, Any]] = {}
+        bundle_version = ""
         if bundled.is_dir():
+            manifest_path = bundled / "manifest.json"
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                bundle_version = str(manifest.get("version") or "")
+                for entry in manifest.get("tracks", []):
+                    if not isinstance(entry, dict):
+                        continue
+                    relative = str(entry.get("bundle_path") or "").replace("\\", "/").strip()
+                    if not relative:
+                        continue
+                    candidate = (bundled / relative).resolve()
+                    try:
+                        candidate.relative_to(bundled.resolve())
+                    except ValueError:
+                        continue
+                    bundle_entries[str(candidate)] = entry
+            except (OSError, ValueError, TypeError):
+                log.exception("Could not read bundled starter-audio manifest %s", manifest_path)
             roots.append((bundled, "Bundled with application"))
+
         found: dict[str, dict[str, Any]] = {}
+        seeded_starter_ids: set[tuple[str, str, str, str]] = set()
         category_aliases = {
             "fantasy adventure": "fantasy", "fantasy-adventure": "fantasy",
             "battle & warfare": "action", "battle-warfare": "action", "battle warfare": "action",
@@ -5416,13 +5438,14 @@ class PremiumV2Bridge(QObject):
             "universal": "Calm narration", "emotional": "Others",
             "slice-of-life": "Others", "comedy": "Others",
         }
+
         for root, source in roots:
             if not root.is_dir():
                 continue
             try:
                 candidates = root.rglob("*")
                 for path in candidates:
-                    if not path.is_file() or path.suffix.lower() not in extensions:
+                    if not path.is_file() or path.suffix.lower() not in AUDIO_EXTENSIONS:
                         continue
                     try:
                         resolved = path.resolve()
@@ -5433,7 +5456,10 @@ class PremiumV2Bridge(QObject):
                         continue
                     key = str(resolved)
                     metadata = metadata_for(resolved)
-                    raw_category = str(metadata.get("category") or "").strip().casefold()
+                    bundled_entry = bundle_entries.get(key, {}) if source == "Bundled with application" else {}
+                    raw_category = str(
+                        metadata.get("category") or bundled_entry.get("category") or ""
+                    ).strip().casefold()
                     category = category_aliases.get(raw_category, raw_category)
                     if category not in MUSIC_CATEGORY_LABELS:
                         category = next(
@@ -5441,19 +5467,55 @@ class PremiumV2Bridge(QObject):
                              if part.casefold() in MUSIC_CATEGORY_LABELS),
                             "universal",
                         )
-                    role_value = str(metadata.get("role") or "music").strip().casefold()
-                    # Bundled starter cues persist their slot kind (opening/page/ending)
-                    # as role metadata. Normalize those to the shared cue catalogue role.
-                    role = "cue" if role_value in {"opening", "page", "ending", "closing", "chapter"} else role_value
+                    role_value = str(
+                        metadata.get("role") or bundled_entry.get("type") or "music"
+                    ).strip().casefold()
+                    role = "cue" if role_value in {"cue", "opening", "page", "ending", "closing", "chapter"} else role_value
                     if role not in {"music", "cue"}:
                         role = "music"
+
+                    original_filename = str(metadata.get("original_filename") or path.name).strip()
+                    starter_version = str(
+                        metadata.get("starter_pack_version") or
+                        (bundle_version if source == "Bundled with application" else "")
+                    ).strip()
+                    starter_category = raw_category or category
+                    starter_identity = (
+                        starter_version,
+                        original_filename.casefold(),
+                        starter_category.casefold(),
+                        role,
+                    )
+                    if source == "Imported locally" and starter_version and original_filename:
+                        # The first-run seeded copy is the persistent user-data
+                        # representation of this bundled asset. Mark it Built-in
+                        # and remember it so the packaged source is not shown twice.
+                        seeded_starter_ids.add(starter_identity)
+                    elif source == "Bundled with application" and starter_version and starter_identity in seeded_starter_ids:
+                        continue
+
+                    source_label = (
+                        "Bundled with application"
+                        if source == "Imported locally" and starter_version
+                        else source
+                    )
+                    title = str(
+                        metadata.get("title") or bundled_entry.get("title") or path.stem
+                    )
                     category_label = category_display.get(category, "Others")
-                    license_note = str(metadata.get("license_note") or metadata.get("source_note") or metadata.get("license") or "Unknown; verify rights before publishing")
-                    found[key] = {"id": key, "title": str(metadata.get("title") or path.stem), "path": key,
-                                  "source": source, "format": path.suffix.lower(),
-                                  "size_bytes": size, "duration_seconds": metadata.get("duration_seconds"),
-                                  "licensing": license_note, "category": category,
-                                  "category_label": category_label, "role": role, "metadata": metadata}
+                    license_note = str(
+                        metadata.get("license_note") or metadata.get("source_note") or
+                        metadata.get("license") or bundled_entry.get("license_note") or
+                        bundled_entry.get("license") or
+                        "Unknown; verify rights before publishing"
+                    )
+                    found[key] = {
+                        "id": key, "title": title, "path": key, "source": source_label,
+                        "format": path.suffix.lower(), "size_bytes": size,
+                        "duration_seconds": metadata.get("duration_seconds"),
+                        "licensing": license_note, "category": category,
+                        "category_label": category_label, "role": role, "metadata": metadata,
+                    }
             except OSError:
                 log.exception("Could not scan sound asset folder %s", root)
         return sorted(found.values(), key=lambda row: (row["source"], row["title"].casefold()))

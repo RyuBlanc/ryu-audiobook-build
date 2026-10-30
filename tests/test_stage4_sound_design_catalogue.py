@@ -218,4 +218,53 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         self.assertIn('opening_cue_path=Path(state["opening_cue_path"]) if state.get("opening_cue_path") else None', generation)
         self.assertIn('opening_cue_path=Path(str(state["opening_cue_path"])) if state.get("opening_cue_path") else None', preview_source)
 
+
+    def test_seeded_starter_tracks_are_built_in_and_not_duplicated(self):
+        version = "starter-test-v1"
+        audio_root = self.app_root / "Audio Library" / "music" / "fantasy"
+        seeded = audio_root / "starter-theme.wav"
+        _valid_wav(seeded)
+        seeded.with_name(seeded.name + ".license.json").write_text(json.dumps({
+            "role": "music", "category": "fantasy", "title": "Starter Theme",
+            "original_filename": "starter-theme.wav", "starter_pack_version": version,
+            "license_note": "CC0",
+        }), encoding="utf-8")
+
+        user_import = self.app_root / "Audio Library" / "music" / "romance" / "my-track.wav"
+        _valid_wav(user_import)
+        user_import.with_name(user_import.name + ".license.json").write_text(json.dumps({
+            "role": "music", "category": "romance", "title": "My Imported Track",
+            "original_filename": "my-track.wav", "license_note": "User import",
+        }), encoding="utf-8")
+
+        frozen_root = self.root / "frozen"
+        bundle = frozen_root / "assets" / "starter_audio"
+        bundled_seed = bundle / "music" / "fantasy" / "starter-theme.wav"
+        _valid_wav(bundled_seed)
+        bundled_only = bundle / "music" / "sci-fi" / "bundle-only.wav"
+        _valid_wav(bundled_only)
+        (bundle / "manifest.json").write_text(json.dumps({
+            "version": version,
+            "tracks": [
+                {"type": "music", "category": "fantasy",
+                 "bundle_path": "music/fantasy/starter-theme.wav", "title": "Starter Theme",
+                 "license": "CC0", "license_note": "Starter"},
+                {"type": "music", "category": "sci-fi",
+                 "bundle_path": "music/sci-fi/bundle-only.wav", "title": "Bundle Only",
+                 "license": "CC0", "license_note": "Starter"},
+            ],
+        }), encoding="utf-8")
+
+        with patch.object(host.sys, "_MEIPASS", str(frozen_root), create=True):
+            rows = host.PremiumV2Bridge._sound_catalog(self.bridge_a, {})
+
+        starter_rows = [row for row in rows if row["title"] == "Starter Theme"]
+        self.assertEqual(len(starter_rows), 1)
+        self.assertEqual(starter_rows[0]["source"], "Bundled with application")
+        self.assertEqual(Path(starter_rows[0]["path"]), seeded.resolve())
+        imported = next(row for row in rows if row["title"] == "My Imported Track")
+        self.assertEqual(imported["source"], "Imported locally")
+        bundled_only_row = next(row for row in rows if row["title"] == "Bundle Only")
+        self.assertEqual(bundled_only_row["source"], "Bundled with application")
+
 if __name__ == "__main__": unittest.main()
