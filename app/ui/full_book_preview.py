@@ -14,7 +14,8 @@ def start_full_book_preview(host) -> dict[str, Any]:
     project = host._active_project()
     from app.core.state import load_state
     state = load_state(project.folder)
-    from app.audio.library import validate_saved_audio_paths
+    from app.audio.library import effective_background_audio_mode, validate_saved_audio_paths
+    background_audio_mode = effective_background_audio_mode(state)
     validate_saved_audio_paths(state)
     chapters = sorted(project.chapters, key=lambda chapter: chapter.number)
     if not chapters:
@@ -127,7 +128,7 @@ def _render_full_book_preview(host, job_id, project, chapter_dirs, chapter_title
             background_audio_fade_out=float(state.get("background_audio_fade_out") if state.get("background_audio_fade_out") is not None else 3.0),
             ambience_audio_path=Path(str(state["ambience_audio_path"])) if state.get("ambience_audio_path") else None,
             ambience_audio_volume=float(state.get("ambience_audio_volume") if state.get("ambience_audio_volume") is not None else 0.10),
-            background_audio_mode=str(state.get("background_audio_mode") or "off"),
+            background_audio_mode=background_audio_mode,
             auto_music_style=str(state.get("auto_music_style") or "auto"),
             auto_music_variation=state.get("auto_music_track_path") or None,
             chapter_transition_sound=bool(state.get("chapter_transition_sound", False)),

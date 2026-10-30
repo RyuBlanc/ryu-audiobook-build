@@ -450,12 +450,13 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
     def test_voice_only_ignores_retained_inactive_audio_and_legacy_scene_path(self):
         from tempfile import TemporaryDirectory
         from pathlib import Path
-        from app.audio.library import validate_saved_audio_paths
+        from app.audio.library import effective_background_audio_mode, validate_saved_audio_paths
 
         with TemporaryDirectory() as temporary:
             missing = Path(temporary) / "deleted-audio.wav"
-            validate_saved_audio_paths({
-                "background_audio_mode": "off",
+            voice_only_state = {
+                # A stale manual mode must never defeat the global Voice Only switch.
+                "background_audio_mode": "manual",
                 "background_audio_enabled": False,
                 "background_audio_path": str(missing),
                 "background_audio_preferred_path": str(missing),
@@ -465,7 +466,60 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
                 "scene_transition_cue_path": str(missing),
                 "chapter_bgm_strategy": "custom",
                 "chapter_bgm_overrides": {"2": {"rule": "custom", "path": str(missing)}},
-            })
+            }
+            self.assertEqual(effective_background_audio_mode(voice_only_state), "off")
+            validate_saved_audio_paths(voice_only_state)
+
+    def test_effective_audio_mode_preserves_legacy_projects_and_global_voice_only(self):
+        from app.audio.library import effective_background_audio_mode, validate_saved_audio_paths
+
+        self.assertEqual(effective_background_audio_mode({
+            "background_audio_mode": "manual",
+            "background_audio_enabled": False,
+            "background_audio_path": "retained-book-track.wav",
+        }), "off")
+        self.assertEqual(effective_background_audio_mode({
+            "background_audio_mode": "auto",
+            "background_audio_enabled": False,
+            "auto_music_track_path": "retained-auto-track.wav",
+        }), "off")
+        self.assertEqual(effective_background_audio_mode({
+            "background_audio_mode": "off",
+            "background_audio_enabled": True,
+            "background_audio_path": "retained-book-track.wav",
+        }), "off")
+        # Old projects without the mode field retain the prior inferred manual mode.
+        self.assertEqual(effective_background_audio_mode({
+            "background_audio_path": "legacy-book-track.wav",
+        }), "manual")
+        self.assertEqual(effective_background_audio_mode({
+            "background_audio_enabled": False,
+            "background_audio_path": "legacy-book-track.wav",
+        }), "off")
+        with self.assertRaisesRegex(ValueError, "Unsupported background audio mode"):
+            effective_background_audio_mode({"background_audio_mode": "layered"})
+
+        # Inactive retained/missing assets must not block Voice Only preflight.
+        validate_saved_audio_paths({
+            "background_audio_mode": "manual",
+            "background_audio_enabled": False,
+            "background_audio_path": "deleted-book-track.wav",
+            "opening_cue_path": "deleted-opening-cue.wav",
+            "chapter_bgm_overrides": {
+                "2": {"rule": "custom", "path": "deleted-chapter-track.wav"}
+            },
+        })
+
+    def test_final_generation_and_full_book_preview_share_the_resolved_audio_mode(self):
+        host = Path("app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        preview = Path("app/ui/full_book_preview.py").read_text(encoding="utf-8")
+        library = Path("app/audio/library.py").read_text(encoding="utf-8")
+        self.assertIn("def effective_background_audio_mode(state):", library)
+        self.assertIn("audio_mode=effective_background_audio_mode(state)", library)
+        for source in (host, preview):
+            self.assertIn("effective_background_audio_mode, validate_saved_audio_paths", source)
+            self.assertIn("background_audio_mode = effective_background_audio_mode(state)", source)
+            self.assertIn("background_audio_mode=background_audio_mode,", source)
 
     def test_preflight_checks_only_the_active_bgm_strategy(self):
         from tempfile import TemporaryDirectory

@@ -3982,7 +3982,8 @@ class PremiumV2Bridge(QObject):
         if not chapters:
             raise ValueError("No chapters are eligible for generation. Restore chapter text or re-include a skipped chapter.")
         state = load_state(project.folder)
-        from app.audio.library import validate_saved_audio_paths
+        from app.audio.library import effective_background_audio_mode, validate_saved_audio_paths
+        background_audio_mode = effective_background_audio_mode(state)
         validate_saved_audio_paths(state)
         profile_name = str(payload.get("profile_name") or state.get("voice_profile") or "").strip()
         profile = self._find_profile(profile_name)
@@ -4084,7 +4085,7 @@ class PremiumV2Bridge(QObject):
             ambience_audio_volume=float(state.get("ambience_audio_volume") if state.get("ambience_audio_volume") is not None else 0.10),
             background_audio_fade_in=float(state.get("background_audio_fade_in") if state.get("background_audio_fade_in") is not None else 2.0),
             background_audio_fade_out=float(state.get("background_audio_fade_out") if state.get("background_audio_fade_out") is not None else 3.0),
-            background_audio_mode=str(state.get("background_audio_mode") or "off"),
+            background_audio_mode=background_audio_mode,
             auto_music_style=str(state.get("auto_music_style") or "auto"),
             auto_music_variation=state.get("auto_music_track_path") or None,
             chapter_transition_sound=bool(state.get("chapter_transition_sound", False)),

@@ -288,8 +288,13 @@ def resolve_music_track(mood,selected_track=None,*,seed_text=""):
  if not candidates:return None
  return candidates[_seed_index(seed_text,len(candidates))].path
 
-def validate_saved_audio_paths(state):
- """Validate active saved assets and enforce Music Library / cue role separation."""
+def effective_background_audio_mode(state):
+ """Resolve the one authoritative saved BGM/cue mode for preview and generation.
+
+ Legacy projects may not have a background_audio_mode key. Preserve their
+ historical inference, but always let the global Voice Only switch override
+ any retained mode or saved audio preferences.
+ """
  overrides_value=state.get("chapter_bgm_overrides")
  overrides=overrides_value if isinstance(overrides_value,dict) else {}
  raw_mode=state.get("background_audio_mode")
@@ -303,6 +308,16 @@ def validate_saved_audio_paths(state):
  audio_mode=str(raw_mode or "off").strip().casefold()
  if audio_mode not in {"off","auto","manual"}:
   raise ValueError(f"Unsupported background audio mode: {audio_mode}")
+ if audio_mode=="off" or not bool(state.get("background_audio_enabled",True)):
+  return "off"
+ return audio_mode
+
+
+def validate_saved_audio_paths(state):
+ """Validate active saved assets and enforce Music Library / cue role separation."""
+ overrides_value=state.get("chapter_bgm_overrides")
+ overrides=overrides_value if isinstance(overrides_value,dict) else {}
+ audio_mode=effective_background_audio_mode(state)
  strategy=str(state.get("chapter_bgm_strategy") or ("custom" if overrides else "same")).strip().casefold()
  chapter_based=strategy in {"custom","chapter-based","chapter_based","chapter"}
  if strategy not in {"same","same-bgm","same_bgm","custom","chapter-based","chapter_based","chapter"}:
