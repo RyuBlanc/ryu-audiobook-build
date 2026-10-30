@@ -88,3 +88,12 @@ Run #1746 passed on 68c4afb: JavaScript syntax passed; 843 tests passed in 37.08
 - [#1748](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41074194154) found one overly broad assertion in the new test: it searched for the name `soundListEpoch` even in an explanatory comment. It did not report a JavaScript syntax or application failure. The test was narrowed to forbid the actual shared-epoch operations rather than the comment.
 - [#1749](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41074552773) passed on `c747fc67b68f5b88990c44f7e597a12eeb7ddb1c`: JavaScript syntax validation passed; **843 tests passed in 40.789 seconds**.
 - Next gate: run the frozen Windows artifact acceptance on the green-tested source. Do not close `SD-09`, `SD-10`, or `MUS-06` until the Built-in/Imported/All/Fantasy Music filters, cue cards, and actual cue/music playback all pass in the frozen executable.
+
+## Packaged cue-card timing investigation — Runs #1750–#1751
+
+- [#1750](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41075207417) passed regression tests, frozen executable verification, and bundled voice/module verification. In the packaged app, **all Music Library checks passed**: Built-in, Imported, All, Fantasy and search filters; imported track selection and metadata; saved 42% BGM level; real WAV play/pause/resume and track switching; explicit book-default save; and protection against candidate selection overwriting the saved default.
+- #1750 then stopped at the cue-card assertion. The driver had waited for both cue fixtures to appear in the native catalogue but immediately queried the cue DOM without waiting for the renderer. That acceptance condition was weaker than the Music Library filters, which explicitly wait for the rendered rows.
+- Driver/test correction commit: `79d1f81e6c03ae00949b3539eedae8e7909dd871`. The packaged test now waits up to 15 seconds for the two exact imported cue paths in `#cueGrid`; on timeout it reports catalogue role counts, expected and rendered paths, grid existence/signature/text, selected source and search state. No application code was changed in this correction.
+- [#1751](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41076814352) passed on `79d1f81e6c03ae00949b3539eedae8e7909dd871`: frontend JavaScript syntax passed; **844 tests passed in 24.362 seconds**.
+- Frozen Windows verification of cue cards and playback remains pending; a new artifact-checkpoint run is required. The current successful Music Library checks must remain in the combined gate.
+
