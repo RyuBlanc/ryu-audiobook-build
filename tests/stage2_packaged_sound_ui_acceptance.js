@@ -179,16 +179,19 @@
     const builtInSource = document.querySelector('#soundSourceFilter [data-source="built-in"]');
     must(allSource && importedSource && builtInSource, "Music Library source filter buttons are incomplete.");
     builtInSource.click();
-    await waitFor("Built-in source filter", function () {
-      return builtInSource.classList.contains("active") &&
-        !visibleHas(config.track_titles[0]) && !visibleHas(config.track_titles[1]);
-    }, 10000);
-    if (musicButtons().length === 0) {
+    try {
+      await waitFor("Built-in filter to render only bundled music", function () {
+        const rows = musicButtons();
+        return builtInSource.classList.contains("active") &&
+          rows.length > 0 &&
+          rows.every(button => rowText(button).includes("Bundled with application")) &&
+          !visibleHas(config.track_titles[0]) && !visibleHas(config.track_titles[1]);
+      }, 12000);
+    } catch (filterError) {
       const diagnosticCatalog = await invoke("sound.catalog", {});
       const sourceCounts = {};
       const categoryCounts = {};
       const roleCounts = {};
-      const examples = [];
       for (const track of Array.isArray(diagnosticCatalog) ? diagnosticCatalog : []) {
         const metadata = track && typeof track.metadata === "object" ? track.metadata : {};
         const role = String(track?.role || metadata.role || "music").trim().toLowerCase();
@@ -197,37 +200,54 @@
         sourceCounts[source] = (sourceCounts[source] || 0) + 1;
         categoryCounts[category] = (categoryCounts[category] || 0) + 1;
         roleCounts[role] = (roleCounts[role] || 0) + 1;
-        if (examples.length < 14 && (role !== "cue" || source.toLowerCase().includes("bundled"))) {
-          examples.push({title:track?.title,source,category,role,path:String(track?.path || "").slice(-100)});
-        }
       }
-      const activeCategory = document.querySelector('#sound .sound-categories-list [data-music-category].active')?.dataset.musicCategory || "(none)";
-      const activeSource = document.querySelector('#soundSourceFilter [data-source].active')?.dataset.source || "(none)";
-      throw new Error("Packaged starter music is missing from the Built-in filter. Runtime catalogue diagnostics: " +
+      const renderedRows = musicButtons().map(rowText);
+      throw new Error("Built-in filter did not settle on bundled music rows. " +
         JSON.stringify({
+          cause:String(filterError),
           catalogCount:Array.isArray(diagnosticCatalog) ? diagnosticCatalog.length : -1,
-          sourceCounts, categoryCounts, roleCounts, examples,
-          activeCategory, activeSource,
-          renderedMusicRows:musicButtons().map(rowText).slice(0,8)
+          sourceCounts, categoryCounts, roleCounts,
+          activeCategory:document.querySelector('#sound .sound-categories-list [data-music-category].active')?.dataset.musicCategory || "(none)",
+          activeSource:document.querySelector('#soundSourceFilter [data-source].active')?.dataset.source || "(none)",
+          renderedRows:renderedRows.slice(0,12)
         }));
     }
+    record("music_builtin_source_filter", true,
+      "The Built-in filter waited for a non-empty list and every rendered row belongs to the bundled application catalogue.");
+
     importedSource.click();
-    await waitFor("Imported source filter", function () {
+    await waitFor("Imported filter to render only imported music", function () {
+      const rows = musicButtons();
       return importedSource.classList.contains("active") &&
+        rows.length === 2 &&
+        rows.every(button => rowText(button).includes("Imported locally")) &&
         visibleHas(config.track_titles[0]) && visibleHas(config.track_titles[1]);
-    }, 10000);
+    }, 12000);
+    record("music_imported_source_filter", true,
+      "The Imported filter rendered exactly the two imported fixture tracks and no bundled rows.");
+
     allSource.click();
-    await waitFor("All source filter", function () {
+    await waitFor("All source filter to restore bundled and imported music", function () {
+      const rows = musicButtons();
+      const texts = rows.map(rowText);
       return allSource.classList.contains("active") &&
+        rows.length >= 3 &&
+        texts.some(text => text.includes("Bundled with application")) &&
+        texts.some(text => text.includes("Imported locally")) &&
         visibleHas(config.track_titles[0]) && visibleHas(config.track_titles[1]);
-    }, 10000);
+    }, 12000);
+    record("music_all_source_filter", true,
+      "All restored both bundled starter tracks and imported music together.");
 
     const fantasy = document.querySelector('#sound .sound-categories-list [data-music-category="fantasy-adventure"]');
     fantasy.click();
-    await waitFor("Fantasy filter results", function () {
+    await waitFor("Fantasy category to render only Fantasy adventure tracks", function () {
+      const rows = musicButtons();
       return fantasy.classList.contains("active") &&
+        rows.length > 0 &&
+        rows.every(button => rowText(button).includes("Fantasy adventure")) &&
         visibleHas(config.track_titles[0]) && visibleHas(config.track_titles[1]);
-    }, 10000);
+    }, 12000);
     const search = document.querySelector("#soundTrackSearch");
     must(search, "Music Library search field is missing.");
     search.value = config.track_titles[0];

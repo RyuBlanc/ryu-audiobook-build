@@ -135,6 +135,17 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         )
         self.assertIn("if (musicButtons().length === 0)", script)
 
+    def test_packaged_driver_waits_for_rendered_source_filter_results_not_only_button_state(self):
+        script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        self.assertIn('rows.every(button => rowText(button).includes("Bundled with application"))', script)
+        self.assertIn('rows.every(button => rowText(button).includes("Imported locally"))', script)
+        self.assertIn('rows.some(text => text.includes("Bundled with application"))', script)
+        self.assertIn('rows.some(text => text.includes("Imported locally"))', script)
+        self.assertIn('rows.every(button => rowText(button).includes("Fantasy adventure"))', script)
+        self.assertIn('music_builtin_source_filter', script)
+        self.assertIn('music_imported_source_filter', script)
+        self.assertIn('music_all_source_filter', script)
+
     def test_windows_package_job_runs_the_real_frozen_executable_acceptance(self):
         workflow = (ROOT / ".github/workflows/build-windows.yml").read_text(encoding="utf-8")
         self.assertIn("Run packaged Sound Design Music Library acceptance", workflow)
