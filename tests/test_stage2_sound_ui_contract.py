@@ -70,7 +70,7 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
             self.assertIn(f'data-music-category="{category}"', self.sound_markup)
         self.assertIn("selectedMusicCategory", self.adapter)
         self.assertIn("matchesCategory", self.adapter)
-        self.assertIn("metadata?.category", self.adapter)
+        self.assertIn("metadata.category", self.adapter)
 
     def test_music_import_uses_selected_category(self):
         self.assertIn('id="musicImportCategory"', self.sound_markup)
@@ -151,8 +151,9 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
                          "horror", "romance", "sci-fi", "calm-narration", "others"):
             self.assertIn(f'data-chapter-category="{category}"', self.adapter)
         self.assertIn("chapterMusicCategoryGroup(track) === categoryFilter", self.adapter)
-        self.assertIn("soundSourceKind(track) === 'built-in'", self.adapter)
-        self.assertIn("soundSourceKind(track) === 'imported'", self.adapter)
+        self.assertIn("const sourceKind = soundSourceKind(track);", self.adapter)
+        self.assertIn("(sourceFilter === 'built-in' && sourceKind === 'built-in')", self.adapter)
+        self.assertIn("(sourceFilter === 'imported' && sourceKind === 'imported')", self.adapter)
         self.assertIn("data-chapter-category", self.adapter)
         self.assertIn("chapterTrackListSignature", self.adapter)
 
@@ -223,7 +224,7 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         start = self.host.index("    def _sound_chapter_bgm_save(")
         end = self.host.index("    def _sound_cues_get(", start)
         method = self.host[start:end]
-        self.assertIn('preferred = str(state.get("background_audio_path") or state.get("background_audio_preferred_path") or "").strip()', method)
+        self.assertIn('preferred = str(state.get("background_audio_preferred_path") or state.get("background_audio_path") or "").strip()', method)
         self.assertIn("if master_enabled and preferred and preferred in catalog_paths and Path(preferred).is_file():", method)
         self.assertIn('state["background_audio_path"] = preferred', method)
 
@@ -242,7 +243,7 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("function isMusicSoundAsset(track)", self.adapter)
         self.assertIn("const role = soundAssetRole(t);", self.adapter)
         self.assertIn("const matchesMusicType = role !== 'cue';", self.adapter)
-        self.assertIn("const allMusicTracks = sounds.filter(isMusicSoundAsset);", self.adapter)
+        self.assertIn("const allMusicTracks = sounds.filter(track => isMusicSoundAsset(track));", self.adapter)
         self.assertIn("const isCue = isCueSoundAsset(t);", self.adapter)
 
     def test_selected_music_track_does_not_replace_saved_default_on_handoff(self):
@@ -267,8 +268,10 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("const categoryGroup = soundCategoryGroup;", self.adapter)
         self.assertIn("function chapterMusicCategoryGroup(track) { return soundCategoryGroup(track); }", self.adapter)
         self.assertIn("function soundSourceKind(track)", self.adapter)
-        self.assertIn("soundSourceKind(t) === 'built-in'", self.adapter)
-        self.assertIn("soundSourceKind(track) === 'imported'", self.adapter)
+        self.assertIn("const sourceKind = soundSourceKind(t);", self.adapter)
+        self.assertIn("const sourceKind = soundSourceKind(track);", self.adapter)
+        self.assertIn("sourceKind === 'built-in'", self.adapter)
+        self.assertIn("sourceKind === 'imported'", self.adapter)
         for alias in ("fantasy-adventure", "battle-warfare", "calm-narration", "others"):
             self.assertIn("'" + alias + "'", self.adapter)
 
@@ -291,7 +294,7 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
 
     def test_full_book_mix_preview_flushes_current_sound_design_drafts(self):
         start = self.adapter.index("soundButton.id === 'soundPreviewBook'")
-        end = self.adapter.index("soundButton.id === 'applySoundToProduction'", start)
+        end = self.adapter.index("} catch (err) { message", start)
         preview = self.adapter[start:end]
         self.assertIn("if (cueClearAllStaged)", preview)
         self.assertIn("await saveCurrentChapterBgmDraft();", preview)

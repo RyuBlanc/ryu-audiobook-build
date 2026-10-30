@@ -134,7 +134,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "character.analyze", "character.assign", "character.update", "character.delete", "pronunciation.list",
             "pronunciation.save", "pronunciation.analyze", "production.preview",
             "production.generate_book", "player.get_active", "job.list", "job.pause", "job.resume",
-            "job.cancel", "settings.save", "sound.catalog", "sound.import", "sound.assign", "sound.save_manifest",
+            "job.cancel", "settings.save", "sound.catalog", "sound.import", "sound.save_manifest",
             "sound.cues.get", "sound.cues.save", "sound.chapter_bgm.get", "sound.chapter_bgm.save", "models.install",
         ):
             self.assertIn(command, script)
@@ -349,7 +349,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("#importMusicTracks, #importCueClips, #previewSelectedTrack", adapter)
         self.assertIn("call('sound.import'", adapter)
         self.assertIn("target_kind: soundButton.id === 'importMusicTracks' ? 'music' : 'cue'", adapter)
-        self.assertIn("call('sound.assign'", adapter)
+        self.assertIn("async function saveSoundManifest(overrides = {})", adapter)
+        self.assertIn("await saveSoundManifest({path:selectedSoundPath, enabled:true})", adapter)
         self.assertIn("call('sound.save_manifest'", adapter)
         self.assertIn("The selected local audio file could not be played", adapter)
         self.assertIn("call('sound.cues.save'", adapter)
@@ -460,7 +461,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
     def test_cue_feedback_matches_current_three_slot_assignment_contract(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("pendingCueAssignments[pendingCueSlot] = path", adapter)
-        self.assertIn("Use Save Cue Changes to persist this assignment.", adapter)
+        self.assertIn("It will save automatically; use Save Cue Changes to save now.", adapter)
+        self.assertIn("function scheduleCueAutoSave()", adapter)
         self.assertIn("soundButton.id === 'saveCueChanges'", adapter)
         self.assertNotIn("message(result.generation_supported ? 'Cue assignment saved to this book.' :", adapter)
         self.assertNotIn("Scene transition cue saved to this book and will be included during audiobook assembly.", adapter)
@@ -900,7 +902,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("const duration = lengthGroup?.querySelector('.seg button.active')?.textContent.match(/\\d+/)?.[0] || '30'", adapter)
         # Chapter context actions and track selection have source-backed host calls.
         self.assertIn("Type one: add, rename, delete, up, down, merge, review, skip, find, replace, undo, redo", adapter)
-        for command in ("chapter.add", "chapter.delete", "chapter.reorder", "chapter.merge", "sound.catalog", "sound.assign", "sound.save_manifest"):
+        for command in ("chapter.add", "chapter.delete", "chapter.reorder", "chapter.merge", "sound.catalog", "sound.save_manifest"):
             self.assertIn("call('" + command + "'", adapter)
         self.assertIn("call('player.get_active', {folder})", adapter)
 

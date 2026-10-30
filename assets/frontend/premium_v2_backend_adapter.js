@@ -288,7 +288,7 @@
       ? track.metadata : {};
     const raw = typeof track === 'string'
       ? track : (track?.category || metadata.category || track?.category_label || 'universal');
-    const category = String(raw).trim().toLowerCase().replace(/_/g, '-').replace(/\\s+/g, ' ');
+    const category = String(raw).trim().toLowerCase().replace(/_/g, '-').replace(/\s+/g, ' ');
     return soundCategoryGroups[category] || 'others';
   }
   function soundAssetRole(track) {
