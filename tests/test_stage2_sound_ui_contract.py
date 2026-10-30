@@ -373,6 +373,37 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("'Voice Only · BGM disabled'", self.adapter)
         self.assertIn("defaultAvailable && defaultTrack", self.adapter)
 
+
+    def test_book_default_selection_stays_preference_only_in_chapter_based_strategy(self):
+        from app.ui.premium_v2_host import _sound_manifest_bgm_paths
+
+        track = "C:/Audio Library/BookTheme.wav"
+        chapter_state = {
+            "chapter_bgm_strategy": "custom",
+            "background_audio_path": "",
+            "background_audio_preferred_path": "C:/Audio Library/OlderTheme.wav",
+            "chapter_bgm_overrides": {"2": {"rule": "custom", "path": "C:/Audio Library/Chapter.wav"}},
+        }
+        active, preferred = _sound_manifest_bgm_paths(chapter_state, track, True)
+        self.assertEqual(active, "")
+        self.assertEqual(preferred, track)
+
+        same_state = {**chapter_state, "chapter_bgm_strategy": "same"}
+        active, preferred = _sound_manifest_bgm_paths(same_state, track, True)
+        self.assertEqual(active, track)
+        self.assertEqual(preferred, track)
+
+        active, preferred = _sound_manifest_bgm_paths(chapter_state, "", False)
+        self.assertEqual(active, "")
+        self.assertEqual(preferred, chapter_state["background_audio_preferred_path"])
+
+        method_start = self.host.index("    def _sound_save_manifest(")
+        method_end = self.host.index("    def _sound_chapter_bgm_get(", method_start)
+        method = self.host[method_start:method_end]
+        self.assertIn("_sound_manifest_bgm_paths(state, path, enabled)", method)
+        self.assertIn('"background_audio_path": active_bgm_path', method)
+        self.assertIn('"background_audio_preferred_path": preferred_bgm_path', method)
+
     def test_zero_cue_level_does_not_add_silent_audio_duration(self):
         self.assertIn("if cue is None or cue_gain <= 1e-9:", self.assembler)
         self.assertIn("return None", self.assembler[self.assembler.index("def apply_cue_level"):self.assembler.index("# Real local audio only", self.assembler.index("def apply_cue_level"))])

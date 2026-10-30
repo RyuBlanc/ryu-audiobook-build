@@ -302,6 +302,29 @@ def _cleanup_staged_import_file(path: Path | None) -> None:
         log.warning("Could not remove temporary import staging file: %s", path, exc_info=True)
 
 
+def _sound_manifest_bgm_paths(state: dict[str, Any], path: str, enabled: bool) -> tuple[str, str]:
+    """Return active and preferred book-BGM paths without breaking Chapter-Based exclusivity."""
+    preferred = str(
+        state.get("background_audio_preferred_path") or state.get("background_audio_path") or ""
+    ).strip()
+    selected = str(path or "").strip()
+    overrides = state.get("chapter_bgm_overrides")
+    strategy = str(
+        state.get("chapter_bgm_strategy") or
+        ("custom" if isinstance(overrides, dict) and overrides else "same")
+    ).strip().casefold()
+    chapter_based = strategy in {"custom", "chapter-based", "chapter_based", "chapter"}
+    if not enabled:
+        return "", selected or preferred
+    if selected and chapter_based:
+        # The chosen book track is retained as the preference for switching
+        # back to Same BGM, but never becomes active under Chapter-Based BGM.
+        return "", selected
+    if selected:
+        return selected, selected
+    return "", preferred
+
+
 class PremiumV2Bridge(QObject):
     """Narrow, allow-listed JSON bridge; renderer content cannot execute shell commands."""
 
@@ -5555,27 +5578,19 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Background music and cue volume must be 0–50 percent, narration 0–100 percent, and fades 0–30 seconds.")
         catalog = self._sound_catalog({})
         catalog_paths = {str(row["path"]) for row in catalog}
+        active_bgm_path, preferred_bgm_path = _sound_manifest_bgm_paths(state, path, enabled)
         if enabled and path:
             selected = Path(path).expanduser().resolve()
             selected_row = next((row for row in catalog if str(row["path"]) == str(selected)), None)
             if not selected.is_file() or selected_row is None or str(selected_row.get("role") or "music").casefold() == "cue":
                 raise ValueError("Selected BGM is missing from the local music library.")
-            state.update({"background_audio_path": str(selected), "background_audio_preferred_path": str(selected),
-                          "background_audio_mode": "manual", "background_audio_enabled": True,
-                          "background_audio_volume": volume})
-        elif enabled:
-            # Enable chapter-assigned BGM/story cues without activating an
-            # unrelated book-wide default in Chapter-Based mode.
-            preferred = str(state.get("background_audio_path") or state.get("background_audio_preferred_path") or "").strip()
-            state.update({"background_audio_path": "", "background_audio_preferred_path": preferred,
-                          "background_audio_mode": "manual", "background_audio_enabled": True,
-                          "background_audio_volume": volume})
-        else:
-            # Keep the preferred path so the user can re-enable it later, but
-            # never leave disabled/missing audio in the active generation state.
-            preferred = path or str(state.get("background_audio_path") or state.get("background_audio_preferred_path") or "").strip()
-            state.update({"background_audio_path": "", "background_audio_preferred_path": preferred,
-                          "background_audio_mode": "off", "background_audio_enabled": False})
+        state.update({
+            "background_audio_path": active_bgm_path,
+            "background_audio_preferred_path": preferred_bgm_path,
+            "background_audio_mode": "manual" if enabled else "off",
+            "background_audio_enabled": enabled,
+            "background_audio_volume": volume,
+        })
         state["background_audio_volume"] = volume
         state["background_audio_fade_in"] = fade_in
         state["background_audio_fade_out"] = fade_out
