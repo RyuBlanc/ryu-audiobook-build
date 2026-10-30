@@ -3692,6 +3692,10 @@
     }).length;
     const missingCount = missingDefault + missingChapterTracks + missingCues;
     const assignedOverrideCount = Object.values(overrides).filter(item => item && ['custom','none'].includes(item.rule)).length;
+    const explicitChapterTrackCount = Number(chapterBgmState.explicit_chapter_track_count ??
+      new Set(Object.values(overrides)
+        .filter(item => item && item.rule === 'custom' && item.path)
+        .map(item => String(item.path))).size);
 
     setText('mixBgmStatus', !masterEnabled ? 'Voice only' : (hasActiveBgm ? 'Enabled' : 'Enabled · no BGM track assigned'));
     const effectiveTrackPaths = chapterBased
@@ -3754,7 +3758,14 @@
     document.querySelectorAll('#sound [data-bgm-enabled]').forEach(button => {
       button.classList.toggle('active', (button.dataset.bgmEnabled === 'true') === masterEnabled);
     });
-    setText('productionMusicSummary', hasActiveBgm && masterEnabled ? (chapterBased ? 'Chapter-based BGM' : (defaultTrack?.title || 'Book BGM')) : (masterEnabled ? 'No BGM track assigned' : 'Voice only · BGM off'));
+    const productionMusicLabel = !masterEnabled
+      ? 'Voice Only · BGM disabled'
+      : chapterBased
+        ? 'Chapter-Based BGM · ' + explicitChapterTrackCount + ' unique assigned track' + (explicitChapterTrackCount === 1 ? '' : 's')
+        : (defaultAvailable && defaultTrack
+          ? defaultTrack.title
+          : (defaultPath ? 'Saved book-default track missing' : 'No BGM track assigned'));
+    setText('productionMusicSummary', productionMusicLabel);
     setText('productionPreviewMix', outputDescription);
     setText('productionFinalMix', !masterEnabled ? 'Voice Only' : (chapterBased ? 'Chapter-Based BGM' : 'Same BGM'));
   }
@@ -3815,14 +3826,13 @@
       const allMusicTracks = sounds.filter(track => isMusicSoundAsset(track));
       const visible = allMusicTracks.filter(track => {
         const metadata = track.metadata && typeof track.metadata === 'object' ? track.metadata : {};
-        const source = String(track.source || '').toLowerCase();
         const searchable = [track.title, track.source, track.format, track.category, track.category_label,
           metadata.category, metadata.tags, metadata.mood, metadata.original_filename]
           .map(value => Array.isArray(value) ? value.join(' ') : String(value ?? '')).join(' ').toLowerCase();
-        const builtIn = source.includes('bundled');
-        const imported = source.includes('imported');
+        const sourceKind = soundSourceKind(track);
         const matchesSource = sourceFilter === 'all' ||
-          (sourceFilter === 'built-in' && builtIn) || (sourceFilter === 'imported' && imported);
+          (sourceFilter === 'built-in' && sourceKind === 'built-in') ||
+          (sourceFilter === 'imported' && sourceKind === 'imported');
         const matchesCategory = categoryFilter === 'all' || chapterMusicCategoryGroup(track) === categoryFilter;
         return matchesSource && matchesCategory && (!query || searchable.includes(query));
       });

@@ -5640,6 +5640,12 @@ class PremiumV2Bridge(QObject):
             "fade_in_seconds": float(state.get("background_audio_fade_in") if state.get("background_audio_fade_in") is not None else 2.0),
             "fade_out_seconds": float(state.get("background_audio_fade_out") if state.get("background_audio_fade_out") is not None else 3.0),
             "overrides": overrides,
+            "explicit_chapter_track_count": len({
+                str(value.get("path") or "").strip()
+                for value in stored.values()
+                if isinstance(value, dict) and value.get("rule") == "custom"
+                and str(value.get("path") or "").strip()
+            }),
             "chapters": [{"number": chapter.number, "title": chapter.title} for chapter in project.chapters],
         }
 

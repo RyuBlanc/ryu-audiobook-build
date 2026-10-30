@@ -322,6 +322,13 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn('state["background_audio_path"] = ""', strategy)
         self.assertIn('state["background_audio_preferred_path"] = preferred', strategy)
 
+    def test_production_summary_counts_unique_explicit_chapter_bgm_tracks(self):
+        self.assertIn('"explicit_chapter_track_count": len({', self.host)
+        self.assertIn("const explicitChapterTrackCount = Number(chapterBgmState.explicit_chapter_track_count ??", self.adapter)
+        self.assertIn("'Chapter-Based BGM · ' + explicitChapterTrackCount + ' unique assigned track'", self.adapter)
+        self.assertIn("'Voice Only · BGM disabled'", self.adapter)
+        self.assertIn("defaultAvailable && defaultTrack", self.adapter)
+
     def test_zero_cue_level_does_not_add_silent_audio_duration(self):
         self.assertIn("if cue is None or cue_gain <= 1e-9:", self.assembler)
         self.assertIn("return None", self.assembler[self.assembler.index("def apply_cue_level"):self.assembler.index("# Real local audio only", self.assembler.index("def apply_cue_level"))])
