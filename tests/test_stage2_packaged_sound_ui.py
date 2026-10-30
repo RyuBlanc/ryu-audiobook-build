@@ -61,6 +61,45 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         ):
             self.assertIn(required, helper)
 
+
+    def test_packaged_driver_proves_real_music_and_cue_playback_and_cue_card_readability(self):
+        script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        for required in (
+            "window.Audio = function (src)",
+            "window.__RYU_SOUND_UI_ACCEPTANCE_AUDIOS__",
+            "audio.readyState >= 2",
+            "audio.currentTime",
+            "music_audio_preview_play_pause_resume",
+            "music_preview_track_switch",
+            "#importCueClips",
+            'command === "sound.import" && request.target_kind === "cue"',
+            "config.cue_paths",
+            "#cueGrid [data-cue-path]",
+            "#selectedCueTitle",
+            "#selectedCueMeta",
+            "#playSelectedCue",
+            "#pauseSelectedCue",
+            "#replaySelectedCue",
+            "titleRect.bottom <= metadataRect.top",
+            "cue_audio_preview_play_pause_replay",
+            "cue_preview_track_switch",
+            "cue_card_readability_and_selected_track_details",
+        ):
+            self.assertIn(required, script)
+
+    def test_packaged_runner_provisions_and_validates_separate_cue_fixtures(self):
+        helper = (ROOT / "tests/packaged_sound_ui_acceptance.py").read_text(encoding="utf-8")
+        for required in (
+            "cue_alpha_source",
+            "cue_beta_source",
+            "cue_paths",
+            "cue_track_titles",
+            "validate_imported_audio_metadata",
+            '"role": "cue"',
+            '"category": "universal"',
+        ):
+            self.assertIn(required, helper)
+
     def test_windows_package_job_runs_the_real_frozen_executable_acceptance(self):
         workflow = (ROOT / ".github/workflows/build-windows.yml").read_text(encoding="utf-8")
         self.assertIn("Run packaged Sound Design Music Library acceptance", workflow)
