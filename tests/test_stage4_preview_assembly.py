@@ -113,6 +113,49 @@ class PreviewAssemblyTests(unittest.TestCase):
             self.assertFalse((source / "chapter.m4a").exists())
             self.assertEqual(next(row for job, row in host.updates if job=="retry").get("state"), "completed")
 
+    def test_full_book_preview_uses_production_eligible_chapters_only(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            opening = self._chapter_fixture(root)
+            ending = root / "working_audio" / "004_Final"
+            _write_wav(ending / "chunks" / "00001.wav")
+            (ending / "narration.json").write_text(
+                '{"narration_text":"Final chapter.","title":"Final"}', encoding="utf-8"
+            )
+            (ending / "chunk_manifest.json").write_text(
+                '{"chunks":[{"file":"00001.wav","text":"Final chapter."}]}', encoding="utf-8"
+            )
+            chapters = [
+                SimpleNamespace(number=1, title="Opening", text="Opening narration", skip_for_generation=False),
+                SimpleNamespace(number=2, title="Skipped chapter", text="Skipped narration", skip_for_generation=True),
+                SimpleNamespace(number=3, title="Empty chapter", text="  ", skip_for_generation=False),
+                SimpleNamespace(number=4, title="Final", text="Final narration", skip_for_generation=False),
+            ]
+            project = SimpleNamespace(folder=root, title="Book", chapters=chapters)
+            host = _Host()
+            host._active_project = lambda: project
+            host._new_job = lambda *args: "eligible-preview"
+            host._now = lambda: "2026-10-30T00:00:00+00:00"
+            captured = {}
+
+            class _Thread:
+                def __init__(self, *, target, args, daemon, name):
+                    captured.update(target=target, args=args, daemon=daemon, name=name)
+                def start(self):
+                    captured["started"] = True
+
+            state = {"background_audio_mode": "off", "background_audio_enabled": False, "audio_bitrate": 256}
+            with patch("app.core.state.load_state", return_value=state), \
+                 patch("app.core.paths.app_root", return_value=root / "app"), \
+                 patch("threading.Thread", _Thread):
+                result = full_book_preview.start_full_book_preview(host)
+
+            self.assertTrue(captured["started"])
+            self.assertEqual(result["chapter_count"], 2)
+            self.assertEqual([path.name for path in captured["args"][3]], ["001_Opening", "004_Final"])
+            self.assertEqual(captured["args"][4], ["Opening", "Final"])
+            self.assertEqual(result["reuses_saved_narration"], True)
+
     def test_voice_preview_cancellation_stops_before_normalization_and_leaves_no_output(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); output = root / "preview.wav"; event = threading.Event()

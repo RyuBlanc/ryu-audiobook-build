@@ -16,9 +16,23 @@ def start_full_book_preview(host) -> dict[str, Any]:
     state = load_state(project.folder)
     from app.audio.library import validate_saved_audio_paths
     validate_saved_audio_paths(state)
-    chapters = sorted(project.chapters, key=lambda chapter: chapter.number)
-    if not chapters:
+    if not project.chapters:
         raise ValueError("Add chapters to this book before previewing its mix.")
+    # Match Production Studio exactly: excluded and empty chapters never enter
+    # the generation plan, so they must not block a full-book sound preview.
+    chapters = sorted(
+        [
+            chapter for chapter in project.chapters
+            if not getattr(chapter, "skip_for_generation", False)
+            and (chapter.text or "").strip()
+        ],
+        key=lambda chapter: chapter.number,
+    )
+    if not chapters:
+        raise ValueError(
+            "No chapters are eligible for a full-book sound-design preview. "
+            "Restore chapter text or re-include a skipped chapter first."
+        )
 
     audio_root = project.folder / "working_audio"
     chapter_dirs: list[Path] = []
