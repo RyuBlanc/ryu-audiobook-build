@@ -102,10 +102,9 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("const legacySoundTabs = document.querySelector('#sound .sound-tabs');", self.adapter)
         self.assertIn("const cleanSoundTabs = legacySoundTabs.cloneNode(true);", self.adapter)
         self.assertIn("legacySoundTabs.replaceWith(cleanSoundTabs);", self.adapter)
-        handler_start = self.adapter.index(
-            "document.addEventListener('click', async e =>\\n"
-            "      const soundTab = e.target?.closest?.('#sound .sound-tabs [data-sound-tab]');"
-        )
+        tab_marker = "const soundTab = e.target?.closest?.('#sound .sound-tabs [data-sound-tab]');"
+        tab_body = self.adapter.index(tab_marker)
+        handler_start = self.adapter.rfind("document.addEventListener('click', async e =>", 0, tab_body)
         handler_end = self.adapter.index("}, true);", handler_start)
         handler = self.adapter[handler_start:handler_end + len("}, true);")]
         self.assertIn("e.stopImmediatePropagation();", handler)
