@@ -343,7 +343,10 @@ def _mix_chapter_bgm(
         "-filter_complex",
         "[0:a]aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo[narr];"
         f"[1:a]{','.join(music_filters)}[bed];"
-        "[narr][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
+        # Keep chapter-specific BGM beneath speech, using the same narration
+        # priority policy as the book-level/automatic BGM mixer.
+        "[bed][narr]sidechaincompress=threshold=0.025:ratio=7:attack=22:release=420:makeup=1[ducked];"
+        "[narr][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
         "alimiter=limit=0.95[out]",
         "-map", "[out]", "-vn", "-t", f"{duration_seconds:.3f}",
         "-c:a", "aac", "-b:a", bitrate, "-ar", "44100", str(output_path),

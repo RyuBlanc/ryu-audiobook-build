@@ -91,6 +91,8 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
             self.assertIn("adelay=10000|10000", filters)
             self.assertIn("afade=t=in:st=10.000:d=1.500", filters)
             self.assertIn("afade=t=out:st=17.500:d=2.500", filters)
+            self.assertIn("[bed][narr]sidechaincompress=threshold=0.025:ratio=7:attack=22:release=420:makeup=1[ducked]", filters)
+            self.assertIn("[narr][ducked]amix=inputs=2:duration=first", filters)
             self.assertIn("duration=first", filters)
             self.assertEqual(args[args.index("-t") + 1], "20.000")
 
