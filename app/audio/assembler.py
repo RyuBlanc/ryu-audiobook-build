@@ -372,10 +372,29 @@ def _chapter_first_paragraph_offset_ms(chapter_dir: Path) -> int | None:
     if not isinstance(chunks, list) or not chunks:
         return None
 
-    elapsed_ms = 0
-    for item in chunks:
+    # Resolve the exact boundary from text metadata before probing any WAVs.
+    # This avoids unnecessary media probes and, more importantly, detects old
+    # chunks that merged multiple paragraphs before timing can be guessed.
+    boundary_index = None
+    for index, item in enumerate(chunks):
         if not isinstance(item, dict):
             return None
+        chunk_text = str(item.get("text") or "")
+        marker = re.search(r"\r?\n[ \t]*\r?\n", chunk_text)
+        if marker:
+            if not re.search(r"\r?\n[ \t]*\r?\n[ \t]*$", chunk_text):
+                return None
+            boundary_index = index
+            break
+
+    if boundary_index is None:
+        if len(paragraphs) > 1:
+            return None
+        # A one-paragraph chapter ends at its only paragraph boundary.
+        boundary_index = len(chunks) - 1
+
+    elapsed_ms = 0
+    for item in chunks[:boundary_index + 1]:
         filename = Path(str(item.get("file") or "")).name
         if not filename:
             return None
@@ -386,19 +405,7 @@ def _chapter_first_paragraph_offset_ms(chapter_dir: Path) -> int | None:
             elapsed_ms += max(0, int(_duration_ms(chunk_path)))
         except (OSError, ValueError, RuntimeError, TypeError):
             return None
-        chunk_text = str(item.get("text") or "")
-        marker = re.search(r"\r?\n[ \t]*\r?\n", chunk_text)
-        if marker:
-            if not re.search(r"\r?\n[ \t]*\r?\n[ \t]*$", chunk_text):
-                return None
-            return elapsed_ms
-
-    # A single-paragraph chapter ends at the only paragraph boundary.
-    if len(paragraphs) <= 1:
-        return elapsed_ms
-    # Old multi-paragraph chunks that merged text cannot supply an exact audio
-    # timestamp. Do not guess; generation now writes a separate WAV at this edge.
-    return None
+    return elapsed_ms
 
 
 def _chapter_bgm_fade_out(end_behavior: str, configured_fade_out: float) -> float:
