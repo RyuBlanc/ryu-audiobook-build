@@ -606,6 +606,506 @@
     record("cue_preview_track_switch", true,
       "Selecting Beta stopped Alpha and the Play action opened Beta's own audio file.");
 
+
+    // Import one additional real fixture into each non-Fantasy category.
+    document.querySelector('#sound .sound-tabs [data-sound-tab="music"]').click();
+    await waitFor("Music Library for category matrix", function () {
+      return document.querySelector('#sound .sound-view[data-sound-view="music"]')?.classList.contains("active");
+    }, 8000);
+    const categoryImport = document.querySelector("#musicImportCategory");
+    const categoryImportButton = document.querySelector("#importMusicTracks");
+    must(categoryImport && categoryImportButton, "Music category import controls are missing.");
+    for (const fixture of (config.category_imports || [])) {
+      must(Array.from(categoryImport.options || []).some(option => option.value === fixture.category),
+        "Music import category is missing: " + fixture.category);
+      categoryImport.value = fixture.category;
+      categoryImport.dispatchEvent(new Event("change", {bubbles:true}));
+      categoryImportButton.click();
+      await waitFor("native import of category " + fixture.category, async function () {
+        const rows = await invoke("sound.catalog", {});
+        return rows.some(track => String(track.path || "") === String(fixture.path) &&
+          String(track.role || "").toLowerCase() === "music" &&
+          String(track.category || "").toLowerCase() === fixture.category);
+      }, 20000);
+    }
+    record("music_import_all_eight_categories", true,
+      "The actual Music import action saved Fantasy, Battle, Mystery, Horror, Romance, Sci-fi, Calm narration and Others metadata.");
+
+    const allMusicCategory = document.querySelector('#sound .sound-categories-list [data-music-category="all"]');
+    const allMusicSource = document.querySelector('#soundSourceFilter [data-source="all"]');
+    const importedMusicSource = document.querySelector('#soundSourceFilter [data-source="imported"]');
+    const builtInMusicSource = document.querySelector('#soundSourceFilter [data-source="built-in"]');
+    must(allMusicCategory && allMusicSource && importedMusicSource && builtInMusicSource,
+      "Music Library category/source filters are incomplete.");
+    allMusicCategory.click();
+    allMusicSource.click();
+    await waitFor("all nine imported Music fixtures", function () {
+      return musicButtons().length >= 9 &&
+        config.track_titles.every(visibleHas) &&
+        (config.category_imports || []).every(item => visibleHas(item.title));
+    }, 15000);
+    const categoryMatrix = [
+      {filter:"fantasy-adventure",titles:config.track_titles.slice()},
+      ...(config.category_imports || []).map(item => ({filter:item.filter,title:item.title}))
+    ];
+    for (const entry of categoryMatrix) {
+      const button = document.querySelector('#sound .sound-categories-list [data-music-category="' + entry.filter + '"]');
+      must(button, "Music category button is missing: " + entry.filter);
+      button.click();
+      await waitFor("Music category " + entry.filter + " real results", function () {
+        const expected = entry.titles || [entry.title];
+        const excluded = (config.category_imports || [])
+          .filter(item => !expected.includes(item.title))
+          .some(item => visibleHas(item.title));
+        return button.classList.contains("active") &&
+          expected.every(title => visibleHas(title)) && !excluded;
+      }, 12000);
+    }
+    allMusicCategory.click();
+    importedMusicSource.click();
+    await waitFor("Imported filter contains exactly nine imported music files", function () {
+      const rows = musicButtons();
+      return rows.length === 9 && rows.every(button => rowText(button).includes("Imported locally"));
+    }, 12000);
+    builtInMusicSource.click();
+    await waitFor("Built-in filter contains only bundled music", function () {
+      const rows = musicButtons();
+      return rows.length > 0 && rows.every(button => rowText(button).includes("Bundled with application")) &&
+        !config.track_titles.some(visibleHas) &&
+        !(config.category_imports || []).some(item => visibleHas(item.title));
+    }, 12000);
+    allMusicSource.click();
+    await waitFor("All source filter restores the complete Music Library", function () {
+      return config.track_titles.every(visibleHas) &&
+        (config.category_imports || []).every(item => visibleHas(item.title));
+    }, 12000);
+    record("music_all_eight_category_results", true,
+      "All eight actual categories returned matching imported tracks, and Built-in/Imported/All source filters remained accurate.");
+
+    // Chapter BGM has its own source/category controls but must use the same
+    // actual Music catalogue and never display cue-role assets.
+    document.querySelector('#sound .sound-tabs [data-sound-tab="chapters"]').click();
+    await waitFor("Chapter BGM view", function () {
+      return document.querySelector('#sound .sound-view[data-sound-view="chapters"]')?.classList.contains("active");
+    }, 8000);
+    await waitFor("Chapter BGM picker and generated controls", function () {
+      return document.querySelector("#chapterBgmFilterControls") &&
+        document.querySelectorAll("#chapterBgmList [data-chapter-bgm]").length === 3 &&
+        document.querySelectorAll("#chapterTrackPicker [data-chapter-track]").length > 0;
+    }, 12000);
+    const strategyCustom = document.querySelector('#sound [data-bgm-strategy="custom"]');
+    must(strategyCustom, "Chapter-Based BGM strategy control is missing.");
+    strategyCustom.click();
+    await waitFor("Chapter-Based strategy save", async function () {
+      return (await invoke("sound.chapter_bgm.get", {})).strategy === "custom";
+    }, 15000);
+    const chapterSourceAll = document.querySelector('#chapterBgmSourceFilter [data-chapter-source="all"]');
+    const chapterSourceBuiltIn = document.querySelector('#chapterBgmSourceFilter [data-chapter-source="built-in"]');
+    const chapterSourceImported = document.querySelector('#chapterBgmSourceFilter [data-chapter-source="imported"]');
+    must(chapterSourceAll && chapterSourceBuiltIn && chapterSourceImported,
+      "Chapter BGM Built-in/Imported/All controls are missing.");
+    chapterSourceBuiltIn.click();
+    await waitFor("Chapter BGM Built-in rows", function () {
+      const rows = Array.from(document.querySelectorAll("#chapterTrackPicker [data-chapter-track]"));
+      return rows.length > 0 && rows.every(row => row.textContent.includes("Bundled with application")) &&
+        !config.track_titles.some(title => rows.some(row => row.textContent.includes(title))) &&
+        !(config.category_imports || []).some(item => rows.some(row => row.textContent.includes(item.title)));
+    }, 12000);
+    chapterSourceImported.click();
+    await waitFor("Chapter BGM Imported rows", function () {
+      const rows = Array.from(document.querySelectorAll("#chapterTrackPicker [data-chapter-track]"));
+      return rows.length === 9 && rows.every(row => row.textContent.includes("Imported locally"));
+    }, 12000);
+    chapterSourceAll.click();
+    const chapterCategoryMatrix = [
+      {filter:"fantasy-adventure",titles:config.track_titles.slice()},
+      ...(config.category_imports || []).map(item => ({filter:item.filter,title:item.title}))
+    ];
+    for (const entry of chapterCategoryMatrix) {
+      const button = document.querySelector('#chapterBgmCategoryFilter [data-chapter-category="' + entry.filter + '"]');
+      must(button, "Chapter BGM category button is missing: " + entry.filter);
+      button.click();
+      await waitFor("Chapter BGM category " + entry.filter, function () {
+        const rows = Array.from(document.querySelectorAll("#chapterTrackPicker [data-chapter-track]"));
+        const expected = entry.titles || [entry.title];
+        const excluded = (config.category_imports || [])
+          .filter(item => !expected.includes(item.title))
+          .some(item => rows.some(row => row.textContent.includes(item.title)));
+        return button.classList.contains("active") &&
+          expected.every(title => rows.some(row => row.textContent.includes(title))) && !excluded;
+      }, 12000);
+    }
+    document.querySelector('#chapterBgmCategoryFilter [data-chapter-category="all"]').click();
+    await waitFor("All Chapter BGM candidate rows", function () {
+      return document.querySelectorAll("#chapterTrackPicker [data-chapter-track]").length >= 9;
+    }, 12000);
+    record("chapter_bgm_all_eight_category_results", true,
+      "Chapter BGM returned the matching results for all eight categories and all three source filters.");
+
+    async function selectChapter(number) {
+      const row = document.querySelector('#chapterBgmList [data-chapter-bgm="' + number + '"]');
+      must(row, "Chapter BGM row is missing for chapter " + number + ".");
+      row.click();
+      await waitFor("Chapter " + number + " selection", function () {
+        return row.classList.contains("active") &&
+          document.querySelector("#chapterBgmTitle")?.textContent.includes("Chapter " + number);
+      }, 8000);
+    }
+    async function chooseChapterCandidate(trackPath, trackTitle) {
+      const candidate = Array.from(document.querySelectorAll("#chapterTrackPicker [data-chapter-track]"))
+        .find(button => String(button.dataset.chapterTrack || "") === String(trackPath));
+      must(candidate, "Chapter BGM candidate is missing: " + trackTitle);
+      candidate.click();
+      await waitFor("candidate-only panel for " + trackTitle, function () {
+        return document.querySelector("#selectedChapterBgmTrackTitle")?.textContent.trim() === trackTitle &&
+          document.querySelector("#selectedChapterBgmTrackState")?.textContent.includes("Candidate only");
+      }, 8000);
+      const confirm = document.querySelector("#confirmChapterBgmTrack");
+      must(confirm && !confirm.disabled, "Explicit Select is disabled for " + trackTitle);
+    }
+    async function setChapterTimingAndVolume(value, startIndex, endIndex) {
+      const volumeInput = document.querySelector("#chapterVolume");
+      const startInput = document.querySelector("#chapterStartOffset");
+      const endInput = document.querySelector("#chapterEndBehavior");
+      must(volumeInput && Number(volumeInput.max) === 50 && startInput && endInput,
+        "Chapter volume, start-offset or end-behaviour controls are missing or incorrectly bounded.");
+      volumeInput.value = String(value);
+      volumeInput.dispatchEvent(new Event("input", {bubbles:true}));
+      startInput.selectedIndex = startIndex;
+      startInput.dispatchEvent(new Event("change", {bubbles:true}));
+      endInput.selectedIndex = endIndex;
+      endInput.dispatchEvent(new Event("change", {bubbles:true}));
+      must(volumeInput.value === String(value) &&
+        document.querySelector("#chapterVolumeValue")?.textContent.trim() === value + "%",
+        "Chapter BGM live volume percentage did not match the edit.");
+    }
+    async function saveChapter(number, rule, expectedPath) {
+      document.querySelector("#saveChapterBgm").click();
+      await waitFor("saved Chapter " + number + " assignment", async function () {
+        const state = await invoke("sound.chapter_bgm.get", {});
+        const row = state.overrides && state.overrides[String(number)];
+        return Boolean(row && row.rule === rule &&
+          (expectedPath == null || String(row.path || "") === String(expectedPath)));
+      }, 15000);
+    }
+
+    await selectChapter(1);
+    const stateBeforeCandidate = await invoke("sound.chapter_bgm.get", {});
+    await chooseChapterCandidate(alpha.path, config.track_titles[0]);
+    const stateAfterCandidate = await invoke("sound.chapter_bgm.get", {});
+    must(JSON.stringify(stateAfterCandidate.overrides["1"] || {}) === JSON.stringify(stateBeforeCandidate.overrides["1"] || {}),
+      "Candidate selection overwrote Chapter One's saved assignment before confirmation.");
+    document.querySelector("#confirmChapterBgmTrack").click();
+    await waitFor("Chapter One explicit selection", async function () {
+      const state = await invoke("sound.chapter_bgm.get", {});
+      return String(state.overrides?.["1"]?.path || "") === String(alpha.path);
+    }, 15000);
+    await setChapterTimingAndVolume(37, 1, 1);
+    await saveChapter(1, "custom", alpha.path);
+
+    await selectChapter(2);
+    await chooseChapterCandidate(beta.path, config.track_titles[1]);
+    document.querySelector("#confirmChapterBgmTrack").click();
+    await waitFor("Chapter Two explicit selection", async function () {
+      const state = await invoke("sound.chapter_bgm.get", {});
+      return String(state.overrides?.["2"]?.path || "") === String(beta.path);
+    }, 15000);
+    await setChapterTimingAndVolume(29, 2, 2);
+    await saveChapter(2, "custom", beta.path);
+
+    await selectChapter(3);
+    const noBgmRule = document.querySelector('#sound .chapter-rule [data-chapter-rule="none"]');
+    must(noBgmRule, "Chapter No BGM rule is missing.");
+    noBgmRule.click();
+    await setChapterTimingAndVolume(15, 0, 0);
+    await saveChapter(3, "none", null);
+    let savedChapterState = await invoke("sound.chapter_bgm.get", {});
+    must(savedChapterState.overrides["1"].start_offset === "after_first_paragraph" &&
+      savedChapterState.overrides["1"].end_behavior === "continue_to_transition" &&
+      Math.abs(Number(savedChapterState.overrides["1"].volume) - 0.37) < 0.005 &&
+      savedChapterState.overrides["2"].start_offset === "after_10_seconds" &&
+      savedChapterState.overrides["2"].end_behavior === "stop_immediately" &&
+      Math.abs(Number(savedChapterState.overrides["2"].volume) - 0.29) < 0.005 &&
+      savedChapterState.overrides["3"].rule === "none",
+      "Chapter track, volume, offset, end behaviour or explicit No BGM did not persist.");
+    record("chapter_bgm_assignment_volume_offsets_end_and_no_fallback", true,
+      "Chapter One/Two assignments, independent levels, paragraph/ten-second offsets, end policies and Chapter Three No BGM were saved.");
+
+    document.querySelector('#sound [data-bgm-strategy="same"]').click();
+    await waitFor("Same BGM restore", async function () {
+      const state = await invoke("sound.chapter_bgm.get", {});
+      return state.strategy === "same" && String(state.default_path || "") === String(alpha.path);
+    }, 15000);
+    savedChapterState = await invoke("sound.chapter_bgm.get", {});
+    must(savedChapterState.overrides["1"]?.path === alpha.path &&
+      savedChapterState.overrides["2"]?.path === beta.path &&
+      savedChapterState.overrides["3"]?.rule === "none",
+      "Same BGM switching erased Chapter-Based assignments.");
+    document.querySelector('#sound [data-bgm-strategy="custom"]').click();
+    await waitFor("Chapter-Based restored after strategy switch", async function () {
+      const state = await invoke("sound.chapter_bgm.get", {});
+      return state.strategy === "custom" &&
+        String(state.overrides?.["1"]?.path || "") === String(alpha.path) &&
+        String(state.overrides?.["2"]?.path || "") === String(beta.path);
+    }, 15000);
+    record("same_and_chapter_strategy_round_trip", true,
+      "Same BGM restored the book-default preference; Chapter-Based restored the explicit assignments without fallback or loss.");
+
+    document.querySelector('#sound .sound-tabs [data-sound-tab="cues"]').click();
+    await waitFor("cue slot assignment view", function () {
+      return document.querySelector('#sound .sound-view[data-sound-view="cues"]')?.classList.contains("active");
+    }, 8000);
+    async function stageCueAssignment(slot, track) {
+      const change = document.querySelector('#sound [data-assign-cue="' + slot + '"]');
+      must(change, "Cue Change control is missing for " + slot + ".");
+      change.click();
+      const card = Array.from(document.querySelectorAll("#cueGrid [data-cue-path]"))
+        .find(button => String(button.dataset.cuePath || "") === String(track.path));
+      must(card, "Cue asset is missing for " + slot + ": " + track.title);
+      card.click();
+      await waitFor("staged " + slot + " cue assignment", function () {
+        const nameId = slot === "opening" ? "openingCueName" : slot === "chapter" ? "chapterCueName" : "closingCueName";
+        return document.querySelector("#" + nameId)?.textContent.includes(track.title);
+      }, 8000);
+    }
+    async function waitForCuePath(slot, trackPath) {
+      await waitFor("saved " + slot + " cue path", async function () {
+        const state = await invoke("sound.cues.get", {});
+        return String(state[slot]?.path || "") === String(trackPath || "");
+      }, 15000);
+    }
+    await stageCueAssignment("opening", cueAlpha);
+    await waitForCuePath("opening", cueAlpha.path);
+    await stageCueAssignment("chapter", cueBeta);
+    await waitForCuePath("chapter", cueBeta.path);
+    await stageCueAssignment("closing", cueAlpha);
+    await waitForCuePath("closing", cueAlpha.path);
+    record("cue_three_slot_autosave_and_production_fields", true,
+      "Opening, Next Chapter and Closing cue assignments autosaved into the three supported production fields.");
+
+    config.reject_next_cue_save = true;
+    await stageCueAssignment("opening", cueBeta);
+    await waitFor("cue-save error remains visible", function () {
+      return document.querySelector("#cueSaveState")?.textContent.includes("Save failed");
+    }, 12000);
+    const cueStateOnFailure = await invoke("sound.cues.get", {});
+    must(String(cueStateOnFailure.opening?.path || "") === String(cueAlpha.path) &&
+      document.querySelector("#saveCueChanges").disabled === false,
+      "Failed cue save overwrote the previous saved slot or prevented retry.");
+    document.querySelector("#saveCueChanges").click();
+    await waitForCuePath("opening", cueBeta.path);
+    record("cue_save_failure_retains_retryable_changes", true,
+      "Injected cue-save failure preserved the old slot and draft; an explicit retry succeeded.");
+
+    document.querySelector("#clearAllCues").click();
+    await waitFor("Clear All staged state", function () {
+      return document.querySelector("#cueSaveState")?.textContent.includes("Clear All is staged");
+    }, 8000);
+    const savedBeforeClear = await invoke("sound.cues.get", {});
+    must(Boolean(savedBeforeClear.opening?.path && savedBeforeClear.chapter?.path && savedBeforeClear.closing?.path),
+      "Clear All removed saved cue assignments before explicit Save Cue Changes.");
+    document.querySelector("#saveCueChanges").click();
+    await waitFor("explicit Clear All commit", async function () {
+      const state = await invoke("sound.cues.get", {});
+      return !state.opening?.path && !state.chapter?.path && !state.closing?.path;
+    }, 15000);
+    await stageCueAssignment("opening", cueBeta);
+    await waitForCuePath("opening", cueBeta.path);
+    await stageCueAssignment("chapter", cueBeta);
+    await waitForCuePath("chapter", cueBeta.path);
+    await stageCueAssignment("closing", cueAlpha);
+    await waitForCuePath("closing", cueAlpha.path);
+    record("cue_clear_all_explicit_and_persisted", true,
+      "Clear All remained staged until explicit save, cleared all three slots, and the required final assignments were restored.");
+
+    const mixTab = document.querySelector('#sound .sound-tabs [data-sound-tab="mix"]');
+    must(mixTab, "Mix & Production Sync tab is missing.");
+    mixTab.click();
+    await waitFor("Mix & Production Sync view", function () {
+      return document.querySelector('#sound .sound-view[data-sound-view="mix"]')?.classList.contains("active");
+    }, 8000);
+    function editMixLevel(id, value) {
+      const input = document.querySelector("#" + id);
+      must(input, "Mix level control is missing: " + id);
+      input.focus();
+      input.value = String(value);
+      input.dispatchEvent(new Event("input", {bubbles:true}));
+      input.dispatchEvent(new Event("change", {bubbles:true}));
+    }
+    editMixLevel("advancedMusicVolume", 42);
+    editMixLevel("narrationVolume", 82);
+    editMixLevel("cueVolume", 30);
+    await waitFor("saved BGM/narration/cue levels", async function () {
+      const state = await invoke("sound.chapter_bgm.get", {});
+      return Math.abs(Number(state.default_volume) - 0.42) < 0.005 &&
+        Math.abs(Number(state.narration_volume) - 0.82) < 0.005 &&
+        Math.abs(Number(state.cue_volume) - 0.30) < 0.005;
+    }, 20000);
+    await waitFor("Mix summary live effective values", function () {
+      return document.querySelector("#mixStrategy")?.textContent.includes("Chapter-Based BGM") &&
+        document.querySelector("#mixOverrides")?.textContent.includes("3 chapters") &&
+        document.querySelector("#mixEffectiveTracks")?.textContent.includes(config.track_titles[0]) &&
+        document.querySelector("#mixEffectiveTracks")?.textContent.includes(config.track_titles[1]) &&
+        document.querySelector("#advancedMusicVolumeValue")?.textContent.trim() === "42%" &&
+        document.querySelector("#narrationVolumeValue")?.textContent.trim() === "82%" &&
+        document.querySelector("#cueVolumeValue")?.textContent.trim() === "30%";
+    }, 12000);
+    record("mix_summary_and_saved_three_levels", true,
+      "Mix summary reflected two effective chapter tracks, three rules, and the real saved 42%/82%/30% levels.");
+
+    async function renderFullBookPreview(label) {
+      const button = document.querySelector("#soundPreviewBook");
+      must(button, "Full-book Sound Design preview action is missing.");
+      window.__RYU_SOUND_UI_ACCEPTANCE_PREVIEW_JOB_ID__ = null;
+      button.click();
+      await waitFor(label + " job start", function () {
+        return Boolean(window.__RYU_SOUND_UI_ACCEPTANCE_PREVIEW_JOB_ID__);
+      }, 20000);
+      const jobId = window.__RYU_SOUND_UI_ACCEPTANCE_PREVIEW_JOB_ID__;
+      let completed = null;
+      await waitFor(label + " job completion", async function () {
+        const jobs = await invoke("job.list", {include_hidden:false});
+        const job = Array.isArray(jobs) ? jobs.find(item => String(item.job_id) === String(jobId)) : null;
+        if (!job) return false;
+        if (job.state === "failed" || job.state === "cancelled") {
+          throw new Error(label + " failed: " + String(job.message || job.state));
+        }
+        if (job.state === "completed") { completed = job; return true; }
+        return false;
+      }, 240000);
+      const result = completed && completed.result ? completed.result : {};
+      const duration = Number(result.duration_seconds || 0);
+      must(duration > 0 && (result.output_path || completed.output_path),
+        label + " did not create a measurable full-book audio file.");
+      const audio = latestAcceptanceAudio();
+      if (audio && !audio.paused) audio.pause();
+      return {duration, output_path:result.output_path || completed.output_path};
+    }
+
+    document.querySelector('#sound [data-bgm-strategy="same"]').click();
+    await waitFor("Same BGM ready for real mixer", async function () {
+      const state = await invoke("sound.chapter_bgm.get", {});
+      return state.strategy === "same" && String(state.default_path || "") === String(alpha.path);
+    }, 15000);
+    const samePreview = await renderFullBookPreview("Same BGM preview");
+    must(samePreview.duration >= 45, "Same BGM preview omitted the saved cue sequence.");
+    document.querySelector('#sound [data-bgm-strategy="custom"]').click();
+    await waitFor("Chapter-Based restored for full preview", async function () {
+      const state = await invoke("sound.chapter_bgm.get", {});
+      return state.strategy === "custom" &&
+        String(state.overrides?.["1"]?.path || "") === String(alpha.path) &&
+        String(state.overrides?.["2"]?.path || "") === String(beta.path);
+    }, 15000);
+    const chapterPreview = await renderFullBookPreview("Chapter-Based preview");
+    must(chapterPreview.duration >= 45 &&
+      Math.abs(chapterPreview.duration - samePreview.duration) <= 2.0,
+      "Chapter-Based preview did not preserve the same narration/cue duration as Same BGM.");
+    record("same_and_chapter_based_real_full_book_preview", true,
+      "Both strategies rendered real full-book M4B previews from saved narration using the shared FFmpeg mixer.");
+
+    const voiceOnly = document.querySelector('#sound [data-bgm-enabled="false"]');
+    must(voiceOnly, "Sound Design Voice Only toggle is missing.");
+    voiceOnly.click();
+    await waitFor("Voice Only mode persisted", async function () {
+      const state = await invoke("sound.chapter_bgm.get", {});
+      return state.bgm_enabled === false && state.background_audio_mode === "off";
+    }, 15000);
+    const voiceOnlyPreview = await renderFullBookPreview("Voice Only preview");
+    must(chapterPreview.duration - voiceOnlyPreview.duration >= 12,
+      "Voice Only did not remove the saved Opening/Next Chapter/Closing cue audio from the preview timeline.");
+    record("voice_only_removes_bgm_and_cues_from_real_preview", true,
+      "Voice Only rendered the same saved narration with BGM and all fixed cues excluded.");
+
+    document.querySelector('#sound [data-bgm-enabled="true"]').click();
+    await waitFor("Use BGM restored", async function () {
+      const state = await invoke("sound.chapter_bgm.get", {});
+      return state.bgm_enabled === true && state.background_audio_mode === "manual";
+    }, 15000);
+
+    const narrationInput = document.querySelector("#narrationVolume");
+    narrationInput.focus();
+    narrationInput.value = "82";
+    narrationInput.dispatchEvent(new Event("input", {bubbles:true}));
+    config.fail_next_manifest_save = true;
+    document.querySelector("#applySoundToProduction").click();
+    await sleep(1500);
+    must(document.querySelector("#sound")?.classList.contains("active") &&
+      !document.querySelector("#generate")?.classList.contains("active"),
+      "Production handoff navigated despite a sound-manifest save failure.");
+    must(document.querySelector("#mixLevelsSaveState")?.textContent.includes("Unsaved") ||
+      document.querySelector("#mixOverallSaveState")?.textContent.includes("Unsaved"),
+      "Failed Production handoff did not retain a visible unsaved status.");
+    document.querySelector("#applySoundToProduction").click();
+    await waitFor("successful Production handoff retry", function () {
+      return document.querySelector("#generate")?.classList.contains("active");
+    }, 15000);
+    const handedOff = await invoke("sound.chapter_bgm.get", {});
+    must(Math.abs(Number(handedOff.narration_volume) - 0.82) < 0.005 &&
+      document.querySelector("#productionMusicSummary")?.textContent.includes("Chapter-Based BGM") &&
+      document.querySelector("#productionSoundReady")?.textContent.includes("Synced"),
+      "Production handoff did not persist the latest mix level or display saved Chapter-Based BGM.");
+    record("production_handoff_save_error_gate_and_retry", true,
+      "A failed shared-state save blocked navigation; retry flushed pending settings and opened Production with the real saved summary.");
+
+    const productionVoiceOnly = document.querySelector('#generate [data-bgm-enabled="false"]');
+    must(productionVoiceOnly, "Production Studio Voice Only mode toggle is missing.");
+    productionVoiceOnly.click();
+    await waitFor("Production Voice Only synchronization", async function () {
+      const state = await invoke("sound.chapter_bgm.get", {});
+      return state.bgm_enabled === false && state.background_audio_mode === "off";
+    }, 15000);
+    const productionUseBgm = document.querySelector('#generate [data-bgm-enabled="true"]');
+    must(productionUseBgm, "Production Studio Use BGM mode toggle is missing.");
+    productionUseBgm.click();
+    await waitFor("Production Use BGM synchronization", async function () {
+      const state = await invoke("sound.chapter_bgm.get", {});
+      return state.bgm_enabled === true && state.background_audio_mode === "manual";
+    }, 15000);
+    record("production_mode_toggles_share_sound_manifest", true,
+      "Production Studio Voice Only and Use BGM controls persisted through the same Sound Design state.");
+
+    async function openProjectFromDashboard(folder, label) {
+      window.go("dashboard");
+      await waitFor("Dashboard recent project cards", function () {
+        return Boolean(document.querySelector("#dashboard .recent-grid [data-project-folder]"));
+      }, 15000);
+      const card = Array.from(document.querySelectorAll("#dashboard .recent-grid [data-project-folder]"))
+        .find(node => String(node.dataset.projectFolder || "") === String(folder));
+      must(card, label + " project card is missing from the real Dashboard recent-project list.");
+      card.click();
+    }
+    await openProjectFromDashboard(config.secondary_project_folder, "Secondary");
+    await waitFor("Secondary project active", async function () {
+      const state = await invoke("sound.chapter_bgm.get", {});
+      return Array.isArray(state.chapters) && state.chapters.length === 1;
+    }, 20000);
+    const secondaryCues = await invoke("sound.cues.get", {});
+    must(!secondaryCues.opening?.path && !secondaryCues.chapter?.path && !secondaryCues.closing?.path,
+      "Secondary project inherited another book's fixed cue assignments.");
+    const globalCatalogue = await invoke("sound.catalog", {});
+    const missingGlobal = (config.category_imports || []).filter(item =>
+      !globalCatalogue.some(track => String(track.path || "") === String(item.path)));
+    must(missingGlobal.length === 0,
+      "Imported Music Library assets disappeared after switching projects: " + missingGlobal.map(item => item.title).join(", "));
+    record("project_switch_isolates_book_settings_and_keeps_global_library", true,
+      "Dashboard project switch isolated cue settings while all imported Music Library categories remained globally available.");
+
+    await openProjectFromDashboard(config.project_folder, "Primary");
+    await waitFor("Primary project restored", async function () {
+      const state = await invoke("sound.chapter_bgm.get", {});
+      return Array.isArray(state.chapters) && state.chapters.length === 3 &&
+        state.strategy === "custom" &&
+        String(state.overrides?.["1"]?.path || "") === String(alpha.path) &&
+        String(state.overrides?.["2"]?.path || "") === String(beta.path);
+    }, 20000);
+    const primaryCues = await invoke("sound.cues.get", {});
+    must(primaryCues.opening?.path === cueBeta.path &&
+      primaryCues.chapter?.path === cueBeta.path &&
+      primaryCues.closing?.path === cueAlpha.path,
+      "Returning from the secondary project changed the primary book's cue assignments.");
+    record("project_switch_restores_primary_sound_design", true,
+      "Returning through Dashboard restored the original strategy, chapter BGM settings and all three cue slots.");
+
     publish("passed");
   } catch (error) {
     errors.push(String(error && error.stack || error));
