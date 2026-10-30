@@ -433,7 +433,7 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
 
     def test_music_library_selected_track_panel_and_preview_follow_current_track(self):
         selection_start = self.adapter.index("if ($('soundTrackGrid')) $('soundTrackGrid').addEventListener('click'")
-        selection_end = self.adapter.index("async function refreshSoundCues()", selection_start)
+        selection_end = self.adapter.index("message('Selected ' + (track.title || 'sound track')", selection_start)
         selection = self.adapter[selection_start:selection_end]
         self.assertIn("const track = sounds.find(item => String(item.path || '') === requestedPath);", selection)
         self.assertIn("track.category_label || track.category || 'Others'", selection)
