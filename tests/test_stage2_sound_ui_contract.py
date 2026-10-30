@@ -88,11 +88,31 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         for view in ("music", "chapters", "cues", "mix"):
             self.assertIn(f'data-sound-tab="{view}"', self.sound_markup)
             self.assertIn(f'data-sound-view="{view}"', self.sound_markup)
-        self.assertIn("const soundTab = e.target.closest('#sound .sound-tabs [data-sound-tab]');", self.adapter)
+        self.assertIn("const soundTab = e.target?.closest?.('#sound .sound-tabs [data-sound-tab]');", self.adapter)
         self.assertIn("document.querySelectorAll('#sound .sound-view[data-sound-view]')", self.adapter)
         self.assertIn("if (nextView === 'music') await refreshSounds();", self.adapter)
         self.assertIn("else if (nextView === 'chapters') await refreshChapterBgm();", self.adapter)
         self.assertIn("else if (nextView === 'cues') await refreshSoundCues();", self.adapter)
+        self.assertIn("else if (nextView === 'mix')", self.adapter)
+
+    def test_sound_tab_navigation_preempts_legacy_prototype_handlers(self):
+        # The earlier test checked only that a handler string existed. The installed
+        # app also runs the approved reference HTML's prototype listeners, so the
+        # adapter must remove those listeners and handle navigation in capture phase.
+        self.assertIn("const legacySoundTabs = document.querySelector('#sound .sound-tabs');", self.adapter)
+        self.assertIn("const cleanSoundTabs = legacySoundTabs.cloneNode(true);", self.adapter)
+        self.assertIn("legacySoundTabs.replaceWith(cleanSoundTabs);", self.adapter)
+        handler_start = self.adapter.index(
+            "document.addEventListener('click', async e =>\\n"
+            "      const soundTab = e.target?.closest?.('#sound .sound-tabs [data-sound-tab]');"
+        )
+        handler_end = self.adapter.index("}, true);", handler_start)
+        handler = self.adapter[handler_start:handler_end + len("}, true);")]
+        self.assertIn("e.stopImmediatePropagation();", handler)
+        self.assertIn("if (!['music', 'chapters', 'cues', 'mix'].includes(nextView)) return;", handler)
+        self.assertIn("document.querySelectorAll('#sound .sound-tabs [data-sound-tab]')", handler)
+        self.assertIn("document.querySelectorAll('#sound .sound-view[data-sound-view]')", handler)
+        self.assertLess(self.adapter.index("legacySoundTabs.replaceWith(cleanSoundTabs);"), handler_start)
 
     def test_chapter_bgm_assignments_survive_strategy_switch(self):
         start = self.host.index("    def _sound_chapter_bgm_save(")
