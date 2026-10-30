@@ -3664,12 +3664,19 @@
       ? chapterBgmState.overrides : {};
     const chapterBased = ['custom', 'chapter-based', 'chapter_based'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
     const masterEnabled = chapterBgmState.bgm_enabled === true;
+    const bgmLevelInput = $('advancedMusicVolume');
     const narrationInput = $('narrationVolume');
     const cueLevelInput = $('cueVolume');
+    const storedBgm = Math.max(0, Math.min(0.50, Number(chapterBgmState.default_volume ?? 0.18)));
     const storedNarration = Math.max(0, Math.min(1, Number(chapterBgmState.narration_volume ?? 1)));
     const storedCue = Math.max(0, Math.min(0.50, Number(chapterBgmState.cue_volume ?? 0.25)));
+    if (bgmLevelInput && document.activeElement !== bgmLevelInput && Number.isFinite(storedBgm)) {
+      bgmLevelInput.value = String(Math.round(storedBgm * 100));
+    }
     if (narrationInput && document.activeElement !== narrationInput && Number.isFinite(storedNarration)) narrationInput.value = String(Math.round(storedNarration * 100));
     if (cueLevelInput && document.activeElement !== cueLevelInput && Number.isFinite(storedCue)) cueLevelInput.value = String(Math.round(storedCue * 100));
+    const bgmLevel = Math.max(0, Math.min(0.50, Number(bgmLevelInput?.value ?? storedBgm * 100) / 100));
+    setText('advancedMusicVolumeValue', Math.round(bgmLevel * 100) + '%');
     const narrationLevel = Math.max(0, Math.min(1, Number(narrationInput?.value ?? storedNarration * 100) / 100));
     const cueLevel = Math.max(0, Math.min(0.50, Number(cueLevelInput?.value ?? storedCue * 100) / 100));
     setText('narrationVolumeValue', Math.round(narrationLevel * 100) + '%');

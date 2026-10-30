@@ -463,6 +463,18 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("'#sound #chapterBgmSelectedTrackPanel h2{font-size:1.15rem;line-height:1.35;margin:10px 0}'", self.adapter)
         self.assertIn("Candidate only — press Select to save it for Chapter ", self.adapter)
 
+
+    def test_master_bgm_slider_hydrates_saved_value_without_overwriting_active_edit(self):
+        start = self.adapter.index("function renderSoundMixSummary()")
+        end = self.adapter.index("function renderChapterBgm()", start)
+        summary = self.adapter[start:end]
+        self.assertIn("const bgmLevelInput = $('advancedMusicVolume');", summary)
+        self.assertIn("const storedBgm = Math.max(0, Math.min(0.50, Number(chapterBgmState.default_volume ?? 0.18)));", summary)
+        self.assertIn("document.activeElement !== bgmLevelInput", summary)
+        self.assertIn("bgmLevelInput.value = String(Math.round(storedBgm * 100));", summary)
+        self.assertIn("setText('advancedMusicVolumeValue', Math.round(bgmLevel * 100) + '%');", summary)
+        self.assertIn("await saveSoundMixLevels(true);", self.adapter)
+
     def test_zero_cue_level_does_not_add_silent_audio_duration(self):
         self.assertIn("if cue is None or cue_gain <= 1e-9:", self.assembler)
         self.assertIn("return None", self.assembler[self.assembler.index("def apply_cue_level"):self.assembler.index("# Real local audio only", self.assembler.index("def apply_cue_level"))])
