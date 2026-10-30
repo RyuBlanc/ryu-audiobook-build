@@ -47,7 +47,14 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
     def test_packaged_runner_creates_isolated_project_and_audio_fixtures(self):
         helper = (ROOT / "tests/packaged_sound_ui_acceptance.py").read_text(encoding="utf-8")
         for required in (
-            "QSettings",
+            "import winreg",
+            "def get_active_project_setting",
+            "def set_active_project_setting",
+            "winreg.OpenKey",
+            "winreg.CreateKeyEx",
+            "winreg.QueryValueEx",
+            "winreg.SetValueEx",
+            "winreg.DeleteValue",
             "Project(",
             "Chapter(",
             "write_tone_fixture",
@@ -56,11 +63,12 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
             "RYU_SOUND_UI_ACCEPTANCE_MARKER",
             "QTWEBENGINE_CHROMIUM_FLAGS",
             "validate_saved_music_state",
-            "settings.setValue(\"project/active_folder\", str(project_folder.resolve()))",
-            "settings.setValue(\"project/active_folder\", previous_active)",
+            "previous_active = get_active_project_setting()",
+            "set_active_project_setting(str(project_folder.resolve()))",
+            "set_active_project_setting(previous_active)",
         ):
             self.assertIn(required, helper)
-
+        self.assertNotIn("from PySide6.QtCore import QSettings", helper)
 
     def test_packaged_driver_proves_real_music_and_cue_playback_and_cue_card_readability(self):
         script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
@@ -105,3 +113,12 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         self.assertIn("Run packaged Sound Design Music Library acceptance", workflow)
         self.assertIn("tests\\packaged_sound_ui_acceptance.py", workflow)
         self.assertIn("dist\\Ryu's Audiobook\\Ryu's Audiobook.exe", workflow)
+
+    def test_packaged_acceptance_uses_durable_python_created_by_the_build_job(self):
+        workflow = (ROOT / ".github/workflows/build-windows.yml").read_text(encoding="utf-8")
+        acceptance_start = workflow.index("Run packaged Sound Design Music Library acceptance")
+        acceptance_end = workflow.index("- name: Install Inno Setup", acceptance_start)
+        acceptance_step = workflow[acceptance_start:acceptance_end]
+        self.assertIn("ryu-qwen-python-bootstrap", acceptance_step)
+        self.assertIn("python312", acceptance_step)
+        self.assertIn("durable acceptance Python", acceptance_step)
