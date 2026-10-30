@@ -115,6 +115,19 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         ):
             self.assertIn(required, helper)
 
+    def test_packaged_volume_interaction_focuses_the_real_slider_before_editing(self):
+        script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        start = script.index('const volume = document.querySelector("#advancedMusicVolume");')
+        end = script.index('record("music_volume_control"', start)
+        interaction = script[start:end]
+        self.assertIn("volume.focus();", interaction)
+        self.assertIn("document.activeElement === volume", interaction)
+        self.assertLess(interaction.index("volume.focus();"), interaction.index("volume.value ="))
+        self.assertLess(interaction.index("volume.value ="), interaction.index('new Event("input"'))
+        self.assertIn('new Event("change"', interaction)
+        self.assertIn("saved.default_volume", interaction)
+        self.assertIn('textContent.trim() === "42%"', interaction)
+        self.assertIn('volume.value === "42"', interaction)
     def test_built_in_filter_failure_captures_native_catalogue_source_diagnostics(self):
         script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
         for required in (
