@@ -166,7 +166,7 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         self.assertIn("volume.focus();", interaction)
         self.assertIn("document.activeElement === volume", interaction)
         focus_at = interaction.index("volume.focus();")
-        edit_at = interaction.index('volume.value = "42";')
+        edit_at = interaction.index("volume.value = String(config.expected_volume * 100);")
         self.assertLess(focus_at, edit_at)
         self.assertLess(interaction.index("volume.value ="), interaction.index('new Event("input"'))
         self.assertIn('new Event("change"', interaction)
