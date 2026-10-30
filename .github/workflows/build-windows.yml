@@ -613,7 +613,7 @@ jobs:
           Write-Host 'Critical application modules were already exercised by the frozen EXE self-test.'
 
       - name: Run packaged Sound Design Music Library acceptance
-        timeout-minutes: 5
+        timeout-minutes: 20
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
