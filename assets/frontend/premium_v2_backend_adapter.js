@@ -1180,6 +1180,7 @@
       characterStudioSelectedChapter = null;
       characterStudioSelectedSeries = '';
       window.ryuPremiumSelectedCharacter = '';
+      window.ryuPremiumSelectedAssignedDialogueId = '';
       window.ryuPremiumSelectedChapter = null;
       window.ryuPremiumSelectedDialogueId = '';
       window.ryuPremiumAiChapterNumber = null;
@@ -2224,6 +2225,7 @@
       window.ryuPremiumCharacterAnalysisStatus = characterAnalysisStatus;
       window.ryuPremiumSelectedCharacter = '';
       window.ryuPremiumSelectedDialogueId = '';
+      window.ryuPremiumSelectedAssignedDialogueId = '';
       const projectTitleNode = document.querySelector('.project-mini .pm-body b');
       const projectCrumb = document.querySelector('.topbar .crumb span');
       writeTextIfChanged(projectTitleNode, 'No project selected');
@@ -2373,12 +2375,16 @@
     return chapters;
   }
   async function refreshCharacters() {
+    const activeFolderAtRequest = String(window.ryuPremiumActiveProject?.folder || '');
     const requestToken = ++characterListEpoch;
     const loaded = await call('character.list');
-    if (requestToken !== characterListEpoch) return characters;
+    const activeFolderAfterRequest = String(window.ryuPremiumActiveProject?.folder || '');
+    if (requestToken !== characterListEpoch ||
+        activeFolderAtRequest !== activeFolderAfterRequest) return characters;
     characters = Array.isArray(loaded) ? loaded : [];
     if (!characters.some(c => String(c.name || '').toLowerCase() === String(window.ryuPremiumSelectedCharacter || '').toLowerCase())) {
       window.ryuPremiumSelectedCharacter = '';
+      window.ryuPremiumSelectedAssignedDialogueId = '';
     }
     renderCharacterStudioLive();
     return characters;
@@ -5383,6 +5389,7 @@
       if (button.matches('#characters #assignedCharacterList [data-character-name]')) {
         handle(() => {
           window.ryuPremiumSelectedCharacter = button.dataset.characterName;
+          window.ryuPremiumSelectedAssignedDialogueId = '';
           document.querySelectorAll('#assignedCharacterList [data-character-name]').forEach(item => item.classList.toggle('active', item === button));
           renderCharacterInspector();
         });
