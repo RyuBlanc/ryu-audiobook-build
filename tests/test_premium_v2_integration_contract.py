@@ -1117,7 +1117,8 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         end = adapter.index("const librarySeriesName =", start)
         block = adapter[start:end]
         self.assertIn("const requestToken = ++characterListEpoch;", block)
-        self.assertIn("if (requestToken !== characterListEpoch) return characters;", block)
+        self.assertIn("requestToken !== characterListEpoch", block)
+        self.assertIn("activeFolderAtRequest !== activeFolderAfterRequest", block)
         self.assertIn("renderCharacterStudioLive();", block)
         self.assertNotIn("list.dataset.characterListSignature !== signature", block)
         self.assertIn("function renderCharacterStudioLive()", adapter)
