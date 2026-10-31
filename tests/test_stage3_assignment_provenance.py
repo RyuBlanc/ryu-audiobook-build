@@ -149,6 +149,8 @@ class AssignmentProvenanceBridgeTests(unittest.TestCase):
         self.assertEqual(chapter_b.dialogue_assignments[0]["text"], text_b)
         self.assertEqual(chapter_a.dialogue_assignments[0]["series"], "Series A")
         self.assertEqual(chapter_b.dialogue_assignments[0]["series"], "Series B")
+        self.assertEqual(chapter_a.dialogue_assignments[0]["source"], "manual")
+        self.assertEqual(chapter_b.dialogue_assignments[0]["source"], "manual")
 
     def test_bridge_rejects_unknown_source_before_saving(self):
         text = '“The gate is closing.”'

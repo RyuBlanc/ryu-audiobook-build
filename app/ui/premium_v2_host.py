@@ -1141,6 +1141,29 @@ class PremiumV2Bridge(QObject):
                                                  chapter_number=chapter_number, mode=mode,
                                                  source=assignment_source, confidence=assignment_confidence)
             assignment_series = requested_series or default_series
+            saved_chapter = next(
+                (item for item in project.chapters if item.number == result.get("chapter_number")),
+                None,
+            )
+            if saved_chapter is None:
+                raise ValueError("The selected chapter is no longer available. Refresh the chapter and try again.")
+            assignments = list(getattr(saved_chapter, "dialogue_assignments", []) or [])
+            matching = [
+                index for index, item in enumerate(assignments)
+                if isinstance(item, dict)
+                and item.get("start") == result.get("start")
+                and item.get("end") == result.get("end")
+            ]
+            if len(matching) != 1:
+                raise ValueError("The saved dialogue assignment could not be uniquely verified. Refresh and try again.")
+            saved_assignment = dict(assignments[matching[0]])
+            saved_assignment.update({
+                "source": assignment_source,
+                "confidence": assignment_confidence,
+                "series": assignment_series,
+            })
+            assignments[matching[0]] = saved_assignment
+            saved_chapter.dialogue_assignments = assignments
             result["series"] = assignment_series
         project.save()
         project_state = load_state(project.folder)
