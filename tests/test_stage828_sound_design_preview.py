@@ -626,7 +626,7 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
                 "ending_cue_path": str(root / "inactive-closing.wav"),
             }
 
-            with patch("app.audio.assembler.assemble_m4b", side_effect=render), \\
+            with patch("app.audio.assembler.assemble_m4b", side_effect=render), \
                  patch("app.audio.assembler._duration_ms", return_value=12_345):
                 full_book_preview._render_full_book_preview(
                     host, "voice-only-job", object(), [], [], output,
