@@ -4182,7 +4182,6 @@
     const cue = Math.max(0, Math.min(0.50, Number($('cueVolume')?.value ?? Math.round(Number(chapterBgmState.cue_volume ?? 0.25) * 100)) / 100));
     return {
       path:chapterBased ? '' : (chapterBgmState.default_path || ''),
-      enabled:chapterBgmState.bgm_enabled === true,
       volume, narration_volume:narration, cue_volume:cue,
       fade_in_seconds:fadeSeconds('bgmFadeIn'), fade_out_seconds:fadeSeconds('bgmFadeOut')
     };

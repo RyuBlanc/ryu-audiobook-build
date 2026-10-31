@@ -322,3 +322,21 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         self.assertIn("if (revision === mixLevelsRevision)", save)
         self.assertIn("mixLevelsDirty = false;", save)
         self.assertIn("renderSoundMixSummary();", save)
+
+
+    def test_mix_level_manifest_saves_do_not_rewrite_global_bgm_toggle(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        payload_start = adapter.index("function currentSoundManifestPayload()")
+        payload_end = adapter.index("async function saveSoundManifest", payload_start)
+        payload = adapter[payload_start:payload_end]
+        self.assertNotIn("enabled:", payload)
+        self.assertIn("saveSoundManifest({path, enabled})", adapter)
+
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        save_start = host.index("def _sound_save_manifest(")
+        save_end = host.index("def _sound_chapter_bgm_get(", save_start)
+        save = host[save_start:save_end]
+        self.assertIn('explicit_enabled = "enabled" in payload', save)
+        self.assertIn("current_mode = effective_background_audio_mode(state)", save)
+        self.assertIn('else current_mode != "off"', save)
+        self.assertIn('else current_mode,', save)

@@ -295,4 +295,59 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         self.assertNotIn(str(corrupt.resolve()), paths)
         self.assertIn(str(valid.resolve()), paths)
 
+
+    def test_level_only_manifest_update_preserves_saved_global_mode(self):
+        track = _valid_wav(self.app_root / "Audio Library" / "preserved-mode.wav")
+        self.bridge_a.catalog = [{"path": str(track.resolve()), "title": "preserved-mode"}]
+        from app.core.state import load_state, save_state
+
+        volume_payload = {
+            "path": "",
+            "volume": 0.18,
+            "narration_volume": 0.82,
+            "cue_volume": 0.30,
+            "fade_in_seconds": 2,
+            "fade_out_seconds": 3,
+        }
+        # A volume-only manifest update must preserve Voice Only even when
+        # music/cue preferences remain saved for later re-enabling.
+        state = load_state(self.project_a)
+        state.update({
+            "background_audio_mode": "off",
+            "background_audio_enabled": False,
+            "background_audio_path": "",
+            "background_audio_preferred_path": str(track.resolve()),
+            "chapter_bgm_strategy": "custom",
+            "chapter_bgm_overrides": {
+                "1": {"rule": "custom", "path": str(track.resolve()), "volume": 0.18},
+            },
+        })
+        save_state(self.project_a, state)
+        disabled = host.PremiumV2Bridge._sound_save_manifest(self.bridge_a, volume_payload)
+        state = load_state(self.project_a)
+        self.assertEqual(state["background_audio_mode"], "off")
+        self.assertFalse(state["background_audio_enabled"])
+        self.assertEqual(state["background_audio_path"], "")
+        self.assertEqual(state["background_audio_preferred_path"], str(track.resolve()))
+        self.assertFalse(disabled["enabled"])
+
+        # Chapter-Based BGM can be enabled without a book-default track. A
+        # volume-only save must preserve that explicit enabled/manual mode.
+        state.update({
+            "background_audio_mode": "manual",
+            "background_audio_enabled": True,
+            "background_audio_path": "",
+            "chapter_bgm_strategy": "custom",
+            "chapter_bgm_overrides": {
+                "1": {"rule": "custom", "path": str(track.resolve()), "volume": 0.18},
+            },
+        })
+        save_state(self.project_a, state)
+        enabled = host.PremiumV2Bridge._sound_save_manifest(self.bridge_a, volume_payload)
+        state = load_state(self.project_a)
+        self.assertEqual(state["background_audio_mode"], "manual")
+        self.assertTrue(state["background_audio_enabled"])
+        self.assertEqual(state["background_audio_path"], "")
+        self.assertTrue(enabled["enabled"])
+
 if __name__ == "__main__": unittest.main()

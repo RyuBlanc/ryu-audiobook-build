@@ -5653,7 +5653,13 @@ class PremiumV2Bridge(QObject):
             path = str(payload.get("path") or "").strip()
         else:
             path = str(state.get("background_audio_path") or state.get("background_audio_preferred_path") or "").strip()
-        enabled = bool(payload.get("enabled", bool(path)))
+        from app.audio.library import effective_background_audio_mode
+        explicit_enabled = "enabled" in payload
+        current_mode = effective_background_audio_mode(state)
+        # Volume/fade/path saves must not overwrite the global BGM/Voice Only
+        # toggle from a possibly stale frontend snapshot. Only the explicit
+        # master toggle supplies "enabled" and changes the saved mode.
+        enabled = bool(payload.get("enabled")) if explicit_enabled else current_mode != "off"
         try:
             volume = max(0.0, min(0.50, float(payload.get("volume", state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18))))
             narration_volume = max(0.0, min(1.0, float(payload.get("narration_volume", state.get("narration_audio_volume") if state.get("narration_audio_volume") is not None else 1.0))))
@@ -5675,7 +5681,7 @@ class PremiumV2Bridge(QObject):
         state.update({
             "background_audio_path": active_bgm_path,
             "background_audio_preferred_path": preferred_bgm_path,
-            "background_audio_mode": "manual" if enabled else "off",
+            "background_audio_mode": ("manual" if enabled else "off") if explicit_enabled else current_mode,
             "background_audio_enabled": enabled,
             "background_audio_volume": volume,
         })
