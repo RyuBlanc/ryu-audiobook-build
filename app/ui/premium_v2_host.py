@@ -29,6 +29,7 @@ from app.core.project import create_project, list_projects
 from app.documents.parser import SUPPORTED_EXTENSIONS, clean_import_noise, clean_text, detect_repeated_book_noise, extract_text
 from app.chapters.detector import detect_chapters
 from app.chapters.characters import analyze_book, merge_character_analysis_record
+from app.chapters.character_inspector import build_character_assignment_inspector
 from app.tts.manager import GenerationManager
 from app.tts.preview import build_voice_preview
 from app.tts.profile_provider import provider_from_profile
@@ -127,6 +128,7 @@ class PremiumV2Bridge(QObject):
                 "voice.select": self._voice_select,
                 "voice.preview": self._voice_preview,
                 "character.list": self._character_list,
+                "character.dialogue.list": self._character_dialogue_list,
                 "character_library.list": self._character_library_list,
                 "character_library.save": self._character_library_save,
                 "character_library.delete": self._character_library_delete,
@@ -234,6 +236,7 @@ class PremiumV2Bridge(QObject):
             "voice.select": True,
             "voice.preview": True,
             "character.list": True,
+            "character.dialogue.list": True,
             "character_library.list": True,
             "character_library.save": True,
             "character_library.delete": True,
@@ -1245,9 +1248,56 @@ class PremiumV2Bridge(QObject):
                              error={"code": "preview_failed", "message": str(exc)}, recoverable=True)
 
     def _character_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        state = load_state(self._active_project().folder)
+        """Return the saved cast enriched with live, project-scoped assignment counts."""
+        project = self._active_project()
+        state = load_state(project.folder)
         rows = state.get("characters") or []
-        return rows if isinstance(rows, list) else []
+        if not isinstance(rows, list):
+            return []
+        result: list[dict[str, Any]] = []
+        for raw in rows:
+            if not isinstance(raw, dict) or not str(raw.get("name") or "").strip():
+                continue
+            character = dict(raw)
+            preview = build_character_assignment_inspector(
+                project.chapters, character, project.title, offset=0, limit=1
+            )
+            stats = preview["stats"]
+            character["story_name"] = project.title
+            character["assigned_voice"] = stats["assigned_voice"]
+            character["assigned_dialogue_count"] = stats["dialogue_lines"]
+            character["assigned_chapter_count"] = stats["chapters"]
+            character["ai_assigned_percent"] = stats["ai_assigned_percent"]
+            result.append(character)
+        return result
+
+    def _character_dialogue_list(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return a bounded page of source-backed dialogue for a saved character."""
+        project = self._active_project()
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            raise ValueError("Choose a saved character before loading its dialogue.")
+        state = load_state(project.folder)
+        characters = state.get("characters") or []
+        if not isinstance(characters, list):
+            characters = []
+        character = next(
+            (item for item in characters
+             if isinstance(item, dict)
+             and str(item.get("name") or "").strip().casefold() == name.casefold()),
+            None,
+        )
+        if character is None:
+            raise ValueError("The selected character is no longer in this project's saved cast.")
+        offset = payload.get("offset", 0)
+        limit = payload.get("limit", 30)
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise ValueError("Dialogue pagination offset must be a non-negative integer.")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ValueError("Dialogue page size must be between 1 and 100.")
+        return build_character_assignment_inspector(
+            project.chapters, character, project.title, offset=offset, limit=limit
+        )
 
     def _character_analyze(self, _payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
