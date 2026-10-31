@@ -76,7 +76,7 @@ class LiveCharacterStudioContracts(unittest.TestCase):
             "performance_target_met",
         ):
             self.assertIn(token, adapter)
-        self.assertIn("No Characters Found", adapter)
+        self.assertIn("No Assigned Cast yet", adapter)
         self.assertIn("const candidateSeries = String(linked?.series || hintedSeries || activeCharacterProjectSeries());", adapter)
         self.assertIn("Saved / manually created characters", adapter)
         self.assertIn(".ai-sentence.unassigned", adapter)
