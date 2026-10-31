@@ -186,5 +186,84 @@ class VoiceProfileRenameTests(unittest.TestCase):
             self.assertEqual(saved[0].sample_path, str(sample.resolve()))
 
 
+    def test_renaming_saved_voice_updates_all_project_cast_and_narrator_references(self):
+        from types import SimpleNamespace
+        from app.core.state import load_state, save_state
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sample = root / "reference.wav"
+            sample.write_bytes(b"reference-placeholder")
+            voices = root / "voices"
+            project_one = SimpleNamespace(folder=root / "project-one", title="Silver Moon Saga · Vol 1")
+            project_two = SimpleNamespace(folder=root / "project-two", title="Silver Moon Saga · Vol 2")
+            save_state(project_one.folder, {
+                "voice_profile": "Old Reference Name",
+                "narrator": "Old Reference Name",
+                "voice_id": "reference-id",
+                "backend": "automatic",
+                "characters": [
+                    {"name": "Mira", "series": "Silver Moon Saga", "voice_profile": "Old Reference Name"},
+                    {"name": "Ren", "series": "Silver Moon Saga", "voice_profile": "Other Voice"},
+                ],
+            })
+            save_state(project_two.folder, {
+                "voice_profile": "Other Narrator",
+                "narrator": "Other Narrator",
+                "voice_id": "other-id",
+                "backend": "automatic",
+                "characters": [
+                    {"name": "Mira", "series": "Silver Moon Saga", "voice_profile": "Old Reference Name"},
+                ],
+            })
+            registry = [
+                {"id": "registry-mira", "series": "Silver Moon Saga", "primary_name": "Mira", "voice_name": "Old Reference Name"},
+                {"id": "registry-ren", "series": "Silver Moon Saga", "primary_name": "Ren", "voice_name": "Other Voice"},
+            ]
+            registry_updates = []
+
+            def update_registry(record_id, changes):
+                registry_updates.append((record_id, dict(changes)))
+
+            with (
+                patch("app.ui.premium_v2_host.ensure_roots"),
+                patch.object(PremiumV2Bridge, "_load_durable_jobs"),
+                patch("app.tts.voice_profile.voices_root", return_value=voices),
+                patch("app.tts.voice_profile.builtin_voice_profiles", return_value=[]),
+                patch("app.ui.premium_v2_host.list_projects", return_value=[project_one, project_two]),
+                patch("app.ui.premium_v2_host.list_reusable_characters", return_value=registry),
+                patch("app.ui.premium_v2_host.update_reusable_character", side_effect=update_registry),
+            ):
+                bridge = PremiumV2Bridge()
+                bridge._voice_save({
+                    "name": "Old Reference Name",
+                    "provider": "chatterbox",
+                    "voice_id": "reference-id",
+                    "sample_path": str(sample),
+                    "authorized": True,
+                })
+                result = bridge._voice_save({
+                    "name": "Renamed Reference Voice",
+                    "original_name": "Old Reference Name",
+                    "provider": "chatterbox",
+                    "voice_id": "reference-id",
+                    "authorized": True,
+                })
+
+            first = load_state(project_one.folder)
+            second = load_state(project_two.folder)
+            self.assertEqual(result["name"], "Renamed Reference Voice")
+            self.assertEqual(first["voice_profile"], "Renamed Reference Voice")
+            self.assertEqual(first["narrator"], "Renamed Reference Voice")
+            self.assertEqual(first["characters"][0]["voice_profile"], "Renamed Reference Voice")
+            self.assertEqual(first["characters"][1]["voice_profile"], "Other Voice")
+            self.assertEqual(second["voice_profile"], "Other Narrator")
+            self.assertEqual(second["characters"][0]["voice_profile"], "Renamed Reference Voice")
+            self.assertEqual(
+                registry_updates,
+                [("registry-mira", {"voice_name": "Renamed Reference Voice"})],
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
