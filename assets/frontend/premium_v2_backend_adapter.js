@@ -390,6 +390,7 @@
   let chapterLastText = '', chapterHistoryGroupOpen = false, chapterHistoryGroupTimer = null, chapterHistoryApplying = false;
   let libraryCharacters = [], libraryEditorId = null, libraryEditorActive = false;
   let characterDialogueSuggestions = [], characterSuggestionsEpoch = 0;
+  let characterNarrationSegments = [];
   let characterAnalysisStatus = {analyzed:false, updated_at:null, dialogue_total:0, unassigned_dialogue:0, suggestion_count:0};
   let characterStudioSelectedChapter = null, characterStudioSelectedSeries = '', characterStudioRenderEpoch = 0;
   let characterManualFormBound = false, characterAssignedActionsBound = false, characterStudioCaptureBound = false;
@@ -2380,6 +2381,7 @@
     const loaded = await call('character.list');
     if (requestToken !== characterListEpoch) return characters;
     characters = Array.isArray(loaded) ? loaded : [];
+    await refreshCharacterNarrationSegments();
     const selectedName = String(window.ryuPremiumSelectedCharacter || '').trim().toLowerCase();
     const selectedSeries = String(window.ryuPremiumSelectedCharacterSeries || '').trim().toLowerCase();
     if (!characters.some(c => characterCanonical(c).toLowerCase() === selectedName &&
@@ -2533,6 +2535,26 @@
       return characterDialogueSuggestions;
     }
   }
+  async function refreshCharacterNarrationSegments() {
+    try {
+      const loaded = await call('character.narration.segments.list');
+      characterNarrationSegments = Array.isArray(loaded) ? loaded : [];
+      return characterNarrationSegments;
+    } catch (error) {
+      console.warn('[Ryu narrator segmentation]', error);
+      return characterNarrationSegments;
+    }
+  }
+  function characterNarrationSegmentsForChapter(chapter) {
+    const number = Number(chapter?.number);
+    if (!Number.isFinite(number)) return [];
+    const source = String(chapter?.text || '');
+    return characterNarrationSegments.filter(row => Number(row.chapter_number) === number &&
+      row.kind === 'narration' && Number.isInteger(Number(row.start)) &&
+      Number.isInteger(Number(row.end)) && Number(row.start) >= 0 &&
+      Number(row.end) > Number(row.start) && Number(row.end) <= source.length &&
+      source.slice(Number(row.start), Number(row.end)) === String(row.text || ''));
+  }
   function installCharacterStudioStyles() {
     if ($('ryuLiveCharacterStudioStyles')) return;
     const style = document.createElement('style');
@@ -2545,6 +2567,9 @@
       '.ryu-live-passage.is-assigned-ai{background:rgba(236,160,45,.075);box-shadow:inset 3px 0 0 #efae35;}' +
       '.ryu-live-passage.is-assigned-manual{background:rgba(36,190,122,.07);box-shadow:inset 3px 0 0 #22c982;}' +
       '.ryu-live-passage.is-ai-review{background:rgba(236,160,45,.075);box-shadow:inset 3px 0 0 #efae35;}' +
+      '.ryu-narrator-passage{display:inline;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:5px;background:rgba(91,153,222,.055);box-shadow:inset 3px 0 0 rgba(91,153,222,.5);padding:1px 2px;}' +
+      '.ryu-narrator-chip{display:inline-flex;vertical-align:middle;margin:0 5px 0 2px;padding:2px 6px;border-radius:8px;background:rgba(91,153,222,.14);color:#8fc0ff;font-size:10px;font-weight:800;letter-spacing:.02em;}' +
+      '.ryu-needs-speaker-chip{background:rgba(236,160,45,.14);color:#efbd63;}' +
       '.ryu-live-passage .ryu-speaker-chip{display:inline-flex;vertical-align:middle;margin:0 5px 0 2px;padding:2px 6px;border-radius:8px;background:rgba(34,201,130,.12);color:#25d184;font-size:10px;font-weight:800;}' +
       '.ryu-character-empty{padding:22px 16px;text-align:center;color:#aeb6c5;line-height:1.6;}' +
       '.ryu-character-empty b{display:block;color:#f0f2f7;margin-bottom:7px;font-size:15px;}' +
@@ -2827,19 +2852,33 @@
     if (story) {
       const source = String(chapter?.text || '');
       const rows = characterDialogueRowsForChapter(chapter);
-      const renderSig = JSON.stringify([chapter?.number, chapter?.title, source, rows.map(row => [row.start,row.end,row.speakers,row.assignmentSource,row.skipped,row.suggestions])]);
+      const narratorRows = characterNarrationSegmentsForChapter(chapter);
+      const visualRows = [
+        ...rows.map(row => ({...row, visualKind:'dialogue'})),
+        ...narratorRows.map(row => ({...row, visualKind:'narration', start:Number(row.start), end:Number(row.end)}))
+      ].sort((a,b) => a.start - b.start || b.end - a.end);
+      const renderSig = JSON.stringify([chapter?.number, chapter?.title, source,
+        rows.map(row => [row.start,row.end,row.speakers,row.assignmentSource,row.skipped,row.suggestions]),
+        narratorRows.map(row => [row.start,row.end,row.text,row.source])]);
       if (story.dataset.liveSignature !== renderSig) {
         let html = '', cursor = 0;
-        for (const row of rows) {
+        for (const row of visualRows) {
           if (row.start < cursor) continue;
           html += esc(source.slice(cursor, row.start)).replace(/\n/g, '<br>');
+          if (row.visualKind === 'narration') {
+            html += '<span class="ryu-narrator-passage" title="Narrator · Automatically classified non-dialogue text">' +
+              '<span class="ryu-narrator-chip">Narrator · Auto</span>' + esc(row.text) + '</span>';
+            cursor = row.end;
+            continue;
+          }
           const assignedName = row.speakers.join(' + ');
           const sourceClass = row.assignmentSource === 'ai' ? ' is-assigned-ai' : ' is-assigned-manual';
           const classes = 'ryu-live-passage' + (row.assigned ? ' is-assigned' + sourceClass : '');
-          const title = row.assigned ? 'Assigned to ' + assignedName : 'Click to assign this exact source passage';
+          const title = row.assigned ? 'Assigned to ' + assignedName : 'Needs speaker review · Click to assign';
           html += '<button type="button" class="' + classes + '" data-manual-dialogue="1" data-dialogue-id="' + esc(row.id) +
             '" data-chapter-number="' + Number(chapter.number) + '" data-start="' + row.start + '" data-end="' + row.end +
-            '" title="' + esc(title) + '">' + (row.assigned ? '<span class="ryu-speaker-chip">' + esc(assignedName) + '</span>' : '') +
+            '" title="' + esc(title) + '">' + (row.assigned ? '<span class="ryu-speaker-chip">' + esc(assignedName) + '</span>' :
+              '<span class="ryu-speaker-chip ryu-needs-speaker-chip">Needs speaker</span>') +
             esc(row.text) + '</button>';
           cursor = row.end;
         }

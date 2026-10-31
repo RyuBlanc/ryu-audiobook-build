@@ -393,6 +393,7 @@ class PremiumV2Bridge(QObject):
                 "voice.preview": self._voice_preview,
                 "voice.preview.save": self._voice_preview_save,
                 "character.list": self._character_list,
+                "character.narration.segments.list": self._character_narration_segments_list,
                 "character.create": self._character_create,
                 "character.dialogue.suggestions.list": self._character_dialogue_suggestions_list,
                 "character.dialogue.suggestion.skip": self._character_dialogue_suggestion_skip,
@@ -520,6 +521,7 @@ class PremiumV2Bridge(QObject):
             "voice.preview": True,
             "voice.preview.save": True,
             "character.list": True,
+            "character.narration.segments.list": True,
             "character.create": True,
             "character.dialogue.suggestions.list": True,
             "character.dialogue.suggestion.skip": True,
@@ -3046,6 +3048,27 @@ class PremiumV2Bridge(QObject):
         state = load_state(self._active_project().folder)
         rows = state.get("characters") or []
         return rows if isinstance(rows, list) else []
+
+    def _character_narration_segments_list(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return source-backed speaker segmentation for the active project's chapters."""
+        from dataclasses import asdict
+        from app.chapters.speaker_segmentation import segment_chapter_speakers
+
+        project = self._active_project()
+        raw_number = payload.get("chapter_number")
+        requested_number = None
+        if raw_number not in (None, ""):
+            try:
+                requested_number = int(raw_number)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("Choose a valid chapter number for narrator segmentation.") from exc
+
+        results: list[dict[str, Any]] = []
+        for chapter in project.chapters:
+            if requested_number is not None and int(chapter.number) != requested_number:
+                continue
+            results.extend(asdict(segment) for segment in segment_chapter_speakers(chapter))
+        return results
 
     def _character_analysis_status(self, _payload: dict[str, Any]) -> dict[str, Any]:
         """Return only analysis status persisted for the active project."""
