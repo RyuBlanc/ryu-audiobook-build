@@ -1,6 +1,7 @@
 """Behavioral tests for the saved-project Character Studio dialogue inspector."""
 
 import unittest
+from pathlib import Path
 
 from app.chapters.character_inspector import build_character_assignment_inspector
 from app.chapters.detector import Chapter
