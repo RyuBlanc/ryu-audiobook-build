@@ -2894,9 +2894,94 @@ class PremiumV2Bridge(QObject):
                     self._preview_cancel_events.pop(job_id, None)
 
     def _character_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
-        state = load_state(self._active_project().folder)
-        rows = state.get("characters") or []
-        return rows if isinstance(rows, list) else []
+        """Return a normalized cast snapshot from the currently active project only."""
+        project = self._active_project()
+        state = load_state(project.folder)
+        raw_rows = state.get("characters")
+        if not isinstance(raw_rows, list):
+            return []
+
+        default_series = self._project_series_name(project, state)
+        rows: list[dict[str, Any]] = []
+        by_identity: dict[tuple[str, str], dict[str, Any]] = {}
+
+        def text_values(value: Any) -> list[str]:
+            if isinstance(value, str):
+                values = value.replace("\\n", ",").split(",")
+            elif isinstance(value, (list, tuple, set)):
+                values = list(value)
+            else:
+                values = []
+            result: list[str] = []
+            seen: set[str] = set()
+            for raw_value in values:
+                item = str(raw_value or "").strip()[:160]
+                key = item.casefold()
+                if not item or key in seen:
+                    continue
+                seen.add(key)
+                result.append(item)
+            return result
+
+        for raw in raw_rows:
+            if not isinstance(raw, dict):
+                continue
+            name = str(raw.get("name") or raw.get("primary_name") or "").strip()
+            if not name:
+                continue
+            name = name[:160]
+
+            series = str(raw.get("series") or "").strip()
+            if not series:
+                scope = str(raw.get("scope") or "").strip()
+                if re.match(r"(?i)^series\\s*[·:-]", scope):
+                    series = re.sub(r"(?i)^series\\s*[·:-]\\s*", "", scope).strip()
+            if not series or series.casefold() in {
+                "global character library", "all series", "unassigned series"
+            }:
+                series = default_series
+            series = str(series or "Unassigned series").strip()[:300]
+
+            aliases = [
+                alias for alias in text_values(raw.get("aliases"))
+                if alias.casefold() != name.casefold()
+            ]
+            row = dict(raw)
+            row["name"] = name
+            row["series"] = series
+            row["scope"] = "Series · " + series
+            row["aliases"] = aliases
+
+            identity = (name.casefold(), series.casefold())
+            existing = by_identity.get(identity)
+            if existing is None:
+                by_identity[identity] = row
+                rows.append(row)
+                continue
+
+            # Older analysis/library migrations can leave duplicate rows. Merge
+            # non-conflicting metadata but never replace an existing explicit
+            # voice assignment with a different duplicate's value.
+            merged_aliases = text_values([*existing.get("aliases", []), *aliases])
+            existing["aliases"] = [
+                alias for alias in merged_aliases
+                if alias.casefold() != str(existing.get("name") or "").casefold()
+            ]
+            for field in ("role", "short_description", "notes", "voice_profile"):
+                if not str(existing.get(field) or "").strip() and str(row.get(field) or "").strip():
+                    existing[field] = row[field]
+            examples = text_values([*(existing.get("examples") or []), *(row.get("examples") or [])])
+            if examples:
+                existing["examples"] = examples
+            try:
+                existing["dialogue_count"] = max(
+                    int(existing.get("dialogue_count") or 0),
+                    int(row.get("dialogue_count") or 0),
+                )
+            except (TypeError, ValueError, OverflowError):
+                pass
+
+        return rows
 
     def _character_analysis_status(self, _payload: dict[str, Any]) -> dict[str, Any]:
         """Return only analysis status persisted for the active project."""
