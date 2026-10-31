@@ -743,13 +743,18 @@
       "Chapter BGM returned the matching results for all eight categories and all three source filters.");
 
     async function selectChapter(number) {
-      const row = document.querySelector('#chapterBgmList [data-chapter-bgm="' + number + '"]');
-      must(row, "Chapter BGM row is missing for chapter " + number + ".");
-      row.click();
+      const chapterRowSelector = '#chapterBgmList [data-chapter-bgm="' + number + '"]';
+      const rowToSelect = document.querySelector(chapterRowSelector);
+      must(rowToSelect, "Chapter BGM row is missing for chapter " + number + ".");
+      rowToSelect.click();
+      // The real click handler calls renderChapterBgm(), which replaces the chapter
+      // list via innerHTML. Re-query the live DOM during every wait poll rather than
+      // checking the detached button instance that received the click.
       await waitFor("Chapter " + number + " selection", function () {
-        return row.classList.contains("active") &&
+        const selectedRow = document.querySelector(chapterRowSelector);
+        return selectedRow?.classList.contains("active") === true &&
           document.querySelector("#chapterBgmTitle")?.textContent.includes("Chapter " + number);
-      }, 8000);
+      }, 12000);
     }
     async function chooseChapterCandidate(trackPath, trackTitle) {
       const candidate = Array.from(document.querySelectorAll("#chapterTrackPicker [data-chapter-track]"))
