@@ -97,6 +97,39 @@ class LiveCharacterStudioContracts(unittest.TestCase):
         self.assertIn('<span>AI Assigned</span>', assigned_summary)
         self.assertNotIn('<span>Confidence</span>', assigned_summary)
 
+    def test_assigned_cast_uses_series_identity_and_requires_selected_dialogue_for_audition(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("button.dataset.characterSeries", adapter)
+        self.assertIn("window.ryuPremiumSelectedCharacterSeries = button.dataset.characterSeries", adapter)
+        self.assertIn("#characters #assignedQuotes [data-assigned-dialogue-key]", adapter)
+        self.assertIn("window.ryuPremiumSelectedAssignedDialogueKey = button.dataset.assignedDialogueKey || ''", adapter)
+        self.assertIn("const c = selectedCharacterRow()", adapter)
+        self.assertIn("original_series:characterSeries(current)", adapter)
+        self.assertIn("Select a saved dialogue row in the Assigned Cast inspector before testing voice.", adapter)
+        self.assertNotIn("const dialogue = selected || savedPassages[0]", adapter)
+
+    def test_ambiguous_character_name_lookup_requires_series_instead_of_first_match(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("const scoped = matches.filter(item => characterSeries(item).toLowerCase() === seriesKey)", adapter)
+        self.assertIn("return scoped.length === 1 ? scoped[0] : null", adapter)
+        self.assertIn("return matches.length === 1 ? matches[0] : null", adapter)
+        self.assertIn("characterRowForName(canonical, requestedSeries)", adapter)
+        self.assertIn("characterRowForName(result?.character?.name || canonical, createdSeries)", adapter)
+        self.assertIn("characterRowForName(result?.character?.name || name, series)", adapter)
+        self.assertIn("const current = selectedCharacterRow()", adapter)
+
+    def test_voice_profile_preview_selection_survives_inspector_rerender_until_explicit_save(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("const currentCharacterKey = currentCharacter", adapter)
+        self.assertIn("select.dataset.characterKey !== currentCharacterKey", adapter)
+        self.assertIn("select.dataset.selectionInitialized !== '1' || !previousStillAvailable", adapter)
+        self.assertIn("String($('assignedAudioProfile')?.value ?? profileName)", adapter)
+        self.assertIn("String($('assignedAudioProfile')?.value ?? current.voice_profile ?? '')", adapter)
+        self.assertIn("else if (!options.some(item => item[0] === select.value))", adapter)
+        self.assertIn("select.value = options.some(item => item[0] === current) ? current : ''", adapter)
+        self.assertIn("select.onchange = () => {", adapter)
+        self.assertIn("renderCharacterInspector();", adapter)
+
     def test_assignment_popup_preserves_full_source_passage_and_repositions_after_live_choices(self):
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("function positionCharacterAssignmentPopover(popover, x, y)", adapter)

@@ -64,16 +64,26 @@ class AssignmentProvenanceUtilityTests(unittest.TestCase):
 class _BridgeHarness:
     _chapter_dialogue_assign = host.PremiumV2Bridge._chapter_dialogue_assign
     _character_delete = host.PremiumV2Bridge._character_delete
+    _character_update = host.PremiumV2Bridge._character_update
+    _character_create = host.PremiumV2Bridge._character_create
     _project_series_name = host.PremiumV2Bridge._project_series_name
 
     def __init__(self, project):
         self.project = project
+        self.saved_library_rows = []
 
     def _active_project(self):
         return self.project
 
     def _now(self):
         return "2026-10-31T00:00:00+00:00"
+
+    def _find_profile(self, _name):
+        return None
+
+    def _character_library_save(self, payload):
+        self.saved_library_rows.append(dict(payload))
+        return {"saved": True}
 
 
 class AssignmentProvenanceBridgeTests(unittest.TestCase):
@@ -238,6 +248,152 @@ class AssignmentProvenanceBridgeTests(unittest.TestCase):
         project.save.assert_not_called()
         save_state.assert_not_called()
 
+
+class CharacterUpdateSeriesIntegrityTests(unittest.TestCase):
+    def _bridge(self):
+        project = SimpleNamespace(folder=Path("unused-stage3-character-update-project"), chapters=[])
+        return _BridgeHarness(project)
+
+    def test_character_create_allows_same_canonical_name_in_a_different_series(self):
+        state = {
+            "series_name": "Series A",
+            "characters": [
+                {"name": "Mira", "series": "Series A", "aliases": ["A-Mira"]},
+            ],
+        }
+        bridge = self._bridge()
+        with patch.object(host, "load_state", return_value=state), \
+             patch.object(host, "save_state"), \
+             patch.object(host, "list_reusable_characters", return_value=[]):
+            result = bridge._character_create({
+                "name": "Mira",
+                "series": "Series B",
+                "aliases": ["B-Mira"],
+                "short": "Mira",
+            })
+        self.assertTrue(result["saved"])
+        self.assertEqual([(row["name"], row["series"]) for row in state["characters"]], [
+            ("Mira", "Series A"), ("Mira", "Series B")
+        ])
+        self.assertEqual(bridge.saved_library_rows[-1]["series"], "Series B")
+
+    def test_character_create_updates_existing_character_only_within_same_series(self):
+        state = {
+            "series_name": "Series A",
+            "characters": [
+                {"name": "Mira", "series": "Series A", "aliases": ["A-Mira"], "role": "Lead"},
+                {"name": "Mira", "series": "Series B", "aliases": ["B-Mira"], "role": "Rival"},
+            ],
+        }
+        bridge = self._bridge()
+        with patch.object(host, "load_state", return_value=state), \
+             patch.object(host, "save_state"), \
+             patch.object(host, "list_reusable_characters", return_value=[]):
+            result = bridge._character_create({
+                "name": "Mira",
+                "series": "Series B",
+                "aliases": ["Night Runner"],
+                "short": "Mira",
+            })
+        self.assertTrue(result["saved"])
+        self.assertEqual(len(state["characters"]), 2)
+        self.assertEqual(state["characters"][0]["aliases"], ["A-Mira"])
+        self.assertEqual(state["characters"][1]["aliases"], ["Night Runner"])
+        self.assertEqual(state["characters"][1]["role"], "Rival")
+
+    def test_character_update_targets_the_selected_series_when_names_are_duplicated(self):
+        state = {
+            "series_name": "Series A",
+            "characters": [
+                {"name": "Mira", "series": "Series A", "role": "Lead", "aliases": ["A-Mira"]},
+                {"name": "Mira", "series": "Series B", "role": "Rival", "aliases": ["B-Mira"]},
+            ],
+        }
+        bridge = self._bridge()
+        with patch.object(host, "load_state", return_value=state), \
+             patch.object(host, "save_state"), \
+             patch.object(host, "list_reusable_characters", return_value=[]):
+            result = bridge._character_update({
+                "original_name": "Mira",
+                "original_series": "Series B",
+                "name": "Mira Vale",
+                "series": "Series B",
+                "aliases": "B-Mira, Night Runner",
+                "role": "Rival",
+            })
+        self.assertTrue(result["saved"])
+        self.assertEqual(state["characters"][0]["name"], "Mira")
+        self.assertEqual(state["characters"][0]["series"], "Series A")
+        self.assertEqual(state["characters"][1]["name"], "Mira Vale")
+        self.assertEqual(state["characters"][1]["series"], "Series B")
+        self.assertIn("Mira", state["characters"][1]["aliases"])
+        self.assertEqual(bridge.saved_library_rows[0]["series"], "Series B")
+
+    def test_character_update_without_series_rejects_ambiguous_duplicate_name(self):
+        state = {
+            "series_name": "Series A",
+            "characters": [
+                {"name": "Mira", "series": "Series A"},
+                {"name": "Mira", "series": "Series B"},
+            ],
+        }
+        bridge = self._bridge()
+        with patch.object(host, "load_state", return_value=state), \
+             patch.object(host, "save_state") as save_state:
+            with self.assertRaisesRegex(ValueError, "more than one series"):
+                bridge._character_update({
+                    "original_name": "Mira",
+                    "name": "Mira Vale",
+                    "series": "Series A",
+                })
+        self.assertEqual([row["name"] for row in state["characters"]], ["Mira", "Mira"])
+        save_state.assert_not_called()
+
+    def test_same_character_name_is_allowed_in_a_different_target_series(self):
+        state = {
+            "series_name": "Series A",
+            "characters": [
+                {"name": "Mira", "series": "Series A"},
+                {"name": "Mira", "series": "Series B"},
+                {"name": "Ren", "series": "Series A"},
+            ],
+        }
+        bridge = self._bridge()
+        with patch.object(host, "load_state", return_value=state), \
+             patch.object(host, "save_state"), \
+             patch.object(host, "list_reusable_characters", return_value=[]):
+            result = bridge._character_update({
+                "original_name": "Ren",
+                "original_series": "Series A",
+                "name": "Mira",
+                "series": "Series C",
+            })
+        self.assertTrue(result["saved"])
+        self.assertEqual([row["name"] for row in state["characters"]], ["Mira", "Mira", "Mira"])
+        self.assertEqual([row["series"] for row in state["characters"]], ["Series A", "Series B", "Series C"])
+
+
+    def test_character_update_rejects_name_collision_within_target_series(self):
+        state = {
+            "series_name": "Series A",
+            "characters": [
+                {"name": "Mira", "series": "Series A"},
+                {"name": "Ren", "series": "Series A"},
+                {"name": "Mira", "series": "Series B"},
+            ],
+        }
+        bridge = self._bridge()
+        with patch.object(host, "load_state", return_value=state), \
+             patch.object(host, "save_state") as save_state:
+            with self.assertRaisesRegex(ValueError, "already uses that name in the selected series"):
+                bridge._character_update({
+                    "original_name": "Ren",
+                    "original_series": "Series A",
+                    "name": "Mira",
+                    "series": "Series A",
+                })
+        self.assertEqual([row["name"] for row in state["characters"]], ["Mira", "Ren", "Mira"])
+        save_state.assert_not_called()
 
 class CharacterDeleteIntegrityTests(unittest.TestCase):
     def _bridge(self, chapter):

@@ -3000,19 +3000,29 @@ class PremiumV2Bridge(QObject):
             # every character row still stores its own explicit series identity.
             state["series_name"] = series
         characters = [dict(row) for row in (state.get("characters") or []) if isinstance(row, dict)]
-        match = next((row for row in characters if
-                      str(row.get("name") or "").casefold() == name.casefold()
-                      or name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])}), None)
-        if match is not None:
-            match_series = str(match.get("series") or "").strip()
-            if not match_series:
-                scope = str(match.get("scope") or "").strip()
-                match_series = re.sub(r"(?i)^series\s*[·:-]\s*", "", scope).strip() if re.match(r"(?i)^series\s*[·:-]", scope) else prior_project_series
-            if match_series and match_series.casefold() != series.casefold():
-                raise ValueError(
-                    f"{name} already exists in this project under the series “{match_series}”. "
-                    f"Choose that series or use a distinct character name for “{series}”."
-                )
+        def _row_series(row: dict[str, Any]) -> str:
+            existing_series = str(row.get("series") or "").strip()
+            if existing_series:
+                return existing_series
+            scope = str(row.get("scope") or "").strip()
+            if re.match(r"(?i)^series\s*[·:-]", scope):
+                return re.sub(r"(?i)^series\s*[·:-]\s*", "", scope).strip()
+            return prior_project_series
+
+        matching_rows = [
+            row for row in characters
+            if (
+                str(row.get("name") or "").casefold() == name.casefold()
+                or name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])}
+            )
+            and _row_series(row).casefold() == series.casefold()
+        ]
+        if len(matching_rows) > 1:
+            raise ValueError(
+                f"More than one saved cast entry matches “{name}” in series “{series}”. "
+                "Resolve the duplicate entries before assigning dialogue."
+            )
+        match = matching_rows[0] if matching_rows else None
         if match is None:
             match = {
                 "name": name, "role": str(payload.get("role") or "Character")[:160],
@@ -3368,7 +3378,7 @@ class PremiumV2Bridge(QObject):
         return {"name": name, "voice_profile": item["voice_profile"], "saved": True}
 
     def _character_update(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Persist edits to a character discovered by analysis."""
+        """Persist edits to one character, selected by name and series identity."""
         project = self._active_project()
         original_name = str(payload.get("original_name") or payload.get("name") or "").strip()
         name = str(payload.get("name") or "").strip()
@@ -3378,15 +3388,38 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Character names must be 160 characters or fewer.")
         state = load_state(project.folder)
         characters = list(state.get("characters") or [])
-        item = next((c for c in characters
-                     if isinstance(c, dict) and str(c.get("name", "")).casefold() == original_name.casefold()), None)
-        if item is None:
-            raise ValueError("The selected character is no longer in the saved cast. Refresh and try again.")
-        duplicate = next((c for c in characters
-                          if isinstance(c, dict) and c is not item
-                          and str(c.get("name", "")).casefold() == name.casefold()), None)
+        default_series = self._project_series_name(project, state)
+        requested_original_series = str(payload.get("original_series") or "").strip()
+        matches = [
+            row for row in characters
+            if isinstance(row, dict)
+            and str(row.get("name") or "").strip().casefold() == original_name.casefold()
+            and (
+                not requested_original_series
+                or str(row.get("series") or default_series).strip().casefold()
+                   == requested_original_series.casefold()
+            )
+        ]
+        if not matches:
+            raise ValueError("The selected character is no longer in the saved cast for that series. Refresh and try again.")
+        if len(matches) > 1:
+            raise ValueError("This character name exists in more than one series. Select the series before editing.")
+        item = matches[0]
+        current_series = str(item.get("series") or default_series).strip()
+        raw_series_value = payload.get("series") if "series" in payload else item.get("series", default_series)
+        if isinstance(raw_series_value, str):
+            series_value = raw_series_value.strip()[:300]
+        else:
+            series_value = ""
+        target_series = series_value or default_series
+        duplicate = next((
+            row for row in characters
+            if isinstance(row, dict) and row is not item
+            and str(row.get("name") or "").strip().casefold() == name.casefold()
+            and str(row.get("series") or default_series).strip().casefold() == target_series.casefold()
+        ), None)
         if duplicate is not None:
-            raise ValueError("Another character already uses that name.")
+            raise ValueError("Another character already uses that name in the selected series.")
         # Partial updates must not erase saved cast metadata merely because a
         # caller omitted a field. Explicit empty values still allow the UI to
         # clear optional fields intentionally.
@@ -3415,12 +3448,6 @@ class PremiumV2Bridge(QObject):
         description_value = payload.get("short_description") if "short_description" in payload else item.get("short_description", "")
         notes_value = payload.get("notes") if "notes" in payload else item.get("notes", "")
         scope_value = payload.get("scope") if "scope" in payload else item.get("scope", "Current book only")
-        current_series = str(item.get("series") or "")
-        series_value = payload.get("series") if "series" in payload else item.get("series", "")
-        if isinstance(series_value, str):
-            series_value = series_value.strip()[:300]
-        else:
-            series_value = ""
         item.update({
             "name": name,
             "role": str(role_value or "Character").strip()[:160],
@@ -3437,16 +3464,18 @@ class PremiumV2Bridge(QObject):
         if series_value:
             try:
                 registry_rows = list_reusable_characters()
-                old_series = str(current_series or '').casefold()
+                old_series = current_series.casefold()
+                target_series_key = series_value.casefold()
                 active_folder = str(Path(project.folder).resolve())
                 library_row = next((row for row in registry_rows
                     if str(row.get("source_project_folder") or "") and
                        str(Path(str(row.get("source_project_folder"))).resolve()) == active_folder and
+                       str(row.get("series") or current_series).casefold() in {old_series, target_series_key} and
                        str(row.get("primary_name") or row.get("name") or "").casefold() in
                        {original_name.casefold(), name.casefold()}), None)
                 if library_row is None:
                     library_row = next((row for row in registry_rows
-                        if str(row.get("series") or "").casefold() == series_value.casefold()
+                        if str(row.get("series") or "").casefold() == target_series_key
                         and (str(row.get("primary_name") or row.get("name") or "").casefold() == name.casefold()
                              or name.casefold() in {str(alias).casefold() for alias in (row.get("aliases") or [])})), None)
                 if library_row is None:
