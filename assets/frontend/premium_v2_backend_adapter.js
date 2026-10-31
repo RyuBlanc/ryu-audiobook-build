@@ -367,6 +367,12 @@
     if ($('assignedQuotes')) $('assignedQuotes').innerHTML = '<p class="assigned-dialogue-empty">No character selected.</p>';
     if ($('loadMoreAssignedDialogue')) $('loadMoreAssignedDialogue').hidden = true;
   }
+  function resetAssignedInspectorProjectContext() {
+    assignedDialogueRequest += 1;
+    window.ryuPremiumSelectedCharacter = null;
+    if ($('assignedSearch')) $('assignedSearch').value = '';
+    clearAssignedInspector();
+  }
   async function refreshCharacters() {
     const previousName = window.ryuPremiumSelectedCharacter || null;
     characters = await call('character.list');
@@ -663,10 +669,10 @@
     if ($('importBar')) $('importBar').style.width = '5%';
     const result = await call('import.start', payload);
     if (result.job_id) await monitorJob(result.job_id, async () => {
-      await refreshProjects(); await refreshChapters(); await refreshCharacters();
+      await refreshProjects(); await refreshChapters(); resetAssignedInspectorProjectContext(); await refreshCharacters();
       if (typeof window.go === 'function') window.go('chapters');
     });
-    else { await refreshProjects(); await refreshChapters(); await refreshCharacters(); message('Book imported into the local library.'); }
+    else { await refreshProjects(); await refreshChapters(); resetAssignedInspectorProjectContext(); await refreshCharacters(); message('Book imported into the local library.'); }
   }
   async function importBook() {
     const chosen = await call('import.choose_file');
@@ -1003,6 +1009,7 @@
       if (!folder) { message('This dashboard card has no local project folder.', true); return; }
       try {
         const opened = await call('project.open', {folder});
+        resetAssignedInspectorProjectContext();
         await refreshProjects();
         await refreshChapters();
         await refreshCharacters();
@@ -1015,7 +1022,7 @@
     if ($('libraryGrid')) $('libraryGrid').addEventListener('click', async e => {
       const button = e.target.closest('[data-open-project]'); if (!button) return;
       button.disabled = true;
-      try { const opened = await call('project.open', {folder:button.dataset.openProject}); await refreshProjects(); await refreshChapters(); await refreshCharacters(); if (typeof window.go === 'function') window.go('chapters'); message('Opened local project: ' + (opened.title || opened.folder || 'project')); }
+      try { const opened = await call('project.open', {folder:button.dataset.openProject}); resetAssignedInspectorProjectContext(); await refreshProjects(); await refreshChapters(); await refreshCharacters(); if (typeof window.go === 'function') window.go('chapters'); message('Opened local project: ' + (opened.title || opened.folder || 'project')); }
       catch (err) { message(err?.message || String(err), true); }
       finally { button.disabled = false; }
     });
@@ -1388,6 +1395,7 @@
         e.preventDefault(); e.stopImmediatePropagation();
         try {
           const opened = await call('project.open', {folder:recentProject.dataset.projectFolder});
+          resetAssignedInspectorProjectContext();
           await refreshProjects(); await refreshChapters(); await refreshCharacters();
           if (typeof window.go === 'function') window.go('chapters');
           message('Opened local project: ' + (opened.title || 'project'));
@@ -1415,6 +1423,7 @@
             const candidate = activeProject || projects.find(p => !p.completed && Number(p.chapter_count || 0) > 0) || projects[0];
             if (!candidate) throw new Error('Import a book before continuing a project.');
             const opened = await call('project.open', {folder:candidate.folder});
+            resetAssignedInspectorProjectContext();
             await refreshProjects(); await refreshChapters(); await refreshCharacters();
             if (typeof window.go === 'function') window.go('chapters');
             message('Continuing ' + (opened.title || candidate.title) + '.');
@@ -1624,7 +1633,7 @@
       throw new Error('The task is still running. Check Generation History for its latest state.');
     };
     const previewSavedProfile = async (profile, text, label) => {
-      const previewKey = JSON.stringify([profile.name, String(text)]);
+      const previewKey = JSON.stringify([profile, String(text)]);
       const displayName = label || profile.name;
       if (previewAudio && previewAudio.dataset?.ryuPreviewKey === previewKey) {
         if (!previewAudio.paused) {

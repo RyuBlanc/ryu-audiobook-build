@@ -126,5 +126,93 @@ class CharacterAssignmentInspectorTests(unittest.TestCase):
         self.assertEqual(page["stats"]["dialogue_lines"], 0)
 
 
+class CharacterAssignmentFrontendSyntaxTests(unittest.TestCase):
+    def test_backend_adapter_passes_node_syntax_check(self):
+        import shutil
+        import subprocess
+
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js is unavailable on this runner.")
+        adapter = Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js"
+        result = subprocess.run(
+            [node, "--check", str(adapter)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class CharacterAssignmentBridgeProjectIsolationTests(unittest.TestCase):
+    class BridgeHarness:
+        def __init__(self, project):
+            self.project = project
+
+        def _active_project(self):
+            return self.project
+
+    def test_character_inspector_reads_only_the_current_projects_saved_dialogue(self):
+        import tempfile
+        from pathlib import Path
+
+        from app.core.project import Project
+        from app.core.state import save_state
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        project_values = [
+            ("Book One", "First book's saved line."),
+            ("Book Two", "Second book's saved line."),
+        ]
+        observed = []
+        for title, line in project_values:
+            with tempfile.TemporaryDirectory() as temp:
+                folder = Path(temp)
+                chapter = Chapter(1, "Chapter 1", line, dialogue_assignments=[{
+                    "start": 0,
+                    "end": len(line),
+                    "text": line,
+                    "speaker": "Mira",
+                    "source": "manual",
+                }])
+                project = Project(title, folder, chapters=[chapter])
+                project.save()
+                save_state(folder, {"characters": [{
+                    "name": "Mira",
+                    "aliases": ["Miri"],
+                    "voice_profile": "Mira Voice",
+                }]})
+                bridge = self.BridgeHarness(project)
+
+                inspector = PremiumV2Bridge._character_dialogue_list(
+                    bridge, {"name": "Mira", "offset": 0, "limit": 30}
+                )
+                cast = PremiumV2Bridge._character_list(bridge, {})
+
+                self.assertEqual(inspector["story_name"], title)
+                self.assertEqual(inspector["total"], 1)
+                self.assertEqual(inspector["rows"][0]["text"], line)
+                self.assertEqual(cast[0]["story_name"], title)
+                self.assertEqual(cast[0]["assigned_dialogue_count"], 1)
+                self.assertEqual(cast[0]["assigned_chapter_count"], 1)
+                observed.append(inspector["rows"][0]["text"])
+
+        self.assertEqual(observed, [value[1] for value in project_values])
+
+
+class CharacterAssignmentFrontendContractTests(unittest.TestCase):
+    def test_preview_profile_is_not_persisted_until_character_save(self):
+        adapter = (Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("selectedAssignedPreviewProfile=$('assignedPreviewProfile').value || null", adapter)
+        self.assertNotIn(
+            "editCharacterVoice').onchange=act(async()=>{if(!window.ryuPremiumSelectedCharacter)return;await call('character.assign'",
+            adapter,
+        )
+        self.assertIn("previewSavedProfile(profile, dialogue.text, c.name)", adapter)
+        self.assertIn("resetAssignedInspectorProjectContext()", adapter)
+
+
+
+
 if __name__ == "__main__":
     unittest.main()
