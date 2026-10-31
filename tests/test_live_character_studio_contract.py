@@ -93,7 +93,9 @@ class LiveCharacterStudioContracts(unittest.TestCase):
         self.assertIn("characterVoiceAssignments(selected.name, seriesValue)", adapter)
         self.assertIn("aiAssignedNode.textContent = String(assignments.aiAssignedPercent) + '%';", adapter)
         self.assertIn('<b id="assignedConfidence">—</b><span>AI Assigned</span>', html)
-        self.assertNotIn('<span>Confidence</span>', html)
+        assigned_summary = html[html.index('id="assignedVoiceName"'):html.index('id="assignedQuotes"')]
+        self.assertIn('<span>AI Assigned</span>', assigned_summary)
+        self.assertNotIn('<span>Confidence</span>', assigned_summary)
 
     def test_assignment_popup_preserves_full_source_passage_and_repositions_after_live_choices(self):
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
