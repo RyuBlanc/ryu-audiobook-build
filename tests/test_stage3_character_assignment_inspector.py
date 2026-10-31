@@ -203,6 +203,21 @@ class CharacterAssignmentBridgeProjectIsolationTests(unittest.TestCase):
 
 
 class CharacterAssignmentFrontendContractTests(unittest.TestCase):
+    def test_assigned_cast_is_saved_voice_only_and_searches_character_alias_and_voice(self):
+        adapter = (Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("characters.filter(c => savedCharacterVoice(c))", adapter)
+        self.assertIn("[c.name, c.story_name, c.assigned_voice, c.voice_profile, c.voice,", adapter)
+        self.assertIn("...aliases", adapter)
+        self.assertIn("renderSelect($('assignedPreviewProfile'), rows, 'name'", adapter)
+
+    def test_manual_and_ai_rows_keep_source_tints_when_selected(self):
+        html = (Path(__file__).resolve().parents[1] / "assets" / "frontend" / "ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
+        self.assertIn(".assigned-dialogue-row.manual{border-left-color:var(--green);background:rgba(51,199,111,.09)}", html)
+        self.assertIn(".assigned-dialogue-row.ai{border-left-color:var(--gold);background:rgba(214,176,106,.09)}", html)
+        self.assertIn(".assigned-dialogue-row.manual.active", html)
+        self.assertIn(".assigned-dialogue-row.ai.active", html)
+        self.assertIn(".assigned-dialogue-row.active{outline:2px solid var(--red2)", html)
+
     def test_preview_profile_is_not_persisted_until_character_save(self):
         adapter = (Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("const next=$('assignedPreviewProfile').value || null", adapter)
