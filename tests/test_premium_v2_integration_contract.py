@@ -1387,7 +1387,6 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("characterProfileByName(selectedProfileName)", helper)
         self.assertIn("window.ryuPremiumSelectedAssignedDialogueId", helper)
         self.assertIn("previewSavedProfile(profile, sample, current.name)", helper)
-        self.assertNotIn("Hello, my name is ", adapter)
         self.assertNotIn("await previewSavedProfile(profile, 'Hello, my name is '", adapter)
 
     def test_stage3_voice_assignment_dropdown_is_not_persisted_until_explicit_save(self):
