@@ -228,3 +228,22 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         self.assertIn("ryu-qwen-python-bootstrap", acceptance_step)
         self.assertIn("python312", acceptance_step)
         self.assertIn("durable acceptance Python", acceptance_step)
+
+    def test_chapter_selection_wait_requeries_row_after_real_renderer_rebuild(self):
+        script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = script.index("async function selectChapter(number)")
+        end = script.index("async function chooseChapterCandidate", start)
+        selection = script[start:end]
+        wait_start = selection.index('await waitFor("Chapter " + number + " selection"')
+        wait = selection[wait_start:]
+        self.assertIn('const chapterRowSelector = \'#chapterBgmList [data-chapter-bgm="\' + number + \'"]\';', selection)
+        self.assertIn("const rowToSelect = document.querySelector(chapterRowSelector);", selection)
+        self.assertIn("rowToSelect.click();", selection)
+        self.assertIn("const selectedRow = document.querySelector(chapterRowSelector);", wait)
+        self.assertIn('selectedRow?.classList.contains("active") === true', wait)
+        self.assertNotIn('rowToSelect.classList.contains("active")', wait)
+        render_start = adapter.index("function renderChapterBgm()")
+        render_end = adapter.index("async function refreshChapterBgm()", render_start)
+        render = adapter[render_start:render_end]
+        self.assertIn("list.innerHTML = rows.map", render)
