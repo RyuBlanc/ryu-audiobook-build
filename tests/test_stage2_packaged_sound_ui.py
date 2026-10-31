@@ -229,6 +229,28 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         self.assertIn("python312", acceptance_step)
         self.assertIn("durable acceptance Python", acceptance_step)
 
+    def test_cue_save_failure_state_survives_catalogue_refresh_and_retry(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        refresh_start = adapter.index("async function refreshSoundCues()")
+        refresh_end = adapter.index("function chapterMusicCategoryGroup", refresh_start)
+        refresh = adapter[refresh_start:refresh_end]
+        save_start = adapter.index("async function savePendingCueChanges()")
+        save_end = adapter.index("function currentSoundManifestPayload", save_start)
+        save = adapter[save_start:save_end]
+        self.assertIn("cueSaveError = '';", adapter)
+        self.assertIn("if (cueSaveError)", refresh)
+        self.assertIn("cueSaveState.textContent = cueSaveError;", refresh)
+        self.assertIn("cueSaveError = 'Save failed. Unsaved cue changes have been retained.';", save)
+        self.assertIn("cueSaveError = '';", save)
+        failure_start = script.index("config.reject_next_cue_save = true;")
+        failure_end = script.index('record("cue_save_failure_retains_retryable_changes"', failure_start)
+        failure_flow = script[failure_start:failure_end]
+        self.assertIn("cueAllSource.click();", failure_flow)
+        self.assertIn('textContent.includes("Save failed")', failure_flow)
+        self.assertIn('textContent.includes("Unsaved")', failure_flow)
+        self.assertIn('textContent.includes("All cue changes saved")', failure_flow)
+
     def test_chapter_selection_wait_requeries_row_after_real_renderer_rebuild(self):
         script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")

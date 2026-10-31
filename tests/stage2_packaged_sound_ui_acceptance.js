@@ -929,14 +929,26 @@
     await waitFor("cue-save error remains visible", function () {
       return document.querySelector("#cueSaveState")?.textContent.includes("Save failed");
     }, 12000);
+    // Force a second real catalogue refresh while the failed draft is still
+    // pending. The failure message and retryable draft must survive it.
+    const cueAllSource = document.querySelector('#cueSourceFilter [data-cue-source="all"]');
+    must(cueAllSource, "Cue source All filter is missing during save-failure recovery.");
+    cueAllSource.click();
+    await waitFor("cue-save error survives cue catalogue refresh", function () {
+      return document.querySelector("#cueSaveState")?.textContent.includes("Save failed");
+    }, 8000);
     const cueStateOnFailure = await invoke("sound.cues.get", {});
     must(String(cueStateOnFailure.opening?.path || "") === String(cueAlpha.path) &&
+      document.querySelector("#openingCueName")?.textContent.includes("Unsaved") &&
       document.querySelector("#saveCueChanges").disabled === false,
-      "Failed cue save overwrote the previous saved slot or prevented retry.");
+      "Failed cue save overwrote the previous saved slot, lost the retryable draft, or disabled retry.");
     document.querySelector("#saveCueChanges").click();
     await waitForCuePath("opening", cueBeta.path);
+    await waitFor("successful cue-save retry status", function () {
+      return document.querySelector("#cueSaveState")?.textContent.includes("All cue changes saved");
+    }, 8000);
     record("cue_save_failure_retains_retryable_changes", true,
-      "Injected cue-save failure preserved the old slot and draft; an explicit retry succeeded.");
+      "An injected auto-save failure kept the old backend assignment, retained the visible draft and retry button through a catalogue refresh, then an explicit retry succeeded.");
 
     document.querySelector("#clearAllCues").click();
     await waitFor("Clear All staged state", function () {

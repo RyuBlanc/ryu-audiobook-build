@@ -262,7 +262,7 @@
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
   let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
-  let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, selectedCuePath = null, pendingCueSlot = null, pendingCueAssignments = Object.create(null), cueChangesDirty = false, cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null, chapterBgmDraftDirty = false, mixLevelsDirty = false, soundPreviewKind = null, soundPreviewPath = null;
+  let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, selectedCuePath = null, pendingCueSlot = null, pendingCueAssignments = Object.create(null), cueChangesDirty = false, cueSaveError = '', cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null, chapterBgmDraftDirty = false, mixLevelsDirty = false, soundPreviewKind = null, soundPreviewPath = null;
   let chapterBgmCandidateTrackPath = null, chapterBgmCandidateChapter = null, chapterBgmSavePromise = null, cueSavePromise = null;
   let chapterStrategySavePromise = null;
   let chapterBgmAutoSaveTimer = null, cueAutoSaveTimer = null, chapterBgmDraftRevision = 0;
@@ -3524,13 +3524,22 @@
         : (cue.available === true && cue.title ? cue.title : (cue.assigned || cue.missing ? 'Missing file' : 'Not assigned'));
     }
     const cueSaveState = $('cueSaveState');
-    if (cueSaveState) cueSaveState.textContent = !cueChangesDirty
-      ? 'All cue changes saved.'
-      : cueClearAllStaged
-        ? 'Clear All is staged. Press Save Cue Changes to remove the three saved assignments.'
-        : (Object.keys(pendingCueAssignments).length
-          ? 'Unsaved cue changes — saving automatically shortly. Use Save Cue Changes to save now.'
-          : 'Unsaved cue changes — use Save Cue Changes to persist them.');
+    if (cueSaveState) {
+      if (cueSaveError) {
+        // A catalogue refresh must not replace a save failure with a generic
+        // unsaved message. Keep it visible until a retry succeeds or the user
+        // changes the staged assignment.
+        cueSaveState.textContent = cueSaveError;
+      } else if (!cueChangesDirty) {
+        cueSaveState.textContent = 'All cue changes saved.';
+      } else if (cueClearAllStaged) {
+        cueSaveState.textContent = 'Clear All is staged. Press Save Cue Changes to remove the three saved assignments.';
+      } else if (Object.keys(pendingCueAssignments).length) {
+        cueSaveState.textContent = 'Unsaved cue changes — saving automatically shortly. Use Save Cue Changes to save now.';
+      } else {
+        cueSaveState.textContent = 'Unsaved cue changes — use Save Cue Changes to persist them.';
+      }
+    }
     const cueSaveButton = $('saveCueChanges');
     if (cueSaveButton) cueSaveButton.disabled = !cueChangesDirty;
     if (selectedCuePath && !sounds.some(track =>
@@ -4104,6 +4113,7 @@
     const runSave = (async () => {
       const status = $('cueSaveState');
       const button = $('saveCueChanges');
+      cueSaveError = '';
       if (status) status.textContent = 'Saving cue changes…';
       if (button) button.disabled = true;
       try {
@@ -4123,11 +4133,13 @@
         }
         cueChangesDirty = false;
         cueClearAllStaged = false;
+        cueSaveError = '';
         if (status) status.textContent = 'All cue changes saved.';
         return true;
       } catch (error) {
         cueChangesDirty = Object.keys(pendingCueAssignments).length > 0;
-        if (status) status.textContent = 'Save failed. Unsaved cue changes have been retained.';
+        cueSaveError = 'Save failed. Unsaved cue changes have been retained.';
+        if (status) status.textContent = cueSaveError;
         throw error;
       } finally {
         if (button) button.disabled = !cueChangesDirty;
@@ -7164,6 +7176,7 @@
         if (pendingCueSlot) {
           pendingCueAssignments[pendingCueSlot] = path;
           cueChangesDirty = true;
+          cueSaveError = '';
           const slot = pendingCueSlot;
           pendingCueSlot = null;
           await refreshSoundCues();
@@ -7249,6 +7262,7 @@
             pendingCueAssignments = Object.create(null);
             for (const slot of ['opening','chapter','closing']) pendingCueAssignments[slot] = null;
             cueChangesDirty = true;
+            cueSaveError = '';
             cueClearAllStaged = true;
             await refreshSoundCues();
             message('Clear-all is staged. Choose Save Cue Changes to remove the three saved cue assignments.');
