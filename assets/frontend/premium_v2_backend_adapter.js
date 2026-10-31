@@ -465,7 +465,7 @@
     const renderSignature = JSON.stringify([
       characterAnalysisStatus.analyzed, items.map(item => [
         item.id,item.chapter_number,item.start,item.end,item.text,item.speakers,item.assigned,
-        item.skipped,(item.suggestions||[]).map(candidate=>[candidate.name,candidate.confidence,candidate.evidence])
+        item.assignmentSource,item.skipped,(item.suggestions||[]).map(candidate=>[candidate.name,candidate.confidence,candidate.evidence])
       ])
     ]);
     window.ryuPremiumDialogueReviewItems = items;
@@ -525,14 +525,14 @@
     const heading = storyDocument.closest('.ai-story')?.querySelector('.story-head h2');
     const subheading = storyDocument.closest('.ai-story')?.querySelector('.story-head p');
     if (heading) heading.textContent = chapter ? 'Chapter ' + chapter.number + ' · ' + String(chapter.title || 'Untitled chapter') : 'No project selected';
-    if (subheading) subheading.textContent = 'Green = saved character assignment · orange = analysis suggestion · plain text = no saved assignment or supported prediction.';
+    if (subheading) subheading.textContent = 'Green = manually assigned · gold = AI-assigned · orange = unconfirmed AI suggestion · plain text = no saved assignment or supported prediction.';
     if (!chapter || !String(chapter.text || '').trim()) {
       storyDocument.innerHTML = '<div class="ryu-character-empty"><b>No chapter text to analyze</b>Open a project with imported chapters, then run Analyze book.</div>';
       return;
     }
     const source = String(chapter.text || '');
     const rows = characterDialogueRowsForChapter(chapter);
-    const signature = JSON.stringify([chapter.number,source,rows.map(row=>[row.start,row.end,row.speakers,row.skipped,row.suggestions])]);
+    const signature = JSON.stringify([chapter.number,source,rows.map(row=>[row.start,row.end,row.speakers,row.assignmentSource,row.skipped,row.suggestions])]);
     if (storyDocument.dataset.liveSignature === signature) return;
     let html = '', cursor = 0;
     for (const row of rows) {
@@ -541,8 +541,9 @@
       let klass = 'ai-sentence';
       let label = '';
       if (row.assigned) {
-        klass += ' confirmed';
-        label = 'Assigned: ' + row.speakers.join(' + ');
+        const sourceKind = row.assignmentSource === 'ai' ? 'ai' : 'manual';
+        klass += ' confirmed confirmed-' + sourceKind;
+        label = (sourceKind === 'ai' ? 'AI-assigned: ' : 'Manually assigned: ') + row.speakers.join(' + ');
       } else if (!row.skipped && row.suggestions?.length) {
         klass += ' review';
         const candidate = row.suggestions[0];
@@ -2497,6 +2498,9 @@
         assigned:Boolean(rawSpeakers.length),
         assignmentPresent:Boolean(assignment),
         assignmentSeries:String(assignment?.series || ''),
+        assignmentSource:assignment
+          ? (String(assignment.source || 'manual').trim().toLowerCase() === 'ai' ? 'ai' : 'manual')
+          : '',
         suggestions:suggestions.length ? suggestions : fallback
       });
     }
@@ -2538,6 +2542,8 @@
       '.ryu-live-passage{display:inline;white-space:pre-wrap;max-width:100%;cursor:pointer;border:0;border-radius:5px;padding:1px 2px;background:transparent;color:inherit;font:inherit;text-align:left;box-shadow:inset 3px 0 0 transparent;}' +
       '.ryu-live-passage:hover{background:rgba(255,255,255,.035);outline:1px solid rgba(255,255,255,.12);}' +
       '.ryu-live-passage.is-assigned{background:rgba(36,190,122,.07);box-shadow:inset 3px 0 0 #22c982;}' +
+      '.ryu-live-passage.is-assigned-ai{background:rgba(236,160,45,.075);box-shadow:inset 3px 0 0 #efae35;}' +
+      '.ryu-live-passage.is-assigned-manual{background:rgba(36,190,122,.07);box-shadow:inset 3px 0 0 #22c982;}' +
       '.ryu-live-passage.is-ai-review{background:rgba(236,160,45,.075);box-shadow:inset 3px 0 0 #efae35;}' +
       '.ryu-live-passage .ryu-speaker-chip{display:inline-flex;vertical-align:middle;margin:0 5px 0 2px;padding:2px 6px;border-radius:8px;background:rgba(34,201,130,.12);color:#25d184;font-size:10px;font-weight:800;}' +
       '.ryu-character-empty{padding:22px 16px;text-align:center;color:#aeb6c5;line-height:1.6;}' +
@@ -2563,6 +2569,9 @@
       '#characters .ai-sentence.unassigned{display:block;width:100%;max-width:100%;box-sizing:border-box;background:transparent!important;border:1px solid transparent!important;border-left:3px solid transparent!important;box-shadow:none!important;color:inherit!important;text-align:left;font:inherit;font-weight:400;white-space:pre-wrap;}' +
       '#characters .ai-sentence.review{display:block;width:100%;max-width:100%;box-sizing:border-box;background:rgba(236,160,45,.075)!important;border:1px solid rgba(236,160,45,.18)!important;border-left:3px solid #efae35!important;box-shadow:none!important;color:inherit!important;text-align:left;white-space:pre-wrap;}' +
       '#characters .ai-sentence.confirmed{display:block;width:100%;max-width:100%;box-sizing:border-box;background:rgba(36,190,122,.07)!important;border:1px solid rgba(36,190,122,.18)!important;border-left:3px solid #22c982!important;box-shadow:none!important;color:inherit!important;text-align:left;white-space:pre-wrap;}' +
+      '#characters .ai-sentence.confirmed-manual{background:rgba(36,190,122,.07)!important;border-color:rgba(36,190,122,.18)!important;border-left-color:#22c982!important;}' +
+      '#characters .ai-sentence.confirmed-ai{background:rgba(236,160,45,.075)!important;border-color:rgba(236,160,45,.22)!important;border-left-color:#efae35!important;}' +
+      '#characters .ai-sentence.confirmed-ai.active,#characters .ai-sentence.confirmed-manual.active{outline:2px solid rgba(255,255,255,.65)!important;outline-offset:1px;}' +
       '#aiPredictionModal .ai-prediction-modal{width:min(640px,calc(100vw - 32px));height:min(680px,82vh);max-height:min(82vh,760px);overflow:auto;}' +
       '#aiPredictionModal .selected-dialogue-preview{margin-bottom:12px;min-height:64px;display:flex;align-items:center;line-height:1.6;}';
     document.head.appendChild(style);
@@ -2796,14 +2805,15 @@
     if (story) {
       const source = String(chapter?.text || '');
       const rows = characterDialogueRowsForChapter(chapter);
-      const renderSig = JSON.stringify([chapter?.number, chapter?.title, source, rows.map(row => [row.start,row.end,row.speakers,row.skipped,row.suggestions])]);
+      const renderSig = JSON.stringify([chapter?.number, chapter?.title, source, rows.map(row => [row.start,row.end,row.speakers,row.assignmentSource,row.skipped,row.suggestions])]);
       if (story.dataset.liveSignature !== renderSig) {
         let html = '', cursor = 0;
         for (const row of rows) {
           if (row.start < cursor) continue;
           html += esc(source.slice(cursor, row.start)).replace(/\n/g, '<br>');
           const assignedName = row.speakers.join(' + ');
-          const classes = 'ryu-live-passage' + (row.assigned ? ' is-assigned' : '');
+          const sourceClass = row.assignmentSource === 'ai' ? ' is-assigned-ai' : ' is-assigned-manual';
+          const classes = 'ryu-live-passage' + (row.assigned ? ' is-assigned' + sourceClass : '');
           const title = row.assigned ? 'Assigned to ' + assignedName : 'Click to assign this exact source passage';
           html += '<button type="button" class="' + classes + '" data-manual-dialogue="1" data-dialogue-id="' + esc(row.id) +
             '" data-chapter-number="' + Number(chapter.number) + '" data-start="' + row.start + '" data-end="' + row.end +

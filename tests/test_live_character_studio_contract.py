@@ -131,6 +131,21 @@ class LiveCharacterStudioContracts(unittest.TestCase):
         self.assertIn("select.onchange = () => {", adapter)
         self.assertIn("renderCharacterInspector();", adapter)
 
+    def test_ai_and_manual_assignments_keep_distinct_full_row_styles_in_both_chapter_views(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("assignmentSource:assignment", adapter)
+        self.assertIn("row.assignmentSource === 'ai' ? ' is-assigned-ai' : ' is-assigned-manual'", adapter)
+        self.assertIn("klass += ' confirmed confirmed-' + sourceKind", adapter)
+        self.assertIn("AI-assigned: ", adapter)
+        self.assertIn("Manually assigned: ", adapter)
+        self.assertIn(".ryu-live-passage.is-assigned-ai", adapter)
+        self.assertIn(".ryu-live-passage.is-assigned-manual", adapter)
+        self.assertIn(".ai-sentence.confirmed-ai", adapter)
+        self.assertIn(".ai-sentence.confirmed-manual", adapter)
+        self.assertIn(".ai-sentence.confirmed-ai.active", adapter)
+        self.assertIn(".ai-sentence.confirmed-manual.active", adapter)
+        self.assertIn("row.assignmentSource", adapter)
+
     def test_assignment_popup_preserves_full_source_passage_and_repositions_after_live_choices(self):
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("function positionCharacterAssignmentPopover(popover, x, y)", adapter)
