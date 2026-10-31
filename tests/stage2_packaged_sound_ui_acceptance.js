@@ -107,7 +107,7 @@
             config.reject_long_cue_import = false;
             request.paths = [String(config.long_cue_path || "")];
           } else {
-            request.paths = Array.isArray(config.cue_paths) ? config.cue_paths.slice() : [];
+            request.paths = Array.isArray(config.cue_import_paths) ? config.cue_import_paths.slice() : [];
           }
           if (!request.paths.length || !request.paths[0]) throw new Error("No generated cue fixture paths were provided.");
         }

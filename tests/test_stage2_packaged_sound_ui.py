@@ -124,6 +124,7 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         for required in (
             "cue_alpha_source",
             "cue_beta_source",
+            "cue_import_paths",
             "cue_paths",
             "cue_track_titles",
             "validate_imported_audio_metadata",
@@ -131,6 +132,27 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
             '"category": "universal"',
         ):
             self.assertIn(required, helper)
+
+
+    def test_cue_fixture_import_source_is_distinct_from_persisted_library_destination(self):
+        runner = (ROOT / "tests/packaged_sound_ui_acceptance.py").read_text(encoding="utf-8")
+        script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        self.assertIn(
+            '"cue_import_paths": [str(cue_alpha_source.resolve()), str(cue_beta_source.resolve())]',
+            runner,
+        )
+        self.assertIn(
+            '"cue_paths": [str(cue_paths[0].resolve()), str(cue_paths[1].resolve())]',
+            runner,
+        )
+        self.assertIn(
+            "request.paths = Array.isArray(config.cue_import_paths) ? config.cue_import_paths.slice() : [];",
+            script,
+        )
+        self.assertIn("opening: String(config.cue_paths[1])", script)
+        self.assertIn("chapter: String(config.cue_paths[1])", script)
+        self.assertIn("closing: String(config.cue_paths[0])", script)
+
 
     def test_music_grid_repairs_stale_dom_even_when_catalogue_signature_is_unchanged(self):
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
