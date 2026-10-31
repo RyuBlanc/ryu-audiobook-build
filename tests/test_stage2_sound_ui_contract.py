@@ -456,7 +456,10 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         cue_start = self.host.index("    def _sound_cues_get(")
         cue_end = self.host.index("    def _sound_cues_save(", cue_start)
         cue_read = self.host[cue_start:cue_end]
-        self.assertIn('str(row.get("role") or "music").casefold() == "cue"', cue_read)
+        self.assertIn('role = str((row or {}).get("role") or persisted_role or "").casefold()', cue_read)
+                self.assertIn('available = bool(resolved.is_file() and role == "cue")', cue_read)
+                self.assertIn('"path": str(resolved) if resolved.is_file() else path', cue_read)
+                self.assertIn('"missing": not available', cue_read)
 
     def test_cue_assignment_rejects_music_and_long_assets(self):
         start = self.host.index("    def _sound_cues_save(")

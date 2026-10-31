@@ -272,7 +272,7 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         self.assertTrue(missing["assigned"])
         self.assertTrue(missing["missing"])
         self.assertFalse(missing["available"])
-        self.assertIsNone(missing["path"])
+        self.assertEqual(missing["path"], str(track.resolve()))
         host.PremiumV2Bridge._sound_cues_clear(self.bridge_a, {})
         empty = host.PremiumV2Bridge._sound_cues_get(self.bridge_a, {})["opening"]
         self.assertFalse(empty["assigned"])
