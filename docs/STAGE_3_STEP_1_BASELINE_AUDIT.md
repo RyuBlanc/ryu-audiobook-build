@@ -141,3 +141,20 @@ For every failure: capture the exact run, failed step, failing assertion/log and
 The current source has significant pre-existing implementation worth retaining, so Stage 3 does **not** need a blind rewrite. However, the audit confirms the requirements above are not yet fully accepted. The first implementation priorities are AI/manual provenance and CS-05 statistics, selected-line test binding (CS-04), the selected-character dialogue list/source styling (CS-06/CS-07), and profile/project lifecycle coverage (CS-02/CS-03/CS-08). VS requirements remain in the same stage and must be completed in Steps 4–9.
 
 **Step 1 is the baseline audit. It does not close Stage 3 and does not authorize packaging.**
+
+## 9. Step 3 continuation-branch checkpoint
+
+**Source reviewed:** `stage-3/restart-from-stage2-closeout-1794` at `d57b8c23a0cc7df1dfe83e1de2fadfefa49489ec` (31 October 2026).
+
+Step 3's continuation-branch implementation now contains the follow-up fixes that supersede the baseline-only gaps recorded in Section 4:
+
+- CS-01/CS-02: live, project-scoped Assigned Cast with series identity and refreshed state.
+- CS-05: AI Assigned percentage is computed from valid saved AI-source dialogue spans divided by valid assigned dialogue spans; the fourth metric is no longer confidence.
+- CS-06: the Assigned Cast inspector exposes source-backed dialogue passages for the selected character and series, including the selected-row key used by audition.
+- CS-07: saved AI-origin and manual-origin dialogue retain distinct full-row styling in the live chapter and AI review views.
+- Regression coverage is present in `tests/test_live_character_studio_contract.py`, `tests/test_stage3_assignment_provenance.py`, and `tests/test_stage3_dialogue_assignment_persistence.py`.
+
+**Gate C evidence:** Build Windows App #1847 on this exact continuation branch and source SHA completed successfully. Frontend JavaScript syntax validation passed and the regression suite passed (891 tests). The Windows package job was skipped in #1847; therefore #1847 is test evidence only, not an artifact checkpoint.
+
+**This commit starts the dedicated Step 3 artifact checkpoint.** Step 3 will be accepted as CI/package-closed only if the resulting run succeeds on the new checkpoint commit SHA and its installer, portable package and checksum manifest are verified from that same run. Manual installed-app acceptance remains a separate Gate E.
+
