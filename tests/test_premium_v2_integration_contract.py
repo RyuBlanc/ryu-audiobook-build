@@ -718,8 +718,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertNotIn("Dialogue-line speaker assignment is not persisted by the current backend", adapter)
         self.assertIn("def assign_dialogue_to_chapters(", helper)
         self.assertIn("no assignment was saved", helper)
-        self.assertIn('normalized["source"] = "manual"', helper)
-        self.assertIn('normalized["confidence"] = 1.0', helper)
+        self.assertIn('source_value not in {"manual", "ai"}', helper)
+        self.assertIn('normalized["source"] = source_value', helper)
+        self.assertIn('normalized["confidence"] = confidence_value', helper)
 
 
     def test_adapter_calls_match_dispatcher_and_capability_map(self):
