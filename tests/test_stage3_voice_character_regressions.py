@@ -312,5 +312,93 @@ class Stage3HostSafetyContractTests(unittest.TestCase):
         self.assertIn('if not sample_path:', method)
 
 
+
+
+class Stage3ProjectCastFoundationTests(unittest.TestCase):
+    def test_state_json_is_written_atomically_and_failed_replace_preserves_last_good_state(self):
+        from app.core.state import load_state, save_state
+
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp) / "project"
+            original = {
+                "characters": [{"name": "Mira", "series": "Silver Moon Saga", "voice_profile": "Mira Voice"}],
+                "marker": "last-good",
+            }
+            save_state(folder, original)
+            state_file = folder / "state.json"
+            before = state_file.read_bytes()
+
+            with mock.patch.object(Path, "replace", side_effect=OSError("simulated atomic replace failure")):
+                with self.assertRaisesRegex(OSError, "simulated atomic replace failure"):
+                    save_state(folder, {"characters": [], "marker": "partial"})
+
+            self.assertEqual(state_file.read_bytes(), before)
+            self.assertEqual(load_state(folder), original)
+            self.assertEqual(list(folder.glob(".state.json.*.tmp")), [])
+
+    def test_character_list_returns_normalized_active_project_cast_without_mutating_saved_state(self):
+        from types import SimpleNamespace
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        saved_state = {
+            "series_name": "Current Project Series",
+            "characters": [
+                {"name": " Mira ", "series": "Silver Moon Saga", "aliases": ["Mira Vale", "Mira Vale"]},
+                None,
+                {"name": "   ", "series": "Silver Moon Saga"},
+                {"name": "mira", "series": "silver moon saga", "aliases": ["Captain Mira"]},
+                {"name": "Ren", "scope": "Series · Other Saga", "aliases": "Renji, Ren"},
+                {"primary_name": "Asha"},
+            ],
+        }
+        original_characters = list(saved_state["characters"])
+        project = SimpleNamespace(folder=Path("active-project"), title="Current Project Series · Volume 2")
+        bridge = SimpleNamespace(
+            _active_project=lambda: project,
+            _project_series_name=lambda _project, _state=None: "Current Project Series",
+        )
+
+        with mock.patch("app.ui.premium_v2_host.load_state", return_value=saved_state):
+            rows = PremiumV2Bridge._character_list(bridge, {})
+
+        self.assertEqual(
+            [(row["name"], row["series"]) for row in rows],
+            [
+                ("Mira", "Silver Moon Saga"),
+                ("Ren", "Other Saga"),
+                ("Asha", "Current Project Series"),
+            ],
+        )
+        self.assertEqual(rows[0]["aliases"], ["Mira Vale", "Captain Mira"])
+        self.assertEqual(rows[1]["aliases"], ["Renji"])
+        self.assertEqual(saved_state["characters"], original_characters)
+        self.assertIsNot(rows[0], saved_state["characters"][0])
+
+    def test_project_switch_and_character_switch_clear_previous_assigned_dialogue_selection(self):
+        adapter = Path("assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        switch_start = adapter.index("if (changedProject) {")
+        switch_end = adapter.index("activeProjectCardFolder = folder;", switch_start)
+        switch_block = adapter[switch_start:switch_end]
+        self.assertIn("window.ryuPremiumSelectedAssignedDialogueId = '';", switch_block)
+
+        no_project_start = adapter.index("if (noActiveProject) {")
+        no_project_end = adapter.index("if (requestToken !== chapterListEpoch)", no_project_start)
+        no_project_block = adapter[no_project_start:no_project_end]
+        self.assertIn("window.ryuPremiumSelectedAssignedDialogueId = '';", no_project_block)
+
+        select_start = adapter.index("if (button.matches('#characters #assignedCharacterList [data-character-name]'))")
+        select_end = adapter.index("if (button.id === 'testAssignedVoice')", select_start)
+        select_block = adapter[select_start:select_end]
+        self.assertIn("window.ryuPremiumSelectedAssignedDialogueId = '';", select_block)
+
+    def test_character_list_response_is_discarded_when_active_project_changes_mid_request(self):
+        adapter = Path("assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("async function refreshCharacters()")
+        end = adapter.index("const librarySeriesName", start)
+        refresh = adapter[start:end]
+        self.assertIn("activeFolderAtRequest", refresh)
+        self.assertIn("window.ryuPremiumActiveProject?.folder", refresh)
+        self.assertIn("activeFolderAtRequest !== activeFolderAfterRequest", refresh)
+
 if __name__ == "__main__":
     unittest.main()
