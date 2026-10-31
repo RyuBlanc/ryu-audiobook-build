@@ -3984,6 +3984,7 @@ class PremiumV2Bridge(QObject):
         state = load_state(project.folder)
         from app.audio.library import effective_background_audio_mode, validate_saved_audio_paths
         background_audio_mode = effective_background_audio_mode(state)
+        sound_enabled = background_audio_mode != "off"
         validate_saved_audio_paths(state)
         profile_name = str(payload.get("profile_name") or state.get("voice_profile") or "").strip()
         profile = self._find_profile(profile_name)
@@ -4066,6 +4067,19 @@ class PremiumV2Bridge(QObject):
             ("custom" if state.get("chapter_bgm_overrides") else "same")
         ).strip().casefold()
         chapter_based_bgm = chapter_bgm_strategy in {"custom", "chapter-based", "chapter_based", "chapter"}
+        effective_chapter_transition_sound = sound_enabled and bool(state.get("chapter_transition_sound", False))
+        opening_cue_path = (
+            Path(state["opening_cue_path"])
+            if effective_chapter_transition_sound and state.get("opening_cue_path") else None
+        )
+        page_turn_cue_path = (
+            Path(state["page_turn_cue_path"])
+            if effective_chapter_transition_sound and state.get("page_turn_cue_path") else None
+        )
+        ending_cue_path = (
+            Path(state["ending_cue_path"])
+            if effective_chapter_transition_sound and state.get("ending_cue_path") else None
+        )
         manager = GenerationManager(
             provider, voice, chapters, project.folder / "working_audio",
             on_progress=lambda *args: self._generation_progress(job_id, *args),
@@ -4076,26 +4090,26 @@ class PremiumV2Bridge(QObject):
             metadata=metadata, bitrate=bitrate,
             background_audio_path=(
                 Path(state["background_audio_path"])
-                if state.get("background_audio_path") and not chapter_based_bgm else None
+                if sound_enabled and state.get("background_audio_path") and not chapter_based_bgm else None
             ),
             background_audio_volume=float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18),
             narration_volume=float(state.get("narration_audio_volume") if state.get("narration_audio_volume") is not None else 1.0),
             cue_audio_volume=float(state.get("sound_cue_volume") if state.get("sound_cue_volume") is not None else 0.25),
-            ambience_audio_path=Path(state["ambience_audio_path"]) if state.get("ambience_audio_path") else None,
+            ambience_audio_path=Path(state["ambience_audio_path"]) if sound_enabled and state.get("ambience_audio_path") else None,
             ambience_audio_volume=float(state.get("ambience_audio_volume") if state.get("ambience_audio_volume") is not None else 0.10),
             background_audio_fade_in=float(state.get("background_audio_fade_in") if state.get("background_audio_fade_in") is not None else 2.0),
             background_audio_fade_out=float(state.get("background_audio_fade_out") if state.get("background_audio_fade_out") is not None else 3.0),
             background_audio_mode=background_audio_mode,
             auto_music_style=str(state.get("auto_music_style") or "auto"),
-            auto_music_variation=state.get("auto_music_track_path") or None,
-            chapter_transition_sound=bool(state.get("chapter_transition_sound", False)),
+            auto_music_variation=(state.get("auto_music_track_path") or None) if sound_enabled else None,
+            chapter_transition_sound=effective_chapter_transition_sound,
             story_effects_enabled=bool(state.get("story_effects_enabled", False)),
             story_effect_volume=float(state.get("story_effect_volume") if state.get("story_effect_volume") is not None else 0.22),
             sound_cue_style=str(state.get("sound_cue_style") or "classic-book"),
-            opening_cue_path=Path(state["opening_cue_path"]) if state.get("opening_cue_path") else None,
-            page_turn_cue_path=Path(state["page_turn_cue_path"]) if state.get("page_turn_cue_path") else None,
-            ending_cue_path=Path(state["ending_cue_path"]) if state.get("ending_cue_path") else None,
-            chapter_bgm_overrides=state.get("chapter_bgm_overrides") if isinstance(state.get("chapter_bgm_overrides"), dict) else {},
+            opening_cue_path=opening_cue_path,
+            page_turn_cue_path=page_turn_cue_path,
+            ending_cue_path=ending_cue_path,
+            chapter_bgm_overrides=(state.get("chapter_bgm_overrides") if sound_enabled and isinstance(state.get("chapter_bgm_overrides"), dict) else {}),
             chapter_bgm_strategy=chapter_bgm_strategy,
         )
         with self._jobs_lock:

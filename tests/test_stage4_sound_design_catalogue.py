@@ -218,7 +218,12 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         self.assertIn("validate_saved_audio_paths(state)", host_source)
         self.assertIn("validate_saved_audio_paths(state)", preview_source)
         generation = host_source[host_source.index("def _production_generate_book"):host_source.index("def _sound_catalog")]
-        self.assertIn('opening_cue_path=Path(state["opening_cue_path"]) if state.get("opening_cue_path") else None', generation)
+        self.assertIn('sound_enabled = background_audio_mode != "off"', generation)
+                self.assertIn('chapter_transition_sound=effective_chapter_transition_sound,', generation)
+                self.assertIn('opening_cue_path = (', generation)
+                self.assertIn('Path(state["opening_cue_path"])\n            if effective_chapter_transition_sound and state.get("opening_cue_path") else None', generation)
+                self.assertIn('page_turn_cue_path=page_turn_cue_path,', generation)
+                self.assertIn('ending_cue_path=ending_cue_path,', generation)
         self.assertIn("chapter_transition_sound = sound_enabled and bool(state.get(\"chapter_transition_sound\", False))", preview_source)
         self.assertIn('opening_cue_path = (', preview_source)
         self.assertIn('Path(str(state["opening_cue_path"])) if chapter_transition_sound and state.get("opening_cue_path") else None', preview_source)
