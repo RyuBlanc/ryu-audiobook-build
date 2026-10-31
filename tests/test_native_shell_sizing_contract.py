@@ -251,8 +251,8 @@ class NativeShellSizingContracts(unittest.TestCase):
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         for sample in ("Rimuru Tempest", "18 of 23 reviewed", "The eastern route is clear…", "324</b>"):
             self.assertNotIn(sample, html)
-        self.assertIn("No Characters Found", html)
-        self.assertIn("Loading the selected project", html)
+        self.assertIn("No Assigned Cast yet", html)
+        self.assertIn("Saved dialogue assignments or explicit voice profiles", html)
         self.assertIn("function renderCharacterStudioLive()", adapter)
         self.assertIn("function renderDialogueReview()", adapter)
         self.assertIn("call('character.list')", adapter)
