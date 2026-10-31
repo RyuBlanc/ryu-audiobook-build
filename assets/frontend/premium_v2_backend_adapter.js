@@ -1275,6 +1275,7 @@
     await refreshCurrentProjectCard();
     renderAudiobookLibrary(projects);
     if (!playerAudio || !playerAudio.src) clearAudiobookPlayerDisplay();
+    if (isVisiblePage('generate')) await refreshProductionSummary();
     return projects;
   }
   const voiceLibraryTitles = {
@@ -3972,6 +3973,155 @@
     const mixOverrides = $('mixOverrides');
     if (mixOverrides) mixOverrides.textContent = Object.values(overrides).filter(o => o.rule === 'custom' || o.rule === 'none').length + ' chapters';
   }
+  function setProductionStatus(id, value, kind = 'info') {
+    const node = $(id);
+    if (!node) return;
+    const next = String(value ?? '');
+    if (node.textContent !== next) node.textContent = next;
+    if (node.style) node.style.color = kind === 'ready' ? 'var(--green)' :
+      (kind === 'warn' ? 'var(--amber)' : 'var(--muted)');
+  }
+
+  async function refreshProductionSummary() {
+    const active = await call('project.get_active');
+    if (!active || !active.folder) {
+      window.ryuPremiumActiveProject = null;
+      setProductionStatus('productionBookTitle', 'No project selected');
+      setProductionStatus('productionBookMetadata', 'Open or import a saved project to view its details.');
+      setProductionStatus('productionNarrator', 'Not set');
+      setProductionStatus('productionVoiceCastCount', 'No saved character assignments');
+      setProductionStatus('productionOutputSummary', 'No output target configured');
+      setProductionStatus('productionBookImported', 'No active project', 'warn');
+      setProductionStatus('productionChaptersReady', 'No active project', 'warn');
+      setProductionStatus('productionNarratorReady', 'No active project', 'warn');
+      setProductionStatus('productionCharacterVoices', 'No active project', 'warn');
+      setProductionStatus('productionPronunciationReady', 'No active project');
+      setProductionStatus('productionOutputReady', 'No active project', 'warn');
+      const cover = $('productionBookCover');
+      if (cover) applyProjectCover(cover, '');
+      return null;
+    }
+    window.ryuPremiumActiveProject = active;
+    const author = String(active.author || '').trim() || 'Author not set';
+    const language = String(active.language || '').trim() || 'Language not set';
+    const publisher = String(active.publisher || '').trim();
+    const series = String(active.series_name || active.series || '').trim();
+    setProductionStatus('productionBookTitle', String(active.title || 'Untitled audiobook'));
+    setProductionStatus('productionBookMetadata', [author, language,
+      publisher ? 'Publisher ' + publisher : 'Publisher not set',
+      series ? 'Series ' + series : ''].filter(Boolean).join(' · '));
+    setProductionStatus('productionNarrator',
+      String(active.narrator || active.voice_profile || '').trim() || 'Not set');
+
+    const totalCharacters = Math.max(0, Number(active.character_count || 0));
+    const assignedCharacters = Math.max(0, Math.min(totalCharacters, Number(active.character_voice_count || 0)));
+    const analysisDone = active.character_analysis_done === true;
+    setProductionStatus('productionVoiceCastCount', totalCharacters
+      ? assignedCharacters + ' / ' + totalCharacters + ' assigned'
+      : (analysisDone ? 'No character speakers detected' : 'Character analysis not run'));
+
+    const outputTarget = String(active.output_target_path || active.output_path || '').trim();
+    const outputFormat = String(active.output_format || 'M4B').toUpperCase();
+    const bitrate = Math.max(128, Math.min(320, Number(active.audio_bitrate || 256)));
+    setProductionStatus('productionOutputSummary', outputTarget
+      ? outputFormat + ' · ' + bitrate + ' kbps · ' + outputTarget
+      : 'No output target configured');
+
+    const cover = $('productionBookCover');
+    if (cover) {
+      cover.dataset.coverPath = String(active.cover_path || '');
+      applyProjectCover(cover, active.cover_path || '');
+    }
+    const sourceReady = active.source_exists === true;
+    setProductionStatus('productionBookImported',
+      sourceReady ? 'Source file available' : 'Source file missing or unavailable',
+      sourceReady ? 'ready' : 'warn');
+
+    const chapterCount = Math.max(0, Number(active.chapter_count || 0));
+    const preparedCount = Math.max(0, Math.min(chapterCount, Number(active.prepared_chapter_count || 0)));
+    const chaptersReady = chapterCount > 0 && preparedCount === chapterCount;
+    setProductionStatus('productionChaptersReady',
+      chapterCount ? preparedCount + ' / ' + chapterCount + ' chapters prepared' : 'No chapters available',
+      chaptersReady ? 'ready' : 'warn');
+
+    const narratorReady = active.narrator_voice_configured === true;
+    const narratorProfile = String(active.voice_profile || '').trim();
+    setProductionStatus('productionNarratorReady',
+      narratorReady ? 'Saved voice profile · ' + narratorProfile : 'No saved narrator voice profile',
+      narratorReady ? 'ready' : 'warn');
+
+    let characterStatus = 'Character analysis not run';
+    let characterKind = 'warn';
+    if (analysisDone && totalCharacters === 0) {
+      characterStatus = 'No character speakers detected';
+      characterKind = 'ready';
+    } else if (totalCharacters > 0) {
+      const missing = Math.max(0, totalCharacters - assignedCharacters);
+      characterStatus = assignedCharacters + ' / ' + totalCharacters + ' assigned' +
+        (missing ? ' · ' + missing + ' need voice assignment' : '');
+      characterKind = missing ? 'warn' : 'ready';
+    }
+    setProductionStatus('productionCharacterVoices', characterStatus, characterKind);
+
+    const pronunciationCount = Math.max(0, Number(active.pronunciation_rule_count || 0));
+    setProductionStatus('productionPronunciationReady', pronunciationCount
+      ? pronunciationCount + ' saved pronunciation rules'
+      : 'No custom pronunciation rules saved · optional',
+      pronunciationCount ? 'ready' : 'info');
+
+    const outputReady = active.output_folder_ready === true && active.output_format_supported === true;
+    const outputStatus = active.output_format_supported === false
+      ? 'Unsupported output type · choose M4B'
+      : (outputReady ? 'Writable · ' + String(active.output_folder || '')
+        : 'Output folder is missing or not writable');
+    setProductionStatus('productionOutputReady', outputStatus, outputReady ? 'ready' : 'warn');
+    return active;
+  }
+
+  function formatProductionDuration(value) {
+    const seconds = Math.max(0, Math.floor(Number(value) || 0));
+    const hours = Math.floor(seconds / 3600), minutes = Math.floor((seconds % 3600) / 60);
+    const remainder = seconds % 60;
+    return hours ? hours + ':' + String(minutes).padStart(2, '0') + ':' + String(remainder).padStart(2, '0')
+      : minutes + ':' + String(remainder).padStart(2, '0');
+  }
+
+  function renderProductionGeneration(jobs = []) {
+    const page = $('generate');
+    if (!page || !isVisiblePage('generate')) return;
+    const project = window.ryuPremiumActiveProject || null;
+    const activeStates = ['queued','running','pause_requested','paused','cancel_requested','retrying'];
+    const job = jobs.filter(row =>
+      String(row.type || '').toLowerCase() === 'audiobook-generation' &&
+      activeStates.includes(String(row.state || '').toLowerCase()) &&
+      (!project?.folder || String(row.project_folder || '') === String(project.folder))
+    ).sort((a,b) =>
+      (Date.parse(b.updated_at || b.started_at || b.queued_at || '') || 0) -
+      (Date.parse(a.updated_at || a.started_at || a.queued_at || '') || 0))[0] || null;
+    const completed = !job && Boolean(project?.completed && project?.output_path);
+    const percent = job ? Math.max(0, Math.min(100, Math.round(Number(job.progress || 0)))) : (completed ? 100 : 0);
+    const ring = $('genRing');
+    if (ring?.style) ring.style.setProperty('--progress', percent + '%');
+    setProductionStatus('genPercent', percent + '%');
+    setProductionStatus('genStage', job
+      ? String(job.stage || job.message || job.state || 'Generation running')
+      : (completed ? 'Audiobook ready' : 'Ready to generate'));
+    const chapter = Math.max(0, Number(job?.current_chapter || 0));
+    const total = Math.max(0, Number(job?.chapters_total || project?.chapter_count || 0));
+    setProductionStatus('genChapter', job
+      ? (chapter ? 'Chapter ' + chapter + (total ? ' of ' + total : '') : 'Waiting for first chapter')
+      : (completed ? (total ? total + ' chapters completed' : 'Completed output verified') : 'No chapter currently rendering'));
+    const elapsed = Number(job?.elapsed_seconds), eta = Number(job?.eta_seconds);
+    setProductionStatus('elapsed', Number.isFinite(elapsed) && elapsed >= 0 ? formatProductionDuration(elapsed) : '—');
+    setProductionStatus('remaining', Number.isFinite(eta) && eta >= 0 ? formatProductionDuration(eta) : '—');
+    const pause = $('pauseGenerate');
+    if (pause) {
+      const canPause = Boolean(job && ['running','paused','pause_requested'].includes(String(job.state || '').toLowerCase()));
+      pause.disabled = !canPause;
+      pause.textContent = job && ['paused','pause_requested'].includes(String(job.state || '').toLowerCase()) ? 'Resume' : 'Pause';
+    }
+  }
+
   async function refreshChapterBgm() {
     chapterBgmState = await call('sound.chapter_bgm.get');
     const fadeIn = Number(chapterBgmState.fade_in_seconds ?? 2);
@@ -4296,6 +4446,7 @@
   async function refreshJobsImpl() {
     const allJobs = await call('job.list', {include_hidden:false});
     if (isVisiblePage('dashboard')) refreshDashboardGeneration(allJobs);
+    if (isVisiblePage('generate')) renderProductionGeneration(allJobs);
     const jobs = allJobs.filter(j => backendJobFilter === 'all' ||
       (backendJobFilter === 'completed' ? j.state === 'completed' :
       (backendJobFilter === 'failed' ? j.state === 'failed' :
@@ -6741,11 +6892,20 @@
     });
     if ($('startGenerate')) $('startGenerate').onclick=act(async()=>{
       await flushSoundDesignState();
+      const [activeProject, savedSettings] = await Promise.all([
+        call('project.get_active'),
+        call('settings.get')
+      ]);
+      window.ryuPremiumActiveProject = activeProject || null;
+      window.ryuPremiumApplicationSettings = savedSettings || {};
+      const bitrate = Number(activeProject?.audio_bitrate || savedSettings?.bitrate || 256);
       const data = await call('production.generate_book', {
-        profile_name:selectedVoice || $('profileName')?.value,
-        bitrate:256
+        profile_name:selectedVoice || $('profileName')?.value || activeProject?.voice_profile,
+        bitrate
       });
       await monitorJob(data.job_id);
+      await refreshProductionSummary();
+      await refreshJobs();
     });
     if ($('pauseGenerate')) $('pauseGenerate').onclick=act(async()=>{if(!activeJob||activeJobType!=='audiobook-generation')throw new Error('There is no active audiobook generation job to pause.');await call('job.pause',{job_id:activeJob});await refreshJobs();});
     if ($('cancelJob')) $('cancelJob').onclick=act(async()=>{if(!activeJob||activeJobType!=='audiobook-generation')throw new Error('There is no active audiobook generation job to cancel.');await call('job.cancel',{job_id:activeJob});await refreshJobs();});
@@ -8046,6 +8206,7 @@
     // while persisted Settings are still loading. PremiumV2Window keeps a native
     // loading surface visible until wire() finishes this essential phase.
     await hydratePhase([loadSettings, refreshProjects, refreshVoices, refreshChapters], {required:true});
+    await refreshProductionSummary();
     reportStartupProgress('Essential workspace loaded. Finishing the studio…', 94);
     // Secondary panels remain asynchronous and are isolated: a slow optional
     // sound/model subsystem cannot hold the main interface hostage.
@@ -8058,6 +8219,20 @@
     // The prototype action controls were replaced before any async work above;
     // only backend-owned Voice Studio actions remain active here.
 
+    const productionPage = $('generate');
+    if (productionPage && !window.__ryuProductionPageObserver) {
+      window.__ryuProductionPageObserver = new MutationObserver(() => {
+        if (!isVisiblePage('generate') || window.__ryuProductionSummaryRefresh) return;
+        const refresh = refreshProductionSummary()
+          .then(() => refreshJobs())
+          .catch(err => message(err?.message || String(err), true))
+          .finally(() => { window.__ryuProductionSummaryRefresh = null; });
+        window.__ryuProductionSummaryRefresh = refresh;
+      });
+      window.__ryuProductionPageObserver.observe(productionPage, {
+        attributes:true, attributeFilter:['class']
+      });
+    }
     if (!window.__ryuBackendJobTimer) window.__ryuBackendJobTimer=setInterval(()=>refreshJobs().catch(()=>{}),1500);
     const jobsBox = $('backgroundJobsList');
     if (jobsBox && !window.__ryuBackendJobsObserver) {

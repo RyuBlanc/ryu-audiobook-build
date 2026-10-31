@@ -1014,8 +1014,14 @@
         document.querySelector("#narrationVolumeValue")?.textContent.trim() === "82%" &&
         document.querySelector("#cueVolumeValue")?.textContent.trim() === "30%";
     }, 12000);
+    const chapterSummaryState = await invoke("sound.chapter_bgm.get", {});
+    const productionMusicSummary = document.querySelector("#productionMusicSummary")?.textContent.trim() || "";
+    must(Number(chapterSummaryState.explicit_chapter_track_count) === 2 &&
+      productionMusicSummary === "Chapter-Based BGM · 2 unique assigned tracks",
+      "Production Studio did not report exactly two unique explicitly assigned chapter tracks. " +
+      JSON.stringify({explicit_chapter_track_count:chapterSummaryState.explicit_chapter_track_count,summary:productionMusicSummary}));
     record("mix_summary_and_saved_three_levels", true,
-      "Mix summary reflected two effective chapter tracks, three rules, and the real saved 42%/82%/30% levels.");
+      "Mix summary reflected two effective chapter tracks, three rules, numeric unique-track Production count, and saved 42%/82%/30% levels.");
 
     async function renderFullBookPreview(label) {
       const button = document.querySelector("#soundPreviewBook");
@@ -1130,8 +1136,36 @@
       document.querySelector("#productionMusicSummary")?.textContent.includes("Chapter-Based BGM") &&
       document.querySelector("#productionSoundReady")?.textContent.includes("Synced"),
       "Production handoff did not persist the latest mix level or display saved Chapter-Based BGM.");
+    const activeProductionProject = await invoke("project.get_active", {});
+    must(activeProductionProject && activeProductionProject.folder,
+      "Production handoff left no active saved project.");
+    await waitFor("source-backed Production project summary", function () {
+      return document.querySelector("#productionBookTitle")?.textContent.trim() ===
+        String(activeProductionProject.title || "Untitled audiobook");
+    }, 12000);
+    const productionText = document.querySelector("#generate")?.textContent || "";
+    must(!productionText.includes("Slime Vol. 2") &&
+      !productionText.includes("Fuse · English") &&
+      !productionText.includes("20 / 23") &&
+      !productionText.includes("Partial audio found for Chapter 18"),
+      "Production Studio still shows hard-coded prototype project/readiness values.");
+    must(document.querySelector("#productionBookMetadata")?.textContent.includes(
+      String(activeProductionProject.author || "Author not set")) &&
+      document.querySelector("#productionOutputSummary")?.textContent.includes(
+      String(activeProductionProject.output_target_path || activeProductionProject.output_path || "")),
+      "Production Studio did not display saved book metadata and its actual output target.");
+    must(document.querySelector("#productionBookImported") &&
+      document.querySelector("#productionChaptersReady") &&
+      document.querySelector("#productionNarratorReady") &&
+      document.querySelector("#productionCharacterVoices") &&
+      document.querySelector("#productionPronunciationReady") &&
+      document.querySelector("#productionOutputReady"),
+      "Production Studio readiness summary is missing one or more live project fields.");
+    must(document.querySelector("#productionMusicSummary")?.textContent.trim() ===
+      "Chapter-Based BGM · 2 unique assigned tracks",
+      "Production Studio unique assigned-track summary is incorrect after handoff.");
     record("production_handoff_save_error_gate_and_retry", true,
-      "A failed shared-state save blocked navigation; retry flushed pending settings and opened Production with the real saved summary.");
+      "A failed save blocked navigation; retry opened Production with live metadata, output destination, readiness fields and exact unique chapter-track count.");
 
     const productionVoiceOnly = document.querySelector('#generate [data-bgm-enabled="false"]');
     must(productionVoiceOnly, "Production Studio Voice Only mode toggle is missing.");

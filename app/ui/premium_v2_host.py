@@ -584,6 +584,40 @@ class PremiumV2Bridge(QObject):
             valid_output = False
         completed = valid_output and str(state.get("status") or "").casefold() == "completed"
 
+        # Match Production's displayed destination to the final generation default.
+        persisted_target = str(state.get("generation_target_path") or output_value or "").strip()
+        safe_output_stem = re.sub(r'[<>:"/\\|?*]+', "_", project.title).strip() or "Audiobook"
+        output_target = (
+            Path(persisted_target).expanduser()
+            if persisted_target else audiobooks_root() / (safe_output_stem + ".m4b")
+        )
+        try:
+            output_target = output_target.resolve()
+            output_folder = output_target.parent
+            output_folder_ready = output_folder.is_dir() and os.access(output_folder, os.W_OK)
+        except (OSError, RuntimeError, ValueError):
+            output_folder = output_target.parent
+            output_folder_ready = False
+
+        settings_store = getattr(self, "settings", None)
+        default_bitrate = 256
+        if settings_store is not None:
+            try:
+                default_bitrate = settings_store.value(
+                    "production/bitrate",
+                    settings_store.value("audio/default_bitrate", 256),
+                )
+            except Exception:
+                default_bitrate = 256
+        try:
+            audio_bitrate = int(state.get("audio_bitrate") or default_bitrate or 256)
+        except (TypeError, ValueError, OverflowError):
+            audio_bitrate = 256
+        if not 128 <= audio_bitrate <= 320:
+            audio_bitrate = 256
+        output_format = output_target.suffix.lstrip(".").upper() or "M4B"
+        output_format_supported = output_target.suffix.casefold() == ".m4b"
+
         cover_value = str(state.get("cover_path") or "").strip()
         candidate_cover = Path(cover_value).expanduser() if cover_value else None
         cover = None
@@ -752,9 +786,20 @@ class PremiumV2Bridge(QObject):
             "completed": bool(completed),
             "cover_path": str(cover) if cover else None,
             "author": str(state.get("author") or ""),
+            "publisher": str(state.get("publisher") or ""),
+            "series": str(state.get("series") or ""),
+            "language": str(state.get("language") or ""),
+            "year": str(state.get("year") or ""),
+            "genre": str(state.get("genre") or ""),
             "narrator": str(state.get("narrator") or state.get("voice_profile") or ""),
             "voice_profile": str(state.get("voice_profile") or ""),
             "narrator_voice_configured": narrator_ready,
+            "output_target_path": str(output_target),
+            "output_folder": str(output_folder),
+            "output_folder_ready": bool(output_folder_ready),
+            "output_format": output_format,
+            "output_format_supported": bool(output_format_supported),
+            "audio_bitrate": audio_bitrate,
             "character_count": len(character_names),
             "character_voice_count": character_voice_count,
             "character_analysis_done": character_analysis_done,
@@ -4043,7 +4088,14 @@ class PremiumV2Bridge(QObject):
         output.parent.mkdir(parents=True, exist_ok=True)
         if not os.access(output.parent, os.W_OK):
             raise PermissionError("The selected output folder is not writable.")
-        bitrate = int(payload.get("bitrate") or state.get("audio_bitrate") or 256)
+        try:
+            default_bitrate = self.settings.value(
+                "production/bitrate",
+                self.settings.value("audio/default_bitrate", 256),
+            )
+        except Exception:
+            default_bitrate = 256
+        bitrate = int(payload.get("bitrate") or state.get("audio_bitrate") or default_bitrate or 256)
         if not 128 <= bitrate <= 320:
             raise ValueError("Select a bitrate from 128 through 320 kbps.")
         job_id = self._new_job("audiobook-generation", "Generate " + project.title,
@@ -5402,8 +5454,8 @@ class PremiumV2Bridge(QObject):
     def _system_open_output(self, _payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
         state = load_state(project.folder)
-        value = str(state.get("output_path") or "")
-        path = Path(value).expanduser() if value else project.folder
+        value = str(state.get("output_path") or state.get("generation_target_path") or "").strip()
+        path = Path(value).expanduser() if value else audiobooks_root()
         folder = path if path.is_dir() else path.parent
         if not folder.exists():
             raise FileNotFoundError("The output folder does not exist yet.")
@@ -6082,6 +6134,11 @@ class PremiumV2Bridge(QObject):
             "window_size": self.settings.value("ui/window_size", "auto"),
             "storage_root": str(app_root()),
             "library_root": str(library_root()),
+            "output_root": str(audiobooks_root()),
+            "bitrate": int(self.settings.value(
+                "production/bitrate",
+                self.settings.value("audio/default_bitrate", 256),
+            ) or 256),
         }
 
 

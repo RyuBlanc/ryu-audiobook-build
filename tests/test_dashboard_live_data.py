@@ -254,6 +254,78 @@ class DashboardLiveDataTests(unittest.TestCase):
             self.assertEqual(selected["output_path"], str(output_b.resolve()))
             self.assertEqual(selected["narrator"], "Voice B")
 
+    def test_production_summary_exposes_saved_metadata_and_real_output_target(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            library = base / "library"
+            output_root = base / "Audiobooks"
+            output_root.mkdir(parents=True)
+            with mock.patch("app.core.project.library_root", return_value=library):
+                project = self._create_project(library, "Production Summary Book")
+
+            state = {
+                "status": "imported",
+                "author": "Saved Author",
+                "publisher": "Saved Publisher",
+                "series": "Saved Series",
+                "language": "Japanese",
+                "year": "2025",
+                "genre": "Fantasy",
+                "voice_profile": "Saved Narrator",
+                "audio_bitrate": 192,
+                "characters": [{"name": "Mira", "voice_profile": "Mira Voice"}],
+                "pronunciation_dictionary": {"東京": "とうきょう"},
+            }
+            bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
+            with (
+                mock.patch("app.ui.premium_v2_host.load_state", return_value=state),
+                mock.patch("app.ui.premium_v2_host.audiobooks_root", return_value=output_root),
+            ):
+                summary = bridge._project_summary(project)
+
+            expected = (output_root / "Production Summary Book.m4b").resolve()
+            self.assertEqual(summary["author"], "Saved Author")
+            self.assertEqual(summary["publisher"], "Saved Publisher")
+            self.assertEqual(summary["series"], "Saved Series")
+            self.assertEqual(summary["language"], "Japanese")
+            self.assertEqual(summary["year"], "2025")
+            self.assertEqual(summary["genre"], "Fantasy")
+            self.assertEqual(summary["voice_profile"], "Saved Narrator")
+            self.assertEqual(summary["audio_bitrate"], 192)
+            self.assertEqual(summary["output_target_path"], str(expected))
+            self.assertEqual(summary["output_folder"], str(output_root.resolve()))
+            self.assertTrue(summary["output_folder_ready"])
+            self.assertEqual(summary["output_format"], "M4B")
+            self.assertTrue(summary["output_format_supported"])
+            self.assertEqual(summary["pronunciation_rule_count"], 1)
+
+    def test_production_summary_prefers_the_saved_generation_target(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            library = base / "library"
+            output_root = base / "Audiobooks"
+            output_root.mkdir(parents=True)
+            custom_output = base / "External" / "Book.m4b"
+            custom_output.parent.mkdir(parents=True)
+            with mock.patch("app.core.project.library_root", return_value=library):
+                project = self._create_project(library, "Target Override Book")
+
+            state = {
+                "status": "generating",
+                "generation_target_path": str(custom_output),
+                "audio_bitrate": 256,
+            }
+            bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
+            with (
+                mock.patch("app.ui.premium_v2_host.load_state", return_value=state),
+                mock.patch("app.ui.premium_v2_host.audiobooks_root", return_value=output_root),
+            ):
+                summary = bridge._project_summary(project)
+
+            self.assertEqual(summary["output_target_path"], str(custom_output.resolve()))
+            self.assertEqual(summary["output_folder"], str(custom_output.parent.resolve()))
+            self.assertTrue(summary["output_folder_ready"])
+
     @staticmethod
     def _source(library: Path, title: str) -> Path:
         source = library.parent / (title.replace(" ", "_") + ".txt")
@@ -267,6 +339,10 @@ class DashboardLiveDataTests(unittest.TestCase):
         self.assertIn("function refreshDashboardGeneration", adapter)
         self.assertIn("function renderAudiobookLibrary", adapter)
         self.assertIn("function refreshDashboardFlow", adapter)
+        self.assertIn("async function refreshProductionSummary()", adapter)
+        self.assertIn("function renderProductionGeneration(jobs = [])", adapter)
+        self.assertIn("active.output_target_path", adapter)
+        self.assertIn("productionOutputReady", adapter)
         self.assertIn("refreshDashboardFlow(dashboardProject)", adapter)
         self.assertIn("Boolean(String(project.voice_profile || '').trim())", adapter)
         self.assertIn("const progressLine = [...card.querySelectorAll('.job-line')][2]", adapter)
