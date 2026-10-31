@@ -5880,28 +5880,69 @@ class PremiumV2Bridge(QObject):
                 "strategy": "custom", "override_count": len(overrides)}
 
     def _sound_cues_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
-        """Return persisted book cue assignments, resolving legacy state keys."""
+        """Rehydrate saved cue assignments even when the catalogue is refreshed after restart."""
+        from app.audio.library import audio_asset_role, metadata_for
+
         project = self._active_project()
         state = load_state(project.folder)
-        cues = state.get("sound_cues")
-        if not isinstance(cues, dict):
-            cues = {
-                "opening": state.get("opening_cue_path"),
-                "chapter": state.get("page_turn_cue_path"),
-                "closing": state.get("ending_cue_path"),
-            }
-        catalog = {str(row["path"]): row for row in self._sound_catalog({})}
+        stored = state.get("sound_cues")
+        cues = stored if isinstance(stored, dict) else {}
+        legacy_fields = {
+            "opening": "opening_cue_path",
+            "chapter": "page_turn_cue_path",
+            "closing": "ending_cue_path",
+        }
+
+        def path_key(value: Any) -> str:
+            try:
+                return str(Path(str(value)).expanduser().resolve()).casefold()
+            except (OSError, RuntimeError, ValueError):
+                return str(value or "").strip().replace("\\\\", "/").casefold()
+
+        catalog = {}
+        for row in self._sound_catalog({}):
+            raw_catalog_path = row.get("path")
+            if raw_catalog_path:
+                catalog[path_key(raw_catalog_path)] = row
+
         result = {}
         for slot in ("opening", "chapter", "closing"):
-            raw = cues.get(slot)
+            # Prefer the canonical three-slot map but keep old per-slot projects
+            # readable when the map exists but a migrated entry is empty.
+            raw = cues.get(slot) or state.get(legacy_fields[slot])
             path = str(raw).strip() if raw else ""
-            row = catalog.get(path)
-            available = bool(row and str(row.get("role") or "music").casefold() == "cue"
-                             and path and Path(path).is_file())
-            result[slot] = {"path": path if available else None,
-                            "title": row["title"] if available else None,
-                            "available": available, "assigned": bool(path),
-                            "missing": bool(path and not available)}
+            if not path:
+                result[slot] = {
+                    "path": None, "title": None, "available": False,
+                    "assigned": False, "missing": False,
+                }
+                continue
+
+            candidate = Path(path).expanduser()
+            resolved = candidate.resolve()
+            row = catalog.get(path_key(path))
+            try:
+                metadata = metadata_for(resolved) if resolved.is_file() else {}
+                persisted_role = audio_asset_role(resolved) if resolved.is_file() else ""
+            except (OSError, ValueError, TypeError, RuntimeError):
+                metadata = {}
+                persisted_role = ""
+            role = str((row or {}).get("role") or persisted_role or "").casefold()
+            available = bool(resolved.is_file() and role == "cue")
+            title = (
+                str(row.get("title") or "") if row and role == "cue" else
+                str(metadata.get("title") or resolved.stem)
+            )
+            # Keep the saved path visible even when its asset is currently
+            # missing/unindexed. The UI can show a missing-asset state and let
+            # the user reassign it; silently returning null looked like data loss.
+            result[slot] = {
+                "path": str(resolved) if resolved.is_file() else path,
+                "title": title or None,
+                "available": available,
+                "assigned": True,
+                "missing": not available,
+            }
         return result
 
     def _sound_cues_save(self, payload: dict[str, Any]) -> dict[str, Any]:

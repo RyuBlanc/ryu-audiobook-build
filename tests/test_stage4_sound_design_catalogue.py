@@ -95,6 +95,86 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         host.PremiumV2Bridge._sound_cues_clear(self.bridge_a, {})
         self.assertIsNone(host.PremiumV2Bridge._sound_cues_get(self.bridge_a, {})["opening"]["path"])
 
+
+    def test_cue_assignments_rehydrate_from_sidecar_after_catalogue_refresh(self):
+        track = _valid_wav(self.app_root / "Audio Library" / "restart-cue.wav", seconds=1)
+        track.with_name(track.name + ".license.json").write_text(json.dumps({
+            "role": "cue", "category": "universal", "title": "Restart cue",
+        }), encoding="utf-8")
+        from app.core.state import load_state, save_state
+        state = load_state(self.project_a)
+        state.update({
+            "sound_cues": {
+                "opening": str(track.resolve()),
+                "chapter": str(track.resolve()),
+                "closing": str(track.resolve()),
+            },
+            "opening_cue_path": str(track.resolve()),
+            "page_turn_cue_path": str(track.resolve()),
+            "ending_cue_path": str(track.resolve()),
+        })
+        save_state(self.project_a, state)
+
+        # A new bridge instance must be able to hydrate the saved assignment
+        # from its persisted sidecar even if its first catalogue snapshot is empty.
+        restarted_bridge = _BridgeHarness(self.project_a, self.bridge_a.project.chapters)
+        restarted_bridge.catalog = []
+        restored = host.PremiumV2Bridge._sound_cues_get(restarted_bridge, {})
+        for slot in ("opening", "chapter", "closing"):
+            self.assertEqual(restored[slot]["path"], str(track.resolve()))
+            self.assertTrue(restored[slot]["available"])
+            self.assertTrue(restored[slot]["assigned"])
+            self.assertFalse(restored[slot]["missing"])
+            self.assertEqual(restored[slot]["title"], "Restart cue")
+
+    def test_cue_rehydration_normalizes_catalogue_path_case(self):
+        track = _valid_wav(self.app_root / "Audio Library" / "case-cue.wav", seconds=1)
+        track.with_name(track.name + ".license.json").write_text(json.dumps({
+            "role": "cue", "category": "universal", "title": "Case cue",
+        }), encoding="utf-8")
+        from app.core.state import load_state, save_state
+        state = load_state(self.project_a)
+        state["sound_cues"] = {
+            "opening": str(track.resolve()), "chapter": None, "closing": None,
+        }
+        save_state(self.project_a, state)
+        # Simulate a catalogue path with different casing after a new scan.
+        self.bridge_a.catalog = [{
+            "path": str(track.resolve()).swapcase(), "role": "cue", "title": "Case cue",
+        }]
+        restored = host.PremiumV2Bridge._sound_cues_get(self.bridge_a, {})
+        self.assertEqual(restored["opening"]["path"], str(track.resolve()))
+        self.assertTrue(restored["opening"]["available"])
+
+    def test_cue_rehydration_preserves_missing_saved_path_for_relinking(self):
+        missing_path = str((self.app_root / "Audio Library" / "removed-cue.wav").resolve())
+        from app.core.state import load_state, save_state
+        state = load_state(self.project_a)
+        state["sound_cues"] = {"opening": missing_path, "chapter": None, "closing": None}
+        save_state(self.project_a, state)
+        self.bridge_a.catalog = []
+        restored = host.PremiumV2Bridge._sound_cues_get(self.bridge_a, {})
+        self.assertEqual(restored["opening"]["path"], missing_path)
+        self.assertTrue(restored["opening"]["assigned"])
+        self.assertFalse(restored["opening"]["available"])
+        self.assertTrue(restored["opening"]["missing"])
+
+    def test_cue_rehydration_reads_legacy_fields_when_canonical_slot_is_empty(self):
+        track = _valid_wav(self.app_root / "Audio Library" / "legacy-cue.wav", seconds=1)
+        track.with_name(track.name + ".license.json").write_text(json.dumps({
+            "role": "cue", "category": "universal", "title": "Legacy cue",
+        }), encoding="utf-8")
+        from app.core.state import load_state, save_state
+        state = load_state(self.project_a)
+        state["sound_cues"] = {"opening": None, "chapter": None, "closing": None}
+        state["opening_cue_path"] = str(track.resolve())
+        save_state(self.project_a, state)
+        self.bridge_a.catalog = []
+        restored = host.PremiumV2Bridge._sound_cues_get(self.bridge_a, {})
+        self.assertEqual(restored["opening"]["path"], str(track.resolve()))
+        self.assertTrue(restored["opening"]["available"])
+
+
     def test_only_opening_next_chapter_and_closing_are_supported_fixed_cue_slots(self):
         for slot in ("scene", "transition", "unknown"):
             with self.assertRaisesRegex(ValueError, "Opening, Next Chapter, or Closing"):

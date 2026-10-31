@@ -170,10 +170,21 @@
         "Chapter Two's track, volume, start offset or end policy was not restored.");
       must(overrides["3"] && overrides["3"].rule === "none",
         "Chapter Three's explicit No BGM rule was not restored.");
-      must(String(cues.opening && cues.opening.path || "") === String(config.cue_paths[1]) &&
-        String(cues.chapter && cues.chapter.path || "") === String(config.cue_paths[1]) &&
-        String(cues.closing && cues.closing.path || "") === String(config.cue_paths[0]),
-        "Opening, Next Chapter or Closing cue assignments were not restored.");
+      const expectedCueSlots = {
+        opening: String(config.cue_paths[1]),
+        chapter: String(config.cue_paths[1]),
+        closing: String(config.cue_paths[0])
+      };
+      const cueCatalogue = Array.isArray(catalogue)
+        ? catalogue.filter(track => String(track.role || "").toLowerCase() === "cue")
+        : [];
+      const cuesRestored = Object.entries(expectedCueSlots).every(([slot, expectedPath]) =>
+        String(cues[slot] && cues[slot].path || "") === expectedPath &&
+        cues[slot].available === true && cues[slot].assigned === true && cues[slot].missing === false);
+      must(cuesRestored,
+        "Opening, Next Chapter or Closing cue assignments/assets were not restored. " +
+        JSON.stringify({actual:cues, expected:expectedCueSlots,
+          cue_catalogue:cueCatalogue.map(track => ({path:track.path, role:track.role, title:track.title}))}));
       record("application_restart_music_library_persistence", true, "All imported Music Library assets and categories remained available after a new frozen-app process.");
       record("application_restart_chapter_bgm_persistence", true, "Strategy, default preference, assignments, No BGM, offsets, end policies and chapter volume survived restart.");
       record("application_restart_mix_and_cue_persistence", true, "Narration/BGM/cue levels and all three cue slots survived restart.");
