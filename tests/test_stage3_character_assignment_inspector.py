@@ -333,7 +333,7 @@ class CharacterDialoguePreviewBridgeTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp:
             project, dialogue, start = self._fixture(Path(temp), speaker="Ren")
-            bridge = self.BridgeHarness(project, {"name": "Preview Only Voice"})
+            bridge = self.BridgeHarness(project, type("VoiceProfileStub", (), {"name": "Preview Only Voice"})())
             with patch("app.ui.premium_v2_host.threading.Thread") as thread:
                 with self.assertRaisesRegex(ValueError, "not assigned to this character"):
                     PremiumV2Bridge._character_dialogue_preview(bridge, {
