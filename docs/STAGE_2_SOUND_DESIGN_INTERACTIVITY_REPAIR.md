@@ -168,3 +168,12 @@
 - Fix: the runner now emits `cue_import_paths` for temporary import sources and `cue_paths` for the final Audio Library destination paths. The JavaScript bridge wrapper imports only from `cue_import_paths`, while restart assertions continue to compare against `cue_paths`. A regression contract explicitly checks this source/destination separation and all three expected restart slot mappings.
 - This does not alter application code or weaken restart checks. The next artifact checkpoint must rebuild the frozen executable and pass the complete first-process and second-process acceptance before any release packaging steps are allowed.
 - Stage 2 remains OPEN. Keep the full SD-01..SD-15, MUS-01..MUS-09 and PROD-09/10/11 scope intact; no Version 1.2.0 bump or release before packaged acceptance and remaining required evidence pass.
+
+## Regression checkpoint — cue import/persistence path separation (run #1791)
+
+- Source commit: `18e8383e410beeaffbc18336161a632b301721f1`.
+- Regression workflow [#1791](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41169588894) passed **857 tests in 38.619 seconds**; frontend JavaScript syntax validation also passed.
+- The #1790 restart failure was isolated to the browser acceptance fixture mapping, not the application persistence layer. The fresh second process returned all three imported cue files from `Audio Library` with exact saved assignments and `available=true`, `assigned=true`, `missing=false`; the test had expected their original temporary import-source paths.
+- The harness now separates `cue_import_paths` (temporary WAV source files passed to `sound.import`) from `cue_paths` (the copied Audio Library destinations used by persisted-state and restart checks). A regression test asserts the source and destination properties separately and confirms all three expected slot mappings.
+- This exact regression-tested source is cleared for a new frozen Windows artifact checkpoint. The checkpoint must pass the complete first-process SD/MUS flow, Voice Only, Production handoff/retry, project isolation/restoration, and second-process restart cue availability before installer, portable artifact, or release steps proceed.
+- Stage 2 remains OPEN. SD-01..SD-15, MUS-01..MUS-09 and PROD-09/10/11 remain intact and must be closed against their original acceptance evidence; do not bump or publish Version 1.2.0 yet.
