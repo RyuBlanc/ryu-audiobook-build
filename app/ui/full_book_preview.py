@@ -104,6 +104,40 @@ def _render_full_book_preview(host, job_id, project, chapter_dirs, chapter_title
     from app.tts.preview import PreviewCancelledError
     from app.audio.library import effective_background_audio_mode
     background_audio_mode = effective_background_audio_mode(state)
+    sound_enabled = background_audio_mode != "off"
+    # Enforce Voice Only at the preview boundary, not only inside the mixer.
+    # Saved preferences remain in project state for re-enabling later, but
+    # inactive BGM/cue paths must never be handed to this preview job.
+    chapter_transition_sound = sound_enabled and bool(state.get("chapter_transition_sound", False))
+    opening_cue_path = (
+        Path(str(state["opening_cue_path"])) if chapter_transition_sound and state.get("opening_cue_path") else None
+    )
+    page_turn_cue_path = (
+        Path(str(state["page_turn_cue_path"])) if chapter_transition_sound and state.get("page_turn_cue_path") else None
+    )
+    ending_cue_path = (
+        Path(str(state["ending_cue_path"])) if chapter_transition_sound and state.get("ending_cue_path") else None
+    )
+    background_audio_path = (
+        Path(str(state["background_audio_path"])) if sound_enabled and state.get("background_audio_path") else None
+    )
+    ambience_audio_path = (
+        Path(str(state["ambience_audio_path"])) if sound_enabled and state.get("ambience_audio_path") else None
+    )
+    chapter_bgm_overrides = (
+        state.get("chapter_bgm_overrides")
+        if sound_enabled and isinstance(state.get("chapter_bgm_overrides"), dict) else {}
+    )
+    sound_configuration = {
+        "background_audio_mode": background_audio_mode,
+        "background_audio_enabled": sound_enabled,
+        "fixed_cues_enabled": bool(chapter_transition_sound),
+        "effective_cue_slots": {
+            "opening": bool(opening_cue_path),
+            "chapter": bool(page_turn_cue_path),
+            "closing": bool(ending_cue_path),
+        },
+    }
     try:
         from app.audio.assembler import assemble_m4b, _duration_ms
 
@@ -135,26 +169,25 @@ def _render_full_book_preview(host, job_id, project, chapter_dirs, chapter_title
             staged_dirs, output, title, author, cover, chapter_titles,
             metadata=metadata, progress=report, bitrate=bitrate,
             narration_speed=float(state.get("narration_speed") if state.get("narration_speed") is not None else 0.90),
-            background_audio_path=Path(str(state["background_audio_path"])) if state.get("background_audio_path") else None,
+            background_audio_path=background_audio_path,
             background_audio_volume=float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18),
             narration_volume=float(state.get("narration_audio_volume") if state.get("narration_audio_volume") is not None else 1.0),
             cue_audio_volume=float(state.get("sound_cue_volume") if state.get("sound_cue_volume") is not None else 0.25),
             background_audio_fade_in=float(state.get("background_audio_fade_in") if state.get("background_audio_fade_in") is not None else 2.0),
             background_audio_fade_out=float(state.get("background_audio_fade_out") if state.get("background_audio_fade_out") is not None else 3.0),
-            ambience_audio_path=Path(str(state["ambience_audio_path"])) if state.get("ambience_audio_path") else None,
+            ambience_audio_path=ambience_audio_path,
             ambience_audio_volume=float(state.get("ambience_audio_volume") if state.get("ambience_audio_volume") is not None else 0.10),
             background_audio_mode=background_audio_mode,
             auto_music_style=str(state.get("auto_music_style") or "auto"),
-            auto_music_variation=state.get("auto_music_track_path") or None,
-            chapter_transition_sound=bool(state.get("chapter_transition_sound", False)),
+            auto_music_variation=(state.get("auto_music_track_path") or None) if sound_enabled else None,
+            chapter_transition_sound=chapter_transition_sound,
             story_effects_enabled=bool(state.get("story_effects_enabled", False)),
             story_effect_volume=float(state.get("story_effect_volume") if state.get("story_effect_volume") is not None else 0.22),
             sound_cue_style=str(state.get("sound_cue_style") or "classic-book"),
-            opening_cue_path=Path(str(state["opening_cue_path"])) if state.get("opening_cue_path") else None,
-            page_turn_cue_path=Path(str(state["page_turn_cue_path"])) if state.get("page_turn_cue_path") else None,
-            ending_cue_path=Path(str(state["ending_cue_path"])) if state.get("ending_cue_path") else None,
-            chapter_bgm_overrides=state.get("chapter_bgm_overrides")
-                if isinstance(state.get("chapter_bgm_overrides"), dict) else {},
+            opening_cue_path=opening_cue_path,
+            page_turn_cue_path=page_turn_cue_path,
+            ending_cue_path=ending_cue_path,
+            chapter_bgm_overrides=chapter_bgm_overrides,
             chapter_bgm_strategy=str(state.get("chapter_bgm_strategy") or ("custom" if state.get("chapter_bgm_overrides") else "same")),
             )
         check_cancelled()
@@ -167,7 +200,8 @@ def _render_full_book_preview(host, job_id, project, chapter_dirs, chapter_title
             output_path=str(output_path),
             result={"output_path": str(output_path), "file_url": output_path.resolve().as_uri(),
                     "duration_seconds": round(duration_ms / 1000.0, 3),
-                    "chapter_count": len(chapter_dirs), "reuses_saved_narration": True},
+                    "chapter_count": len(chapter_dirs), "reuses_saved_narration": True,
+                    "sound_configuration": sound_configuration},
             recoverable=False,
         )
     except Exception as exc:

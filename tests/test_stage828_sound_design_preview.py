@@ -587,5 +587,70 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
 
 
 
+    def test_full_book_voice_only_strips_saved_sound_assets_before_mixer(self):
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.ui import full_book_preview
+
+        class Host:
+            def __init__(self):
+                self.updates = []
+
+            def _job_update(self, job_id, **changes):
+                self.updates.append((job_id, changes))
+
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "voice-only.m4b"
+            host = Host()
+            captured = {}
+
+            def render(*args, **kwargs):
+                captured.update(kwargs)
+                target = Path(args[1])
+                target.write_bytes(b"validated voice-only preview")
+                return target
+
+            state = {
+                "background_audio_mode": "off",
+                "background_audio_enabled": False,
+                "background_audio_path": str(root / "inactive-book-bgm.wav"),
+                "ambience_audio_path": str(root / "inactive-ambience.wav"),
+                "chapter_bgm_strategy": "custom",
+                "chapter_bgm_overrides": {
+                    "1": {"rule": "custom", "path": str(root / "inactive-chapter-bgm.wav")}
+                },
+                "chapter_transition_sound": True,
+                "opening_cue_path": str(root / "inactive-opening.wav"),
+                "page_turn_cue_path": str(root / "inactive-next-chapter.wav"),
+                "ending_cue_path": str(root / "inactive-closing.wav"),
+            }
+
+            with patch("app.audio.assembler.assemble_m4b", side_effect=render), \\
+                 patch("app.audio.assembler._duration_ms", return_value=12_345):
+                full_book_preview._render_full_book_preview(
+                    host, "voice-only-job", object(), [], [], output,
+                    "Title", "", {}, 256, state,
+                )
+
+            self.assertEqual(captured["background_audio_mode"], "off")
+            self.assertIsNone(captured["background_audio_path"])
+            self.assertIsNone(captured["ambience_audio_path"])
+            self.assertFalse(captured["chapter_transition_sound"])
+            self.assertIsNone(captured["opening_cue_path"])
+            self.assertIsNone(captured["page_turn_cue_path"])
+            self.assertIsNone(captured["ending_cue_path"])
+            self.assertEqual(captured["chapter_bgm_overrides"], {})
+            result = host.updates[-1][1]["result"]
+            self.assertEqual(result["sound_configuration"], {
+                "background_audio_mode": "off",
+                "background_audio_enabled": False,
+                "fixed_cues_enabled": False,
+                "effective_cue_slots": {
+                    "opening": False, "chapter": False, "closing": False,
+                },
+            })
+
+
 if __name__ == "__main__":
     unittest.main()

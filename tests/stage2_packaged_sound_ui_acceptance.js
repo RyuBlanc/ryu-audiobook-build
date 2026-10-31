@@ -1032,7 +1032,7 @@
         label + " did not create a measurable full-book audio file.");
       const audio = latestAcceptanceAudio();
       if (audio && !audio.paused) audio.pause();
-      return {duration, output_path:result.output_path || completed.output_path};
+      return {duration, output_path:result.output_path || completed.output_path, sound_configuration:result.sound_configuration || {}};
     }
 
     document.querySelector('#sound [data-bgm-strategy="same"]').click();
@@ -1042,6 +1042,11 @@
     }, 15000);
     const samePreview = await renderFullBookPreview("Same BGM preview");
     must(samePreview.duration >= 45, "Same BGM preview omitted the saved cue sequence.");
+    must(samePreview.sound_configuration.background_audio_mode === "manual" &&
+      samePreview.sound_configuration.fixed_cues_enabled === true &&
+      Object.values(samePreview.sound_configuration.effective_cue_slots || {}).every(Boolean),
+      "Same BGM preview did not pass all saved fixed cue slots to the mixer: " +
+      JSON.stringify(samePreview.sound_configuration));
     document.querySelector('#sound [data-bgm-strategy="custom"]').click();
     await waitFor("Chapter-Based restored for full preview", async function () {
       const state = await invoke("sound.chapter_bgm.get", {});
@@ -1053,6 +1058,11 @@
     must(chapterPreview.duration >= 45 &&
       Math.abs(chapterPreview.duration - samePreview.duration) <= 2.0,
       "Chapter-Based preview did not preserve the same narration/cue duration as Same BGM.");
+    must(chapterPreview.sound_configuration.background_audio_mode === "manual" &&
+      chapterPreview.sound_configuration.fixed_cues_enabled === true &&
+      Object.values(chapterPreview.sound_configuration.effective_cue_slots || {}).every(Boolean),
+      "Chapter-Based preview did not pass all saved fixed cue slots to the mixer: " +
+      JSON.stringify(chapterPreview.sound_configuration));
     record("same_and_chapter_based_real_full_book_preview", true,
       "Both strategies rendered real full-book M4B previews from saved narration using the shared FFmpeg mixer.");
 
@@ -1064,10 +1074,22 @@
       return state.bgm_enabled === false && state.background_audio_mode === "off";
     }, 15000);
     const voiceOnlyPreview = await renderFullBookPreview("Voice Only preview");
-    must(chapterPreview.duration - voiceOnlyPreview.duration >= 12,
-      "Voice Only did not remove the saved Opening/Next Chapter/Closing cue audio from the preview timeline.");
+    const voiceOnlyConfig = voiceOnlyPreview.sound_configuration || {};
+    must(voiceOnlyConfig.background_audio_mode === "off" &&
+      voiceOnlyConfig.background_audio_enabled === false &&
+      voiceOnlyConfig.fixed_cues_enabled === false &&
+      Object.values(voiceOnlyConfig.effective_cue_slots || {}).every(value => value === false),
+      "Voice Only preview passed saved BGM/cues to the mixer: " + JSON.stringify(voiceOnlyConfig));
+    const removedCueSeconds = chapterPreview.duration - voiceOnlyPreview.duration;
+    must(removedCueSeconds >= 11.5,
+      "Voice Only duration did not remove the three saved fixed cue slots within 0.5s AAC tolerance: " +
+      "chapterPreview=" + chapterPreview.duration.toFixed(3) + "s; " +
+      "voiceOnlyPreview=" + voiceOnlyPreview.duration.toFixed(3) + "s; " +
+      "removed=" + removedCueSeconds.toFixed(3) + "s; " +
+      "configuration=" + JSON.stringify(voiceOnlyConfig));
     record("voice_only_removes_bgm_and_cues_from_real_preview", true,
-      "Voice Only rendered the same saved narration with BGM and all fixed cues excluded.");
+      "Voice Only excluded all saved fixed cues; measured timeline reduction was " +
+      removedCueSeconds.toFixed(3) + "s.");
 
     document.querySelector('#sound [data-bgm-enabled="true"]').click();
     await waitFor("Use BGM restored", async function () {
