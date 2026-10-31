@@ -1120,7 +1120,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("renderCharacterStudioLive();", block)
         self.assertNotIn("list.dataset.characterListSignature !== signature", block)
         self.assertIn("function renderCharacterStudioLive()", adapter)
-        self.assertIn("No Characters Found", adapter)
+        self.assertIn("No Assigned Cast yet", adapter)
         self.assertIn("character.dialogue.suggestions.list", adapter)
 
     def test_chapter_switch_flushes_debounced_draft_before_changing_selection(self):
