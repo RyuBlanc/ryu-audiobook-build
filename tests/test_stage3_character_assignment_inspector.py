@@ -344,6 +344,24 @@ class CharacterDialoguePreviewBridgeTests(unittest.TestCase):
                 thread.assert_not_called()
 
 
+class CharacterAssignmentLiveRefreshContractTests(unittest.TestCase):
+    def test_saved_dialogue_assignment_and_unassignment_refresh_the_assigned_cast(self):
+        adapter = (Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        for command in ("chapter.dialogue.assign", "chapter.dialogue.unassign"):
+            offset = 0
+            matches = 0
+            while True:
+                position = adapter.find("call('" + command + "'", offset)
+                if position < 0:
+                    break
+                matches += 1
+                tail = adapter[position:position + 1800]
+                self.assertIn("await refreshChapters();", tail, command + " must refresh chapter data after saving")
+                self.assertIn("await refreshCharacters();", tail, command + " must refresh Assigned Cast after saving")
+                offset = position + len(command) + 8
+            self.assertGreater(matches, 0, "Expected a Premium V2 UI path for " + command)
+
+
 
 if __name__ == "__main__":
     unittest.main()

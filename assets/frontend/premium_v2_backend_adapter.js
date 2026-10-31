@@ -2033,6 +2033,7 @@
           window.ryuPremiumPendingDialogueEnd = null;
           window.ryuPremiumPendingDialogueId = null;
           await refreshChapters();
+          await refreshCharacters();
           message('Removed the saved speaker assignment for Chapter ' + result.chapter_number + '.');
         })().catch(err => message(err?.message || String(err), true));
         return;
@@ -2053,6 +2054,7 @@
           window.ryuPremiumPendingDialogueEnd = null;
           window.ryuPremiumPendingDialogueId = null;
           await refreshChapters();
+          await refreshCharacters();
           message('Saved speaker assignment for Chapter ' + result.chapter_number + '.');
         })().catch(err => message(err?.message || String(err), true));
         return;
@@ -2180,6 +2182,7 @@
           window.ryuPremiumPendingDialogueText = '';
           window.ryuPremiumPendingDialogueChapter = null;
           await refreshChapters();
+          await refreshCharacters();
           message('Saved speaker assignment for Chapter ' + result.chapter_number + '.');
         });
         return;
