@@ -221,6 +221,7 @@ class VoiceProfileRenameTests(unittest.TestCase):
                 bridge._voice_save({
                     "name": "Old Voice", "provider": "piper",
                     "voice_id": "old-voice-id", "backend": "old-backend",
+                    "sample_path": str(sample),
                 })
                 result = bridge._voice_save({
                     "name": "Renamed Voice", "original_name": "Old Voice",
