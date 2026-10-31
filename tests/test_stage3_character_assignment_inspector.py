@@ -205,7 +205,8 @@ class CharacterAssignmentBridgeProjectIsolationTests(unittest.TestCase):
 class CharacterAssignmentFrontendContractTests(unittest.TestCase):
     def test_preview_profile_is_not_persisted_until_character_save(self):
         adapter = (Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
-        self.assertIn("selectedAssignedPreviewProfile=$('assignedPreviewProfile').value || null", adapter)
+        self.assertIn("const next=$('assignedPreviewProfile').value || null", adapter)
+        self.assertIn("selectedAssignedPreviewProfile=next", adapter)
         self.assertNotIn(
             "editCharacterVoice').onchange=act(async()=>{if(!window.ryuPremiumSelectedCharacter)return;await call('character.assign'",
             adapter,
@@ -230,7 +231,7 @@ class CharacterDialoguePreviewBridgeTests(unittest.TestCase):
             return self.project
 
         def _find_profile(self, name):
-            return self.profile if name == self.profile["name"] else None
+            return self.profile if name == self.profile.name else None
 
         def _new_job(self, *args):
             self.started_job = args
@@ -277,7 +278,7 @@ class CharacterDialoguePreviewBridgeTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp:
             project, dialogue, start = self._fixture(Path(temp))
-            selected_profile = {"name": "Preview Only Voice"}
+            selected_profile = type("VoiceProfileStub", (), {"name": "Preview Only Voice"})()
             bridge = self.BridgeHarness(project, selected_profile)
             thread_data = {}
 
