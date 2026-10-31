@@ -20,6 +20,8 @@ class Stage3NarratorSegmentationContracts(unittest.TestCase):
             "function characterNarrationSegmentsForChapter(chapter)",
             "Narrator · Auto",
             "Needs speaker",
+            "kind === 'needs_speaker_review'",
+            "review-' + Number(chapter.number)",
             "ryu-narrator-passage",
         ):
             self.assertIn(token, adapter)

@@ -62,7 +62,18 @@ class NarratorSegmentationTests(unittest.TestCase):
         self.assertEqual([row.kind for row in rows], [
             "narration", "needs_speaker_review", "narration"
         ])
-        self.assertEqual(next(row for row in rows if row.kind == "needs_speaker_review").text, "—Leave now!")
+        self.assertEqual([row.text for row in rows], [
+            "He turned toward the door.", "—Leave now!", "The room became quiet."
+        ])
+
+    def test_single_newline_and_whitespace_around_quotes_preserve_adjacent_narration(self):
+        text = "The hallway was empty.\n  “Come back!”\nShe waited by the door."
+        rows = segment_chapter_speakers(Chapter(4, "Four", text))
+        self.assertEqual([row.kind for row in rows], [
+            "narration", "needs_speaker_review", "narration"
+        ])
+        self.assertEqual(rows[0].text, "The hallway was empty.")
+        self.assertEqual(rows[2].text, "She waited by the door.")
 
     def test_smart_single_and_japanese_quote_spans_require_speaker_review(self):
         text = "She hesitated. ‘I understand.’ 彼女は「わかった」と答えた。 Then she left."

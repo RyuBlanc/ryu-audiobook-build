@@ -2506,7 +2506,33 @@
         suggestions:suggestions.length ? suggestions : fallback
       });
     }
-    return result;
+    // Include all unresolved source spans from the authoritative segmentation
+    // feed, even when the browser's simple quote pattern does not recognize
+    // dash-style or smart-single-quoted dialogue.
+    const reviewSegments = characterNarrationSegments.filter(row =>
+      Number(row.chapter_number) === Number(chapter.number) && row.kind === 'needs_speaker_review'
+    );
+    for (const segment of reviewSegments) {
+      const start = Number(segment.start), end = Number(segment.end);
+      if (!Number.isInteger(start) || !Number.isInteger(end) ||
+          start < 0 || end <= start || end > source.length) continue;
+      const exact = source.slice(start, end);
+      if (!exact || exact !== String(segment.text || '')) continue;
+      const existing = result.find(row => Number(row.start) === start && Number(row.end) === end);
+      if (existing) {
+        existing.needsReview = true;
+        continue;
+      }
+      result.push({
+        id:'review-' + Number(chapter.number) + '-' + start + '-' + end,
+        chapter_number:Number(chapter.number), chapter_title:String(chapter.title || ''),
+        start, end, source_text:exact, text:exact, suggestions:[],
+        suggested_speaker:'', confidence:0, skipped:false, assignmentSeries:'',
+        source:'source-segmentation-review', speakers:[], assigned:false,
+        assignmentPresent:false, assignmentSource:'', needsReview:true
+      });
+    }
+    return result.sort((a,b) => Number(a.start) - Number(b.start) || Number(b.end) - Number(a.end));
   }
   async function refreshCharacterDialogueSuggestions() {
     const token = ++characterSuggestionsEpoch;

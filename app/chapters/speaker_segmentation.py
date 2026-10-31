@@ -119,10 +119,15 @@ def _merge_dialogue_blocks(blocks: list[_SourceBlock]) -> list[tuple[int, int, t
 def _narration_gaps(text: str, start: int, end: int, chapter_number: int) -> list[SpeakerSegment]:
     """Split non-dialogue gaps into paragraph-sized, exact source passages."""
     fragment = text[start:end]
+    # Trim whitespace at the boundary created by a neighbouring dialogue line.
+    # A single line break before/after a quote is not a blank paragraph, but it
+    # must not cause the adjacent narration to disappear from the segment map.
+    leading_trim = len(fragment) - len(fragment.lstrip())
+    fragment = fragment.strip()
     results: list[SpeakerSegment] = []
     for match in re.finditer(r"\S(?:.*?\S)?(?=(?:\r?\n[ \t]*\r?\n)|\Z)", fragment, flags=re.S):
         local_start, local_end = match.span()
-        absolute_start, absolute_end = start + local_start, start + local_end
+        absolute_start, absolute_end = start + leading_trim + local_start, start + leading_trim + local_end
         if absolute_end <= absolute_start:
             continue
         exact = text[absolute_start:absolute_end]
