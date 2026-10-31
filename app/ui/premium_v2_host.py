@@ -1085,7 +1085,37 @@ class PremiumV2Bridge(QObject):
         mode = str(payload.get("mode") or "single").strip().lower()
         if mode not in {"single", "chorus", "alternating"}:
             raise ValueError("Assignment mode must be single, chorus, or alternating.")
+        assignment_source = "manual"
+        requested_source = str(payload.get("source") or "").strip().casefold()
         has_offsets = "start" in payload or "end" in payload
+        if has_offsets and requested_source in {"ai", "local-dialogue-analysis"}:
+            try:
+                source_number = int(payload.get("chapter_number"))
+                source_start = int(payload.get("start"))
+                source_end = int(payload.get("end"))
+            except (TypeError, ValueError):
+                raise ValueError("An AI-origin assignment requires a valid source chapter and exact offsets.")
+            source_chapter = next((item for item in project.chapters if item.number == source_number), None)
+            if source_chapter is None or source_start < 0 or source_end <= source_start or source_end > len(source_chapter.text or ""):
+                raise ValueError("The AI suggestion no longer matches an available source passage.")
+            exact_source = str(source_chapter.text or "")[source_start:source_end]
+            suggestion_rows = project_state_suggestions = state.get("character_dialogue_suggestions") or []
+            if not isinstance(suggestion_rows, list):
+                suggestion_rows = []
+            grounded = next((row for row in suggestion_rows
+                if isinstance(row, dict)
+                and str(row.get("source") or "") == "local-dialogue-analysis"
+                and str(row.get("suggested_speaker") or "").strip().casefold() == speakers[0].casefold()
+                and len(speakers) == 1
+                and str(row.get("id") or "") == f"dialogue-{source_number}-{source_start}-{source_end}"
+                and int(row.get("chapter_number") or -1) == source_number
+                and int(row.get("start") or -1) == source_start
+                and int(row.get("end") or -1) == source_end
+                and str(row.get("source_text") or "") == exact_source
+                and exact_source == dialogue_text), None)
+            if grounded is None:
+                raise ValueError("This speaker was not the source-grounded AI suggestion for the selected passage. Save it as a manual assignment instead.")
+            assignment_source = "local-dialogue-analysis"
         if has_offsets:
             try:
                 start = int(payload.get("start"))
@@ -1111,18 +1141,21 @@ class PremiumV2Bridge(QObject):
             base = next((dict(item) for item in existing if isinstance(item, dict)
                          and item.get("start") == start and item.get("end") == end),
                         {"start": start, "end": end, "text": exact_text, "source": "manual"})
-            base.update({"start": start, "end": end, "text": exact_text, "source": "manual"})
+            base.update({"start": start, "end": end, "text": exact_text, "source": assignment_source})
             normalized = normalize_assignment(base, speakers, mode)
             assignment_series = requested_series or default_series
-            normalized.update({"source": "manual", "confidence": 1.0, "series": assignment_series})
+            normalized.update({"source": assignment_source,
+                               "confidence": 1.0 if assignment_source == "manual" else float(grounded.get("confidence") or 0.0),
+                               "series": assignment_series})
             chapter.dialogue_assignments = [
                 item for item in existing if not (isinstance(item, dict)
                     and item.get("start") == start and item.get("end") == end)
             ] + [normalized]
             chapter.dialogue_assignments.sort(key=lambda item: (int(item.get("start", 0)), int(item.get("end", 0))))
             result = {"chapter_number": chapter.number, "start": start, "end": end,
-                      "text": exact_text, "speakers": speakers, "source": "manual",
-                      "confidence": 1.0, "series": assignment_series, "saved": True}
+                      "text": exact_text, "speakers": speakers, "source": assignment_source,
+                      "confidence": float(normalized.get("confidence") or 0.0),
+                      "series": assignment_series, "saved": True}
         else:
             result = assign_dialogue_to_chapters(project.chapters, dialogue_text, speakers,
                                                  chapter_number=chapter_number, mode=mode)
