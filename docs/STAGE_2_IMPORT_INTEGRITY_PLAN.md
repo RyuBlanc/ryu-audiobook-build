@@ -24,7 +24,7 @@
 - [ ] Keep re-detection disabled unless it can show a before/after review and protect manual edits.
 
 ### 2.4 Automated and Windows acceptance
-- [ ] Run the complete unittest regression suite and Windows package/installer pipeline on the latest branch head; Run #871 passed before the newest persistence/failure-path fixtures.
+- [x] Run the complete unittest regression suite and Windows package/installer pipeline on the final Stage 2 branch head; Run #877 passed on commit `05e03c14637bb4ff3fe8514a50101ebde0d2ab4b`.
 - [ ] Inspect failures and fix them before merging.
 - [ ] On a target Windows install, import one fixture in each supported format, edit and save chapters, restart/reopen, and compare text and chapter counts.
 - [ ] Record any Windows-only acceptance that cannot be performed in cloud CI as an explicit release gate.
@@ -37,7 +37,7 @@
 
 ## Current status after Run #871
 
-Run #871 passed on commit `3607554656b8217a9bf37a39d32d35cc88c9e61c`. Additional regression coverage was then added for edited/reordered chapter persistence, invalid-source rejection, and repeated boilerplate cleanup; these newer commits must pass the next Windows workflow before they can be counted as verified. Stage 2 is not yet declared complete until that run passes and the packaged-Windows acceptance gate below is either performed or explicitly recorded as outstanding.
+Run #877 passed on final Stage 2 commit `05e03c14637bb4ff3fe8514a50101ebde0d2ab4b`, including added coverage for edited/reordered chapter persistence, invalid-source rejection, and repeated boilerplate cleanup. PR #17 was merged as `9aa1ba5cc9be0808d596c1e2c0618584433c9917`. Automated implementation and package gates passed; packaged-Windows acceptance remains explicitly outstanding.
 
 ## Known limitations / risk boundaries
 

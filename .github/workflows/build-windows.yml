@@ -9,17 +9,18 @@ on:
       - fix/import-qa-speaker-hover-hardware
       - fix/stage-1-generation-stability
       - stage-2/import-integrity
+      - stage-3/voice-studio-character-assignment
   workflow_dispatch:
 
-# Build artifacts are produced and verified on every main build.
+# Every push runs regression tests; package/artifact gates require an explicit [artifact-checkpoint] commit.
 
 permissions:
   contents: write
   actions: write
 
 concurrency:
-  group: ryu-audiobook-windows-build
-  cancel-in-progress: true
+  group: ryu-audiobook-windows-build-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -38,6 +39,7 @@ jobs:
         shell: pwsh
         env:
           RYU_BUILD_NUMBER: ${{ github.run_number }}
+          RYU_BUILD_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           $ErrorActionPreference = 'Stop'
           $env:PYTHONDONTWRITEBYTECODE = '1'
@@ -76,6 +78,13 @@ jobs:
           $env:PYTHONDONTWRITEBYTECODE = '1'
           & $pythonExe -B -m unittest discover -s tests -v
           if ($LASTEXITCODE -ne 0) { throw "Regression tests failed with exit code $LASTEXITCODE." }
+
+          # Ordinary fix commits run the full test suite only. Packaging and
+          # artifact creation require an explicit [artifact-checkpoint] commit.
+          if ($env:RYU_BUILD_MESSAGE -notmatch '\[artifact-checkpoint\]') {
+            Write-Host 'Test-only run passed; checkpoint marker absent, so packaging and artifact creation are skipped.'
+            exit 0
+          }
 
           Write-Host '=== Verify pinned Chatterbox Nano source ==='
           $source = Get-Content 'app\tts\chatterbox_runtime.py' -Raw
@@ -377,6 +386,7 @@ jobs:
           & $venvPython -c "import importlib.metadata as md; assert md.version('qwen-tts') == '0.1.1'; print('qwen_tts wheel bootstrap OK')"
 
       - name: Verify frozen application
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -412,6 +422,7 @@ jobs:
           }
 
       - name: Verify bundled voice assets and critical modules
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -460,12 +471,14 @@ jobs:
           Write-Host 'Critical application modules were already exercised by the frozen EXE self-test.'
 
       - name: Install Inno Setup
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         shell: pwsh
         run: |
           choco install innosetup -y --no-progress
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed with exit code $LASTEXITCODE." }
 
       - name: Build installer
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -483,15 +496,19 @@ jobs:
           Write-Host "Installer created: $installer"
 
       - name: Verify original logo transparency and generate release hashes
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           Add-Type -AssemblyName System.Drawing
           $png = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.png'
           $ico = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.ico'
+          $panel = Join-Path (Get-Location) 'assets\installer_brand_panel.png'
+          $logoBmp = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.bmp'
+          $panelBmp = Join-Path (Get-Location) 'assets\installer_brand_panel.bmp'
           $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
           $exe = Join-Path (Get-Location) "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
-          foreach ($path in @($png, $ico, $installer, $exe)) {
+          foreach ($path in @($png, $ico, $panel, $logoBmp, $panelBmp, $installer, $exe)) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required release asset missing: $path" }
           }
           $bitmap = [System.Drawing.Bitmap]::FromFile($png)
@@ -511,10 +528,26 @@ jobs:
           } finally {
             $bitmap.Dispose()
           }
+          $panelBitmap = [System.Drawing.Bitmap]::FromFile($panel)
+          try {
+            if ($panelBitmap.Width -ne 656 -or $panelBitmap.Height -ne 1256) { throw "Installer brand panel has unexpected dimensions: $($panelBitmap.Width)x$($panelBitmap.Height)" }
+            if ($panelBitmap.GetPixel(0,0).A -ne 0 -or $panelBitmap.GetPixel($panelBitmap.Width-1,0).A -ne 0 -or $panelBitmap.GetPixel(0,$panelBitmap.Height-1).A -ne 0 -or $panelBitmap.GetPixel($panelBitmap.Width-1,$panelBitmap.Height-1).A -ne 0) { throw 'Installer brand panel outer corners must remain transparent.' }
+            Write-Host 'Installer brand panel dimensions and transparent corners verified.'
+          } finally { $panelBitmap.Dispose() }
+          foreach ($bitmapPath in @($logoBmp, $panelBmp)) {
+            $bitmap = [System.Drawing.Bitmap]::FromFile($bitmapPath)
+            try {
+              if ($bitmap.PixelFormat.ToString() -notmatch 'Rgb') { throw "Installer bitmap must be RGB: $bitmapPath" }
+              $pixel = $bitmap.GetPixel(0,0)
+              if ($pixel.R -ne 5 -or $pixel.G -ne 6 -or $pixel.B -ne 10) { throw "Installer bitmap background must match #05060A: $bitmapPath" }
+              if ($bitmapPath -eq $panelBmp -and ($bitmap.Width -ne 656 -or $bitmap.Height -ne 1256)) { throw "Installer panel BMP dimensions are wrong: $($bitmap.Width)x$($bitmap.Height)" }
+            } finally { $bitmap.Dispose() }
+          }
+          Write-Host 'Installer BMP dimensions and dark-background blending verified.'
           if ((Get-Item -LiteralPath $ico).Length -lt 1024) { throw 'Generated Windows ICO is unexpectedly small.' }
           Write-Host "Generated Windows ICO exists and is non-trivial in size: $((Get-Item -LiteralPath $ico).Length) bytes."
           $manifest = @()
-          foreach ($path in @($installer, $exe, $png, $ico)) {
+          foreach ($path in @($installer, $exe, $png, $ico, $panel, $logoBmp, $panelBmp)) {
             $hash = Get-FileHash -LiteralPath $path -Algorithm SHA256
             $manifest += [pscustomobject]@{
               file = [System.IO.Path]::GetRelativePath((Get-Location).Path, $path)
@@ -527,6 +560,7 @@ jobs:
           if (-not (Test-Path -LiteralPath 'release-sha256-manifest.json' -PathType Leaf)) { throw 'Release SHA-256 manifest was not created.' }
 
       - name: Scan release executables with Microsoft Defender
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -556,56 +590,43 @@ jobs:
           Write-Host 'Microsoft Defender returned clean scan results for both release executables.'
 
       - name: Upload Windows installer artifact
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Installer-${{ github.run_number }}
           path: installer/installer-output/Ryu's Audiobook Setup.exe
           if-no-files-found: error
           compression-level: 0
-          retention-days: 30
+          retention-days: 90
 
       - name: Upload release SHA-256 manifest
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Release-SHA256-${{ github.run_number }}
           path: release-sha256-manifest.json
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 90
 
       - name: Upload portable Windows application
+        if: contains(github.event.head_commit.message, '[artifact-checkpoint]')
         uses: actions/upload-artifact@v4
         with:
           name: Ryu-Audiobook-Portable-${{ github.run_number }}
           path: dist/Ryu's Audiobook/
           if-no-files-found: error
           compression-level: 0
-          retention-days: 30
+          retention-days: 90
 
-      - name: Remove older Windows build runs and artifacts
-        if: success()
+      - name: Preserve regression evidence and checkpoint artifacts
+        if: success() && contains(github.event.head_commit.message, '[artifact-checkpoint]')
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          CURRENT_RUN_ID: ${{ github.run_id }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $runs = gh api --paginate "/repos/$env:REPOSITORY/actions/runs?per_page=100" --jq '.workflow_runs[] | select(.name == "Build Windows App") | [.id,.status,.created_at] | @tsv'
-          foreach ($line in $runs) {
-            if ([string]::IsNullOrWhiteSpace($line)) { continue }
-            $parts = $line -split "	"
-            $runId = $parts[0]
-            $status = $parts[1]
-            if ($runId -eq $env:CURRENT_RUN_ID) { continue }
-            if ($status -in @('in_progress','queued','waiting','requested','pending')) { continue }
-            Write-Host "Removing old Windows build run $runId ($status) and its artifact."
-            gh api --method DELETE "/repos/$env:REPOSITORY/actions/runs/$runId" | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "Could not remove old workflow run $runId." }
-          }
-          Write-Host "Only the newly uploaded Windows build is retained."
+          Write-Host 'Retention guard active: this build does not delete any prior workflow runs or artifacts.'
+          Write-Host 'Preserve focused substage tests, full regression evidence, and prior checkpoint packages for review.'
 
       - name: Publish verified installer release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[artifact-checkpoint]')
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}

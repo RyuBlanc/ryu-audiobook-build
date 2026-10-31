@@ -269,6 +269,10 @@ class VoicePage(QWidget):
         self.last_preview: Path | None = None
         self.last_preview_elapsed_seconds: float | None = None
         self.preview_worker: VoicePreviewWorker | None = None
+        # Every preview worker is tied to the exact UI profile/settings snapshot
+        # and generation that created it. Late signals must not revive stale audio.
+        self._preview_generation = 0
+        self._preview_worker_contexts: dict[int, tuple[VoicePreviewWorker, int, tuple | None]] = {}
         self.character_worker: PremiumCharacterVoiceWorker | None = None
         self.character_previews: list[dict] = []
         self.edge_voices: list[dict] = []
@@ -965,6 +969,9 @@ class VoicePage(QWidget):
             return
         self._invalidating_preview = True
         try:
+            # Invalidate all callbacks from an in-flight worker before asking it
+            # to cancel; cancellation and completion may race on the Qt thread.
+            self._preview_generation = int(getattr(self, "_preview_generation", 0)) + 1
             worker = getattr(self, "preview_worker", None)
             if self._is_live_qt_object(worker) and worker.isRunning():
                 worker.cancel()
@@ -2654,18 +2661,32 @@ class VoicePage(QWidget):
         )
 
         output = Path(tempfile.gettempdir()) / "ryu_audiobook_voice_preview.wav"
+        # Drop any older playable output immediately. A new request is not
+        # assignable until its own result is complete and identity-verified.
+        self.last_preview = None
+        self.last_preview_elapsed_seconds = None
+        self._preview_profile_signature = None
+        self._refresh_assignment_actions()
+
+        self._preview_generation = int(getattr(self, "_preview_generation", 0)) + 1
+        generation = self._preview_generation
+        profile_signature = self._voice_profile_signature(profile)
+
         self.preview_button.setEnabled(False)
         self.play_button.setEnabled(False)
+        if hasattr(self, "save_preview_button"):
+            self.save_preview_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self.preview_activity_bar.setVisible(True)
         self.preview_target_seconds = seconds
-        self.preview_worker = VoicePreviewWorker(preview_profile, text, output, seconds)
-        self.preview_worker.status.connect(self._preview_worker_status)
-        self.preview_worker.progress.connect(self.preview_percent_bar.setValue)
-        self.preview_worker.finished_ok.connect(self._preview_worker_ok)
-        self.preview_worker.failed.connect(self._preview_worker_failed)
-        self.preview_worker.cancelled.connect(self._preview_worker_cancelled)
-        worker = self.preview_worker
+        worker = VoicePreviewWorker(preview_profile, text, output, seconds)
+        self.preview_worker = worker
+        self._preview_worker_contexts[id(worker)] = (worker, generation, profile_signature)
+        worker.status.connect(self._preview_worker_status)
+        worker.progress.connect(self._preview_worker_progress)
+        worker.finished_ok.connect(self._preview_worker_ok)
+        worker.failed.connect(self._preview_worker_failed)
+        worker.cancelled.connect(self._preview_worker_cancelled)
         worker.finished.connect(self._preview_worker_finished)
         worker.start()
         # If the UI remains on "Queued", distinguish a worker that never
@@ -2686,15 +2707,66 @@ class VoicePage(QWidget):
             self.preview_engine_status.setText(message)
             self.status.setText(message)
 
+    def _preview_worker_context(self, worker=None):
+        if worker is None:
+            try:
+                worker = self.sender()
+            except RuntimeError:
+                worker = None
+        if worker is None:
+            return None
+        context = getattr(self, "_preview_worker_contexts", {}).get(id(worker))
+        if not context or context[0] is not worker:
+            return None
+        return context
+
+    def _preview_event_is_current(self, worker=None) -> bool:
+        if worker is None:
+            try:
+                worker = self.sender()
+            except RuntimeError:
+                worker = None
+        if worker is None:
+            # Preserve direct calls used by focused unit tests and diagnostics.
+            return True
+        context = self._preview_worker_context(worker)
+        return bool(
+            context
+            and context[1] == int(getattr(self, "_preview_generation", 0))
+            and getattr(self, "preview_worker", None) is worker
+        )
+
     def _preview_worker_status(self, message: str) -> None:
+        if not self._preview_event_is_current():
+            return
         self.preview_engine_status.setText(message)
         self.status.setText(message)
 
+    def _preview_worker_progress(self, value: int) -> None:
+        if not self._preview_event_is_current():
+            return
+        self.preview_percent_bar.setValue(value)
+
     def _preview_worker_ok(self, path: str, elapsed_seconds: float = 0.0) -> None:
+        worker = self.sender()
+        context = self._preview_worker_context(worker)
+        if worker is not None and not self._preview_event_is_current(worker):
+            return
+
+        active_profile = self._profile_from_ui()
+        active_signature = self._voice_profile_signature(active_profile)
+        captured_signature = context[2] if context is not None else None
+        if context is not None and captured_signature != active_signature:
+            # A profile changed without a corresponding invalidation signal. Do
+            # not relabel this audio as the newly selected voice.
+            self._invalidate_preview()
+            return
+
         self.last_preview = Path(path)
         self.last_preview_elapsed_seconds = max(0.0, float(elapsed_seconds))
-        active_profile = self._profile_from_ui()
-        self._preview_profile_signature = self._voice_profile_signature(active_profile)
+        self._preview_profile_signature = (
+            captured_signature if captured_signature is not None else active_signature
+        )
         self._refresh_assignment_actions()
         self.player.stop()
         self.player.setSource(QUrl.fromLocalFile(path))
@@ -2733,29 +2805,46 @@ class VoicePage(QWidget):
         )
 
     def _preview_worker_failed(self, message: str) -> None:
+        if not self._preview_event_is_current():
+            return
         self.preview_percent_bar.setValue(0)
         self.preview_activity_bar.setVisible(False)
         self.preview_engine_status.setText(f"0% • Preview failed • {message}")
         self.status.setText(f"Preview failed: {message}")
-        self.preview_button.setEnabled(True)
         self.play_button.setEnabled(False)
         if hasattr(self, "save_preview_button"):
             self.save_preview_button.setEnabled(False)
         QMessageBox.warning(self, "Voice Preview Failed", message)
 
     def _preview_worker_cancelled(self) -> None:
+        if not self._preview_event_is_current():
+            return
         self.preview_percent_bar.setValue(0)
         self.preview_activity_bar.setVisible(False)
         self.preview_engine_status.setText("0% • Preview cancelled")
         self.status.setText("Voice preview cancelled.")
-        self.preview_button.setEnabled(True)
         self.play_button.setEnabled(False)
         if hasattr(self, "save_preview_button"):
             self.save_preview_button.setEnabled(False)
 
     def _preview_worker_finished(self) -> None:
-        self.preview_button.setEnabled(True)
-        self.preview_worker = None
+        try:
+            worker = self.sender()
+        except RuntimeError:
+            worker = None
+        if worker is None:
+            worker = self.preview_worker
+
+        if worker is not None:
+            context = getattr(self, "_preview_worker_contexts", {}).get(id(worker))
+            if context and context[0] is worker:
+                self._preview_worker_contexts.pop(id(worker), None)
+
+        # A late finish from an old worker may clean up its own token, but it
+        # must never clear a newer active worker or enable controls prematurely.
+        if self.preview_worker is worker:
+            self.preview_worker = None
+            self.preview_button.setEnabled(True)
 
     def save_profile(self) -> None:
         profile = self._profile_from_ui()

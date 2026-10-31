@@ -476,7 +476,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         for token in (
-            "previewSavedProfile(profile, 'Hello, my name is ' + c.name",
+            "const dialogue = assignedDialogueRows.find(item => item.id === selectedAssignedDialogueId)",
+            "previewCharacterDialogue(profile, c, dialogue)",
+            "call('character.dialogue.preview'",
             "call('character.update'",
             "call('character.delete'",
             "Automatic per-line AI speaker suggestions remain prototype-only",

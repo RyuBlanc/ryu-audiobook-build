@@ -181,7 +181,10 @@ def _detect_first_person_narrator(text: str) -> str | None:
         r"\b(?:I['’]m|I am|this is)\s+([A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30}(?:\s+[A-Z][A-Za-zÀ-ÖØ-öø-ÿ'’-]{2,30})?)\b",
     )
     for pattern in patterns:
-        match = re.search(pattern, text)
+        # Book openings commonly capitalize the first word ("My name is ...").
+        # Treat introductory phrases case-insensitively while still validating
+        # the captured name against the normal stopword/plausibility rules.
+        match = re.search(pattern, text, flags=re.IGNORECASE)
         if match and _is_plausible_name(match.group(1)):
             return _clean_name(match.group(1))
     return None
@@ -522,3 +525,37 @@ def _is_plausible_name(value: str) -> bool:
         or (not token.isascii() and len(token) >= 2)
         for token in (word.strip(".,!?;:") for word in words)
     )
+
+
+def merge_character_analysis_record(candidate: Character, prior: dict | None = None) -> dict:
+    """Refresh analysis evidence while preserving explicitly saved cast metadata.
+
+    Detection-derived dialogue counts, confidence, examples, and role defaults are
+    refreshed. User-maintained aliases, voice selection, descriptions, notes, scope,
+    and chapter appearance metadata survive re-analysis for an exact case-insensitive
+    name match.
+    """
+    prior = prior if isinstance(prior, dict) else {}
+    prior_aliases = prior.get("aliases") or []
+    if isinstance(prior_aliases, str):
+        prior_aliases = [prior_aliases]
+    aliases = list(dict.fromkeys(
+        str(alias).strip()
+        for alias in [*prior_aliases, *(candidate.aliases or [])]
+        if str(alias).strip()
+    ))
+    item = {
+        "name": candidate.name,
+        "role": str(prior.get("role") or candidate.role),
+        "dialogue_count": candidate.dialogue_count,
+        "examples": list(candidate.examples or []),
+        "confidence": float(candidate.confidence),
+        "aliases": aliases,
+        "voice_profile": prior.get("voice_profile"),
+        "chapter_appearances": list(prior.get("chapter_appearances") or []),
+    }
+    for key, limit in (("short_description", 1000), ("notes", 4000), ("scope", 80)):
+        value = prior.get(key)
+        if isinstance(value, str) and value.strip():
+            item[key] = value.strip()[:limit]
+    return item

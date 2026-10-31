@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 import os
+import re
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import PyInstaller.__main__
-from PIL import Image
+from PIL import Image, ImageChops, ImageDraw
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QGuiApplication, QImage, QPainter
 from PySide6.QtSvg import QSvgRenderer
@@ -75,14 +76,18 @@ STARTER_AUDIO = ASSETS / "starter_audio"
 LOGO_SVG = ASSETS / "ryu_audiobook_logo.svg"
 LOGO_PNG = ASSETS / "ryu_audiobook_logo.png"
 LOGO_ICO = ASSETS / "ryu_audiobook_logo.ico"
+LOGO_BMP = ASSETS / "ryu_audiobook_logo.bmp"
+INSTALLER_BRAND_PANEL_BMP = ASSETS / "installer_brand_panel.bmp"
+INSTALLER_BRAND_PANEL_PNG = ASSETS / "installer_brand_panel.png"
 DRAGON_MASTER_PNG = ASSETS / "dragon_four_winged.png"
 DRAGON_CROSS_PNG = ASSETS / "dragon_cross.png"
 DRAGON_CURSOR_PNG = ASSETS / "dragon_cursor.png"
 
 
 def build_logo_assets() -> None:
+    """Generate the application icon and native-resolution installer artwork."""
     ASSETS.mkdir(parents=True, exist_ok=True)
-    if not LOGO_SVG.exists():
+    if not LOGO_SVG.is_file():
         raise RuntimeError(f"Missing application logo source: {LOGO_SVG}")
 
     qt_app = QGuiApplication.instance() or QGuiApplication([])
@@ -90,35 +95,132 @@ def build_logo_assets() -> None:
         renderer = QSvgRenderer(str(LOGO_SVG))
         if not renderer.isValid():
             raise RuntimeError(f"Invalid application logo SVG: {LOGO_SVG}")
+        source_size = renderer.defaultSize()
+        if source_size.width() < 1200 or source_size.height() < 1200:
+            raise RuntimeError(
+                f"Application logo source is unexpectedly small: "
+                f"{source_size.width()}x{source_size.height()}"
+            )
 
-        image = QImage(1024, 1024, QImage.Format_RGBA8888)
+        image = QImage(source_size, QImage.Format_RGBA8888)
         image.fill(Qt.transparent)
         painter = QPainter(image)
         try:
             renderer.render(painter)
         finally:
             painter.end()
-
         if not image.save(str(LOGO_PNG), "PNG"):
             raise RuntimeError(f"Could not render application logo: {LOGO_PNG}")
 
         with Image.open(LOGO_PNG) as source:
-            source.convert("RGBA").save(
+            rgba = source.convert("RGBA")
+
+        # Reapply the SVG's original rounded tile clip so shell icons retain
+        # transparent corners. Application PNG/ICO art remains unflattened.
+        svg_text = LOGO_SVG.read_text(encoding="utf-8")
+        clip_match = re.search(
+            r'<clipPath id="roundedBrandTile">.*?<rect[^>]*rx="([0-9.]+)"[^>]*ry="([0-9.]+)"',
+            svg_text,
+            re.DOTALL,
+        )
+        if not clip_match:
+            raise RuntimeError("Logo SVG is missing its roundedBrandTile clip path.")
+        radius_x, radius_y = float(clip_match.group(1)), float(clip_match.group(2))
+        if abs(radius_x - radius_y) > 0.01:
+            raise RuntimeError("Logo SVG clip path must use equal horizontal and vertical radii.")
+
+        mask_scale = 4
+        mask_large = Image.new("L", (rgba.width * mask_scale, rgba.height * mask_scale), 0)
+        ImageDraw.Draw(mask_large).rounded_rectangle(
+            (0, 0, rgba.width * mask_scale - 1, rgba.height * mask_scale - 1),
+            radius=round(radius_x * mask_scale),
+            fill=255,
+        )
+        clip_mask = mask_large.resize(rgba.size, Image.Resampling.LANCZOS)
+        rgba.putalpha(ImageChops.multiply(rgba.getchannel("A"), clip_mask))
+        rgba.save(LOGO_PNG, format="PNG", optimize=True)
+
+        with Image.open(LOGO_PNG) as logo_source:
+            logo_source.convert("RGBA").save(
                 LOGO_ICO,
                 format="ICO",
                 sizes=[
                     (16, 16), (24, 24), (32, 32), (48, 48),
-                    (64, 64), (128, 128), (256, 256)
+                    (64, 64), (128, 128), (256, 256),
                 ],
             )
-        if LOGO_PNG.stat().st_size < 4096:
-            raise RuntimeError("Generated application PNG is unexpectedly small.")
-        if LOGO_ICO.stat().st_size < 1024:
-            raise RuntimeError("Generated application icon is unexpectedly small.")
 
-        # Use the supplied four-winged dragon artwork, not a replacement SVG.
-        # It is already transparent and cursor-sized; copying it preserves the
-        # silhouette and wing outline without redrawing or cropping it.
+        # Explicit artwork replaces the generic Inno Setup image. Keep the
+        # portrait panel transparent so it blends into the native dark wizard.
+        panel = Image.new("RGBA", (656, 1256), (0, 0, 0, 0))
+        panel_logo = rgba.copy()
+        panel_logo.thumbnail((560, 560), Image.Resampling.LANCZOS)
+        panel.alpha_composite(panel_logo, ((panel.width - panel_logo.width) // 2, 52))
+        draw = ImageDraw.Draw(panel)
+        divider_y = 705
+        draw.line((118, divider_y, 538, divider_y), fill=(214, 176, 106, 190), width=3)
+        draw.polygon(
+            ((328, divider_y - 10), (338, divider_y), (328, divider_y + 10), (318, divider_y)),
+            fill=(255, 240, 185, 235),
+        )
+        panel.save(INSTALLER_BRAND_PANEL_PNG, format="PNG", optimize=True)
+
+        # Inno Setup wizard slots use Windows bitmap assets. Composite only
+        # these installer-specific BMPs onto the exact dark wizard background;
+        # keep the application's PNG and ICO transparent and full resolution.
+        logo_bmp = Image.new("RGB", rgba.size, (5, 6, 10))
+        logo_bmp.paste(rgba, (0, 0), rgba.getchannel("A"))
+        logo_bmp.save(LOGO_BMP, format="BMP")
+
+        panel_bmp = Image.new("RGB", panel.size, (5, 6, 10))
+        panel_bmp.paste(panel, (0, 0), panel.getchannel("A"))
+        panel_bmp.save(INSTALLER_BRAND_PANEL_BMP, format="BMP")
+
+        with Image.open(LOGO_PNG) as logo_check:
+            logo_alpha = logo_check.convert("RGBA").getchannel("A")
+            if logo_check.size != (source_size.width(), source_size.height()):
+                raise RuntimeError(f"Application logo resolution changed: {logo_check.size}")
+            if any(
+                logo_alpha.getpixel(point) != 0
+                for point in ((0, 0), (logo_check.width - 1, 0),
+                              (0, logo_check.height - 1), (logo_check.width - 1, logo_check.height - 1))
+            ):
+                raise RuntimeError("Application logo canvas corners must remain transparent.")
+        with Image.open(LOGO_ICO) as icon_file:
+            required_sizes = {
+                (16, 16), (24, 24), (32, 32), (48, 48),
+                (64, 64), (128, 128), (256, 256),
+            }
+            missing_sizes = required_sizes - icon_file.ico.sizes()
+            if missing_sizes:
+                raise RuntimeError(f"Generated Windows icon is missing sizes: {sorted(missing_sizes)}")
+        with Image.open(INSTALLER_BRAND_PANEL_PNG) as panel_check:
+            panel_alpha = panel_check.getchannel("A")
+            if panel_check.size != (656, 1256) or any(
+                panel_alpha.getpixel(point) != 0
+                for point in ((0, 0), (panel_check.width - 1, 0),
+                              (0, panel_check.height - 1), (panel_check.width - 1, panel_check.height - 1))
+            ):
+                raise RuntimeError("Installer brand panel must keep a transparent full-size canvas.")
+
+        if LOGO_PNG.stat().st_size < 4096 or LOGO_ICO.stat().st_size < 1024:
+            raise RuntimeError("Generated application logo assets are unexpectedly small.")
+        if LOGO_BMP.stat().st_size < 4096:
+            raise RuntimeError("Generated installer logo BMP is unexpectedly small.")
+        if INSTALLER_BRAND_PANEL_PNG.stat().st_size < 4096:
+            raise RuntimeError("Generated installer brand panel PNG is unexpectedly small.")
+        if INSTALLER_BRAND_PANEL_BMP.stat().st_size < 4096:
+            raise RuntimeError("Generated installer brand panel BMP is unexpectedly small.")
+        with Image.open(LOGO_BMP) as logo_bitmap:
+            if logo_bitmap.mode != "RGB" or logo_bitmap.getpixel((0, 0)) != (5, 6, 10):
+                raise RuntimeError("Installer logo BMP must match WizardBackColor.")
+        with Image.open(INSTALLER_BRAND_PANEL_BMP) as panel_bitmap:
+            if panel_bitmap.mode != "RGB" or panel_bitmap.size != (656, 1256):
+                raise RuntimeError("Installer brand panel BMP must be RGB at 656x1256.")
+            if panel_bitmap.getpixel((0, 0)) != (5, 6, 10):
+                raise RuntimeError("Installer brand panel BMP must match WizardBackColor.")
+
+        # Preserve the supplied four-winged dragon artwork used by UI controls.
         if not DRAGON_MASTER_PNG.is_file():
             raise RuntimeError(f"Missing supplied dragon artwork: {DRAGON_MASTER_PNG}")
         for output_png in (DRAGON_CROSS_PNG, DRAGON_CURSOR_PNG):
@@ -132,7 +234,6 @@ def build_logo_assets() -> None:
     finally:
         if QGuiApplication.instance() is qt_app:
             qt_app.quit()
-
 
 build_logo_assets()
 write_installer_version()
