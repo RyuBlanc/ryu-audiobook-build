@@ -2907,7 +2907,7 @@ class PremiumV2Bridge(QObject):
 
         def text_values(value: Any) -> list[str]:
             if isinstance(value, str):
-                values = value.replace("\\n", ",").split(",")
+                values = re.split(r"[,\r\n]+", value)
             elif isinstance(value, (list, tuple, set)):
                 values = list(value)
             else:
@@ -2934,8 +2934,8 @@ class PremiumV2Bridge(QObject):
             series = str(raw.get("series") or "").strip()
             if not series:
                 scope = str(raw.get("scope") or "").strip()
-                if re.match(r"(?i)^series\\s*[·:-]", scope):
-                    series = re.sub(r"(?i)^series\\s*[·:-]\\s*", "", scope).strip()
+                if re.match(r"(?i)^series\s*[·:-]", scope):
+                    series = re.sub(r"(?i)^series\s*[·:-]\s*", "", scope).strip()
             if not series or series.casefold() in {
                 "global character library", "all series", "unassigned series"
             }:
