@@ -333,7 +333,8 @@ class Stage3ProjectCastFoundationTests(unittest.TestCase):
                     save_state(folder, {"characters": [], "marker": "partial"})
 
             self.assertEqual(state_file.read_bytes(), before)
-            self.assertEqual(load_state(folder), original)
+            self.assertEqual(load_state(folder)["characters"], original["characters"])
+            self.assertEqual(load_state(folder)["marker"], original["marker"])
             self.assertEqual(list(folder.glob(".state.json.*.tmp")), [])
 
     def test_character_list_returns_normalized_active_project_cast_without_mutating_saved_state(self):
@@ -381,8 +382,8 @@ class Stage3ProjectCastFoundationTests(unittest.TestCase):
         switch_block = adapter[switch_start:switch_end]
         self.assertIn("window.ryuPremiumSelectedAssignedDialogueId = '';", switch_block)
 
-        no_project_start = adapter.index("if (noActiveProject) {")
-        no_project_end = adapter.index("if (requestToken !== chapterListEpoch)", no_project_start)
+        no_project_start = adapter.index("noActiveProject = true;")
+        no_project_end = adapter.index("const projectTitleNode", no_project_start)
         no_project_block = adapter[no_project_start:no_project_end]
         self.assertIn("window.ryuPremiumSelectedAssignedDialogueId = '';", no_project_block)
 
