@@ -2414,6 +2414,19 @@
   function characterSeries(item) {
     return librarySeriesName(item || {}) || activeCharacterProjectSeries() || 'Unassigned series';
   }
+  function characterRowForName(name, series) {
+    const key = String(name || '').trim().toLowerCase();
+    const seriesKey = String(series || '').trim().toLowerCase();
+    const matches = characters.filter(item => characterCanonical(item).toLowerCase() === key ||
+      characterAliases(item).some(alias => alias.toLowerCase() === key));
+    return matches.find(item => !seriesKey || characterSeries(item).toLowerCase() === seriesKey) || null;
+  }
+  function selectedCharacterRow() {
+    return characterRowForName(window.ryuPremiumSelectedCharacter, window.ryuPremiumSelectedCharacterSeries);
+  }
+  function characterAssignmentKey(name, series) {
+    return String(name || '').trim().toLowerCase() + '::' + String(series || '').trim().toLowerCase();
+  }
   function characterAssignmentsFor(chapter) {
     return Array.isArray(chapter?.dialogue_assignments) ? chapter.dialogue_assignments.filter(item => item && typeof item === 'object') : [];
   }
