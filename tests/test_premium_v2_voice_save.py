@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 import json
 import tempfile
 import unittest
@@ -156,6 +157,93 @@ class VoiceProfileCatalogueRegressionTests(unittest.TestCase):
 
 
 class VoiceProfileRenameTests(unittest.TestCase):
+    def test_profile_rename_migrates_narrator_cast_and_library_references_across_projects(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            voices = root / "voices"
+            folder_a = root / "project-a"
+            folder_b = root / "project-b"
+            folder_c = root / "project-c"
+            for folder in (folder_a, folder_b, folder_c):
+                folder.mkdir()
+
+            states = {
+                str(folder_a): {
+                    "voice_profile": "Old Voice", "narrator": "Old Voice",
+                    "voice_id": "old-voice-id", "backend": "old-backend",
+                    "characters": [{"name": "Mira", "series": "Series A",
+                                    "voice_profile": "Old Voice", "voice_id": "old-voice-id"}],
+                    "voice_cast": {"Mira": "Old Voice"},
+                },
+                str(folder_b): {
+                    "voice_profile": "", "characters": [
+                        {"name": "Mira", "series": "Series B", "voice_profile": "Old Voice"}
+                    ],
+                    "voice_cast": {"Mira": "Old Voice"},
+                },
+                str(folder_c): {
+                    "voice_profile": "Other Voice", "narrator": "Other Voice",
+                    "voice_id": "other-id", "backend": "other-backend",
+                    "characters": [{"name": "Ren", "voice_profile": "Other Voice"}],
+                },
+            }
+            projects = [
+                SimpleNamespace(folder=folder_a, title="Book A"),
+                SimpleNamespace(folder=folder_b, title="Book B"),
+                SimpleNamespace(folder=folder_c, title="Book C"),
+            ]
+            sample = root / "reference.wav"
+            sample.write_bytes(b"reference-placeholder")
+            library_rows = [{
+                "id": "library-character-1", "primary_name": "Mira",
+                "series": "Series A", "voice_profile": "Old Voice",
+                "voice_name": "Old Voice", "voice": "Old Voice",
+            }]
+
+            def read_state(folder):
+                return states[str(folder)]
+
+            def write_state(folder, state):
+                states[str(folder)] = state
+
+            with (
+                patch("app.ui.premium_v2_host.ensure_roots"),
+                patch.object(PremiumV2Bridge, "_load_durable_jobs"),
+                patch("app.tts.voice_profile.voices_root", return_value=voices),
+                patch("app.tts.voice_profile.builtin_voice_profiles", return_value=[]),
+                patch("app.ui.premium_v2_host.list_projects", return_value=projects),
+                patch("app.ui.premium_v2_host.load_state", side_effect=read_state),
+                patch("app.ui.premium_v2_host.save_state", side_effect=write_state) as save_state,
+                patch("app.ui.premium_v2_host.list_reusable_characters", return_value=library_rows),
+                patch("app.ui.premium_v2_host.update_reusable_character") as update_library,
+            ):
+                bridge = PremiumV2Bridge()
+                bridge._voice_save({
+                    "name": "Old Voice", "provider": "piper",
+                    "voice_id": "old-voice-id", "backend": "old-backend",
+                })
+                result = bridge._voice_save({
+                    "name": "Renamed Voice", "original_name": "Old Voice",
+                    "provider": "piper", "voice_id": "new-voice-id",
+                    "backend": "automatic",
+                })
+
+            self.assertEqual(result["name"], "Renamed Voice")
+            self.assertEqual(states[str(folder_a)]["voice_profile"], "Renamed Voice")
+            self.assertEqual(states[str(folder_a)]["narrator"], "Renamed Voice")
+            self.assertEqual(states[str(folder_a)]["voice_id"], "new-voice-id")
+            self.assertEqual(states[str(folder_a)]["backend"], "automatic")
+            self.assertEqual(states[str(folder_a)]["characters"][0]["voice_profile"], "Renamed Voice")
+            self.assertEqual(states[str(folder_a)]["characters"][0]["voice_id"], "new-voice-id")
+            self.assertEqual(states[str(folder_a)]["voice_cast"]["Mira"], "Renamed Voice")
+            self.assertEqual(states[str(folder_b)]["characters"][0]["voice_profile"], "Renamed Voice")
+            self.assertEqual(states[str(folder_b)]["voice_cast"]["Mira"], "Renamed Voice")
+            self.assertEqual(states[str(folder_c)]["voice_profile"], "Other Voice")
+            self.assertEqual(states[str(folder_c)]["characters"][0]["voice_profile"], "Other Voice")
+            save_state.assert_any_call(folder_a, states[str(folder_a)])
+            save_state.assert_any_call(folder_b, states[str(folder_b)])
+            update_library.assert_called_once_with("library-character-1", {"voice_name": "Renamed Voice"})
+
     def test_renaming_a_saved_reference_profile_replaces_the_original_record(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

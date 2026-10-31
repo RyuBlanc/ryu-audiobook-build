@@ -1925,16 +1925,156 @@ class PremiumV2Bridge(QObject):
             qwen_anchor_text=str(payload.get("qwen_anchor_text") or getattr(target_existing, "qwen_anchor_text", "") or "")[:10000],
             qwen_profile_id=str(payload.get("qwen_profile_id") or getattr(target_existing, "qwen_profile_id", "") or ""),
         )
+        previous_saved = list(saved)
         if target_existing is not None:
             saved[saved.index(target_existing)] = profile
         else:
             saved.append(profile)
         save_profiles(saved)
+        if target_existing is not None:
+            try:
+                self._migrate_saved_voice_profile_references(
+                    target_existing, profile, previous_saved
+                )
+            except Exception:
+                # Do not leave the catalogue renamed while project references still
+                # point to the removed name. The migration helper restores any state
+                # records it already changed; restore the catalogue to its snapshot.
+                save_profiles(previous_saved)
+                raise
         return {"name": profile.name, "provider": profile.provider, "voice_id": profile.voice_id,
                 "sample_path": profile.sample_path, "model_id": profile.model_id,
                 "backend": profile.backend, "language": profile.language,
                 "authorized": profile.authorized, "qwen_mode": profile.qwen_mode, "saved": True,
                 "count": len(load_profiles())}
+
+    def _migrate_saved_voice_profile_references(self, previous_profile, profile, previous_saved) -> None:
+        """Migrate narrator, cast and reusable-library references after a saved-profile rename/update."""
+        from copy import deepcopy
+
+        old_name = str(getattr(previous_profile, "name", "") or "").strip()
+        new_name = str(getattr(profile, "name", "") or "").strip()
+        if not old_name or not new_name:
+            return
+        old_key = old_name.casefold()
+        old_voice_id = str(getattr(previous_profile, "voice_id", "") or "").strip()
+        new_voice_id = str(getattr(profile, "voice_id", "") or "").strip()
+        new_backend = str(getattr(profile, "backend", "") or "automatic")
+
+        project_updates = []
+        library_updates = []
+        attempted_projects = []
+        attempted_library = []
+        try:
+            for project in list_projects():
+                original_state = load_state(project.folder)
+                updated_state = deepcopy(original_state)
+                changed = False
+
+                narrator_keys = ("voice_profile", "voice_profile_name", "assigned_voice_profile", "narrator")
+                narrator_uses_profile = any(
+                    str(updated_state.get(key) or "").strip().casefold() == old_key
+                    for key in narrator_keys
+                )
+                if narrator_uses_profile:
+                    for key in narrator_keys:
+                        value = updated_state.get(key)
+                        if isinstance(value, str) and value.strip().casefold() == old_key:
+                            updated_state[key] = new_name
+                            changed = True
+                    if updated_state.get("voice_id") != new_voice_id:
+                        updated_state["voice_id"] = new_voice_id
+                        changed = True
+                    if updated_state.get("backend") != new_backend:
+                        updated_state["backend"] = new_backend
+                        changed = True
+
+                characters = updated_state.get("characters")
+                if isinstance(characters, list):
+                    for character in characters:
+                        if not isinstance(character, dict):
+                            continue
+                        profile_keys = ("voice_profile", "voice_profile_name", "assigned_voice_profile")
+                        character_uses_profile = any(
+                            str(character.get(key) or "").strip().casefold() == old_key
+                            for key in profile_keys
+                        )
+                        if not character_uses_profile:
+                            continue
+                        for key in profile_keys:
+                            value = character.get(key)
+                            if isinstance(value, str) and value.strip().casefold() == old_key:
+                                character[key] = new_name
+                                changed = True
+                        if old_voice_id and str(character.get("voice_id") or "").strip() == old_voice_id:
+                            character["voice_id"] = new_voice_id
+                            changed = True
+                        if "backend" in character and character.get("backend") != new_backend:
+                            character["backend"] = new_backend
+                            changed = True
+
+                voice_cast = updated_state.get("voice_cast")
+                if isinstance(voice_cast, dict):
+                    for cast_name, assignment in list(voice_cast.items()):
+                        if isinstance(assignment, str) and assignment.strip().casefold() == old_key:
+                            voice_cast[cast_name] = new_name
+                            changed = True
+                        elif isinstance(assignment, dict):
+                            for key in ("voice_profile", "voice_profile_name", "assigned_voice_profile", "profile_name"):
+                                value = assignment.get(key)
+                                if isinstance(value, str) and value.strip().casefold() == old_key:
+                                    assignment[key] = new_name
+                                    changed = True
+                            if old_voice_id and str(assignment.get("voice_id") or "").strip() == old_voice_id:
+                                assignment["voice_id"] = new_voice_id
+                                changed = True
+                            if any(str(assignment.get(key) or "").strip().casefold() == old_key
+                                   for key in ("voice_profile", "voice_profile_name", "assigned_voice_profile", "profile_name")):
+                                assignment["backend"] = new_backend
+
+                if changed:
+                    updated_state["modified_at"] = self._now()
+                    project_updates.append((project.folder, original_state, updated_state))
+
+            for row in list_reusable_characters():
+                if not isinstance(row, dict):
+                    continue
+                referenced_name = next((
+                    str(row.get(key) or "").strip()
+                    for key in ("voice_profile", "voice_name", "voice")
+                    if str(row.get(key) or "").strip().casefold() == old_key
+                ), "")
+                if not referenced_name:
+                    continue
+                record_id = str(row.get("id") or "").strip()
+                if not record_id:
+                    raise ValueError("A reusable Character Library voice reference is missing its record ID.")
+                library_updates.append((record_id, referenced_name))
+
+            for folder, original_state, updated_state in project_updates:
+                attempted_projects.append((folder, original_state))
+                save_state(folder, updated_state)
+
+            for record_id, old_voice_name in library_updates:
+                attempted_library.append((record_id, old_voice_name))
+                update_reusable_character(record_id, {"voice_name": new_name})
+
+        except Exception as exc:
+            rollback_errors = []
+            for record_id, old_voice_name in reversed(attempted_library):
+                try:
+                    update_reusable_character(record_id, {"voice_name": old_voice_name})
+                except Exception as rollback_exc:
+                    rollback_errors.append(str(rollback_exc))
+            for folder, original_state in reversed(attempted_projects):
+                try:
+                    save_state(folder, original_state)
+                except Exception as rollback_exc:
+                    rollback_errors.append(str(rollback_exc))
+            detail = " Saved-profile catalogue rollback will be applied by the caller."
+            if rollback_errors:
+                detail += " Some reference rollback operations also failed: " + "; ".join(rollback_errors)
+            raise RuntimeError("Voice-profile references could not be migrated." + detail) from exc
 
     def _voice_catalog(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Return the real provider catalogue for a Voice Studio library card."""
