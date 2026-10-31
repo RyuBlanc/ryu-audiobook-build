@@ -184,9 +184,11 @@ class AssignmentProvenanceBridgeTests(unittest.TestCase):
                 },
             }
             bridge_a, bridge_b = _BridgeHarness(project_a), _BridgeHarness(project_b)
-            with patch.object(host, "load_state", side_effect=lambda folder: states[str(folder)]), \\
-                 patch.object(host, "save_state"), \\
-                 patch("app.chapters.character_learning.record_assignment_feedback"):
+            with (
+                patch.object(host, "load_state", side_effect=lambda folder: states[str(folder)]),
+                patch.object(host, "save_state"),
+                patch("app.chapters.character_learning.record_assignment_feedback"),
+            ):
                 manual_result = bridge_a._chapter_dialogue_assign({
                     "dialogue_text": manual_text, "speakers": ["Mira"],
                     "chapter_number": 1, "series": "Series A", "source": "manual",
