@@ -5365,7 +5365,7 @@
         row.chapter_number + ':' + row.start + ':' + row.end === selectedKey
     );
     if (!selected) throw new Error('Select a saved dialogue row in the Assigned Cast inspector before testing voice.');
-    await previewSavedProfile(profile, String(selected.text || ''), current.name);
+    await previewSavedProfile(profile, String(selected.text || ''), current.name, {routeCharacterCast:false});
   }
   function installCharacterStudioHandlers() {
     if (characterStudioCaptureBound) return;
@@ -7719,8 +7719,10 @@
       }
       throw new Error('The task is still running. Check Generation History for its latest state.');
     };
-    const previewSavedProfile = async (profile, text, label) => {
-      const data = await call('voice.preview', {profile_name:profile.name,text,duration_seconds:10});
+    const previewSavedProfile = async (profile, text, label, options = {}) => {
+      const payload = {profile_name:profile.name,text,duration_seconds:10};
+      if (options.routeCharacterCast === false) payload.route_character_cast = false;
+      const data = await call('voice.preview', payload);
       const job = await waitForTerminalJob(data.job_id);
       const url = job?.result?.file_url;
       if (!url) throw new Error((label || profile.name) + ' preview finished without a playable audio file.');

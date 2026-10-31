@@ -1,5 +1,6 @@
 """Stage 4 contract tests for selected voice profile and requested preview duration."""
 from pathlib import Path
+import threading
 from types import SimpleNamespace
 import shutil
 import subprocess
@@ -39,7 +40,83 @@ class VoicePreviewContractTests(unittest.TestCase):
                 args = thread_factory.call_args.kwargs["args"]
                 self.assertEqual(args[1], profile)
                 self.assertEqual(args[3], seconds)
+                self.assertIs(args[6], True)
                 thread.start.assert_called_once()
+
+
+    def test_character_audition_handler_explicitly_disables_cast_routing(self):
+        profile = SimpleNamespace(name="Draft Selected Profile")
+        project = SimpleNamespace(folder=Path("unused"), chapters=[])
+        thread = Mock()
+        bridge = SimpleNamespace(
+            _active_project=lambda: project,
+            _assert_no_active_model_lifecycle=lambda _activity: None,
+            _find_profile=lambda name: profile if name == profile.name else None,
+            _new_job=Mock(return_value="character-preview-job"),
+            _job_update=Mock(),
+            _now=premium_v2_host.PremiumV2Bridge._now,
+        )
+        with patch.object(premium_v2_host, "load_state", return_value={"characters":[
+            {"name":"Mira", "voice_profile":"Previously Saved Profile"}
+        ]}), patch.object(premium_v2_host.threading, "Thread", return_value=thread) as thread_factory:
+            result = premium_v2_host.PremiumV2Bridge._voice_preview(
+                bridge, {
+                    "profile_name": profile.name,
+                    "text": "The exact selected dialogue passage.",
+                    "duration_seconds": 10,
+                    "route_character_cast": False,
+                }
+            )
+        self.assertEqual(result["profile_name"], profile.name)
+        self.assertIs(thread_factory.call_args.kwargs["args"][6], False)
+        thread.start.assert_called_once()
+
+    def test_preview_worker_bypasses_saved_cast_profiles_for_character_audition(self):
+        selected_profile = SimpleNamespace(name="Draft Selected Profile", provider="piper", voice_id="draft")
+        saved_character_profile = SimpleNamespace(name="Previously Saved Profile", provider="piper", voice_id="saved")
+        provider = object()
+        updates = []
+
+        def update(_job_id, **kwargs):
+            updates.append(kwargs)
+            return kwargs
+
+        bridge = SimpleNamespace(
+            _job_update=update,
+            _jobs_lock=threading.RLock(),
+            _preview_cancel_events={},
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+
+            def fake_build(_text, built_provider, _voice, output_path, **kwargs):
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(b"valid preview fixture")
+                self.assertIs(built_provider, provider)
+                return SimpleNamespace(
+                    output_path=output_path, voices_used=("draft",), segments=1,
+                    applied_rule_counts={},
+                )
+
+            with patch.object(premium_v2_host, "provider_from_profile", return_value=(provider, "draft")) as provider_factory, \
+                 patch.object(premium_v2_host, "load_profiles", return_value=[saved_character_profile]) as profile_catalog, \
+                 patch.object(premium_v2_host, "app_root", return_value=root), \
+                 patch.object(premium_v2_host, "build_voice_preview", side_effect=fake_build), \
+                 patch("app.tts.cast_provider.CastAwareProvider") as cast_wrapper, \
+                 patch("app.audio.assembler._duration_ms", return_value=10_000):
+                premium_v2_host.PremiumV2Bridge._preview_worker(
+                    bridge, "character-preview-job", selected_profile,
+                    "The exact selected dialogue passage.", 10,
+                    {"characters":[{"name":"Mira", "voice_profile":"Previously Saved Profile"}]},
+                    threading.Event(), False,
+                )
+
+        provider_factory.assert_called_once_with(selected_profile)
+        profile_catalog.assert_not_called()
+        cast_wrapper.assert_not_called()
+        completed = next(item for item in updates if item.get("state") == "completed")
+        self.assertEqual(completed["result"]["selected_profile"], selected_profile.name)
+        self.assertEqual(completed["result"]["selected_voice_id"], "draft")
 
     def test_preview_handler_rejects_unsupported_duration_before_starting_worker(self):
         profile = SimpleNamespace(name="Saved Narrator")

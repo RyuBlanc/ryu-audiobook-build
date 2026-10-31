@@ -2631,6 +2631,9 @@ class PremiumV2Bridge(QObject):
         seconds = int(payload.get("duration_seconds") or payload.get("duration") or 30)
         if seconds not in {10, 30, 60, 90}:
             raise ValueError("Preview duration must be 10, 30, 60, or 90 seconds.")
+        route_character_cast = payload.get("route_character_cast", True)
+        if not isinstance(route_character_cast, bool):
+            raise ValueError("Character cast routing must be a boolean preview option.")
         include_sound_design = bool(payload.get("include_sound_design"))
         if include_sound_design:
             state["_include_sound_design_preview"] = True
@@ -2643,8 +2646,12 @@ class PremiumV2Bridge(QObject):
         with getattr(self, "_jobs_lock", threading.RLock()):
             self._preview_cancel_events[job_id] = cancel_event
         self._job_update(job_id, state="running", started_at=self._now(), stage="Preparing preview", progress=2)
-        threading.Thread(target=self._preview_worker, args=(job_id, profile, text_value, seconds, state, cancel_event),
-                         daemon=True, name="RyuPremiumPreview").start()
+        threading.Thread(
+            target=self._preview_worker,
+            args=(job_id, profile, text_value, seconds, state, cancel_event, route_character_cast),
+            daemon=True,
+            name="RyuPremiumPreview",
+        ).start()
         return {"job_id": job_id, "state": "running", "duration_seconds": seconds, "profile_name": profile.name}
 
     def _voice_preview_save(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -2750,7 +2757,10 @@ class PremiumV2Bridge(QObject):
             audio_source.unlink(missing_ok=True)
         return output
 
-    def _preview_worker(self, job_id: str, profile, text_value: str, seconds: int, state: dict[str, Any], cancel_event=None) -> None:
+    def _preview_worker(
+        self, job_id: str, profile, text_value: str, seconds: int,
+        state: dict[str, Any], cancel_event=None, route_character_cast: bool = True,
+    ) -> None:
         from app.tts.preview import PreviewCancelledError
         output = app_root() / "Previews" / f"preview_{job_id}.wav"
         preview_path = output
@@ -2772,29 +2782,35 @@ class PremiumV2Bridge(QObject):
             # selected profiles, while narration continues to use the narrator.
             cast_assignments: dict[str, str] = {}
             cast_profiles: dict[str, Any] = {}
-            available_profiles = {p.name.casefold(): p for p in load_profiles()}
-            for character in state.get("characters") or []:
-                if not isinstance(character, dict):
-                    continue
-                assigned_name = str(character.get("voice_profile") or "").strip()
-                if not assigned_name:
-                    continue
-                assigned_profile = available_profiles.get(assigned_name.casefold())
-                if assigned_profile is None:
-                    raise ValueError(
-                        f"Character '{character.get('name', 'Unknown')}' uses voice profile "
-                        f"'{assigned_name}', which is no longer available. Reassign its voice in Character Studio."
-                    )
-                cast_profiles[assigned_profile.name] = assigned_profile
-                character_names = [str(character.get("name") or "").strip()]
-                aliases = character.get("aliases") or []
-                if isinstance(aliases, list):
-                    character_names.extend(str(alias).strip() for alias in aliases)
-                for character_name in character_names:
-                    if character_name:
-                        cast_assignments[character_name] = assigned_profile.name
+            # Character Studio's selected-line audition must use the draft-selected
+            # profile directly. Production and ordinary Voice Studio previews keep
+            # the saved cast router unless this explicit option is false.
+            if route_character_cast:
+                available_profiles = {p.name.casefold(): p for p in load_profiles()}
+                for character in state.get("characters") or []:
+                    if not isinstance(character, dict):
+                        continue
+                    assigned_name = str(character.get("voice_profile") or "").strip()
+                    if not assigned_name:
+                        continue
+                    assigned_profile = available_profiles.get(assigned_name.casefold())
+                    if assigned_profile is None:
+                        raise ValueError(
+                            f"Character '{character.get('name', 'Unknown')}' uses voice profile "
+                            f"'{assigned_name}', which is no longer available. Reassign its voice in Character Studio."
+                        )
+                    cast_profiles[assigned_profile.name] = assigned_profile
+                    character_names = [str(character.get("name") or "").strip()]
+                    aliases = character.get("aliases") or []
+                    if isinstance(aliases, list):
+                        character_names.extend(str(alias).strip() for alias in aliases)
+                    for character_name in character_names:
+                        if character_name:
+                            cast_assignments[character_name] = assigned_profile.name
+
             cache_signature = json.dumps({
                 "profile": getattr(profile, "__dict__", str(profile)),
+                "route_character_cast": bool(route_character_cast),
                 "cast_profiles": {
                     name: getattr(item, "__dict__", str(item))
                     for name, item in sorted(cast_profiles.items(), key=lambda pair: pair[0].casefold())

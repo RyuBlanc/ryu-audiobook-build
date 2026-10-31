@@ -106,6 +106,7 @@ class LiveCharacterStudioContracts(unittest.TestCase):
         self.assertIn("const c = selectedCharacterRow()", adapter)
         self.assertIn("original_series:characterSeries(current)", adapter)
         self.assertIn("Select a saved dialogue row in the Assigned Cast inspector before testing voice.", adapter)
+        self.assertIn("await previewSavedProfile(profile, String(selected.text || ''), current.name, {routeCharacterCast:false});", adapter)
         self.assertNotIn("const dialogue = selected || savedPassages[0]", adapter)
 
     def test_ambiguous_character_name_lookup_requires_series_instead_of_first_match(self):
