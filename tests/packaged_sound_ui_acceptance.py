@@ -299,8 +299,15 @@ def _run(args: argparse.Namespace) -> int:
     marker = temp_root / "acceptance-result.json"
     config = temp_root / "acceptance-fixtures.json"
     category_imports = [
-        {"category": item["category"], "filter": item["filter"], "title": item["title"],
-         "path": str((audio_root / item["source"].name).resolve())}
+        {
+            "category": item["category"],
+            "filter": item["filter"],
+            "title": item["title"],
+            # The import action must receive the real temporary WAV source.
+            # "path" is the native Audio Library destination for assertions.
+            "source_path": str(item["source"].resolve()),
+            "path": str((audio_root / item["source"].name).resolve()),
+        }
         for item in category_sources
     ]
     music_category_map = {

@@ -97,7 +97,7 @@
           } else {
             const fixture = (config.category_imports || []).find(item =>
               String(item.category) === category && !importedMusicCategories.has(category));
-            request.paths = fixture ? [fixture.path] : [];
+            request.paths = fixture && fixture.source_path ? [fixture.source_path] : [];
           }
           if (!request.paths.length) throw new Error("No unused Music Library fixture was configured for category " + category + ".");
           importedMusicCategories.add(category);

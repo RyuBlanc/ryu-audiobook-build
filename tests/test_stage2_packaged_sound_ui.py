@@ -110,6 +110,15 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         self.assertIn("gridSignature", script)
         self.assertIn("cueRoleCounts", script)
 
+    def test_category_fixture_import_uses_source_path_and_checks_library_destination(self):
+        runner = (ROOT / "tests/packaged_sound_ui_acceptance.py").read_text(encoding="utf-8")
+        script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        self.assertIn('"source_path": str(item["source"].resolve())', runner)
+        self.assertIn('"path": str((audio_root / item["source"].name).resolve())', runner)
+        self.assertIn("request.paths = fixture && fixture.source_path ? [fixture.source_path] : [];", script)
+        self.assertIn('String(track.path || "") === String(fixture.path)', script)
+        self.assertIn('String(track.category || "").toLowerCase() === fixture.category', script)
+
     def test_packaged_runner_provisions_and_validates_separate_cue_fixtures(self):
         helper = (ROOT / "tests/packaged_sound_ui_acceptance.py").read_text(encoding="utf-8")
         for required in (
