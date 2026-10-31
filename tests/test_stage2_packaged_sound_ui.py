@@ -252,7 +252,7 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         helper_start = script.index("async function waitForChapterSaveComplete")
-        helper_end = script.index("async function selectChapter(number)", helper_start)
+        helper_end = script.index("await selectChapter(1);", helper_start)
         helper = script[helper_start:helper_end]
         self.assertIn('status === "Chapter assignment saved."', helper)
         self.assertIn("controls.every(control => control && !control.disabled)", helper)
