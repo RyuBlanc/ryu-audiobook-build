@@ -2637,6 +2637,7 @@
     const names = new Set([characterCanonical(item), ...characterAliases(item)]
       .filter(Boolean).map(value => value.toLowerCase()));
     const selectedSeries = String(series || characterSeries(item) || '').trim().toLowerCase();
+    const projectDefaultSeries = String(activeCharacterProjectSeries() || '').trim().toLowerCase();
     const passages = [];
     const chapterSet = new Set();
     let aiAssigned = 0;
@@ -2645,19 +2646,40 @@
       for (const assignment of characterAssignmentsFor(chapter)) {
         const speakers = Array.isArray(assignment.speakers) ? assignment.speakers :
           (assignment.speaker ? [assignment.speaker] : []);
-        if (!speakers.some(speaker => names.has(String(speaker || '').trim().toLowerCase()))) continue;
-        const assignmentSeries = String(assignment.series || selectedSeries).trim().toLowerCase();
-        if (selectedSeries && assignmentSeries !== selectedSeries) continue;
+        const speakerKeys = speakers.map(speaker => String(speaker || '').trim().toLowerCase()).filter(Boolean);
+        if (!speakerKeys.some(speaker => names.has(speaker))) continue;
+
+        const storedSeries = String(assignment.series || '').trim().toLowerCase();
+        const assignmentSeries = storedSeries || projectDefaultSeries;
+        if (selectedSeries && assignmentSeries && assignmentSeries !== selectedSeries) continue;
+        if (selectedSeries && !assignmentSeries) {
+          // An unscoped legacy assignment is safe only when none of its speakers
+          // also identify a saved character in another series.
+          const ambiguousLegacyIdentity = characters.some(other => {
+            if (!other || other === item) return false;
+            const otherSeries = characterSeries(other).trim().toLowerCase();
+            if (!otherSeries || otherSeries === selectedSeries) return false;
+            const otherNames = [characterCanonical(other), ...characterAliases(other)]
+              .map(value => String(value || '').trim().toLowerCase()).filter(Boolean);
+            return otherNames.some(value => speakerKeys.includes(value));
+          });
+          if (ambiguousLegacyIdentity) continue;
+        }
+
         const start = Number(assignment.start), end = Number(assignment.end);
-        const text = Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end > start && end <= source.length
-          ? source.slice(start, end) : String(assignment.text || '');
-        if (!text) continue;
+        if (!Number.isInteger(start) || !Number.isInteger(end) ||
+            start < 0 || end <= start || end > source.length) continue;
+        const text = source.slice(start, end);
+        if (!text || (assignment.text && String(assignment.text) !== text)) continue;
+
         chapterSet.add(Number(chapter.number));
         const sourceKind = String(assignment.source || 'manual').trim().toLowerCase();
         if (sourceKind === 'ai') aiAssigned += 1;
         passages.push({
           chapter_number:Number(chapter.number), start, end, text,
-          source:sourceKind, series:String(assignment.series || selectedSeries), speakers
+          source:sourceKind,
+          series:storedSeries || assignmentSeries || selectedSeries,
+          speakers
         });
       }
     }

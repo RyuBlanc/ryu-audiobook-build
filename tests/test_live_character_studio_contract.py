@@ -146,6 +146,21 @@ class LiveCharacterStudioContracts(unittest.TestCase):
         self.assertIn(".ai-sentence.confirmed-manual.active", adapter)
         self.assertIn("row.assignmentSource", adapter)
 
+    def test_assigned_cast_statistics_exclude_invalid_spans_and_ambiguous_legacy_series(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        aggregation = adapter[
+            adapter.index("function characterVoiceAssignments(name, series)"):
+            adapter.index("function renderCharacterInspector()")
+        ]
+        self.assertIn("activeCharacterProjectSeries()", aggregation)
+        self.assertIn("Number.isInteger(start) || !Number.isInteger(end)", aggregation)
+        self.assertIn("start < 0 || end <= start || end > source.length", aggregation)
+        self.assertIn("assignment.text && String(assignment.text) !== text", aggregation)
+        self.assertIn("ambiguousLegacyIdentity", aggregation)
+        self.assertIn("if (ambiguousLegacyIdentity) continue", aggregation)
+        self.assertIn("const dialogueLines = passages.length", aggregation)
+        self.assertIn("Math.round(aiAssigned / dialogueLines * 100)", aggregation)
+
     def test_assignment_popup_preserves_full_source_passage_and_repositions_after_live_choices(self):
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("function positionCharacterAssignmentPopover(popover, x, y)", adapter)
