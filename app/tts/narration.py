@@ -125,8 +125,23 @@ def apply_pronunciation_dictionary_with_counts(
         return text, {}
     entries.sort(key=lambda pair: len(pair[0]), reverse=True)
     by_written = {written.casefold(): (written, spoken) for written, spoken in entries}
-    alternatives = "|".join(re.escape(written) for written, _spoken in entries)
-    pattern = re.compile(r"(?<!\w)(?P<written>" + alternatives + r")(?!\w)", re.IGNORECASE)
+    alternatives = []
+    # Japanese/CJK names are commonly written without spaces and directly
+    # followed by grammatical particles. Unicode \w boundaries reject those
+    # valid matches. Use literal matching for native-script entries and
+    # Latin-aware boundaries for Latin entries, so "ariax" remains protected
+    # while "Rimuruが来た" can use a saved Rimuru pronunciation.
+    latin_word_char = r"A-Za-zÀ-ÖØ-öø-ÿĀ-ž0-9_"
+    native_script = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]")
+    for written, _spoken in entries:
+        escaped = re.escape(written)
+        if native_script.search(written):
+            alternatives.append(escaped)
+        else:
+            alternatives.append(
+                r"(?<![" + latin_word_char + r"])" + escaped + r"(?![" + latin_word_char + r"])"
+            )
+    pattern = re.compile(r"(?P<written>" + "|".join(alternatives) + r")", re.IGNORECASE)
     counts: dict[str, int] = {}
     def replace_match(match: re.Match[str]) -> str:
         written, spoken = by_written[unicodedata.normalize("NFC", match.group("written")).casefold()]

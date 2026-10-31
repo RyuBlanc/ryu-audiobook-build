@@ -70,6 +70,14 @@ EXPRESSION_STYLES = {
         "Keep the same exact character identity. Use unhurried, inward-looking phrasing with "
         "small meaningful pauses and a gentle downward contour."
     ),
+    "bored": (
+        "Keep the same exact character identity. Use restrained energy and modest pitch movement "
+        "to convey disinterest without mumbling, losing clarity, or sounding like a different speaker."
+    ),
+    "calm": (
+        "Keep the same exact character identity. Use relaxed, even phrasing and quiet confidence "
+        "without flattening the sentence or losing natural emphasis."
+    ),
 }
 
 EXPRESSION_TEMPERATURES = {
@@ -86,6 +94,8 @@ EXPRESSION_TEMPERATURES = {
     "amused": 0.88,
     "serious": 0.82,
     "reflective": 0.83,
+    "bored": 0.80,
+    "calm": 0.81,
 }
 
 _STYLE_ALIASES = {
@@ -102,6 +112,8 @@ _STYLE_ALIASES = {
     "angry": "concerned",
     "tense": "concerned",
     "serious": "neutral",
+    "bored": "thoughtful",
+    "calm": "neutral",
 }
 
 
@@ -113,29 +125,77 @@ def classify_expression(text: str) -> str:
 
     # Titles/headings should get a pause, not be mistaken for shouting because
     # they are typeset in capitals.
-    letters = [char for char in value if char.isalpha()]
-    if letters and value == value.upper() and len(value.split()) <= 14 and not re.search(r"[.!?…]$", value):
+    # Only Latin all-caps headings are treated as typography. Unicode scripts
+    # without case (for example Japanese) compare equal to upper(), so using
+    # str.upper() alone incorrectly classified their whole sentences neutral.
+    latin_letters = re.findall(r"[A-Za-z]", value)
+    has_native_script = bool(re.search(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]", value))
+    if not has_native_script and latin_letters and all(char.isupper() for char in latin_letters) and len(value.split()) <= 14 and not re.search(r"[.!?…]$", value):
         return "neutral"
     low = value.casefold()
 
     # Explicit delivery/action cues take priority over punctuation.
     if re.search(r"\b(whisper(?:ed|ing)?|murmur(?:ed|ing)?|softly|quietly|under (?:her|his|their) breath|hushed)\b", low):
         return "soft"
-    if re.search(r"\b(sob(?:bed|bing)?|wept|tears streamed|heartbroken|grief-stricken|mournful)\b", low):
+    if re.search(
+        r"\b(?:sob(?:bed|bing)?|cry|cries|cried|crying|wept|weep(?:ing)?|tears?|"
+        r"heartbroken|grief-stricken|mournful|sad|sadly|sorrow|regret(?:ted|fully)?|"
+        r"lonely|miss(?:ed|ing) you|disappointed)\b|[泣涙悲愴寂]",
+        low,
+    ):
         return "sad"
-    if re.search(r"\b(furious|enraged|angrily|snapped|barked|how dare you|damn you|shut up)\b", low):
+    if re.search(
+        r"\b(?:angry|anger|furious|enraged|angrily|snapped|barked|how dare you|"
+        r"damn you|shut up)\b|(?:激怒|怒鳴|怒|腹を立)",
+        low,
+    ):
         return "angry"
-    if re.search(r"\b(terrified|panicked|desperate|urgent|in a panic|danger|dangerous|run away|get back|help me|don't touch|do not touch|worried|afraid|fearful|anxious|trembl(?:ed|ing)|hurt|pain)\b", low):
-        return "tense" if re.search(r"\b(terrified|panicked|desperate|urgent|run away|get back|help me|don't touch|do not touch)\b", low) else "concerned"
-    if re.search(r"\b(laughed|laughing|chuckled|chuckling|smiled|smiling|grinned|amused|joked|teased|teasing|heh|haha)\b", low):
+    if re.search(
+        r"\b(?:terrified|panicked|desperate|urgent|in a panic|danger|dangerous|"
+        r"run away|get back|help me|don't touch|do not touch|worried|afraid|"
+        r"fearful|anxious|trembl(?:ed|ing)|hurt|pain)\b|[怖恐怯震]|不安",
+        low,
+    ):
+        return "tense" if re.search(
+            r"\b(?:terrified|panicked|desperate|urgent|run away|get back|help me|"
+            r"don't touch|do not touch)\b|[怖恐怯]",
+            low,
+        ) else "concerned"
+    if re.search(
+        r"\b(?:laughed|laughing|chuckled|chuckling|smiled|smiling|grinned|amused|"
+        r"joked|teased|teasing|heh|haha)\b|[笑]|くすくす|爆笑",
+        low,
+    ):
         return "amused"
+    if re.search(
+        r"\b(?:surpris(?:ed|ing)?|astonish(?:ed|ing)?|startl(?:ed|ing)|stunned|"
+        r"taken aback)\b|驚|びっくり|仰天",
+        low,
+    ):
+        return "excited"
+    if re.search(
+        r"\b(?:happy|happily|joyful|joyfully|glad|pleased|delighted|thrilled|"
+        r"cheerful|beamed)\b|幸せ|嬉",
+        low,
+    ):
+        return "warm"
+    if re.search(
+        r"\b(?:bored|boredom|uninterested|listless|tedious)\b|退屈|つまらな|飽きた",
+        low,
+    ):
+        return "bored"
+    if re.search(
+        r"\b(?:calm|calmly|peaceful|serene|tranquil|composed|settled)\b|穏やか|落ち着|安心",
+        low,
+    ):
+        return "calm"
     if re.search(r"\b(maybe|perhaps|i think|i wonder|not sure|could it be|i guess|hesitat(?:ed|ing)|uncertain|hesitant)\b", low) or "…" in value or "..." in value:
         return "thoughtful"
     if re.search(r"\b(curious|wondered|intrigued|eager to know)\b", low):
         return "curious"
     if re.search(r"\b(sad|sadly|sorrow|regret(?:ted|fully)?|lonely|miss(?:ed|ing) you|disappointed)\b", low):
         return "sad"
-    if re.search(r"\b(seriously|in a low voice|firmly|solemnly|gravely|matter-of-fact)\b", low):
+    if re.search(r"\b(serious|seriously|in a low voice|firmly|solemnly|gravely|matter-of-fact)\b|真剣|厳か|冷静", low):
         return "serious"
     if re.search(r"\b(reflected|thought to himself|thought to herself|remembered|in retrospect)\b", low):
         return "reflective"
