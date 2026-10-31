@@ -1206,6 +1206,7 @@
     if (statusOverride) setProjectCardStatus(statusOverride);
     else if (changedProject) setProjectCardStatus('Project open · saved locally');
     else if (renamed) setProjectCardStatus('Renamed · saved locally');
+    await refreshSeriesNarratorControls();
     return active;
   }
 
@@ -2401,6 +2402,58 @@
     const raw = String(c?.series || c?.scope || '').trim();
     return raw.replace(/^Series\s*[·:-]\s*/i, '').replace(/^Global character library$/i, '').trim();
   };
+  let seriesNarratorDefault = null;
+  async function refreshSeriesNarratorControls() {
+    const project = window.ryuPremiumActiveProject || null;
+    const series = String(project?.series_name || project?.series || project?.title || '').trim();
+    const panel = $('voices') || $('voice');
+    if (!series || !panel) { seriesNarratorDefault = null; return null; }
+    try { seriesNarratorDefault = await call('narrator.series.default.get', {series}); }
+    catch (error) { console.warn('[Ryu series narrator default]', error); seriesNarratorDefault = null; }
+    let card = $('seriesNarratorDefaultCard');
+    if (!card) {
+      card = document.createElement('section');
+      card.id = 'seriesNarratorDefaultCard';
+      card.className = 'card';
+      card.style.cssText = 'margin:14px 0;padding:14px;border:1px solid rgba(150,160,180,.22);border-radius:12px;';
+      const anchor = $('useNarrator')?.closest('.card') || $('useNarrator')?.parentElement || panel.firstElementChild;
+      if (anchor?.parentNode) anchor.parentNode.insertBefore(card, anchor.nextSibling);
+      else panel.appendChild(card);
+    }
+    const savedName = String(seriesNarratorDefault?.profile_name || '');
+    const effectiveName = String(project?.voice_profile || seriesNarratorDefault?.effective_profile_name || '');
+    const options = characterSavedProfiles().map(profile =>
+      '<option value="' + esc(profile.name) + '"' + (profile.name === savedName ? ' selected' : '') + '>' + esc(profile.name) + '</option>'
+    ).join('');
+    card.innerHTML = '<div style="font-weight:750;margin-bottom:5px">Series Narrator Default</div>' +
+      '<div class="muted" style="font-size:12px;margin-bottom:10px">Series: ' + esc(series) +
+      ' · This default is applied to a book only when you explicitly choose Apply to This Book.</div>' +
+      '<select id="seriesNarratorProfile" class="input" style="width:100%;margin-bottom:8px">' +
+      '<option value="">Choose a saved voice profile</option>' + options + '</select>' +
+      '<div class="muted" style="font-size:12px;margin-bottom:9px">Saved default: ' + esc(savedName || 'Not set') +
+      ' · Effective narrator for this book: ' + esc(effectiveName || 'Not set') +
+      ' · Source: ' + esc(String(seriesNarratorDefault?.source || 'none')) + '</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small" type="button" id="saveSeriesNarratorDefault">Save Series Default</button>' +
+      '<button class="btn small ghost" type="button" id="applySeriesNarratorDefault">Apply to This Book</button></div>';
+    $('saveSeriesNarratorDefault')?.addEventListener('click', async () => {
+      const profileName = String($('seriesNarratorProfile')?.value || '').trim();
+      if (!profileName) { message('Select a saved voice profile first.', true); return; }
+      try {
+        const saved = await call('narrator.series.default.save', {series, profile_name:profileName});
+        await refreshSeriesNarratorControls();
+        message('Series narrator default saved: ' + saved.profile_name);
+      } catch (error) { message(error?.message || String(error), true); }
+    });
+    $('applySeriesNarratorDefault')?.addEventListener('click', async () => {
+      try {
+        const applied = await call('narrator.series.default.apply', {series});
+        await refreshProjects();
+        await refreshSeriesNarratorControls();
+        message('Series narrator default applied to this book: ' + applied.profile_name);
+      } catch (error) { message(error?.message || String(error), true); }
+    });
+    return seriesNarratorDefault;
+  }
   function activeCharacterProjectSeries() {
     const active = window.ryuPremiumActiveProject || {};
     return String(active.series_name || active.series || active.title || '').trim();
@@ -7107,6 +7160,7 @@
       if(!v)return;
       await call('voice.select',{profile_name:v.name});
       await refreshProjects();
+      await refreshSeriesNarratorControls();
       document.querySelectorAll('#voices *').forEach(node => {
         if(node.children.length===0 && node.textContent.trim()==='Narrator unchanged') node.textContent='Assigned to this narrator';
       });

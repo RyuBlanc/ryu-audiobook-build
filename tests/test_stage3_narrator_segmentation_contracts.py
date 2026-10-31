@@ -27,3 +27,22 @@ class Stage3NarratorSegmentationContracts(unittest.TestCase):
             "ryu-narrator-passage",
         ):
             self.assertIn(token, adapter)
+
+
+    def test_series_narrator_default_backend_commands_and_project_precedence(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        for token in (
+            '"narrator.series.default.get": self._narrator_series_default_get',
+            '"narrator.series.default.save": self._narrator_series_default_save',
+            '"narrator.series.default.apply": self._narrator_series_default_apply',
+            'def _narrator_series_default_get(',
+            'def _narrator_series_default_save(',
+            'def _narrator_series_default_apply(',
+            '"narrator_profile_source": "project_override"',
+            'effective = project_profile or default_profile',
+        ):
+            self.assertIn(token, host)
+        for token in ("Series Narrator Default", "Save Series Default", "Apply to This Book",
+                      "narrator.series.default.save", "narrator.series.default.apply"):
+            self.assertIn(token, adapter)

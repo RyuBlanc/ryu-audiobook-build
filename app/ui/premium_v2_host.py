@@ -390,6 +390,9 @@ class PremiumV2Bridge(QObject):
                 "voice.delete": self._voice_delete,
                 "voice.import_reference": self._voice_import_reference,
                 "voice.select": self._voice_select,
+                "narrator.series.default.get": self._narrator_series_default_get,
+                "narrator.series.default.save": self._narrator_series_default_save,
+                "narrator.series.default.apply": self._narrator_series_default_apply,
                 "voice.preview": self._voice_preview,
                 "voice.preview.save": self._voice_preview_save,
                 "character.list": self._character_list,
@@ -518,6 +521,9 @@ class PremiumV2Bridge(QObject):
             "voice.delete": True,
             "voice.import_reference": True,
             "voice.select": True,
+            "narrator.series.default.get": True,
+            "narrator.series.default.save": True,
+            "narrator.series.default.apply": True,
             "voice.preview": True,
             "voice.preview.save": True,
             "character.list": True,
@@ -795,6 +801,8 @@ class PremiumV2Bridge(QObject):
             "genre": str(state.get("genre") or ""),
             "narrator": str(state.get("narrator") or state.get("voice_profile") or ""),
             "voice_profile": str(state.get("voice_profile") or ""),
+            "narrator_profile_source": str(state.get("narrator_profile_source") or ("project_override" if state.get("voice_profile") else "none")),
+            "series_narrator_profile": str((self._narrator_series_default_get({"series": self._project_series_name(project, state)}).get("profile_name") or "")),
             "narrator_voice_configured": narrator_ready,
             "output_target_path": str(output_target),
             "output_folder": str(output_folder),
@@ -2465,7 +2473,7 @@ class PremiumV2Bridge(QObject):
         state = load_state(project.folder)
         state.update({"voice_profile": profile.name, "voice_id": profile.voice_id,
                       "backend": str(payload.get("backend") or profile.backend or "automatic"),
-                      "narrator": profile.name})
+                      "narrator": profile.name, "narrator_profile_source": "project_override"})
         save_state(project.folder, state)
         return {"name": profile.name, "provider": profile.provider, "voice_id": profile.voice_id,
                 "backend": state["backend"], "saved": True}
@@ -3860,6 +3868,88 @@ class PremiumV2Bridge(QObject):
             title,
         ).strip(" \t-–—_.:|")
         return (inferred or title or "Unassigned series")[:300]
+
+    def _narrator_series_default_store_path(self, series: str) -> Path:
+        """Return an app-owned file path for one normalized series narrator preference."""
+        from app.core.paths import settings_root
+        normalized = str(series or "").strip()
+        if not normalized or normalized.casefold() in {"unassigned series", "all series"}:
+            raise ValueError("Set a series name before saving a series narrator default.")
+        safe_key = re.sub(r"[^a-z0-9]+", "-", normalized.casefold()).strip("-")[:80] or "series"
+        digest = hashlib.sha256(normalized.casefold().encode("utf-8")).hexdigest()[:16]
+        return settings_root() / "series-narrators" / f"{safe_key}-{digest}.json"
+
+    def _narrator_series_default_get(self, payload: dict[str, Any]) -> dict[str, Any]:
+        project = self._active_project()
+        state = load_state(project.folder)
+        series = str(payload.get("series") or self._project_series_name(project, state)).strip()
+        path = self._narrator_series_default_store_path(series)
+        record: dict[str, Any] = {}
+        if path.is_file():
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict) and str(loaded.get("series") or "").casefold() == series.casefold():
+                    record = loaded
+            except (OSError, ValueError, json.JSONDecodeError):
+                raise ValueError("The saved series narrator preference could not be read. It has not been changed.")
+        project_profile = str(state.get("voice_profile") or "").strip()
+        default_profile = str(record.get("profile_name") or "").strip()
+        source = "project" if project_profile else ("series" if default_profile else "none")
+        effective = project_profile or default_profile
+        profile_exists = bool(effective and self._find_profile(effective))
+        return {
+            "series": series, "profile_name": default_profile or None,
+            "project_profile_name": project_profile or None,
+            "effective_profile_name": effective or None, "source": source,
+            "profile_available": profile_exists if effective else False,
+            "updated_at": record.get("updated_at"), "saved": bool(default_profile),
+        }
+
+    def _narrator_series_default_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        project = self._active_project()
+        state = load_state(project.folder)
+        series = str(payload.get("series") or self._project_series_name(project, state)).strip()
+        profile_name = str(payload.get("profile_name") or "").strip()
+        if not profile_name:
+            raise ValueError("Select a saved voice profile for the series narrator default.")
+        profile = self._find_profile(profile_name)
+        if profile is None:
+            raise ValueError("The selected series narrator profile is not in the saved voice catalogue.")
+        path = self._narrator_series_default_store_path(series)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "schema_version": 1, "series": series, "profile_name": profile.name,
+            "provider": profile.provider, "voice_id": profile.voice_id,
+            "updated_at": self._now(),
+        }
+        temp_path = path.with_suffix(path.suffix + ".tmp")
+        temp_path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp_path.replace(path)
+        return {"saved": True, "series": series, "profile_name": profile.name, "updated_at": record["updated_at"]}
+
+    def _narrator_series_default_apply(self, payload: dict[str, Any]) -> dict[str, Any]:
+        project = self._active_project()
+        state = load_state(project.folder)
+        series = str(payload.get("series") or self._project_series_name(project, state)).strip()
+        saved = self._narrator_series_default_get({"series": series})
+        profile_name = str(saved.get("profile_name") or "").strip()
+        if not profile_name:
+            raise ValueError("This series has no saved narrator default. Save a series default first.")
+        profile = self._find_profile(profile_name)
+        if profile is None:
+            raise ValueError(
+                f"The series narrator profile '{profile_name}' is not currently available. "
+                "Restore or install the profile before applying it to this book."
+            )
+        state.update({
+            "voice_profile": profile.name, "voice_id": profile.voice_id,
+            "backend": profile.backend or "automatic", "narrator": profile.name,
+            "narrator_profile_source": "series_default",
+            "narrator_series_default": profile.name, "modified_at": self._now(),
+        })
+        save_state(project.folder, state)
+        return {"saved": True, "applied": True, "series": series,
+                "profile_name": profile.name, "source": "series_default"}
 
     def _sync_saved_cast(
         self,
