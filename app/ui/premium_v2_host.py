@@ -3413,6 +3413,28 @@ class PremiumV2Bridge(QObject):
             raise ValueError("This character name exists in more than one series. Select the series before editing.")
         item = matches[0]
         current_series = str(item.get("series") or default_series).strip()
+        previous_identity_names = {original_name.casefold()}
+        previous_identity_names.update(
+            str(alias).strip().casefold()
+            for alias in (item.get("aliases") or [])
+            if str(alias).strip()
+        )
+        # An alias shared with another character in the same series is ambiguous;
+        # never migrate another character's saved dialogue through that alias.
+        other_series_names: set[str] = set()
+        for other in characters:
+            if not isinstance(other, dict) or other is item:
+                continue
+            other_series = str(other.get("series") or default_series).strip()
+            if other_series.casefold() != current_series.casefold():
+                continue
+            other_series_names.add(str(other.get("name") or "").strip().casefold())
+            other_series_names.update(
+                str(alias).strip().casefold()
+                for alias in (other.get("aliases") or [])
+                if str(alias).strip()
+            )
+        previous_identity_names.difference_update(other_series_names)
         raw_series_value = payload.get("series") if "series" in payload else item.get("series", default_series)
         if isinstance(raw_series_value, str):
             series_value = raw_series_value.strip()[:300]
@@ -3468,6 +3490,42 @@ class PremiumV2Bridge(QObject):
         state["characters"] = characters
         state["modified_at"] = self._now()
         save_state(project.folder, state)
+
+        # Keep every saved source span routed to the edited character when its
+        # series or aliases change. Preserve source/confidence/offsets; only update
+        # the series key and speaker labels that belonged uniquely to this identity.
+        new_identity_names = {name.casefold(), *(str(alias).strip().casefold() for alias in aliases if str(alias).strip())}
+        assignment_changes = 0
+        for chapter in project.chapters:
+            for assignment in list(getattr(chapter, "dialogue_assignments", []) or []):
+                if not isinstance(assignment, dict):
+                    continue
+                assignment_series = str(assignment.get("series") or default_series).strip()
+                if assignment_series.casefold() != current_series.casefold():
+                    continue
+                raw_speakers = assignment.get("speakers")
+                if not isinstance(raw_speakers, (list, tuple)):
+                    raw_speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
+                speaker_names = {str(value or "").strip().casefold() for value in raw_speakers if str(value or "").strip()}
+                if not speaker_names.intersection(previous_identity_names):
+                    continue
+
+                def rehome_speaker(value: Any) -> Any:
+                    normalized = str(value or "").strip().casefold()
+                    if normalized in previous_identity_names and normalized not in new_identity_names:
+                        return name
+                    return value
+
+                if isinstance(assignment.get("speakers"), (list, tuple)):
+                    assignment["speakers"] = [rehome_speaker(value) for value in assignment["speakers"]]
+                if assignment.get("speaker"):
+                    assignment["speaker"] = rehome_speaker(assignment["speaker"])
+                if current_series.casefold() != target_series.casefold() or not assignment.get("series"):
+                    assignment["series"] = target_series
+                assignment_changes += 1
+        if assignment_changes:
+            project.save()
+
         if series_value:
             try:
                 registry_rows = list_reusable_characters()

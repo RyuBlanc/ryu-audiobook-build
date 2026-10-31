@@ -424,6 +424,67 @@ class CharacterUpdateSeriesIntegrityTests(unittest.TestCase):
         self.assertEqual([row["series"] for row in state["characters"]], ["Series A", "Series B", "Series C"])
 
 
+    def test_character_update_moves_only_selected_series_assignments_and_preserves_routing(self):
+        source = '“A.” “B.” “C.”'
+        chapter = Chapter(1, "Routing", source)
+        a_start = source.index("“A.”")
+        b_start = source.index("“B.”")
+        c_start = source.index("“C.”")
+        chapter.dialogue_assignments = [
+            {
+                "start": a_start, "end": a_start + 4, "text": "“A.”",
+                "speaker": "Mira", "speakers": ["Mira"], "series": "Series A",
+                "source": "ai", "confidence": 0.91,
+            },
+            {
+                "start": b_start, "end": b_start + 4, "text": "“B.”",
+                "speaker": "Mi", "speakers": ["Mi"], "series": "Series A",
+                "source": "manual", "confidence": 1.0,
+            },
+            {
+                "start": c_start, "end": c_start + 4, "text": "“C.”",
+                "speaker": "Mira", "speakers": ["Mira"], "series": "Series B",
+                "source": "manual", "confidence": 1.0,
+            },
+        ]
+        project = SimpleNamespace(
+            folder=Path("unused-stage3-character-update-project"),
+            chapters=[chapter], title="Series A", save=Mock(),
+        )
+        bridge = _BridgeHarness(project)
+        state = {
+            "series_name": "Series A",
+            "characters": [
+                {"name": "Mira", "series": "Series A", "aliases": ["Mi"], "voice_profile": None},
+                {"name": "Mira", "series": "Series B", "aliases": ["Other"], "voice_profile": None},
+            ],
+        }
+        with (
+            patch.object(host, "load_state", return_value=state),
+            patch.object(host, "save_state"),
+            patch.object(host, "list_reusable_characters", return_value=[]),
+        ):
+            result = bridge._character_update({
+                "original_name": "Mira",
+                "original_series": "Series A",
+                "name": "Mira Vale",
+                "series": "Series C",
+                "aliases": "",
+            })
+        self.assertTrue(result["saved"])
+        self.assertEqual(state["characters"][0]["series"], "Series C")
+        self.assertIn("Mira", state["characters"][0]["aliases"])
+        moved, migrated_alias, other_series = chapter.dialogue_assignments
+        self.assertEqual(moved["series"], "Series C")
+        self.assertEqual(moved["speakers"], ["Mira"])
+        self.assertEqual(moved["source"], "ai")
+        self.assertAlmostEqual(moved["confidence"], 0.91)
+        self.assertEqual(migrated_alias["series"], "Series C")
+        self.assertEqual(migrated_alias["speakers"], ["Mira Vale"])
+        self.assertEqual(other_series["series"], "Series B")
+        self.assertEqual(other_series["speakers"], ["Mira"])
+        project.save.assert_called_once()
+
     def test_character_update_rejects_name_collision_within_target_series(self):
         state = {
             "series_name": "Series A",
