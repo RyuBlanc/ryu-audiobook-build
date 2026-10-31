@@ -2422,19 +2422,41 @@
     }
     const savedName = String(seriesNarratorDefault?.profile_name || '');
     const effectiveName = String(project?.voice_profile || seriesNarratorDefault?.effective_profile_name || '');
-    const options = characterSavedProfiles().map(profile =>
+    const projectNarratorName = String(project?.voice_profile || '');
+    const profileOptions = characterSavedProfiles().map(profile =>
+      '<option value="' + esc(profile.name) + '">' + esc(profile.name) + '</option>'
+    ).join('');
+    const seriesOptions = characterSavedProfiles().map(profile =>
       '<option value="' + esc(profile.name) + '"' + (profile.name === savedName ? ' selected' : '') + '>' + esc(profile.name) + '</option>'
     ).join('');
-    card.innerHTML = '<div style="font-weight:750;margin-bottom:5px">Series Narrator Default</div>' +
+    card.innerHTML = '<div style="font-weight:750;margin-bottom:5px">Project Narrator</div>' +
+      '<div class="muted" style="font-size:12px;margin-bottom:8px">Active project: ' + esc(String(project?.title || '')) +
+      ' · Current narrator: ' + esc(projectNarratorName || 'Not selected') +
+      ' · Source: ' + esc(String(project?.narrator_profile_source || 'none')) + '</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">' +
+      '<select id="projectNarratorProfile" class="input" style="min-width:220px;flex:1">' +
+      '<option value="">Choose a saved narrator profile</option>' + profileOptions + '</select>' +
+      '<button class="btn small" type="button" id="saveProjectNarrator">Use for This Book</button></div>' +
+      '<div style="font-weight:750;margin-bottom:5px">Series Narrator Default</div>' +
       '<div class="muted" style="font-size:12px;margin-bottom:10px">Series: ' + esc(series) +
       ' · This default is applied to a book only when you explicitly choose Apply to This Book.</div>' +
       '<select id="seriesNarratorProfile" class="input" style="width:100%;margin-bottom:8px">' +
-      '<option value="">Choose a saved voice profile</option>' + options + '</select>' +
+      '<option value="">Choose a saved voice profile</option>' + seriesOptions + '</select>' +
       '<div class="muted" style="font-size:12px;margin-bottom:9px">Saved default: ' + esc(savedName || 'Not set') +
       ' · Effective narrator for this book: ' + esc(effectiveName || 'Not set') +
       ' · Source: ' + esc(String(seriesNarratorDefault?.source || 'none')) + '</div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small" type="button" id="saveSeriesNarratorDefault">Save Series Default</button>' +
       '<button class="btn small ghost" type="button" id="applySeriesNarratorDefault">Apply to This Book</button></div>';
+    $('saveProjectNarrator')?.addEventListener('click', async () => {
+      const profileName = String($('projectNarratorProfile')?.value || '').trim();
+      if (!profileName) { message('Select a saved narrator profile first.', true); return; }
+      try {
+        const selected = await call('voice.select', {profile_name:profileName});
+        await refreshCurrentProjectCard();
+        await refreshSeriesNarratorControls();
+        message('Project narrator saved: ' + selected.name);
+      } catch (error) { message(error?.message || String(error), true); }
+    });
     $('saveSeriesNarratorDefault')?.addEventListener('click', async () => {
       const profileName = String($('seriesNarratorProfile')?.value || '').trim();
       if (!profileName) { message('Select a saved voice profile first.', true); return; }
