@@ -242,6 +242,9 @@ class CharacterDialoguePreviewBridgeTests(unittest.TestCase):
         def _job_update(self, *args, **kwargs):
             self.updated.append((args, kwargs))
 
+        def _preview_worker(self, *args, **kwargs):
+            self.preview_args = (args, kwargs)
+
     def _fixture(self, folder, speaker="Mira"):
         from app.core.project import Project
         from app.core.state import save_state
