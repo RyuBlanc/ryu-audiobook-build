@@ -568,7 +568,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
         for token in (
-            "previewSavedProfile(profile, 'Hello, my name is ' + c.name",
+            "async function testSelectedCharacterVoice()",
+            "previewSavedProfile(profile, sample, current.name)",
+            "window.ryuPremiumSelectedAssignedDialogueId",
             "call('character.update'",
             "call('character.delete'",
             "Automatic per-line AI speaker suggestions remain prototype-only",
