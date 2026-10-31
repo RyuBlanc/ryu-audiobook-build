@@ -118,3 +118,8 @@ Run #1746 passed on 68c4afb: JavaScript syntax passed; 843 tests passed in 37.08
 - A new regression test asserts that source/destination distinction and the final category metadata check.
 - [#1765](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41148752076) passed the full regression suite and frontend JavaScript syntax validation on that exact source commit.
 - Next: repeat the consolidated frozen Windows package acceptance, including full workflow and second-process persistence. The Stage 2 items remain open until all expanded packaged checks and restart assertions pass.
+
+## Regression gate for corrected category source path
+
+- [#1766](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41148980962) passed the frontend JavaScript syntax gate and complete regression suite on `74c9be04f0c4cb56d6eb3cb6aea792b8e1322278`. The category fixture contract now distinguishes the temporary WAV source passed to the native importer from the expected Audio Library destination stored in the catalogue assertions.
+- Re-run the complete frozen Windows Stage 2 UI workflow and its restart phase before marking the remaining SD/MUS requirements accepted.
