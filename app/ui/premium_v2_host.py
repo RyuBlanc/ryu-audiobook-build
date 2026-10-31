@@ -1874,6 +1874,7 @@ class PremiumV2Bridge(QObject):
             raise ValueError("A voice ID or speaker identifier is required.")
 
         saved = load_saved_profiles()
+        previous_saved = list(saved)
         existing = next((p for p in saved if p.name.casefold() == name.casefold()), None)
         original_name = str(payload.get("original_name") or "").strip()
         source_existing = next(
@@ -1937,11 +1938,93 @@ class PremiumV2Bridge(QObject):
         else:
             saved.append(profile)
         save_profiles(saved)
+        if source_existing is not None and source_existing.name.casefold() != profile.name.casefold():
+            try:
+                self._rename_saved_profile_references(source_existing.name, profile)
+            except Exception:
+                # Keep the catalogue and all project references on the same
+                # identity. The helper rolls back any state/library updates it
+                # completed; restore the previous profile record as well.
+                try:
+                    save_profiles(previous_saved)
+                except Exception:
+                    log.exception("Could not roll back a renamed voice profile after reference synchronization failed")
+                raise
         return {"name": profile.name, "provider": profile.provider, "voice_id": profile.voice_id,
                 "sample_path": profile.sample_path, "model_id": profile.model_id,
                 "backend": profile.backend, "language": profile.language,
                 "authorized": profile.authorized, "qwen_mode": profile.qwen_mode, "saved": True,
                 "count": len(load_profiles())}
+
+
+    def _rename_saved_profile_references(self, old_name: str, profile) -> None:
+        """Keep project narrator/cast and reusable-library references aligned on profile rename."""
+        old_key = str(old_name or "").strip().casefold()
+        new_name = str(getattr(profile, "name", "") or "").strip()
+        if not old_key or not new_name:
+            raise ValueError("A voice profile rename requires both the previous and new profile names.")
+
+        changed_projects: list[tuple[Path, dict[str, Any]]] = []
+        changed_library_rows: list[tuple[str, str]] = []
+        try:
+            for project in list_projects():
+                old_state = load_state(project.folder)
+                new_state = dict(old_state)
+                dirty = False
+
+                old_narrator_profile = str(old_state.get("voice_profile") or "").strip()
+                if old_narrator_profile.casefold() == old_key:
+                    new_state["voice_profile"] = new_name
+                    new_state["voice_id"] = str(getattr(profile, "voice_id", "") or "")
+                    new_state["backend"] = str(getattr(profile, "backend", "") or "automatic")
+                    dirty = True
+
+                old_narrator = str(old_state.get("narrator") or "").strip()
+                if old_narrator.casefold() == old_key:
+                    new_state["narrator"] = new_name
+                    dirty = True
+
+                cast = old_state.get("characters")
+                if isinstance(cast, list):
+                    updated_cast: list[Any] = []
+                    cast_changed = False
+                    for raw in cast:
+                        if not isinstance(raw, dict):
+                            updated_cast.append(raw)
+                            continue
+                        character = dict(raw)
+                        if str(character.get("voice_profile") or "").strip().casefold() == old_key:
+                            character["voice_profile"] = new_name
+                            cast_changed = True
+                        updated_cast.append(character)
+                    if cast_changed:
+                        new_state["characters"] = updated_cast
+                        dirty = True
+
+                if dirty:
+                    new_state["modified_at"] = self._now()
+                    save_state(project.folder, new_state)
+                    changed_projects.append((Path(project.folder), old_state))
+
+            for row in list_reusable_characters():
+                old_voice = str(row.get("voice_name") or "").strip()
+                record_id = str(row.get("id") or "").strip()
+                if not record_id or old_voice.casefold() != old_key:
+                    continue
+                update_reusable_character(record_id, {"voice_name": new_name})
+                changed_library_rows.append((record_id, old_voice))
+        except Exception:
+            for record_id, old_voice in reversed(changed_library_rows):
+                try:
+                    update_reusable_character(record_id, {"voice_name": old_voice})
+                except Exception:
+                    log.exception("Could not roll back Character Library voice reference %s", record_id)
+            for folder, old_state in reversed(changed_projects):
+                try:
+                    save_state(folder, old_state)
+                except Exception:
+                    log.exception("Could not roll back project voice references in %s", folder)
+            raise
 
     def _voice_catalog(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Return the real provider catalogue for a Voice Studio library card."""
