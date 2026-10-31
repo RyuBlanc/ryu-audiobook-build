@@ -1351,5 +1351,62 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             adapter,
         )
 
+    def test_stage3_character_inspector_metrics_use_confirmed_assignment_provenance(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        helper = adapter.split("function characterVoiceAssignments(name)", 1)[1].split("function renderCharacterInspector()", 1)[0]
+        inspector = adapter.split("function renderCharacterInspector()", 1)[1].split("function renderCharacterStudioLive()", 1)[0]
+        self.assertIn("assignment.source || 'manual'", helper)
+        self.assertIn("sourceKind === 'local-dialogue-analysis' || sourceKind === 'ai'", helper)
+        self.assertIn("aiAssignedPercent:passages.length ? Math.round(aiAssignedCount / passages.length * 100) : 0", helper)
+        self.assertIn("assignments.aiAssignedPercent + '%'", inspector)
+        self.assertIn("assignments.chapters.length", inspector)
+        self.assertIn("assignments.passages.length", inspector)
+        self.assertIn("source:selectedCandidateIsAi ? 'local-dialogue-analysis' : 'manual'", adapter)
+        self.assertIn('assignment_source = "local-dialogue-analysis"', host)
+        self.assertIn('str(row.get("source") or "") != "local-dialogue-analysis"', host)
+        self.assertIn("exact_source == dialogue_text", host)
+        self.assertIn("and row_start == source_start", host)
+        self.assertIn("and row_end == source_end", host)
+
+    def test_stage3_character_inspector_dialogue_rows_are_selectable_and_source_styled(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        inspector = adapter.split("function renderCharacterInspector()", 1)[1].split("function renderCharacterStudioLive()", 1)[0]
+        self.assertIn("data-assigned-dialogue", inspector)
+        self.assertIn("data-chapter-number", inspector)
+        self.assertIn("row.sourceLabel", inspector)
+        self.assertIn("is-ai' : 'is-manual'", inspector)
+        self.assertIn("window.ryuPremiumSelectedAssignedDialogueId = current.id", inspector)
+        self.assertIn("ryu-assigned-dialogue.is-manual", adapter)
+        self.assertIn("ryu-assigned-dialogue.is-ai", adapter)
+
+    def test_stage3_character_voice_test_uses_selected_saved_profile_and_actual_selected_dialogue(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        helper = adapter.split("async function testSelectedCharacterVoice()", 1)[1].split("function installCharacterStudioHandlers()", 1)[0]
+        self.assertIn("assignedAudioProfile", helper)
+        self.assertIn("characterProfileByName(selectedProfileName)", helper)
+        self.assertIn("window.ryuPremiumSelectedAssignedDialogueId", helper)
+        self.assertIn("previewSavedProfile(profile, sample, current.name)", helper)
+        self.assertNotIn("Hello, my name is ", adapter)
+        self.assertNotIn("await previewSavedProfile(profile, 'Hello, my name is '", adapter)
+
+    def test_stage3_voice_assignment_dropdown_is_not_persisted_until_explicit_save(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        controls = adapter.split("function ensureAssignedAudioProfileControls()", 1)[1].split("function characterVoiceAssignments()", 1)[0]
+        self.assertIn("select.onchange = () =>", controls)
+        self.assertIn("save.disabled", controls)
+        self.assertIn("if (save) save.addEventListener('click'", controls)
+        self.assertIn("call('character.assign'", controls)
+        self.assertNotIn("editCharacterVoice').onchange=act(async()", adapter)
+
+    def test_stage3_voice_preview_keeps_registered_10_30_60_90_options_and_30_default(self):
+        voice = (ROOT / "app" / "ui" / "voice_page.py").read_text(encoding="utf-8")
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("PREVIEW_DURATION_OPTIONS = (10, 30, 60, 90)", voice)
+        self.assertIn("PREVIEW_DURATION_OPTIONS.index(30)", voice)
+        self.assertIn("if seconds not in {10, 30, 60, 90}", host)
+        self.assertIn("Preview duration must be 10, 30, 60, or 90 seconds.", host)
+
+
 if __name__ == "__main__":
     unittest.main()
