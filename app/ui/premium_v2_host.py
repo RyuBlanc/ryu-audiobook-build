@@ -3349,14 +3349,21 @@ class PremiumV2Bridge(QObject):
         state = load_state(project.folder)
         characters = list(state.get("characters") or [])
         requested_series = str(payload.get("series") or "").strip()
-        item = next((c for c in characters
-                     if isinstance(c, dict)
-                     and str(c.get("name", "")).casefold() == name.casefold()
-                     and (not requested_series
-                          or str(c.get("series") or self._project_series_name(project, state)).casefold()
-                             == requested_series.casefold())), None)
-        if item is None:
+        matches = [
+            c for c in characters
+            if isinstance(c, dict)
+            and str(c.get("name", "")).strip().casefold() == name.casefold()
+            and (
+                not requested_series
+                or str(c.get("series") or self._project_series_name(project, state)).strip().casefold()
+                   == requested_series.casefold()
+            )
+        ]
+        if not matches:
             raise ValueError("That character is not in the selected series of the saved project cast. Refresh the list and try again.")
+        if len(matches) > 1:
+            raise ValueError("This character name exists in more than one series. Select the series before assigning a voice.")
+        item = matches[0]
         item["voice_profile"] = profile_name or None
         state["characters"] = characters
         state["modified_at"] = self._now()

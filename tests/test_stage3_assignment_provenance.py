@@ -64,6 +64,7 @@ class AssignmentProvenanceUtilityTests(unittest.TestCase):
 class _BridgeHarness:
     _chapter_dialogue_assign = host.PremiumV2Bridge._chapter_dialogue_assign
     _character_delete = host.PremiumV2Bridge._character_delete
+    _character_assign = host.PremiumV2Bridge._character_assign
     _character_update = host.PremiumV2Bridge._character_update
     _character_create = host.PremiumV2Bridge._character_create
     _project_series_name = host.PremiumV2Bridge._project_series_name
@@ -253,6 +254,52 @@ class CharacterUpdateSeriesIntegrityTests(unittest.TestCase):
     def _bridge(self):
         project = SimpleNamespace(folder=Path("unused-stage3-character-update-project"), chapters=[])
         return _BridgeHarness(project)
+
+    def test_character_voice_profile_assignment_requires_series_when_name_is_ambiguous(self):
+        state = {
+            "series_name": "Series A",
+            "characters": [
+                {"name": "Mira", "series": "Series A", "voice_profile": "Voice A"},
+                {"name": "Mira", "series": "Series B", "voice_profile": "Voice B"},
+            ],
+        }
+        project = SimpleNamespace(
+            folder=Path("unused-stage3-voice-assignment-project"),
+            title="Series A", chapters=[], save=Mock(),
+        )
+        bridge = _BridgeHarness(project)
+        with patch.object(host, "load_state", return_value=state), \\
+             patch.object(host, "save_state") as save_state, \\
+             patch.object(host, "list_reusable_characters", return_value=[]):
+            with self.assertRaisesRegex(ValueError, "more than one series"):
+                bridge._character_assign({"name": "Mira", "profile_name": ""})
+            save_state.assert_not_called()
+        self.assertEqual([row["voice_profile"] for row in state["characters"]], ["Voice A", "Voice B"])
+
+    def test_character_voice_profile_assignment_targets_the_requested_series(self):
+        state = {
+            "series_name": "Series A",
+            "characters": [
+                {"name": "Mira", "series": "Series A", "voice_profile": "Voice A"},
+                {"name": "Mira", "series": "Series B", "voice_profile": "Voice B"},
+            ],
+        }
+        project = SimpleNamespace(
+            folder=Path("unused-stage3-voice-assignment-project"),
+            title="Series A", chapters=[], save=Mock(),
+        )
+        bridge = _BridgeHarness(project)
+        with patch.object(host, "load_state", return_value=state), \\
+             patch.object(host, "save_state") as save_state, \\
+             patch.object(host, "list_reusable_characters", return_value=[]), \\
+             patch.object(bridge, "_find_profile", return_value=SimpleNamespace(name="Voice New")):
+            result = bridge._character_assign({
+                "name": "Mira", "series": "Series B", "profile_name": "Voice New",
+            })
+        self.assertTrue(result["saved"])
+        self.assertEqual(state["characters"][0]["voice_profile"], "Voice A")
+        self.assertEqual(state["characters"][1]["voice_profile"], "Voice New")
+        save_state.assert_called_once()
 
     def test_character_create_allows_same_canonical_name_in_a_different_series(self):
         state = {
