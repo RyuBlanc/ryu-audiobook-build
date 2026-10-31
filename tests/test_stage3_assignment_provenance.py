@@ -152,6 +152,74 @@ class AssignmentProvenanceBridgeTests(unittest.TestCase):
         self.assertEqual(chapter_a.dialogue_assignments[0]["source"], "manual")
         self.assertEqual(chapter_b.dialogue_assignments[0]["source"], "manual")
 
+    def test_bridge_assignment_provenance_and_series_survive_project_reopen(self):
+        with TemporaryDirectory() as root:
+            project_a_folder = Path(root) / "project-a"
+            project_b_folder = Path(root) / "project-b"
+            project_a_folder.mkdir()
+            project_b_folder.mkdir()
+            manual_text = '“Only Project A manual.”'
+            ai_text = '“Only Project A AI.”'
+            other_text = '“Only Project B.”'
+            project_a = Project(
+                "Series A",
+                project_a_folder,
+                chapters=[Chapter(1, "A", manual_text + "\\n" + ai_text)],
+            )
+            project_b = Project(
+                "Series B",
+                project_b_folder,
+                chapters=[Chapter(1, "B", other_text)],
+            )
+            project_a.save()
+            project_b.save()
+            states = {
+                str(project_a_folder): {
+                    "series_name": "Series A",
+                    "characters": [{"name": "Mira", "series": "Series A"}],
+                },
+                str(project_b_folder): {
+                    "series_name": "Series B",
+                    "characters": [{"name": "Mira", "series": "Series B"}],
+                },
+            }
+            bridge_a, bridge_b = _BridgeHarness(project_a), _BridgeHarness(project_b)
+            with patch.object(host, "load_state", side_effect=lambda folder: states[str(folder)]), \\
+                 patch.object(host, "save_state"), \\
+                 patch("app.chapters.character_learning.record_assignment_feedback"):
+                manual_result = bridge_a._chapter_dialogue_assign({
+                    "dialogue_text": manual_text, "speakers": ["Mira"],
+                    "chapter_number": 1, "series": "Series A", "source": "manual",
+                })
+                ai_result = bridge_a._chapter_dialogue_assign({
+                    "dialogue_text": ai_text, "speakers": ["Mira"],
+                    "chapter_number": 1, "series": "Series A", "source": "ai", "confidence": 0.87,
+                })
+                other_result = bridge_b._chapter_dialogue_assign({
+                    "dialogue_text": other_text, "speakers": ["Mira"],
+                    "chapter_number": 1, "series": "Series B", "source": "manual",
+                })
+            self.assertTrue(manual_result["saved"])
+            self.assertTrue(ai_result["saved"])
+            self.assertTrue(other_result["saved"])
+            reopened_a = Project.load(project_a_folder)
+            reopened_b = Project.load(project_b_folder)
+            assignments_a = reopened_a.chapters[0].dialogue_assignments
+            assignments_b = reopened_b.chapters[0].dialogue_assignments
+            self.assertEqual(len(assignments_a), 2)
+            self.assertEqual(len(assignments_b), 1)
+            by_text_a = {row["text"]: row for row in assignments_a}
+            by_text_b = {row["text"]: row for row in assignments_b}
+            self.assertEqual(by_text_a[manual_text]["series"], "Series A")
+            self.assertEqual(by_text_a[manual_text]["source"], "manual")
+            self.assertEqual(by_text_a[ai_text]["series"], "Series A")
+            self.assertEqual(by_text_a[ai_text]["source"], "ai")
+            self.assertAlmostEqual(by_text_a[ai_text]["confidence"], 0.87)
+            self.assertEqual(by_text_b[other_text]["series"], "Series B")
+            self.assertEqual(by_text_b[other_text]["source"], "manual")
+            self.assertNotIn(other_text, by_text_a)
+            self.assertNotIn(manual_text, by_text_b)
+
     def test_bridge_rejects_unknown_source_before_saving(self):
         text = '“The gate is closing.”'
         chapter = Chapter(1, "Gate", text)
