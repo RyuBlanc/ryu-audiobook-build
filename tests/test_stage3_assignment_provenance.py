@@ -268,9 +268,11 @@ class CharacterUpdateSeriesIntegrityTests(unittest.TestCase):
             title="Series A", chapters=[], save=Mock(),
         )
         bridge = _BridgeHarness(project)
-        with patch.object(host, "load_state", return_value=state), \\
-             patch.object(host, "save_state") as save_state, \\
-             patch.object(host, "list_reusable_characters", return_value=[]):
+        with (
+            patch.object(host, "load_state", return_value=state),
+            patch.object(host, "save_state") as save_state,
+            patch.object(host, "list_reusable_characters", return_value=[]),
+        ):
             with self.assertRaisesRegex(ValueError, "more than one series"):
                 bridge._character_assign({"name": "Mira", "profile_name": ""})
             save_state.assert_not_called()
@@ -289,10 +291,12 @@ class CharacterUpdateSeriesIntegrityTests(unittest.TestCase):
             title="Series A", chapters=[], save=Mock(),
         )
         bridge = _BridgeHarness(project)
-        with patch.object(host, "load_state", return_value=state), \\
-             patch.object(host, "save_state") as save_state, \\
-             patch.object(host, "list_reusable_characters", return_value=[]), \\
-             patch.object(bridge, "_find_profile", return_value=SimpleNamespace(name="Voice New")):
+        with (
+            patch.object(host, "load_state", return_value=state),
+            patch.object(host, "save_state") as save_state,
+            patch.object(host, "list_reusable_characters", return_value=[]),
+            patch.object(bridge, "_find_profile", return_value=SimpleNamespace(name="Voice New")),
+        ):
             result = bridge._character_assign({
                 "name": "Mira", "series": "Series B", "profile_name": "Voice New",
             })
