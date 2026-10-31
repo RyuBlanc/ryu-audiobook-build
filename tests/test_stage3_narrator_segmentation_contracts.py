@@ -11,6 +11,8 @@ class Stage3NarratorSegmentationContracts(unittest.TestCase):
         self.assertIn('"character.narration.segments.list": self._character_narration_segments_list', host)
         self.assertIn("def _character_narration_segments_list(", host)
         self.assertIn("segment_chapter_speakers(chapter)", host)
+        self.assertIn('chapter.narrator_passages = [', host)
+        self.assertIn('"automatic": True', host)
 
     def test_character_studio_displays_narration_as_a_dedicated_speaker_role(self):
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")

@@ -1178,6 +1178,7 @@
       chapters = [];
       characters = [];
       characterDialogueSuggestions = [];
+      characterNarrationSegments = [];
       characterAnalysisStatus = {analyzed:false, updated_at:null, dialogue_total:0, unassigned_dialogue:0, suggestion_count:0};
       characterStudioSelectedChapter = null;
       characterStudioSelectedSeries = '';
@@ -2236,6 +2237,10 @@
     }
     if (requestToken !== chapterListEpoch) return chapters;
     chapters = Array.isArray(loaded) ? loaded : [];
+    // Narrator spans are a derived view over the authoritative chapter source.
+    // Refresh only after the new chapter text has been loaded so stale offsets
+    // cannot be displayed for an edited/reordered/split/merged chapter.
+    await refreshCharacterNarrationSegments();
     if (draft) {
       const pendingChapter = chapters.find(chapter => Number(chapter.number) === draft.number);
       if (pendingChapter) {

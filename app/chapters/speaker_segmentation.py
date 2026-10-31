@@ -142,6 +142,29 @@ def _narration_gaps(text: str, start: int, end: int, chapter_number: int) -> lis
     return results
 
 
+def narrator_assignment_rows(chapter: Chapter) -> list[dict]:
+    """Return deterministic narrator passage records tied to the exact chapter source.
+
+    These records are derived metadata, not user-editable character assignments.
+    They may be cached by callers, but every consumer must verify the exact source
+    slice before using them.
+    """
+    return [
+        {
+            "chapter_number": int(row.chapter_number),
+            "start": int(row.start),
+            "end": int(row.end),
+            "text": row.text,
+            "role": NARRATOR_ROLE,
+            "kind": "narration",
+            "source": row.source,
+            "automatic": True,
+        }
+        for row in segment_chapter_speakers(chapter)
+        if row.kind == "narration"
+    ]
+
+
 def segment_chapter_speakers(chapter: Chapter) -> list[SpeakerSegment]:
     """Classify a chapter into narrator, assigned character and review passages.
 

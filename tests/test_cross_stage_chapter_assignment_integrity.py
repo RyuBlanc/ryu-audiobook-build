@@ -67,6 +67,26 @@ class CrossStageChapterAssignmentIntegrityTests(unittest.TestCase):
         self.assertEqual(item["multi_speaker_mode"], "chorus")
         self.assertEqual(item["confidence"], 0.95)
 
+    def test_narrator_passage_is_derived_again_after_edit_split_and_merge(self):
+        from app.chapters.speaker_segmentation import narrator_assignment_rows
+
+        first = Chapter(1, "One", "The first room was quiet.\n\n“Wait!”")
+        before = narrator_assignment_rows(first)
+        self.assertEqual(before[0]["text"], "The first room was quiet.")
+        editor = ChapterEditor([first])
+        editor.edit_text(0, "The second room was quiet.\n\n“Wait!”")
+        after_edit = narrator_assignment_rows(editor.chapters[0])
+        self.assertEqual(after_edit[0]["text"], "The second room was quiet.")
+        self.assertEqual(after_edit[0]["start"], editor.chapters[0].text.index("The second room"))
+        editor.chapters.append(Chapter(2, "Two", "He left the room."))
+        editor.merge_with_next(0)
+        merged = editor.chapters[0]
+        rows = narrator_assignment_rows(merged)
+        self.assertIn("The second room was quiet.", [row["text"] for row in rows])
+        self.assertIn("He left the room.", [row["text"] for row in rows])
+        for row in rows:
+            self.assertEqual(merged.text[row["start"]:row["end"]], row["text"])
+
     def test_split_at_heading_selection_keeps_assignments_with_their_text(self):
         heading = "Chapter 2: Return"
         text = f"Opening line.\n{heading}\nMira said, Wait here.\nClosing line."

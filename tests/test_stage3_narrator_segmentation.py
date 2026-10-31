@@ -83,6 +83,32 @@ class NarratorSegmentationTests(unittest.TestCase):
         self.assertIn("‘I understand.’", [row.text for row in review])
         self.assertIn("「わかった」", [row.text for row in review])
 
+    def test_narrator_passages_are_deterministic_source_bound_metadata(self):
+        from app.chapters.speaker_segmentation import narrator_assignment_rows
+
+        text = "The room was quiet.\n\n“Do not move.”\n\nHe waited."
+        chapter = Chapter(7, "Seven", text)
+        rows = narrator_assignment_rows(chapter)
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(row["role"] == "Narrator" and row["automatic"] for row in rows))
+        for row in rows:
+            self.assertEqual(text[row["start"]:row["end"]], row["text"])
+        self.assertEqual(rows, narrator_assignment_rows(chapter))
+
+    def test_saved_character_assignments_are_untouched_by_narrator_metadata(self):
+        text = "The sun rose. “Hello.” She smiled."
+        start = text.index("“Hello.”")
+        chapter = Chapter(1, "One", text, [{
+            "start": start, "end": start + len("“Hello.”"),
+            "text": "“Hello.”", "speaker": "Mira", "source": "manual",
+        }])
+        before = [dict(row) for row in chapter.dialogue_assignments]
+        from app.chapters.speaker_segmentation import narrator_assignment_rows
+        rows = narrator_assignment_rows(chapter)
+        self.assertEqual(chapter.dialogue_assignments, before)
+        self.assertEqual(len(rows), 2)
+        self.assertNotIn("Mira", [row["role"] for row in rows])
+
     def test_narrator_is_a_reserved_speaker_not_a_character(self):
         text = '"A line."'
         chapter = Chapter(1, "One", text, [{

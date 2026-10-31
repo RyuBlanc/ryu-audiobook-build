@@ -3067,7 +3067,19 @@ class PremiumV2Bridge(QObject):
         for chapter in project.chapters:
             if requested_number is not None and int(chapter.number) != requested_number:
                 continue
-            results.extend(asdict(segment) for segment in segment_chapter_speakers(chapter))
+            rows = [asdict(segment) for segment in segment_chapter_speakers(chapter)]
+            # Persist a deterministic, source-bound view cache for diagnostics and
+            # fast subsequent reads. It is rebuilt from chapter source on every
+            # request, so edits/splits/merges cannot leave stale offsets authoritative.
+            chapter.narrator_passages = [
+                {
+                    "start": row["start"], "end": row["end"], "text": row["text"],
+                    "role": "Narrator", "kind": "narration",
+                    "source": row["source"], "automatic": True,
+                }
+                for row in rows if row.get("kind") == "narration"
+            ]
+            results.extend(rows)
         return results
 
     def _character_analysis_status(self, _payload: dict[str, Any]) -> dict[str, Any]:
