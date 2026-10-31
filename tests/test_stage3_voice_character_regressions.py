@@ -250,6 +250,67 @@ class Stage3CastRoutingTests(unittest.TestCase):
         self.assertTrue(any("Mira said" in spoken and voice == "Narrator" for spoken, voice in parts))
         self.assertTrue(any("Ren answered" in spoken and voice == "Narrator" for spoken, voice in parts))
 
+    def test_smart_single_quote_dialogue_uses_the_assigned_character_profile(self):
+        narrator = _RecordingNarratorProvider()
+        profiles = {"Mira Voice": VoiceProfile(name="Mira Voice", provider="piper", voice_id="mira")}
+        provider = CastAwareProvider(narrator, "Narrator", profiles, {"Mira": "Mira Voice"})
+        text = "The room was quiet. ‘Come back soon.’ She waited."
+        quote = "‘Come back soon.’"
+        start = text.index(quote)
+        assignments = [{
+            "start": start, "end": start + len(quote),
+            "text": quote, "speaker": "Mira", "source": "manual",
+        }]
+        parts = provider.split_for_cast(text, "Narrator", dialogue_assignments=assignments)
+        self.assertTrue(any("Come back soon." in spoken and voice == "Mira Voice" for spoken, voice in parts))
+        self.assertTrue(any("The room was quiet." in spoken and voice == "Narrator" for spoken, voice in parts))
+        self.assertTrue(any("She waited." in spoken and voice == "Narrator" for spoken, voice in parts))
+
+    def test_japanese_quote_dialogue_uses_the_assigned_character_profile(self):
+        narrator = _RecordingNarratorProvider()
+        profiles = {"Aoi Voice": VoiceProfile(name="Aoi Voice", provider="piper", voice_id="aoi")}
+        provider = CastAwareProvider(narrator, "Narrator", profiles, {"Aoi": "Aoi Voice"})
+        text = "彼女は「わかった」と答えた。廊下は静かだった。"
+        quote = "「わかった」"
+        start = text.index(quote)
+        assignments = [{
+            "start": start, "end": start + len(quote),
+            "text": quote, "speaker": "Aoi", "source": "manual",
+        }]
+        parts = provider.split_for_cast(text, "Narrator", dialogue_assignments=assignments)
+        self.assertTrue(any(voice == "Aoi Voice" and "わかった" in spoken for spoken, voice in parts))
+        self.assertTrue(any(voice == "Narrator" and "彼女は" in spoken for spoken, voice in parts))
+
+    def test_unquoted_exactly_assigned_dialogue_routes_to_character_and_preserves_narrator_gaps(self):
+        narrator = _RecordingNarratorProvider()
+        profiles = {"Ren Voice": VoiceProfile(name="Ren Voice", provider="piper", voice_id="ren")}
+        provider = CastAwareProvider(narrator, "Narrator", profiles, {"Ren": "Ren Voice"})
+        text = "Ren stepped outside. I will return before sunset. The rain continued."
+        passage = "I will return before sunset."
+        start = text.index(passage)
+        assignments = [{
+            "start": start, "end": start + len(passage),
+            "text": passage, "speaker": "Ren", "source": "manual",
+        }]
+        parts = provider.split_for_cast(text, "Narrator", dialogue_assignments=assignments)
+        self.assertEqual(parts, [
+            ("Ren stepped outside.", "Narrator"),
+            (passage, "Ren Voice"),
+            ("The rain continued.", "Narrator"),
+        ])
+
+    def test_stale_unquoted_assignment_is_not_added_to_production_dialogue_spans(self):
+        narrator = _RecordingNarratorProvider()
+        profiles = {"Ren Voice": VoiceProfile(name="Ren Voice", provider="piper", voice_id="ren")}
+        provider = CastAwareProvider(narrator, "Narrator", profiles, {"Ren": "Ren Voice"})
+        text = "The rain continued."
+        assignments = [{
+            "start": 0, "end": len(text), "text": "Old passage",
+            "speaker": "Ren", "source": "manual",
+        }]
+        self.assertEqual(provider.split_for_cast(text, "Narrator", dialogue_assignments=assignments),
+                         [(text, "Narrator")])
+
     def test_missing_assigned_cast_profile_fails_instead_of_using_narrator(self):
         narrator = _RecordingNarratorProvider()
         provider = CastAwareProvider(

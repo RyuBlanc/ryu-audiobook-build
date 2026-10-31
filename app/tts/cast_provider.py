@@ -284,6 +284,36 @@ class CastAwareProvider(TTSProvider):
     def split_for_cast(self, text: str, fallback_voice: str | None, dialogue_assignments=None):        # Use the same dialogue span detector as Voice Cast analysis so
         # generation and review cannot disagree about what counts as dialogue.
         spans = _all_dialogue_spans(text)
+        # Explicitly saved source assignments may be unquoted or originate
+        # from manual selection. Include exact, validated spans when they are
+        # not already contained in a detected quotation.
+        for assignment in dialogue_assignments or []:
+            if not isinstance(assignment, dict) or not assignment_speakers(assignment):
+                continue
+            raw_start, raw_end = assignment.get("start"), assignment.get("end")
+            if isinstance(raw_start, bool) or isinstance(raw_end, bool):
+                continue
+            try:
+                start, end = int(raw_start), int(raw_end)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if start < 0 or end <= start or end > len(text):
+                continue
+            exact = text[start:end]
+            if not exact.strip():
+                continue
+            if assignment.get("text") is not None and str(assignment.get("text")) != exact:
+                continue
+            # A detected span containing the saved body already supports the
+            # existing exact/normalized assignment match. Avoid duplicate audio.
+            if any(span_start <= start and end <= span_end for span_start, span_end, _ in spans):
+                continue
+            # Partial overlap is ambiguous source data; do not synthesize
+            # overlapping parts or guess which saved assignment should win.
+            if any(start < span_end and span_start < end for span_start, span_end, _ in spans):
+                continue
+            spans.append((start, end, exact))
+        spans.sort(key=lambda item: (item[0], -(item[1] - item[0])))
 
         if not spans:
             return [(text, fallback_voice)]
@@ -341,7 +371,12 @@ class CastAwareProvider(TTSProvider):
 
             # Normalize only the dialogue marker for synthesis. The source
             # text stays untouched in narration.json and the project.
-            if len(dialogue) >= 2 and dialogue[0] in '“"「『' and dialogue[-1] in '”"」』':
+            if len(dialogue) >= 2 and (
+                (dialogue[0], dialogue[-1]) in {
+                    ("“", "”"), ('"', '"'), ("「", "」"),
+                    ("『", "』"), ("‘", "’"), ("'", "'"),
+                }
+            ):
                 dialogue = dialogue[1:-1].strip()
             else:
                 stripped = dialogue.lstrip(" \t")

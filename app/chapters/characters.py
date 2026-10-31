@@ -30,6 +30,9 @@ DIALOGUE_PATTERNS = (
     re.compile(r'"([^"]{2,1800})"'),
     re.compile(r'[\u300c]([^\u300d]{2,1800})[\u300d]'),
     re.compile(r'[\u300e]([^\u300f]{2,1800})[\u300f]'),
+    # Smart and straight single-quoted dialogue, excluding apostrophes inside words.
+    re.compile(r'(?<![\w])‘([^’\r\n]{2,1800})’(?![\w])'),
+    re.compile(r"(?<![\w])'([^'\r\n]{2,1800})'(?![\w])"),
 )
 SPEAKER_VERBS = (
     "said|asked|replied|answered|shouted|yelled|whispered|muttered|called|"
