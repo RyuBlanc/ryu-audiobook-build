@@ -141,3 +141,49 @@ Do not close Stage 3 from CI alone. Packaged Windows interaction and actual audi
 - Workflow concurrency is branch-scoped and no longer cancels an active build when a different branch's validation starts. The checkpoint workflow no longer deletes prior runs, the scheduled cleanup workflow is disabled until manual release review, and uploaded artifacts are retained for 90 days.
 - The previous successful test-only run #1500 is evidence for the prior source SHA, not this correction. This correction needs its own focused tests, then a full checkpoint test and packaging run on one exact source SHA.
 - A separate source-scope gate remains: the Stage 3 branch contains the recent Stage 3 fixes but not all later-stage feature branches. Do not describe a Stage 3-only artifact as a complete all-feature product until the requested feature scope is reconciled and verified.
+
+## Stage 3 Step 3 — Assigned Cast and dialogue inspector implementation — 2026-10-31
+
+### Scope closed by this step
+
+This step implements and automatically verifies the Step 3 scope from the staged plan: **CS-01, CS-02, CS-05, CS-06 and CS-07**. It does not close the broader Stage 3/Voice Studio scope or claim target-PC runtime acceptance.
+
+- **CS-01 — Assigned Cast:** the Premium V2 list is populated from the active project's saved character records and only includes characters with a saved character voice assignment. Each row shows character name, active project/story and the live count of assigned dialogue lines. Search covers canonical name, aliases and assigned voice.
+- **CS-02 — Project isolation and saved state:** all inspector data is read from the active project's own saved state and chapter records. Project open/import invalidates the prior selection and pending inspector requests. A row/character from the previous project cannot be carried into the new project's inspector.
+- **CS-05 — Statistics:** the inspector displays exactly Assigned Voice, Dialogue Lines, Chapters and AI Assigned. Counts use saved dialogue-assignment records whose offsets and text still match the active chapter. Chapter count uses distinct chapter numbers. AI Assigned is calculated from saved `source` metadata, not AI confidence. Legacy assignments with missing source remain visible as unknown and are not guessed to be AI or manual.
+- **CS-06 — Dialogue inspector:** all matching saved dialogue lines for the selected character are available in stable 30-row pages, with a Load More action. Both AI and manual assignments are included. Selected row state is retained when an already-loaded page is refreshed; a selected line is passed to Test Voice by its saved chapter/offset identity.
+- **CS-07 — Source highlighting:** manual rows use a green full-row tint/accent; AI-analyzed rows use a golden full-row tint/accent. Selection adds a separate outline and selected tint while preserving the source-specific accent/background.
+
+### Related preview safety added while implementing the inspector
+
+The original `voice.preview` path applies production's saved cast router. That could override a different profile chosen for a Character Studio audition. A dedicated `character.dialogue.preview` action now validates the active project's exact saved passage and confirms the selected character is one of its saved speakers. It uses the exact selected saved Voice Studio profile for this audition and bypasses the production cast router only for this preview. It does not write narrator or character assignment state. Existing production synthesis and ordinary Voice Studio preview routing retain their previous cast-aware behavior.
+
+The UI caches completed dialogue/profile previews for replay, pauses/resumes the current audio, and stops old audio when the selected character, dialogue row, profile or project changes. A late preview completion is not played if the inspector selection has changed while it was generating.
+
+### Matching-head test evidence
+
+- Test source commit: `65425bc2feeb251e199ec1a3eb0b3131ff9bfb2b`.
+- Windows Actions test-only run **#41191777934**: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41191777934
+- Result: **449 tests passed in 63.397 seconds**; the regression job completed successfully.
+- The run includes behavioral coverage for mixed AI/manual records and alias matching, distinct chapter counts, zero assignments, unknown legacy provenance, stale span exclusion, 37 dialogue lines across 30-row pages, project isolation, saved-only Assigned Cast search by name/alias/voice, local-only preview-profile selection, direct preview profile selection without modifying narrator/assignment, rejection of another character's passage, source-preserving selection styling and Node syntax validation of the frontend adapter.
+- This was a test-only commit. Frozen-app packaging, installer, Defender, SHA-256 and artifact upload steps were intentionally skipped in this run.
+
+### Requirement status after the test-only gate
+
+| Requirement | Automated disposition | Remaining acceptance |
+|---|---|---|
+| CS-01 | AUTOMATED TESTS PASSED | Confirm the real packaged screen and counts on the target PC |
+| CS-02 | AUTOMATED TESTS PASSED | Confirm project switching and reopen behaviour in the installed app |
+| CS-05 | AUTOMATED TESTS PASSED | Compare live project counts against a user-selected real book |
+| CS-06 | AUTOMATED TESTS PASSED | Inspect long-list scrolling and selected-line preview in the installed app |
+| CS-07 | AUTOMATED TESTS PASSED | Visual confirmation against the supplied Premium V2 reference at target resolutions |
+
+### Explicitly not closed by this Step 3 test run
+
+- The matching Windows artifact checkpoint is the next gate; this test-only run did not package the app.
+- Manual target-PC acceptance of the packaged Character Studio screen, navigation/restart persistence and actual audio playback remains pending.
+- The preview integration safety above does not by itself close every CS-03/CS-04 requirement or every VS-02/VS-08 subrequirement. Progress/status, real playback, pause/replay and profile identity still need packaged audio acceptance.
+- Voice Studio's wider frozen scope VS-01 through VS-08, including the under-60-second real 30-second preview benchmark and all other Step 4–10 plan work, remains separate.
+- Stage 1 target-PC hardware acceptance and Stage 2 target-PC import/edit/reopen acceptance remain independent release gates.
+
+**Decision:** Step 3's implementation and automated regression gate are green on the identified source SHA. Do not mark the step fully accepted until the matching artifact checkpoint is successful and the target-PC UI/audio acceptance is recorded.
