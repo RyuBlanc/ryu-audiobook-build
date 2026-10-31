@@ -7777,7 +7777,7 @@
       // Do not invoke button.onclick from this bubbling handler: the browser has
       // already executed it at the target. Re-dispatching caused duplicate saves,
       // duplicated narrator assignment and overlapping preview jobs.
-remove placeholder preview      if (button.id === 'editAssignedCharacter') {
+      if (button.id === 'editAssignedCharacter') {
         stop();
         const c = characters.find(item => item.name === window.ryuPremiumSelectedCharacter);
         if (!c) { message('Select a character from the assigned cast first.', true); return; }
