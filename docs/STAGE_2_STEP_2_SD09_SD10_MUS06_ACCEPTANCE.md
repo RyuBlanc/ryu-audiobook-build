@@ -110,3 +110,11 @@ Run #1746 passed on 68c4afb: JavaScript syntax passed; 843 tests passed in 37.08
 - The slider regression assertion was corrected to match the actual configured value expression while preserving the required order: focus, value edit, input and change. No production code changed in this correction.
 - Regression baseline: [#1763](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41147418738) passed on `3a2ab79b12e883dc55ed9f3fee2bdd9ad7762286`: frontend JavaScript syntax validation passed and **844 tests passed in 37.141 seconds**.
 - The next artifact checkpoint must pass the entire expanded packaged workflow and restart phase before SD/MUS closure is considered.
+
+## Category fixture import source/destination correction — Run #1765
+
+- [#1764](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41147606862) passed the 844-test regression suite, Windows freeze, frozen-executable validation and bundled voice assets. Its expanded packaged UI acceptance stopped at the first extra category import because the harness passed the expected Audio Library destination path as the native import source; the native importer correctly rejected the nonexistent destination. The earlier Music and Cue controls and playback checks had passed.
+- Correction commit: `3dcab8cba10fcc5c8b883b5db13ff9006b83c8bc`. The acceptance fixture now records both `source_path` (the generated temporary WAV supplied to `sound.import`) and `path` (the final Audio Library catalogue destination). The native import wrapper uses only the real source path; all catalogue, category, project-switch, metadata and restart assertions continue to validate the destination path.
+- A new regression test asserts that source/destination distinction and the final category metadata check.
+- [#1765](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41148752076) passed the full regression suite and frontend JavaScript syntax validation on that exact source commit.
+- Next: repeat the consolidated frozen Windows package acceptance, including full workflow and second-process persistence. The Stage 2 items remain open until all expanded packaged checks and restart assertions pass.
