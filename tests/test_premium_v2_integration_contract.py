@@ -1365,6 +1365,10 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("assignments.aiAssignedPercent + '%'", inspector)
         self.assertIn("assignments.chapters.length", inspector)
         self.assertIn("assignments.passages.length", inspector)
+        self.assertIn("assignments.assignedVoice", inspector)
+        self.assertIn("manualAssignedCount", helper)
+        self.assertIn("chapterSet.add(chapterNumber)", helper)
+        self.assertNotIn("confidence", helper.lower())
         self.assertIn("source:selectedCandidateIsAi ? 'local-dialogue-analysis' : 'manual'", adapter)
         self.assertIn('assignment_source = "local-dialogue-analysis"', host)
         self.assertIn('str(row.get("source") or "") != "local-dialogue-analysis"', host)
@@ -1375,13 +1379,29 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
     def test_stage3_character_inspector_dialogue_rows_are_selectable_and_source_styled(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         inspector = adapter.split("function renderCharacterInspector()", 1)[1].split("function renderCharacterStudioLive()", 1)[0]
-        self.assertIn("data-assigned-dialogue", inspector)
-        self.assertIn("data-chapter-number", inspector)
-        self.assertIn("row.sourceLabel", inspector)
-        self.assertIn("is-ai' : 'is-manual'", inspector)
+        row_renderer = adapter.split("function assignedDialogueRowsMarkup(passages, selectedId, visibleCount)", 1)[1].split("function renderCharacterInspector()", 1)[0]
+        self.assertIn("assignedDialogueRowsMarkup(", inspector)
+        self.assertIn("assignedDialogueVisibleCount(", inspector)
+        self.assertIn("data-assigned-dialogue", row_renderer)
+        self.assertIn("data-assigned-dialogue-more", row_renderer)
+        self.assertIn("data-chapter-number", row_renderer)
+        self.assertIn("sourceLabel", row_renderer)
+        self.assertIn("is-' + source", row_renderer)
         self.assertIn("window.ryuPremiumSelectedAssignedDialogueId = current.id", inspector)
+        self.assertIn("renderCharacterInspector();", inspector)
+        self.assertNotIn("slice(0, 30)", inspector)
         self.assertIn("ryu-assigned-dialogue.is-manual", adapter)
         self.assertIn("ryu-assigned-dialogue.is-ai", adapter)
+        self.assertIn("ryu-assigned-dialogue-more", adapter)
+
+    def test_stage3_assigned_cast_search_covers_name_alias_and_voice(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        search_helper = adapter.split("function characterMatchesAssignedCastSearch(item, query)", 1)[1].split("function assignedDialogueVisibleCount(", 1)[0]
+        cast_renderer = adapter.split("function renderCharacterStudioLive()", 1)[1]
+        self.assertIn("characterCanonical(item)", search_helper)
+        self.assertIn("characterAliases(item)", search_helper)
+        self.assertIn("item?.voice_profile", search_helper)
+        self.assertIn("characterMatchesAssignedCastSearch(item, assignedQuery)", cast_renderer)
 
     def test_stage3_character_voice_test_uses_selected_saved_profile_and_actual_selected_dialogue(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")

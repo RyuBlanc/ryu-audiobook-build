@@ -2539,10 +2539,12 @@
       '.ryu-ai-option{display:flex!important;flex-direction:column;align-items:flex-start!important;gap:4px!important;text-align:left;}' +
       '.ryu-ai-option small{color:#aeb6c5;font-size:11px;font-weight:400;line-height:1.4;}' +
       '.ryu-assigned-series{border-left:3px solid #e3b65e;padding-left:12px;}' +
-      '#assignedQuotes .ryu-assigned-dialogue{display:block;width:100%;text-align:left;cursor:pointer;margin:6px 0;padding:9px 11px;border-radius:8px;white-space:pre-wrap;color:inherit;font:inherit;background:transparent;border:1px solid rgba(255,255,255,.08);}' +
+      '#assignedQuotes .ryu-assigned-dialogue{display:block;box-sizing:border-box;width:100%;text-align:left;cursor:pointer;margin:6px 0;padding:9px 11px;border-radius:8px;white-space:pre-wrap;color:inherit;font:inherit;background:transparent;border:1px solid rgba(255,255,255,.08);}' +
       '#assignedQuotes .ryu-assigned-dialogue.is-manual{border-left:3px solid #22c982;background:rgba(36,190,122,.07);}' +
       '#assignedQuotes .ryu-assigned-dialogue.is-ai{border-left:3px solid #efae35;background:rgba(236,160,45,.075);}' +
-      '#assignedQuotes .ryu-assigned-dialogue.is-selected{outline:2px solid rgba(212,55,93,.72);}' +
+      '#assignedQuotes .ryu-assigned-dialogue.is-selected{outline:2px solid rgba(212,55,93,.82);outline-offset:1px;}' +
+      '#assignedQuotes .ryu-assigned-dialogue:focus-visible{outline:2px solid rgba(212,55,93,.92);outline-offset:2px;}' +
+      '#assignedQuotes .ryu-assigned-dialogue-more{display:block;box-sizing:border-box;width:100%;margin:10px 0;padding:10px 12px;border:1px solid rgba(227,182,94,.34);border-radius:8px;background:rgba(227,182,94,.08);color:inherit;font:inherit;font-weight:700;cursor:pointer;}' +
       '#assignedQuotes .ryu-assigned-dialogue-meta{display:block;margin-bottom:4px;color:#e3b65e;font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;}' +
       '#characterAssignPopover{max-height:82vh;overflow-y:auto;box-sizing:border-box;}' +
       '#characterAssignPopover .popover-head>div{min-width:0;flex:1 1 auto;}' +
@@ -2600,33 +2602,88 @@
   }
   function characterVoiceAssignments(name) {
     const item = characterRowForName(name);
-    const names = [characterCanonical(item), ...characterAliases(item)].filter(Boolean).map(value => value.toLowerCase());
+    const names = [...new Set([characterCanonical(item), ...characterAliases(item)]
+      .map(value => String(value || '').trim().toLocaleLowerCase()).filter(Boolean))];
     const passages = [];
     const chapterSet = new Set();
-    for (const chapter of chapters) {
+    const seenPassages = new Set();
+    for (const chapter of (Array.isArray(chapters) ? chapters : [])) {
+      const chapterNumber = Number(chapter?.number);
+      if (!Number.isInteger(chapterNumber)) continue;
       const source = String(chapter.text || '');
       for (const assignment of characterAssignmentsFor(chapter)) {
-        const speakers = Array.isArray(assignment.speakers) ? assignment.speakers : (assignment.speaker ? [assignment.speaker] : []);
-        if (!speakers.some(speaker => names.includes(String(speaker || '').toLowerCase()))) continue;
+        const speakers = Array.isArray(assignment.speakers) && assignment.speakers.length
+          ? assignment.speakers : (assignment.speaker ? [assignment.speaker] : []);
+        if (!speakers.some(speaker => names.includes(String(speaker || '').trim().toLocaleLowerCase()))) continue;
         const start = Number(assignment.start), end = Number(assignment.end);
-        const text = Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end > start && end <= source.length
-          ? source.slice(start, end) : String(assignment.text || '');
-        if (!text || (assignment.text && String(assignment.text) !== text)) continue;
-        chapterSet.add(Number(chapter.number));
-        const sourceKind = String(assignment.source || 'manual').toLowerCase();
+        // Inspector rows must resolve to an exact selectable span in the saved chapter.
+        if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > source.length) continue;
+        const text = source.slice(start, end);
+        if (!text || (assignment.text != null && String(assignment.text) !== text)) continue;
+        const id = 'assigned-' + chapterNumber + '-' + start + '-' + end;
+        if (seenPassages.has(id)) continue;
+        seenPassages.add(id);
+        chapterSet.add(chapterNumber);
+        const sourceKind = String(assignment.source || 'manual').trim().toLowerCase();
         const aiAssigned = sourceKind === 'local-dialogue-analysis' || sourceKind === 'ai';
         passages.push({
-          id:'assigned-' + Number(chapter.number) + '-' + start + '-' + end,
-          chapter_number:Number(chapter.number), chapter_title:String(chapter.title || 'Chapter ' + chapter.number),
-          start, end, text, source:aiAssigned ? 'ai' : 'manual',
+          id,
+          chapter_number:chapterNumber,
+          chapter_title:String(chapter.title || 'Chapter ' + chapterNumber),
+          start, end, text,
+          source:aiAssigned ? 'ai' : 'manual',
           sourceLabel:aiAssigned ? 'AI analyzed' : 'Manual'
         });
       }
     }
-    passages.sort((a,b) => a.chapter_number-b.chapter_number || a.start-b.start);
+    passages.sort((a,b) => a.chapter_number-b.chapter_number || a.start-b.start || a.end-b.end);
     const aiAssignedCount = passages.filter(row => row.source === 'ai').length;
-    return {passages, chapters:[...chapterSet].sort((a,b) => a-b), aiAssignedCount,
-      aiAssignedPercent:passages.length ? Math.round(aiAssignedCount / passages.length * 100) : 0};
+    const manualAssignedCount = passages.length - aiAssignedCount;
+    return {
+      assignedVoice:String(item?.voice_profile || '').trim(),
+      passages,
+      chapters:[...chapterSet].sort((a,b) => a-b),
+      aiAssignedCount,
+      manualAssignedCount,
+      aiAssignedPercent:passages.length ? Math.round(aiAssignedCount / passages.length * 100) : 0
+    };
+  }
+  function characterMatchesAssignedCastSearch(item, query) {
+    const needle = String(query || '').trim().toLocaleLowerCase();
+    if (!needle) return true;
+    const values = [
+      characterCanonical(item), characterSeries(item), item?.voice_profile, item?.voice_name,
+      item?.voice, item?.voice_id, item?.provider, item?.backend, item?.model_id,
+      item?.role, ...characterAliases(item)
+    ];
+    return values.some(value => String(value || '').toLocaleLowerCase().includes(needle));
+  }
+  function assignedDialogueVisibleCount(passages, selectedId, requestedCount) {
+    const rows = Array.isArray(passages) ? passages : [];
+    if (!rows.length) return 0;
+    const requested = Number(requestedCount);
+    let visible = Number.isFinite(requested) ? Math.max(30, Math.floor(requested)) : 30;
+    const selectedIndex = rows.findIndex(row => String(row.id || '') === String(selectedId || ''));
+    if (selectedIndex >= visible) visible = Math.ceil((selectedIndex + 1) / 30) * 30;
+    return Math.min(rows.length, visible);
+  }
+  function assignedDialogueRowsMarkup(passages, selectedId, visibleCount) {
+    const rows = Array.isArray(passages) ? passages : [];
+    const limit = Math.min(rows.length, Math.max(0, Math.floor(Number(visibleCount) || 0)));
+    return rows.slice(0, limit).map(row => {
+      const source = String(row.source || '').toLowerCase() === 'ai' ? 'ai' : 'manual';
+      const active = String(selectedId || '') === String(row.id || '');
+      const sourceLabel = String(row.sourceLabel || (source === 'ai' ? 'AI analyzed' : 'Manual'));
+      return '<button type="button" class="quote ryu-assigned-dialogue is-' + source + (active ? ' is-selected' : '') +
+        '" data-assigned-dialogue="' + esc(row.id) + '" data-source="' + source +
+        '" data-chapter-number="' + Number(row.chapter_number) +
+        '" data-start="' + Number(row.start) + '" data-end="' + Number(row.end) +
+        '" aria-pressed="' + (active ? 'true' : 'false') + '"><span class="ryu-assigned-dialogue-meta">' +
+        esc(row.chapter_title) + ' · ' + esc(sourceLabel) + '</span><span>' + esc(row.text) + '</span></button>';
+    }).join('') + (limit < rows.length
+      ? '<button type="button" class="ryu-assigned-dialogue-more" data-assigned-dialogue-more data-visible-count="' +
+        limit + '" data-total="' + rows.length + '">Show more dialogue (' + limit + ' of ' + rows.length + ')</button>'
+      : '');
   }
   function renderCharacterInspector() {
     const selected = characterRowForName(window.ryuPremiumSelectedCharacter);
@@ -2672,27 +2729,41 @@
     const seriesName = $('assignedSeriesName');
     if (seriesName) seriesName.textContent = seriesValue;
     if (seriesBox) seriesBox.hidden = false;
-    const profileName = String(selected.voice_profile || '').trim();
-    if (voiceNode) voiceNode.textContent = profileName || 'Unassigned';
     const assignments = characterVoiceAssignments(selected.name);
+    const profileName = assignments.assignedVoice;
+    if (voiceNode) voiceNode.textContent = profileName || 'Unassigned';
     if (lineNode) lineNode.textContent = String(assignments.passages.length);
     if (chapterNode) chapterNode.textContent = String(assignments.chapters.length);
     if (aiAssignedNode) aiAssignedNode.textContent = assignments.aiAssignedPercent + '%';
     if (aiAssignedLabel) aiAssignedLabel.textContent = 'AI assigned';
     if (quotesNode) {
-      quotesNode.innerHTML = assignments.passages.slice(0, 30).map(row => {
-        const active = window.ryuPremiumSelectedAssignedDialogueId === row.id;
-        return '<button type="button" class="quote ryu-assigned-dialogue ' +
-          (row.source === 'ai' ? 'is-ai' : 'is-manual') + (active ? ' is-selected' : '') +
-          '" data-assigned-dialogue="' + esc(row.id) + '" data-chapter-number="' + row.chapter_number +
-          '" data-start="' + row.start + '" data-end="' + row.end + '" aria-pressed="' + (active ? 'true' : 'false') +
-          '"><span class="ryu-assigned-dialogue-meta">' + esc(row.chapter_title) + ' · ' + esc(row.sourceLabel) +
-          '</span><span>' + esc(row.text) + '</span></button>';
-      }).join('') ||
-        '<div class="ryu-character-empty"><b>No assigned dialogue yet</b>Assign a source passage in Character assigning, then test this saved profile.</div>';
+      const dialogueScope = String(window.ryuPremiumActiveProject?.folder || '') + '|' +
+        characterCanonical(selected).toLocaleLowerCase();
+      if (quotesNode.dataset.assignedDialogueScope !== dialogueScope) {
+        quotesNode.dataset.assignedDialogueScope = dialogueScope;
+        quotesNode.dataset.visibleDialogueCount = '30';
+      }
+      const selectedDialogueId = String(window.ryuPremiumSelectedAssignedDialogueId || '');
+      const visibleDialogueCount = assignedDialogueVisibleCount(
+        assignments.passages, selectedDialogueId, quotesNode.dataset.visibleDialogueCount
+      );
+      quotesNode.dataset.visibleDialogueCount = String(visibleDialogueCount);
+      const previousScrollTop = Number(quotesNode.scrollTop || 0);
+      quotesNode.innerHTML = assignedDialogueRowsMarkup(
+        assignments.passages, selectedDialogueId, visibleDialogueCount
+      ) || '<div class="ryu-character-empty"><b>No assigned dialogue yet</b>Assign a source passage in Character assigning, then test this saved profile.</div>';
+      quotesNode.scrollTop = previousScrollTop;
       if (!quotesNode.dataset.assignedDialogueBound) {
         quotesNode.dataset.assignedDialogueBound = '1';
         quotesNode.addEventListener('click', event => {
+          const moreButton = event.target.closest('[data-assigned-dialogue-more]');
+          if (moreButton) {
+            const total = Math.max(0, Number(moreButton.dataset.total) || 0);
+            const currentLimit = Math.max(30, Number(moreButton.dataset.visibleCount) || 30);
+            quotesNode.dataset.visibleDialogueCount = String(Math.min(total, currentLimit + 30));
+            renderCharacterInspector();
+            return;
+          }
           const button = event.target.closest('[data-assigned-dialogue]');
           if (!button) return;
           const chapterNumber = Number(button.dataset.chapterNumber);
@@ -2838,7 +2909,7 @@
     const castList = $('assignedCharacterList');
     if (castList) {
       const assignedQuery = String($('assignedSearch')?.value || '').trim().toLowerCase();
-      const visibleCharacters = characters.filter(item => [characterCanonical(item),characterSeries(item),item.voice_profile,item.role,...characterAliases(item)].join(' ').toLowerCase().includes(assignedQuery));
+      const visibleCharacters = characters.filter(item => characterMatchesAssignedCastSearch(item, assignedQuery));
       const signature = JSON.stringify([assignedQuery,visibleCharacters.map(item => [item.name,item.series,item.voice_profile,item.aliases,item.examples,item.dialogue_count,item.confidence])]);
       if (castList.dataset.liveSignature !== signature) {
         castList.innerHTML = visibleCharacters.map(item => {

@@ -76,6 +76,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Premium V2 backend adapter JavaScript syntax validation failed with exit code $LASTEXITCODE." }
           & $nodeExe --check 'tests\stage2_packaged_sound_ui_acceptance.js'
           if ($LASTEXITCODE -ne 0) { throw "Packaged Sound Design acceptance JavaScript syntax validation failed with exit code $LASTEXITCODE." }
+          & $nodeExe --check 'tests\stage3_character_inspector.test.js'
+          if ($LASTEXITCODE -ne 0) { throw "Stage 3 Character Studio behavior-test syntax validation failed with exit code $LASTEXITCODE." }
+          & $nodeExe 'tests\stage3_character_inspector.test.js'
+          if ($LASTEXITCODE -ne 0) { throw "Stage 3 Character Studio behavior checks failed with exit code $LASTEXITCODE." }
           & $nodeExe --check 'installer\ryu_installer.js'
           if ($LASTEXITCODE -ne 0) { throw "Installer JavaScript syntax validation failed with exit code $LASTEXITCODE." }
 
