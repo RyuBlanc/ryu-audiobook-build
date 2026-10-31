@@ -2668,8 +2668,7 @@
     const assignments = characterVoiceAssignments(selected.name, seriesValue);
     if (lineNode) lineNode.textContent = String(assignments.dialogueLines);
     if (chapterNode) chapterNode.textContent = String(assignments.chapters.length);
-    const confidence = Number(selected.confidence);
-    if (confidenceNode) confidenceNode.textContent = Number.isFinite(confidence) ? Math.round(confidence <= 1 ? confidence * 100 : confidence) + '%' : '—';
+    if (aiAssignedNode) aiAssignedNode.textContent = String(assignments.aiAssignedPercent) + '%';
     if (quotesNode) {
       const samples = [];
       for (const row of assignments.passages.slice(0, 8)) samples.push(row.text);

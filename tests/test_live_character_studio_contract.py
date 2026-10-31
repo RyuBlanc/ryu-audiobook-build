@@ -91,7 +91,7 @@ class LiveCharacterStudioContracts(unittest.TestCase):
         self.assertIn("sourceKind === 'ai'", adapter)
         self.assertIn("const chapterSet = new Set()", adapter)
         self.assertIn("characterVoiceAssignments(selected.name, seriesValue)", adapter)
-        self.assertIn("aiAssignedNode.textContent = String(assignments.aiAssignedPercent)", adapter)
+        self.assertIn("aiAssignedNode.textContent = String(assignments.aiAssignedPercent) + '%';", adapter)
         self.assertIn('<b id="assignedConfidence">—</b><span>AI Assigned</span>', html)
         self.assertNotIn('<span>Confidence</span>', html)
 
