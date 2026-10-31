@@ -5229,7 +5229,7 @@
     renderCharacterStudioLive();
   }
   function openCharacterEditorForSelected() {
-    const selected = characterRowForName(window.ryuPremiumSelectedCharacter);
+    const selected = selectedCharacterRow();
     if (!selected) throw new Error('Select a real character from this project before editing.');
     libraryEditorActive = false;
     ensureCharacterSeriesField();
