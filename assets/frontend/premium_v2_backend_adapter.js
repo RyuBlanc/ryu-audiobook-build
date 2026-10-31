@@ -259,6 +259,7 @@
       more.onclick = () => loadAssignedDialogue({append:true}).catch(err => message(err?.message || String(err), true));
     }
     quotes.querySelectorAll('[data-assigned-dialogue-id]').forEach(el => el.addEventListener('click', () => {
+      if (selectedAssignedDialogueId !== el.dataset.assignedDialogueId) stopCurrentPreview();
       selectedAssignedDialogueId = el.dataset.assignedDialogueId;
       quotes.querySelectorAll('[data-assigned-dialogue-id]').forEach(row => {
         const selected = row === el;
@@ -336,6 +337,7 @@
     if (!character || !savedCharacterVoice(character)) return;
     window.ryuPremiumSelectedCharacter = name;
     if (!sameCharacter) {
+      stopCurrentPreview();
       selectedAssignedDialogueId = null;
       assignedDialogueRows = [];
       assignedDialogueTotal = 0;
@@ -346,6 +348,14 @@
     if ($('assignedPreviewProfile')) $('assignedPreviewProfile').value = selectedAssignedPreviewProfile || savedCharacterVoice(character);
     renderAssignedCast();
     await loadAssignedDialogue({preserve:sameCharacter});
+  }
+  function stopCurrentPreview() {
+    if (previewAudio) {
+      previewAudio.pause();
+      previewAudio.currentTime = 0;
+      previewAudio = null;
+    }
+    if ($('testAssignedVoice')) $('testAssignedVoice').textContent = '▶ Test voice';
   }
   function clearAssignedInspector() {
     selectedAssignedDialogueId = null;
@@ -368,6 +378,7 @@
     if ($('loadMoreAssignedDialogue')) $('loadMoreAssignedDialogue').hidden = true;
   }
   function resetAssignedInspectorProjectContext() {
+    stopCurrentPreview();
     assignedDialogueRequest += 1;
     window.ryuPremiumSelectedCharacter = null;
     if ($('assignedSearch')) $('assignedSearch').value = '';
@@ -1317,7 +1328,7 @@
       message('Character removed from this book’s saved cast.');
     });
     if ($('assignCharacter')) $('assignCharacter').onclick=act(async()=>{const name=window.ryuPremiumSelectedCharacter;if(!name)throw new Error('Select a character first.');await call('character.assign',{name,profile_name:selectedVoice||$('profileName')?.value});await refreshCharacters();});
-    if ($('assignedPreviewProfile')) $('assignedPreviewProfile').onchange=()=>{selectedAssignedPreviewProfile=$('assignedPreviewProfile').value || null;};
+    if ($('assignedPreviewProfile')) $('assignedPreviewProfile').onchange=()=>{const next=$('assignedPreviewProfile').value || null;if(next!==selectedAssignedPreviewProfile)stopCurrentPreview();selectedAssignedPreviewProfile=next;};
     if ($('importMusicTracks')) $('importMusicTracks').onclick = act(async()=>{const r=await call('sound.import');await refreshSounds();message('Imported '+(r.imported||[]).length+' sound file(s) into the local Audio Library.');});
     if ($('importCueClips')) $('importCueClips').onclick = act(async()=>{const r=await call('sound.import');await refreshSounds();message('Imported '+(r.imported||[]).length+' sound clip(s) into the local Audio Library.');});
     if ($('soundTrackSearch')) $('soundTrackSearch').oninput = () => refreshSounds().catch(e=>message(e.message,true));
@@ -1660,6 +1671,7 @@
         message('Playing saved preview · ' + displayName + '.');
         return;
       }
+      stopCurrentPreview();
       const data = await call('voice.preview', {profile_name:profile.name,text,duration_seconds:10});
       const job = await waitForTerminalJob(data.job_id);
       const url = job?.result?.file_url;
@@ -1674,6 +1686,69 @@
       await previewAudio.play();
       if ($('testAssignedVoice')) $('testAssignedVoice').textContent = 'Ⅱ Pause';
       message('Playing selected dialogue · ' + displayName + ' · ' + Number(job.result.actual_duration_seconds || 0).toFixed(1) + ' seconds.');
+      return job;
+    };
+    const previewCharacterDialogue = async (profile, character, dialogue) => {
+      const previewKey = JSON.stringify([profile, dialogue.id, String(dialogue.text)]);
+      const displayName = character.name + ' · ' + profile.name;
+      if (previewAudio && previewAudio.dataset?.ryuPreviewKey === previewKey) {
+        if (!previewAudio.paused) {
+          previewAudio.pause();
+          if ($('testAssignedVoice')) $('testAssignedVoice').textContent = '▶ Test voice';
+          message('Character preview paused · ' + displayName + '.');
+          return;
+        }
+        if (previewAudio.ended) previewAudio.currentTime = 0;
+        await previewAudio.play();
+        if ($('testAssignedVoice')) $('testAssignedVoice').textContent = 'Ⅱ Pause';
+        message('Replaying saved character preview · ' + displayName + '.');
+        return;
+      }
+      const cachedUrl = previewAudioCache.get(previewKey);
+      if (cachedUrl) {
+        stopCurrentPreview();
+        previewAudio = new Audio(cachedUrl);
+        previewAudio.dataset.ryuPreviewKey = previewKey;
+        previewAudio.onerror = () => message(displayName + ' preview audio could not be played.', true);
+        previewAudio.onended = () => { if ($('testAssignedVoice')) $('testAssignedVoice').textContent = '▶ Test voice'; };
+        await previewAudio.play();
+        if ($('testAssignedVoice')) $('testAssignedVoice').textContent = 'Ⅱ Pause';
+        message('Playing saved character preview · ' + displayName + '.');
+        return;
+      }
+      stopCurrentPreview();
+      const expectedCharacter = character.name;
+      const expectedDialogue = dialogue.id;
+      const expectedProfile = profile.name;
+      const requestToken = assignedDialogueRequest;
+      const data = await call('character.dialogue.preview', {
+        name: expectedCharacter,
+        profile_name: expectedProfile,
+        chapter_number: dialogue.chapter_number,
+        start: dialogue.start,
+        end: dialogue.end,
+        text: dialogue.text,
+        duration_seconds: 10,
+      });
+      const job = await waitForTerminalJob(data.job_id);
+      const url = job?.result?.file_url;
+      if (!url) throw new Error(displayName + ' preview finished without a playable audio file.');
+      previewAudioCache.set(previewKey, url);
+      if (previewAudioCache.size > 12) previewAudioCache.delete(previewAudioCache.keys().next().value);
+      if (window.ryuPremiumSelectedCharacter !== expectedCharacter ||
+          selectedAssignedDialogueId !== expectedDialogue ||
+          assignedDialogueRequest !== requestToken ||
+          ($('assignedPreviewProfile')?.value || '') !== expectedProfile) {
+        return;
+      }
+      previewAudio = new Audio(url);
+      previewAudio.dataset.ryuPreviewKey = previewKey;
+      previewAudio.onerror = () => message(displayName + ' preview audio could not be played.', true);
+      previewAudio.onended = () => { if ($('testAssignedVoice')) $('testAssignedVoice').textContent = '▶ Test voice'; };
+      await previewAudio.play();
+      if ($('testAssignedVoice')) $('testAssignedVoice').textContent = 'Ⅱ Pause';
+      message('Playing selected saved dialogue · ' + displayName + ' · ' +
+        Number(job.result.actual_duration_seconds || 0).toFixed(1) + ' seconds.');
       return job;
     };
     document.addEventListener('click', e => {
@@ -1818,7 +1893,7 @@
           const profile = voices.find(item => item.name.toLowerCase() === String(profileName).toLowerCase());
           if (!profile) throw new Error('Choose a saved Voice Studio profile for this preview.');
           selectedAssignedPreviewProfile = profile.name;
-          await previewSavedProfile(profile, dialogue.text, c.name);
+          await previewCharacterDialogue(profile, c, dialogue);
         });
         return;
       }

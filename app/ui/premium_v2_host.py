@@ -129,6 +129,7 @@ class PremiumV2Bridge(QObject):
                 "voice.preview": self._voice_preview,
                 "character.list": self._character_list,
                 "character.dialogue.list": self._character_dialogue_list,
+                "character.dialogue.preview": self._character_dialogue_preview,
                 "character_library.list": self._character_library_list,
                 "character_library.save": self._character_library_save,
                 "character_library.delete": self._character_library_delete,
@@ -237,6 +238,7 @@ class PremiumV2Bridge(QObject):
             "voice.preview": True,
             "character.list": True,
             "character.dialogue.list": True,
+            "character.dialogue.preview": True,
             "character_library.list": True,
             "character_library.save": True,
             "character_library.delete": True,
@@ -1168,7 +1170,7 @@ class PremiumV2Bridge(QObject):
             raise RuntimeError("The Sound Design mix preview changed duration unexpectedly.")
         return output
 
-    def _preview_worker(self, job_id: str, profile, text_value: str, seconds: int, state: dict[str, Any]) -> None:
+    def _preview_worker(self, job_id: str, profile, text_value: str, seconds: int, state: dict[str, Any], route_character_cast: bool = True) -> None:
         try:
             provider, voice = provider_from_profile(profile)
             # Keep Voice Studio previews consistent with production: saved
@@ -1177,7 +1179,8 @@ class PremiumV2Bridge(QObject):
             cast_assignments: dict[str, str] = {}
             cast_profiles: dict[str, Any] = {}
             available_profiles = {p.name.casefold(): p for p in load_profiles()}
-            for character in state.get("characters") or []:
+            characters_for_routing = (state.get("characters") or []) if route_character_cast else []
+            for character in characters_for_routing:
                 if not isinstance(character, dict):
                     continue
                 assigned_name = str(character.get("voice_profile") or "").strip()
@@ -1197,7 +1200,7 @@ class PremiumV2Bridge(QObject):
                 for character_name in character_names:
                     if character_name:
                         cast_assignments[character_name] = assigned_profile.name
-            if cast_assignments:
+            if route_character_cast and cast_assignments:
                 from app.tts.cast_provider import CastAwareProvider
                 provider = CastAwareProvider(
                     provider, voice, cast_profiles, cast_assignments,
@@ -1298,6 +1301,95 @@ class PremiumV2Bridge(QObject):
         return build_character_assignment_inspector(
             project.chapters, character, project.title, offset=offset, limit=limit
         )
+
+    def _character_dialogue_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Audition saved dialogue with the exact selected profile without saving."""
+        from app.chapters.assignment_utils import assignment_speakers
+
+        project = self._active_project()
+        name = str(payload.get("name") or "").strip()
+        profile_name = str(payload.get("profile_name") or "").strip()
+        text_value = str(payload.get("text") or "")
+        chapter_number, start, end = payload.get("chapter_number"), payload.get("start"), payload.get("end")
+        if not name:
+            raise ValueError("Choose a saved character before testing its voice.")
+        if not profile_name:
+            raise ValueError("Choose a saved Voice Studio profile for this preview.")
+        profile = self._find_profile(profile_name)
+        if profile is None:
+            raise ValueError("The selected preview profile is no longer in the saved Voice Studio catalogue.")
+        if (isinstance(chapter_number, bool) or not isinstance(chapter_number, int)
+                or isinstance(start, bool) or not isinstance(start, int)
+                or isinstance(end, bool) or not isinstance(end, int)
+                or start < 0 or end <= start):
+            raise ValueError("Select a valid saved dialogue passage before testing.")
+        if not text_value.strip() or len(text_value) > 5000:
+            raise ValueError("Select a valid dialogue passage before testing.")
+
+        state = load_state(project.folder)
+        characters = state.get("characters") or []
+        if not isinstance(characters, list):
+            characters = []
+        character = next(
+            (item for item in characters
+             if isinstance(item, dict)
+             and str(item.get("name") or "").strip().casefold() == name.casefold()),
+            None,
+        )
+        if character is None:
+            raise ValueError("The selected character is no longer in this project's saved cast.")
+        aliases = character.get("aliases") or []
+        if isinstance(aliases, str):
+            aliases = [aliases]
+        accepted_names = {
+            value.casefold()
+            for value in [name, *(str(alias).strip() for alias in aliases)]
+            if value
+        }
+        chapters = [chapter for chapter in project.chapters if chapter.number == chapter_number]
+        if len(chapters) != 1:
+            raise ValueError("The selected dialogue chapter is no longer available. Refresh the inspector.")
+        chapter = chapters[0]
+        source_text = str(chapter.text or "")
+        if end > len(source_text) or source_text[start:end] != text_value:
+            raise ValueError("The saved chapter text changed. Refresh the Dialogue Inspector before testing.")
+        matching = [
+            assignment for assignment in (getattr(chapter, "dialogue_assignments", []) or [])
+            if isinstance(assignment, dict)
+            and assignment.get("start") == start
+            and assignment.get("end") == end
+            and assignment.get("text") == text_value
+        ]
+        if len(matching) != 1:
+            raise ValueError("This exact passage no longer has one unique saved speaker assignment.")
+        speakers = assignment_speakers(matching[0])
+        if not any(speaker.casefold() in accepted_names for speaker in speakers):
+            raise ValueError("The selected passage is not assigned to this character.")
+        seconds = payload.get("duration_seconds", 10)
+        if isinstance(seconds, bool) or not isinstance(seconds, int) or seconds not in {10, 20, 30, 45, 60}:
+            raise ValueError("Preview duration must be 10, 20, 30, 45, or 60 seconds.")
+
+        job_id = self._new_job(
+            "character-dialogue-preview",
+            f"Character preview · {name} · {profile.name}",
+            f"Audition the selected saved dialogue using {profile.name}",
+            project,
+        )
+        self._job_update(
+            job_id, state="running", started_at=self._now(),
+            stage="Preparing selected-character preview", progress=2,
+        )
+        threading.Thread(
+            target=self._preview_worker,
+            args=(job_id, profile, text_value, seconds, state, False),
+            daemon=True,
+            name="RyuCharacterDialoguePreview",
+        ).start()
+        return {
+            "job_id": job_id, "state": "running", "character_name": name,
+            "profile_name": profile.name, "chapter_number": chapter_number,
+            "dialogue_id": f"{chapter_number}:{start}:{end}", "duration_seconds": seconds,
+        }
 
     def _character_analyze(self, _payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()

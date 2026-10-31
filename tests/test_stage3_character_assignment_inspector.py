@@ -2,6 +2,7 @@
 
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app.chapters.character_inspector import build_character_assignment_inspector
 from app.chapters.detector import Chapter
@@ -209,9 +210,119 @@ class CharacterAssignmentFrontendContractTests(unittest.TestCase):
             "editCharacterVoice').onchange=act(async()=>{if(!window.ryuPremiumSelectedCharacter)return;await call('character.assign'",
             adapter,
         )
-        self.assertIn("previewSavedProfile(profile, dialogue.text, c.name)", adapter)
+        self.assertIn("previewCharacterDialogue(profile, c, dialogue)", adapter)
+        self.assertIn("character.dialogue.preview", adapter)
+        self.assertIn("stopCurrentPreview()", adapter)
         self.assertIn("resetAssignedInspectorProjectContext()", adapter)
 
+
+
+
+class CharacterDialoguePreviewBridgeTests(unittest.TestCase):
+    class BridgeHarness:
+        def __init__(self, project, profile):
+            self.project = project
+            self.profile = profile
+            self.started_job = None
+            self.updated = []
+
+        def _active_project(self):
+            return self.project
+
+        def _find_profile(self, name):
+            return self.profile if name == self.profile["name"] else None
+
+        def _new_job(self, *args):
+            self.started_job = args
+            return "character-preview-job"
+
+        def _now(self):
+            return "2026-10-31T10:00:00Z"
+
+        def _job_update(self, *args, **kwargs):
+            self.updated.append((args, kwargs))
+
+    def _fixture(self, folder, speaker="Mira"):
+        from app.core.project import Project
+        from app.core.state import save_state
+
+        source = 'Mira said, “Wait here.”'
+        dialogue = "Wait here."
+        start = source.index(dialogue)
+        chapter = Chapter(1, "Chapter 1", source, dialogue_assignments=[{
+            "start": start, "end": start + len(dialogue), "text": dialogue,
+            "speaker": speaker, "source": "manual",
+        }])
+        project = Project("Character preview book", folder, chapters=[chapter])
+        project.save()
+        save_state(folder, {
+            "voice_profile": "Narrator Voice",
+            "narrator": "Narrator Voice",
+            "characters": [{
+                "name": "Mira", "aliases": ["Miri"],
+                "voice_profile": "Saved Mira Voice",
+            }],
+        })
+        return project, dialogue, start
+
+    def test_preview_uses_exact_selected_profile_without_mutating_saved_assignment(self):
+        import tempfile
+        from pathlib import Path
+
+        from app.core.state import load_state
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        with tempfile.TemporaryDirectory() as temp:
+            project, dialogue, start = self._fixture(Path(temp))
+            selected_profile = {"name": "Preview Only Voice"}
+            bridge = self.BridgeHarness(project, selected_profile)
+            thread_data = {}
+
+            class FakeThread:
+                def __init__(self, target, args, daemon, name):
+                    thread_data["target"] = target
+                    thread_data["args"] = args
+                    thread_data["daemon"] = daemon
+                    thread_data["name"] = name
+
+                def start(self):
+                    thread_data["started"] = True
+
+            with patch("app.ui.premium_v2_host.threading.Thread", FakeThread):
+                result = PremiumV2Bridge._character_dialogue_preview(bridge, {
+                    "name": "Mira", "profile_name": "Preview Only Voice",
+                    "chapter_number": 1, "start": start,
+                    "end": start + len(dialogue), "text": dialogue,
+                    "duration_seconds": 10,
+                })
+
+            self.assertEqual(result["job_id"], "character-preview-job")
+            self.assertTrue(thread_data["started"])
+            self.assertIs(thread_data["args"][1], selected_profile)
+            self.assertEqual(thread_data["args"][2], dialogue)
+            self.assertIs(thread_data["args"][5], False)
+            saved = load_state(Path(temp))
+            self.assertEqual(saved["voice_profile"], "Narrator Voice")
+            self.assertEqual(saved["narrator"], "Narrator Voice")
+            self.assertEqual(saved["characters"][0]["voice_profile"], "Saved Mira Voice")
+
+    def test_preview_rejects_dialogue_not_assigned_to_selected_character(self):
+        import tempfile
+        from pathlib import Path
+
+        from app.ui.premium_v2_host import PremiumV2Bridge
+
+        with tempfile.TemporaryDirectory() as temp:
+            project, dialogue, start = self._fixture(Path(temp), speaker="Ren")
+            bridge = self.BridgeHarness(project, {"name": "Preview Only Voice"})
+            with patch("app.ui.premium_v2_host.threading.Thread") as thread:
+                with self.assertRaisesRegex(ValueError, "not assigned to this character"):
+                    PremiumV2Bridge._character_dialogue_preview(bridge, {
+                        "name": "Mira", "profile_name": "Preview Only Voice",
+                        "chapter_number": 1, "start": start,
+                        "end": start + len(dialogue), "text": dialogue,
+                    })
+                thread.assert_not_called()
 
 
 
