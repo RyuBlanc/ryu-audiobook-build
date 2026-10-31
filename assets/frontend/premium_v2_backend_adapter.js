@@ -1180,6 +1180,8 @@
       characterStudioSelectedChapter = null;
       characterStudioSelectedSeries = '';
       window.ryuPremiumSelectedCharacter = '';
+      window.ryuPremiumSelectedCharacterSeries = '';
+      window.ryuPremiumSelectedAssignedDialogueKey = '';
       window.ryuPremiumSelectedChapter = null;
       window.ryuPremiumSelectedDialogueId = '';
       window.ryuPremiumAiChapterNumber = null;
@@ -2377,8 +2379,12 @@
     const loaded = await call('character.list');
     if (requestToken !== characterListEpoch) return characters;
     characters = Array.isArray(loaded) ? loaded : [];
-    if (!characters.some(c => String(c.name || '').toLowerCase() === String(window.ryuPremiumSelectedCharacter || '').toLowerCase())) {
+    const selectedName = String(window.ryuPremiumSelectedCharacter || '').trim().toLowerCase();
+    const selectedSeries = String(window.ryuPremiumSelectedCharacterSeries || '').trim().toLowerCase();
+    if (!characters.some(c => characterCanonical(c).toLowerCase() === selectedName &&
+        (!selectedSeries || characterSeries(c).toLowerCase() === selectedSeries))) {
       window.ryuPremiumSelectedCharacter = '';
+      window.ryuPremiumSelectedCharacterSeries = '';
     }
     renderCharacterStudioLive();
     return characters;
@@ -2407,11 +2413,6 @@
   }
   function characterSeries(item) {
     return librarySeriesName(item || {}) || activeCharacterProjectSeries() || 'Unassigned series';
-  }
-  function characterRowForName(name) {
-    const key = String(name || '').trim().toLowerCase();
-    return characters.find(item => characterCanonical(item).toLowerCase() === key ||
-      characterAliases(item).some(alias => alias.toLowerCase() === key)) || null;
   }
   function characterAssignmentsFor(chapter) {
     return Array.isArray(chapter?.dialogue_assignments) ? chapter.dialogue_assignments.filter(item => item && typeof item === 'object') : [];
@@ -2533,6 +2534,12 @@
       '.ryu-ai-option{display:flex!important;flex-direction:column;align-items:flex-start!important;gap:4px!important;text-align:left;}' +
       '.ryu-ai-option small{color:#aeb6c5;font-size:11px;font-weight:400;line-height:1.4;}' +
       '.ryu-assigned-series{border-left:3px solid #e3b65e;padding-left:12px;}' +
+      '.ryu-assigned-dialogue{display:block;width:100%;box-sizing:border-box;margin:0 0 8px;padding:11px 13px;border:1px solid transparent;border-radius:9px;color:inherit;text-align:left;font:inherit;white-space:pre-wrap;overflow-wrap:anywhere;cursor:pointer;}' +
+      '.ryu-assigned-dialogue small{display:block;margin-bottom:6px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;opacity:.8;}' +
+      '.ryu-assigned-dialogue-ai{background:rgba(236,160,45,.075);border-color:rgba(236,160,45,.22);box-shadow:inset 3px 0 0 #efae35;}' +
+      '.ryu-assigned-dialogue-manual{background:rgba(36,190,122,.07);border-color:rgba(36,190,122,.2);box-shadow:inset 3px 0 0 #22c982;}' +
+      '.ryu-assigned-dialogue.is-selected{outline:2px solid rgba(255,255,255,.62);outline-offset:1px;}' +
+      '.assigned-character.active{border-color:rgba(227,182,94,.8);background:rgba(227,182,94,.08);}' +
       '#characterAssignPopover{max-height:82vh;overflow-y:auto;box-sizing:border-box;}' +
       '#characterAssignPopover .popover-head>div{min-width:0;flex:1 1 auto;}' +
       '#characterAssignPopover .popover-head b{display:block;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;overflow:visible;text-overflow:clip;line-height:1.45;max-height:150px;overflow-y:auto;}' +
@@ -2570,7 +2577,7 @@
     const select = $('assignedAudioProfile');
     if (!select) return;
     const saved = characterSavedProfiles();
-    const currentCharacter = characterRowForName(window.ryuPremiumSelectedCharacter);
+    const currentCharacter = selectedCharacterRow();
     const current = String(currentCharacter?.voice_profile || '');
     const options = [['','Select a saved audio profile'], ...saved.map(item => [String(item.name), String(item.name) + ' · ' + String(item.provider || 'Voice')])];
     const signature = JSON.stringify(options);
@@ -2588,7 +2595,7 @@
     select.onchange = () => { if (save) save.disabled = !currentCharacter || saved.length === 0 || select.value === current; };
   }
   function characterVoiceAssignments(name, series) {
-    const item = characterRowForName(name);
+    const item = characterRowForName(name, series);
     const names = new Set([characterCanonical(item), ...characterAliases(item)]
       .filter(Boolean).map(value => value.toLowerCase()));
     const selectedSeries = String(series || characterSeries(item) || '').trim().toLowerCase();
@@ -2622,10 +2629,10 @@
       aiAssignedLines:aiAssigned, aiAssignedPercent};
   }
   function renderCharacterInspector() {
-    const selected = characterRowForName(window.ryuPremiumSelectedCharacter);
+    const selected = selectedCharacterRow();
     const inspector = document.querySelector('#characters .assigned-inspector');
     if (!inspector) return;
-    let summary = inspector.querySelector('.assigned-summary');
+    const summary = inspector.querySelector('.assigned-summary');
     if (summary && !$('assignedSeriesName')) {
       const seriesBox = document.createElement('div');
       seriesBox.className = 'ryu-assigned-series';
@@ -2644,12 +2651,12 @@
     const seriesBox = $('assignedSeriesName')?.closest('.assigned-summary > div');
     if (!selected) {
       if (nameNode) nameNode.textContent = 'No characters found';
-      if (aliasesNode) aliasesNode.textContent = 'Assign a character from the selected project to see live voice details.';
+      if (aliasesNode) aliasesNode.textContent = 'Choose a character from the saved Assigned Cast.';
       if (voiceNode) voiceNode.textContent = 'Unassigned';
       if (lineNode) lineNode.textContent = '0';
       if (chapterNode) chapterNode.textContent = '0';
       if (aiAssignedNode) aiAssignedNode.textContent = '0%';
-      if (quotesNode) quotesNode.innerHTML = '<div class="ryu-character-empty"><b>No Characters Found</b>Assign a character from Character assigning to preview and manage its voice.</div>';
+      if (quotesNode) quotesNode.innerHTML = '<div class="ryu-character-empty"><b>No saved dialogue yet</b>Save a character dialogue assignment to display it here.</div>';
       if (seriesBox) seriesBox.hidden = true;
       if ($('assignedAudioProfile')) { $('assignedAudioProfile').value = ''; $('assignedAudioProfile').disabled = true; }
       if ($('saveAssignedAudioProfile')) $('saveAssignedAudioProfile').disabled = true;
@@ -2670,13 +2677,31 @@
     if (chapterNode) chapterNode.textContent = String(assignments.chapters.length);
     if (aiAssignedNode) aiAssignedNode.textContent = String(assignments.aiAssignedPercent) + '%';
     if (quotesNode) {
-      const samples = [];
-      for (const row of assignments.passages.slice(0, 8)) samples.push(row.text);
-      if (!samples.length) for (const row of selected.examples || []) if (row) samples.push(String(row));
-      quotesNode.innerHTML = samples.map(text => '<div class="quote">' + esc(text) + '</div>').join('') ||
-        '<div class="ryu-character-empty"><b>No assigned dialogue yet</b>Assign a source passage in Character assigning, then test this saved profile.</div>';
+      const selectedDialogueKey = String(window.ryuPremiumSelectedAssignedDialogueKey || '');
+      const rows = assignments.passages;
+      const selectedRow = rows.find(row =>
+        characterAssignmentKey(selected.name, seriesValue) + '::' +
+          row.chapter_number + ':' + row.start + ':' + row.end === selectedDialogueKey
+      );
+      const selectedLabel = selectedRow ? selectedRow.text : '';
+      quotesNode.innerHTML = rows.length ? rows.map(row => {
+        const sourceKind = String(row.source || 'manual').toLowerCase() === 'ai' ? 'ai' : 'manual';
+        const key = characterAssignmentKey(selected.name, seriesValue) + '::' +
+          row.chapter_number + ':' + row.start + ':' + row.end;
+        const active = key === selectedDialogueKey;
+        return '<button type="button" class="ryu-assigned-dialogue ryu-assigned-dialogue-' + sourceKind +
+          (active ? ' is-selected' : '') + '" data-assigned-dialogue-key="' + esc(key) + '">' +
+          '<small>Chapter ' + Number(row.chapter_number) + ' · ' +
+          (sourceKind === 'ai' ? 'AI-assigned' : 'Manually assigned') + '</small>' +
+          '<span>' + esc(row.text) + '</span></button>';
+      }).join('') : '<div class="ryu-character-empty"><b>No assigned dialogue yet</b>Assign and save a source passage in Character assigning to see it here.</div>';
+      if (selectedLabel && !rows.some(row => (
+        characterAssignmentKey(selected.name, seriesValue) + '::' +
+          row.chapter_number + ':' + row.start + ':' + row.end
+      ) === selectedDialogueKey)) window.ryuPremiumSelectedAssignedDialogueKey = '';
     }
-    if ($('testAssignedVoice')) $('testAssignedVoice').disabled = !profileName || !characterProfileByName(profileName);
+    if ($('testAssignedVoice')) $('testAssignedVoice').disabled =
+      !profileName || !characterProfileByName(profileName) || assignments.dialogueLines === 0;
     if ($('editAssignedCharacter')) $('editAssignedCharacter').disabled = false;
     ensureAssignedAudioProfileControls();
   }
@@ -2796,33 +2821,58 @@
       }
     }
     const castList = $('assignedCharacterList');
+    const assignedCastRows = characters.map(item => {
+      const name = characterCanonical(item);
+      const series = characterSeries(item);
+      const assignments = characterVoiceAssignments(name, series);
+      const profileName = String(item.voice_profile || '').trim();
+      return {item, name, series, assignments, profileName,
+        key:characterAssignmentKey(name, series)};
+    }).filter(row => row.assignments.dialogueLines > 0 || Boolean(row.profileName));
     if (castList) {
       const assignedQuery = String($('assignedSearch')?.value || '').trim().toLowerCase();
-      const visibleCharacters = characters.filter(item => [characterCanonical(item),characterSeries(item),item.voice_profile,item.role,...characterAliases(item)].join(' ').toLowerCase().includes(assignedQuery));
-      const signature = JSON.stringify([assignedQuery,visibleCharacters.map(item => [item.name,item.series,item.voice_profile,item.aliases,item.examples,item.dialogue_count,item.confidence])]);
+      const visibleCharacters = assignedCastRows.filter(row =>
+        [row.name,row.series,row.profileName,row.item.role,...characterAliases(row.item)]
+          .join(' ').toLowerCase().includes(assignedQuery));
+      const selectedKey = characterAssignmentKey(
+        window.ryuPremiumSelectedCharacter, window.ryuPremiumSelectedCharacterSeries
+      );
+      const signature = JSON.stringify([assignedQuery,selectedKey,visibleCharacters.map(row => [
+        row.key,row.profileName,row.item.aliases,row.assignments.dialogueLines,
+        row.assignments.chapters,row.assignments.aiAssignedPercent
+      ])]);
       if (castList.dataset.liveSignature !== signature) {
-        castList.innerHTML = visibleCharacters.map(item => {
-          const name = characterCanonical(item), assignments = characterVoiceAssignments(name);
-          return '<button type="button" class="assigned-character" data-character-name="' + esc(name) + '">' +
-            '<span><b>' + esc(name) + '</b><small>' + esc(characterSeries(item)) + ' · ' + assignments.passages.length + ' assigned line(s) · ' + esc(item.voice_profile || 'Unassigned voice') + '</small></span></button>';
-        }).join('') || (characters.length
-          ? '<div class="ryu-character-empty">No characters match this search.</div>'
-          : '<div class="ryu-character-empty"><b>No Characters Found</b>Assign Characters from the selected project text to build this cast.<button type="button" class="btn small" id="assignCharactersEmpty">Assign Characters</button></div>');
+        const top = castList.scrollTop;
+        castList.innerHTML = visibleCharacters.map(row =>
+          '<button type="button" class="assigned-character' + (row.key === selectedKey ? ' active' : '') +
+          '" data-character-name="' + esc(row.name) + '" data-character-series="' + esc(row.series) + '">' +
+          '<span><b>' + esc(row.name) + '</b><small>' + esc(row.series) + ' · ' +
+          row.assignments.dialogueLines + ' assigned line(s) · ' +
+          esc(row.profileName || 'Unassigned voice') + '</small></span></button>'
+        ).join('') || (assignedCastRows.length
+          ? '<div class="ryu-character-empty">No assigned characters match this search.</div>'
+          : '<div class="ryu-character-empty"><b>No Assigned Cast yet</b>Save a dialogue assignment or an explicit character voice profile to build this list.</div>');
         castList.dataset.liveSignature = signature;
+        castList.scrollTop = top;
       }
       if (!castList.dataset.liveBound) {
         castList.dataset.liveBound = '1';
         castList.addEventListener('click', event => {
-          const button = event.target.closest('[data-character-name]');
+          const button = event.target.closest('[data-character-name][data-character-series]');
           if (!button) return;
           window.ryuPremiumSelectedCharacter = button.dataset.characterName;
-          castList.querySelectorAll('[data-character-name]').forEach(row => row.classList.toggle('active', row === button));
+          window.ryuPremiumSelectedCharacterSeries = button.dataset.characterSeries;
+          window.ryuPremiumSelectedAssignedDialogueKey = '';
+          const key = characterAssignmentKey(button.dataset.characterName, button.dataset.characterSeries);
+          castList.querySelectorAll('[data-character-name][data-character-series]').forEach(row =>
+            row.classList.toggle('active', characterAssignmentKey(row.dataset.characterName,row.dataset.characterSeries) === key));
           renderCharacterInspector();
         });
       }
     }
     const assignedBadge = $('assignedCountBadge');
-    if (assignedBadge) assignedBadge.textContent = characters.length + (characters.length === 1 ? ' character' : ' characters');
+    if (assignedBadge) assignedBadge.textContent = assignedCastRows.length +
+      (assignedCastRows.length === 1 ? ' character' : ' characters');
     renderCharacterInspector();
     ensureManualAssignmentFields();
   }
@@ -5223,15 +5273,20 @@
     message('Removed ' + name + ' from this project cast.');
   }
   async function testSelectedCharacterVoice() {
-    const current = characterRowForName(window.ryuPremiumSelectedCharacter);
+    const current = selectedCharacterRow();
     if (!current) throw new Error('Select a character from the active project cast first.');
     const selectedProfileName = String($('assignedAudioProfile')?.value || current.voice_profile || '').trim();
     const profile = characterProfileByName(selectedProfileName);
     if (!profile) throw new Error('Choose a saved audio profile first.');
-    const savedPassages = characterVoiceAssignments(current.name).passages;
-    const sample = String(savedPassages[0]?.text || (current.examples || [])[0] || current.dialogue_sample || '').trim();
-    if (!sample) throw new Error('This character has no assigned sentence yet. Assign a source passage before testing the voice.');
-    await previewSavedProfile(profile, sample, current.name);
+    const savedPassages = characterVoiceAssignments(current.name, characterSeries(current)).passages;
+    if (!savedPassages.length) throw new Error('This character has no saved dialogue assignment to test. Assign and save a source passage first.');
+    const selectedKey = String(window.ryuPremiumSelectedAssignedDialogueKey || '');
+    const selected = savedPassages.find(row =>
+      characterAssignmentKey(current.name, characterSeries(current)) + '::' +
+        row.chapter_number + ':' + row.start + ':' + row.end === selectedKey
+    );
+    const dialogue = selected || savedPassages[0];
+    await previewSavedProfile(profile, String(dialogue.text || ''), current.name);
   }
   function installCharacterStudioHandlers() {
     if (characterStudioCaptureBound) return;
