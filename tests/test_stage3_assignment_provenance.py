@@ -1,5 +1,8 @@
 """Stage 3 Step 2: saved assignment origin and character-delete integrity."""
+import json
 from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -232,6 +235,63 @@ class AssignmentProvenanceBridgeTests(unittest.TestCase):
             self.assertEqual(by_text_b[other_text]["source"], "manual")
             self.assertNotIn(other_text, by_text_a)
             self.assertNotIn(manual_text, by_text_b)
+
+    def test_project_assignment_identity_survives_separate_process_reopen(self):
+        with TemporaryDirectory() as root:
+            folder_a = Path(root) / "project-a"
+            folder_b = Path(root) / "project-b"
+            folder_a.mkdir()
+            folder_b.mkdir()
+            text_a = '“Mira belongs to Series A.”'
+            text_b = '“Mira belongs to Series B.”'
+            project_a = Project("Series A", folder_a, chapters=[Chapter(1, "A", text_a, [{
+                "start": 0, "end": len(text_a), "text": text_a,
+                "speaker": "Mira", "speakers": ["Mira"], "series": "Series A",
+                "source": "ai", "confidence": 0.88,
+            }])])
+            project_b = Project("Series B", folder_b, chapters=[Chapter(1, "B", text_b, [{
+                "start": 0, "end": len(text_b), "text": text_b,
+                "speaker": "Mira", "speakers": ["Mira"], "series": "Series B",
+                "source": "manual", "confidence": 1.0,
+            }])])
+            project_a.save()
+            project_b.save()
+            script = """
+import json
+import sys
+from pathlib import Path
+from app.core.project import Project
+
+def assignments(folder):
+    project = Project.load(Path(folder))
+    return [
+        {
+            "series": row.get("series"),
+            "speaker": row.get("speaker"),
+            "source": row.get("source"),
+            "confidence": row.get("confidence"),
+            "text": row.get("text"),
+        }
+        for chapter in project.chapters
+        for row in chapter.dialogue_assignments
+    ]
+
+print(json.dumps([assignments(sys.argv[1]), assignments(sys.argv[2])], ensure_ascii=False))
+"""
+            completed = subprocess.run(
+                [sys.executable, "-c", script, str(folder_a), str(folder_b)],
+                check=True, capture_output=True, text=True,
+            )
+            reopened_a, reopened_b = json.loads(completed.stdout)
+            self.assertEqual(len(reopened_a), 1)
+            self.assertEqual(len(reopened_b), 1)
+            self.assertEqual(reopened_a[0]["series"], "Series A")
+            self.assertEqual(reopened_a[0]["source"], "ai")
+            self.assertAlmostEqual(reopened_a[0]["confidence"], 0.88)
+            self.assertEqual(reopened_b[0]["series"], "Series B")
+            self.assertEqual(reopened_b[0]["source"], "manual")
+            self.assertAlmostEqual(reopened_b[0]["confidence"], 1.0)
+            self.assertNotEqual(reopened_a[0]["text"], reopened_b[0]["text"])
 
     def test_bridge_rejects_unknown_source_before_saving(self):
         text = '“The gate is closing.”'
