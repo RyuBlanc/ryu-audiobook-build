@@ -362,6 +362,22 @@ class CharacterAssignmentLiveRefreshContractTests(unittest.TestCase):
             self.assertGreater(matches, 0, "Expected a Premium V2 UI path for " + command)
 
 
+class CharacterAssignmentVoiceProfileRefreshContractTests(unittest.TestCase):
+    def test_saving_or_deleting_a_voice_profile_refreshes_assigned_cast(self):
+        adapter = (Path(__file__).resolve().parents[1] / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        save_start = adapter.index("async function saveVoice()")
+        save_end = adapter.index("async function startImportPayload", save_start)
+        save_voice = adapter[save_start:save_end]
+        self.assertIn("await refreshVoices(); await refreshCharacters();", save_voice)
+        self.assertIn("!voices.some(item => item.name === selectedAssignedPreviewProfile)", adapter)
+        self.assertIn("selectedAssignedPreviewProfile = current ? savedCharacterVoice(current) : null", adapter)
+        delete_start = adapter.index("if (button.closest('#voices .panel[data-panel=\"3\"]') && label === 'delete')")
+        delete_end = adapter.index("if (button.matches('[data-ai-sentence]'))", delete_start)
+        delete_voice = adapter[delete_start:delete_end]
+        self.assertIn("await refreshVoices();", delete_voice)
+        self.assertIn("await refreshCharacters();", delete_voice)
+
+
 
 if __name__ == "__main__":
     unittest.main()

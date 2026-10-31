@@ -408,6 +408,9 @@
       search.addEventListener('input', renderAssignedCast);
     }
     const current = characters.find(item => item.name === window.ryuPremiumSelectedCharacter);
+    if (selectedAssignedPreviewProfile && !voices.some(item => item.name === selectedAssignedPreviewProfile)) {
+      selectedAssignedPreviewProfile = current ? savedCharacterVoice(current) : null;
+    }
     if ($('editCharacterVoice')) $('editCharacterVoice').value = current?.voice_profile || current?.voice || '';
     if ($('assignedPreviewProfile') && selectedAssignedPreviewProfile) {
       $('assignedPreviewProfile').value = selectedAssignedPreviewProfile;
@@ -666,7 +669,7 @@
       qwen_seed:choice === 'voicedesign' ? designSeed : null,
       notes:choice === 'voicedesign' ? designPrompt : '',
       reference_text:$('cloneTranscript')?.value || ''});
-    selectedVoice = result.name; await refreshVoices();
+    selectedVoice = result.name; await refreshVoices(); await refreshCharacters();
     if ($('profileName')) $('profileName').value = result.name;
     if ($('profileLibrary')) $('profileLibrary').textContent = result.provider;
     if ($('profileVoice')) $('profileVoice').textContent = result.voice_id;
@@ -1980,6 +1983,7 @@
           if (!window.confirm('Delete saved custom voice profile "' + name + '"?')) return;
           await call('voice.delete', {profile_name:name});
           await refreshVoices();
+          await refreshCharacters();
           if ($('profileName')) $('profileName').value = '';
           message('Deleted saved custom voice profile: ' + name);
         });
