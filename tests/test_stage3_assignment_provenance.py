@@ -3,7 +3,9 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
+from tempfile import TemporaryDirectory
 
+from app.core.project import Project
 from app.chapters.assignment_utils import assign_dialogue_to_chapters
 from app.chapters.detector import Chapter
 from app.ui import premium_v2_host as host
@@ -25,6 +27,22 @@ class AssignmentProvenanceUtilityTests(unittest.TestCase):
         self.assertEqual(result["source"], "ai")
         self.assertEqual(chapter.dialogue_assignments[0]["source"], "ai")
         self.assertAlmostEqual(chapter.dialogue_assignments[0]["confidence"], 0.93)
+
+    def test_ai_assignment_source_and_confidence_survive_project_save_and_reopen(self):
+        with TemporaryDirectory() as folder:
+            text = '“The gate is closing.”'
+            chapter = Chapter(1, "Gate", text, [{
+                "start": 0, "end": len(text), "text": text,
+                "speaker": "Mira", "speakers": ["Mira"], "series": "Test Series",
+                "source": "ai", "confidence": 0.93,
+            }])
+            project = Project("Test Series", Path(folder), chapters=[chapter])
+            project.save()
+            reopened = Project.load(Path(folder))
+            saved = reopened.chapters[0].dialogue_assignments[0]
+            self.assertEqual(saved["source"], "ai")
+            self.assertAlmostEqual(saved["confidence"], 0.93)
+            self.assertEqual(saved["series"], "Test Series")
 
     def test_unknown_assignment_source_is_rejected_without_mutation(self):
         text = '“Wait for me.”'
@@ -80,6 +98,57 @@ class AssignmentProvenanceBridgeTests(unittest.TestCase):
         self.assertAlmostEqual(chapter.dialogue_assignments[0]["confidence"], 0.94)
         project.save.assert_called_once()
         save_state.assert_called_once()
+
+    def test_bridge_ai_source_is_preserved_when_offsets_are_resolved_by_backend(self):
+        text = 'Narration. “The gate is closing.”'
+        chapter = Chapter(1, "Gate", text)
+        state = {"series_name": "Test Series", "characters": [{"name": "Mira", "series": "Test Series"}]}
+        project = self._project(chapter)
+        bridge = _BridgeHarness(project)
+        with patch.object(host, "load_state", return_value=state), \
+             patch.object(host, "save_state"), \
+             patch("app.chapters.character_learning.record_assignment_feedback"):
+            result = bridge._chapter_dialogue_assign({
+                "dialogue_text": "“The gate is closing.”", "speakers": ["Mira"],
+                "chapter_number": 1, "series": "Test Series", "source": "ai", "confidence": 0.91,
+            })
+        self.assertTrue(result["saved"])
+        self.assertEqual(result["source"], "ai")
+        self.assertAlmostEqual(chapter.dialogue_assignments[0]["confidence"], 0.91)
+
+    def test_assignment_writes_only_to_the_selected_active_project(self):
+        text_a = '“Only Project A.”'
+        text_b = '“Only Project B.”'
+        chapter_a = Chapter(1, "A", text_a)
+        chapter_b = Chapter(1, "B", text_b)
+        project_a = self._project(chapter_a)
+        project_b = self._project(chapter_b)
+        project_a.folder = Path("project-a")
+        project_b.folder = Path("project-b")
+        state_by_folder = {
+            "project-a": {"series_name": "Series A", "characters": [{"name": "Mira", "series": "Series A"}]},
+            "project-b": {"series_name": "Series B", "characters": [{"name": "Mira", "series": "Series B"}]},
+        }
+        bridge_a, bridge_b = _BridgeHarness(project_a), _BridgeHarness(project_b)
+        with patch.object(host, "load_state", side_effect=lambda folder: state_by_folder[str(folder)]), \
+             patch.object(host, "save_state"), \
+             patch("app.chapters.character_learning.record_assignment_feedback"):
+            result_a = bridge_a._chapter_dialogue_assign({
+                "dialogue_text": text_a, "speakers": ["Mira"], "chapter_number": 1,
+                "series": "Series A", "source": "manual",
+            })
+            self.assertTrue(result_a["saved"])
+            self.assertEqual(len(chapter_a.dialogue_assignments), 1)
+            self.assertEqual(chapter_b.dialogue_assignments, [])
+            result_b = bridge_b._chapter_dialogue_assign({
+                "dialogue_text": text_b, "speakers": ["Mira"], "chapter_number": 1,
+                "series": "Series B", "source": "manual",
+            })
+        self.assertTrue(result_b["saved"])
+        self.assertEqual(chapter_a.dialogue_assignments[0]["text"], text_a)
+        self.assertEqual(chapter_b.dialogue_assignments[0]["text"], text_b)
+        self.assertEqual(chapter_a.dialogue_assignments[0]["series"], "Series A")
+        self.assertEqual(chapter_b.dialogue_assignments[0]["series"], "Series B")
 
     def test_bridge_rejects_unknown_source_before_saving(self):
         text = '“The gate is closing.”'
