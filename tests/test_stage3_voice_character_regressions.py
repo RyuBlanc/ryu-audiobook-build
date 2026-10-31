@@ -298,6 +298,7 @@ class Stage3CastRoutingTests(unittest.TestCase):
             (passage, "Ren Voice"),
             ("The rain continued.", "Narrator"),
         ])
+        self.assertTrue(all(spoken == spoken.strip() for spoken, _voice in parts))
 
     def test_stale_unquoted_assignment_is_not_added_to_production_dialogue_spans(self):
         narrator = _RecordingNarratorProvider()

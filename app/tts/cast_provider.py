@@ -397,7 +397,10 @@ class CastAwareProvider(TTSProvider):
 
         if cursor < len(text):
             parts.append((text[cursor:], fallback_voice))
-        return [(t, v) for t, v in parts if t.strip()]
+        # Strip only boundary whitespace from each synthesis unit. The saved
+        # chapter source and dialogue offsets remain untouched; leading/trailing
+        # spaces are formatting separators, not audible narration content.
+        return [(t.strip(), v) for t, v in parts if t.strip()]
 
     def close(self) -> None:
         providers = [self.narrator_provider, *[item[0] for item in self._providers.values()]]
