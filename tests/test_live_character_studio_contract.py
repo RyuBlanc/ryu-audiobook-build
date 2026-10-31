@@ -84,6 +84,17 @@ class LiveCharacterStudioContracts(unittest.TestCase):
         self.assertIn(".ai-sentence.confirmed", adapter)
 
 
+    def test_assigned_cast_statistics_use_saved_provenance_and_distinct_chapters(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        html = (ROOT / "assets/frontend/ryu_audiobook_premium_v2.html").read_text(encoding="utf-8")
+        self.assertIn("aiAssigned / dialogueLines", adapter)
+        self.assertIn("sourceKind === 'ai'", adapter)
+        self.assertIn("const chapterSet = new Set()", adapter)
+        self.assertIn("characterVoiceAssignments(selected.name, seriesValue)", adapter)
+        self.assertIn("assignments.aiAssignedPercent", adapter)
+        self.assertIn('<b id="assignedConfidence">—</b><span>AI Assigned</span>', html)
+        self.assertNotIn('<span>Confidence</span>', html)
+
     def test_assignment_popup_preserves_full_source_passage_and_repositions_after_live_choices(self):
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         self.assertIn("function positionCharacterAssignmentPopover(popover, x, y)", adapter)

@@ -2587,24 +2587,39 @@
     if (save) save.disabled = !currentCharacter || saved.length === 0 || select.value === current;
     select.onchange = () => { if (save) save.disabled = !currentCharacter || saved.length === 0 || select.value === current; };
   }
-  function characterVoiceAssignments(name) {
+  function characterVoiceAssignments(name, series) {
     const item = characterRowForName(name);
-    const names = [characterCanonical(item), ...characterAliases(item)].filter(Boolean).map(value => value.toLowerCase());
+    const names = new Set([characterCanonical(item), ...characterAliases(item)]
+      .filter(Boolean).map(value => value.toLowerCase()));
+    const selectedSeries = String(series || characterSeries(item) || '').trim().toLowerCase();
     const passages = [];
     const chapterSet = new Set();
+    let aiAssigned = 0;
     for (const chapter of chapters) {
       const source = String(chapter.text || '');
       for (const assignment of characterAssignmentsFor(chapter)) {
-        const speakers = Array.isArray(assignment.speakers) ? assignment.speakers : (assignment.speaker ? [assignment.speaker] : []);
-        if (!speakers.some(speaker => names.includes(String(speaker || '').toLowerCase()))) continue;
-        chapterSet.add(Number(chapter.number));
+        const speakers = Array.isArray(assignment.speakers) ? assignment.speakers :
+          (assignment.speaker ? [assignment.speaker] : []);
+        if (!speakers.some(speaker => names.has(String(speaker || '').trim().toLowerCase()))) continue;
+        const assignmentSeries = String(assignment.series || selectedSeries).trim().toLowerCase();
+        if (selectedSeries && assignmentSeries !== selectedSeries) continue;
         const start = Number(assignment.start), end = Number(assignment.end);
         const text = Number.isInteger(start) && Number.isInteger(end) && start >= 0 && end > start && end <= source.length
           ? source.slice(start, end) : String(assignment.text || '');
-        if (text) passages.push({chapter_number:Number(chapter.number), start, end, text});
+        if (!text) continue;
+        chapterSet.add(Number(chapter.number));
+        const sourceKind = String(assignment.source || 'manual').trim().toLowerCase();
+        if (sourceKind === 'ai') aiAssigned += 1;
+        passages.push({
+          chapter_number:Number(chapter.number), start, end, text,
+          source:sourceKind, series:String(assignment.series || selectedSeries), speakers
+        });
       }
     }
-    return {passages, chapters:[...chapterSet].sort((a,b) => a-b)};
+    const dialogueLines = passages.length;
+    const aiAssignedPercent = dialogueLines ? Math.round(aiAssigned / dialogueLines * 100) : 0;
+    return {passages, chapters:[...chapterSet].sort((a,b) => a-b), dialogueLines,
+      aiAssignedLines:aiAssigned, aiAssignedPercent};
   }
   function renderCharacterInspector() {
     const selected = characterRowForName(window.ryuPremiumSelectedCharacter);
@@ -2624,7 +2639,7 @@
     const voiceNode = $('assignedVoiceName');
     const lineNode = $('assignedLineCount');
     const chapterNode = $('assignedChapterCount');
-    const confidenceNode = $('assignedConfidence');
+    const aiAssignedNode = $('assignedConfidence');
     const quotesNode = $('assignedQuotes');
     const seriesBox = $('assignedSeriesName')?.closest('.assigned-summary > div');
     if (!selected) {
@@ -2633,7 +2648,7 @@
       if (voiceNode) voiceNode.textContent = 'Unassigned';
       if (lineNode) lineNode.textContent = '0';
       if (chapterNode) chapterNode.textContent = '0';
-      if (confidenceNode) confidenceNode.textContent = '—';
+      if (aiAssignedNode) aiAssignedNode.textContent = '0%';
       if (quotesNode) quotesNode.innerHTML = '<div class="ryu-character-empty"><b>No Characters Found</b>Assign a character from Character assigning to preview and manage its voice.</div>';
       if (seriesBox) seriesBox.hidden = true;
       if ($('assignedAudioProfile')) { $('assignedAudioProfile').value = ''; $('assignedAudioProfile').disabled = true; }
@@ -2650,8 +2665,8 @@
     if (seriesBox) seriesBox.hidden = false;
     const profileName = String(selected.voice_profile || '').trim();
     if (voiceNode) voiceNode.textContent = profileName || 'Unassigned';
-    const assignments = characterVoiceAssignments(selected.name);
-    if (lineNode) lineNode.textContent = String(assignments.passages.length);
+    const assignments = characterVoiceAssignments(selected.name, seriesValue);
+    if (lineNode) lineNode.textContent = String(assignments.dialogueLines);
     if (chapterNode) chapterNode.textContent = String(assignments.chapters.length);
     const confidence = Number(selected.confidence);
     if (confidenceNode) confidenceNode.textContent = Number.isFinite(confidence) ? Math.round(confidence <= 1 ? confidence * 100 : confidence) + '%' : '—';
