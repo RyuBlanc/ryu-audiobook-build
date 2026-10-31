@@ -802,7 +802,7 @@ class PremiumV2Bridge(QObject):
             "narrator": str(state.get("narrator") or state.get("voice_profile") or ""),
             "voice_profile": str(state.get("voice_profile") or ""),
             "narrator_profile_source": str(state.get("narrator_profile_source") or ("project_override" if state.get("voice_profile") else "none")),
-            "series_narrator_profile": str((self._narrator_series_default_get({"series": self._project_series_name(project, state)}).get("profile_name") or "")),
+            "series_narrator_profile": str((self._narrator_series_default_read(project, state, self._project_series_name(project, state)).get("profile_name") or "")),
             "narrator_voice_configured": narrator_ready,
             "output_target_path": str(output_target),
             "output_folder": str(output_folder),
@@ -3879,10 +3879,9 @@ class PremiumV2Bridge(QObject):
         digest = hashlib.sha256(normalized.casefold().encode("utf-8")).hexdigest()[:16]
         return settings_root() / "series-narrators" / f"{safe_key}-{digest}.json"
 
-    def _narrator_series_default_get(self, payload: dict[str, Any]) -> dict[str, Any]:
-        project = self._active_project()
-        state = load_state(project.folder)
-        series = str(payload.get("series") or self._project_series_name(project, state)).strip()
+    def _narrator_series_default_read(self, project, state: dict[str, Any], series: str) -> dict[str, Any]:
+        """Read a series narrator default without requiring that project to be active."""
+        series = str(series or self._project_series_name(project, state)).strip()
         path = self._narrator_series_default_store_path(series)
         record: dict[str, Any] = {}
         if path.is_file():
@@ -3904,6 +3903,12 @@ class PremiumV2Bridge(QObject):
             "profile_available": profile_exists if effective else False,
             "updated_at": record.get("updated_at"), "saved": bool(default_profile),
         }
+
+    def _narrator_series_default_get(self, payload: dict[str, Any]) -> dict[str, Any]:
+        project = self._active_project()
+        state = load_state(project.folder)
+        series = str(payload.get("series") or self._project_series_name(project, state)).strip()
+        return self._narrator_series_default_read(project, state, series)
 
     def _narrator_series_default_save(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
@@ -3931,7 +3936,7 @@ class PremiumV2Bridge(QObject):
         project = self._active_project()
         state = load_state(project.folder)
         series = str(payload.get("series") or self._project_series_name(project, state)).strip()
-        saved = self._narrator_series_default_get({"series": series})
+        saved = self._narrator_series_default_read(project, state, series)
         profile_name = str(saved.get("profile_name") or "").strip()
         if not profile_name:
             raise ValueError("This series has no saved narrator default. Save a series default first.")

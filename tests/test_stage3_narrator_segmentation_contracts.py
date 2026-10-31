@@ -46,3 +46,11 @@ class Stage3NarratorSegmentationContracts(unittest.TestCase):
         for token in ("Series Narrator Default", "Save Series Default", "Apply to This Book",
                       "narrator.series.default.save", "narrator.series.default.apply"):
             self.assertIn(token, adapter)
+
+    def test_series_narrator_summary_reader_does_not_require_active_project(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        start = host.index("    def _narrator_series_default_read(")
+        end = host.index("    def _narrator_series_default_get(", start)
+        reader = host[start:end]
+        self.assertNotIn("self._active_project()", reader)
+        self.assertIn("_narrator_series_default_read(project, state,", host)
