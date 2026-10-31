@@ -3727,11 +3727,14 @@
     const storedBgm = Math.max(0, Math.min(0.50, Number(chapterBgmState.default_volume ?? 0.18)));
     const storedNarration = Math.max(0, Math.min(1, Number(chapterBgmState.narration_volume ?? 1)));
     const storedCue = Math.max(0, Math.min(0.50, Number(chapterBgmState.cue_volume ?? 0.25)));
-    if (bgmLevelInput && document.activeElement !== bgmLevelInput && Number.isFinite(storedBgm)) {
+    // Preserve every pending slider draft until the shared manifest save completes.
+    // Rehydrating an inactive control from stale persisted state can erase a
+    // different slider value when several levels are edited in quick succession.
+    if (!mixLevelsDirty && bgmLevelInput && document.activeElement !== bgmLevelInput && Number.isFinite(storedBgm)) {
       bgmLevelInput.value = String(Math.round(storedBgm * 100));
     }
-    if (narrationInput && document.activeElement !== narrationInput && Number.isFinite(storedNarration)) narrationInput.value = String(Math.round(storedNarration * 100));
-    if (cueLevelInput && document.activeElement !== cueLevelInput && Number.isFinite(storedCue)) cueLevelInput.value = String(Math.round(storedCue * 100));
+    if (!mixLevelsDirty && narrationInput && document.activeElement !== narrationInput && Number.isFinite(storedNarration)) narrationInput.value = String(Math.round(storedNarration * 100));
+    if (!mixLevelsDirty && cueLevelInput && document.activeElement !== cueLevelInput && Number.isFinite(storedCue)) cueLevelInput.value = String(Math.round(storedCue * 100));
     const bgmLevel = Math.max(0, Math.min(0.50, Number(bgmLevelInput?.value ?? storedBgm * 100) / 100));
     setText('advancedMusicVolumeValue', Math.round(bgmLevel * 100) + '%');
     const narrationLevel = Math.max(0, Math.min(1, Number(narrationInput?.value ?? storedNarration * 100) / 100));

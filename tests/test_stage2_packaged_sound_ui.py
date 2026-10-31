@@ -300,3 +300,25 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         self.assertIn("controls.forEach(control => { control.disabled = true; });", save)
         self.assertIn("setChapterBgmSaveStatus('Chapter assignment saved.');", save)
         self.assertIn("controls.forEach((control, index) => { control.disabled = priorDisabled[index]; });", save)
+
+
+    def test_mix_summary_preserves_all_pending_slider_drafts(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        summary_start = adapter.index("function renderSoundMixSummary()")
+        summary_end = adapter.index("function renderChapterBgm()", summary_start)
+        summary = adapter[summary_start:summary_end]
+
+        # Editing one level can trigger a render while the next level is being
+        # edited. The saved backend values must not overwrite any pending draft.
+        for control in ("bgmLevelInput", "narrationInput", "cueLevelInput"):
+            self.assertIn(
+                f"if (!mixLevelsDirty && {control} && document.activeElement !== {control}",
+                summary,
+            )
+
+        save_start = adapter.index("async function saveSoundMixLevels(force = false)")
+        save_end = adapter.index("async function flushSoundDesignState", save_start)
+        save = adapter[save_start:save_end]
+        self.assertIn("if (revision === mixLevelsRevision)", save)
+        self.assertIn("mixLevelsDirty = false;", save)
+        self.assertIn("renderSoundMixSummary();", save)
