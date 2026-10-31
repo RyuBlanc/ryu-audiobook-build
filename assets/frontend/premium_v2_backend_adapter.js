@@ -2977,7 +2977,7 @@
     if (!current) throw new Error('The character was created but could not be loaded into the active project cast.');
     return current;
   }
-  async function assignPassageToCharacter(name, preferredSeries = '', preferredProfile = '') {
+  async function assignPassageToCharacter(name, preferredSeries = '', preferredProfile = '', assignmentSource = 'manual', assignmentConfidence = 1.0) {
     const dialogueText = String(window.ryuPremiumPendingDialogueText || '');
     const chapterNumber = Number(window.ryuPremiumPendingDialogueChapter);
     const start = Number(window.ryuPremiumPendingDialogueStart), end = Number(window.ryuPremiumPendingDialogueEnd);
@@ -2994,7 +2994,7 @@
     }
     const result = await call('chapter.dialogue.assign', {
       dialogue_text:dialogueText, speakers:[characterCanonical(character)], series:characterSeries(character),
-      chapter_number, start, end, mode:'single'
+      chapter_number, start, end, mode:'single', source:assignmentSource, confidence:assignmentConfidence
     });
     closeCharacterAssignmentPopover();
     await refreshChapters();
@@ -3102,7 +3102,8 @@
         await call('chapter.dialogue.assign', {
           dialogue_text:String(row.source_text || row.text), speakers:[characterCanonical(castCandidate)],
           series:characterSeries(castCandidate),
-          chapter_number:Number(row.chapter_number), start:Number(row.start), end:Number(row.end), mode:'single'
+          chapter_number:Number(row.chapter_number), start:Number(row.start), end:Number(row.end), mode:'single',
+          source:'ai', confidence:topConfidence
         });
         applied++;
       } catch (error) {
@@ -5122,7 +5123,7 @@
       const evidence = String(candidate.evidence || 'Local dialogue-context suggestion');
       return '<button type="button" class="prediction-option ryu-ai-option' + (isActive ? ' active' : '') +
         '" data-prediction="' + esc(name) + '" data-series="' + esc(candidateSeries) +
-        '" data-profile="' + esc(linked?.profile || '') + '" data-source="ai"><b>' + esc(name) + '</b><small>' +
+        '" data-profile="' + esc(linked?.profile || '') + '" data-source="ai" data-confidence="' + esc(probability) + '"><b>' + esc(name) + '</b><small>' +
         esc(candidateSeries) + ' · ' + Math.round(probability * 100) + '% · ' + esc(evidence) + '</small></button>';
     }).join('') : '<p class="muted">No ranked AI suggestion is available for this passage. Choose a saved character below or create a new one.</p>';
     const seen = new Set();
@@ -5201,7 +5202,7 @@
     if (!current) throw new Error('Select a real project character before deleting.');
     const name = characterCanonical(current);
     if (!window.confirm('Remove "' + name + '" from this project cast? Reusable Character Library data is retained.')) return;
-    await call('character.delete', {name});
+    await call('character.delete', {name, series:characterSeries(current)});
     window.ryuPremiumSelectedCharacter = '';
     $('characterEditorModal')?.classList.remove('show');
     await refreshCharacters(); await refreshCharacterLibrary();
@@ -5370,8 +5371,10 @@
           const selected = $('predictionList')?.querySelector('.prediction-option.active');
           const name = String(selected?.dataset.prediction || '').trim();
           if (!name) throw new Error('Select an AI suggestion or a saved character first.');
+          const assignmentSource = selected.dataset.source === 'ai' ? 'ai' : 'manual';
+          const assignmentConfidence = assignmentSource === 'ai' ? Number(selected.dataset.confidence || 0) : 1.0;
           await assignPassageToCharacter(name, String(selected.dataset.series || activeCharacterProjectSeries()),
-            String(selected.dataset.profile || ''));
+            String(selected.dataset.profile || ''), assignmentSource, assignmentConfidence);
           $('aiPredictionModal')?.classList.remove('show');
           window.ryuPremiumSelectedDialogueId = '';
         });

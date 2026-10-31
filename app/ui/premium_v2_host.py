@@ -1085,6 +1085,19 @@ class PremiumV2Bridge(QObject):
         mode = str(payload.get("mode") or "single").strip().lower()
         if mode not in {"single", "chorus", "alternating"}:
             raise ValueError("Assignment mode must be single, chorus, or alternating.")
+        import math
+        assignment_source = str(payload.get("source") or "manual").strip().casefold()
+        if assignment_source not in {"manual", "ai"}:
+            raise ValueError("Dialogue assignment source must be manual or ai.")
+        if assignment_source == "ai":
+            try:
+                assignment_confidence = float(payload.get("confidence", 0.0))
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("AI confidence must be a finite value between 0 and 1.") from exc
+            if not math.isfinite(assignment_confidence) or not 0.0 <= assignment_confidence <= 1.0:
+                raise ValueError("AI confidence must be a finite value between 0 and 1.")
+        else:
+            assignment_confidence = 1.0
         has_offsets = "start" in payload or "end" in payload
         if has_offsets:
             try:
@@ -1110,22 +1123,23 @@ class PremiumV2Bridge(QObject):
                 raise ValueError("The selected passage overlaps another saved speaker assignment. Edit or remove the existing assignment first.")
             base = next((dict(item) for item in existing if isinstance(item, dict)
                          and item.get("start") == start and item.get("end") == end),
-                        {"start": start, "end": end, "text": exact_text, "source": "manual"})
-            base.update({"start": start, "end": end, "text": exact_text, "source": "manual"})
+                        {"start": start, "end": end, "text": exact_text, "source": assignment_source})
+            base.update({"start": start, "end": end, "text": exact_text, "source": assignment_source})
             normalized = normalize_assignment(base, speakers, mode)
             assignment_series = requested_series or default_series
-            normalized.update({"source": "manual", "confidence": 1.0, "series": assignment_series})
+            normalized.update({"source": assignment_source, "confidence": assignment_confidence, "series": assignment_series})
             chapter.dialogue_assignments = [
                 item for item in existing if not (isinstance(item, dict)
                     and item.get("start") == start and item.get("end") == end)
             ] + [normalized]
             chapter.dialogue_assignments.sort(key=lambda item: (int(item.get("start", 0)), int(item.get("end", 0))))
             result = {"chapter_number": chapter.number, "start": start, "end": end,
-                      "text": exact_text, "speakers": speakers, "source": "manual",
-                      "confidence": 1.0, "series": assignment_series, "saved": True}
+                      "text": exact_text, "speakers": speakers, "source": assignment_source,
+                      "confidence": assignment_confidence, "series": assignment_series, "saved": True}
         else:
             result = assign_dialogue_to_chapters(project.chapters, dialogue_text, speakers,
-                                                 chapter_number=chapter_number, mode=mode)
+                                                 chapter_number=chapter_number, mode=mode,
+                                                 source=assignment_source, confidence=assignment_confidence)
             assignment_series = requested_series or default_series
             result["series"] = assignment_series
         project.save()
@@ -3431,23 +3445,56 @@ class PremiumV2Bridge(QObject):
         return {"character": item, "saved": True}
 
     def _character_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Remove one character from the active book's saved cast."""
+        """Remove an unreferenced character from exactly one active-project series."""
         project = self._active_project()
         name = str(payload.get("name") or "").strip()
         if not name:
             raise ValueError("Choose a character to delete.")
         state = load_state(project.folder)
         characters = list(state.get("characters") or [])
-        kept = [c for c in characters if not (
-            isinstance(c, dict) and str(c.get("name", "")).casefold() == name.casefold()
-        )]
-        removed = len(characters) - len(kept)
-        if not removed:
-            raise ValueError("The selected character is no longer in the saved cast.")
-        state["characters"] = kept
+        default_series = self._project_series_name(project, state)
+        requested_series = str(payload.get("series") or "").strip()
+        matches = [
+            row for row in characters
+            if isinstance(row, dict)
+            and str(row.get("name") or "").strip().casefold() == name.casefold()
+            and (
+                not requested_series
+                or str(row.get("series") or default_series).strip().casefold() == requested_series.casefold()
+            )
+        ]
+        if not matches:
+            raise ValueError("The selected character is no longer in the saved cast for that series.")
+        if len(matches) > 1:
+            raise ValueError("This character name exists in more than one series. Select the series before deleting.")
+        selected = matches[0]
+        selected_series = str(selected.get("series") or default_series).strip()
+        identity_names = {
+            str(value or "").strip().casefold()
+            for value in [selected.get("name"), *(selected.get("aliases") or [])]
+            if str(value or "").strip()
+        }
+        # Do not leave saved dialogue spans pointing at a character that no longer exists.
+        for chapter in project.chapters:
+            for assignment in list(getattr(chapter, "dialogue_assignments", []) or []):
+                if not isinstance(assignment, dict):
+                    continue
+                assignment_series = str(assignment.get("series") or default_series).strip()
+                if assignment_series and selected_series and assignment_series.casefold() != selected_series.casefold():
+                    continue
+                raw_speakers = assignment.get("speakers")
+                if not isinstance(raw_speakers, (list, tuple)):
+                    raw_speakers = [assignment.get("speaker")] if assignment.get("speaker") else []
+                speakers = {str(value or "").strip().casefold() for value in raw_speakers if str(value or "").strip()}
+                if speakers.intersection(identity_names):
+                    raise ValueError(
+                        f"Cannot delete '{name}' while saved dialogue assignments still refer to this character. "
+                        "Unassign or reassign those passages first."
+                    )
+        state["characters"] = [row for row in characters if row is not selected]
         state["modified_at"] = self._now()
         save_state(project.folder, state)
-        return {"name": name, "deleted": True, "remaining": len(kept)}
+        return {"name": name, "series": selected_series, "deleted": True, "remaining": len(state["characters"])}
 
     def _character_library_path(self) -> Path:
         return reusable_character_library_path()

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 import json
+import math
 from pathlib import Path
 
 from app.core.state import load_state
@@ -178,7 +179,8 @@ def unassign_dialogue_from_chapters(chapters, chapter_number: int, start: int, e
 
 
 def assign_dialogue_to_chapters(chapters, dialogue_text: str, speakers: list[str],
-                                chapter_number: int | None = None, mode: str = "single") -> dict:
+                                chapter_number: int | None = None, mode: str = "single",
+                                source: str = "manual", confidence: float = 1.0) -> dict:
     """Persist an explicit speaker choice against one uniquely matched source span."""
     import re
     requested = str(dialogue_text or "").strip()
@@ -189,6 +191,18 @@ def assign_dialogue_to_chapters(chapters, dialogue_text: str, speakers: list[str
         raise ValueError("Select at least one saved character.")
     if len(requested) > 5000:
         raise ValueError("The selected dialogue passage is too long to assign safely.")
+    source_value = str(source or "manual").strip().casefold()
+    if source_value not in {"manual", "ai"}:
+        raise ValueError("Dialogue assignment source must be manual or ai.")
+    if source_value == "ai":
+        try:
+            confidence_value = float(confidence)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("AI confidence must be a finite value between 0 and 1.") from exc
+        if not math.isfinite(confidence_value) or not 0.0 <= confidence_value <= 1.0:
+            raise ValueError("AI confidence must be a finite value between 0 and 1.")
+    else:
+        confidence_value = 1.0
     candidates = []
     for chapter in chapters or []:
         if chapter_number is not None and int(getattr(chapter, "number", 0)) != int(chapter_number):
@@ -213,15 +227,15 @@ def assign_dialogue_to_chapters(chapters, dialogue_text: str, speakers: list[str
         raise ValueError("The selected passage overlaps another saved speaker assignment. Edit or remove the existing assignment first.")
     base = next((dict(item) for item in existing if isinstance(item, dict)
                  and item.get("start") == start and item.get("end") == end),
-                {"start": start, "end": end, "text": exact_text, "source": "manual"})
-    base.update({"start": start, "end": end, "text": exact_text, "source": "manual"})
+                {"start": start, "end": end, "text": exact_text, "source": source_value})
+    base.update({"start": start, "end": end, "text": exact_text, "source": source_value})
     normalized = normalize_assignment(base, names, mode)
-    normalized["source"] = "manual"
-    normalized["confidence"] = 1.0
+    normalized["source"] = source_value
+    normalized["confidence"] = confidence_value
     existing = [item for item in existing if not (isinstance(item, dict)
                 and item.get("start") == start and item.get("end") == end)]
     existing.append(normalized)
     existing.sort(key=lambda item: (int(item.get("start", 0)), int(item.get("end", 0))))
     chapter.dialogue_assignments = existing
     return {"chapter_number": chapter.number, "start": start, "end": end, "text": exact_text,
-            "speakers": names, "source": "manual", "confidence": 1.0, "saved": True}
+            "speakers": names, "source": source_value, "confidence": confidence_value, "saved": True}
