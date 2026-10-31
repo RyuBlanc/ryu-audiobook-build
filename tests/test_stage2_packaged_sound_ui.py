@@ -247,3 +247,25 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         render_end = adapter.index("async function refreshChapterBgm()", render_start)
         render = adapter[render_start:render_end]
         self.assertIn("list.innerHTML = rows.map", render)
+
+    def test_chapter_acceptance_waits_for_completed_save_and_reenabled_editor(self):
+        script = (ROOT / "tests/stage2_packaged_sound_ui_acceptance.js").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        helper_start = script.index("async function waitForChapterSaveComplete")
+        helper_end = script.index("async function selectChapter(number)", helper_start)
+        helper = script[helper_start:helper_end]
+        self.assertIn('status === "Chapter assignment saved."', helper)
+        self.assertIn("controls.every(control => control && !control.disabled)", helper)
+        self.assertIn("row.start_offset === expectedValues.start_offset", helper)
+        self.assertIn("row.end_behavior === expectedValues.end_behavior", helper)
+        self.assertIn("Math.abs(Number(row.volume) - expectedValues.volume) < 0.005", helper)
+        self.assertIn("await waitForChapterSaveComplete(1, \"custom\", alpha.path);", script)
+        self.assertIn("await waitForChapterSaveComplete(2, \"custom\", beta.path);", script)
+        self.assertIn('volume:0.37, start_offset:"after_first_paragraph", end_behavior:"continue_to_transition"', script)
+        self.assertIn('volume:0.29, start_offset:"after_10_seconds", end_behavior:"stop_immediately"', script)
+        save_start = adapter.index("async function saveCurrentChapterBgmDraft")
+        save_end = adapter.index("function scheduleCueAutoSave", save_start)
+        save = adapter[save_start:save_end]
+        self.assertIn("controls.forEach(control => { control.disabled = true; });", save)
+        self.assertIn("setChapterBgmSaveStatus('Chapter assignment saved.');", save)
+        self.assertIn("controls.forEach((control, index) => { control.disabled = priorDisabled[index]; });", save)

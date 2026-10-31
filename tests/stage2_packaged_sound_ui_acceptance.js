@@ -784,14 +784,43 @@
         document.querySelector("#chapterVolumeValue")?.textContent.trim() === value + "%",
         "Chapter BGM live volume percentage did not match the edit.");
     }
-    async function saveChapter(number, rule, expectedPath) {
-      document.querySelector("#saveChapterBgm").click();
-      await waitFor("saved Chapter " + number + " assignment", async function () {
-        const state = await invoke("sound.chapter_bgm.get", {});
-        const row = state.overrides && state.overrides[String(number)];
-        return Boolean(row && row.rule === rule &&
+    async function waitForChapterSaveComplete(number, rule, expectedPath, expectedValues) {
+      let latestState = null;
+      await waitFor("Chapter " + number + " save completion and re-enabled editor", async function () {
+        latestState = await invoke("sound.chapter_bgm.get", {});
+        const row = latestState.overrides && latestState.overrides[String(number)];
+        const controls = [
+          document.querySelector("#chapterVolume"),
+          document.querySelector("#chapterStartOffset"),
+          document.querySelector("#chapterEndBehavior"),
+          document.querySelector("#saveChapterBgm")
+        ];
+        const editorReady = controls.every(control => control && !control.disabled);
+        const status = document.querySelector("#chapterBgmSaveState")?.textContent.trim() || "";
+        const trackMatches = Boolean(row && row.rule === rule &&
           (expectedPath == null || String(row.path || "") === String(expectedPath)));
-      }, 15000);
+        const valuesMatch = !expectedValues || Boolean(row &&
+          Math.abs(Number(row.volume) - expectedValues.volume) < 0.005 &&
+          row.start_offset === expectedValues.start_offset &&
+          row.end_behavior === expectedValues.end_behavior);
+        return trackMatches && valuesMatch && editorReady && status === "Chapter assignment saved.";
+      }, 18000);
+      return latestState;
+    }
+    async function saveChapter(number, rule, expectedPath, expectedValues) {
+      const saveButton = document.querySelector("#saveChapterBgm");
+      must(saveButton && !saveButton.disabled,
+        "Chapter " + number + " Save control remained disabled before the explicit save.");
+      saveButton.click();
+      try {
+        return await waitForChapterSaveComplete(number, rule, expectedPath, expectedValues);
+      } catch (error) {
+        const state = await invoke("sound.chapter_bgm.get", {});
+        const row = state.overrides && state.overrides[String(number)] || null;
+        const status = document.querySelector("#chapterBgmSaveState")?.textContent.trim() || "(missing)";
+        throw new Error("Chapter " + number + " values were not confirmed saved. " +
+          JSON.stringify({expected:expectedValues || null, actual:row, status, cause:String(error)}));
+      }
     }
 
     await selectChapter(1);
@@ -801,38 +830,45 @@
     must(JSON.stringify(stateAfterCandidate.overrides["1"] || {}) === JSON.stringify(stateBeforeCandidate.overrides["1"] || {}),
       "Candidate selection overwrote Chapter One's saved assignment before confirmation.");
     document.querySelector("#confirmChapterBgmTrack").click();
-    await waitFor("Chapter One explicit selection", async function () {
-      const state = await invoke("sound.chapter_bgm.get", {});
-      return String(state.overrides?.["1"]?.path || "") === String(alpha.path);
-    }, 15000);
+    // Select saves the candidate asynchronously and disables the editor controls
+    // until its backend save + refresh has completed. Do not edit disabled controls
+    // or race that refresh with programmatic changes.
+    await waitForChapterSaveComplete(1, "custom", alpha.path);
     await setChapterTimingAndVolume(37, 1, 1);
-    await saveChapter(1, "custom", alpha.path);
+    await saveChapter(1, "custom", alpha.path, {
+      volume:0.37, start_offset:"after_first_paragraph", end_behavior:"continue_to_transition"
+    });
 
     await selectChapter(2);
     await chooseChapterCandidate(beta.path, config.track_titles[1]);
     document.querySelector("#confirmChapterBgmTrack").click();
-    await waitFor("Chapter Two explicit selection", async function () {
-      const state = await invoke("sound.chapter_bgm.get", {});
-      return String(state.overrides?.["2"]?.path || "") === String(beta.path);
-    }, 15000);
+    await waitForChapterSaveComplete(2, "custom", beta.path);
     await setChapterTimingAndVolume(29, 2, 2);
-    await saveChapter(2, "custom", beta.path);
+    await saveChapter(2, "custom", beta.path, {
+      volume:0.29, start_offset:"after_10_seconds", end_behavior:"stop_immediately"
+    });
 
     await selectChapter(3);
     const noBgmRule = document.querySelector('#sound .chapter-rule [data-chapter-rule="none"]');
     must(noBgmRule, "Chapter No BGM rule is missing.");
     noBgmRule.click();
     await setChapterTimingAndVolume(15, 0, 0);
-    await saveChapter(3, "none", null);
+    await saveChapter(3, "none", null, {
+      volume:0.15, start_offset:"immediate", end_behavior:"fade_before_end"
+    });
     let savedChapterState = await invoke("sound.chapter_bgm.get", {});
-    must(savedChapterState.overrides["1"].start_offset === "after_first_paragraph" &&
-      savedChapterState.overrides["1"].end_behavior === "continue_to_transition" &&
-      Math.abs(Number(savedChapterState.overrides["1"].volume) - 0.37) < 0.005 &&
-      savedChapterState.overrides["2"].start_offset === "after_10_seconds" &&
-      savedChapterState.overrides["2"].end_behavior === "stop_immediately" &&
-      Math.abs(Number(savedChapterState.overrides["2"].volume) - 0.29) < 0.005 &&
-      savedChapterState.overrides["3"].rule === "none",
-      "Chapter track, volume, offset, end behaviour or explicit No BGM did not persist.");
+    const chapterOneSaved = savedChapterState.overrides["1"] || {};
+    const chapterTwoSaved = savedChapterState.overrides["2"] || {};
+    const chapterThreeSaved = savedChapterState.overrides["3"] || {};
+    must(chapterOneSaved.start_offset === "after_first_paragraph" &&
+      chapterOneSaved.end_behavior === "continue_to_transition" &&
+      Math.abs(Number(chapterOneSaved.volume) - 0.37) < 0.005 &&
+      chapterTwoSaved.start_offset === "after_10_seconds" &&
+      chapterTwoSaved.end_behavior === "stop_immediately" &&
+      Math.abs(Number(chapterTwoSaved.volume) - 0.29) < 0.005 &&
+      chapterThreeSaved.rule === "none",
+      "Chapter track, volume, offset, end behaviour or explicit No BGM did not persist: " +
+      JSON.stringify(savedChapterState.overrides));
     record("chapter_bgm_assignment_volume_offsets_end_and_no_fallback", true,
       "Chapter One/Two assignments, independent levels, paragraph/ten-second offsets, end policies and Chapter Three No BGM were saved.");
 
