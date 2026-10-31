@@ -4089,8 +4089,17 @@
   function scheduleCueAutoSave() {
     if (cueAutoSaveTimer) clearTimeout(cueAutoSaveTimer);
     cueAutoSaveTimer = null;
-    if (cueClearAllStaged || !Object.keys(pendingCueAssignments).length) return;
     const status = $('cueSaveState');
+    // A failed automatic save is a user-visible pending state, not a reason
+    // to silently launch another retry. Keep the error until the user edits
+    // the draft or explicitly presses Save Cue Changes.
+    if (cueSaveError) {
+      if (status) status.textContent = cueSaveError;
+      const retryButton = $('saveCueChanges');
+      if (retryButton) retryButton.disabled = !cueChangesDirty;
+      return;
+    }
+    if (cueClearAllStaged || !Object.keys(pendingCueAssignments).length) return;
     if (status) status.textContent = 'Unsaved cue changes — saving automatically shortly. Use Save Cue Changes to save now.';
     cueAutoSaveTimer = setTimeout(async () => {
       cueAutoSaveTimer = null;
@@ -4101,6 +4110,14 @@
           message('Cue changes saved automatically.');
         }
       } catch (error) {
+        // Mirror the failure state here as well as in savePendingCueChanges().
+        // This is the outer handler that owns the timer-driven automatic save.
+        cueChangesDirty = Object.keys(pendingCueAssignments).length > 0;
+        cueSaveError = 'Save failed. Unsaved cue changes have been retained.';
+        const failureStatus = $('cueSaveState');
+        if (failureStatus) failureStatus.textContent = cueSaveError;
+        const retryButton = $('saveCueChanges');
+        if (retryButton) retryButton.disabled = !cueChangesDirty;
         message(error?.message || String(error), true);
       }
     }, 700);

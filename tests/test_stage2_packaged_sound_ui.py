@@ -235,12 +235,21 @@ class Stage2PackagedSoundUiAcceptanceTests(unittest.TestCase):
         refresh_start = adapter.index("async function refreshSoundCues()")
         refresh_end = adapter.index("function chapterMusicCategoryGroup", refresh_start)
         refresh = adapter[refresh_start:refresh_end]
+        schedule_start = adapter.index("function scheduleCueAutoSave()")
+        schedule_end = adapter.index("async function savePendingCueChanges()", schedule_start)
+        schedule = adapter[schedule_start:schedule_end]
         save_start = adapter.index("async function savePendingCueChanges()")
         save_end = adapter.index("function currentSoundManifestPayload", save_start)
         save = adapter[save_start:save_end]
         self.assertIn("cueSaveError = '';", adapter)
         self.assertIn("if (cueSaveError)", refresh)
         self.assertIn("cueSaveState.textContent = cueSaveError;", refresh)
+        self.assertIn("if (cueSaveError)", schedule)
+        self.assertIn("if (status) status.textContent = cueSaveError;", schedule)
+        self.assertLess(schedule.index("if (cueSaveError)"), schedule.index("cueAutoSaveTimer = setTimeout"))
+        self.assertIn("cueSaveError = 'Save failed. Unsaved cue changes have been retained.';", schedule)
+        self.assertIn("failureStatus.textContent = cueSaveError;", schedule)
+        self.assertIn("retryButton.disabled = !cueChangesDirty;", schedule)
         self.assertIn("cueSaveError = 'Save failed. Unsaved cue changes have been retained.';", save)
         self.assertIn("cueSaveError = '';", save)
         failure_start = script.index("config.reject_next_cue_save = true;")
