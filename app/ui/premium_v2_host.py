@@ -1099,20 +1099,31 @@ class PremiumV2Bridge(QObject):
             if source_chapter is None or source_start < 0 or source_end <= source_start or source_end > len(source_chapter.text or ""):
                 raise ValueError("The AI suggestion no longer matches an available source passage.")
             exact_source = str(source_chapter.text or "")[source_start:source_end]
-            suggestion_rows = project_state_suggestions = state.get("character_dialogue_suggestions") or []
+            suggestion_rows = state.get("character_dialogue_suggestions") or []
             if not isinstance(suggestion_rows, list):
                 suggestion_rows = []
-            grounded = next((row for row in suggestion_rows
-                if isinstance(row, dict)
-                and str(row.get("source") or "") == "local-dialogue-analysis"
-                and str(row.get("suggested_speaker") or "").strip().casefold() == speakers[0].casefold()
-                and len(speakers) == 1
-                and str(row.get("id") or "") == f"dialogue-{source_number}-{source_start}-{source_end}"
-                and int(row.get("chapter_number") or -1) == source_number
-                and int(row.get("start") or -1) == source_start
-                and int(row.get("end") or -1) == source_end
-                and str(row.get("source_text") or "") == exact_source
-                and exact_source == dialogue_text), None)
+            grounded = None
+            if len(speakers) == 1:
+                for row in suggestion_rows:
+                    if not isinstance(row, dict) or str(row.get("source") or "") != "local-dialogue-analysis":
+                        continue
+                    try:
+                        row_number = int(row.get("chapter_number"))
+                        row_start = int(row.get("start"))
+                        row_end = int(row.get("end"))
+                    except (TypeError, ValueError):
+                        continue
+                    if (
+                        row.get("id") == f"dialogue-{source_number}-{source_start}-{source_end}"
+                        and row_number == source_number
+                        and row_start == source_start
+                        and row_end == source_end
+                        and str(row.get("suggested_speaker") or "").strip().casefold() == speakers[0].casefold()
+                        and str(row.get("source_text") or "") == exact_source
+                        and exact_source == dialogue_text
+                    ):
+                        grounded = row
+                        break
             if grounded is None:
                 raise ValueError("This speaker was not the source-grounded AI suggestion for the selected passage. Save it as a manual assignment instead.")
             assignment_source = "local-dialogue-analysis"
