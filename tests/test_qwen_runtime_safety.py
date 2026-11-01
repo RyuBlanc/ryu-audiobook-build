@@ -264,6 +264,7 @@ class QwenAcceleratorDiscoveryTests(unittest.TestCase):
             self.assertEqual(selected.backend, "directml")
             self.assertFalse(selected.supported)
             self.assertEqual(selected.device, "cpu")
+            self.assertEqual(accelerator.model_selection_memory_gb(), 0.0)
             self.assertIn("AMD Radeon iGPU", accelerator.accelerator_report())
             self.assertIn("not certified", accelerator.accelerator_report())
 
