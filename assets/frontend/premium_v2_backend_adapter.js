@@ -3441,7 +3441,7 @@
     }
     const result = await call('chapter.dialogue.assign', {
       dialogue_text:dialogueText, speakers:[characterCanonical(character)], series:characterSeries(character),
-      chapter_number, start, end, mode:'single', source:assignmentSource, confidence:assignmentConfidence
+      chapter_number:chapterNumber, start, end, mode:'single', source:assignmentSource, confidence:assignmentConfidence
     });
     closeCharacterAssignmentPopover();
     await refreshChapters();
