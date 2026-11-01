@@ -1,17 +1,8 @@
 from __future__ import annotations
 
-"""Qwen3-TTS accelerator discovery and runtime installation policy.
+"""Qwen3-TTS accelerator discovery and runtime installation policy."""
 
-Supported auto paths:
-- NVIDIA CUDA: official PyTorch CUDA wheels on Windows/Linux.
-- AMD ROCm: only on Linux, where official ROCm PyTorch wheels are supported.
-- Intel XPU: only when an Intel XPU-enabled PyTorch build is already installed.
-- Windows AMD/Intel: DirectML is reported as experimental/unavailable for Qwen
-  transformer inference until the Qwen3-TTS operator stack passes real-device
-  acceptance. We do not install torch-directml alongside arbitrary CUDA/CPU
-  wheels because that combination is not a validated production runtime.
-"""
-
+import json
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -43,7 +34,6 @@ def _run(command: list[str], timeout: float = 4.0) -> str:
 
 
 def _windows_video_controllers() -> list[tuple[str, float]]:
-    """Return visible Windows display adapters and dedicated memory in GiB."""
     if os.name != "nt":
         return []
     script = (
@@ -54,7 +44,6 @@ def _windows_video_controllers() -> list[tuple[str, float]]:
     if not raw:
         return []
     try:
-        import json
         payload = json.loads(raw)
         if isinstance(payload, dict):
             payload = [payload]
@@ -88,11 +77,8 @@ def detect_accelerators() -> tuple[Accelerator, ...]:
             memory = float(fields[1]) / 1024.0 if len(fields) > 1 else 0.0
         except ValueError:
             memory = 0.0
-        found.append(Accelerator(
-            backend="cuda", device="cuda:0", name=fields[0],
-            memory_gb=memory, supported=True,
-            reason="NVIDIA CUDA device detected",
-        ))
+        found.append(Accelerator("cuda", "cuda:0", fields[0], memory, True,
+                                 "NVIDIA CUDA device detected"))
 
     if sys.platform.startswith("linux"):
         rocm = _run(["rocminfo"], timeout=8.0)
@@ -104,9 +90,8 @@ def detect_accelerators() -> tuple[Accelerator, ...]:
             ]
             name = next((v for v in names if v), "AMD ROCm device")
             found.append(Accelerator(
-                backend="rocm", device="cuda:0", name=name,
-                memory_gb=0.0, supported=True,
-                reason="ROCm runtime detected; PyTorch ROCm wheel still required",
+                "rocm", "cuda:0", name, 0.0, True,
+                "ROCm runtime detected; requires a compatible ROCm PyTorch build",
             ))
 
     try:
@@ -118,41 +103,29 @@ def detect_accelerators() -> tuple[Accelerator, ...]:
                 try:
                     props = xpu.get_device_properties(index)
                     name = str(getattr(props, "name", f"Intel XPU {index}"))
-                    memory = float(getattr(props, " total_memory", 0) or getattr(props, "total_memory", 0)) / (1024 ** 3)
+                    memory = float(getattr(props, "total_memory", 0) or 0) / (1024 ** 3)
                 except Exception:
                     name, memory = f"Intel XPU {index}", 0.0
                 found.append(Accelerator(
-                    backend="xpu", device=f"xpu:{index}", name=name,
-                    memory_gb=memory, supported=True,
-                    reason="Installed PyTorch build exposes Intel XPU",
+                    "xpu", f"xpu:{index}", name, memory, True,
+                    "Installed PyTorch build exposes Intel XPU",
                 ))
     except Exception:
         pass
 
-    adapters = _windows_video_controllers()
-    for name, memory in adapters:
+    for name, memory in _windows_video_controllers():
         lowered = name.casefold()
-        if "amd" in lowered or "radeon" in lowered:
-            backend = "directml"
-            supported = False
-            reason = (
-                "AMD display adapter detected. DirectML is not enabled for "
-                "Qwen3-TTS until transformer operator compatibility is verified."
-            )
-        elif "intel" in lowered or "arc" in lowered:
-            backend = "directml"
-            supported = False
-            reason = (
-                "Intel display adapter detected. Install a validated Intel XPU "
-                "PyTorch build for acceleration; Windows DirectML Qwen execution "
-                "is not yet certified."
-            )
-        else:
-            continue
-        if not any(item.backend == "cuda" for item in found):
+        if ("amd" in lowered or "radeon" in lowered) and not any(x.backend == "cuda" for x in found):
             found.append(Accelerator(
-                backend=backend, device="directml", name=name,
-                memory_gb=memory, supported=supported, reason=reason,
+                "directml", "directml", name, memory, False,
+                "AMD adapter detected, but Qwen3-TTS DirectML transformer compatibility "
+                "is not certified. CPU is used until real-device acceptance passes.",
+            ))
+        elif ("intel" in lowered or "arc" in lowered) and not any(x.backend == "xpu" for x in found):
+            found.append(Accelerator(
+                "directml", "directml", name, memory, False,
+                "Intel adapter detected, but no Intel XPU PyTorch runtime is available. "
+                "DirectML Qwen transformer compatibility is not certified.",
             ))
 
     return tuple(found)
@@ -167,10 +140,8 @@ def best_accelerator() -> Accelerator:
     experimental = next((item for item in devices if item.backend == "directml"), None)
     if experimental:
         return experimental
-    return Accelerator(
-        backend="cpu", device="cpu", name="CPU", memory_gb=0.0,
-        supported=True, reason="No supported Qwen GPU backend detected",
-    )
+    return Accelerator("cpu", "cpu", "CPU", 0.0, True,
+                       "No supported Qwen GPU backend detected")
 
 
 def accelerator_report() -> str:
@@ -179,13 +150,13 @@ def accelerator_report() -> str:
         return "Qwen accelerator: CPU (no supported GPU backend detected)."
     return "Qwen accelerators: " + "; ".join(
         f"{item.name} [{item.backend}, {item.memory_gb:.1f} GiB, "
-        f"{'supported' if item.supported else 'not certified'}]"
+        f"{'supported' if item.supported else 'not certified'}] — {item.reason}"
         for item in devices
     )
 
 
 def model_selection_memory_gb() -> float:
-    """Memory hint for model size selection; never mistakes iGPU shared RAM as VRAM."""
+    """Memory hint for model selection; does not treat shared system RAM as VRAM."""
     device = best_accelerator()
     if device.backend in {"cuda", "xpu", "rocm"}:
         return device.memory_gb
