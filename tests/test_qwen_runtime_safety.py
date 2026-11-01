@@ -310,6 +310,7 @@ class QwenAcceleratorRuntimeInstallTests(unittest.TestCase):
         with (
             patch.object(runtime, "detect_accelerators", return_value=(adapter,)),
             patch.object(runtime, "best_accelerator", return_value=adapter),
+            patch.object(runtime, "_has_nvidia_gpu", return_value=False),
             patch.object(runtime, "_run_capture", side_effect=capture),
             patch.object(runtime.os, "name", platform),
         ):
@@ -319,7 +320,7 @@ class QwenAcceleratorRuntimeInstallTests(unittest.TestCase):
     def test_amd_rocm_windows_uses_official_rocm_721_python312_wheels(self):
         from app.tts.qwen_accelerator import Accelerator
 
-        adapter = Accelerator("rocm", "cpu", "AMD Radeon RX 9070", 16.0, False, "candidate")
+        adapter = Accelerator("rocm-candidate", "cpu", "AMD Radeon RX 9070", 16.0, False, "candidate")
         commands, messages = self._run_install(
             adapter,
             "nt",
@@ -335,7 +336,7 @@ class QwenAcceleratorRuntimeInstallTests(unittest.TestCase):
     def test_intel_xpu_windows_uses_official_pytorch_xpu_index(self):
         from app.tts.qwen_accelerator import Accelerator
 
-        adapter = Accelerator("xpu", "cpu", "Intel Arc Graphics", 8.0, False, "candidate")
+        adapter = Accelerator("xpu-candidate", "cpu", "Intel Arc Graphics", 8.0, False, "candidate")
         commands, messages = self._run_install(
             adapter,
             "nt",
@@ -347,72 +348,28 @@ class QwenAcceleratorRuntimeInstallTests(unittest.TestCase):
         self.assertTrue(any("Intel XPU" in message for message in messages))
 
     def test_amd_rocm_install_rejects_wheels_without_active_hip_runtime(self):
-        from pathlib import Path
-        from unittest.mock import patch
-        from app.tts import qwen_character_runtime as runtime
         from app.tts.qwen_accelerator import Accelerator
 
-        adapter = Accelerator("rocm", "cpu", "AMD Radeon RX 9070", 16.0, False, "candidate")
-        responses = [
-            (0, "pip bootstrap ok"),
-            (0, "ROCm packages installed"),
-            (0, "Qwen package installed"),
-            (0, "torch=2.9.1 hip=None cuda=False xpu=False"),
-        ]
-
-        def capture(command, timeout=120):
-            command_text = " ".join(str(value) for value in command)
-            if "pip" in command_text and "setuptools" in command_text:
-                return (0, "pip bootstrap ok")
-            if "qwen-tts==" in command_text:
-                return (0, "Qwen package installed")
-            if "-c" in command and "import torch" in command[command.index("-c") + 1]:
-                return responses.pop()
-            return responses.pop(0)
-
-        with (
-            patch.object(runtime, "detect_accelerators", return_value=(adapter,)),
-            patch.object(runtime, "best_accelerator", return_value=adapter),
-            patch.object(runtime, "_run_capture", side_effect=capture),
-            patch.object(runtime.os, "name", "nt"),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "no HIP runtime"):
-                runtime._install_runtime_packages(Path("qwen-python.exe"))
+        adapter = Accelerator("rocm-candidate", "cpu", "AMD Radeon RX 9070", 16.0, False, "candidate")
+        with self.assertRaisesRegex(RuntimeError, "AMD ROCm packages installed but PyTorch did not activate HIP"):
+            self._run_install(
+                adapter,
+                "nt",
+                [(0, "ROCm packages installed")],
+                "torch=2.9.1 hip=None cuda=False xpu=False",
+            )
 
     def test_intel_xpu_install_rejects_if_xpu_is_not_available(self):
-        from pathlib import Path
-        from unittest.mock import patch
-        from app.tts import qwen_character_runtime as runtime
         from app.tts.qwen_accelerator import Accelerator
 
-        adapter = Accelerator("xpu", "cpu", "Intel Arc Graphics", 8.0, False, "candidate")
-        responses = [
-            (0, "pip bootstrap ok"),
-            (0, "XPU wheels installed"),
-            (0, "Qwen package installed"),
-            (0, "torch=2.9.1 hip=None cuda=False xpu=False"),
-        ]
-
-        def capture(command, timeout=120):
-            command_text = " ".join(str(value) for value in command)
-            if "pip" in command_text and "setuptools" in command_text:
-                return (0, "pip bootstrap ok")
-            if "qwen-tts==" in command_text:
-                return (0, "Qwen package installed")
-            if "-c" in command and "import torch" in command[command.index("-c") + 1]:
-                return responses.pop()
-            return responses.pop(0)
-
-        with (
-            patch.object(runtime, "detect_accelerators", return_value=(adapter,)),
-            patch.object(runtime, "best_accelerator", return_value=adapter),
-            patch.object(runtime, "_run_capture", side_effect=capture),
-            patch.object(runtime.os, "name", "nt"),
-        ):
-            with self.assertRaisesRegex(RuntimeError, "Intel XPU wheels"):
-                runtime._install_runtime_packages(Path("qwen-python.exe"))
-
-
+        adapter = Accelerator("xpu-candidate", "cpu", "Intel Arc Graphics", 8.0, False, "candidate")
+        with self.assertRaisesRegex(RuntimeError, "Intel XPU packages installed but torch.xpu.is_available"):
+            self._run_install(
+                adapter,
+                "nt",
+                [(0, "XPU wheels installed")],
+                "torch=2.9.1 hip=None cuda=False xpu=False",
+            )
 
 
 if __name__ == "__main__":
