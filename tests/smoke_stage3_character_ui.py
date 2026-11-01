@@ -185,17 +185,33 @@ def main() -> None:
             dialogue = "Stay close."
             start = source.index(dialogue)
             end = start + len(dialogue)
-            dialog_outcome = {}
+            dialog_outcome = {"polls": 0}
 
             def accept_real_assignment_dialog():
                 try:
                     dialog = QApplication.activeModalWidget()
                     if not isinstance(dialog, NativeCharacterAssignmentDialog):
-                        raise RuntimeError("The real Character Assignment dialog did not open.")
+                        dialog = next(
+                            (
+                                widget for widget in QApplication.topLevelWidgets()
+                                if isinstance(widget, NativeCharacterAssignmentDialog)
+                                and widget.isVisible()
+                            ),
+                            None,
+                        )
+                    if not isinstance(dialog, NativeCharacterAssignmentDialog):
+                        dialog_outcome["polls"] += 1
+                        if dialog_outcome["polls"] < 30:
+                            QTimer.singleShot(50, accept_real_assignment_dialog)
+                            return
+                        raise RuntimeError(
+                            "The source-linked Character Assignment dialog did not become visible "
+                            f"after {dialog_outcome['polls']} Qt polling attempts."
+                        )
                     mira_row = next(
                         (
                             index for index in range(dialog.saved_characters.count())
-                            if str(dialog.saved_characters.item(index).data(256).get("name") or "") == "Mira"
+                            if str((dialog.saved_characters.item(index).data(256) or {}).get("name") or "") == "Mira"
                         ),
                         -1,
                     )
@@ -211,10 +227,23 @@ def main() -> None:
                 except Exception as exc:
                     dialog_outcome["error"] = str(exc)
                     dialog = QApplication.activeModalWidget()
+                    if not isinstance(dialog, NativeCharacterAssignmentDialog):
+                        dialog = next(
+                            (
+                                widget for widget in QApplication.topLevelWidgets()
+                                if isinstance(widget, NativeCharacterAssignmentDialog)
+                            ),
+                            None,
+                        )
                     if dialog is not None:
                         dialog.reject()
 
-            QTimer.singleShot(0, accept_real_assignment_dialog)
+            linked_passage = panel._decode_link(QUrl(f"dialog://1/{start}/{end}"))
+            if not linked_passage or linked_passage.get("text") != dialogue:
+                raise RuntimeError(
+                    f"Source-linked dialogue URL did not resolve to the exact selected passage: {linked_passage!r}"
+                )
+            QTimer.singleShot(100, accept_real_assignment_dialog)
             panel._manual_link_clicked(QUrl(f"dialog://1/{start}/{end}"))
             if dialog_outcome.get("error"):
                 raise RuntimeError(dialog_outcome["error"])

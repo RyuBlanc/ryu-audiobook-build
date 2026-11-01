@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ryu-audiobook-provider-functional
+  group: ryu-audiobook-provider-functional-stage3
   cancel-in-progress: true
 
 jobs:
