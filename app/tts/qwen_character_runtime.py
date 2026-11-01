@@ -348,8 +348,9 @@ def verify_runtime(progress=None) -> str:
         raise RuntimeError(f"Qwen worker script is missing: {worker}")
     check = (
         "import ast, pathlib; "
+        "ast.parse(pathlib.Path(r%r).read_text(encoding='utf-8')); "
         "ast.parse(pathlib.Path(r%r).read_text(encoding='utf-8'))"
-    ) % str(worker)
+    ) % (str(worker), str(Path(__file__).with_name("qwen_accelerator.py")))
     code, detail = _run_capture([str(VENV_PYTHON), "-c", check], timeout=120)
     if code != 0:
         raise RuntimeError(
