@@ -28,8 +28,11 @@ jobs:
       - name: Install application dependencies
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed." }
           python -m pip install -r requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw "Kokoro and application requirements failed to install." }
 
       - name: Download Kokoro assets
         shell: pwsh
@@ -88,12 +91,17 @@ jobs:
           python -m pip install --no-cache-dir --no-deps $perthSource.Directory.FullName
           python -c "import perth; print(perth.__file__); assert getattr(perth,'PerthImplicitWatermarker',None) is not None or getattr(perth,'DummyWatermarker',None) is not None"
           python -m pip install --no-cache-dir --no-deps (Get-ChildItem $extract -Directory | Select-Object -First 1).FullName
+          if ($LASTEXITCODE -ne 0) { throw "Pinned Chatterbox source installation failed." }
 
       - name: Import actual Chatterbox Nano API
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $env:PYTHONPATH = "${{ github.workspace }}"
-          python -c "import inspect; from chatterbox.tts_turbo import ChatterboxTurboTTS; sig=inspect.signature(ChatterboxTurboTTS.from_pretrained); print(sig); assert 'nano' in sig.parameters"
+          python -m pip install --no-cache-dir librosa==0.11.0
+          if ($LASTEXITCODE -ne 0) { throw "Chatterbox librosa dependency failed to install." }
+          python -c "import librosa; import inspect; from chatterbox.tts_turbo import ChatterboxTurboTTS; sig=inspect.signature(ChatterboxTurboTTS.from_pretrained); print(sig); assert 'nano' in sig.parameters"
+          if ($LASTEXITCODE -ne 0) { throw "Pinned Chatterbox Nano API import smoke test failed." }
           Write-Host "Pinned Chatterbox Nano API import smoke test PASSED."
 
 
