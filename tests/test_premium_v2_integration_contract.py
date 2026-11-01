@@ -185,7 +185,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
 
     def test_preview_ui_reports_requested_vs_actual_duration(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
-        self.assertIn("function preparePreviewPlayback(job, requestedSeconds)", adapter)
+        self.assertIn("function preparePreviewPlayback(job, requestedSeconds, options = {})", adapter)
         self.assertIn("Preview shorter than requested", adapter)
         self.assertIn("requested_duration_seconds", adapter)
         self.assertIn("preparePreviewPlayback(job,Number(duration))", adapter)
