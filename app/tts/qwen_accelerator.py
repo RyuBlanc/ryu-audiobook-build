@@ -274,9 +274,30 @@ def _windows_video_controllers() -> list[tuple[str, float]]:
         return []
 
 
+def _nvidia_smi_devices() -> list[tuple[str, float]]:
+    """Discover NVIDIA adapters without requiring the Qwen PyTorch runtime."""
+    raw = _run(
+        ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+        timeout=6.0,
+    )
+    devices: list[tuple[str, float]] = []
+    for line in raw.splitlines():
+        parts = [part.strip() for part in line.split(",", 1)]
+        if not parts or not parts[0]:
+            continue
+        memory_gb = 0.0
+        if len(parts) > 1:
+            try:
+                memory_gb = max(0.0, float(parts[1])) / 1024.0
+            except (TypeError, ValueError):
+                memory_gb = 0.0
+        devices.append((parts[0], memory_gb))
+    return devices
+
+
 @lru_cache(maxsize=1)
-def detect_accelerators() -> tuple[Accelerator, ...]:
-    """Detect working accelerators and report installed-but-uncertified GPU candidates."""
+def _detect_accelerators_cached() -> tuple[Accelerator, ...]:
+    """Scan all active PyTorch GPU devices and hardware candidates."""
     found: list[Accelerator] = []
     try:
         import torch
@@ -284,25 +305,38 @@ def detect_accelerators() -> tuple[Accelerator, ...]:
         torch = None
 
     if torch is not None:
-        if bool(getattr(torch, "cuda", None) and torch.cuda.is_available()):
-            try:
+        cuda = getattr(torch, "cuda", None)
+        try:
+            if cuda is not None and cuda.is_available():
                 hip = bool(getattr(torch.version, "hip", None))
-                name = str(torch.cuda.get_device_name(0))
-                memory = float(torch.cuda.get_device_properties(0).total_memory) / (1024 ** 3)
                 backend = "rocm" if hip else "cuda"
-                reason = "AMD ROCm PyTorch is active" if hip else "NVIDIA CUDA PyTorch is active"
-                found.append(Accelerator(backend, "cuda:0", name, memory, True, reason))
-            except Exception:
-                backend = "rocm" if bool(getattr(torch.version, "hip", None)) else "cuda"
-                found.append(Accelerator(
-                    backend, "cuda:0", backend.upper(), 0.0, True,
-                    "PyTorch reports CUDA-compatible GPU runtime active",
-                ))
+                count = max(1, int(cuda.device_count()))
+                for index in range(count):
+                    try:
+                        props = cuda.get_device_properties(index)
+                        name = str(getattr(props, "name", f"{backend.upper()} {index}"))
+                        memory = float(getattr(props, "total_memory", 0) or 0) / (1024 ** 3)
+                    except Exception:
+                        try:
+                            name = str(cuda.get_device_name(index))
+                        except Exception:
+                            name = f"{backend.upper()} {index}"
+                        memory = 0.0
+                    reason = (
+                        "AMD ROCm PyTorch is active"
+                        if hip else "NVIDIA CUDA PyTorch is active"
+                    )
+                    found.append(Accelerator(
+                        backend, f"cuda:{index}", name, memory, True, reason
+                    ))
+        except Exception:
+            pass
 
         xpu = getattr(torch, "xpu", None)
         try:
             if xpu is not None and xpu.is_available():
-                for index in range(max(1, int(xpu.device_count()))):
+                count = max(1, int(xpu.device_count()))
+                for index in range(count):
                     try:
                         props = xpu.get_device_properties(index)
                         name = str(getattr(props, "name", f"Intel XPU {index}"))
@@ -316,12 +350,24 @@ def detect_accelerators() -> tuple[Accelerator, ...]:
         except Exception:
             pass
 
+    # nvidia-smi can see a supported NVIDIA adapter even when the private
+    # Qwen environment currently has CPU-only PyTorch. Report that state as a
+    # candidate so Auto mode can repair/upgrade the runtime instead of silently
+    # running a multi-minute CPU synthesis.
+    if not any(item.backend == "cuda" for item in found):
+        for name, memory in _nvidia_smi_devices():
+            found.append(Accelerator(
+                "cuda-candidate", "cpu", name, memory, False,
+                "NVIDIA GPU detected, but CUDA PyTorch is not active. "
+                "The Qwen runtime must install/verify CUDA before Auto can use it.",
+            ))
+
     if os.name == "nt":
         os_caption, display_version, cpu_name = windows_host_identity()
-        for name, memory in _windows_video_controllers():
+        for name, _adapter_memory in _windows_video_controllers():
             lowered = name.casefold()
             if ("amd" in lowered or "radeon" in lowered) and not any(
-                item.backend in {"rocm", "cuda"} and item.supported for item in found
+                item.backend == "rocm" and item.supported for item in found
             ):
                 spec = amd_windows_runtime_spec(name, cpu_name, os_caption, display_version)
                 if spec:
@@ -344,9 +390,8 @@ def detect_accelerators() -> tuple[Accelerator, ...]:
                 if is_supported_intel_windows_device(name, cpu_name, os_caption):
                     backend = "xpu-candidate"
                     reason = (
-                        "Intel Arc/Core Ultra Arc device is listed for Windows 11 XPU "
-                        "(including Core Ultra Series 3); XPU activation is verified "
-                        "after installing the PyTorch XPU runtime."
+                        "Intel Arc/Core Ultra Arc device is listed for Windows 11 XPU; "
+                        "XPU activation is verified after installing the PyTorch XPU runtime."
                     )
                 else:
                     backend = "xpu-unsupported"
@@ -359,13 +404,50 @@ def detect_accelerators() -> tuple[Accelerator, ...]:
     return tuple(found)
 
 
+def detect_accelerators(refresh: bool = False) -> tuple[Accelerator, ...]:
+    """Return cached hardware discovery; refresh=True rescans after runtime changes."""
+    if refresh:
+        _detect_accelerators_cached.cache_clear()
+    return _detect_accelerators_cached()
+
+
+def gpu_runtime_candidates(refresh: bool = False) -> tuple[Accelerator, ...]:
+    """Return GPUs with a known install path but no active PyTorch runtime yet."""
+    return tuple(
+        item for item in detect_accelerators(refresh=refresh)
+        if item.backend in {"cuda-candidate", "rocm-candidate", "xpu-candidate"}
+    )
+
+
 def best_accelerator() -> Accelerator:
     devices = detect_accelerators()
-    for backend in ("cuda", "rocm", "xpu"):
-        match = next((item for item in devices if item.backend == backend and item.supported), None)
-        if match:
-            return match
-    experimental = next((item for item in devices if item.backend in {"directml", "intel-runtime-missing"}), None)
+    priority = {"cuda": 0, "rocm": 1, "xpu": 2}
+    active = [item for item in devices if item.supported and item.backend in priority]
+    if active:
+        # Prefer backend family, then the adapter with the most reported VRAM
+        # within that family (important on PCs with multiple same-vendor GPUs).
+        return min(
+            active,
+            key=lambda item: (priority[item.backend], -item.memory_gb, item.device),
+        )
+    candidates = [
+        item for item in devices
+        if item.backend in {"cuda-candidate", "rocm-candidate", "xpu-candidate"}
+    ]
+    if candidates:
+        candidate_priority = {
+            "cuda-candidate": 0, "rocm-candidate": 1, "xpu-candidate": 2
+        }
+        return min(
+            candidates,
+            key=lambda item: (
+                candidate_priority[item.backend], -item.memory_gb, item.name
+            ),
+        )
+    experimental = next(
+        (item for item in devices if item.backend in {"directml", "intel-runtime-missing"}),
+        None,
+    )
     if experimental:
         return Accelerator(
             backend=experimental.backend,
@@ -375,11 +457,23 @@ def best_accelerator() -> Accelerator:
             supported=False,
             reason=experimental.reason,
         )
+    unsupported = next(
+        (item for item in devices if item.backend.endswith("-unsupported")),
+        None,
+    )
+    if unsupported:
+        return Accelerator(
+            backend=unsupported.backend,
+            device="cpu",
+            name=unsupported.name,
+            memory_gb=0.0,
+            supported=False,
+            reason=unsupported.reason,
+        )
     return Accelerator(
         "cpu", "cpu", "CPU", 0.0, True,
         "No supported Qwen GPU backend detected",
     )
-
 
 def accelerator_report() -> str:
     devices = detect_accelerators()
