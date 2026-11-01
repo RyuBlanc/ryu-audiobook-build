@@ -2,7 +2,7 @@ name: Provider Functional Smoke
 
 on:
   push:
-    branches: [main]
+    branches: [main, stage-3/restart-from-stage2-closeout-1794]
   workflow_dispatch:
 
 permissions:
@@ -36,7 +36,12 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path "bundled_models\piper" | Out-Null
           python -m piper.download_voices --data-dir "bundled_models\piper" en_US-lessac-medium
-          if (-not (Get-ChildItem "bundled_models\piper\*.onnx")) { throw "Piper voice was not downloaded." }
+          python -m piper.download_voices --data-dir "bundled_models\piper" en_US-amy-medium
+          python -m piper.download_voices --data-dir "bundled_models\piper" en_US-ryan-high
+          foreach ($voice in @("en_US-lessac-medium", "en_US-amy-medium", "en_US-ryan-high")) {
+            if (-not (Test-Path "bundled_models\piper\$voice.onnx")) { throw "Required Piper model was not downloaded: $voice" }
+            if (-not (Test-Path "bundled_models\piper\$voice.onnx.json")) { throw "Required Piper model config was not downloaded: $voice" }
+          }
 
       - name: Run Piper and Edge synthesis
         shell: pwsh
@@ -44,6 +49,13 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           PYTHONWARNINGS: ignore
         run: python -B tests/smoke_piper_edge.py
+
+      - name: Run real Stage 3 Voice Studio preview and multi-chapter audiobook acceptance
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          PYTHONWARNINGS: ignore
+        run: python -B tests/smoke_stage3_real_multichapter.py
 
   chatterbox:
     name: Chatterbox Nano real synthesis

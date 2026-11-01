@@ -2,7 +2,7 @@ name: Provider Runtime Smoke
 
 on:
   push:
-    branches: [main]
+    branches: [main, stage-3/restart-from-stage2-closeout-1794]
   workflow_dispatch:
 
 permissions:
