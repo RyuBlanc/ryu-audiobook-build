@@ -2451,7 +2451,9 @@
       '<div class="muted" style="font-size:12px;margin-bottom:9px">Saved default: ' + esc(savedName || 'Not set') +
       ' · Effective narrator for this book: ' + esc(effectiveName || 'Not set') +
       ' · Source: ' + esc(sourceLabel) + '</div>' +
-      '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small" type="button" id="saveSeriesNarratorDefault">Save Series Default</button></div>';
+      '<div class="muted" style="font-size:12px;margin:8px 0">To audition the effective narrator, select narration-only text in Chapter Studio first. Uses the Preview Length control above.</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small" type="button" id="previewProjectNarrator">Preview Selected Narration</button>' +
+      '<button class="btn small" type="button" id="saveSeriesNarratorDefault">Save Series Default</button></div>';
     $('saveProjectNarrator')?.addEventListener('click', async () => {
       const profileName = String($('projectNarratorProfile')?.value || '').trim();
       if (!profileName) { message('Select a saved narrator profile first.', true); return; }
@@ -2481,6 +2483,35 @@
           ? 'Project narrator reset. It now inherits ' + reset.profile_name + ' from the series.'
           : 'Project narrator override cleared. Configure a series narrator before generation.';
         message(messageText, !reset.profile_available);
+      } catch (error) { message(error?.message || String(error), true); }
+    });
+    $('previewProjectNarrator')?.addEventListener('click', async () => {
+      try {
+        const chapter = selectedChapter();
+        const editor = $('chapterEditor');
+        if (!chapter || !editor) throw new Error('Open a chapter in Chapter Studio before previewing narration.');
+        const start = Number(editor.selectionStart), end = Number(editor.selectionEnd);
+        if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start) {
+          throw new Error('Select narration-only text in Chapter Studio first.');
+        }
+        const selectedText = editor.value.slice(start, end);
+        if (!selectedText.trim()) throw new Error('The selected narration passage is empty.');
+
+        // Flush pending chapter edits before sending source offsets to the backend.
+        if (chapterSaveTimer) { clearTimeout(chapterSaveTimer); chapterSaveTimer = null; }
+        await chapterSavePromise.catch(() => {});
+        const chapterTitleValue = $('chapterTitle')?.textContent || chapter.title;
+        await persistChapterSnapshot(chapter.number, chapterTitleValue, editor.value, true);
+
+        const lengthGroup = [...document.querySelectorAll('#voices .toolbar')].find(el => /Length/.test(el.textContent));
+        const duration = Number(lengthGroup?.querySelector('.seg button.active')?.textContent.match(/\d+/)?.[0] || 30);
+        const result = await call('narrator.preview', {
+          chapter_number:chapter.number, start, end, text:selectedText, duration_seconds:duration
+        });
+        if (!result?.job_id || !result.profile_name) throw new Error('Narrator Preview did not return a valid preview job.');
+        await monitorJob(result.job_id, job => preparePreviewPlayback(job, duration, {
+          profileName: result.profile_name, preserveSummary: true
+        }));
       } catch (error) { message(error?.message || String(error), true); }
     });
     return seriesNarratorDefault;
@@ -5318,7 +5349,7 @@
   }
   function formatPlaybackTime(value){const seconds=Math.max(0,Math.floor(Number(value)||0));return String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');}
   function syncPreviewPlaybackTime(){const node=$('previewPlaybackTime');if(!node)return;node.textContent=formatPlaybackTime(previewAudio?.currentTime||0)+' / '+formatPlaybackTime(previewAudio?.duration||0);}
-  function preparePreviewPlayback(job, requestedSeconds) {
+  function preparePreviewPlayback(job, requestedSeconds, options = {}) {
     const url=job?.result?.file_url,actual=Number(job?.result?.actual_duration_seconds),requested=Number(requestedSeconds||job?.result?.requested_duration_seconds||0),play=$('playPreview');
     const totalElapsed = Number(job?.result?.total_seconds);
     const synthesisElapsed = Number(job?.result?.synthesis_seconds);
@@ -5332,7 +5363,7 @@
     }
     if(previewAudio){previewAudio.pause();previewAudio=null;}
     previewAudio=new Audio(url);previewAudio.preload='auto';previewAudio.volume=previewVolume;
-    lastVoicePreviewPath=String(job?.result?.output_path||'');lastVoicePreviewProfileName=currentVoiceName();voicePreviewValid=Boolean(lastVoicePreviewPath);
+    lastVoicePreviewPath=String(job?.result?.output_path||'');lastVoicePreviewProfileName=String(options.profileName||currentVoiceName());voicePreviewValid=Boolean(lastVoicePreviewPath);
     previewAudio.ontimeupdate=syncPreviewPlaybackTime;previewAudio.onloadedmetadata=syncPreviewPlaybackTime;
     previewAudio.onplay=()=>{if(play)play.textContent='Ⅱ Pause';if($('wave'))$('wave').classList.add('playing');syncPreviewPlaybackTime();};
     previewAudio.onpause=()=>{if(play)play.textContent='▶ Play';if($('wave'))$('wave').classList.remove('playing');syncPreviewPlaybackTime();};
@@ -5350,7 +5381,7 @@
       ?'Preview shorter than requested · '+actual.toFixed(1)+'s of '+requested.toFixed(0)+'s. The source text or voice provider produced less audio than requested; try a longer passage and check the selected voice.'+timingNote
       :'Preview ready · '+actual.toFixed(1)+' seconds'+(requested>0?' (requested '+requested.toFixed(0)+'s)':'')+timingNote;
     syncPreviewPlaybackTime();
-    updateVoiceSummary({name:currentVoiceName(),provider:selectedVoiceProvider||({offline:'piper',sapi:'windows-sapi',customvoice:'qwen-character',voicedesign:'qwen-character',qwenclone:'qwen-character',customref:'chatterbox',edge:'edge-tts',eleven:'elevenlabs'}[document.querySelector('#voices .provider.active')?.dataset.provider]||'piper'),qwen_mode:document.querySelector('#voices .provider.active')?.dataset.provider==='voicedesign'?'design':'custom'},
+    if(!options.preserveSummary) updateVoiceSummary({name:currentVoiceName(),provider:selectedVoiceProvider||({offline:'piper',sapi:'windows-sapi',customvoice:'qwen-character',voicedesign:'qwen-character',qwenclone:'qwen-character',customref:'chatterbox',edge:'edge-tts',eleven:'elevenlabs'}[document.querySelector('#voices .provider.active')?.dataset.provider]||'piper'),qwen_mode:document.querySelector('#voices .provider.active')?.dataset.provider==='voicedesign'?'design':'custom'},
       {saved:Boolean(selectedVoice),previewReady:true,assignment: $('sumAssign')?.textContent || ''});
     updateVoiceActionButtons();return voicePreviewValid;
   }

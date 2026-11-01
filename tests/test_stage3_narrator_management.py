@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from app.chapters.detector import Chapter
 from app.ui.premium_v2_host import PremiumV2Bridge
 
 
@@ -88,6 +89,80 @@ class Stage3NarratorManagementTests(unittest.TestCase):
         self.assertIsNone(result["effective_profile_name"])
         self.assertEqual(result["source"], "none")
         self.assertFalse(result["profile_available"])
+
+    def test_narrator_preview_uses_effective_profile_for_selected_narration_only(self):
+        text = 'The sun rose. “Hello there.” Then the road was quiet.'
+        first = text.index("The sun rose.")
+        first_end = first + len("The sun rose.")
+        chapter = Chapter(1, "One", text)
+        self.project.chapters = [chapter]
+        self.bridge._active_project = lambda: self.project
+        self.bridge._project_series_name = lambda _project, _state: "The Series"
+        self.bridge._narrator_series_default_read = lambda *_args: {
+            "effective_profile_name": "Series Narrator",
+            "profile_available": True,
+            "source": "series_default",
+        }
+        self.bridge._voice_preview = lambda payload: {"job_id": "preview-1", "payload": payload}
+        with patch("app.ui.premium_v2_host.load_state", return_value={"series": "The Series"}):
+            result = self.bridge._narrator_preview({
+                "chapter_number": 1,
+                "start": first,
+                "end": first_end,
+                "text": text[first:first_end],
+                "duration_seconds": 30,
+            })
+        self.assertEqual(result["job_id"], "preview-1")
+        self.assertEqual(result["payload"]["profile_name"], "Series Narrator")
+        self.assertEqual(result["payload"]["text"], "The sun rose.")
+        self.assertFalse(result["payload"]["route_character_cast"])
+
+    def test_narrator_preview_rejects_unidentified_quoted_dialogue(self):
+        text = 'The sun rose. “Hello there.” Then the road was quiet.'
+        start = text.index("“Hello there.”")
+        end = start + len("“Hello there.”")
+        chapter = Chapter(1, "One", text)
+        self.project.chapters = [chapter]
+        self.bridge._active_project = lambda: self.project
+        self.bridge._voice_preview = lambda _payload: self.fail("Dialogue must not be synthesized as narration.")
+        with patch("app.ui.premium_v2_host.load_state", return_value={"series": "The Series"}):
+            with self.assertRaisesRegex(ValueError, "Narrator Preview accepts narration only"):
+                self.bridge._narrator_preview({
+                    "chapter_number": 1, "start": start, "end": end,
+                    "text": text[start:end], "duration_seconds": 30,
+                })
+
+    def test_series_setup_narrator_preview_uses_selected_saved_voice_without_project(self):
+        profile = self._profile("Series Narrator")
+        self.bridge._find_profile = lambda name: profile if name == profile.name else None
+        self.bridge._voice_preview = lambda payload: payload
+        result = self.bridge._narrator_preview({
+            "series_setup_preview": True,
+            "profile_name": profile.name,
+            "text": "Long ago, a new journey began.",
+            "duration_seconds": 10,
+        })
+        self.assertEqual(result["profile_name"], "Series Narrator")
+        self.assertEqual(result["text"], "Long ago, a new journey began.")
+        self.assertTrue(result["allow_projectless_preview"])
+        self.assertFalse(result["route_character_cast"])
+
+    def test_series_narrator_default_can_be_saved_for_a_new_series_without_active_project(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "series-default.json"
+            profile = self._profile("Series Narrator")
+            self.bridge._active_project = lambda: self.fail("Explicit series save must not require an active book.")
+            self.bridge._find_profile = lambda name: profile if name == profile.name else None
+            self.bridge._narrator_series_default_store_path = lambda _series: path
+            self.bridge._now = lambda: "2026-11-01T00:00:00Z"
+            result = self.bridge._narrator_series_default_save({
+                "series": "New Series",
+                "profile_name": profile.name,
+            })
+            record = json.loads(path.read_text(encoding="utf-8"))
+        self.assertTrue(result["saved"])
+        self.assertEqual(result["series"], "New Series")
+        self.assertEqual(record["profile_name"], "Series Narrator")
 
     def test_reset_restores_series_inheritance_and_clears_project_snapshot(self):
         self._write_series_default("Series Voice")

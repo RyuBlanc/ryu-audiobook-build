@@ -390,6 +390,7 @@ class PremiumV2Bridge(QObject):
                 "voice.delete": self._voice_delete,
                 "voice.import_reference": self._voice_import_reference,
                 "voice.select": self._voice_select,
+                "narrator.preview": self._narrator_preview,
                 "narrator.series.default.get": self._narrator_series_default_get,
                 "narrator.series.default.save": self._narrator_series_default_save,
                 "narrator.series.default.apply": self._narrator_series_default_apply,
@@ -522,6 +523,7 @@ class PremiumV2Bridge(QObject):
             "voice.delete": True,
             "voice.import_reference": True,
             "voice.select": True,
+            "narrator.preview": True,
             "narrator.series.default.get": True,
             "narrator.series.default.save": True,
             "narrator.series.default.apply": True,
@@ -2631,13 +2633,88 @@ class PremiumV2Bridge(QObject):
                 "Wait for the active preview or audiobook generation to finish first."
             )
 
+    def _narrator_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Preview actual narration with the effective saved narrator profile.
+
+        The only projectless mode is the Create Series setup preview, which uses
+        an explicitly selected saved Voice Studio profile and sample narration.
+        """
+        if payload.get("series_setup_preview") is True:
+            profile_name = str(payload.get("profile_name") or "").strip()
+            profile = self._find_profile(profile_name)
+            if profile is None:
+                raise ValueError("Choose an available saved Voice Studio profile for the series narrator.")
+            text_value = str(payload.get("text") or "")
+            if not text_value.strip():
+                raise ValueError("Enter sample narration text before previewing the series narrator.")
+            if len(text_value) > 1_000_000:
+                raise ValueError("The series narrator preview text is too long.")
+            return self._voice_preview({
+                "profile_name": profile.name,
+                "text": text_value,
+                "duration_seconds": payload.get("duration_seconds") or 30,
+                "route_character_cast": False,
+                "allow_projectless_preview": True,
+            })
+
+        project = self._active_project()
+        state = load_state(project.folder)
+        try:
+            chapter_number = int(payload.get("chapter_number"))
+            start = int(payload.get("start"))
+            end = int(payload.get("end"))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("Select a narration passage in the active chapter before previewing.") from exc
+        chapter = next((item for item in project.chapters if int(item.number) == chapter_number), None)
+        if chapter is None:
+            raise ValueError("The selected chapter no longer exists. Refresh Chapter Studio and select the passage again.")
+        source_text = str(chapter.text or "")
+        selected_text = str(payload.get("text") or "")
+        if start < 0 or end <= start or end > len(source_text) or source_text[start:end] != selected_text:
+            raise ValueError("The selected passage changed or its source positions are stale. Save the chapter and select the narration again.")
+
+        from app.chapters.speaker_segmentation import segment_chapter_speakers
+        segments = segment_chapter_speakers(chapter)
+        intersecting = [
+            segment for segment in segments
+            if int(segment.end) > start and int(segment.start) < end
+        ]
+        if not intersecting or any(segment.kind != "narration" for segment in intersecting):
+            raise ValueError(
+                "Narrator Preview accepts narration only. Select text classified as Narrator; "
+                "character dialogue and Needs Speaker Review passages cannot be previewed as narration."
+            )
+
+        series = self._project_series_name(project, state)
+        narrator = self._narrator_series_default_read(project, state, series)
+        profile_name = str(narrator.get("effective_profile_name") or "").strip()
+        if not profile_name:
+            raise ValueError("No narrator voice is configured for this project or its series.")
+        if not narrator.get("profile_available"):
+            raise ValueError(
+                f"The effective narrator profile '{profile_name}' is unavailable. Restore or select a valid saved Voice Studio profile."
+            )
+        return self._voice_preview({
+            "profile_name": profile_name,
+            "text": selected_text,
+            "chapter_number": chapter_number,
+            "duration_seconds": payload.get("duration_seconds") or 30,
+            "route_character_cast": False,
+        })
+
     def _voice_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._assert_no_active_model_lifecycle("generate a voice preview")
         check_active = getattr(self, "_assert_no_active_audio_synthesis", None)
         if callable(check_active):
             check_active("generate a preview")
-        project = self._active_project()
-        state = load_state(project.folder)
+        try:
+            project = self._active_project()
+            state = load_state(project.folder)
+        except ValueError:
+            if not payload.get("allow_projectless_preview"):
+                raise
+            project = None
+            state = {}
         profile = PremiumV2Bridge._preview_profile_from_payload(self, payload, state)
         if profile is None:
             raise ValueError("Choose an installed voice or load a saved voice profile before previewing.")
@@ -3941,9 +4018,14 @@ class PremiumV2Bridge(QObject):
         return self._narrator_series_default_read(project, state, series)
 
     def _narrator_series_default_save(self, payload: dict[str, Any]) -> dict[str, Any]:
-        project = self._active_project()
-        state = load_state(project.folder)
-        series = str(payload.get("series") or self._project_series_name(project, state)).strip()
+        requested_series = str(payload.get("series") or "").strip()
+        if requested_series:
+            series = requested_series
+        else:
+            project = self._active_project()
+            state = load_state(project.folder)
+            series = self._project_series_name(project, state)
+        series = series.strip()
         profile_name = str(payload.get("profile_name") or "").strip()
         if not profile_name:
             raise ValueError("Select a saved voice profile for the series narrator default.")

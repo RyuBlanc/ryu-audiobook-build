@@ -48,6 +48,17 @@ class Stage3NarratorSegmentationContracts(unittest.TestCase):
             self.assertIn(token, adapter)
         self.assertNotIn("Apply to This Book", adapter)
 
+    def test_narrator_preview_requires_source_backed_narration_and_reuses_voice_preview(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn('"narrator.preview": self._narrator_preview', host)
+        self.assertIn('def _narrator_preview(', host)
+        self.assertIn('segment_chapter_speakers(chapter)', host)
+        self.assertIn('segment.kind != "narration"', host)
+        self.assertIn('"route_character_cast": False', host)
+        self.assertIn('id="previewProjectNarrator"', adapter)
+        self.assertIn("call('narrator.preview'", adapter)
+
     def test_series_narrator_summary_reader_does_not_require_active_project(self):
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         start = host.index("    def _narrator_series_default_read(")
