@@ -51,7 +51,7 @@ def _load_model(kind: str, backend: str, root: Path):
     if requested == "cpu":
         device = "cpu"
     elif requested in {"automatic", "auto"}:
-        device = selected.device if selected.supported else "cpu"
+        device = selected.device if selected.supported and selected.backend in {"cuda", "rocm", "xpu"} else "cpu"
     elif requested == "cuda" and torch.cuda.is_available():
         device = "cuda:0"
     elif requested == "xpu" and getattr(torch, "xpu", None) is not None and torch.xpu.is_available():
