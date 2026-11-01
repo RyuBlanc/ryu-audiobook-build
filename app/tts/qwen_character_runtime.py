@@ -6,6 +6,7 @@ from pathlib import Path
 import queue
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -212,6 +213,12 @@ def _create_or_repair_venv(progress=None) -> Path:
 
 
 def _install_runtime_packages(python: Path, progress=None) -> str:
+    """Install the best compatible Qwen runtime and return its verified backend.
+
+    NVIDIA CUDA may fall back to CPU if neither CUDA wheel is installable. AMD
+    ROCm and Intel XPU candidates must pass their own backend checks; they are
+    never marked accelerated merely because a display adapter was detected.
+    """
     if progress:
         progress("Installing PyTorch for the local character engine…")
 
@@ -231,23 +238,37 @@ def _install_runtime_packages(python: Path, progress=None) -> str:
     )
     active = best_accelerator()
 
+    cpu_plan = (
+        "CPU",
+        [
+            "--index-url", "https://download.pytorch.org/whl/cpu",
+            f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}",
+        ],
+        "cpu",
+    )
     install_plan: list[tuple[str, list[str], str]] = []
-    if active.backend == "cuda":
+
+    if _has_nvidia_gpu() or active.backend == "cuda":
         install_plan.extend([
             (
-                "NVIDIA CUDA 12.8",
-                ["--index-url", "https://download.pytorch.org/whl/cu128",
-                 f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}"],
+                "CUDA 12.8",
+                [
+                    "--index-url", "https://download.pytorch.org/whl/cu128",
+                    f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}",
+                ],
                 "cuda",
             ),
             (
-                "NVIDIA CUDA 12.6",
-                ["--index-url", "https://download.pytorch.org/whl/cu126",
-                 f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}"],
+                "CUDA 12.6",
+                [
+                    "--index-url", "https://download.pytorch.org/whl/cu126",
+                    f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}",
+                ],
                 "cuda",
             ),
         ])
-    elif amd_candidate and os.name == "nt" and PYTHON_VERSION == "3.12.10":
+    elif amd_candidate is not None and os.name == "nt":
+        # AMD's published Windows bundle is Python 3.12 / ROCm 7.2.1.
         rocm_root = "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1"
         packages = [
             f"{rocm_root}/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl",
@@ -258,87 +279,140 @@ def _install_runtime_packages(python: Path, progress=None) -> str:
             f"{rocm_root}/torchaudio-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl",
         ]
         install_plan.append(("AMD ROCm 7.2.1 (Windows)", packages, "rocm"))
-    elif intel_candidate and os.name == "nt":
+    elif intel_candidate is not None and os.name == "nt":
         install_plan.append((
             "Intel XPU (Windows)",
-            ["--index-url", "https://download.pytorch.org/whl/xpu", "torch", "torchaudio"],
+            [
+                "--index-url", "https://download.pytorch.org/whl/xpu",
+                "torch", "torchaudio",
+            ],
             "xpu",
         ))
     elif active.backend == "rocm" and sys.platform.startswith("linux"):
         install_plan.append((
             "AMD ROCm",
-            ["--index-url", "https://download.pytorch.org/whl/rocm6.4",
-             f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}"],
+            [
+                "--index-url", "https://download.pytorch.org/whl/rocm6.4",
+                f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}",
+            ],
             "rocm",
         ))
     elif active.backend == "xpu":
         install_plan.append((
             "Intel XPU",
-            ["--index-url", "https://download.pytorch.org/whl/xpu", "torch", "torchaudio"],
+            [
+                "--index-url", "https://download.pytorch.org/whl/xpu",
+                "torch", "torchaudio",
+            ],
             "xpu",
         ))
-
-    # CPU is deliberately used only when no supported GPU is present. A
-    # detected AMD/Intel GPU must not be silently marked accelerated if its
-    # backend-specific installation or self-test fails.
-    target_backend = install_plan[0][2] if install_plan else "cpu"
-    target_label = install_plan[0][0] if install_plan else "CPU compatibility"
-    if not install_plan:
-        install_plan.append((
-            target_label,
-            ["--index-url", "https://download.pytorch.org/whl/cpu",
-             f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}"],
-            "cpu",
-        ))
+    else:
+        install_plan.append(cpu_plan)
 
     install_error = ""
+    selected_backend = ""
+    selected_label = ""
     for label, package_args, expected_backend in install_plan:
         if progress:
             progress(f"Installing PyTorch {TORCH_VERSION} ({label})…")
         code, detail = _run_capture(
-            [str(python), "-m", "pip", "install", "--upgrade", "--no-cache-dir", *package_args],
+            [
+                str(python), "-m", "pip", "install", "--upgrade",
+                "--no-cache-dir", *package_args,
+            ],
             timeout=3600,
         )
-        if code != 0:
+        if code == 0:
+            selected_backend = expected_backend
+            selected_label = label
+            break
+        install_error = detail
+
+    # CUDA wheels are allowed to fall back to CPU to keep NVIDIA installations
+    # usable if their local driver is too old. AMD/Intel candidates do not
+    # silently fall back: the user must see that their GPU runtime did not work.
+    if not selected_backend and (_has_nvidia_gpu() or active.backend == "cuda"):
+        if progress:
+            progress("CUDA wheels were unavailable • installing CPU compatibility runtime…")
+        code, detail = _run_capture(
+            [
+                str(python), "-m", "pip", "install", "--upgrade",
+                "--no-cache-dir", *cpu_plan[1],
+            ],
+            timeout=3600,
+        )
+        if code == 0:
+            selected_backend = "cpu"
+            selected_label = cpu_plan[0]
+        else:
             install_error = detail
-            continue
 
-        check = (
-            "import torch, torchaudio, qwen_tts; "
-            "print('torch=' + torch.__version__); "
-            "print('torchaudio=' + torchaudio.__version__); "
-            "print('cuda=' + str(torch.cuda.is_available())); "
-            "print('hip=' + str(getattr(torch.version, 'hip', None))); "
-            "xpu=getattr(torch, 'xpu', None); "
-            "print('xpu=' + str(bool(xpu is not None and xpu.is_available())))"
+    if not selected_backend:
+        hardware = (
+            f"{amd_candidate.name} (AMD ROCm)"
+            if amd_candidate is not None
+            else f"{intel_candidate.name} (Intel XPU)"
+            if intel_candidate is not None
+            else f"{active.name} ({active.backend})"
         )
-        test_code, test_detail = _run_capture(
-            [str(python), "-c", check], timeout=240
-        )
-        if test_code != 0:
-            install_error = test_detail
-            continue
-        normalized = test_detail.replace(" ", "")
-        backend_ok = (
-            expected_backend == "cpu"
-            or (expected_backend == "cuda" and "cuda=True" in normalized)
-            or (expected_backend == "rocm" and "hip=None" not in normalized and "cuda=True" in normalized)
-            or (expected_backend == "xpu" and "xpu=True" in normalized)
-        )
-        if backend_ok:
-            if progress:
-                progress(f"Qwen runtime backend ready • {label}. {test_detail[-700:]}")
-            return expected_backend
-        install_error = (
-            f"Installed {label} but backend self-test did not activate {expected_backend}. "
-            + test_detail[-2500:]
+        raise RuntimeError(
+            f"Could not install the selected Qwen accelerator runtime for {hardware}. "
+            "No CPU downgrade was applied to a detected AMD/Intel GPU. "
+            f"Last installer error: {install_error[-3000:]}"
         )
 
-    raise RuntimeError(
-        "The selected GPU runtime did not pass its backend self-test. "
-        "Qwen has not marked this adapter as accelerated; repair the driver or "
-        "backend installation and retry. " + install_error[-3500:]
+    if progress:
+        progress("Installing the official Qwen3-TTS Python package…")
+    code, detail = _run_capture(
+        [
+            str(python), "-m", "pip", "install", "--upgrade",
+            f"qwen-tts=={QWEN_TTS_VERSION}",
+        ],
+        timeout=2400,
     )
+    if code != 0:
+        raise RuntimeError(
+            f"Qwen3-TTS package installation failed: {detail[-3500:]}"
+        )
+
+    if progress:
+        progress("Verifying the installed Qwen runtime and accelerator…")
+    check = (
+        "import sys, torch, torchaudio, qwen_tts; "
+        "print('python=' + sys.version.split()[0]); "
+        "print('torch=' + torch.__version__); "
+        "print('torchaudio=' + torchaudio.__version__); "
+        "print('qwen_tts=' + getattr(qwen_tts, '__version__', 'unknown')); "
+        "print('cuda=' + str(torch.cuda.is_available())); "
+        "print('hip=' + str(getattr(torch.version, 'hip', None))); "
+        "xpu=getattr(torch, 'xpu', None); "
+        "print('xpu=' + str(bool(xpu is not None and xpu.is_available())))"
+    )
+    code, detail = _run_capture([str(python), "-c", check], timeout=240)
+    if code != 0:
+        raise RuntimeError(
+            f"Qwen3-TTS runtime self-test failed: {detail[-3500:]}"
+        )
+
+    normalized = detail.replace(" ", "")
+    backend_ok = (
+        (selected_backend == "cpu")
+        or (selected_backend == "cuda" and "cuda=True" in normalized and "hip=None" in normalized)
+        or (selected_backend == "rocm" and "hip=None" not in normalized and "cuda=True" in normalized)
+        or (selected_backend == "xpu" and "xpu=True" in normalized)
+    )
+    if not backend_ok:
+        if selected_backend == "rocm":
+            reason = "AMD ROCm packages installed but PyTorch did not activate HIP"
+        elif selected_backend == "xpu":
+            reason = "Intel XPU packages installed but torch.xpu.is_available() is false"
+        else:
+            reason = f"PyTorch did not activate the selected {selected_backend} backend"
+        raise RuntimeError(f"{reason}. Qwen runtime is not marked ready. {detail[-2500:]}")
+
+    if progress:
+        progress(f"Qwen runtime ready • {selected_label}. {detail[-700:]}")
+    return selected_backend
 
 
 def _runtime_self_test(python: Path) -> tuple[bool, str]:
@@ -392,298 +466,24 @@ def _runtime_version_is_current() -> bool:
             data.get("ready") is not True
             or data.get("bootstrap_version") != BOOTSTRAP_VERSION
             or data.get("qwen_tts") != QWEN_TTS_VERSION
-            or data.get("accelerator") != best_accelerator().backend
-            or data.get("accelerator_name") != best_accelerator().name
             or not _python_works(VENV_PYTHON)
         ):
             return False
-        ok, _detail = _runtime_self_test(VENV_PYTHON)
-        return ok
+
+        ok, detail = _runtime_self_test(VENV_PYTHON)
+        if not ok:
+            return False
+        runtime_backend = str(data.get("accelerator") or "cpu").casefold()
+        normalized = detail.replace(" ", "")
+        if runtime_backend == "cuda":
+            return "cuda=True" in normalized and "hip=None" in normalized
+        if runtime_backend == "rocm":
+            return "cuda=True" in normalized and "hip=None" not in normalized
+        if runtime_backend == "xpu":
+            return "xpu=True" in normalized
+        return runtime_backend == "cpu"
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return False
-
-
-def runtime_ready() -> bool:
-    """Cheap UI-safe readiness gate.
-
-    The previous implementation imported torch, torchaudio and qwen_tts in a
-    subprocess every time a voice-selection callback queried readiness. On
-    some Windows/GPU setups that import can take several seconds and makes
-    Qt report the application as not responding. This fast gate only checks
-    local marker/filesystem state. The worker process remains responsible for
-    real model/runtime initialization, and verify_runtime() remains the full
-    diagnostic used by repair/installation workflows.
-    """
-    try:
-        if not MARKER.is_file() or not VENV_PYTHON.is_file() or not worker_script().is_file():
-            return False
-        data = json.loads(MARKER.read_text(encoding="utf-8"))
-        return (
-            data.get("ready") is True
-            and data.get("bootstrap_version") == BOOTSTRAP_VERSION
-            and data.get("qwen_tts") == QWEN_TTS_VERSION
-            and data.get("accelerator") == best_accelerator().backend
-        )
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        return False
-
-
-def runtime_python() -> Path:
-    return VENV_PYTHON
-
-
-def model_path(kind: str) -> Path:
-    return MODEL_DIRS[kind]
-
-
-def _model_weight_file_ready(path: Path) -> bool:
-    try:
-        return path.is_file() and path.stat().st_size >= 1024
-    except OSError:
-        return False
-
-
-def model_installed(kind: str) -> bool:
-    """Return true only when the local model's config and required weights are present."""
-    root = MODEL_DIRS[kind]
-    config_path = root / "config.json"
-    try:
-        if not config_path.is_file():
-            return False
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-        if not isinstance(config, dict):
-            return False
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        return False
-
-    index_path = root / "model.safetensors.index.json"
-    if index_path.is_file():
-        try:
-            index = json.loads(index_path.read_text(encoding="utf-8"))
-            weight_map = index.get("weight_map")
-            if not isinstance(weight_map, dict) or not weight_map:
-                return False
-            names = list(weight_map.values())
-            if any(not isinstance(name, str) or not name or Path(name).name != name for name in names):
-                return False
-            shards = {root / name for name in names}
-            if not all(_model_weight_file_ready(path) for path in shards):
-                return False
-
-            # A sharded download may leave all filenames in place but only
-            # partially write the last file. Compare the aggregate byte count
-            # with the index's declared tensor size when that metadata exists.
-            metadata = index.get("metadata")
-            expected_size = metadata.get("total_size", 0) if isinstance(metadata, dict) else 0
-            try:
-                expected_size = int(expected_size or 0)
-            except (TypeError, ValueError):
-                expected_size = 0
-            actual_size = sum(path.stat().st_size for path in shards)
-            # SafeTensors headers add bytes beyond tensor payload size, so a
-            # complete set should meet or exceed the index's declared tensor
-            # payload size. Do not accept a percentage tolerance: it can label
-            # a truncated shard as ready when the missing bytes are a small
-            # fraction of a large model.
-            if expected_size > 0 and actual_size < expected_size:
-                return False
-            return True
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            return False
-
-    # Without an index, a sharded naming convention is not safe to accept:
-    # a missing index can itself be the result of an interrupted download.
-    weights = list(root.glob("*.safetensors"))
-    if not weights or any("-of-" in path.name for path in weights):
-        return False
-    return all(_model_weight_file_ready(path) for path in weights)
-
-
-@lru_cache(maxsize=1)
-@lru_cache(maxsize=1)
-def _detected_vram_gb() -> float:
-    """Return usable accelerator memory in GiB for model-size heuristics."""
-    return model_selection_memory_gb()
-
-def best_custom_kind(vram_gb: float | None = None) -> str:
-    # Qwen 1.7B CustomVoice is the quality path for 8GB-class GPUs; 0.6B is
-    # the compatibility path for 4GB-class GPUs. Detect VRAM automatically
-    # when the caller does not provide it.
-    if vram_gb is None:
-        vram_gb = _detected_vram_gb()
-    if vram_gb >= 7.0 and model_installed("custom-1.7b"):
-        return "custom-1.7b"
-    if model_installed("custom-0.6b"):
-        return "custom-0.6b"
-    if model_installed("custom-1.7b"):
-        return "custom-1.7b"
-    return "custom-0.6b"
-
-
-def best_clone_kind(vram_gb: float | None = None) -> str:
-    # Voice cloning uses Qwen Base, not CustomVoice. The 1.7B Base model is
-    # the higher-quality path for 8GB-class GPUs; 0.6B is the lighter option.
-    if vram_gb is None:
-        vram_gb = _detected_vram_gb()
-    # Keep the default long-form path compatible with 4 GB and 8 GB GPUs.
-    # The 1.7B Base remains selectable explicitly for high-memory systems.
-    if vram_gb >= 10.0 and model_installed("base-1.7b"):
-        return "base-1.7b"
-    if model_installed("base-0.6b"):
-        return "base-0.6b"
-    if model_installed("base-1.7b"):
-        return "base-1.7b"
-    return "base-0.6b"
-
-
-def best_voice_design_kind() -> str:
-    # Qwen's official VoiceDesign API is provided by the 1.7B VoiceDesign model.
-    return "design-1.7b"
-
-
-def best_long_form_clone_kind(vram_gb: float | None = None) -> str:
-    """Choose a stable Base clone model for reusable VoiceDesign identities.
-
-    8GB-class GPUs get the higher-quality 1.7B Base when it is installed.
-    4GB-class GPUs prefer the lighter 0.6B Base to avoid memory pressure.
-    """
-    if vram_gb is None:
-        vram_gb = _detected_vram_gb()
-    if vram_gb >= 7.0 and model_installed("base-1.7b"):
-        return "base-1.7b"
-    if model_installed("base-0.6b"):
-        return "base-0.6b"
-    if model_installed("base-1.7b"):
-        return "base-1.7b"
-    return "base-0.6b"
-
-
-
-def required_models_for_profile(profile) -> tuple[str, ...]:
-    """Return the exact local model kinds required by a saved Qwen voice profile.
-
-    Selection mirrors QwenCharacterProvider: explicit model IDs win; automatic
-    CustomVoice/Clone profiles use the same installed-model preference helpers.
-    VoiceDesign additionally requires a Base model to preserve identity during
-    long-form generation.
-    """
-    mode = str(getattr(profile, "qwen_mode", "custom") or "custom").casefold()
-    requested = str(getattr(profile, "model_id", "auto") or "auto").casefold()
-    if mode in {"design", "design-preview"}:
-        return (best_voice_design_kind(), best_long_form_clone_kind())
-    if mode == "clone":
-        kind = requested if requested in {"base-0.6b", "base-1.7b"} else best_clone_kind()
-        return (kind,)
-    kind = requested if requested in {"custom-0.6b", "custom-1.7b"} else best_custom_kind()
-    return (kind,)
-
-
-def profile_model_readiness(profile) -> tuple[bool, str]:
-    """Check model files required by a Qwen profile without importing ML runtimes."""
-    required = required_models_for_profile(profile)
-    missing = [kind for kind in required if not model_installed(kind)]
-    if not missing:
-        return True, "Required local Qwen model files are present: " + ", ".join(required) + "."
-    labels = [f"{kind} ({MODEL_IDS.get(kind, kind)})" for kind in missing]
-    phase = str(getattr(profile, "qwen_mode", "custom") or "custom").casefold()
-    action = {
-        "design": "Install Qwen VoiceDesign and its required Base model",
-        "design-preview": "Install Qwen VoiceDesign and its required Base model",
-        "clone": "Install the matching Qwen Base model",
-    }.get(phase, "Install the matching Qwen CustomVoice model")
-    return False, "Missing or incomplete model files: " + "; ".join(labels) + f". {action} in Models."
-
-def _run(command: list[str], progress=None, timeout: int = 3600) -> None:
-    """Run a child command with streaming progress and an enforceable wall-clock timeout.
-
-    Reading stdout directly on the controlling thread can block forever when a
-    subprocess stalls without emitting a newline. A daemon reader thread feeds
-    a queue so this function can enforce the deadline even during silent stalls.
-    """
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        bufsize=1,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,
-    )
-    output: queue.Queue[object] = queue.Queue()
-    finished = object()
-    deadline = time.monotonic() + max(0.0, float(timeout))
-
-    def drain_stdout() -> None:
-        try:
-            if process.stdout is not None:
-                for line in iter(process.stdout.readline, ""):
-                    output.put(line)
-        except Exception as exc:
-            output.put(exc)
-        finally:
-            output.put(finished)
-
-    reader = threading.Thread(target=drain_stdout, name="QwenCommandOutput", daemon=True)
-    reader.start()
-
-    try:
-        stream_finished = False
-        while not stream_finished:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise subprocess.TimeoutExpired(command, timeout)
-            try:
-                item = output.get(timeout=min(0.2, remaining))
-            except queue.Empty:
-                continue
-
-            if item is finished:
-                stream_finished = True
-            elif isinstance(item, BaseException):
-                raise item
-            elif isinstance(item, str):
-                line = item.strip()
-                if line and progress:
-                    progress(line[-500:])
-
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise subprocess.TimeoutExpired(command, timeout)
-        code = process.wait(timeout=remaining)
-    except subprocess.TimeoutExpired as exc:
-        try:
-            process.kill()
-        except OSError:
-            pass
-        try:
-            process.wait(timeout=5)
-        except (OSError, subprocess.SubprocessError):
-            pass
-        reader.join(timeout=1)
-        raise RuntimeError(
-            f"Qwen character runtime command timed out after {timeout} seconds."
-        ) from exc
-    except Exception:
-        try:
-            process.kill()
-        except OSError:
-            pass
-        try:
-            process.wait(timeout=5)
-        except (OSError, subprocess.SubprocessError):
-            pass
-        reader.join(timeout=1)
-        raise
-    finally:
-        if process.stdout is not None:
-            try:
-                process.stdout.close()
-            except OSError:
-                pass
-
-    if code != 0:
-        raise RuntimeError(f"Qwen character runtime command failed with exit code {code}.")
 
 
 def install_runtime(progress=None, force_repair: bool = False) -> None:
@@ -705,13 +505,6 @@ def install_runtime(progress=None, force_repair: bool = False) -> None:
     python = _install_portable_python(progress)
     python = _create_or_repair_venv(progress)
     selected_backend = _install_runtime_packages(python, progress)
-    active_device = best_accelerator()
-    if selected_backend != active_device.backend:
-        raise RuntimeError(
-            "Qwen backend installation did not match detected GPU hardware. "
-            f"Installed: {selected_backend}; detected: {active_device.backend} "
-            f"({active_device.name}). Qwen runtime was not marked ready."
-        )
 
     MARKER.write_text(
         json.dumps(
@@ -723,8 +516,7 @@ def install_runtime(progress=None, force_repair: bool = False) -> None:
                 "torch": TORCH_VERSION,
                 "torchaudio": TORCHAUDIO_VERSION,
                 "tokenizer": TOKENIZER_ID,
-                "accelerator": best_accelerator().backend,
-                "accelerator_name": best_accelerator().name,
+                "accelerator": selected_backend,
             },
             indent=2,
         ),
