@@ -240,34 +240,90 @@ class QwenAcceleratorDiscoveryTests(unittest.TestCase):
                 self.assertEqual(accelerator.best_accelerator().backend, backend)
                 self.assertEqual(accelerator.best_accelerator().device, device)
 
-    def test_amd_rocm_candidate_requires_listed_windows_11_gpu(self):
+    def test_amd_rocm_101_windows_matrix_covers_current_radeon_and_ryzen_devices(self):
+        from app.tts.qwen_accelerator import amd_windows_runtime_spec
+
+        cases = [
+            ("AMD Radeon AI PRO R9700S", "", "gfx1201"),
+            ("AMD Radeon AI PRO R9600D", "", "gfx1201"),
+            ("AMD Radeon RX 9070 GRE", "", "gfx1201"),
+            ("AMD Radeon RX 9060 XT LP", "", "gfx1200"),
+            ("AMD Radeon RX 9050 (4GB)", "", "gfx1200"),
+            ("AMD Radeon PRO W7800 48GB", "", "gfx1100"),
+            ("AMD Radeon RX 7900 GRE", "", "gfx1100"),
+            ("AMD Radeon RX 7800 XT", "", "gfx1101"),
+            ("AMD Radeon RX 7600", "", "gfx1102"),
+            ("AMD Radeon PRO V710", "", "gfx1101"),
+            ("AMD Radeon Graphics", "AMD Ryzen AI Max+ PRO 495", "gfx1151"),
+            ("AMD Radeon Graphics", "AMD Ryzen AI Max PRO 380", "gfx1151"),
+            ("AMD Radeon Graphics", "AMD Ryzen AI 9 HX PRO 475", "gfx1150"),
+            ("AMD Radeon Graphics", "AMD Ryzen AI 7 PRO 450", "gfx1152"),
+            ("AMD Radeon Graphics", "AMD Ryzen AI 5 PRO 435", "gfx1153"),
+            ("AMD Radeon Graphics", "AMD Ryzen AI 5 430", "gfx1153"),
+            ("AMD Radeon Graphics", "AMD Ryzen 7 PRO 250", "gfx1103"),
+            ("AMD Radeon Graphics", "AMD Ryzen 3 210", "gfx1103"),
+        ]
+        for adapter, cpu, expected_arch in cases:
+            with self.subTest(adapter=adapter, cpu=cpu):
+                spec = amd_windows_runtime_spec(
+                    adapter, cpu, "Microsoft Windows 11 Pro", "25H2"
+                )
+                self.assertIsNotNone(spec)
+                self.assertEqual(spec["rocm"], "10.1.0")
+                self.assertEqual(spec["arch"], expected_arch)
+                self.assertEqual(spec["torch"], "2.14.0+rocm10.1.0")
+                self.assertEqual(spec["torchaudio"], "2.11.0.3+rocm10.1.0")
+
+    def test_amd_windows_keeps_legacy_rocm_721_only_for_its_published_models(self):
+        from app.tts.qwen_accelerator import amd_windows_runtime_spec
+
+        legacy = amd_windows_runtime_spec(
+            "AMD Radeon RX 9070 XT", "AMD Ryzen 9 9950X",
+            "Microsoft Windows 11 Pro", "24H2",
+        )
+        self.assertEqual(legacy["rocm"], "7.2.1")
+        self.assertEqual(legacy["torch"], "2.9.1+rocm7.2.1")
+
+        self.assertIsNone(amd_windows_runtime_spec(
+            "AMD Radeon RX 9070 GRE", "AMD Ryzen 9 9950X",
+            "Microsoft Windows 11 Pro", "24H2",
+        ))
+        self.assertIsNone(amd_windows_runtime_spec(
+            "AMD Radeon RX 9050", "AMD Ryzen 9 9950X",
+            "Microsoft Windows 11 Pro", "24H2",
+        ))
+        self.assertIsNone(amd_windows_runtime_spec(
+            "AMD Radeon RX 9070 XT", "AMD Ryzen 9 9950X",
+            "Microsoft Windows 10 Pro", "22H2",
+        ))
+
+    def test_amd_rocm_101_rejects_models_without_a_published_windows_pytorch_wheel(self):
+        from app.tts.qwen_accelerator import amd_windows_runtime_spec
+
+        # gfx1030 devices appear in the broad ROCm hardware table but have no
+        # ROCm 10.1 device-specific PyTorch wheel in the Windows installer matrix.
+        self.assertIsNone(amd_windows_runtime_spec(
+            "AMD Radeon PRO W6800", "AMD Ryzen 9 9950X",
+            "Microsoft Windows 11 Pro", "25H2",
+        ))
+
+    def test_intel_xpu_candidate_requires_supported_arc_and_core_ultra_models(self):
         from app.tts import qwen_accelerator as accelerator
 
-        self.assertTrue(accelerator.is_supported_amd_windows_device(
-            "AMD Radeon RX 9070 XT", "AMD Ryzen 9 9950X", "Microsoft Windows 11 Pro"
-        ))
-        self.assertTrue(accelerator.is_supported_amd_windows_device(
-            "AMD Radeon Graphics", "AMD Ryzen AI Max+ 395", "Microsoft Windows 11 Pro"
-        ))
-        self.assertFalse(accelerator.is_supported_amd_windows_device(
-            "AMD Radeon 780M", "AMD Ryzen 7 7840U", "Microsoft Windows 11 Pro"
-        ))
-        self.assertFalse(accelerator.is_supported_amd_windows_device(
-            "AMD Radeon RX 9070 XT", "AMD Ryzen 9 9950X", "Microsoft Windows 10 Pro"
-        ))
-
-    def test_intel_xpu_candidate_requires_arc_or_supported_core_ultra_integrated_gpu(self):
-        from app.tts import qwen_accelerator as accelerator
-
-        self.assertTrue(accelerator.is_supported_intel_windows_device(
-            "Intel Arc A770 Graphics", "Intel Core i7-14700K", "Microsoft Windows 11 Pro"
-        ))
-        self.assertTrue(accelerator.is_supported_intel_windows_device(
-            "Intel Arc B580 Graphics", "Intel Core i5-14600K", "Microsoft Windows 11 Pro"
-        ))
-        self.assertTrue(accelerator.is_supported_intel_windows_device(
-            "Intel Arc(TM) Graphics", "Intel(R) Core(TM) Ultra 7 155H", "Microsoft Windows 11 Pro"
-        ))
+        supported = [
+            ("Intel Arc A770 Graphics", "Intel Core i7-14700K"),
+            ("Intel Arc B580 Graphics", "Intel Core i5-14600K"),
+            ("Intel Arc B770 Graphics", "Intel Core Ultra 9 285K"),
+            ("Intel Arc(TM) Graphics", "Intel(R) Core(TM) Ultra 7 155H"),
+            ("Intel Arc(TM) Graphics", "Intel(R) Core(TM) Ultra X7 358H"),
+            ("Intel Arc(TM) Graphics", "Intel(R) Core(TM) Ultra 9 388H"),
+            ("Intel Arc(TM) Graphics", "Intel(R) Core(TM) Ultra 7 258V"),
+        ]
+        for adapter, cpu in supported:
+            with self.subTest(adapter=adapter, cpu=cpu):
+                self.assertTrue(accelerator.is_supported_intel_windows_device(
+                    adapter, cpu, "Microsoft Windows 11 Pro"
+                ))
         self.assertFalse(accelerator.is_supported_intel_windows_device(
             "Intel UHD Graphics 770", "Intel Core i7-14700K", "Microsoft Windows 11 Pro"
         ))
@@ -320,10 +376,11 @@ class QwenAcceleratorDiscoveryTests(unittest.TestCase):
         self.assertIn("Qwen DirectML not certified", report)
 
 
-
-
 class QwenAcceleratorRuntimeInstallTests(unittest.TestCase):
-    def _run_install(self, adapter, platform, responses, self_test_output):
+    def _run_install(
+        self, adapter, platform, responses, self_test_output,
+        display_version="25H2", cpu_name="AMD Ryzen 9 9950X",
+    ):
         from pathlib import Path
         from unittest.mock import patch
         from app.tts import qwen_character_runtime as runtime
@@ -349,52 +406,111 @@ class QwenAcceleratorRuntimeInstallTests(unittest.TestCase):
             patch.object(runtime, "detect_accelerators", return_value=(adapter,)),
             patch.object(runtime, "best_accelerator", return_value=adapter),
             patch.object(runtime, "_has_nvidia_gpu", return_value=False),
+            patch.object(
+                runtime, "windows_host_identity",
+                return_value=("Microsoft Windows 11 Pro", display_version, cpu_name),
+            ),
             patch.object(runtime, "_run_capture", side_effect=capture),
             patch.object(runtime.os, "name", platform),
         ):
-            runtime._install_runtime_packages(Path("qwen-python.exe"), messages.append)
-        return commands, messages
+            result = runtime._install_runtime_packages(Path("qwen-python.exe"), messages.append)
+        return commands, messages, result
 
-    def test_amd_rocm_windows_uses_official_rocm_721_python312_wheels(self):
+    def test_amd_rocm_101_windows_uses_arch_specific_pytorch_214_wheels(self):
         from app.tts.qwen_accelerator import Accelerator
 
-        adapter = Accelerator("rocm-candidate", "cpu", "AMD Radeon RX 9070", 16.0, False, "candidate")
-        commands, messages = self._run_install(
+        adapter = Accelerator("rocm-candidate", "cpu", "AMD Radeon RX 9070 GRE", 16.0, False, "candidate")
+        commands, messages, result = self._run_install(
             adapter,
             "nt",
             [(0, "AMD ROCm packages installed")],
-            "torch=2.9.1+rocm7.2.1 torchaudio=2.9.1+rocm7.2.1 hip=7.2.1 cuda=True xpu=False",
+            "torch=2.14.0+rocm10.1.0
+torchaudio=2.11.0.3+rocm10.1.0
+hip=10.1.0
+cuda=True
+xpu=False",
+            "25H2",
+        )
+        joined = " ".join(str(value) for command in commands for value in command)
+        self.assertIn("https://stable.repo.amd.com/rocm/whl-next/", joined)
+        self.assertIn("torch[device-gfx1201]==2.14.0+rocm10.1.0", joined)
+        self.assertIn("torchaudio==2.11.0.3+rocm10.1.0", joined)
+        self.assertEqual(result, ("rocm", "2.14.0+rocm10.1.0", "2.11.0.3+rocm10.1.0"))
+        self.assertTrue(any("AMD ROCm 10.1.0" in message for message in messages))
+
+    def test_amd_rocm_721_windows_uses_legacy_wheels_only_on_older_supported_device_matrix(self):
+        from app.tts.qwen_accelerator import Accelerator
+
+        adapter = Accelerator("rocm-candidate", "cpu", "AMD Radeon RX 9070 XT", 16.0, False, "candidate")
+        commands, messages, result = self._run_install(
+            adapter,
+            "nt",
+            [(0, "AMD ROCm packages installed")],
+            "torch=2.9.1+rocm7.2.1
+torchaudio=2.9.1+rocm7.2.1
+hip=7.2.1
+cuda=True
+xpu=False",
+            "24H2",
         )
         joined = " ".join(str(value) for command in commands for value in command)
         self.assertIn("rocm-rel-7.2.1", joined)
         self.assertIn("torch-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl", joined)
-        self.assertIn("torchaudio-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl", joined)
-        self.assertTrue(any("AMD ROCm" in message for message in messages))
+        self.assertEqual(result, ("rocm", "2.9.1+rocm7.2.1", "2.9.1+rocm7.2.1"))
+
+    def test_amd_windows_candidate_outside_official_matrix_fails_without_cpu_downgrade(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        from app.tts import qwen_character_runtime as runtime
+        from app.tts.qwen_accelerator import Accelerator
+
+        adapter = Accelerator("rocm-candidate", "cpu", "AMD Radeon RX 9050", 16.0, False, "candidate")
+        with (
+            patch.object(runtime, "detect_accelerators", return_value=(adapter,)),
+            patch.object(runtime, "best_accelerator", return_value=adapter),
+            patch.object(runtime, "_has_nvidia_gpu", return_value=False),
+            patch.object(runtime, "windows_host_identity", return_value=(
+                "Microsoft Windows 11 Pro", "24H2", "AMD Ryzen 9 9950X"
+            )),
+            patch.object(runtime, "_run_capture", return_value=(0, "pip bootstrap ok")),
+            patch.object(runtime.os, "name", "nt"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "not listed for this Windows release"):
+                runtime._install_runtime_packages(Path("qwen-python.exe"))
 
     def test_intel_xpu_windows_uses_official_pytorch_xpu_index(self):
         from app.tts.qwen_accelerator import Accelerator
 
         adapter = Accelerator("xpu-candidate", "cpu", "Intel Arc Graphics", 8.0, False, "candidate")
-        commands, messages = self._run_install(
+        commands, messages, result = self._run_install(
             adapter,
             "nt",
             [(0, "Intel XPU wheels installed")],
-            "torch=2.9.1 torchaudio=2.9.1 hip=None cuda=False xpu=True",
+            "torch=2.9.1
+torchaudio=2.9.1
+hip=None
+cuda=False
+xpu=True",
         )
         joined = " ".join(str(value) for command in commands for value in command)
         self.assertIn("https://download.pytorch.org/whl/xpu", joined)
+        self.assertEqual(result[0], "xpu")
         self.assertTrue(any("Intel XPU" in message for message in messages))
 
     def test_amd_rocm_install_rejects_wheels_without_active_hip_runtime(self):
         from app.tts.qwen_accelerator import Accelerator
 
-        adapter = Accelerator("rocm-candidate", "cpu", "AMD Radeon RX 9070", 16.0, False, "candidate")
+        adapter = Accelerator("rocm-candidate", "cpu", "AMD Radeon RX 9070 GRE", 16.0, False, "candidate")
         with self.assertRaisesRegex(RuntimeError, "AMD ROCm packages installed but PyTorch did not activate HIP"):
             self._run_install(
                 adapter,
                 "nt",
                 [(0, "ROCm packages installed")],
-                "torch=2.9.1 hip=None cuda=False xpu=False",
+                "torch=2.14.0+rocm10.1.0
+torchaudio=2.11.0.3+rocm10.1.0
+hip=None
+cuda=False
+xpu=False",
             )
 
     def test_intel_xpu_install_rejects_if_xpu_is_not_available(self):
@@ -406,7 +522,11 @@ class QwenAcceleratorRuntimeInstallTests(unittest.TestCase):
                 adapter,
                 "nt",
                 [(0, "XPU wheels installed")],
-                "torch=2.9.1 hip=None cuda=False xpu=False",
+                "torch=2.9.1
+torchaudio=2.9.1
+hip=None
+cuda=False
+xpu=False",
             )
 
 
