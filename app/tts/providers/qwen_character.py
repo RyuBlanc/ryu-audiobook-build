@@ -67,6 +67,7 @@ class QwenCharacterProvider(TTSProvider):
         qwen_anchor_path: Path | None = None,
         qwen_anchor_text: str = "",
         qwen_profile_id: str = "",
+        long_form_model_kind: str | None = None,
     ):
         self.voice_id = voice_id
         self.language = language or "English"
@@ -80,6 +81,11 @@ class QwenCharacterProvider(TTSProvider):
             or (DEFAULT_VOICE_DESIGN_ANCHOR_TEXT if self.qwen_mode == "design" else "")
         )
         self.qwen_profile_id = qwen_profile_id or ""
+        self.long_form_model_kind = (
+            long_form_model_kind
+            if long_form_model_kind in {"base-0.6b", "base-1.7b"}
+            else None
+        )
         self.status_callback = None
         requested_kind = (model_kind or "auto").lower()
         self._auto_select_model = (
@@ -174,7 +180,7 @@ class QwenCharacterProvider(TTSProvider):
                 self.qwen_mode,
                 self.model_kind,
                 (
-                    best_long_form_clone_kind()
+                    self.long_form_model_kind or best_long_form_clone_kind()
                     if self.qwen_mode == "design"
                     else ""
                 ),
@@ -229,11 +235,11 @@ class QwenCharacterProvider(TTSProvider):
         # audition a profile. Production narration remains on the stable
         # VoiceDesign/Base identity-lock path.
         if self.qwen_mode == "design":
-            clone_kind = best_long_form_clone_kind()
+            clone_kind = self.long_form_model_kind or best_long_form_clone_kind()
             if not model_installed(clone_kind):
                 raise RuntimeError(
-                    f"VoiceDesign stable identity needs the local Qwen Base model ({clone_kind}). "
-                    "Open Models and install the matching Qwen Base phase."
+                    f"VoiceDesign long-form narration needs the selected Qwen Base model ({clone_kind}). "
+                    "Open Models and install the selected global model size, or change the global preference in Models & Voice Engines."
                 )
         log_path = Path.home() / "Ryu's Audiobook" / "Settings" / "qwen_character_worker.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)

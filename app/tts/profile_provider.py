@@ -10,6 +10,10 @@ from app.tts.providers.chatterbox import ChatterboxProvider
 from app.tts.providers.edge_tts import EdgeTTSProvider
 from app.tts.providers.elevenlabs import ElevenLabsProvider
 from app.tts.providers.qwen_character import QwenCharacterProvider
+from app.tts.qwen_model_preference import (
+    get_qwen_model_preference,
+    qwen_model_kinds_for_preference,
+)
 
 
 def provider_from_profile(profile: VoiceProfile):
@@ -23,20 +27,28 @@ def provider_from_profile(profile: VoiceProfile):
         return ElevenLabsProvider(), profile.voice_id
 
     if profile.provider == "qwen-character":
+        # Resolve the global setting at provider creation time so it applies
+        # equally to legacy/saved profiles and profiles created in the future.
+        mode = profile.qwen_mode or "custom"
+        global_model_kind, global_long_form_kind = qwen_model_kinds_for_preference(
+            mode, get_qwen_model_preference()
+        )
+        effective_model_kind = global_model_kind or profile.model_id or "auto"
         return (
             QwenCharacterProvider(
                 voice_id=profile.voice_id,
                 language=profile.language or "English",
                 instruct=profile.qwen_prompt or profile.notes,
                 backend=profile.backend,
-                model_kind=profile.model_id or "auto",
+                model_kind=effective_model_kind,
                 reference_audio=(
                     Path(profile.sample_path).expanduser()
                     if profile.sample_path else None
                 ),
                 reference_text=profile.reference_text or "",
-                qwen_mode=profile.qwen_mode or "custom",
+                qwen_mode=mode,
                 qwen_seed=profile.qwen_seed,
+                long_form_model_kind=global_long_form_kind,
                 qwen_anchor_path=(
                     Path(profile.qwen_anchor_path).expanduser()
                     if profile.qwen_anchor_path else None

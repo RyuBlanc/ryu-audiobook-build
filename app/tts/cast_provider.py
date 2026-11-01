@@ -12,6 +12,8 @@ from app.core.character_identity import character_identity_key, parse_character_
 from app.tts.base import TTSProvider
 from app.tts.profile_provider import provider_from_profile
 from app.tts.voice_profile import VoiceProfile
+from app.tts.providers.qwen_character import QwenCharacterProvider
+from app.tts.qwen_model_preference import get_qwen_model_preference
 
 QUOTE_PATTERNS = (
     re.compile(r'“([^”]+)”'),
@@ -65,7 +67,7 @@ class CastAwareProvider(TTSProvider):
             if profile.provider == "chatterbox":
                 limits.append(300)
             elif profile.provider == "qwen-character":
-                limits.append(1800)
+                limits.append(QwenCharacterProvider.recommended_chunk_chars)
             else:
                 limits.append(getattr(self.narrator_provider, "recommended_chunk_chars", 1400))
         if not limits:
@@ -77,7 +79,7 @@ class CastAwareProvider(TTSProvider):
         if any(profile.provider == "chatterbox" for profile in self.profiles.values()):
             return 1
         if any(profile.provider == "qwen-character" for profile in self.profiles.values()):
-            return 8
+            return QwenCharacterProvider.recommended_chunk_sentences
         return getattr(self.narrator_provider, "recommended_chunk_sentences", 2)
 
     @property
@@ -421,7 +423,10 @@ class CastAwareProvider(TTSProvider):
     def _provider_cache_key(self, profile_name: str, profile: VoiceProfile) -> str:
         backend = self.backend_override if self.backend_override != "automatic" else (profile.backend or "automatic")
         if profile.provider == "qwen-character" and str(profile.qwen_mode or "custom").casefold() in {"custom", "clone", "design"}:
-            return "shared:qwen:" + json.dumps([backend, profile.model_id or "auto", profile.qwen_mode or "custom"], separators=(",", ":"))
+            return "shared:qwen:" + json.dumps([
+                backend, profile.model_id or "auto", profile.qwen_mode or "custom",
+                get_qwen_model_preference(),
+            ], separators=(",", ":"))
         if profile.provider == "chatterbox":
             return "shared:chatterbox:" + json.dumps([backend, profile.language or "en", profile.model_id == "chatterbox-multilingual"], separators=(",", ":"))
         return profile_name

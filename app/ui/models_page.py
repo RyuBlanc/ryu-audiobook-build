@@ -16,7 +16,7 @@ from PySide6.QtCore import QThread, Signal, Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox, QScrollArea,
     QFrame, QLabel, QListWidget, QListWidgetItem, QPushButton, QMessageBox,
-    QInputDialog
+    QInputDialog, QComboBox
 )
 
 from app.core.paths import models_root, ensure_roots
@@ -48,6 +48,11 @@ from app.tts.qwen_character_runtime import (
     INSTALLER_LOG as QWEN_INSTALLER_LOG,
 )
 from app.ai.model_runtime import brain_root, install_runtime as install_audiobook_ai, self_test as test_audiobook_ai
+from app.tts.qwen_model_preference import (
+    get_qwen_model_preference,
+    set_qwen_model_preference,
+    qwen_model_preference_label,
+)
 
 
 KOKORO_MODEL_URL = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.onnx"
@@ -205,18 +210,22 @@ class QwenCharacterInstallWorker(QThread):
             self.progress.emit("Installing isolated Qwen3-TTS runtime…")
             install_qwen_runtime(self.progress.emit)
 
+            preference = get_qwen_model_preference()
+            if preference in {"0.6b", "1.7b"}:
+                selected_custom = f"custom-{preference}"
+                selected_base = f"base-{preference}"
+            else:
+                selected_custom = best_custom_kind()
+                selected_base = best_clone_kind()
+
             choices = {
-                "CustomVoice": [best_custom_kind()],
-                "VoiceDesign": [best_voice_design_kind(), best_clone_kind()],
-                "Voice Clone": [best_clone_kind()],
+                "CustomVoice": [selected_custom],
+                "VoiceDesign": [best_voice_design_kind(), selected_base],
+                "Voice Clone": [selected_base],
             }
             if self.selection == "Full Qwen Voice Studio":
                 targets = []
-                for kind in [
-                    best_custom_kind(),
-                    best_voice_design_kind(),
-                    best_clone_kind(),
-                ]:
+                for kind in [selected_custom, best_voice_design_kind(), selected_base]:
                     if kind not in targets:
                         targets.append(kind)
             else:
@@ -451,6 +460,28 @@ class ModelsPage(QWidget):
         character_grid.addWidget(self.reset_qwen_cache, 1, 1)
         content_layout.addWidget(character_group)
 
+        # One global model-size preference governs every saved and future Qwen
+        # voice profile. Existing profile model_id values remain intact, but
+        # provider creation applies this global override at synthesis time.
+        qwen_preference_group = QGroupBox("Global Qwen model preference")
+        qwen_preference_layout = QVBoxLayout(qwen_preference_group)
+        preference_row = QHBoxLayout()
+        preference_row.addWidget(QLabel("Model size"))
+        self.qwen_model_preference = QComboBox()
+        self.qwen_model_preference.addItem("Automatic (hardware-aware)", "auto")
+        self.qwen_model_preference.addItem("0.6B — lighter / lower memory", "0.6b")
+        self.qwen_model_preference.addItem("1.7B — larger model", "1.7b")
+        selected_preference = get_qwen_model_preference()
+        selected_index = self.qwen_model_preference.findData(selected_preference)
+        self.qwen_model_preference.setCurrentIndex(max(0, selected_index))
+        preference_row.addWidget(self.qwen_model_preference, 1)
+        qwen_preference_layout.addLayout(preference_row)
+        self.qwen_model_preference_status = QLabel()
+        self.qwen_model_preference_status.setWordWrap(True)
+        self.qwen_model_preference_status.setObjectName("muted")
+        qwen_preference_layout.addWidget(self.qwen_model_preference_status)
+        content_layout.addWidget(qwen_preference_group)
+
         ai_group = QGroupBox("Book analysis")
         ai_grid = QGridLayout(ai_group)
         ai_grid.addWidget(self.install_audiobook_ai, 0, 0)
@@ -472,6 +503,10 @@ class ModelsPage(QWidget):
         self.reset_qwen_cache.clicked.connect(self.reset_qwen_voice_cache)
         self.install_audiobook_ai.clicked.connect(self.install_audiobook_ai_runtime)
         self.refresh_button.clicked.connect(self.refresh)
+        self.qwen_model_preference.currentIndexChanged.connect(
+            self._save_qwen_model_preference
+        )
+        self._update_qwen_model_preference_status()
         self._operation_buttons = (
             self.install_kokoro,
             self.install_piper,
@@ -485,6 +520,49 @@ class ModelsPage(QWidget):
         self._update_operation_controls()
         self.status.setText("Model inventory loads when this screen opens.")
 
+
+    def _save_qwen_model_preference(self, _index: int = -1) -> None:
+        selected = self.qwen_model_preference.currentData()
+        try:
+            set_qwen_model_preference(selected)
+        except Exception as exc:
+            QMessageBox.critical(self, "Qwen model preference", str(exc))
+            return
+        self._update_qwen_model_preference_status()
+        self.status.setText(
+            "Global Qwen model preference saved. It applies to all saved and new "
+            "Qwen profiles on their next preview or generation; an active task is unchanged."
+        )
+
+    def _update_qwen_model_preference_status(self) -> None:
+        selected = get_qwen_model_preference()
+        if selected == "auto":
+            self.qwen_model_preference_status.setText(
+                "Automatic selection preserves the existing hardware-aware model choice. "
+                "The setting is shared by saved profiles and profiles created later."
+            )
+            return
+
+        required = [f"custom-{selected}", f"base-{selected}", "design-1.7b"]
+        labels = {
+            "custom-0.6b": "CustomVoice 0.6B",
+            "custom-1.7b": "CustomVoice 1.7B",
+            "base-0.6b": "Base 0.6B",
+            "base-1.7b": "Base 1.7B",
+            "design-1.7b": "VoiceDesign 1.7B",
+        }
+        missing = [labels[kind] for kind in required if not qwen_model_installed(kind)]
+        message = (
+            f"Global override: {qwen_model_preference_label(selected)}. "
+            "Applies to every saved and new Qwen profile, including narrator and character assignments. "
+            "VoiceDesign creation and audition still use the required 1.7B VoiceDesign model; "
+            "this choice controls CustomVoice/Clone and VoiceDesign's long-form Base model."
+        )
+        if missing:
+            message += " Missing selected model files: " + ", ".join(missing) +                 ". Use Install / Repair Qwen Voice Studio to install the chosen size."
+        else:
+            message += " All models required by this selection are installed."
+        self.qwen_model_preference_status.setText(message)
 
     @stable_view_refresh
     def refresh(self) -> None:

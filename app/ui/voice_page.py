@@ -53,6 +53,7 @@ from app.tts.voice_profile import (
     VoiceProfile, builtin_voice_profiles, import_reference_audio,
     load_profiles, load_saved_profiles, save_profiles,
 )
+from app.tts.qwen_model_preference import get_qwen_model_preference
 from app.tts.providers.edge_tts import EdgeTTSProvider
 from app.tts.providers.elevenlabs import ElevenLabsProvider
 
@@ -71,6 +72,9 @@ _QWEN_PREVIEW_PROFILE_KEY = None
 def _qwen_preview_profile_key(profile: VoiceProfile) -> str:
     """Build a complete cache key without rereading large audio references."""
     payload = asdict(profile)
+    # A model-size change must evict the warm preview provider so a saved
+    # profile cannot keep synthesizing with its previous global model choice.
+    payload["global_qwen_model_preference"] = get_qwen_model_preference()
     for field in ("sample_path", "qwen_anchor_path"):
         raw_path = payload.get(field)
         if not raw_path:
@@ -660,6 +664,14 @@ class VoicePage(QWidget):
         self.qwen_phase_status.setObjectName("muted")
         self.qwen_phase_status.setWordWrap(True)
         qwen_phase.addWidget(self.qwen_phase_status)
+        global_preference_hint = QLabel(
+            "Global model size is configured in Models & Voice Engines. "
+            "It applies to all saved and newly-created Qwen profiles. "
+            "VoiceDesign creation/preview itself always uses Qwen's 1.7B VoiceDesign model."
+        )
+        global_preference_hint.setObjectName("muted")
+        global_preference_hint.setWordWrap(True)
+        qwen_phase.addWidget(global_preference_hint)
 
         self.qwen_design_box = QGroupBox("VoiceDesign • create a brand-new voice from a description")
         design_layout = QVBoxLayout(self.qwen_design_box)

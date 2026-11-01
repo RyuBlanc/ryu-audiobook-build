@@ -602,9 +602,13 @@ def server(args) -> int:
                 model, device = _load_model(clone_kind, args.backend, root)
             except Exception as exc:
                 if _is_cuda_oom(exc) and args.backend != "cpu":
-                    clone_kind = "base-0.6b"
-                    args.clone_kind = clone_kind
-                    model, device = _load_model(clone_kind, args.backend, root)
+                    # Respect the globally selected Base size. A GPU OOM may
+                    # move this same model to CPU, but must never silently swap
+                    # a user's selected 1.7B model for 0.6B.
+                    print(json.dumps({
+                        "progress": f"{clone_kind} did not fit GPU memory • retrying the same model on CPU…"
+                    }), flush=True)
+                    model, device = _load_model(clone_kind, "cpu", root)
                 else:
                     raise
         active_kind = clone_kind
