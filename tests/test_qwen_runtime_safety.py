@@ -261,8 +261,9 @@ class QwenAcceleratorDiscoveryTests(unittest.TestCase):
         )
         with patch.object(accelerator, "detect_accelerators", return_value=(directml,)):
             selected = accelerator.best_accelerator()
-            self.assertEqual(selected.backend, "directml")
-            self.assertFalse(selected.supported)
+            self.assertEqual(selected.backend, "cpu")
+            self.assertTrue(selected.supported)
+            self.assertIn("not certified", accelerator.accelerator_report())
 
     def test_accelerator_report_includes_uncertified_reason(self):
         from unittest.mock import patch
