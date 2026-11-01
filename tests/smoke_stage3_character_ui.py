@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import time
 import wave
@@ -238,13 +239,34 @@ def main() -> None:
                     if dialog is not None:
                         dialog.reject()
 
-            linked_passage = panel._decode_link(QUrl(f"dialogue://1/{start}/{end}"))
-            if not linked_passage or linked_passage.get("text") != dialogue:
+            # Use the exact custom URL produced by the native story renderer,
+            # rather than reconstructing a URI in the test harness.
+            html = panel.manual_story.toHtml()
+            link_match = re.search(r'href=["\'](dialogue://[^"\']+)["\']', html)
+            if not link_match:
                 raise RuntimeError(
-                    f"Source-linked dialogue URL did not resolve to the exact selected passage: {linked_passage!r}"
+                    "The native Character Studio did not render a dialogue:// source link. "
+                    f"Chapter={chapter_one.number}; html_excerpt={html[:1600]!r}"
+                )
+            source_url = QUrl(link_match.group(1))
+            linked_passage = panel._decode_link(source_url)
+            if not linked_passage or linked_passage.get("text") != dialogue:
+                try:
+                    host_number = int(source_url.host())
+                except (TypeError, ValueError):
+                    host_number = None
+                chapter_probe = panel._chapter_by_number(host_number) if host_number is not None else None
+                raise RuntimeError(
+                    "Source-linked dialogue URL did not resolve to the exact selected passage: "
+                    f"url={source_url.toString()!r} scheme={source_url.scheme()!r} "
+                    f"host={source_url.host()!r} path={source_url.path()!r} "
+                    f"valid={source_url.isValid()} error={source_url.errorString()!r} "
+                    f"start={start} end={end} expected_text={dialogue!r} "
+                    f"chapter_numbers={[getattr(item, 'number', None) for item in panel._chapters()]} "
+                    f"chapter_probe={chapter_probe!r} linked_passage={linked_passage!r}"
                 )
             QTimer.singleShot(100, accept_real_assignment_dialog)
-            panel._manual_link_clicked(QUrl(f"dialogue://1/{start}/{end}"))
+            panel._manual_link_clicked(source_url)
             if dialog_outcome.get("error"):
                 raise RuntimeError(dialog_outcome["error"])
             if not dialog_outcome.get("accepted"):
