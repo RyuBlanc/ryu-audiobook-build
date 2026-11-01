@@ -17,6 +17,7 @@ from unittest.mock import patch
 from huggingface_hub import snapshot_download
 
 from app.tts.expression import classify_expression
+from app.tts.narration import apply_pronunciation_dictionary_with_counts
 from app.tts.preview import build_voice_preview
 from app.tts.providers.qwen_character import QwenCharacterProvider
 
