@@ -25,11 +25,12 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install application dependencies
+      - name: Install Kokoro runtime dependencies
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install --no-cache-dir -r requirements-voice-cloning.txt
+          python -m pip install --no-cache-dir kokoro-onnx
 
       - name: Download Kokoro assets
         shell: pwsh
