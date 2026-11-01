@@ -15,6 +15,7 @@ import time
 import sys
 import faulthandler
 import traceback
+import wave
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
@@ -88,9 +89,24 @@ def _copy_preview(source_value: str, output: Path, expected_provider: str) -> di
     source = Path(str(source_value or "")).expanduser()
     if not source.is_file() or source.stat().st_size < 1024:
         raise RuntimeError(f"Premium V2 did not create a valid {expected_provider} preview WAV: {source}")
+    try:
+        with wave.open(str(source), "rb") as audio:
+            frames = int(audio.getnframes())
+            rate = int(audio.getframerate())
+            channels = int(audio.getnchannels())
+            width = int(audio.getsampwidth())
+            duration = frames / float(rate) if rate else 0.0
+    except (wave.Error, OSError, EOFError) as exc:
+        raise RuntimeError(f"Premium V2 {expected_provider} preview is not a decodable WAV: {source}: {exc}") from exc
+    if frames <= 0 or rate <= 0 or channels <= 0 or width <= 0 or duration <= 0:
+        raise RuntimeError(f"Premium V2 {expected_provider} preview has invalid audio metadata: {source}")
     output.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, output)
-    return {"source": str(source), "artifact": str(output), "bytes": output.stat().st_size}
+    return {
+        "source": str(source), "artifact": str(output), "bytes": output.stat().st_size,
+        "duration_seconds": duration, "sample_rate": rate, "channels": channels,
+        "sample_width_bytes": width,
+    }
 
 
 def _seed_project(project_folder: Path, app_root: Path, voices_root: Path, models_root: Path) -> Project:
@@ -197,6 +213,8 @@ JS_DRIVER = r"""
   const NativeAudio = window.Audio;
   window.__stage3AudioCreated = [];
   window.__stage3PlayCalls = 0;
+  window.__stage3PlayResolved = 0;
+  window.__stage3PlayRejected = [];
   window.Audio = function(source) {
     const audio = new NativeAudio(source);
     audio.muted = true;
@@ -209,7 +227,14 @@ JS_DRIVER = r"""
   HTMLMediaElement.prototype.play = function() {
     window.__stage3PlayCalls += 1;
     this.muted = true;
-    return nativePlay.call(this);
+    const promise = nativePlay.call(this);
+    if (promise && typeof promise.then === 'function') {
+      promise.then(
+        () => { window.__stage3PlayResolved += 1; },
+        error => { window.__stage3PlayRejected.push(String(error?.message || error)); }
+      );
+    }
+    return promise;
   };
   const waitForJobId = async (jobId, timeout=150000) => {
     const deadline = Date.now() + timeout;
@@ -293,21 +318,30 @@ JS_DRIVER = r"""
   check('CS-03/CS-04 selected saved profile requires saved dialogue and enables audition',
     Boolean(testButton && !testButton.disabled), {profile:profileSelect.value,buttonDisabled:testButton?.disabled});
   const beforePlay = window.__stage3PlayCalls;
+  const beforeResolved = window.__stage3PlayResolved;
   const beforeMiraPreviewIds = new Set((await call('job.list',{include_hidden:true})).map(job => String(job.job_id)));
   testButton.click();
   const miraPreview = await waitForVoiceJob('Stage 3 Mira • Piper Amy', 150000, beforeMiraPreviewIds);
   await waitFor(() => window.__stage3PlayCalls > beforePlay, 10000, 'real selected-character audio play handoff');
+  await waitFor(() => window.__stage3PlayResolved > beforeResolved, 10000, 'selected-character audio play promise resolution');
   const characterAudio = window.__stage3LastAudio;
+  const characterAudioUrl = String(characterAudio?.currentSrc || characterAudio?.src || '');
   check('CS-04 actual selected dialogue Piper preview and playback',
-    Boolean(characterAudio && Number(characterAudio.duration) > 0 && window.__stage3PlayCalls > beforePlay),
-    {duration:characterAudio?.duration,playCalls:window.__stage3PlayCalls,output:miraPreview.result.output_path});
+    Boolean(characterAudio && characterAudioUrl.includes('preview_') &&
+      window.__stage3PlayCalls > beforePlay && window.__stage3PlayResolved > beforeResolved &&
+      window.__stage3PlayRejected.length === 0 && Number(miraPreview.result.actual_duration_seconds) > 0),
+    {audioUrl:characterAudioUrl,playCalls:window.__stage3PlayCalls-beforePlay,
+      playResolved:window.__stage3PlayResolved-beforeResolved,playRejected:window.__stage3PlayRejected,
+      actualDuration:miraPreview.result.actual_duration_seconds,output:miraPreview.result.output_path});
   report.previews.push({
     kind:'assigned-character',
     profile:'Stage 3 Mira • Piper Amy',
     source_text:'“Stay close.”',
     output_path:miraPreview.result.output_path,
     actual_duration_seconds:miraPreview.result.actual_duration_seconds,
-    audio_play_calls:window.__stage3PlayCalls-beforePlay
+    audio_play_calls:window.__stage3PlayCalls-beforePlay,
+    audio_play_resolved:window.__stage3PlayResolved-beforeResolved,
+    audio_url:characterAudioUrl
   });
 
   // The default Premium V2 Character Studio highlights an unresolved quoted
@@ -444,6 +478,7 @@ JS_DRIVER = r"""
   await go('voices');
   await waitFor(() => Boolean(document.querySelector('#previewProjectNarrator')), 5000, 'Project Narrator preview control');
   const beforeNarratorPlay = window.__stage3PlayCalls;
+  const beforeNarratorResolved = window.__stage3PlayResolved;
   const beforeNarratorPreviewIds = new Set((await call('job.list',{include_hidden:true})).map(job => String(job.job_id)));
   document.querySelector('#previewProjectNarrator').click();
   const narratorPreview = await waitForVoiceJob('Stage 3 Narrator • Piper Lessac', 150000, beforeNarratorPreviewIds);
@@ -455,17 +490,23 @@ JS_DRIVER = r"""
   if (!playButton || playButton.disabled) throw new Error('Validated narrator preview did not enable the in-app Play control.');
   playButton.click();
   await waitFor(() => window.__stage3PlayCalls > beforeNarratorPlay, 10000, 'narrator preview Play action');
+  await waitFor(() => window.__stage3PlayResolved > beforeNarratorResolved, 10000, 'narrator preview playback promise resolution');
   const narratorAudio = window.__stage3LastAudio;
   check('CS-12 narrator preview Play uses the embedded audio player',
-    Boolean(narratorAudio && Number(narratorAudio.duration) > 0 && window.__stage3PlayCalls > beforeNarratorPlay),
-    {duration:narratorAudio?.duration,playCalls:window.__stage3PlayCalls-beforeNarratorPlay});
+    Boolean(narratorAudio && window.__stage3PlayCalls > beforeNarratorPlay &&
+      window.__stage3PlayResolved > beforeNarratorResolved && window.__stage3PlayRejected.length === 0),
+    {audioUrl:String(narratorAudio?.currentSrc || narratorAudio?.src || ''),
+      playCalls:window.__stage3PlayCalls-beforeNarratorPlay,
+      playResolved:window.__stage3PlayResolved-beforeNarratorResolved,
+      playRejected:window.__stage3PlayRejected});
   report.previews.push({
     kind:'effective-narrator',
     profile:'Stage 3 Narrator • Piper Lessac',
     source_text:narrationText,
     output_path:narratorPreview.result.output_path,
     actual_duration_seconds:narratorPreview.result.actual_duration_seconds,
-    audio_play_calls:window.__stage3PlayCalls-beforeNarratorPlay
+    audio_play_calls:window.__stage3PlayCalls-beforeNarratorPlay,
+    audio_play_resolved:window.__stage3PlayResolved-beforeNarratorResolved
   });
 
   report.status='passed';
