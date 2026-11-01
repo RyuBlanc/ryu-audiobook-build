@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 import subprocess
@@ -34,67 +35,205 @@ def _run(command: list[str], timeout: float = 4.0) -> str:
         return ""
 
 
-def _windows_host_identity() -> tuple[str, str]:
-    """Return Windows OS caption and processor model without treating RAM as VRAM."""
+def windows_host_identity() -> tuple[str, str, str]:
+    """Return Windows edition, DisplayVersion and processor model."""
     if os.name != "nt":
-        return "", ""
+        return "", "", ""
     script = (
         "$os=Get-CimInstance Win32_OperatingSystem; "
         "$cpu=Get-CimInstance Win32_Processor | Select-Object -First 1; "
-        "[pscustomobject]@{OSCaption=$os.Caption; CPUName=$cpu.Name} | "
+        "$version=Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion'; "
+        "[pscustomobject]@{OSCaption=$os.Caption; DisplayVersion=$version.DisplayVersion; CPUName=$cpu.Name} | "
         "ConvertTo-Json -Compress"
     )
     raw = _run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script])
     if not raw:
-        return "", ""
+        return "", "", ""
     try:
         value = json.loads(raw)
-        return str(value.get("OSCaption") or ""), str(value.get("CPUName") or "")
+        return (
+            str(value.get("OSCaption") or ""),
+            str(value.get("DisplayVersion") or ""),
+            str(value.get("CPUName") or ""),
+        )
     except (ValueError, TypeError, AttributeError):
-        return "", ""
+        return "", "", ""
 
 
-_AMD_WINDOWS_GPU_MODELS = (
-    "rx 9070", "rx 9070 xt", "rx 9060 xt", "rx 7900 xtx",
-    "ai pro r9700", "pro w7900",
+def _normalise_device_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value).casefold()).strip()
+
+
+# AMD ROCm 10.1.0 / PyTorch 2.14.0 Windows 11 25H2 device targets.
+# gfx1030 remains excluded here because AMD's 10.1 PyTorch Windows wheel
+# selector does not publish a gfx1030 10.1.0 wheel.
+_AMD_ROCM_101_GPU_TARGETS = (
+    ("radeon ai pro r9700s", "gfx1201"),
+    ("radeon ai pro r9700", "gfx1201"),
+    ("radeon ai pro r9600d", "gfx1201"),
+    ("radeon ai pro r9600", "gfx1201"),
+    ("radeon rx 9070 xt", "gfx1201"),
+    ("radeon rx 9070 gre", "gfx1201"),
+    ("radeon rx 9070", "gfx1201"),
+    ("radeon rx 9060 xt lp", "gfx1200"),
+    ("radeon rx 9060 xt", "gfx1200"),
+    ("radeon rx 9060", "gfx1200"),
+    ("radeon rx 9050 4gb", "gfx1200"),
+    ("radeon rx 9050", "gfx1200"),
+    ("radeon pro w7900 dual slot", "gfx1100"),
+    ("radeon pro w7900", "gfx1100"),
+    ("radeon pro w7800 48gb", "gfx1100"),
+    ("radeon pro w7800", "gfx1100"),
+    ("radeon rx 7900 xtx", "gfx1100"),
+    ("radeon rx 7900 xt", "gfx1100"),
+    ("radeon rx 7900 gre", "gfx1100"),
+    ("radeon pro w7700", "gfx1101"),
+    ("radeon rx 7800 xt", "gfx1101"),
+    ("radeon rx 7700 xt", "gfx1101"),
+    ("radeon rx 7700", "gfx1101"),
+    ("radeon pro v710", "gfx1101"),
+    ("radeon rx 7600", "gfx1102"),
 )
-_AMD_WINDOWS_APU_MODELS = (
-    "ryzen ai max+ 395", "ryzen ai max 390", "ryzen ai max 385",
-    "ryzen ai 9 hx 375", "ryzen ai 9 hx 370", "ryzen ai 9 365",
-    "ryzen ai 9 hx 475", "ryzen ai 9 hx 470", "ryzen ai 9 465",
+
+_AMD_ROCM_101_APU_TARGETS = (
+    ("ryzen ai max pro 495", "gfx1151"),
+    ("ryzen ai max pro 490", "gfx1151"),
+    ("ryzen ai max pro 485", "gfx1151"),
+    ("ryzen ai max pro 395", "gfx1151"),
+    ("ryzen ai max pro 390", "gfx1151"),
+    ("ryzen ai max pro 385", "gfx1151"),
+    ("ryzen ai max pro 380", "gfx1151"),
+    ("ryzen ai max 395", "gfx1151"),
+    ("ryzen ai max 392", "gfx1151"),
+    ("ryzen ai max 388", "gfx1151"),
+    ("ryzen ai max 390", "gfx1151"),
+    ("ryzen ai max 385", "gfx1151"),
+    ("ryzen ai 9 hx pro 475", "gfx1150"),
+    ("ryzen ai 9 hx pro 470", "gfx1150"),
+    ("ryzen ai 9 pro 465", "gfx1150"),
+    ("ryzen ai 7 pro 450", "gfx1152"),
+    ("ryzen ai 5 pro 440", "gfx1152"),
+    ("ryzen ai 5 pro 435", "gfx1153"),
+    ("ryzen ai 9 hx 475", "gfx1150"),
+    ("ryzen ai 9 hx 470", "gfx1150"),
+    ("ryzen ai 9 465", "gfx1150"),
+    ("ryzen ai 7 450", "gfx1152"),
+    ("ryzen ai 5 435", "gfx1153"),
+    ("ryzen ai 5 430", "gfx1153"),
+    ("ryzen ai 7 445", "gfx1153"),
+    ("ryzen ai 9 hx pro 375", "gfx1150"),
+    ("ryzen ai 9 hx pro 370", "gfx1150"),
+    ("ryzen ai 7 pro 350", "gfx1152"),
+    ("ryzen ai 5 pro 340", "gfx1152"),
+    ("ryzen ai 9 hx 375", "gfx1150"),
+    ("ryzen ai 9 hx 370", "gfx1150"),
+    ("ryzen ai 9 365", "gfx1150"),
+    ("ryzen ai 7 350", "gfx1152"),
+    ("ryzen ai 7 345", "gfx1152"),
+    ("ryzen ai 5 340", "gfx1152"),
+    ("ryzen ai 5 330", "gfx1152"),
+    ("ryzen 7 pro 250", "gfx1103"),
+    ("ryzen 5 pro 230", "gfx1103"),
+    ("ryzen 5 pro 220", "gfx1103"),
+    ("ryzen 5 pro 215", "gfx1103"),
+    ("ryzen 3 pro 210", "gfx1103"),
+    ("ryzen 9 270", "gfx1103"),
+    ("ryzen 7 260", "gfx1103"),
+    ("ryzen 7 250", "gfx1103"),
+    ("ryzen 5 240", "gfx1103"),
+    ("ryzen 5 230", "gfx1103"),
+    ("ryzen 5 220", "gfx1103"),
+    ("ryzen 3 210", "gfx1103"),
+)
+
+# Exact Windows 11 models in the older ROCm 7.2.1 PyTorch matrix.
+_AMD_ROCM_721_GPU_TARGETS = (
+    "radeon rx 9070",
+    "radeon rx 9070 xt",
+    "radeon ai pro r9700",
+    "radeon rx 9060 xt",
+    "radeon rx 7900 xtx",
+    "radeon pro w7900",
+    "radeon pro w7900 dual slot",
+    "radeon rx 7700",
+)
+_AMD_ROCM_721_APU_TARGETS = (
+    "ryzen ai max 395",
+    "ryzen ai max 390",
+    "ryzen ai max 385",
+    "ryzen ai 9 hx 375",
+    "ryzen ai 9 hx 370",
+    "ryzen ai 9 365",
+    "ryzen ai 9 hx 475",
+    "ryzen ai 9 hx 470",
+    "ryzen ai 9 465",
 )
 
 
-def is_supported_amd_windows_device(adapter_name: str, cpu_name: str, os_caption: str) -> bool:
-    """Match only AMD's published Windows PyTorch/ROCm 7.2.1 hardware list."""
+def amd_windows_runtime_spec(
+    adapter_name: str, cpu_name: str, os_caption: str, display_version: str
+) -> dict[str, str] | None:
+    """Return an official Windows ROCm/PyTorch target for the detected AMD device."""
     if "windows 11" not in str(os_caption).casefold():
-        return False
-    adapter = str(adapter_name).casefold()
-    cpu = str(cpu_name).casefold()
-    return (
-        any(model in adapter for model in _AMD_WINDOWS_GPU_MODELS)
-        or any(model in cpu for model in _AMD_WINDOWS_APU_MODELS)
-    )
+        return None
+    adapter = _normalise_device_name(adapter_name)
+    cpu = _normalise_device_name(cpu_name)
+
+    if str(display_version).strip().casefold() == "25h2":
+        arch = next(
+            (target for model, target in _AMD_ROCM_101_GPU_TARGETS if model in adapter),
+            None,
+        )
+        if arch is None:
+            arch = next(
+                (target for model, target in _AMD_ROCM_101_APU_TARGETS if model in cpu),
+                None,
+            )
+        if arch is not None:
+            return {
+                "rocm": "10.1.0",
+                "arch": arch,
+                "torch": "2.14.0+rocm10.1.0",
+                "torchaudio": "2.11.0.3+rocm10.1.0",
+            }
+        return None
+
+    if any(model in adapter for model in _AMD_ROCM_721_GPU_TARGETS) or any(
+        model in cpu for model in _AMD_ROCM_721_APU_TARGETS
+    ):
+        return {
+            "rocm": "7.2.1",
+            "arch": "",
+            "torch": "2.9.1+rocm7.2.1",
+            "torchaudio": "2.9.1+rocm7.2.1",
+        }
+    return None
+
+
+def is_supported_amd_windows_device(
+    adapter_name: str, cpu_name: str, os_caption: str, display_version: str = ""
+) -> bool:
+    """Match only AMD devices for which an official Windows PyTorch/ROCm route exists."""
+    return amd_windows_runtime_spec(
+        adapter_name, cpu_name, os_caption, display_version
+    ) is not None
 
 
 def is_supported_intel_windows_device(adapter_name: str, cpu_name: str, os_caption: str) -> bool:
-    """Match Intel Arc A/B GPUs and supported Core Ultra Arc iGPU families."""
+    """Match Intel Arc A/B and supported Core Ultra Arc iGPU families."""
     if "windows 11" not in str(os_caption).casefold():
         return False
-    adapter = str(adapter_name).casefold()
-    cpu = str(cpu_name).casefold()
+    adapter = _normalise_device_name(adapter_name)
+    cpu = _normalise_device_name(cpu_name)
     if "arc" not in adapter:
         return False
-    # Discrete Arc A/B products are validated independently of processor brand.
-    if any(model in adapter for model in (
-        "arc a", "arc b", "a380", "a580", "a750", "a770",
-        "b570", "b580", "b60",
-    )):
+    if re.search(r"\\barc\\s+[ab]\\d{3}\\b", adapter):
         return True
-    # Integrated Arc graphics are validated on Core Ultra mobile H/V families.
+    # Meteor Lake H, Lunar Lake, Arrow Lake H and Panther Lake mobile SKUs.
+    # Windows WMI names can include "(R)" and "(TM)" between Core/Ultra tokens.
     return bool(
-        re.search(r"\bcore\b.*\bultra\b", cpu)
-        and re.search(r"\b\d{3}[hv]\b", cpu)
+        re.search(r"\\bcore\\b.*\\bultra\\b", cpu)
+        and re.search(r"\\b\\d{3}[hv]\\b", cpu)
     )
 
 
@@ -169,23 +308,25 @@ def detect_accelerators() -> tuple[Accelerator, ...]:
             pass
 
     if os.name == "nt":
-        os_caption, cpu_name = _windows_host_identity()
+        os_caption, display_version, cpu_name = windows_host_identity()
         for name, memory in _windows_video_controllers():
             lowered = name.casefold()
             if ("amd" in lowered or "radeon" in lowered) and not any(
                 item.backend in {"rocm", "cuda"} and item.supported for item in found
             ):
-                if is_supported_amd_windows_device(name, cpu_name, os_caption):
+                spec = amd_windows_runtime_spec(name, cpu_name, os_caption, display_version)
+                if spec:
                     backend = "rocm-candidate"
                     reason = (
-                        "AMD device is listed for ROCm 7.2.1 on Windows 11. "
-                        "The app will verify HIP activation after installing the runtime."
+                        f"AMD device matches official ROCm {spec['rocm']} Windows 11 "
+                        f"PyTorch support ({spec['arch'] or 'legacy ROCm 7.2.1'}); "
+                        "HIP activation is verified after installation."
                     )
                 else:
                     backend = "rocm-unsupported"
                     reason = (
-                        "AMD adapter detected but not listed in AMD's supported Windows "
-                        "PyTorch/ROCm device matrix. Qwen uses CPU on this device."
+                        "AMD adapter/Windows release is not in the official Windows "
+                        "PyTorch device matrix. Qwen uses CPU on this device."
                     )
                 found.append(Accelerator(backend, "cpu", name, 0.0, False, reason))
             elif ("intel" in lowered or "arc" in lowered) and not any(
@@ -194,8 +335,9 @@ def detect_accelerators() -> tuple[Accelerator, ...]:
                 if is_supported_intel_windows_device(name, cpu_name, os_caption):
                     backend = "xpu-candidate"
                     reason = (
-                        "Intel Arc/Core Ultra Arc device is listed for Windows XPU. "
-                        "The app will verify torch.xpu activation after installing."
+                        "Intel Arc/Core Ultra Arc device is listed for Windows 11 XPU "
+                        "(including Core Ultra Series 3); XPU activation is verified "
+                        "after installing the PyTorch XPU runtime."
                     )
                 else:
                     backend = "xpu-unsupported"
