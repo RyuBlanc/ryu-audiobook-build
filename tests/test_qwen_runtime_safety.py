@@ -289,6 +289,14 @@ class QwenAcceleratorDiscoveryTests(unittest.TestCase):
             "Microsoft Windows 11 Pro", "24H2",
         ))
         self.assertIsNone(amd_windows_runtime_spec(
+            "AMD Radeon Graphics", "AMD Ryzen AI Max+ PRO 395",
+            "Microsoft Windows 11 Pro", "24H2",
+        ))
+        self.assertIsNone(amd_windows_runtime_spec(
+            "AMD Radeon Graphics", "AMD Ryzen AI 9 HX PRO 375",
+            "Microsoft Windows 11 Pro", "24H2",
+        ))
+        self.assertIsNone(amd_windows_runtime_spec(
             "AMD Radeon RX 9050", "AMD Ryzen 9 9950X",
             "Microsoft Windows 11 Pro", "24H2",
         ))
