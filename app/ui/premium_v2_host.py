@@ -1987,6 +1987,7 @@ class PremiumV2Bridge(QObject):
         library_updates = []
         attempted_projects = []
         attempted_library = []
+        attempted_series_defaults = []
         try:
             for project in list_projects():
                 original_state = load_state(project.folder)
@@ -2073,6 +2074,27 @@ class PremiumV2Bridge(QObject):
                     raise ValueError("A reusable Character Library voice reference is missing its record ID.")
                 library_updates.append((record_id, referenced_name))
 
+            # Series narrator defaults live outside project state. Migrate these
+            # references too, so renaming a saved Voice Studio profile cannot
+            # silently invalidate every project inheriting that series default.
+            series_defaults_root = Path(settings_root()) / "series-narrators"
+            if series_defaults_root.is_dir():
+                for path in sorted(series_defaults_root.glob("*.json")):
+                    original_text = path.read_text(encoding="utf-8")
+                    record = json.loads(original_text)
+                    if not isinstance(record, dict):
+                        raise ValueError(f"Series narrator preference is not a JSON object: {path.name}")
+                    if str(record.get("profile_name") or "").strip().casefold() != old_key:
+                        continue
+                    record["profile_name"] = new_name
+                    record["provider"] = str(getattr(profile, "provider", "") or "")
+                    record["voice_id"] = new_voice_id
+                    record["updated_at"] = self._now()
+                    attempted_series_defaults.append((path, original_text))
+                    temp_path = path.with_suffix(path.suffix + ".tmp")
+                    temp_path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+                    temp_path.replace(path)
+
             for folder, original_state, updated_state in project_updates:
                 attempted_projects.append((folder, original_state))
                 save_state(folder, updated_state)
@@ -2083,6 +2105,13 @@ class PremiumV2Bridge(QObject):
 
         except Exception as exc:
             rollback_errors = []
+            for path, original_text in reversed(attempted_series_defaults):
+                try:
+                    temp_path = path.with_suffix(path.suffix + ".rollback.tmp")
+                    temp_path.write_text(original_text, encoding="utf-8")
+                    temp_path.replace(path)
+                except Exception as rollback_exc:
+                    rollback_errors.append(str(rollback_exc))
             for record_id, old_voice_name in reversed(attempted_library):
                 try:
                     update_reusable_character(record_id, {"voice_name": old_voice_name})
@@ -2466,6 +2495,22 @@ class PremiumV2Bridge(QObject):
         profile = next((item for item in saved if item.name.casefold() == name.casefold()), None)
         if profile is None:
             raise ValueError("Built-in voices cannot be deleted. Choose a saved custom profile.")
+        series_defaults_root = Path(settings_root()) / "series-narrators"
+        if series_defaults_root.is_dir():
+            for path in sorted(series_defaults_root.glob("*.json")):
+                try:
+                    record = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError, json.JSONDecodeError) as exc:
+                    raise ValueError(
+                        "A saved series narrator preference could not be verified. "
+                        "The profile was not deleted to protect narrator assignments."
+                    ) from exc
+                if isinstance(record, dict) and str(record.get("profile_name") or "").strip().casefold() == name.casefold():
+                    series_name = str(record.get("series") or path.stem)
+                    raise ValueError(
+                        f"The profile is the saved narrator default for series '{series_name}'. "
+                        "Change that series narrator default before deleting this profile."
+                    )
         for project in list_projects():
             state = load_state(project.folder)
             if str(state.get("voice_profile") or "").casefold() == name.casefold():

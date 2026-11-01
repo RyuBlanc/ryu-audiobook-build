@@ -48,6 +48,13 @@ class Stage3NarratorSegmentationContracts(unittest.TestCase):
             self.assertIn(token, adapter)
         self.assertNotIn("Apply to This Book", adapter)
 
+    def test_series_narrator_defaults_are_migrated_and_protected_from_deletion(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn('series_defaults_root = Path(settings_root()) / "series-narrators"', host)
+        self.assertIn('attempted_series_defaults.append((path, original_text))', host)
+        self.assertIn("The profile is the saved narrator default for series", host)
+        self.assertIn("Change that series narrator default before deleting this profile.", host)
+
     def test_generation_uses_effective_narrator_and_blocks_unresolved_dialogue(self):
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn("def _resolve_narrator_for_generation(", host)

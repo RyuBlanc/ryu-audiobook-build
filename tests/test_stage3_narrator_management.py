@@ -92,6 +92,51 @@ class Stage3NarratorManagementTests(unittest.TestCase):
         self.assertEqual(result["source"], "none")
         self.assertFalse(result["profile_available"])
 
+    def test_profile_rename_migrates_saved_series_narrator_defaults(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            defaults = root / "series-narrators"
+            defaults.mkdir()
+            path = defaults / "series-123.json"
+            path.write_text(json.dumps({
+                "schema_version": 1,
+                "series": "The Series",
+                "profile_name": "Old Narrator",
+                "provider": "piper",
+                "voice_id": "old-id",
+                "updated_at": "2026-10-31T00:00:00Z",
+            }), encoding="utf-8")
+            previous = SimpleNamespace(name="Old Narrator", voice_id="old-id")
+            updated = SimpleNamespace(name="New Narrator", voice_id="new-id", provider="kokoro", backend="automatic")
+            with patch("app.ui.premium_v2_host.settings_root", return_value=root):
+                with patch("app.ui.premium_v2_host.list_projects", return_value=[]):
+                    with patch("app.ui.premium_v2_host.list_reusable_characters", return_value=[]):
+                        self.bridge._migrate_saved_voice_profile_references(previous, updated, [previous, updated])
+            record = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(record["profile_name"], "New Narrator")
+        self.assertEqual(record["provider"], "kokoro")
+        self.assertEqual(record["voice_id"], "new-id")
+
+    def test_profile_delete_is_blocked_while_used_as_a_series_narrator_default(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            defaults = root / "series-narrators"
+            defaults.mkdir()
+            (defaults / "series-123.json").write_text(json.dumps({
+                "series": "The Series",
+                "profile_name": "Series Narrator",
+                "provider": "piper",
+                "voice_id": "series-voice",
+            }), encoding="utf-8")
+            saved_profile = SimpleNamespace(name="Series Narrator")
+            with patch("app.tts.voice_profile.load_saved_profiles", return_value=[saved_profile]):
+                with patch("app.tts.voice_profile.save_profiles") as save_profiles:
+                    with patch("app.ui.premium_v2_host.settings_root", return_value=root):
+                        with patch("app.ui.premium_v2_host.list_projects", return_value=[]):
+                            with self.assertRaisesRegex(ValueError, "saved narrator default for series 'The Series'"):
+                                self.bridge._voice_delete({"profile_name": "Series Narrator"})
+            save_profiles.assert_not_called()
+
     def test_generation_uses_effective_series_narrator_not_transient_request_profile(self):
         chapter = Chapter(1, "One", "The sun rose over the quiet valley.")
         project = SimpleNamespace(chapters=[chapter])
