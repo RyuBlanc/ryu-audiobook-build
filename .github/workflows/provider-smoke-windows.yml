@@ -131,7 +131,7 @@ jobs:
       - name: Run actual Qwen VoiceDesign 30-second preview and expression tests
         shell: pwsh
         env:
-          PYTHONPATH: \${{ github.workspace }}
+          PYTHONPATH: ${{ github.workspace }}
           HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
           RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
           RYU_QWEN_ACCEPTANCE_OUTPUT: ${{ github.workspace }}\qwen-real-provider-artifacts
@@ -142,7 +142,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Ryu-Stage3-Real-Qwen-VoiceDesign-\${{ github.run_number }}
+          name: Ryu-Stage3-Real-Qwen-VoiceDesign-${{ github.run_number }}
           path: qwen-real-provider-artifacts/
           if-no-files-found: warn
           retention-days: 30

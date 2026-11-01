@@ -171,8 +171,13 @@ def main() -> None:
                 raise RuntimeError(
                     f"Native Character Studio analysis did not expose both chapters: {panel._review_rows!r}"
                 )
+            panel.ai_chapters.setCurrentRow(1)
+            app.processEvents()
             if "I can guide us." not in panel.ai_story.toPlainText():
-                raise RuntimeError("AI review view did not render the second chapter's live source dialogue.")
+                raise RuntimeError(
+                    "AI review view did not render the second chapter after selecting it: "
+                    + panel.ai_story.toPlainText()
+                )
 
             # Open the real source-backed assignment dialog from its dialogue://
             # link, choose Mira and her saved Audio Profile, then click Assign.
@@ -275,8 +280,12 @@ def main() -> None:
             if not preview_path.is_file() or preview_path.stat().st_size < 1024:
                 raise RuntimeError(f"Selected-profile UI preview did not create a valid WAV: {status.text()}")
             preview_seconds = _wav_duration(preview_path)
-            if reopened_panel._player.source().toLocalFile() != str(preview_path):
-                raise RuntimeError("Native Character Studio player was not handed the real selected-profile preview file.")
+            player_source = Path(reopened_panel._player.source().toLocalFile()).resolve()
+            if player_source != preview_path.resolve():
+                raise RuntimeError(
+                    "Native Character Studio player was not handed the real selected-profile preview file: "
+                    f"player={player_source} expected={preview_path.resolve()}"
+                )
             if cast_page.saved_cast_writes < 1:
                 raise RuntimeError("The native UI did not persist its saved cast update.")
 
