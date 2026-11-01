@@ -1090,6 +1090,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("Ryu-Audiobook-Portable", storage_workflow)
         self.assertIn("Ryu-Audiobook-Release-SHA256", storage_workflow)
         self.assertIn("All Ryu-Audiobook-Test-Evidence-* artifacts and workflow-run logs are intentionally retained.", storage_workflow)
+        self.assertIn("github.rest.actions.deleteArtifact", storage_workflow)
+        self.assertNotIn("github.rest.actions.deleteWorkflowRun", storage_workflow)
         self.assertNotIn("/actions/runs/", storage_workflow)
 
     def test_qwen_voice_preview_reuses_warm_provider_and_replaces_changed_profile(self):

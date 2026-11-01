@@ -31,20 +31,12 @@ jobs:
             const repo = context.repo.repo;
             const protectedRunNumbers = new Set([1441, 1536, 1637]);
             const currentBuildRunId = context.payload.workflow_run?.id ?? null;
-            const currentCleanupRunId = context.runId;
             const packageName = /^Ryu-Audiobook-(Windows|Installer|Portable|Release-SHA256)-(\d+)$/;
 
             const allBuildRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
               owner, repo, workflow_id: 'build-windows.yml', status: 'completed', per_page: 100
             });
 
-            const stageNumber = run => {
-              const source = String(run.head_commit?.message || run.name || '');
-              const match = source.match(/\bStage\s*(\d+)(?:\.\d+)?\b/i);
-              if (match) return Number(match[1]);
-              const branchMatch = String(run.head_branch || '').match(/\bstage-?(\d+)\b/i);
-              return branchMatch ? Number(branchMatch[1]) : null;
-            };
             const hasCheckpointMarker = run =>
               String(run.head_commit?.message || run.name || '').includes('[artifact-checkpoint]');
 
@@ -83,110 +75,33 @@ jobs:
             let deletedArtifacts = 0;
             let protectedArtifacts = 0;
             let keptCurrentArtifacts = 0;
-            if (!packageAnchor) {
-              core.info('No successful checkpoint with a complete package set was found. Package artifacts will be preserved.');
-            } else {
-              core.info(`Verified package replacement at Build #${packageAnchor.run_number}; pruning only superseded package categories.`);
-              const allArtifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
-                owner, repo, per_page: 100
-              });
-              for (const artifact of allArtifacts) {
-                const match = artifact.name.match(packageName);
-                if (!match || artifact.expired) continue;
-                const category = match[1];
-                const number = Number(match[2]);
-                if (!deletableTypes.has(category)) continue;
-                if (artifact.workflow_run?.id === packageAnchor.id || number === packageAnchor.run_number) {
-                  keptCurrentArtifacts++;
-                  continue;
-                }
-                if (protectedRunNumbers.has(number)) {
-                  protectedArtifacts++;
-                  core.info(`Protected rollback package artifact: ${artifact.name}`);
-                  continue;
-                }
-                if (number >= packageAnchor.run_number) continue;
-                await github.rest.actions.deleteArtifact({owner, repo, artifact_id: artifact.id});
-                deletedArtifacts++;
-                core.info(`Deleted superseded package artifact: ${artifact.name}`);
-              }
-            }
-
-            // Preserve latest success and latest terminal result per branch/stage pair.
-            // Old failures/cancellations are deleted only after later evidence supersedes them.
-            // Stage 7+, unlabelled runs and active runs are intentionally untouched.
-            const stageRuns = allBuildRuns
-              .map(run => ({run, stage: stageNumber(run)}))
-              .filter(item => item.stage !== null && item.stage >= 1 && item.stage <= 6)
-              .sort((a, b) => b.run.run_number - a.run.run_number);
-            const latestSuccess = new Map();
-            const latestTerminal = new Map();
-            for (const item of stageRuns) {
-              const key = `${item.run.head_branch || ''}:stage-${item.stage}`;
-              if (!latestTerminal.has(key)) latestTerminal.set(key, item.run.id);
-              if (item.run.conclusion === 'success' && !latestSuccess.has(key)) {
-                latestSuccess.set(key, item.run.id);
-              }
-            }
-
-            let deletedRuns = 0;
-            let keptRuns = 0;
-            let keptForArtifacts = 0;
-            for (const item of stageRuns) {
-              const run = item.run;
-              const key = `${run.head_branch || ''}:stage-${item.stage}`;
-              if (run.id === currentBuildRunId || run.id === packageAnchor?.id || protectedRunNumbers.has(run.run_number)) {
-                keptRuns++;
-                continue;
-              }
-              if (latestSuccess.get(key) === run.id || latestTerminal.get(key) === run.id) {
-                keptRuns++;
-                continue;
-              }
-
-              const artifacts = (await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
-                owner, repo, run_id: run.id, per_page: 100
-              })).filter(a => !a.expired);
-              let mustKeep = false;
-              for (const artifact of artifacts) {
-                const match = artifact.name.match(packageName);
-                if (!match) {
-                  mustKeep = true;
-                  break;
-                }
-                const category = match[1];
-                const artifactRunNumber = Number(match[2]);
-                if (!packageAnchor || !deletableTypes.has(category) ||
-                    artifactRunNumber >= packageAnchor.run_number || protectedRunNumbers.has(artifactRunNumber)) {
-                  mustKeep = true;
-                  break;
-                }
-              }
-              if (mustKeep) {
-                keptForArtifacts++;
-                continue;
-              }
-              await github.rest.actions.deleteWorkflowRun({owner, repo, run_id: run.id});
-              deletedRuns++;
-              core.info(`Deleted superseded Stage ${item.stage} workflow run #${run.run_number} (${run.conclusion || 'no conclusion'}): ${run.head_commit?.message || run.name}`);
-            }
-
-            // Keep the current cleanup invocation and most recent successful cleanup result.
-            const cleanupRuns = await github.paginate(github.rest.actions.listWorkflowRuns, {
-              owner, repo, workflow_id: 'actions-storage-cleanup.yml', status: 'completed', per_page: 100
+            core.info(`Verified package replacement at Build #${packageAnchor.run_number}; pruning only superseded package categories.`);
+            const allArtifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
+              owner, repo, per_page: 100
             });
-            const lastSuccessfulCleanup = cleanupRuns
-              .filter(run => run.conclusion === 'success')
-              .sort((a, b) => b.run_number - a.run_number)[0];
-            let deletedCleanupRuns = 0;
-            for (const run of cleanupRuns) {
-              if (run.id === currentCleanupRunId || run.id === lastSuccessfulCleanup?.id) continue;
-              await github.rest.actions.deleteWorkflowRun({owner, repo, run_id: run.id});
-              deletedCleanupRuns++;
+            for (const artifact of allArtifacts) {
+              const match = artifact.name.match(packageName);
+              if (!match || artifact.expired) continue;
+              const category = match[1];
+              const number = Number(match[2]);
+              if (!deletableTypes.has(category)) continue;
+              if (artifact.workflow_run?.id === packageAnchor.id || number === packageAnchor.run_number) {
+                keptCurrentArtifacts++;
+                continue;
+              }
+              if (protectedRunNumbers.has(number)) {
+                protectedArtifacts++;
+                core.info(`Protected rollback package artifact: ${artifact.name}`);
+                continue;
+              }
+              if (number >= packageAnchor.run_number) continue;
+              await github.rest.actions.deleteArtifact({owner, repo, artifact_id: artifact.id});
+              deletedArtifacts++;
+              core.info(`Deleted superseded package artifact: ${artifact.name}`);
             }
 
             core.info(`Package artifacts: deleted ${deletedArtifacts}; kept current ${keptCurrentArtifacts}; protected rollback ${protectedArtifacts}.`);
-            core.info(`Stage 1–6 run history: deleted ${deletedRuns}; kept ${keptRuns}; preserved for artifacts ${keptForArtifacts}.`);
-            core.info(`Older cleanup workflow runs deleted: ${deletedCleanupRuns}.`);
+            core.info('All Ryu-Audiobook-Test-Evidence-* artifacts and workflow-run logs are intentionally retained.');
+            core.info('Only superseded package artifacts are pruned; workflow runs and their logs remain available for Stage 3 audit and rollback.');
             core.info('Cleanup is only permitted after a successful Stage 3 Step 11.9 artifact checkpoint with a complete Windows package set.');
-            core.info('Protected Build #1441/#1536 rollback packages, Stage 1 checkpoint #1637, latest per-stage evidence, active runs, and all non-package/test-evidence artifacts.');
+            core.info('Protected Build #1441/#1536 rollback packages, Stage 1 checkpoint #1637, the Step 11.9 checkpoint package set, and all non-package/test-evidence artifacts.');
