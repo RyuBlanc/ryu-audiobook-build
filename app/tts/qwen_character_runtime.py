@@ -327,7 +327,10 @@ def _runtime_self_test(python: Path) -> tuple[bool, str]:
         "print('torch=' + torch.__version__); "
         "print('torchaudio=' + torchaudio.__version__); "
         "print('qwen_tts=' + getattr(qwen_tts, '__version__', 'unknown')); "
-        "print('cuda=' + str(torch.cuda.is_available()))"
+        "print('cuda=' + str(torch.cuda.is_available())); "
+        "print('hip=' + str(getattr(torch.version, 'hip', None))); "
+        "xpu=getattr(torch, 'xpu', None); "
+        "print('xpu=' + str(bool(xpu is not None and xpu.is_available())))"
     )
     returncode, detail = _run_capture([str(python), "-c", check], timeout=180)
     return returncode == 0, detail[-5000:]
