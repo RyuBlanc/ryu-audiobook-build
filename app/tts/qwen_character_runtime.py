@@ -19,6 +19,8 @@ from app.tts.qwen_accelerator import (
     detect_accelerators,
     best_accelerator,
     model_selection_memory_gb,
+    amd_windows_runtime_spec,
+    windows_host_identity,
 )
 
 # Qwen3-TTS currently publishes a stable Python 3.12 package/runtime path.
@@ -58,7 +60,7 @@ CUSTOM_SPEAKERS = (
 TORCH_VERSION = "2.9.1"
 TORCHAUDIO_VERSION = "2.9.1"
 QWEN_TTS_VERSION = "0.1.1"
-BOOTSTRAP_VERSION = 8
+BOOTSTRAP_VERSION = 9
 
 
 def _python_works(path: Path) -> bool:
@@ -212,8 +214,8 @@ def _create_or_repair_venv(progress=None) -> Path:
     return VENV_PYTHON
 
 
-def _install_runtime_packages(python: Path, progress=None) -> str:
-    """Install the best compatible Qwen runtime and return its verified backend."""
+def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, str]:
+    """Install the best compatible Qwen runtime and return backend + installed package versions."""
     if progress:
         progress("Installing PyTorch for the local character engine…")
     code, detail = _run_capture(
@@ -229,49 +231,88 @@ def _install_runtime_packages(python: Path, progress=None) -> str:
     active = best_accelerator()
     cpu_plan = (
         "CPU",
-        ["--index-url", "https://download.pytorch.org/whl/cpu",
-         f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}"],
+        [
+            "--index-url", "https://download.pytorch.org/whl/cpu",
+            f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}",
+        ],
         "cpu",
     )
     install_plan: list[tuple[str, list[str], str]] = []
 
     if _has_nvidia_gpu() or active.backend == "cuda":
         install_plan.extend([
-            ("CUDA 12.8",
-             ["--index-url", "https://download.pytorch.org/whl/cu128",
-              f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}"], "cuda"),
-            ("CUDA 12.6",
-             ["--index-url", "https://download.pytorch.org/whl/cu126",
-              f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}"], "cuda"),
+            (
+                "CUDA 12.8",
+                [
+                    "--index-url", "https://download.pytorch.org/whl/cu128",
+                    f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}",
+                ],
+                "cuda",
+            ),
+            (
+                "CUDA 12.6",
+                [
+                    "--index-url", "https://download.pytorch.org/whl/cu126",
+                    f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}",
+                ],
+                "cuda",
+            ),
         ])
     elif amd_candidate is not None and os.name == "nt":
-        rocm_root = "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1"
-        packages = [
-            f"{rocm_root}/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl",
-            f"{rocm_root}/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl",
-            f"{rocm_root}/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl",
-            f"{rocm_root}/rocm-7.2.1.tar.gz",
-            f"{rocm_root}/torch-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl",
-            f"{rocm_root}/torchaudio-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl",
-        ]
-        install_plan.append(("AMD ROCm 7.2.1 (Windows)", packages, "rocm"))
+        os_caption, display_version, cpu_name = windows_host_identity()
+        spec = amd_windows_runtime_spec(
+            amd_candidate.name, cpu_name, os_caption, display_version
+        )
+        if spec is None:
+            raise RuntimeError(
+                f"AMD adapter {amd_candidate.name} is not listed for this Windows release. "
+                "Qwen will not install an unverified ROCm runtime or downgrade this GPU "
+                "to a misleading accelerated state."
+            )
+        if spec["rocm"] == "10.1.0":
+            label = f"AMD ROCm 10.1.0 ({spec['arch']}, Windows 11 25H2)"
+            package_args = [
+                "--index-url", "https://stable.repo.amd.com/rocm/whl-next/",
+                f"torch[device-{spec['arch']}]=={spec['torch']}",
+                f"torchaudio=={spec['torchaudio']}",
+            ]
+        else:
+            rocm_root = "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1"
+            package_args = [
+                f"{rocm_root}/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl",
+                f"{rocm_root}/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl",
+                f"{rocm_root}/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl",
+                f"{rocm_root}/rocm-7.2.1.tar.gz",
+                f"{rocm_root}/torch-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl",
+                f"{rocm_root}/torchaudio-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl",
+            ]
+            label = "AMD ROCm 7.2.1 (legacy Windows 11 support)"
+        install_plan.append((label, package_args, "rocm"))
     elif intel_candidate is not None and os.name == "nt":
         install_plan.append((
             "Intel XPU (Windows)",
-            ["--index-url", "https://download.pytorch.org/whl/xpu", "torch", "torchaudio"],
+            [
+                "--index-url", "https://download.pytorch.org/whl/xpu",
+                "torch", "torchaudio",
+            ],
             "xpu",
         ))
     elif active.backend == "rocm" and sys.platform.startswith("linux"):
         install_plan.append((
             "AMD ROCm",
-            ["--index-url", "https://download.pytorch.org/whl/rocm6.4",
-             f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}"],
+            [
+                "--index-url", "https://download.pytorch.org/whl/rocm6.4",
+                f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}",
+            ],
             "rocm",
         ))
     elif active.backend == "xpu":
         install_plan.append((
             "Intel XPU",
-            ["--index-url", "https://download.pytorch.org/whl/xpu", "torch", "torchaudio"],
+            [
+                "--index-url", "https://download.pytorch.org/whl/xpu",
+                "torch", "torchaudio",
+            ],
             "xpu",
         ))
     else:
@@ -282,9 +323,12 @@ def _install_runtime_packages(python: Path, progress=None) -> str:
     selected_label = ""
     for label, package_args, expected_backend in install_plan:
         if progress:
-            progress(f"Installing PyTorch {TORCH_VERSION} ({label})…")
+            progress(f"Installing PyTorch ({label})…")
         code, detail = _run_capture(
-            [str(python), "-m", "pip", "install", "--upgrade", "--no-cache-dir", *package_args],
+            [
+                str(python), "-m", "pip", "install", "--upgrade",
+                "--no-cache-dir", *package_args,
+            ],
             timeout=3600,
         )
         if code == 0:
@@ -292,11 +336,17 @@ def _install_runtime_packages(python: Path, progress=None) -> str:
             break
         install_error = detail
 
+    # NVIDIA installations remain usable on CPU if their CUDA wheels cannot
+    # install. AMD/Intel candidates fail visibly rather than silently claiming
+    # GPU acceleration after an unsupported driver or wheel resolution.
     if not selected_backend and (_has_nvidia_gpu() or active.backend == "cuda"):
         if progress:
             progress(f"Installing PyTorch {TORCH_VERSION} (CPU)…")
         code, detail = _run_capture(
-            [str(python), "-m", "pip", "install", "--upgrade", "--no-cache-dir", *cpu_plan[1]],
+            [
+                str(python), "-m", "pip", "install", "--upgrade",
+                "--no-cache-dir", *cpu_plan[1],
+            ],
             timeout=3600,
         )
         if code == 0:
@@ -319,7 +369,10 @@ def _install_runtime_packages(python: Path, progress=None) -> str:
     if progress:
         progress("Installing the official Qwen3-TTS Python package…")
     code, detail = _run_capture(
-        [str(python), "-m", "pip", "install", "--upgrade", f"qwen-tts=={QWEN_TTS_VERSION}"],
+        [
+            str(python), "-m", "pip", "install", "--upgrade",
+            f"qwen-tts=={QWEN_TTS_VERSION}",
+        ],
         timeout=2400,
     )
     if code != 0:
@@ -341,6 +394,7 @@ def _install_runtime_packages(python: Path, progress=None) -> str:
     code, detail = _run_capture([str(python), "-c", check], timeout=240)
     if code != 0:
         raise RuntimeError(f"Qwen3-TTS runtime self-test failed: {detail[-3500:]}")
+
     normalized = detail.replace(" ", "")
     backend_ok = (
         selected_backend == "cpu"
@@ -356,9 +410,23 @@ def _install_runtime_packages(python: Path, progress=None) -> str:
         else:
             reason = f"PyTorch did not activate the selected {selected_backend} backend"
         raise RuntimeError(f"{reason}. Qwen runtime is not marked ready. {detail[-2500:]}")
+
+    def output_value(key: str) -> str:
+        prefix = key + "="
+        for line in detail.splitlines():
+            if line.strip().startswith(prefix):
+                return line.strip()[len(prefix):].strip()
+        return ""
+
+    installed_torch = output_value("torch")
+    installed_torchaudio = output_value("torchaudio")
+    if not installed_torch or not installed_torchaudio:
+        raise RuntimeError(
+            "Qwen runtime self-test did not report installed PyTorch and torchaudio versions."
+        )
     if progress:
         progress(f"Qwen runtime ready • {selected_label}. {detail[-700:]}")
-    return selected_backend
+    return selected_backend, installed_torch, installed_torchaudio
 
 
 def _runtime_self_test(python: Path) -> tuple[bool, str]:
@@ -416,6 +484,19 @@ def _runtime_version_is_current() -> bool:
             return False
         ok, detail = _runtime_self_test(VENV_PYTHON)
         if not ok:
+            return False
+
+        def output_value(key: str) -> str:
+            prefix = key + "="
+            for line in detail.splitlines():
+                if line.strip().startswith(prefix):
+                    return line.strip()[len(prefix):].strip()
+            return ""
+
+        if (
+            data.get("torch") != output_value("torch")
+            or data.get("torchaudio") != output_value("torchaudio")
+        ):
             return False
         backend = str(data.get("accelerator") or "cpu").casefold()
         normalized = detail.replace(" ", "")
@@ -752,7 +833,7 @@ def install_runtime(progress=None, force_repair: bool = False) -> None:
 
     python = _install_portable_python(progress)
     python = _create_or_repair_venv(progress)
-    selected_backend = _install_runtime_packages(python, progress)
+    selected_backend, installed_torch, installed_torchaudio = _install_runtime_packages(python, progress)
 
     MARKER.write_text(
         json.dumps(
@@ -761,8 +842,8 @@ def install_runtime(progress=None, force_repair: bool = False) -> None:
                 "bootstrap_version": BOOTSTRAP_VERSION,
                 "python": PYTHON_VERSION,
                 "qwen_tts": QWEN_TTS_VERSION,
-                "torch": TORCH_VERSION,
-                "torchaudio": TORCHAUDIO_VERSION,
+                "torch": installed_torch,
+                "torchaudio": installed_torchaudio,
                 "tokenizer": TOKENIZER_ID,
                 "accelerator": selected_backend,
             },
