@@ -1,0 +1,51 @@
+# Stage 3 Plan — Voice Studio and Character Assignment
+
+**Working branch:** `stage-3/voice-studio-character-assignment`  
+**Baseline:** Stage 2 merge commit `9aa1ba5cc9be0808d596c1e2c0618584433c9917`  
+**UI rule:** preserve the approved Premium V2 HTML and existing control layout. Improve real backend behavior, validation, persistence, and tests; do not replace connected behavior with demo data.
+
+## Objectives
+
+### 3.1 Voice Studio profile lifecycle
+- [x] Regression contract covers supported-provider validation, unique-name collision, required voice ID/reference audio, and explicit permission for cloning; Run #894 passed.
+- [x] Regression test covers saved custom-profile persistence and catalogue reload with Unicode names and paths; Run #894 passed.
+- [x] Regression contracts cover deletion refusal for built-in profiles and profiles still assigned as narrator/character; Run #894 passed. Packaged-app interaction still requires target-PC acceptance.
+- [ ] Target-PC acceptance: confirm selected preview actually uses the selected saved profile/provider and reports provider failures clearly.
+- [ ] Target-PC acceptance: verify custom/reference voices and built-in voices remain distinguishable and reload after application restart.
+
+### 3.2 Character analysis and cast persistence
+- [x] Regression coverage includes dialogue attribution and manual-assignment names surviving analysis; first-person narration and broader alias/false-positive fixtures remain to be expanded.
+- [x] Re-analysis preserves voice-profile assignment and edited cast metadata for case-insensitive exact-name matches; regression test passed in Run #894.
+- [x] Regression contract covers rename preserving the old canonical name as an alias and partial updates preserving omitted metadata; Run #894 passed. Still required: behavioral tests for case-insensitive updates, alias edits, duplicate names, delete semantics and assignment references.
+- [ ] Add persistence-level tests for analysis output, confidence/examples, dialogue totals and unassigned counts across save/reopen.
+
+### 3.3 Dialogue assignment and generation routing
+- [x] Regression tests for legacy/multi-speaker assignment shapes, ambiguous quote rejection, exact/stale-span unassignment and multi-speaker candidate detection passed in Run #894.
+- [ ] Add tests for assignment integrity through chapter reorder/merge/split and explicitly define offset migration or safe invalidation behavior.
+- [x] Regression test confirms assigned dialogue routes to cast profiles while surrounding narration uses the narrator; Run #894 passed.
+- [x] Missing assigned cast profile now fails with actionable guidance rather than silently using the narrator; regression test passed in Run #894.
+- [ ] Target-PC acceptance: verify UI displays saved assignment state and preview/generation failures accurately.
+
+### 3.4 Verification and release gates
+- [x] Run #894 passed the full unittest suite and Windows build/package workflow on commit `ec20d76106e01971e16c045a475eb72f78115c83`.
+- [x] Run #894 passed the Windows build/package workflow, frozen-app verification, bundled assets/modules checks, installer build, SHA-256 manifest and Microsoft Defender scan. Release publication was skipped by workflow policy.
+- [ ] Target-PC acceptance: exercise Voice Studio and Character Studio in the packaged Windows app, including actual audio preview and generation.
+- [ ] Keep hardware-specific Stage 1 validation and Stage 2 import acceptance explicitly open until tested on the target PC.
+
+## Current audit observations
+
+- Backend commands already exist for voice list/save/delete/reference import/select/preview, character analysis/assign/update/delete, and dialogue assign/unassign.
+- Character analysis runs as a background job and saves candidate records into project state.
+- Re-analysis currently carries forward the previous `voice_profile` and `chapter_appearances` by case-insensitive exact character name. User-edited metadata and renamed-character matching need explicit verification.
+- Chapter-level dialogue assignments are persisted in project JSON and support legacy single-speaker plus newer multi-speaker records.
+- The Windows workflow must explicitly include this branch to produce fresh CI evidence.
+
+## Current work after Stage 2
+
+Stage 2 PR #17 was merged after Run #877 succeeded. The Stage 2 packaged-Windows acceptance items remain release gates: duplicate import guidance, cancellation/retry, real supported-format imports, and edit/reopen comparison on the target PC. Stage 1 hardware-specific freeze/crash acceptance also remains open.
+
+Stage 3 implementation and automated/package gates passed Run #894 on commit `ec20d76106e01971e16c045a475eb72f78115c83`. Changes include character metadata preservation on partial updates, renamed-character aliases, cast routing regression coverage, and fail-closed handling for missing assigned voice profiles. The complete unittest suite and Windows packaging pipeline passed. Remaining Stage 3 items are explicitly listed below: behavioral edge-case/persistence tests and target-PC audio/UI acceptance.
+
+## Completion rule
+
+Do not mark Stage 3 complete from a green build alone. Require regression tests, verified package output, and a clearly documented target-Windows acceptance result. Do not claim voice quality is correct without listening to the generated preview/audio.

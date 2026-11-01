@@ -1,0 +1,63 @@
+name: Qwen NVIDIA 30-second Preview Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ryu-audiobook-qwen-nvidia-acceptance
+  cancel-in-progress: false
+
+jobs:
+  qwen-gpu-preview:
+    name: Real Qwen 1.7B VoiceDesign under 60 seconds on NVIDIA
+    runs-on: [self-hosted, Windows, X64, NVIDIA]
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install application and CUDA Qwen runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements.txt
+          python -m pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.9.1 torchaudio==2.9.1
+          python -m pip install qwen-tts==0.1.1
+          python -c "import torch; print('torch=' + torch.__version__); print('cuda=' + str(torch.cuda.is_available())); assert torch.cuda.is_available(), 'This is a GPU-only acceptance job.'"
+          nvidia-smi
+
+      - name: Download the official Qwen 1.7B VoiceDesign model
+        shell: pwsh
+        env:
+          HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
+        run: |
+          python -c "import os; from huggingface_hub import snapshot_download; snapshot_download(repo_id='Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign',local_dir=os.path.join(os.environ['RYU_QWEN_MODEL_ROOT'],'design-1.7b'),allow_patterns=['*.json','*.safetensors','*.txt','*.model','*.npz','*.bin','tokenizer*','vocab*'])"
+
+      - name: Run the warmed 30-second Qwen preview GPU timing gate
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
+          RYU_QWEN_GPU_OUTPUT: ${{ github.workspace }}\qwen-gpu-acceptance
+          PYTHONWARNINGS: ignore
+        run: python -B tests/smoke_qwen_gpu_preview.py
+
+      - name: Upload NVIDIA preview audio and benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Stage3-Qwen-NVIDIA-Preview-${{ github.run_number }}
+          path: qwen-gpu-acceptance/
+          if-no-files-found: warn
+          retention-days: 30

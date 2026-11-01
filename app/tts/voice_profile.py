@@ -1,0 +1,384 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+from pathlib import Path
+import json
+import shutil
+import subprocess
+import wave
+import uuid
+
+import imageio_ffmpeg
+
+from app.core.paths import voices_root
+
+
+@dataclass
+class VoiceProfile:
+    name: str
+    provider: str
+    voice_id: str
+    sample_path: str | None = None
+    model_id: str | None = None
+    backend: str = "automatic"
+    language: str | None = None
+    notes: str = ""
+    authorized: bool = False
+    exaggeration: float = 0.5
+    cfg_weight: float = 0.35
+    style_preset: str = "Natural"
+    # Qwen3-TTS phase/profile metadata. These fields are optional so older
+    # voice profiles continue to load without migration.
+    qwen_mode: str = "custom"
+    qwen_prompt: str = ""
+    qwen_seed: int | None = None
+    reference_text: str = ""
+    qwen_anchor_path: str | None = None
+    qwen_anchor_text: str = ""
+    # Unique identity namespace for Qwen VoiceDesign/Clone profiles. Older
+    # profiles migrate automatically on load; this prevents stale generated
+    # reference audio from being reused by a newly saved voice.
+    qwen_profile_id: str = ""
+
+
+def profiles_file() -> Path:
+    return voices_root() / "voices.json"
+
+
+def _qwen_runtime_available() -> bool:
+    try:
+        from app.tts.qwen_character_runtime import runtime_ready
+        return runtime_ready()
+    except Exception:
+        return False
+
+
+def builtin_voice_profiles() -> list[VoiceProfile]:
+    """Return local neural voices available on this installation."""
+    result: list[VoiceProfile] = []
+    offline_fallbacks: list[VoiceProfile] = []
+
+    try:
+        from app.tts.providers.piper import PiperProvider
+        paths = PiperProvider.model_paths()
+    except Exception:
+        paths = []
+
+    metadata = {
+        "en_US-amy-medium": ("en-US", "Female", "Amy", "Recommended offline fallback voice"),
+        "en_US-lessac-medium": ("en-US", "Male", "Lessac", "Recommended offline fallback voice"),
+        "en_US-ryan-high": ("en-US", "Male", "Ryan", "High-quality offline fallback voice"),
+    }
+    for path in paths:
+        language, gender, friendly, note = metadata.get(
+            path.stem,
+            (path.stem.split("-", 1)[0], "Neutral", path.stem, "Built-in offline neural voice"),
+        )
+        offline_fallbacks.append(
+            VoiceProfile(
+                name=f"Offline Neural • {friendly}",
+                provider="piper",
+                voice_id=path.stem,
+                model_id="piper",
+                backend="automatic",
+                language=language,
+                notes=f"Built-in offline voice • {gender} • {note}",
+                authorized=True,
+            )
+        )
+
+    # Kokoro profiles are exposed only when its local model + voice pack are
+    # actually present. This keeps the voice picker honest and avoids saving
+    # profiles that cannot be previewed or generated on the current PC.
+    try:
+        from app.tts.providers.kokoro import KokoroProvider
+        if KokoroProvider.assets_available():
+            catalog = KokoroProvider().voices()
+            for voice_id in catalog:
+                language = KokoroProvider._language_for_voice(voice_id)
+                region = {
+                    "en-us": "English (US)",
+                    "en-gb": "English (UK)",
+                    "ja": "Japanese",
+                    "cmn": "Chinese",
+                    "es": "Spanish",
+                    "fr-fr": "French",
+                    "hi": "Hindi",
+                }.get(language, language)
+                result.append(
+                    VoiceProfile(
+                        name=f"Kokoro Natural • {voice_id}",
+                        provider="kokoro",
+                        voice_id=voice_id,
+                        model_id="kokoro",
+                        backend="automatic",
+                        language=language,
+                        notes=f"Offline natural voice • {region} • Kokoro voice catalogue",
+                        authorized=True,
+                    )
+                )
+    except Exception:
+        pass
+
+    # Qwen3-TTS offline character voices. Keep the catalogue visible even
+    # before the model is installed so the user can choose a character first;
+    # preview/generation will clearly request the local model when it is missing.
+    # Native languages are respected: only Ryan/Aiden are native-English Qwen
+    # speakers, while Vivian/Serena/Uncle_Fu/Dylan/Eric/Ono_Anna/Sohee retain
+    # their documented native languages.
+    qwen_profiles = [
+        ("Anime Hero", "Ryan", "Dynamic English male character; confident anime-protagonist energy, crisp diction, expressive emotional lifts and cinematic pacing.", "English"),
+        ("Anime Rival", "Ryan", "Cool English male rival; restrained confidence, teasing edge, controlled intensity and clean audiobook diction.", "English"),
+        ("Anime Hero • Warm", "Aiden", "Sunny American English male character; warm young-protagonist energy, optimistic emotion and natural conversational delivery.", "English"),
+        ("Anime Sidekick", "Aiden", "Playful American English male sidekick; bright comic timing, lively reactions and clear intelligible delivery.", "English"),
+        ("Anime / Cartoon • Vivian", "Vivian", "Bright slightly edgy young female voice. Best quality is obtained in the speaker's native Chinese; style instructions can add animated energy.", "Chinese"),
+        ("Anime / Cartoon • Serena", "Serena", "Warm gentle young female voice. Best quality is obtained in the speaker's native Chinese; style instructions can add soft anime warmth.", "Chinese"),
+        ("Anime Villain • Uncle Fu", "Uncle_Fu", "Seasoned low mellow male voice. Best quality is obtained in native Chinese; strong theatrical villain delivery.", "Chinese"),
+        ("Anime • Japanese Female", "Ono_Anna", "Playful Japanese female voice with a light nimble timbre; ideal for Japanese character dialogue.", "Japanese"),
+        ("Anime • Korean Female", "Sohee", "Warm Korean female voice with rich emotion; ideal for Korean character dialogue.", "Korean"),
+    ]
+    qwen_seeds = {
+        "Ryan": 1103,
+        "Aiden": 1207,
+        "Vivian": 1301,
+        "Serena": 1409,
+        "Uncle_Fu": 1601,
+        "Ono_Anna": 1709,
+        "Sohee": 1801,
+    }
+    for name, speaker, instruct, language in qwen_profiles:
+        result.append(
+            VoiceProfile(
+                name=f"Offline Character • {name}",
+                provider="qwen-character",
+                voice_id=speaker,
+                model_id="auto",
+                backend="automatic",
+                language=language,
+                notes=(
+                    f"{instruct} "
+                    "Qwen3-TTS CustomVoice • use the speaker's native language for best quality."
+                ),
+                authorized=True,
+                qwen_mode="custom",
+                qwen_prompt=instruct,
+                qwen_seed=qwen_seeds.get(speaker),
+            )
+        )
+
+    # Prefer Kokoro natural voices in the picker when installed; keep Piper
+    # available as the lightweight fallback.
+    return result + offline_fallbacks
+
+
+def load_saved_profiles() -> list[VoiceProfile]:
+    """Read the persisted profile records only; do not scan installed voice engines."""
+    path = profiles_file()
+    if not path.is_file():
+        return []
+    try:
+        records = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(records, list):
+        return []
+    migrated = False
+    for record in records:
+        if (
+            isinstance(record, dict)
+            and record.get("provider") == "qwen-character"
+            and not record.get("qwen_profile_id")
+        ):
+            record["qwen_profile_id"] = uuid.uuid4().hex
+            migrated = True
+    if migrated:
+        try:
+            # Persist IDs without calling save_profiles(), which scans every
+            # installed engine and is too much work for a simple profile read.
+            path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+    saved: list[VoiceProfile] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        try:
+            saved.append(VoiceProfile(**record))
+        except (TypeError, ValueError):
+            continue
+    return saved
+
+
+def load_saved_profile(name: str) -> VoiceProfile | None:
+    """Read one persisted profile without rebuilding the built-in voice catalogue.
+
+    Pages remain alive while the user switches tabs; reading the saved record
+    directly prevents an older in-memory VoiceDesign description/seed/identity
+    from being used for generation after the profile has been updated.
+    """
+    wanted = str(name or "").strip().casefold()
+    if not wanted:
+        return None
+    return next(
+        (profile for profile in load_saved_profiles() if profile.name.casefold() == wanted),
+        None,
+    )
+
+
+def load_profiles() -> list[VoiceProfile]:
+    """Combine installed voices and saved profiles, recovering from legacy name collisions."""
+    saved = load_saved_profiles()
+    builtins = list(builtin_voice_profiles())
+    combined = list(builtins)
+    seen_names: set[str] = {profile.name.strip().casefold() for profile in combined}
+    changed_names = False
+
+    # Built-in catalogue entries must not disappear just because an old custom
+    # profile happens to use their display name. Give the saved custom item a
+    # stable disambiguated name and persist it once so Load/Preview/Assign all
+    # resolve the same identity after restart.
+    ordered_saved = sorted(
+        saved,
+        key=lambda profile: (0 if profile.provider in {"piper", "kokoro"} else 1, profile.name.casefold()),
+    )
+    for profile in ordered_saved:
+        original_name = profile.name.strip()
+        folded = original_name.casefold()
+        same_installed_voice = any(
+            profile.provider == builtin.provider
+            and profile.voice_id.casefold() == builtin.voice_id.casefold()
+            and not profile.sample_path
+            for builtin in builtins
+        )
+        if same_installed_voice:
+            matching_builtin = next(
+                (builtin for builtin in builtins
+                 if profile.provider == builtin.provider
+                 and profile.voice_id.casefold() == builtin.voice_id.casefold()
+                 and profile.name.strip().casefold() == builtin.name.strip().casefold()),
+                None,
+            )
+            if matching_builtin is not None:
+                continue
+
+        if folded in seen_names:
+            suffix = " • Custom"
+            candidate = original_name + suffix
+            ordinal = 2
+            while candidate.casefold() in seen_names:
+                candidate = f"{original_name}{suffix} {ordinal}"
+                ordinal += 1
+            profile.name = candidate
+            changed_names = True
+            folded = candidate.casefold()
+
+        combined.append(profile)
+        seen_names.add(folded)
+
+    if changed_names:
+        try:
+            save_profiles(saved)
+        except OSError:
+            # Keep the disambiguated in-memory catalogue usable this session.
+            # The original catalogue file remains untouched if persistence fails.
+            pass
+    return combined
+
+
+def save_profiles(profiles: list[VoiceProfile]) -> None:
+    voices_root().mkdir(parents=True, exist_ok=True)
+    for profile in profiles:
+        if profile.provider == "qwen-character" and not profile.qwen_profile_id:
+            profile.qwen_profile_id = uuid.uuid4().hex
+    builtin_names_by_identity = {
+        (p.provider, p.voice_id.casefold()): p.name.casefold()
+        for p in builtin_voice_profiles()
+    }
+    persistent = [
+        p for p in profiles
+        if p.sample_path
+        or (p.provider, p.voice_id.casefold()) not in builtin_names_by_identity
+        or p.name.strip().casefold()
+        != builtin_names_by_identity[(p.provider, p.voice_id.casefold())]
+    ]
+    # Replace the profile catalogue atomically. A crash or forced shutdown
+    # during a direct write must not leave voices.json truncated and make
+    # custom voices disappear on the next application launch.
+    destination = profiles_file()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(
+        [asdict(profile) for profile in persistent],
+        ensure_ascii=False,
+        indent=2,
+    )
+    temporary = destination.with_suffix(destination.suffix + ".tmp")
+    try:
+        temporary.write_text(payload, encoding="utf-8")
+        # Verify the temporary file before it can replace the last good copy.
+        written = json.loads(temporary.read_text(encoding="utf-8"))
+        expected = json.loads(payload)
+        if written != expected:
+            raise IOError("Voice profile catalogue verification failed.")
+        temporary.replace(destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def import_reference_audio(source: Path, profile_name: str, minimum_seconds: float = 6.0) -> Path:
+    voices_root().mkdir(parents=True, exist_ok=True)
+    safe = "".join(c if c.isalnum() or c in " _-" else "_" for c in profile_name).strip() or "voice"
+    target_dir = voices_root() / safe
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if not source.exists() or not source.is_file():
+        raise FileNotFoundError(source)
+
+    original = target_dir / source.name
+    shutil.copy2(source, original)
+    target = target_dir / "reference.wav"
+
+    # Always normalize the clone reference, including WAV files. This prevents
+    # stereo/48 kHz/float input differences from changing Chatterbox conditioning.
+    result = subprocess.run(
+        [
+            imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-i", str(source), "-vn",
+            "-ac", "1", "-ar", "24000", "-sample_fmt", "s16",
+            "-c:a", "pcm_s16le", str(target),
+        ],
+        check=False, capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not target.exists() or target.stat().st_size < 1024:
+        raise RuntimeError(
+            "The selected audio could not be converted to a normalized Chatterbox reference. "
+            + (result.stderr[-1600:] if result.stderr else "")
+        )
+    # Chatterbox reference conditioning requires audio longer than five seconds.
+    # Validate imported references here so the user gets a clear error before
+    # the model is loaded.
+    try:
+        with wave.open(str(target), "rb") as handle:
+            duration = handle.getnframes() / max(1, handle.getframerate())
+    except (OSError, wave.Error) as exc:
+        raise RuntimeError(f"The reference audio could not be inspected: {exc}") from exc
+    if duration < float(minimum_seconds):
+        try:
+            target.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise RuntimeError(
+            f"The reference recording is only {duration:.1f} seconds long. "
+            f"Premium cloning requires a clean reference of at least {float(minimum_seconds):.0f} seconds; "
+            "around 10 seconds of clear single-speaker speech is recommended."
+        )
+    try:
+        with wave.open(str(target), "rb") as handle:
+            channels = handle.getnchannels()
+            sample_rate = handle.getframerate()
+            sample_width = handle.getsampwidth()
+        if channels != 1 or sample_rate != 24000 or sample_width != 2:
+            raise RuntimeError(
+                f"Normalized reference format is {channels}ch/{sample_rate}Hz/{sample_width * 8}-bit; "
+                "expected mono 24 kHz PCM16."
+            )
+    except (OSError, wave.Error) as exc:
+        raise RuntimeError(f"The normalized reference could not be validated: {exc}") from exc
+    return target
