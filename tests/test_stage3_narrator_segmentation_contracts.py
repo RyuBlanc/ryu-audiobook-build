@@ -119,6 +119,17 @@ class Stage3NarratorSegmentationContracts(unittest.TestCase):
         self.assertIn('stored_source in {"series_default", "none"}', host)
         self.assertIn("default_profile = str(record.get(\"profile_name\") or \"\").strip()", host)
 
+    def test_storage_cleanup_only_runs_after_successful_stage_3_step_11_9_checkpoint(self):
+        build = (ROOT / ".github/workflows/build-windows.yml").read_text(encoding="utf-8")
+        cleanup = (ROOT / ".github/workflows/actions-storage-cleanup.yml").read_text(encoding="utf-8")
+        self.assertNotIn("Clean old Actions runs and storage after verified Windows build", build)
+        self.assertNotIn("name: Clean stale Actions runs and storage", build)
+        self.assertIn("github.event.workflow_run.conclusion == 'success'", cleanup)
+        self.assertIn("contains(github.event.workflow_run.head_commit.message, '[artifact-checkpoint]')", cleanup)
+        self.assertIn("contains(github.event.workflow_run.head_commit.message, '[Stage 3][Step 11.9]')", cleanup)
+        self.assertIn(r"/\\[Stage 3\\]\\[Step 11\\.9\\]/.test", cleanup)
+        self.assertIn("if (!packageAnchor)", cleanup)
+
     def test_series_narrator_summary_reader_does_not_require_active_project(self):
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         start = host.index("    def _narrator_series_default_read(")

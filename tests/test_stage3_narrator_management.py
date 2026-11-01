@@ -336,6 +336,7 @@ class Stage3NarratorManagementTests(unittest.TestCase):
     def test_series_setup_preview_queues_real_voice_preview_worker_without_active_project(self):
         profile = self._profile("Series Narrator")
         self.bridge._assert_no_active_model_lifecycle = lambda _action: None
+        self.bridge._assert_no_active_audio_synthesis = lambda _action: None
 
         def no_active_project():
             raise ValueError("Open a local project from the Library first.")
