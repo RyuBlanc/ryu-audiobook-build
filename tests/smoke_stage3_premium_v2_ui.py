@@ -12,6 +12,9 @@ import os
 import shutil
 import tempfile
 import time
+import sys
+import faulthandler
+import traceback
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
@@ -208,13 +211,27 @@ JS_DRIVER = r"""
     this.muted = true;
     return nativePlay.call(this);
   };
-  const waitForVoiceJob = async (profileName, timeout=150000) => {
+  const waitForJobId = async (jobId, timeout=150000) => {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      const jobs = await call('job.list', {include_hidden:true});
+      const job = jobs.find(item => String(item.job_id) === String(jobId));
+      if (job && ['completed','failed','cancelled'].includes(job.state)) {
+        if (job.state !== 'completed') throw new Error('Voice preview ended ' + job.state + ': ' + (job.error?.message || job.message || ''));
+        if (!job.result?.output_path || !job.result?.file_url) throw new Error('Completed preview did not return a local WAV file.');
+        return job;
+      }
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    throw new Error('Timed out waiting for the requested voice preview job ' + jobId);
+  };
+  const waitForVoiceJob = async (profileName, timeout=150000, excludedIds=baselineIds) => {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       const jobs = await call('job.list', {include_hidden:true});
       const candidates = jobs.filter(job =>
         job.type === 'voice-preview' &&
-        !baselineIds.has(String(job.job_id)) &&
+        !excludedIds.has(String(job.job_id)) &&
         String(job.title || '').toLowerCase().includes(profileName.toLowerCase())
       ).sort((a,b) => String(b.queued_at || '').localeCompare(String(a.queued_at || '')));
       const job = candidates[0];
@@ -276,8 +293,9 @@ JS_DRIVER = r"""
   check('CS-03/CS-04 selected saved profile requires saved dialogue and enables audition',
     Boolean(testButton && !testButton.disabled), {profile:profileSelect.value,buttonDisabled:testButton?.disabled});
   const beforePlay = window.__stage3PlayCalls;
+  const beforeMiraPreviewIds = new Set((await call('job.list',{include_hidden:true})).map(job => String(job.job_id)));
   testButton.click();
-  const miraPreview = await waitForVoiceJob('Stage 3 Mira • Piper Amy', 150000);
+  const miraPreview = await waitForVoiceJob('Stage 3 Mira • Piper Amy', 150000, beforeMiraPreviewIds);
   await waitFor(() => window.__stage3PlayCalls > beforePlay, 10000, 'real selected-character audio play handoff');
   const characterAudio = window.__stage3LastAudio;
   check('CS-04 actual selected dialogue Piper preview and playback',
@@ -361,7 +379,7 @@ JS_DRIVER = r"""
     duration_seconds:10
   });
   if (!seriesSetupPreview?.job_id) throw new Error('Create Series narrator setup did not queue its selected-profile preview.');
-  const seriesSetupJob = await waitForVoiceJob('Stage 3 Narrator • Piper Lessac', 90000);
+  const seriesSetupJob = await waitForJobId(seriesSetupPreview.job_id, 90000);
   const seriesSetupPlayBefore = window.__stage3PlayCalls;
   const seriesSetupAudio = new Audio(seriesSetupJob.result.file_url);
   await seriesSetupAudio.play();
@@ -426,8 +444,9 @@ JS_DRIVER = r"""
   await go('voices');
   await waitFor(() => Boolean(document.querySelector('#previewProjectNarrator')), 5000, 'Project Narrator preview control');
   const beforeNarratorPlay = window.__stage3PlayCalls;
+  const beforeNarratorPreviewIds = new Set((await call('job.list',{include_hidden:true})).map(job => String(job.job_id)));
   document.querySelector('#previewProjectNarrator').click();
-  const narratorPreview = await waitForVoiceJob('Stage 3 Narrator • Piper Lessac', 150000);
+  const narratorPreview = await waitForVoiceJob('Stage 3 Narrator • Piper Lessac', 150000, beforeNarratorPreviewIds);
   await waitFor(() => (document.querySelector('#previewState')?.textContent || '').includes('Ready'), 10000, 'narrator preview validation UI');
   check('CS-12 production narrator preview uses effective Series Default and real selected source text',
     Boolean(narratorPreview.result?.output_path && narratorPreview.result?.actual_duration_seconds > 0),
@@ -459,9 +478,35 @@ JS_DRIVER = r"""
 """
 
 
+def _write_bootstrap_marker(output_root: Path, phase: str, **details) -> None:
+    payload = {"phase": str(phase), "time": time.time(), **details}
+    target = output_root / "premium-v2-bootstrap.json"
+    temporary = target.with_suffix(".tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    temporary.replace(target)
+
+
 def main() -> None:
     output_root = Path(os.environ.get("RYU_STAGE3_PREMIUM_V2_OUTPUT", "stage3-premium-v2-artifacts")).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
+    diagnostic_log = (output_root / "premium-v2-bootstrap.log").open("a", encoding="utf-8", buffering=1)
+    faulthandler.enable(diagnostic_log, all_threads=True)
+    _write_bootstrap_marker(output_root, "python-entry", executable=sys.executable, version=sys.version)
+    original_excepthook = sys.excepthook
+    def _save_uncaught_exception(exc_type, exc_value, exc_traceback):
+        diagnostic_log.write("\\nPYTHON_UNCAUGHT_EXCEPTION\\n")
+        traceback.print_exception(exc_type, exc_value, exc_traceback, file=diagnostic_log)
+        diagnostic_log.flush()
+        original_excepthook(exc_type, exc_value, exc_traceback)
+    sys.excepthook = _save_uncaught_exception
+
+    from PySide6.QtCore import qInstallMessageHandler
+    def _qt_diagnostic_handler(mode, context, message):
+        diagnostic_log.write(f"QT_MESSAGE[{mode}] {message}\\n")
+        diagnostic_log.flush()
+    qInstallMessageHandler(_qt_diagnostic_handler)
+    _write_bootstrap_marker(output_root, "qt-diagnostics-installed")
+
     app_dir = Path(os.environ.get("RYU_STAGE3_TEST_APP_ROOT", output_root / "runtime-app")).resolve()
     library_dir = app_dir / "Library"
     voices_dir = app_dir / "Voices"
@@ -479,6 +524,7 @@ def main() -> None:
     from app.ui import premium_v2_host as host_module
 
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
+    _write_bootstrap_marker(output_root, "qt-application-attributes-set")
     QSettings.setDefaultFormat(QSettings.Format.IniFormat)
     QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(qsettings_dir))
 
@@ -487,6 +533,7 @@ def main() -> None:
             path.mkdir(parents=True, exist_ok=True)
 
     with ExitStack() as stack:
+        _write_bootstrap_marker(output_root, "runtime-paths-prepared", app_dir=str(app_dir))
         stack.enter_context(patch.object(core_paths, "app_root", lambda: app_dir))
         stack.enter_context(patch.object(core_paths, "default_library_root", lambda: library_dir))
         stack.enter_context(patch.object(core_paths, "library_root", lambda: library_dir))
@@ -535,14 +582,22 @@ def main() -> None:
         settings.setValue("project/active_folder", str(project_folder.resolve()))
         settings.sync()
 
+        _write_bootstrap_marker(output_root, "before-qapplication")
         app = QApplication.instance() or QApplication([])
         app.setQuitOnLastWindowClosed(False)
+        _write_bootstrap_marker(output_root, "qapplication-created", platform=os.environ.get("QT_QPA_PLATFORM"))
         from PySide6.QtWebEngineCore import QWebEngineProfile
+        (output_root / "web-cache").mkdir(parents=True, exist_ok=True)
+        (output_root / "web-storage").mkdir(parents=True, exist_ok=True)
+        _write_bootstrap_marker(output_root, "before-default-webengine-profile")
         browser_profile = QWebEngineProfile.defaultProfile()
         browser_profile.setCachePath(str(output_root / "web-cache"))
         browser_profile.setPersistentStoragePath(str(output_root / "web-storage"))
+        _write_bootstrap_marker(output_root, "default-webengine-profile-configured")
         window = host_module.PremiumV2Window()
+        _write_bootstrap_marker(output_root, "premium-v2-window-created")
         window.show()
+        _write_bootstrap_marker(output_root, "premium-v2-window-shown")
 
         def process_until(predicate, timeout: float, message: str):
             deadline = time.monotonic() + timeout
@@ -558,10 +613,12 @@ def main() -> None:
         try:
             process_until(lambda: bool(getattr(window, "_frontend_ready", False)), 90.0,
                           "The default Premium V2 WebEngine UI did not finish loading its real local backend bridge.")
+            _write_bootstrap_marker(output_root, "premium-v2-frontend-ready")
             page = window.web.page()
             # Start the actual browser workflow. The JS stores a structured result
             # on window so Python can preserve diagnostic evidence and WAV files.
             page.runJavaScript(JS_DRIVER)
+            _write_bootstrap_marker(output_root, "premium-v2-js-driver-started")
             process_until(
                 lambda: page.runJavaScript("Boolean(window.__RYU_STAGE3_PREMIUM_V2_RESULT__)",
                     lambda value: result_flag.update({"value": value})) is None and bool(result_flag.get("value")),
@@ -572,6 +629,7 @@ def main() -> None:
             if not raw:
                 raise RuntimeError("Premium V2 acceptance did not return a diagnostic result.")
             report = json.loads(raw) if isinstance(raw, str) else raw
+            _write_bootstrap_marker(output_root, "premium-v2-js-driver-finished", status=report.get("status"), error=report.get("error"))
             (output_root / "premium-v2-result.json").write_text(
                 json.dumps(report, ensure_ascii=False, indent=2, default=str),
                 encoding="utf-8",
