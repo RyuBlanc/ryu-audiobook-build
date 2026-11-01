@@ -303,7 +303,9 @@ def _install_runtime_packages(python: Path, progress=None) -> None:
         "print('cuda=' + str(torch.cuda.is_available())); "
         "print('hip=' + str(getattr(torch.version, 'hip', None))); "
         "xpu=getattr(torch, 'xpu', None); "
-        "print('xpu=' + str(bool(xpu is not None and xpu.is_available())))"
+        "print('xpu=' + str(bool(xpu is not None and xpu.is_available()))); "
+        "from app.tts.qwen_accelerator import accelerator_report; "
+        "print(accelerator_report())"
     )
     code, detail = _run_capture([str(python), "-c", check], timeout=180)
     if code != 0:
