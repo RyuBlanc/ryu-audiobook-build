@@ -240,6 +240,44 @@ class QwenAcceleratorDiscoveryTests(unittest.TestCase):
                 self.assertEqual(accelerator.best_accelerator().backend, backend)
                 self.assertEqual(accelerator.best_accelerator().device, device)
 
+    def test_amd_rocm_candidate_requires_listed_windows_11_gpu(self):
+        from app.tts import qwen_accelerator as accelerator
+
+        self.assertTrue(accelerator.is_supported_amd_windows_device(
+            "AMD Radeon RX 9070 XT", "AMD Ryzen 9 9950X", "Microsoft Windows 11 Pro"
+        ))
+        self.assertTrue(accelerator.is_supported_amd_windows_device(
+            "AMD Radeon Graphics", "AMD Ryzen AI Max+ 395", "Microsoft Windows 11 Pro"
+        ))
+        self.assertFalse(accelerator.is_supported_amd_windows_device(
+            "AMD Radeon 780M", "AMD Ryzen 7 7840U", "Microsoft Windows 11 Pro"
+        ))
+        self.assertFalse(accelerator.is_supported_amd_windows_device(
+            "AMD Radeon RX 9070 XT", "AMD Ryzen 9 9950X", "Microsoft Windows 10 Pro"
+        ))
+
+    def test_intel_xpu_candidate_requires_arc_or_supported_core_ultra_integrated_gpu(self):
+        from app.tts import qwen_accelerator as accelerator
+
+        self.assertTrue(accelerator.is_supported_intel_windows_device(
+            "Intel Arc A770 Graphics", "Intel Core i7-14700K", "Microsoft Windows 11 Pro"
+        ))
+        self.assertTrue(accelerator.is_supported_intel_windows_device(
+            "Intel Arc B580 Graphics", "Intel Core i5-14600K", "Microsoft Windows 11 Pro"
+        ))
+        self.assertTrue(accelerator.is_supported_intel_windows_device(
+            "Intel Arc(TM) Graphics", "Intel(R) Core(TM) Ultra 7 155H", "Microsoft Windows 11 Pro"
+        ))
+        self.assertFalse(accelerator.is_supported_intel_windows_device(
+            "Intel UHD Graphics 770", "Intel Core i7-14700K", "Microsoft Windows 11 Pro"
+        ))
+        self.assertFalse(accelerator.is_supported_intel_windows_device(
+            "Intel Arc(TM) Graphics", "Intel Core Ultra 7 125U", "Microsoft Windows 11 Pro"
+        ))
+        self.assertFalse(accelerator.is_supported_intel_windows_device(
+            "Intel Arc A770 Graphics", "Intel Core i7-14700K", "Microsoft Windows 10 Pro"
+        ))
+
     def test_shared_system_memory_is_not_misreported_as_gpu_vram(self):
         from unittest.mock import patch
         from app.tts import qwen_accelerator as accelerator
