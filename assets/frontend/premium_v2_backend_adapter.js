@@ -2421,8 +2421,13 @@
       else panel.appendChild(card);
     }
     const savedName = String(seriesNarratorDefault?.profile_name || '');
-    const effectiveName = String(project?.voice_profile || seriesNarratorDefault?.effective_profile_name || '');
-    const projectNarratorName = String(project?.voice_profile || '');
+    const effectiveName = String(seriesNarratorDefault?.effective_profile_name || project?.voice_profile || '');
+    const projectNarratorName = effectiveName;
+    const sourceLabel = ({
+      project_override:'Project Override',
+      series_default:'Series Default',
+      none:'Not Configured'
+    })[String(seriesNarratorDefault?.source || project?.narrator_profile_source || 'none')] || 'Not Configured';
     const profileOptions = characterSavedProfiles().map(profile =>
       '<option value="' + esc(profile.name) + '">' + esc(profile.name) + '</option>'
     ).join('');
@@ -2432,21 +2437,21 @@
     card.innerHTML = '<div style="font-weight:750;margin-bottom:5px">Project Narrator</div>' +
       '<div class="muted" style="font-size:12px;margin-bottom:8px">Active project: ' + esc(String(project?.title || '')) +
       ' · Current narrator: ' + esc(projectNarratorName || 'Not selected') +
-      ' · Source: ' + esc(String(project?.narrator_profile_source || 'none')) + '</div>' +
+      ' · Source: ' + esc(sourceLabel) + '</div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">' +
       '<select id="projectNarratorProfile" class="input" style="min-width:220px;flex:1">' +
       '<option value="">Choose a saved narrator profile</option>' + profileOptions + '</select>' +
-      '<button class="btn small" type="button" id="saveProjectNarrator">Use for This Book</button></div>' +
+      '<button class="btn small" type="button" id="saveProjectNarrator">Use for This Book</button>' +
+      '<button class="btn small ghost" type="button" id="resetProjectNarrator">Reset to Series Default</button></div>' +
       '<div style="font-weight:750;margin-bottom:5px">Series Narrator Default</div>' +
       '<div class="muted" style="font-size:12px;margin-bottom:10px">Series: ' + esc(series) +
-      ' · This default is applied to a book only when you explicitly choose Apply to This Book.</div>' +
+      ' · Projects inherit this voice unless they have an explicit project override. Updating this default refreshes every inheriting project.</div>' +
       '<select id="seriesNarratorProfile" class="input" style="width:100%;margin-bottom:8px">' +
       '<option value="">Choose a saved voice profile</option>' + seriesOptions + '</select>' +
       '<div class="muted" style="font-size:12px;margin-bottom:9px">Saved default: ' + esc(savedName || 'Not set') +
       ' · Effective narrator for this book: ' + esc(effectiveName || 'Not set') +
-      ' · Source: ' + esc(String(seriesNarratorDefault?.source || 'none')) + '</div>' +
-      '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small" type="button" id="saveSeriesNarratorDefault">Save Series Default</button>' +
-      '<button class="btn small ghost" type="button" id="applySeriesNarratorDefault">Apply to This Book</button></div>';
+      ' · Source: ' + esc(sourceLabel) + '</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn small" type="button" id="saveSeriesNarratorDefault">Save Series Default</button></div>';
     $('saveProjectNarrator')?.addEventListener('click', async () => {
       const profileName = String($('projectNarratorProfile')?.value || '').trim();
       if (!profileName) { message('Select a saved narrator profile first.', true); return; }
@@ -2466,12 +2471,16 @@
         message('Series narrator default saved: ' + saved.profile_name);
       } catch (error) { message(error?.message || String(error), true); }
     });
-    $('applySeriesNarratorDefault')?.addEventListener('click', async () => {
+    $('resetProjectNarrator')?.addEventListener('click', async () => {
       try {
-        const applied = await call('narrator.series.default.apply', {series});
+        const reset = await call('narrator.project.reset', {series});
         await refreshProjects();
+        await refreshCurrentProjectCard();
         await refreshSeriesNarratorControls();
-        message('Series narrator default applied to this book: ' + applied.profile_name);
+        const messageText = reset.profile_name
+          ? 'Project narrator reset. It now inherits ' + reset.profile_name + ' from the series.'
+          : 'Project narrator override cleared. Configure a series narrator before generation.';
+        message(messageText, !reset.profile_available);
       } catch (error) { message(error?.message || String(error), true); }
     });
     return seriesNarratorDefault;
