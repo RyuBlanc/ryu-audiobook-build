@@ -305,6 +305,37 @@ class QwenAcceleratorDiscoveryTests(unittest.TestCase):
             "Microsoft Windows 10 Pro", "22H2",
         ))
 
+    def test_every_amd_rocm_101_gpu_alias_maps_to_its_device_wheel(self):
+        from app.tts.qwen_accelerator import (
+            _AMD_ROCM_101_GPU_TARGETS,
+            amd_windows_runtime_spec,
+        )
+
+        for model, expected_arch in _AMD_ROCM_101_GPU_TARGETS:
+            with self.subTest(model=model):
+                spec = amd_windows_runtime_spec(
+                    "AMD " + model, "", "Microsoft Windows 11 Pro", "25H2"
+                )
+                self.assertIsNotNone(spec)
+                self.assertEqual(spec["arch"], expected_arch)
+                self.assertEqual(spec["rocm"], "10.1.0")
+
+    def test_every_amd_rocm_101_apu_alias_maps_to_its_device_wheel(self):
+        from app.tts.qwen_accelerator import (
+            _AMD_ROCM_101_APU_TARGETS,
+            amd_windows_runtime_spec,
+        )
+
+        for model, expected_arch in _AMD_ROCM_101_APU_TARGETS:
+            with self.subTest(model=model):
+                spec = amd_windows_runtime_spec(
+                    "AMD Radeon Graphics", "AMD " + model,
+                    "Microsoft Windows 11 Pro", "25H2",
+                )
+                self.assertIsNotNone(spec)
+                self.assertEqual(spec["arch"], expected_arch)
+                self.assertEqual(spec["rocm"], "10.1.0")
+
     def test_amd_rocm_101_rejects_models_without_a_published_windows_pytorch_wheel(self):
         from app.tts.qwen_accelerator import amd_windows_runtime_spec
 
