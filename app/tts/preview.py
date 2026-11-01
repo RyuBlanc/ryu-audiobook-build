@@ -118,15 +118,26 @@ def _preview_units(
 
     units = _PreviewUnits()
     used_chars = 0
-    preview_unit_chars = 360
-    preview_unit_sentences = 1
-    # Short previews stay sentence-sized so a 20-second request does not
-    # accidentally trigger a multi-minute synthesis unit.
+    # Keep the conservative one-sentence policy for ordinary providers. Qwen
+    # advertises its own preview policy so model inference is not fragmented
+    # into one heavyweight request per sentence. Qwen still splits on changes
+    # to its four stable expression-reference families, preserving emotional
+    # turns, dialogue boundaries and paragraph structure.
+    preview_unit_chars = max(
+        80, int(getattr(provider, "recommended_preview_chunk_chars", 360) or 360)
+    )
+    preview_unit_sentences = max(
+        1, int(getattr(provider, "recommended_preview_chunk_sentences", 1) or 1)
+    )
+    split_preview_on_expression_change = bool(
+        getattr(provider, "split_preview_on_expression_change", False)
+    )
     for segment, segment_voice in raw:
         for unit in split_for_pacing(
             segment,
             max_chars=preview_unit_chars,
             max_sentences=preview_unit_sentences,
+            split_on_expression_change=split_preview_on_expression_change,
         ):
             unit, rule_counts = apply_pronunciation_dictionary_with_counts(unit, pronunciation_dictionary)
             if used_chars >= max_chars:

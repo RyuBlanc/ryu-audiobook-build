@@ -786,10 +786,13 @@ def server(args) -> int:
             )
         except Exception as exc:
             # A CUDA OOM should not destroy a long audiobook.
-            if _is_cuda_oom(exc) and device.startswith("cuda") and isinstance(batch_texts, list):
+            if _is_cuda_oom(exc) and device.startswith(("cuda", "xpu")) and isinstance(batch_texts, list):
                 try:
                     import torch
-                    torch.cuda.empty_cache()
+                    if device.startswith("cuda"):
+                        torch.cuda.empty_cache()
+                    else:
+                        torch.xpu.empty_cache()
                 except Exception:
                     pass
                 print(json.dumps({

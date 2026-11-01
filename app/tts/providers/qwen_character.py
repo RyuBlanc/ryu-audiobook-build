@@ -39,6 +39,12 @@ class QwenCharacterProvider(TTSProvider):
     # between neutral, thoughtful, warm and concerned styles so each unit can
     # use the matching stable-identity expression reference.
     split_on_expression_change = True
+    # Preview requests use the same bounded sentence-aware units as production
+    # narration. This reduces per-request model overhead without changing the
+    # selected model, prompt, sampling, pronunciation or voice identity.
+    recommended_preview_chunk_chars = 800
+    recommended_preview_chunk_sentences = 4
+    split_preview_on_expression_change = True
     # Conservative startup estimate used only until real chunk timings are available.
     estimated_chars_per_minute = 180.0
     handles_narration_controls = False
@@ -112,8 +118,19 @@ class QwenCharacterProvider(TTSProvider):
 
     @property
     def recommended_batch_size(self) -> int:
-        """Keep long-form chapter generation checkpoint-friendly."""
-        return 1
+        """Use conservative two-chunk batches only with ample GPU memory.
+
+        The production worker already supports same-voice Qwen VoiceDesign
+        batches. CPU, low-memory devices and providers that cannot batch keep
+        the serial path; the generator falls back to serial on an explicit
+        accelerator OOM, preserving checkpoint and recovery behavior.
+        """
+        if self.qwen_mode != "design":
+            return 1
+        try:
+            return 2 if _detected_vram_gb() >= 12.0 else 1
+        except Exception:
+            return 1
 
     @property
     def recommended_preview_batch_size(self) -> int:
