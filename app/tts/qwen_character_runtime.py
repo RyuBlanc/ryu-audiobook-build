@@ -253,7 +253,7 @@ def _install_runtime_packages(python: Path, progress=None) -> None:
     else:
         torch_indexes = (
             ("CPU compatibility (GPU backend not certified)",
-             "https://download.pytorch.org/whl/cpu"),
+            "https://download.pytorch.org/whl/cpu"),
         )
 
     torch_error = ""
