@@ -1,14 +1,9 @@
 name: Actions Storage Cleanup
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/actions-storage-cleanup.yml
   workflow_run:
     workflows: ["Build Windows App"]
     types: [completed]
-  workflow_dispatch:
 
 permissions:
   actions: write
@@ -20,8 +15,12 @@ concurrency:
 
 jobs:
   cleanup:
-    name: Prune superseded packages and obsolete Stage 1–6 runs
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
+    name: Clean superseded packages and obsolete runs after Stage 3 Step 11.9
+    if: >-
+      ${{ github.event_name == 'workflow_run' &&
+          github.event.workflow_run.conclusion == 'success' &&
+          contains(github.event.workflow_run.head_commit.message, '[artifact-checkpoint]') &&
+          contains(github.event.workflow_run.head_commit.message, '[Stage 3][Step 11.9]') }}
     runs-on: ubuntu-latest
     steps:
       - name: Delete superseded packages and prune redundant Stage 1–6 run history
@@ -51,7 +50,10 @@ jobs:
 
             // The marker can be at the beginning or end of a commit title.
             const checkpointCandidates = allBuildRuns
-              .filter(run => run.conclusion === 'success' && hasCheckpointMarker(run))
+              .filter(run => run.id === currentBuildRunId
+                && run.conclusion === 'success'
+                && hasCheckpointMarker(run)
+                && /\\[Stage 3\\]\\[Step 11\\.9\\]/.test(String(run.head_commit?.message || run.name || '')))
               .sort((a, b) => b.run_number - a.run_number);
 
             let packageAnchor = null;
@@ -71,6 +73,11 @@ jobs:
                 ? new Set(['Windows', 'Installer', 'Portable', 'Release-SHA256'])
                 : new Set(['Windows', 'Installer']);
               break;
+            }
+
+            if (!packageAnchor) {
+              core.info('Cleanup blocked: this successful run is not a Stage 3 Step 11.9 artifact checkpoint with a complete package set. No artifacts or workflow runs will be deleted.');
+              return;
             }
 
             let deletedArtifacts = 0;
@@ -181,4 +188,5 @@ jobs:
             core.info(`Package artifacts: deleted ${deletedArtifacts}; kept current ${keptCurrentArtifacts}; protected rollback ${protectedArtifacts}.`);
             core.info(`Stage 1–6 run history: deleted ${deletedRuns}; kept ${keptRuns}; preserved for artifacts ${keptForArtifacts}.`);
             core.info(`Older cleanup workflow runs deleted: ${deletedCleanupRuns}.`);
+            core.info('Cleanup is only permitted after a successful Stage 3 Step 11.9 artifact checkpoint with a complete Windows package set.');
             core.info('Protected Build #1441/#1536 rollback packages, Stage 1 checkpoint #1637, latest per-stage evidence, active runs, and all non-package/test-evidence artifacts.');
