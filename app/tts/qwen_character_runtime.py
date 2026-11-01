@@ -688,6 +688,8 @@ def install_runtime(progress=None, force_repair: bool = False) -> None:
                 "torch": TORCH_VERSION,
                 "torchaudio": TORCHAUDIO_VERSION,
                 "tokenizer": TOKENIZER_ID,
+                "accelerator": best_accelerator().backend,
+                "accelerator_name": best_accelerator().name,
             },
             indent=2,
         ),
