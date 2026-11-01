@@ -1,0 +1,379 @@
+"""Real Qwen Base clone + saved VoiceDesign + Production M4B acceptance.
+
+Exercises authorized-reference import, saved Qwen voice profiles, preview,
+canonical identity reuse after reload, assigned character synthesis, and a
+real two-chapter M4B with FFmpeg decode/chapter verification.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import sys
+import wave
+from unittest.mock import patch
+
+from huggingface_hub import snapshot_download
+
+from app.chapters.detector import Chapter
+from app.core.character_identity import character_identity_key
+from app.tts.preview import build_voice_preview
+from app.tts.profile_provider import provider_from_profile
+from app.tts.qwen_character_runtime import MODEL_IDS, model_installed
+from app.tts.voice_profile import (
+    VoiceProfile,
+    import_reference_audio,
+    load_saved_profile,
+    save_profiles,
+)
+
+
+ROOT = Path(__file__).resolve().parents[1]
+MODEL_ROOT = Path(os.environ["RYU_QWEN_MODEL_ROOT"]).resolve()
+OUTPUT_ROOT = Path(os.environ.get("RYU_QWEN_DESIGN_OUTPUT", ROOT / "qwen-design-production-artifacts"))
+REQUIRED = ("design-1.7b", "base-0.6b")
+SERIES = "Stage 3 Qwen Real Integration"
+
+
+def _valid_wav(path: Path) -> float:
+    with wave.open(str(path), "rb") as audio:
+        frames, rate = audio.getnframes(), audio.getframerate()
+        if frames <= 0 or rate <= 0:
+            raise RuntimeError(f"Audio output is empty or invalid: {path}")
+        return frames / float(rate)
+
+
+def _assigned(text: str, phrase: str) -> dict:
+    start = text.index(phrase)
+    return {
+        "start": start,
+        "end": start + len(phrase),
+        "text": phrase,
+        "speaker": "Mira",
+        "series": SERIES,
+        "source": "manual",
+    }
+
+
+def _prepare_models() -> None:
+    for kind in REQUIRED:
+        destination = MODEL_ROOT / kind
+        if not (destination / "config.json").is_file():
+            snapshot_download(
+                repo_id=MODEL_IDS[kind],
+                local_dir=str(destination),
+                allow_patterns=[
+                    "*.json", "*.safetensors", "*.txt", "*.model", "*.npz",
+                    "*.bin", "tokenizer*", "vocab*",
+                ],
+            )
+    with patch("app.tts.qwen_character_runtime.MODEL_DIRS", {
+        **{key: MODEL_ROOT / key for key in MODEL_IDS}
+    }):
+        missing = [kind for kind in REQUIRED if not model_installed(kind)]
+    if missing:
+        raise RuntimeError("Qwen model integrity check failed: " + ", ".join(missing))
+
+
+def main() -> None:
+    OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+    MODEL_ROOT.mkdir(parents=True, exist_ok=True)
+    _prepare_models()
+
+    import imageio_ffmpeg
+    from app.tts import qwen_character_runtime as runtime
+    from app.tts.providers import qwen_character as qwen_provider_module
+    from app.tts.expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT
+    from app.tts.providers.piper import PiperProvider
+    from app.tts.cast_provider import CastAwareProvider
+    from app.tts.manager import GenerationManager
+
+    model_dirs = {key: MODEL_ROOT / key for key in MODEL_IDS}
+    env = os.environ.copy()
+    env["HF_HOME"] = os.environ.get("HF_HOME", str(MODEL_ROOT / "huggingface"))
+    env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["TOKENIZERS_PARALLELISM"] = "false"
+    env["OMP_NUM_THREADS"] = "2"
+    env["MKL_NUM_THREADS"] = "2"
+    saved_root = OUTPUT_ROOT / "saved-profiles"
+
+    with (
+        patch.object(runtime, "RUNTIME_ROOT", MODEL_ROOT),
+        patch.object(runtime, "MODEL_DIRS", model_dirs),
+        patch.object(runtime, "runtime_ready", return_value=True),
+        patch.object(runtime, "verify_runtime", return_value="CI Qwen runtime"),
+        patch.object(qwen_provider_module, "RUNTIME_ROOT", MODEL_ROOT),
+        patch.object(qwen_provider_module, "runtime_ready", return_value=True),
+        patch.object(qwen_provider_module, "verify_runtime", return_value="CI Qwen runtime"),
+        patch.object(qwen_provider_module, "runtime_python", return_value=Path(sys.executable)),
+        patch.object(qwen_provider_module, "runtime_environment", return_value=env),
+        patch.object(qwen_provider_module, "model_installed", side_effect=lambda kind: runtime.model_installed(kind)),
+        patch("app.tts.voice_profile.voices_root", return_value=saved_root),
+        patch("app.tts.voice_profile.builtin_voice_profiles", return_value=[]),
+    ):
+        # 1. Build a clean speech reference, import it through the same
+        # normalizer as the application, and persist an authorized Base clone.
+        piper_path = ROOT / "bundled_models" / "piper" / "en_US-lessac-medium.onnx"
+        if not piper_path.is_file():
+            raise RuntimeError(f"Reference speech fixture is missing: {piper_path}")
+        transcript = (
+            "Hello. This is an authorized reference recording created for the "
+            "Ryu Audiobook Qwen voice clone acceptance test. The speaker talks "
+            "clearly at a steady pace so the cloned character can preserve identity."
+        )
+        reference_source = OUTPUT_ROOT / "authorized-reference-fixture.wav"
+        reference_engine = PiperProvider(model_path=piper_path, backend="cpu")
+        reference_engine.synthesize(transcript, reference_source, "en_US-lessac-medium")
+        imported_reference = import_reference_audio(
+            reference_source,
+            "Stage 3 Authorized Qwen Clone",
+            minimum_seconds=6.0,
+        )
+        clone_profile = VoiceProfile(
+            name="Stage 3 Qwen Base Clone",
+            provider="qwen-character",
+            voice_id="Ryan",
+            sample_path=str(imported_reference),
+            model_id="base-0.6b",
+            backend="cpu",
+            language="English",
+            notes="Authorized generated speech fixture for Base clone acceptance.",
+            authorized=True,
+            qwen_mode="clone",
+            reference_text=transcript,
+            qwen_seed=20261101,
+        )
+        save_profiles([clone_profile])
+        reloaded_clone = load_saved_profile(clone_profile.name)
+        if not reloaded_clone or not reloaded_clone.authorized or not reloaded_clone.sample_path:
+            raise RuntimeError("Authorized Qwen Base clone profile did not survive save/reload.")
+        clone_engine, clone_voice = provider_from_profile(reloaded_clone)
+        clone_output = OUTPUT_ROOT / "qwen-base-0.6b-cloned-voice.wav"
+        try:
+            clone_engine.synthesize(
+                "The same speaker has returned to tell the next part of the story.",
+                clone_output,
+                clone_voice,
+            )
+        finally:
+            close = getattr(clone_engine, "close", None)
+            if callable(close):
+                close()
+        clone_duration = _valid_wav(clone_output)
+        print(
+            f"REAL_QWEN_BASE_CLONE=PASS model={MODEL_IDS['base-0.6b']} "
+            f"reference={imported_reference.name} duration={clone_duration:.3f}s "
+            f"authorized=true profile_reload=true"
+        )
+
+        # 2. Save and reload a designed character. The qwen_profile_id is the
+        # stable identity namespace used by the worker's canonical anchor.
+        design_profile = VoiceProfile(
+            name="Stage 3 Qwen Designed Mira",
+            provider="qwen-character",
+            voice_id="Ryan",
+            model_id="design-1.7b",
+            backend="cpu",
+            language="English",
+            notes="Saved Stage 3 VoiceDesign identity.",
+            authorized=True,
+            qwen_mode="design",
+            qwen_prompt=(
+                "A warm young adult male audiobook character, clear English "
+                "articulation, restrained emotion, stable natural timbre."
+            ),
+            qwen_seed=20261101,
+            qwen_anchor_text=DEFAULT_VOICE_DESIGN_ANCHOR_TEXT,
+        )
+        save_profiles([design_profile])
+        reloaded_design = load_saved_profile(design_profile.name)
+        if not reloaded_design or not reloaded_design.qwen_profile_id:
+            raise RuntimeError("VoiceDesign saved profile lost its persistent identity ID.")
+
+        preview_engine, preview_voice = provider_from_profile(reloaded_design)
+        preview_output = OUTPUT_ROOT / "qwen-voicedesign-saved-profile-preview.wav"
+        try:
+            preview_result = build_voice_preview(
+                "The lantern glowed beside the quiet road. Mira listened before she answered.",
+                preview_engine,
+                preview_voice,
+                preview_output,
+                narration_speed=1.0,
+                pacing_profile="off",
+                max_chars=500,
+                target_seconds=3.0,
+            )
+        finally:
+            close = getattr(preview_engine, "close", None)
+            if callable(close):
+                close()
+        preview_duration = _valid_wav(preview_output)
+        if preview_result.segments < 1:
+            raise RuntimeError("Saved VoiceDesign profile preview did not synthesize any segments.")
+
+        from app.tts.qwen_character_worker import _anchor_path
+        anchor_request = {
+            "speaker": reloaded_design.voice_id,
+            "language": reloaded_design.language,
+            "instruct": reloaded_design.qwen_prompt or reloaded_design.notes,
+            "seed": reloaded_design.qwen_seed,
+            "anchor_text": reloaded_design.qwen_anchor_text or DEFAULT_VOICE_DESIGN_ANCHOR_TEXT,
+            "profile_id": reloaded_design.qwen_profile_id,
+        }
+        canonical_anchor = _anchor_path(MODEL_ROOT, anchor_request, "neutral")
+        if not canonical_anchor.is_file() or canonical_anchor.stat().st_size < 1024:
+            raise RuntimeError("VoiceDesign did not persist a canonical acoustic identity anchor.")
+        first_anchor_hash = hashlib.sha256(canonical_anchor.read_bytes()).hexdigest()
+
+        # Re-read the profile from disk and create a new provider/worker. The
+        # same profile ID must reuse the exact previously generated anchor.
+        reloaded_again = load_saved_profile(design_profile.name)
+        if not reloaded_again or reloaded_again.qwen_profile_id != reloaded_design.qwen_profile_id:
+            raise RuntimeError("VoiceDesign identity ID changed during reload.")
+        reload_engine, reload_voice = provider_from_profile(reloaded_again)
+        reload_output = OUTPUT_ROOT / "qwen-voicedesign-reloaded-longform.wav"
+        try:
+            reload_engine.synthesize(
+                "Beyond the river, the village lights shimmered while Mira continued her journey.",
+                reload_output,
+                reload_voice,
+            )
+        finally:
+            close = getattr(reload_engine, "close", None)
+            if callable(close):
+                close()
+        reload_duration = _valid_wav(reload_output)
+        second_anchor_hash = hashlib.sha256(canonical_anchor.read_bytes()).hexdigest()
+        if first_anchor_hash != second_anchor_hash:
+            raise RuntimeError("Reloading VoiceDesign changed the saved acoustic identity anchor.")
+        print(
+            f"REAL_QWEN_VOICEDESIGN_SAVE_RELOAD=PASS profile_id={reloaded_design.qwen_profile_id} "
+            f"preview={preview_duration:.3f}s longform={reload_duration:.3f}s "
+            "same_anchor_sha256=true"
+        )
+
+        # 3. Exercise assigned Qwen character dialogue through the same
+        # CastAwareProvider + GenerationManager production route, then inspect
+        # the actual multi-chapter M4B container.
+        narrator_profile = VoiceProfile(
+            name="Stage 3 Qwen M4B Narrator",
+            provider="piper",
+            voice_id="en_US-lessac-medium",
+            model_id="piper",
+            backend="cpu",
+            language="en-US",
+            authorized=True,
+        )
+        narrator_engine = PiperProvider(model_path=piper_path, backend="cpu")
+        chapter_one_text = "The lantern flickered. Mira said, “Stay close.” The tunnel narrowed."
+        chapter_two_text = "Rain fell across the road. Mira whispered, “I will stay.” The village lights appeared."
+        chapters = [
+            Chapter(
+                1, "The Tunnel", chapter_one_text,
+                dialogue_assignments=[_assigned(chapter_one_text, "Stay close.")],
+                review_status="ready",
+            ),
+            Chapter(
+                2, "The Road", chapter_two_text,
+                dialogue_assignments=[_assigned(chapter_two_text, "I will stay.")],
+                review_status="ready",
+            ),
+        ]
+        qwen_recorders = []
+        real_factory = provider_from_profile
+
+        class RecordingProvider:
+            def __init__(self, inner):
+                self.inner = inner
+                self.calls = []
+
+            def __getattr__(self, attribute):
+                return getattr(self.inner, attribute)
+
+            def synthesize(self, text, output_path, voice=None):
+                self.calls.append((str(text), voice, Path(output_path)))
+                return self.inner.synthesize(text, output_path, voice)
+
+        def recording_factory(profile):
+            engine, voice = real_factory(profile)
+            if profile.name == reloaded_design.name:
+                wrapper = RecordingProvider(engine)
+                qwen_recorders.append(wrapper)
+                return wrapper, voice
+            return engine, voice
+
+        provider = CastAwareProvider(
+            narrator_engine,
+            narrator_profile.voice_id,
+            {reloaded_design.name: reloaded_design},
+            {"Mira": reloaded_design.name},
+            narrator_profile=narrator_profile,
+            identity_assignments={
+                character_identity_key("Mira", SERIES): reloaded_design.name,
+            },
+        )
+        output_book = OUTPUT_ROOT / "Ryu-Stage3-Qwen-Character-Integration.m4b"
+        completed = []
+        with (
+            patch("app.tts.cast_provider.provider_from_profile", side_effect=recording_factory),
+            patch("app.tts.providers.piper.models_root", return_value=ROOT / "bundled_models"),
+        ):
+            manager = GenerationManager(
+                provider=provider,
+                voice=narrator_profile.voice_id,
+                chapters=chapters,
+                project_audio_root=OUTPUT_ROOT / "chapter-audio",
+                on_finished=completed.append,
+                narration_speed=1.0,
+                pacing_profile="off",
+                story_effects_enabled=False,
+                metadata={"series": SERIES},
+            )
+            manager._run_body(
+                output_book,
+                SERIES,
+                "Ryu Audiobook CI",
+                None,
+                {"title": "Ryu Stage 3 Qwen Character Integration", "narrator": narrator_profile.name},
+            )
+        provider.close()
+
+        if not output_book.is_file() or output_book.stat().st_size < 10_000:
+            raise RuntimeError("Qwen multi-chapter M4B output is missing or too small.")
+        if len(completed) != 1 or completed[0].chapters_total != 2 or completed[0].chapters_completed != 2 or completed[0].chapters_failed:
+            raise RuntimeError(f"Qwen multi-chapter generation failed: {completed!r}")
+        qwen_calls = [call for recorder in qwen_recorders for call in recorder.calls]
+        if not any("Stay close." in call[0] for call in qwen_calls):
+            raise RuntimeError("First-chapter assigned Mira dialogue did not reach Qwen.")
+        if not any("I will stay." in call[0] for call in qwen_calls):
+            raise RuntimeError("Second-chapter assigned Mira dialogue did not reach Qwen.")
+
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        probe = __import__("subprocess").run(
+            [ffmpeg, "-hide_banner", "-i", str(output_book), "-map", "0:a:0", "-f", "null", "-"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=240,
+        )
+        diagnostic = (probe.stdout or "") + "\n" + (probe.stderr or "")
+        if probe.returncode != 0:
+            raise RuntimeError("FFmpeg could not decode the Qwen M4B: " + diagnostic[-4000:])
+        markers = re.findall(r"Chapter #\d+:\d+:", diagnostic)
+        if len(markers) < 2 or "The Tunnel" not in diagnostic or "The Road" not in diagnostic:
+            raise RuntimeError("The Qwen M4B is missing expected chapter markers: " + diagnostic[-4000:])
+
+        print(
+            f"REAL_QWEN_CHARACTER_TO_M4B=PASS chapters=2 qwen_dialogue_calls={len(qwen_calls)} "
+            f"bytes={output_book.stat().st_size} chapter_markers={len(markers)} ffmpeg_decode=true"
+        )
+        print("QWEN_CLONE_DESIGN_PRODUCTION_ACCEPTANCE=PASS")
+
+
+if __name__ == "__main__":
+    main()
