@@ -91,8 +91,13 @@ def detect_accelerators() -> tuple[Accelerator, ...]:
                 if "Marketing Name:" in line or "Name:" in line
             ]
             name = next((v for v in names if v), "AMD ROCm device")
+            try:
+                import torch
+                rocm_available = bool(getattr(torch.version, "hip", None)) and bool(torch.cuda.is_available())
+            except Exception:
+                rocm_available = False
             found.append(Accelerator(
-                "rocm", "cuda:0", name, 0.0, True,
+                "rocm", "cuda:0", name, 0.0, rocm_available,
                 "ROCm runtime detected; requires a compatible ROCm PyTorch build",
             ))
 
