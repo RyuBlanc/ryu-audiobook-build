@@ -39,7 +39,7 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             (1, "CUDA 12.6 wheel unavailable"),
             (0, "CPU torch installed"),
             (0, "qwen-tts installed"),
-            (0, "torch=2.9.1 cuda=False"),
+            (0, "torch=2.9.1 torchaudio=2.9.1 cuda=False"),
         ]
         progress = []
         with (
@@ -148,7 +148,7 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             (0, "pip bootstrap ready"),
             (0, "CPU torch installed"),
             (0, "qwen-tts installed"),
-            (0, "torch=2.9.1 cuda=False"),
+            (0, "torch=2.9.1 torchaudio=2.9.1 cuda=False"),
         ]
         with (
             patch.object(runtime, "_has_nvidia_gpu", return_value=False),
