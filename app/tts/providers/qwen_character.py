@@ -33,11 +33,11 @@ class QwenCharacterProvider(TTSProvider):
     """Offline Qwen3-TTS character voices with no API key or cloud service."""
 
     provider_id = "qwen-character"
-    # Qwen can safely handle substantially larger sentence-aware units. The
-    # previous 360-char/2-sentence setting created thousands of tiny generation
-    # jobs on long novels and made GPU utilization/ETA unnecessarily poor.
-    recommended_chunk_chars = 800
-    recommended_chunk_sentences = 4
+    # Long-form audiobook narration uses the original high-throughput bounds.
+    # Larger sentence-aware units reduce per-request overhead while retaining
+    # expression-based boundaries. Short previews intentionally stay smaller.
+    recommended_chunk_chars = 2400
+    recommended_chunk_sentences = 10
     # Preserve efficient long units in calm narration, but cut at real shifts
     # between neutral, thoughtful, warm and concerned styles so each unit can
     # use the matching stable-identity expression reference.
