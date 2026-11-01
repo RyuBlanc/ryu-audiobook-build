@@ -113,45 +113,22 @@ def detect_accelerators() -> tuple[Accelerator, ...]:
     except Exception:
         pass
 
-    for name, memory in _windows_video_controllers():
+    adapters = _windows_video_controllers()
+    for name, memory in adapters:
         lowered = name.casefold()
-        if ("amd" in lowered or "radeon" in lowered) and not any(x.backend == "cuda" for x in found):
-            found.append(Accelerator(
-                "directml", "directml", name, memory, False,
-                "AMD adapter detected, but Qwen3-TTS DirectML transformer compatibility "
-                "is not certified. CPU is used until real-device acceptance passes.",
-            ))
-        elif ("intel" in lowered or "arc" in lowered) and not any(x.backend == "xpu" for x in found):
-            found.append(Accelerator(
-                "intel-runtime-missing", "cpu", name, memory, False,
-                "Intel adapter detected, but no Intel XPU PyTorch runtime is available. "
-                "Install a matching Intel XPU PyTorch build to enable acceleration.",
-            ))
-
-    # Keep Windows hardware inventory visible even when accelerator support
-    # is unavailable. Report adapters without implying Qwen can currently use them.
-    known_names = {item.name.casefold() for item in found}
-    for name, memory in _windows_video_controllers():
-        lowered = name.casefold()
-        already_listed = any(
-            lowered in item.name.casefold() or item.name.casefold() in lowered
-            for item in found
-        )
-        if already_listed:
-            continue
         if "amd" in lowered or "radeon" in lowered:
             if not any(item.backend == "cuda" for item in found):
                 found.append(Accelerator(
                     "directml", "cpu", name, memory, False,
-                    "AMD GPU detected, but this Windows Qwen runtime has no certified "
-                    "DirectML execution path. CPU fallback is used.",
+                    "AMD GPU detected, but Windows Qwen3-TTS DirectML operator "
+                    "compatibility has not passed hardware acceptance. CPU fallback is used.",
                 ))
         elif "intel" in lowered or "arc" in lowered:
             if not any(item.backend == "xpu" for item in found):
                 found.append(Accelerator(
                     "intel-runtime-missing", "cpu", name, memory, False,
-                    "Intel GPU detected, but the required Intel XPU PyTorch runtime is "
-                    "not installed. CPU fallback is used.",
+                    "Intel GPU detected, but the app-managed runtime does not yet have "
+                    "a verified Intel XPU PyTorch installation. CPU fallback is used.",
                 ))
 
     return tuple(found)
