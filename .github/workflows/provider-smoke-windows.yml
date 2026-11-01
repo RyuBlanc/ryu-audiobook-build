@@ -96,6 +96,57 @@ jobs:
           python -c "import inspect; from chatterbox.tts_turbo import ChatterboxTurboTTS; sig=inspect.signature(ChatterboxTurboTTS.from_pretrained); print(sig); assert 'nano' in sig.parameters"
           Write-Host "Pinned Chatterbox Nano API import smoke test PASSED."
 
+
+  qwen-real-voicedesign:
+    name: Qwen 1.7B VoiceDesign real preview (CPU acceptance)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install application and Qwen runtime dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements.txt
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.9.1 torchaudio==2.9.1
+          python -m pip install qwen-tts==0.1.1
+          python -c "import torch, torchaudio, qwen_tts; print('torch=' + torch.__version__); print('torchaudio=' + torchaudio.__version__); print('cuda=' + str(torch.cuda.is_available())); assert not torch.cuda.is_available()"
+
+      - name: Download the actual Qwen VoiceDesign model
+        shell: pwsh
+        env:
+          HF_HOME: \${{ runner.temp }}\\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: \${{ runner.temp }}\\ryu-qwen-models
+        run: |
+          python -c "import os; from huggingface_hub import snapshot_download; root=os.environ['RYU_QWEN_MODEL_ROOT']; snapshot_download(repo_id='Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign', local_dir=os.path.join(root,'design-1.7b'), allow_patterns=['*.json','*.safetensors','*.txt','*.model','*.npz','*.bin','tokenizer*','vocab*'])"
+
+      - name: Run actual Qwen VoiceDesign 30-second preview and expression tests
+        shell: pwsh
+        env:
+          PYTHONPATH: \${{ github.workspace }}
+          HF_HOME: \${{ runner.temp }}\\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: \${{ runner.temp }}\\ryu-qwen-models
+          RYU_QWEN_ACCEPTANCE_OUTPUT: \${{ github.workspace }}\\qwen-real-provider-artifacts
+          PYTHONWARNINGS: ignore
+        run: python -B tests/smoke_qwen_real_preview.py
+
+      - name: Upload actual Qwen VoiceDesign audio evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Stage3-Real-Qwen-VoiceDesign-\${{ github.run_number }}
+          path: qwen-real-provider-artifacts/
+          if-no-files-found: warn
+          retention-days: 30
+
   qwen-protocol:
     name: Qwen expression protocol smoke
     runs-on: windows-latest

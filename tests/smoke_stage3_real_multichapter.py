@@ -25,7 +25,7 @@ from app.tts.manager import GenerationManager
 from app.tts.preview import build_voice_preview
 from app.tts.profile_provider import ProfileBoundProvider
 from app.tts.providers.piper import PiperProvider
-from app.tts.voice_profile import VoiceProfile
+from app.tts.voice_profile import VoiceProfile, load_saved_profiles, save_profiles
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -129,7 +129,8 @@ def _real_multichapter_acceptance(models: dict[str, Path], output_root: Path) ->
     )
     chapter_two_text = (
         "Rain hammered against the window. "
-        "Ren answered, “We should leave now.” The village lights appeared."
+        "Mira whispered, “I will stay.” Ren answered, “We should leave now.” "
+        "The crowd roared at the gates. The village lights appeared."
     )
     chapters = [
         Chapter(
@@ -146,7 +147,8 @@ def _real_multichapter_acceptance(models: dict[str, Path], output_root: Path) ->
             "The Road",
             chapter_two_text,
             dialogue_assignments=[
-                _assigned_quote(chapter_two_text, "We should leave now.", "Ren")
+                _assigned_quote(chapter_two_text, "I will stay.", "Mira"),
+                _assigned_quote(chapter_two_text, "We should leave now.", "Ren"),
             ],
             review_status="ready",
         ),
@@ -188,6 +190,24 @@ def _real_multichapter_acceptance(models: dict[str, Path], output_root: Path) ->
         language="en-US",
         authorized=True,
     )
+
+    # Persist and reload the exact profiles before synthesis. This covers
+    # the real on-disk profile catalogue path, not only in-memory profile data.
+    profile_root = output_root / "saved-voice-profiles"
+    with patch("app.tts.voice_profile.voices_root", return_value=profile_root), patch(
+        "app.tts.voice_profile.builtin_voice_profiles", return_value=[]
+    ):
+        save_profiles([narrator_profile, mira_profile, ren_profile, other_profile])
+        reloaded = {item.name: item for item in load_saved_profiles()}
+
+    if set(reloaded) != {
+        narrator_profile.name, mira_profile.name, ren_profile.name, other_profile.name
+    }:
+        raise RuntimeError(f"Saved voice profiles did not round-trip: {sorted(reloaded)}")
+    narrator_profile = reloaded[narrator_profile.name]
+    mira_profile = reloaded[mira_profile.name]
+    ren_profile = reloaded[ren_profile.name]
+    other_profile = reloaded[other_profile.name]
 
     narrator_engine = RecordingPiperProvider(models[narrator_profile.voice_id])
     cast_engines: dict[str, RecordingPiperProvider] = {}
@@ -272,7 +292,13 @@ def _real_multichapter_acceptance(models: dict[str, Path], output_root: Path) ->
     if not any("The village lights appeared." in text for text in narrator_text):
         raise RuntimeError("Narrator profile did not receive the second chapter narration.")
     if not any("Stay close." in text for text in mira_text):
-        raise RuntimeError("Mira's saved character profile did not receive Mira's dialogue.")
+        raise RuntimeError("Mira's saved character profile did not receive first-chapter dialogue.")
+    if not any("I will stay." in text for text in mira_text):
+        raise RuntimeError("The same saved Mira profile did not receive second-chapter dialogue.")
+    if len(cast_engines[mira_profile.name].calls) < 2:
+        raise RuntimeError("Mira's saved voice was not reused across both generated chapters.")
+    if any(voice != mira_profile.voice_id for _spoken, voice, _path in cast_engines[mira_profile.name].calls):
+        raise RuntimeError("Mira's voice identity changed between chapter synthesis calls.")
     if not any("We should leave now." in text for text in ren_text):
         raise RuntimeError("Ren's saved character profile did not receive Ren's dialogue.")
     if any("Stay close." in text or "We should leave now." in text for text in narrator_text):
@@ -302,7 +328,7 @@ def _real_multichapter_acceptance(models: dict[str, Path], output_root: Path) ->
         for chapter in chapters
         for event in detect_story_events(chapter.text)
     }
-    if not {"door_slam", "rain"}.issubset(event_kinds):
+    if not {"door_slam", "rain", "crowd"}.issubset(event_kinds):
         raise RuntimeError(f"Story-effect test fixture did not produce expected cues: {event_kinds}")
 
     # Decode the completed M4B with the same FFmpeg distribution used by the
@@ -332,6 +358,7 @@ def _real_multichapter_acceptance(models: dict[str, Path], output_root: Path) ->
         f"narrator_calls={len(narrator_engine.calls)} "
         f"mira_calls={len(cast_engines[mira_profile.name].calls)} "
         f"ren_calls={len(cast_engines[ren_profile.name].calls)} "
+        f"same_character_chapters=2 "
         f"story_events={','.join(sorted(event_kinds))}"
     )
     print(f"REAL_VOICE_MODEL_OUTPUT_SHA256={sample_hashes}")
