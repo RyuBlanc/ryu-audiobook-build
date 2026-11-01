@@ -77,8 +77,10 @@ def detect_accelerators() -> tuple[Accelerator, ...]:
             memory = float(fields[1]) / 1024.0 if len(fields) > 1 else 0.0
         except ValueError:
             memory = 0.0
-        found.append(Accelerator("cuda", "cuda:0", fields[0], memory, True,
-                                 "NVIDIA CUDA device detected"))
+        found.append(Accelerator(
+            "cuda", "cuda:0", fields[0], memory, True,
+            "NVIDIA CUDA device detected",
+        ))
 
     if sys.platform.startswith("linux"):
         rocm = _run(["rocminfo"], timeout=8.0)
@@ -150,8 +152,10 @@ def best_accelerator() -> Accelerator:
             supported=True,
             reason=experimental.reason,
         )
-    return Accelerator("cpu", "cpu", "CPU", 0.0, True,
-                       "No supported Qwen GPU backend detected")
+    return Accelerator(
+        "cpu", "cpu", "CPU", 0.0, True,
+        "No supported Qwen GPU backend detected",
+    )
 
 
 def accelerator_report() -> str:
