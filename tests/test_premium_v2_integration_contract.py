@@ -1351,6 +1351,20 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "Premium cloud candidate generation is not connected to a provider endpoint",
             adapter,
         )
+    def test_project_narrator_preview_persists_chapter_without_out_of_scope_helper(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("$('previewProjectNarrator')?.addEventListener")
+        end = adapter.index("return seriesNarratorDefault;", start)
+        handler = adapter[start:end]
+        self.assertIn("await call('chapter.update', {", handler)
+        self.assertIn("number:chapter.number", handler)
+        self.assertIn("title:chapterTitleValue", handler)
+        self.assertIn("text:editor.value", handler)
+        self.assertNotIn("persistChapterSnapshot(", handler)
+        self.assertIn("call('narrator.preview', {", handler)
+        self.assertIn("chapter_number:chapter.number, start, end, text:selectedText", handler)
+
+
 
 if __name__ == "__main__":
     unittest.main()

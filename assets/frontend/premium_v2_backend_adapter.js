@@ -2620,7 +2620,21 @@
         if (chapterSaveTimer) { clearTimeout(chapterSaveTimer); chapterSaveTimer = null; }
         await chapterSavePromise.catch(() => {});
         const chapterTitleValue = $('chapterTitle')?.textContent || chapter.title;
-        await persistChapterSnapshot(chapter.number, chapterTitleValue, editor.value, true);
+        // This handler is outside wire()'s lexical scope, so persist through the
+        // public backend bridge rather than calling wire()'s local helper.
+        const savedChapter = await call('chapter.update', {
+          number:chapter.number,
+          title:chapterTitleValue,
+          text:editor.value
+        });
+        const cachedChapter = chapters.find(item => Number(item.number) === Number(chapter.number));
+        if (cachedChapter) {
+          cachedChapter.title = savedChapter.title || chapterTitleValue;
+          cachedChapter.text = editor.value;
+          cachedChapter.word_count = savedChapter.word_count;
+        }
+        const saveState = $('saveState');
+        if (saveState) saveState.textContent = 'Saved just now';
 
         const lengthGroup = [...document.querySelectorAll('#voices .toolbar')].find(el => /Length/.test(el.textContent));
         const duration = Number(lengthGroup?.querySelector('.seg button.active')?.textContent.match(/\d+/)?.[0] || 30);
