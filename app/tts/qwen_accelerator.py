@@ -63,80 +63,64 @@ def _windows_video_controllers() -> list[tuple[str, float]]:
 
 @lru_cache(maxsize=1)
 def detect_accelerators() -> tuple[Accelerator, ...]:
+    """Detect working accelerators and report installed-but-uncertified GPU candidates."""
     found: list[Accelerator] = []
-
-    nvidia = _run([
-        "nvidia-smi", "--query-gpu=name,memory.total",
-        "--format=csv,noheader,nounits",
-    ])
-    for line in nvidia.splitlines():
-        fields = [part.strip() for part in line.split(",")]
-        if not fields:
-            continue
-        try:
-            memory = float(fields[1]) / 1024.0 if len(fields) > 1 else 0.0
-        except ValueError:
-            memory = 0.0
-        found.append(Accelerator(
-            "cuda", "cuda:0", fields[0], memory, True,
-            "NVIDIA CUDA device detected",
-        ))
-
-    # ROCm PyTorch uses the CUDA-compatible torch.cuda API on Windows and Linux.
-    # Only report a usable accelerator when the active PyTorch package is a HIP build.
     try:
         import torch
-        rocm_build = bool(getattr(torch.version, "hip", None))
-        cuda_available = bool(torch.cuda.is_available())
-        if rocm_build and cuda_available:
+    except Exception:
+        torch = None
+
+    if torch is not None:
+        if bool(getattr(torch, "cuda", None) and torch.cuda.is_available()):
             try:
+                hip = bool(getattr(torch.version, "hip", None))
                 name = str(torch.cuda.get_device_name(0))
                 memory = float(torch.cuda.get_device_properties(0).total_memory) / (1024 ** 3)
+                backend = "rocm" if hip else "cuda"
+                reason = "AMD ROCm PyTorch is active" if hip else "NVIDIA CUDA PyTorch is active"
+                found.append(Accelerator(backend, "cuda:0", name, memory, True, reason))
             except Exception:
-                name, memory = "AMD ROCm GPU", 0.0
-            found.append(Accelerator(
-                "rocm", "cuda:0", name, memory, True,
-                "AMD ROCm PyTorch is active",
-            ))
-    except Exception:
-        pass
-
-
-    try:
-        import torch
-        xpu = getattr(torch, "xpu", None)
-        if xpu is not None and bool(xpu.is_available()):
-            count = int(xpu.device_count())
-            for index in range(max(1, count)):
-                try:
-                    props = xpu.get_device_properties(index)
-                    name = str(getattr(props, "name", f"Intel XPU {index}"))
-                    memory = float(getattr(props, "total_memory", 0) or 0) / (1024 ** 3)
-                except Exception:
-                    name, memory = f"Intel XPU {index}", 0.0
+                backend = "rocm" if bool(getattr(torch.version, "hip", None)) else "cuda"
                 found.append(Accelerator(
-                    "xpu", f"xpu:{index}", name, memory, True,
-                    "Installed PyTorch build exposes Intel XPU",
+                    backend, "cuda:0", backend.upper(), 0.0, True,
+                    "PyTorch reports CUDA-compatible GPU runtime active",
                 ))
-    except Exception:
-        pass
 
-    adapters = _windows_video_controllers()
-    for name, memory in adapters:
-        lowered = name.casefold()
-        if "amd" in lowered or "radeon" in lowered:
-            if not any(item.backend in {"rocm", "cuda"} for item in found):
+        xpu = getattr(torch, "xpu", None)
+        try:
+            if xpu is not None and xpu.is_available():
+                for index in range(max(1, int(xpu.device_count()))):
+                    try:
+                        props = xpu.get_device_properties(index)
+                        name = str(getattr(props, "name", f"Intel XPU {index}"))
+                        memory = float(getattr(props, "total_memory", 0) or 0) / (1024 ** 3)
+                    except Exception:
+                        name, memory = f"Intel XPU {index}", 0.0
+                    found.append(Accelerator(
+                        "xpu", f"xpu:{index}", name, memory, True,
+                        "Intel PyTorch XPU runtime is active",
+                    ))
+        except Exception:
+            pass
+
+    if os.name == "nt":
+        for name, memory in _windows_video_controllers():
+            lowered = name.casefold()
+            if ("amd" in lowered or "radeon" in lowered) and not any(
+                item.backend in {"rocm", "cuda"} and item.supported for item in found
+            ):
                 found.append(Accelerator(
                     "rocm-candidate", "cpu", name, memory, False,
-                    "AMD GPU detected. Install the AMD ROCm PyTorch runtime and verify "
-                    "torch.version.hip before Qwen uses this adapter.",
+                    "AMD GPU detected. Install the official AMD ROCm PyTorch runtime "
+                    "then verify HIP availability before Qwen uses this adapter.",
                 ))
-        elif "intel" in lowered or "arc" in lowered:
-            if not any(item.backend == "xpu" for item in found):
+            elif ("intel" in lowered or "arc" in lowered) and not any(
+                item.backend == "xpu" and item.supported for item in found
+            ):
                 found.append(Accelerator(
                     "xpu-candidate", "cpu", name, memory, False,
-                    "Intel GPU detected. Install the PyTorch XPU wheels and verify "
-                    "torch.xpu.is_available() before Qwen uses this adapter.",
+                    "Intel GPU detected. Install the official PyTorch XPU runtime "
+                    "then verify torch.xpu.is_available() before Qwen uses this adapter.",
                 ))
 
     return tuple(found)
