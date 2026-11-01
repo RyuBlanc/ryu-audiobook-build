@@ -247,7 +247,7 @@ def _install_runtime_packages(python: Path, progress=None) -> str:
                 "cuda",
             ),
         ])
-    elif amd_candidate and os.name == "nt":
+    elif amd_candidate and os.name == "nt" and PYTHON_VERSION == "3.12.10":
         rocm_root = "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1"
         packages = [
             f"{rocm_root}/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl",
