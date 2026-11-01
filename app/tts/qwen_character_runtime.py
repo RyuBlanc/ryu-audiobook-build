@@ -472,38 +472,10 @@ def model_installed(kind: str) -> bool:
 
 
 @lru_cache(maxsize=1)
+@lru_cache(maxsize=1)
 def _detected_vram_gb() -> float:
-    """Return the largest NVIDIA VRAM size visible to this PC, or 0.
-
-    Detection is cached per application process; voice-picker callbacks must
-    not repeatedly wait for nvidia-smi to launch.
-    """
-    try:
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=memory.total",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=2,
-        )
-        if result.returncode != 0:
-            return 0.0
-        values = []
-        for line in result.stdout.splitlines():
-            value = line.strip()
-            try:
-                values.append(float(value))
-            except ValueError:
-                continue
-        return max(values, default=0.0) / 1024.0
-    except (OSError, subprocess.SubprocessError):
-        return 0.0
-
+    """Return usable accelerator memory in GiB for model-size heuristics."""
+    return model_selection_memory_gb()
 
 def best_custom_kind(vram_gb: float | None = None) -> str:
     # Qwen 1.7B CustomVoice is the quality path for 8GB-class GPUs; 0.6B is
