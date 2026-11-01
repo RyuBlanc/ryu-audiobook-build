@@ -123,9 +123,9 @@ def detect_accelerators() -> tuple[Accelerator, ...]:
             ))
         elif ("intel" in lowered or "arc" in lowered) and not any(x.backend == "xpu" for x in found):
             found.append(Accelerator(
-                "directml", "directml", name, memory, False,
+                "intel-runtime-missing", "cpu", name, memory, False,
                 "Intel adapter detected, but no Intel XPU PyTorch runtime is available. "
-                "DirectML Qwen transformer compatibility is not certified.",
+                "Install a matching Intel XPU PyTorch build to enable acceleration.",
             ))
 
     return tuple(found)
