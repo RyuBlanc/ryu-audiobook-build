@@ -588,7 +588,8 @@ def server(args) -> int:
             gc.collect()
             clear_model_cache(device)
 
-        # Reuse one Base model instance across character profiles and create
+        # Keep each saved canonical character identity cached per profile while
+        # reusing one Base model instance across character profiles and creating
         # only profile-specific clone prompts. This preserves each character's
         # acoustic anchor without loading a separate 0.6B/1.7B model per cast member.
         if model is None or active_kind != clone_kind:

@@ -517,7 +517,9 @@ class QwenCharacterProvider(TTSProvider):
         self._stdout_queue = None
         self._stdout_thread = None
         if worker is not None:
-            unregister_qwen_worker(worker.pid)
+            worker_pid = getattr(worker, "pid", None)
+            if worker_pid is not None:
+                unregister_qwen_worker(worker_pid)
             try:
                 if worker.stdin:
                     worker.stdin.close()
