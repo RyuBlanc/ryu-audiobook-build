@@ -333,7 +333,7 @@ def _install_runtime_packages(python: Path, progress=None) -> str:
     # silently fall back: the user must see that their GPU runtime did not work.
     if not selected_backend and (_has_nvidia_gpu() or active.backend == "cuda"):
         if progress:
-            progress("CUDA wheels were unavailable • installing CPU compatibility runtime…")
+            progress(f"Installing PyTorch {TORCH_VERSION} (CPU)…")
         code, detail = _run_capture(
             [
                 str(python), "-m", "pip", "install", "--upgrade",
