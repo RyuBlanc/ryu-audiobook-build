@@ -92,6 +92,55 @@ class Stage3NarratorManagementTests(unittest.TestCase):
         self.assertEqual(result["source"], "none")
         self.assertFalse(result["profile_available"])
 
+    def test_generation_uses_effective_series_narrator_not_transient_request_profile(self):
+        chapter = Chapter(1, "One", "The sun rose over the quiet valley.")
+        project = SimpleNamespace(chapters=[chapter])
+        selection = {
+            "effective_profile_name": "Series Narrator",
+            "profile_name": "Series Narrator",
+            "source": "series_default",
+            "profile_available": True,
+        }
+        narrator_profile = self._profile("Series Narrator")
+        self.bridge._project_series_name = lambda _project, _state: "The Series"
+        self.bridge._narrator_series_default_read = lambda *_args: selection
+        self.bridge._find_profile = lambda name: narrator_profile if name == "Series Narrator" else None
+        profile, resolved = self.bridge._resolve_narrator_for_generation(
+            project, {"voice_profile": "Temporary Voice"}, [chapter]
+        )
+        self.assertIs(profile, narrator_profile)
+        self.assertEqual(resolved["source"], "series_default")
+        self.assertEqual(profile.name, "Series Narrator")
+
+    def test_generation_blocks_unidentified_quoted_dialogue_instead_of_sending_it_to_narrator(self):
+        chapter = Chapter(1, "One", 'The gate opened. “Who are you?” Then silence followed.')
+        project = SimpleNamespace(chapters=[chapter])
+        self.bridge._project_series_name = lambda _project, _state: "The Series"
+        self.bridge._narrator_series_default_read = lambda *_args: {
+            "effective_profile_name": "Series Narrator",
+            "profile_name": "Series Narrator",
+            "source": "series_default",
+            "profile_available": True,
+        }
+        narrator_profile = self._profile("Series Narrator")
+        self.bridge._find_profile = lambda name: narrator_profile if name == "Series Narrator" else None
+        with self.assertRaisesRegex(ValueError, "dialogue passage.*need speaker review"):
+            self.bridge._resolve_narrator_for_generation(project, {}, [chapter])
+
+    def test_generation_fails_closed_when_effective_narrator_profile_is_missing(self):
+        chapter = Chapter(1, "One", "The sun rose.")
+        project = SimpleNamespace(chapters=[chapter])
+        self.bridge._project_series_name = lambda _project, _state: "The Series"
+        self.bridge._narrator_series_default_read = lambda *_args: {
+            "effective_profile_name": "Deleted Narrator",
+            "profile_name": "Deleted Narrator",
+            "source": "series_default",
+            "profile_available": False,
+        }
+        self.bridge._find_profile = lambda _name: None
+        with self.assertRaisesRegex(ValueError, "effective narrator profile.*unavailable"):
+            self.bridge._resolve_narrator_for_generation(project, {}, [chapter])
+
     def test_narrator_preview_uses_effective_profile_for_selected_narration_only(self):
         text = 'The sun rose. “Hello there.” Then the road was quiet.'
         first = text.index("The sun rose.")

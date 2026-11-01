@@ -4588,6 +4588,41 @@ class PremiumV2Bridge(QObject):
                          result={"suggestions": suggestions, "count": len(suggestions)})
         return {"job_id": job_id, "state": "completed", "suggestions": suggestions, "count": len(suggestions)}
 
+    def _resolve_narrator_for_generation(self, project, state: dict[str, Any], chapters):
+        """Resolve the effective saved narrator and fail closed on unresolved dialogue."""
+        series = self._project_series_name(project, state)
+        selection = self._narrator_series_default_read(project, state, series)
+        profile_name = str(selection.get("effective_profile_name") or "").strip()
+        if not profile_name:
+            raise ValueError(
+                "Generation is blocked because this project has no narrator voice. "
+                "Choose a series default or save a project narrator override first."
+            )
+        profile = self._find_profile(profile_name)
+        if profile is None or not selection.get("profile_available"):
+            raise ValueError(
+                f"Generation is blocked because the effective narrator profile '{profile_name}' "
+                "is unavailable. Restore the saved Voice Studio profile or choose another narrator."
+            )
+
+        from app.chapters.speaker_segmentation import segment_chapter_speakers
+        unresolved = []
+        for chapter in chapters:
+            for segment in segment_chapter_speakers(chapter):
+                if segment.needs_review or segment.kind in {"needs_speaker_review", "review_required"}:
+                    unresolved.append((int(chapter.number), str(segment.text or "")))
+        if unresolved:
+            examples = "; ".join(
+                f"Chapter {number}: {text[:64].strip()!r}"
+                for number, text in unresolved[:3]
+            )
+            raise ValueError(
+                f"Generation is blocked: {len(unresolved)} dialogue passage(s) still need speaker review. "
+                "Assign a character speaker or correct the narration classification before generating. "
+                + examples
+            )
+        return profile, selection
+
     def _production_generate_book(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._assert_no_active_model_lifecycle("start audiobook generation")
         check_active = getattr(self, "_assert_no_active_audio_synthesis", None)
@@ -4608,10 +4643,11 @@ class PremiumV2Bridge(QObject):
         background_audio_mode = effective_background_audio_mode(state)
         sound_enabled = background_audio_mode != "off"
         validate_saved_audio_paths(state)
-        profile_name = str(payload.get("profile_name") or state.get("voice_profile") or "").strip()
-        profile = self._find_profile(profile_name)
-        if profile is None:
-            raise ValueError("No narrator is saved. Open Voice Studio, select an installed voice, and save it as narrator.")
+        # The saved series default or explicit project override is authoritative.
+        # Never let a transient Voice Studio selection silently replace the narrator
+        # that this project will use for production.
+        profile, narrator_selection = self._resolve_narrator_for_generation(project, state, chapters)
+        profile_name = profile.name
         provider, voice = provider_from_profile(profile)
         # Include the full selected narrator profile in resumable chunk identity
         # even when this book has no character-specific voice assignments.
@@ -4681,6 +4717,9 @@ class PremiumV2Bridge(QObject):
         # same destination as the current audiobook. Keep the intended destination
         # separately; only publish output_path after the final file validates.
         state.update({"voice_profile": profile.name, "voice_id": profile.voice_id,
+                      "narrator": profile.name,
+                      "narrator_profile_source": str(narrator_selection.get("source") or "none"),
+                      "narrator_series_default": str(narrator_selection.get("profile_name") or ""),
                       "output_path": None, "generation_target_path": str(output),
                       "status": "generating", "audio_bitrate": bitrate, "generation_job_id": job_id,
                       "generation_started_at": self._now(), "empty_chapters_skipped": empty_skipped,

@@ -48,6 +48,14 @@ class Stage3NarratorSegmentationContracts(unittest.TestCase):
             self.assertIn(token, adapter)
         self.assertNotIn("Apply to This Book", adapter)
 
+    def test_generation_uses_effective_narrator_and_blocks_unresolved_dialogue(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("def _resolve_narrator_for_generation(", host)
+        self.assertIn("self._narrator_series_default_read(project, state, series)", host)
+        self.assertIn("segment.needs_review", host)
+        self.assertIn("self._resolve_narrator_for_generation(project, state, chapters)", host)
+        self.assertIn('"narrator_profile_source": str(narrator_selection.get("source") or "none")', host)
+
     def test_narrator_preview_requires_source_backed_narration_and_reuses_voice_preview(self):
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
