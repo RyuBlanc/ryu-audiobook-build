@@ -59,6 +59,21 @@ class Stage3NarratorSegmentationContracts(unittest.TestCase):
         self.assertIn('id="previewProjectNarrator"', adapter)
         self.assertIn("call('narrator.preview'", adapter)
 
+    def test_new_series_creation_requires_a_saved_previewed_narrator(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        for token in (
+            "ryuCreateSeriesNarratorSetup",
+            "ryuCreateSeriesNarratorProfile",
+            "ryuCreateSeriesNarratorSample",
+            "Preview Narrator",
+            "Play Narrator Preview",
+            "narrator.preview",
+            "narrator.series.default.save",
+            "Preview and listen to the selected saved narrator profile before saving this new series.",
+            "narratorPanel.hidden=!createSeries",
+        ):
+            self.assertIn(token, adapter)
+
     def test_series_narrator_summary_reader_does_not_require_active_project(self):
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         start = host.index("    def _narrator_series_default_read(")

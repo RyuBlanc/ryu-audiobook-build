@@ -1769,12 +1769,91 @@
     const characterInput=document.createElement('input');characterInput.type='text';characterInput.maxLength=300;characterInput.placeholder='Primary character name';characterInput.hidden=true;
     const seriesCaption=document.createElement('label');seriesCaption.style.cssText='display:block;margin-top:5px;font-size:12px;color:#aeb6c5';seriesCaption.textContent='New series name';seriesCaption.appendChild(seriesInput);
     const charCaption=document.createElement('label');charCaption.style.cssText='display:block;margin-top:5px;font-size:12px;color:#aeb6c5';charCaption.textContent='New primary character';charCaption.appendChild(characterInput);
+    const narratorPanel=document.createElement('section');narratorPanel.id='ryuCreateSeriesNarratorSetup';narratorPanel.hidden=true;
+    narratorPanel.style.cssText='margin:14px 0;padding:14px;border:1px solid rgba(201,32,80,.4);border-radius:12px;background:rgba(201,32,80,.06)';
+    const narratorHeading=document.createElement('div');narratorHeading.textContent='Series Narrator Voice';narratorHeading.style.cssText='font-weight:800;margin-bottom:5px';
+    const narratorHint=document.createElement('p');narratorHint.className='muted';narratorHint.textContent='Choose a saved Voice Studio profile for every project in this series. Preview the sample before creating the series.';narratorHint.style.cssText='font-size:12px;line-height:1.45;margin:0 0 10px';
+    const narratorProfileSelect=document.createElement('select');narratorProfileSelect.id='ryuCreateSeriesNarratorProfile';
+    const narratorSamples=characterSavedProfiles();
+    const addNarratorOption=(value,label)=>{const option=document.createElement('option');option.value=value;option.textContent=label;narratorProfileSelect.appendChild(option);};
+    addNarratorOption('','Choose a saved Voice Studio profile');
+    for(const savedProfile of narratorSamples)addNarratorOption(savedProfile.name,savedProfile.name+' · '+savedProfile.provider);
+    narratorProfileSelect.style.cssText='box-sizing:border-box;width:100%;padding:10px;border-radius:9px;border:1px solid #343b4a;background:#0c1018;color:#f6f7fa;font:inherit';
+    const narratorSampleText=document.createElement('textarea');narratorSampleText.id='ryuCreateSeriesNarratorSample';narratorSampleText.rows=3;
+    narratorSampleText.value='Long ago, beneath a sky of silver stars, a new journey began.';
+    narratorSampleText.style.cssText='box-sizing:border-box;width:100%;margin-top:9px;padding:10px;border-radius:9px;border:1px solid #343b4a;background:#0c1018;color:#f6f7fa;font:inherit;resize:vertical';
+    const narratorDuration=document.createElement('select');narratorDuration.id='ryuCreateSeriesNarratorDuration';
+    for(const seconds of [10,30,60,90]){const option=document.createElement('option');option.value=String(seconds);option.textContent=seconds+' seconds';narratorDuration.appendChild(option);}
+    narratorDuration.value='30';narratorDuration.style.cssText='padding:9px;border-radius:9px;border:1px solid #343b4a;background:#0c1018;color:#f6f7fa;font:inherit';
+    const narratorPreviewButton=document.createElement('button');narratorPreviewButton.type='button';narratorPreviewButton.className='btn small';narratorPreviewButton.textContent='Preview Narrator';
+    const narratorPlayButton=document.createElement('button');narratorPlayButton.type='button';narratorPlayButton.className='btn small secondary';narratorPlayButton.textContent='Play Narrator Preview';narratorPlayButton.disabled=true;
+    const narratorStopButton=document.createElement('button');narratorStopButton.type='button';narratorStopButton.className='btn small ghost';narratorStopButton.textContent='Stop';narratorStopButton.disabled=true;
+    const narratorPreviewStatus=document.createElement('p');narratorPreviewStatus.className='muted';narratorPreviewStatus.id='ryuCreateSeriesNarratorStatus';narratorPreviewStatus.textContent='Narrator preview required before saving this new series.';narratorPreviewStatus.style.cssText='font-size:12px;line-height:1.4;margin:9px 0 0';
+    let validatedSeriesNarratorPreview=null;
+    const clearSeriesNarratorPreview=(reason='Narrator settings changed. Preview again before saving.')=>{
+      validatedSeriesNarratorPreview=null;
+      narratorPreviewStatus.textContent=reason;
+      narratorPlayButton.disabled=true;
+      narratorStopButton.disabled=true;
+      narratorPlayButton.textContent='Play Narrator Preview';
+    };
+    narratorProfileSelect.addEventListener('change',()=>clearSeriesNarratorPreview());
+    narratorSampleText.addEventListener('input',()=>clearSeriesNarratorPreview());
+    narratorDuration.addEventListener('change',()=>clearSeriesNarratorPreview());
+    narratorPreviewButton.addEventListener('click',async()=>{
+      const profileName=String(narratorProfileSelect.value||'').trim();
+      const sampleText=String(narratorSampleText.value||'');
+      const seconds=Number(narratorDuration.value||30);
+      const selectedProfile=narratorSamples.find(item=>item.name===profileName&&item.saved===true);
+      if(!selectedProfile)throw new Error('Choose an available saved Voice Studio narrator profile.');
+      if(!sampleText.trim())throw new Error('Enter sample narration text before previewing.');
+      narratorPreviewButton.disabled=true;narratorPreviewButton.textContent='Generating…';
+      clearSeriesNarratorPreview('Generating narrator preview · '+profileName);
+      try{
+        const started=await call('narrator.preview',{
+          series_setup_preview:true,profile_name:profileName,text:sampleText,duration_seconds:seconds
+        });
+        if(!started?.job_id)throw new Error('The narrator preview did not return a job ID.');
+        const preview=await waitForNarratorPreviewJob(started.job_id,seconds,profileName);
+        validatedSeriesNarratorPreview={
+          profileName,
+          sampleText,
+          durationSeconds:seconds,
+          outputPath:preview.outputPath
+        };
+        narratorPreviewStatus.textContent='Preview ready · '+profileName+' · '+seconds+' seconds requested. Play it before saving the series.';
+        narratorPlayButton.disabled=false;narratorStopButton.disabled=false;
+      }catch(error){
+        clearSeriesNarratorPreview(error?.message||String(error));
+        message(error?.message||String(error),true);
+      }finally{
+        narratorPreviewButton.disabled=false;narratorPreviewButton.textContent='Preview Narrator';
+      }
+    });
+    narratorPlayButton.addEventListener('click',async()=>{
+      if(!validatedSeriesNarratorPreview||!voicePreviewValid||!previewAudio)throw new Error('Generate a valid narrator preview first.');
+      try{
+        if(!previewAudio.paused){previewAudio.pause();narratorPlayButton.textContent='Play Narrator Preview';}
+        else{await previewAudio.play();narratorPlayButton.textContent='Pause Narrator Preview';}
+      }catch(error){message('Narrator preview playback failed: '+(error?.message||String(error)),true);}
+    });
+    narratorStopButton.addEventListener('click',()=>{
+      if(previewAudio){previewAudio.pause();previewAudio.currentTime=0;}
+      narratorPlayButton.textContent='Play Narrator Preview';
+    });
+    const narratorDurationRow=document.createElement('div');narratorDurationRow.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px';
+    const narratorDurationLabel=document.createElement('span');narratorDurationLabel.textContent='Preview length';narratorDurationLabel.style.cssText='font-size:12px;color:#aeb6c5';
+    narratorDurationRow.append(narratorDurationLabel,narratorDuration,narratorPreviewButton,narratorPlayButton,narratorStopButton);
+    narratorPanel.append(narratorHeading,narratorHint,field('Narrator Voice',narratorProfileSelect),field('Sample Narration',narratorSampleText),narratorDurationRow,narratorPreviewStatus);
     const seriesNames=[...new Set(libraryCharacters.map(item=>String(item.series||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
     const addOption=(select,value,label)=>{const option=document.createElement('option');option.value=value;option.textContent=label;select.appendChild(option);};
     addOption(seriesSelect,'','Choose a series');for(const series of seriesNames)addOption(seriesSelect,series,series);addOption(seriesSelect,'__new_series__','＋ Create a new series…');
     const refreshCharactersForSeries=()=>{
       const createSeries=seriesSelect.value==='__new_series__',series=(createSeries?seriesInput.value:seriesSelect.value).trim();
-      seriesInput.hidden=!createSeries;characterSelect.replaceChildren();addOption(characterSelect,'','Choose a character');
+      seriesInput.hidden=!createSeries;
+      narratorPanel.hidden=!createSeries;
+      if(!createSeries)clearSeriesNarratorPreview('Choose Create a new series to configure its narrator.');
+      characterSelect.replaceChildren();addOption(characterSelect,'','Choose a character');
       for(const item of libraryCharacters.filter(c=>String(c.series||'').trim().toLowerCase()===series.toLowerCase()))addOption(characterSelect,String(item.id||''),String(item.primary_name||item.name||'Unnamed character'));
       addOption(characterSelect,'__new_character__','＋ Add a new primary character…');
       if(createSeries)characterSelect.value='__new_character__';
@@ -1793,6 +1872,20 @@
       try{
         const isNewSeries=seriesSelect.value==='__new_series__',series=(isNewSeries?seriesInput.value:seriesSelect.value).trim();
         if(!series)throw new Error('Choose or enter a series name.');
+        if(isNewSeries){
+          const narratorProfileName=String(narratorProfileSelect.value||'').trim();
+          const currentSample=String(narratorSampleText.value||'');
+          const currentDuration=Number(narratorDuration.value||30);
+          const previewMatches=validatedSeriesNarratorPreview
+            && validatedSeriesNarratorPreview.profileName===narratorProfileName
+            && validatedSeriesNarratorPreview.sampleText===currentSample
+            && validatedSeriesNarratorPreview.durationSeconds===currentDuration
+            && voicePreviewValid
+            && lastVoicePreviewPath===validatedSeriesNarratorPreview.outputPath;
+          if(!previewMatches)throw new Error('Preview and listen to the selected saved narrator profile before saving this new series.');
+          const savedNarrator=await call('narrator.series.default.save',{series,profile_name:narratorProfileName});
+          if(!savedNarrator?.saved)throw new Error('The series narrator default was not saved. The new series was not completed.');
+        }
         let character=libraryCharacters.find(item=>String(item.id||'')===characterSelect.value);
         if(characterSelect.value==='__new_character__'||isNewSeries){
           const primary=characterInput.value.trim();if(!primary)throw new Error('Enter the primary character name.');
@@ -1817,7 +1910,7 @@
         close();message('Assigned '+profile.name+' to '+primaryName+' · '+(assigned.character.series||series)+'.');
       }catch(error){message(error?.message||String(error),true);assign.disabled=false;assign.textContent='Assign Voice';}
     });
-    modal.append(title,hint,field('Series',seriesSelect),seriesCaption,field('Character',characterSelect),charCaption,meta,actions);
+    modal.append(title,hint,field('Series',seriesSelect),seriesCaption,narratorPanel,field('Character',characterSelect),charCaption,meta,actions);
     actions.append(cancel,assign);overlay.appendChild(modal);document.body.appendChild(overlay);refreshCharactersForSeries();
     seriesInput.hidden=true;characterInput.hidden=true;seriesSelect.focus();
   }
@@ -2509,9 +2602,7 @@
           chapter_number:chapter.number, start, end, text:selectedText, duration_seconds:duration
         });
         if (!result?.job_id || !result.profile_name) throw new Error('Narrator Preview did not return a valid preview job.');
-        await monitorJob(result.job_id, job => preparePreviewPlayback(job, duration, {
-          profileName: result.profile_name, preserveSummary: true
-        }));
+        await waitForNarratorPreviewJob(result.job_id, duration, result.profile_name);
       } catch (error) { message(error?.message || String(error), true); }
     });
     return seriesNarratorDefault;
@@ -4953,6 +5044,38 @@
     await tick();
     if (!finished && monitorToken === monitorEpoch) poll = setInterval(tick, 1000);
   }
+  function waitForNarratorPreviewJob(jobId, durationSeconds, profileName) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        callback(value);
+      };
+      monitorJob(jobId, job => {
+        const ready = preparePreviewPlayback(job, durationSeconds, {
+          profileName,
+          preserveSummary:true
+        });
+        if (ready) {
+          finish(resolve, {
+            job,
+            profileName,
+            outputPath:lastVoicePreviewPath,
+            durationSeconds
+          });
+        } else {
+          finish(reject, new Error('The narrator preview did not pass audio validation.'));
+        }
+        return ready;
+      }, job => {
+        if (job.state !== 'completed') {
+          finish(reject, new Error(job.error?.message || job.message || 'Narrator preview did not complete.'));
+        }
+      });
+    });
+  }
+
   function requestElevenLabsApiKey() {
     return new Promise(resolve => {
       $('ryuElevenLabsKeyDialog')?.remove();
