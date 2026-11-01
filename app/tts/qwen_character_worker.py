@@ -83,15 +83,9 @@ def _load_model(kind: str, backend: str, root: Path):
         )
 
     if device.startswith("cuda"):
-        try:
-            dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-        except Exception:
-            dtype = torch.float16
+        dtype = _inference_dtype(torch, device)
     elif device.startswith("xpu"):
-        try:
-            dtype = torch.bfloat16 if torch.xpu.is_bf16_supported() else torch.float16
-        except Exception:
-            dtype = torch.float16
+        dtype = _xpu_inference_dtype(torch, device)
     else:
         dtype = torch.float32
     if device.startswith("cuda"):
@@ -120,6 +114,24 @@ def _load_model(kind: str, backend: str, root: Path):
         except Exception:
             pass
     return model, device
+
+
+def _inference_dtype(torch, device: str):
+    """Choose a safe CUDA/ROCm inference dtype for the active device."""
+    if not str(device).startswith("cuda"):
+        return torch.float32
+    try:
+        return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    except Exception:
+        return torch.float16
+
+
+def _xpu_inference_dtype(torch, device: str):
+    """Use BF16 on supported Intel XPU devices, otherwise FP16."""
+    try:
+        return torch.bfloat16 if torch.xpu.is_bf16_supported() else torch.float16
+    except Exception:
+        return torch.float16
 
 
 def _is_cuda_oom(exc: BaseException) -> bool:
