@@ -127,7 +127,7 @@ class Stage3NarratorSegmentationContracts(unittest.TestCase):
         self.assertIn("github.event.workflow_run.conclusion == 'success'", cleanup)
         self.assertIn("contains(github.event.workflow_run.head_commit.message, '[artifact-checkpoint]')", cleanup)
         self.assertIn("contains(github.event.workflow_run.head_commit.message, '[Stage 3][Step 11.9]')", cleanup)
-        self.assertIn(r"/\\[Stage 3\\]\\[Step 11\\.9\\]/.test", cleanup)
+        self.assertIn(r"/\[Stage 3\]\[Step 11\.9\]/.test", cleanup)
         self.assertIn("if (!packageAnchor)", cleanup)
 
     def test_series_narrator_summary_reader_does_not_require_active_project(self):

@@ -1085,7 +1085,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("workflow_run:", storage_workflow)
         self.assertIn("types: [completed]", storage_workflow)
         self.assertIn("artifact-checkpoint", storage_workflow)
-        self.assertIn("new Set([1441])", storage_workflow)
+        self.assertIn("new Set([1441, 1536, 1637])", storage_workflow)
         self.assertIn("Ryu-Audiobook-Installer", storage_workflow)
         self.assertIn("Ryu-Audiobook-Portable", storage_workflow)
         self.assertIn("Ryu-Audiobook-Release-SHA256", storage_workflow)
