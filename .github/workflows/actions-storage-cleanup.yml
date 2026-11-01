@@ -53,7 +53,7 @@ jobs:
               .filter(run => run.id === currentBuildRunId
                 && run.conclusion === 'success'
                 && hasCheckpointMarker(run)
-                && /\\[Stage 3\\]\\[Step 11\\.9\\]/.test(String(run.head_commit?.message || run.name || '')))
+                && /\[Stage 3\]\[Step 11\.9\]/.test(String(run.head_commit?.message || run.name || '')))
               .sort((a, b) => b.run_number - a.run_number);
 
             let packageAnchor = null;
