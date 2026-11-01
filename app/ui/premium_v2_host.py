@@ -802,8 +802,6 @@ class PremiumV2Bridge(QObject):
             "narrator": str(state.get("narrator") or state.get("voice_profile") or ""),
             "voice_profile": str(state.get("voice_profile") or ""),
             "narrator_profile_source": str(state.get("narrator_profile_source") or ("project_override" if state.get("voice_profile") else "none")),
-            "series_narrator_profile": str((self._narrator_series_default_get({"series": self._project_series_name(project, state)}).get("profile_name") or "")),
-            "narrator_profile_source": str(state.get("narrator_profile_source") or ("project_override" if state.get("voice_profile") else "none")),
             "series_narrator_profile": str((self._narrator_series_default_read(project, state, self._project_series_name(project, state)).get("profile_name") or "")),
             "narrator_voice_configured": narrator_ready,
             "output_target_path": str(output_target),

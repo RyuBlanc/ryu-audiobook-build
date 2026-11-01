@@ -78,6 +78,28 @@ class DashboardLiveDataTests(unittest.TestCase):
             self.assertTrue(summary["completed"])
             self.assertEqual(summary["output_path"], str(output.resolve()))
 
+    def test_project_summary_reads_series_narrator_default_from_supplied_project_context(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            library = base / "library"
+            with mock.patch("app.core.project.library_root", return_value=library):
+                project = self._create_project(library, "Series Context Book")
+            state = {"status": "imported", "series": "Series Context"}
+            bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
+            with mock.patch("app.ui.premium_v2_host.load_state", return_value=state):
+                with mock.patch.object(
+                    bridge, "_narrator_series_default_read",
+                    return_value={"profile_name": "Saved Series Narrator"},
+                ) as read_default:
+                    with mock.patch.object(
+                        bridge, "_narrator_series_default_get",
+                        side_effect=AssertionError("Dashboard summary must not resolve the active project."),
+                    ):
+                        summary = bridge._project_summary(project)
+
+            read_default.assert_called_once_with(project, state, "Series Context")
+            self.assertEqual(summary["series_narrator_profile"], "Saved Series Narrator")
+
     def test_legacy_epub_cover_is_discovered_and_persisted_into_project_assets(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)

@@ -7183,7 +7183,6 @@
       await call('voice.select',{profile_name:v.name});
       await refreshProjects();
       await refreshSeriesNarratorControls();
-      await refreshSeriesNarratorControls();
       document.querySelectorAll('#voices *').forEach(node => {
         if(node.children.length===0 && node.textContent.trim()==='Narrator unchanged') node.textContent='Assigned to this narrator';
       });
