@@ -82,24 +82,25 @@ def detect_accelerators() -> tuple[Accelerator, ...]:
             "NVIDIA CUDA device detected",
         ))
 
-    if sys.platform.startswith("linux"):
-        rocm = _run(["rocminfo"], timeout=8.0)
-        if rocm:
-            names = [
-                line.split(":", 1)[-1].strip()
-                for line in rocm.splitlines()
-                if "Marketing Name:" in line or "Name:" in line
-            ]
-            name = next((v for v in names if v), "AMD ROCm device")
+    # ROCm PyTorch uses the CUDA-compatible torch.cuda API on Windows and Linux.
+    # Only report a usable accelerator when the active PyTorch package is a HIP build.
+    try:
+        import torch
+        rocm_build = bool(getattr(torch.version, "hip", None))
+        cuda_available = bool(torch.cuda.is_available())
+        if rocm_build and cuda_available:
             try:
-                import torch
-                rocm_available = bool(getattr(torch.version, "hip", None)) and bool(torch.cuda.is_available())
+                name = str(torch.cuda.get_device_name(0))
+                memory = float(torch.cuda.get_device_properties(0).total_memory) / (1024 ** 3)
             except Exception:
-                rocm_available = False
+                name, memory = "AMD ROCm GPU", 0.0
             found.append(Accelerator(
-                "rocm", "cuda:0", name, 0.0, rocm_available,
-                "ROCm runtime detected; requires a compatible ROCm PyTorch build",
+                "rocm", "cuda:0", name, memory, True,
+                "AMD ROCm PyTorch is active",
             ))
+    except Exception:
+        pass
+
 
     try:
         import torch
