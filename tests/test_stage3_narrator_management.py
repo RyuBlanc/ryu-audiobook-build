@@ -56,6 +56,66 @@ class Stage3NarratorManagementTests(unittest.TestCase):
         self.assertEqual(result["source"], "series_default")
         self.assertTrue(result["profile_available"])
 
+    def test_series_default_change_propagates_only_to_inheriting_projects_after_restart(self):
+        self._write_series_default("Series Voice V1")
+        old_profile = self._profile("Series Voice V1")
+        new_profile = self._profile("Series Voice V2")
+        other_profile = self._profile("Other Series Voice")
+        profiles = {
+            old_profile.name: old_profile,
+            new_profile.name: new_profile,
+            other_profile.name: other_profile,
+        }
+        self.bridge._find_profile = lambda name: profiles.get(name)
+        inherited_project_state = {
+            "series": "The Series",
+            "voice_profile": "Series Voice V1",
+            "narrator_profile_source": "series_default",
+        }
+        override_project_state = {
+            "series": "The Series",
+            "voice_profile": "Book Override",
+            "narrator_profile_source": "project_override",
+        }
+
+        with patch("app.core.paths.settings_root", return_value=self.settings):
+            other_path = self.bridge._narrator_series_default_store_path("Other Series")
+            other_path.parent.mkdir(parents=True, exist_ok=True)
+            other_path.write_text(json.dumps({
+                "schema_version": 1,
+                "series": "Other Series",
+                "profile_name": other_profile.name,
+                "provider": "piper",
+                "voice_id": other_profile.voice_id,
+            }), encoding="utf-8")
+            updated = self.bridge._narrator_series_default_save({
+                "series": "The Series",
+                "profile_name": new_profile.name,
+            })
+            # A fresh bridge represents a process/application restart: effective
+            # narrator selection is re-read from persistent storage, not memory.
+            reopened_bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
+            reopened_bridge._find_profile = lambda name: profiles.get(name)
+            inherited_after = reopened_bridge._narrator_series_default_read(
+                None, inherited_project_state, "The Series"
+            )
+            override_after = reopened_bridge._narrator_series_default_read(
+                None, override_project_state, "The Series"
+            )
+            other_after = reopened_bridge._narrator_series_default_read(
+                None,
+                {"series": "Other Series", "narrator_profile_source": "series_default"},
+                "Other Series",
+            )
+
+        self.assertTrue(updated["saved"])
+        self.assertEqual(inherited_after["effective_profile_name"], "Series Voice V2")
+        self.assertEqual(inherited_after["source"], "series_default")
+        self.assertEqual(override_after["effective_profile_name"], "Book Override")
+        self.assertEqual(override_after["source"], "project_override")
+        self.assertEqual(other_after["effective_profile_name"], "Other Series Voice")
+        self.assertEqual(other_after["series"], "Other Series")
+
     def test_explicit_project_override_wins_over_series_default(self):
         self._write_series_default("Series Voice")
         self.state = {

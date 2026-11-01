@@ -105,6 +105,13 @@ class Stage3NarratorSegmentationContracts(unittest.TestCase):
         ):
             self.assertIn(token, adapter)
 
+    def test_series_default_resolution_is_file_backed_and_does_not_use_project_cache(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn('settings_root() / "series-narrators"', host)
+        self.assertIn("def _narrator_series_default_read(self, project, state: dict[str, Any], series: str)", host)
+        self.assertIn('stored_source in {"series_default", "none"}', host)
+        self.assertIn("default_profile = str(record.get(\"profile_name\") or \"\").strip()", host)
+
     def test_series_narrator_summary_reader_does_not_require_active_project(self):
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         start = host.index("    def _narrator_series_default_read(")
