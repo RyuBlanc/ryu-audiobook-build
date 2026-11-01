@@ -510,12 +510,12 @@ class QwenCharacterProvider(TTSProvider):
             try:
                 if worker.stdout:
                     worker.stdout.close()
-            except OSError:
+            except (OSError, ValueError):
                 pass
         if self._worker_log is not None:
             try:
                 self._worker_log.flush()
                 self._worker_log.close()
-            except OSError:
+            except (OSError, ValueError):
                 pass
             self._worker_log = None

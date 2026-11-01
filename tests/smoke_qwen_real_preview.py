@@ -209,23 +209,23 @@ def main() -> None:
                 json.dumps(japanese_diagnostics, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            print("QWEN_JAPANESE_PREVIEW_DIAGNOSTICS=" + json.dumps(japanese_diagnostics, ensure_ascii=False))
+            print("QWEN_JAPANESE_PREVIEW_DIAGNOSTICS=" + json.dumps(japanese_diagnostics, ensure_ascii=True))
             if actual_spoken != expected_compact:
                 raise RuntimeError(
                     "Qwen Japanese preview source text did not match the normalized saved pronunciation: "
-                    + json.dumps(japanese_diagnostics, ensure_ascii=False)
+                    + json.dumps(japanese_diagnostics, ensure_ascii=True)
                 )
             if actual_rule_count != int(expected_counts.get("Rimuru", 0)) or actual_rule_count != 1:
                 raise RuntimeError(
                     "Qwen Japanese preview did not apply the saved pronunciation rule exactly once: "
-                    + json.dumps(japanese_diagnostics, ensure_ascii=False)
+                    + json.dumps(japanese_diagnostics, ensure_ascii=True)
                 )
             if not japanese_preview_path.is_file() or japanese_preview_path.stat().st_size < 1024:
                 raise RuntimeError("Qwen did not produce Japanese pronunciation preview audio.")
             print(
                 "REAL_QWEN_JAPANESE_PRONUNCIATION=PASS "
                 f"actual={_duration(japanese_preview_path):.3f}s "
-                "language=Auto spoken_form=リムル"
+                "language=Auto spoken_form_unicode=U+30EA-U+30E0-U+30EB"
             )
             print(
                 "QWEN_VS01_CPU_60S_TARGET="
@@ -240,7 +240,7 @@ def main() -> None:
                 json.dumps(diagnostic, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            print("QWEN_PROVIDER_CLOSE_ERROR=" + json.dumps(diagnostic, ensure_ascii=False))
+            print("QWEN_PROVIDER_CLOSE_ERROR=" + json.dumps(diagnostic, ensure_ascii=True))
             raise
 
 
