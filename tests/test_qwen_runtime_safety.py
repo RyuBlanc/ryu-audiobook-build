@@ -28,25 +28,24 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             )
         self.assertIn("download stage", progress)
 
-    def test_gpu_cuda_install_failure_falls_back_to_cpu_pytorch(self):
+    def test_gpu_cuda_install_failure_does_not_silently_install_cpu_torch(self):
         from pathlib import Path
-        from unittest.mock import call, patch
+        from unittest.mock import patch
         from app.tts import qwen_character_runtime as runtime
 
         results = [
             (0, "pip bootstrap ready"),
             (1, "CUDA 12.8 wheel unavailable"),
             (1, "CUDA 12.6 wheel unavailable"),
-            (0, "CPU torch installed"),
-            (0, "qwen-tts installed"),
-            (0, "torch=2.9.1\ntorchaudio=2.9.1\ncuda=False"),
         ]
-        progress = []
+        candidate = type("Candidate", (), {"backend": "cuda-candidate", "name": "NVIDIA GPU"})()
         with (
             patch.object(runtime, "_has_nvidia_gpu", return_value=True),
+            patch.object(runtime, "best_accelerator", return_value=candidate),
             patch.object(runtime, "_run_capture", side_effect=results) as runner,
         ):
-            runtime._install_runtime_packages(Path("python.exe"), progress.append)
+            with self.assertRaisesRegex(RuntimeError, "CPU fallback was not installed automatically"):
+                runtime._install_runtime_packages(Path("python.exe"))
 
         commands = [entry.args[0] for entry in runner.call_args_list]
         index_urls = [
@@ -59,11 +58,9 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
             [
                 "https://download.pytorch.org/whl/cu128",
                 "https://download.pytorch.org/whl/cu126",
-                "https://download.pytorch.org/whl/cpu",
             ],
         )
-        self.assertTrue(any("(CPU)…" in message for message in progress))
-        self.assertEqual(runner.call_count, 6)
+        self.assertEqual(runner.call_count, 3)
 
     def test_stdout_drain_uses_captured_queue_after_close_clears_provider_state(self):
         import queue

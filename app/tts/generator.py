@@ -357,7 +357,6 @@ def generate_chapter(
             callable(batch_provider)
             and not batch_disabled
             and not isinstance(chunk_voice, list)
-            and chunk_voice == voice
         )
         if can_batch:
             batch_indices = []
@@ -370,7 +369,7 @@ def generate_chapter(
                 probe_output = chunks_dir / f"{probe + 1:05d}.wav"
                 if probe in completed and probe_output.exists():
                     break
-                if isinstance(probe_voice, list) or probe_voice != voice:
+                if isinstance(probe_voice, list) or probe_voice != chunk_voice:
                     break
                 batch_indices.append(probe)
                 probe += 1
@@ -384,7 +383,12 @@ def generate_chapter(
                     for i in batch_indices
                 ]
                 try:
-                    batch_provider(items)
+                    try:
+                        batch_provider(items, voice=chunk_voice)
+                    except TypeError as signature_error:
+                        if "voice" not in str(signature_error):
+                            raise
+                        batch_provider(items)
                 except Exception as exc:
                     if "batch exceeded available GPU memory" in str(exc).casefold():
                         batch_disabled = True

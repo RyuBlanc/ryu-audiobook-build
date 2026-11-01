@@ -21,6 +21,7 @@ from app.tts.qwen_accelerator import (
     model_selection_memory_gb,
     amd_windows_runtime_spec,
     windows_host_identity,
+    gpu_runtime_candidates,
 )
 
 # Qwen3-TTS currently publishes a stable Python 3.12 package/runtime path.
@@ -336,24 +337,9 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
             break
         install_error = detail
 
-    # NVIDIA installations remain usable on CPU if their CUDA wheels cannot
-    # install. AMD/Intel candidates fail visibly rather than silently claiming
-    # GPU acceleration after an unsupported driver or wheel resolution.
-    if not selected_backend and (_has_nvidia_gpu() or active.backend == "cuda"):
-        if progress:
-            progress(f"Installing PyTorch {TORCH_VERSION} (CPU)…")
-        code, detail = _run_capture(
-            [
-                str(python), "-m", "pip", "install", "--upgrade",
-                "--no-cache-dir", *cpu_plan[1],
-            ],
-            timeout=3600,
-        )
-        if code == 0:
-            selected_backend, selected_label = "cpu", "CPU"
-        else:
-            install_error = detail
-
+    # Never silently replace a detected GPU runtime with CPU PyTorch. A
+    # user may explicitly select CPU, but Auto must either activate the
+    # compatible GPU backend or report why it could not.
     if not selected_backend:
         hardware = (
             f"{amd_candidate.name} (AMD ROCm)" if amd_candidate is not None
@@ -361,9 +347,10 @@ def _install_runtime_packages(python: Path, progress=None) -> tuple[str, str, st
             else f"{active.name} ({active.backend})"
         )
         raise RuntimeError(
-            f"Could not install the selected Qwen accelerator runtime for {hardware}. "
-            "No CPU downgrade was applied to a detected AMD/Intel GPU. "
-            f"Last installer error: {install_error[-3000:]}"
+            f"Could not activate the selected Qwen GPU runtime for {hardware}. "
+            "CPU fallback was not installed automatically because it would hide "
+            "a GPU performance failure. Check driver/runtime compatibility and "
+            f"use explicit CPU selection only when intended. Last error: {install_error[-3000:]}"
         )
 
     if progress:
@@ -816,6 +803,37 @@ def _run(command: list[str], progress=None, timeout: int = 3600) -> None:
         raise RuntimeError(f"Qwen character runtime command failed with exit code {code}.")
 
 
+_ACTIVE_QWEN_WORKERS: set[int] = set()
+_ACTIVE_QWEN_WORKERS_LOCK = threading.RLock()
+_GPU_RUNTIME_UPGRADE_LOCK = threading.RLock()
+
+
+def register_qwen_worker(pid: int | None) -> None:
+    if pid:
+        with _ACTIVE_QWEN_WORKERS_LOCK:
+            _ACTIVE_QWEN_WORKERS.add(int(pid))
+
+
+def unregister_qwen_worker(pid: int | None) -> None:
+    if pid:
+        with _ACTIVE_QWEN_WORKERS_LOCK:
+            _ACTIVE_QWEN_WORKERS.discard(int(pid))
+
+
+def _active_qwen_worker_pids() -> list[int]:
+    active: list[int] = []
+    with _ACTIVE_QWEN_WORKERS_LOCK:
+        for pid in list(_ACTIVE_QWEN_WORKERS):
+            try:
+                os.kill(pid, 0)
+                active.append(pid)
+            except ProcessLookupError:
+                _ACTIVE_QWEN_WORKERS.discard(pid)
+            except (PermissionError, OSError):
+                active.append(pid)
+    return active
+
+
 def install_runtime(progress=None, force_repair: bool = False) -> None:
     RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
 
@@ -851,6 +869,93 @@ def install_runtime(progress=None, force_repair: bool = False) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def ensure_best_runtime_for_gpu(progress=None) -> str | None:
+    """Safely replace a CPU-only Qwen venv with the best verified GPU runtime.
+
+    The existing CPU runtime is kept until the GPU venv passes its self-test.
+    Upgrades are refused while this app has active Qwen workers, so a running
+    audiobook is never interrupted by replacing its Python environment.
+    """
+    if not runtime_ready():
+        return None
+
+    with _GPU_RUNTIME_UPGRADE_LOCK:
+        try:
+            current = json.loads(MARKER.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return None
+        current_backend = str(current.get("accelerator") or "cpu").casefold()
+        if current_backend in {"cuda", "rocm", "xpu"}:
+            return current_backend
+
+        candidates = gpu_runtime_candidates(refresh=True)
+        if not candidates:
+            return None
+
+        active = best_accelerator()
+        if active.supported and active.backend in {"cuda", "rocm", "xpu"}:
+            return active.backend
+
+        active_pids = _active_qwen_worker_pids()
+        if active_pids:
+            raise RuntimeError(
+                "A supported GPU was detected, but the CPU Qwen runtime cannot "
+                "be upgraded while another Qwen synthesis worker is running. "
+                "Finish or cancel that job, then retry GPU selection."
+            )
+
+        backup_venv = RUNTIME_ROOT / "runtime-cpu-backup"
+        backup_marker = RUNTIME_ROOT / "runtime.json.cpu-backup"
+        if backup_venv.exists():
+            shutil.rmtree(backup_venv, ignore_errors=True)
+        backup_marker.unlink(missing_ok=True)
+        marker_bytes = MARKER.read_bytes()
+        if not VENV_ROOT.exists():
+            raise RuntimeError("The current Qwen CPU runtime folder is missing; use Models → Repair.")
+        VENV_ROOT.replace(backup_venv)
+        MARKER.unlink(missing_ok=True)
+        try:
+            if progress:
+                progress(
+                    f"Supported GPU detected • upgrading Qwen from CPU to {active.name} "
+                    f"({active.backend}) without changing model quality…"
+                )
+            install_runtime(progress, force_repair=False)
+            detail = verify_runtime(progress)
+            installed = json.loads(MARKER.read_text(encoding="utf-8"))
+            selected_backend = str(installed.get("accelerator") or "cpu").casefold()
+            refreshed = best_accelerator()
+            if (
+                selected_backend not in {"cuda", "rocm", "xpu"}
+                or not refreshed.supported
+                or refreshed.backend != selected_backend
+            ):
+                raise RuntimeError(
+                    "GPU PyTorch installed but is not active. "
+                    f"Installed={selected_backend}; detected={refreshed.backend} "
+                    f"({refreshed.name}). {detail[-1200:]}"
+                )
+            shutil.rmtree(backup_venv, ignore_errors=True)
+            backup_marker.unlink(missing_ok=True)
+            if progress:
+                progress(
+                    f"Qwen GPU runtime active • {refreshed.name} • "
+                    f"{selected_backend.upper()} • {installed.get('torch', 'PyTorch')}"
+                )
+            return selected_backend
+        except Exception as exc:
+            if VENV_ROOT.exists():
+                shutil.rmtree(VENV_ROOT, ignore_errors=True)
+            if backup_venv.exists():
+                backup_venv.replace(VENV_ROOT)
+            MARKER.write_bytes(marker_bytes)
+            raise RuntimeError(
+                "Automatic Qwen GPU activation failed. The previous CPU runtime "
+                "was restored intact; no model, profile or audio data was changed. "
+                f"Reason: {exc}"
+            ) from exc
 
 
 def repair_runtime(progress=None) -> str:

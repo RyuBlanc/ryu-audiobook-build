@@ -501,6 +501,7 @@ def server(args) -> int:
     active_kind = args.kind
     locked_clone_prompts = None
     locked_anchors = None
+    design_identity_cache: dict[str, tuple[dict, dict, str]] = {}
 
     def load_model(kind: str, *, allow_cpu_fallback: bool = True) -> None:
         nonlocal model, device, active_kind
@@ -522,92 +523,106 @@ def server(args) -> int:
             for style in ANCHOR_STYLES
         }
 
+    def clear_model_cache(target_device: str) -> None:
+        try:
+            import torch
+            if target_device.startswith("cuda"):
+                torch.cuda.empty_cache()
+            elif target_device.startswith("xpu"):
+                torch.xpu.empty_cache()
+        except Exception:
+            pass
+
     def lock_design_identity(request: dict) -> None:
         nonlocal model, device, locked_clone_prompts, locked_anchors, active_kind
-        if locked_clone_prompts is not None:
+        profile_key = str(request.get("profile_id") or "").strip()
+        if not profile_key:
+            profile_key = hashlib.sha256(
+                json.dumps({
+                    "speaker": request.get("speaker"),
+                    "language": request.get("language"),
+                    "instruct": request.get("instruct"),
+                    "anchor_text": request.get("anchor_text"),
+                    "seed": request.get("seed"),
+                }, sort_keys=True, ensure_ascii=False).encode("utf-8")
+            ).hexdigest()[:32]
+
+        cached_identity = design_identity_cache.get(profile_key)
+        if cached_identity is not None:
+            locked_clone_prompts, locked_anchors, cached_kind = cached_identity
+            if model is None or active_kind != cached_kind:
+                if model is not None:
+                    del model
+                    model = None
+                    gc.collect()
+                    clear_model_cache(device)
+                model, device = _load_model(cached_kind, args.backend, root)
+                active_kind = cached_kind
             return
+
         paths = anchor_bank_paths(request)
         ready = all(
             path.exists() and path.stat().st_size >= 1024
             for path in paths.values()
         )
+        clone_kind = str(args.clone_kind)
 
-        if ready:
+        if not ready:
+            # Create a new character anchor only when this profile has none.
+            # Release an already loaded Base model before loading VoiceDesign.
+            if model is not None:
+                del model
+                model = None
+                gc.collect()
+                clear_model_cache(device)
+            load_model(args.kind)
             print(
                 json.dumps({
-                    "progress": "Loading the saved canonical character identity…"
+                    "progress": "Preparing this character's saved acoustic identity…"
                 }),
                 flush=True,
             )
-            clone_kind = args.clone_kind
+            paths = _create_expression_anchors(model, request, root)
+            del model
+            model = None
+            gc.collect()
+            clear_model_cache(device)
+
+        # Reuse one Base model instance across character profiles and create
+        # only profile-specific clone prompts. This preserves each character's
+        # acoustic anchor without loading a separate 0.6B/1.7B model per cast member.
+        if model is None or active_kind != clone_kind:
+            if model is not None:
+                del model
+                model = None
+                gc.collect()
+                clear_model_cache(device)
             try:
-                clone_model, clone_device = _load_model(clone_kind, args.backend, root)
+                model, device = _load_model(clone_kind, args.backend, root)
             except Exception as exc:
                 if _is_cuda_oom(exc) and args.backend != "cpu":
                     clone_kind = "base-0.6b"
                     args.clone_kind = clone_kind
-                    clone_model, clone_device = _load_model(clone_kind, args.backend, root)
+                    model, device = _load_model(clone_kind, args.backend, root)
                 else:
                     raise
-            model = clone_model
-            device = clone_device
-            active_kind = clone_kind
-            explicit_anchor = bool(str(request.get("anchor_path") or "").strip())
-            locked_clone_prompts = {}
-            for style, path in paths.items():
-                transcript = _expression_anchor_text(request, style)
-                use_xvector_only = explicit_anchor and style == "neutral" and not str(
-                    request.get("anchor_text") or ""
-                ).strip()
-                locked_clone_prompts[style] = model.create_voice_clone_prompt(
-                    ref_audio=str(path),
-                    ref_text=None if use_xvector_only else transcript,
-                    x_vector_only_mode=use_xvector_only,
-                )
-            locked_anchors = paths
-            return
-
-        load_model(args.kind)
-        print(
-            json.dumps({
-                "progress": "Preparing the saved character identity • first use for this profile…"
-            }),
-            flush=True,
-        )
-        paths = _create_expression_anchors(model, request, root)
-        del model
-        gc.collect()
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except Exception:
-            pass
-
-        clone_kind = str(args.clone_kind)
-        try:
-            model, device = _load_model(clone_kind, args.backend, root)
-        except Exception as exc:
-            if _is_cuda_oom(exc) and args.backend != "cpu":
-                clone_kind = "base-0.6b"
-                args.clone_kind = clone_kind
-                model, device = _load_model(clone_kind, args.backend, root)
-            else:
-                raise
         active_kind = clone_kind
+
         explicit_anchor = bool(str(request.get("anchor_path") or "").strip())
-        locked_clone_prompts = {}
+        prompts = {}
         for style, path in paths.items():
             transcript = _expression_anchor_text(request, style)
             use_xvector_only = explicit_anchor and style == "neutral" and not str(
                 request.get("anchor_text") or ""
             ).strip()
-            locked_clone_prompts[style] = model.create_voice_clone_prompt(
+            prompts[style] = model.create_voice_clone_prompt(
                 ref_audio=str(path),
                 ref_text=None if use_xvector_only else transcript,
                 x_vector_only_mode=use_xvector_only,
             )
+        locked_clone_prompts = prompts
         locked_anchors = paths
+        design_identity_cache[profile_key] = (prompts, paths, clone_kind)
 
     print(
         json.dumps(

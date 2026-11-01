@@ -22,6 +22,9 @@ from ..qwen_character_runtime import (
     verify_runtime,
     worker_script,
     _detected_vram_gb,
+    ensure_best_runtime_for_gpu,
+    register_qwen_worker,
+    unregister_qwen_worker,
 )
 from ..expression import DEFAULT_VOICE_DESIGN_ANCHOR_TEXT, classify_expression
 
@@ -200,6 +203,8 @@ class QwenCharacterProvider(TTSProvider):
         if self._worker is not None and self._worker.poll() is None:
             return
         self._ensure_model_kind()
+        if str(self.backend or "automatic").casefold() in {"automatic", "auto"} and runtime_ready():
+            ensure_best_runtime_for_gpu(self._status)
         if not runtime_ready():
             try:
                 verify_runtime()
@@ -260,6 +265,7 @@ class QwenCharacterProvider(TTSProvider):
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
             if sys.platform == "win32" else 0,
         )
+        register_qwen_worker(self._worker.pid)
         stdout_queue = queue.Queue()
         self._stdout_queue = stdout_queue
         worker = self._worker
@@ -419,6 +425,7 @@ class QwenCharacterProvider(TTSProvider):
     def synthesize_batch(
         self,
         items: list[tuple[str, Path]],
+        voice: str | None = None,
     ) -> list[Path]:
         """Generate several same-voice chunks in one Qwen request.
 
@@ -510,6 +517,7 @@ class QwenCharacterProvider(TTSProvider):
         self._stdout_queue = None
         self._stdout_thread = None
         if worker is not None:
+            unregister_qwen_worker(worker.pid)
             try:
                 if worker.stdin:
                     worker.stdin.close()

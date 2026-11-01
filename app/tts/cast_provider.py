@@ -420,7 +420,7 @@ class CastAwareProvider(TTSProvider):
 
     def _provider_cache_key(self, profile_name: str, profile: VoiceProfile) -> str:
         backend = self.backend_override if self.backend_override != "automatic" else (profile.backend or "automatic")
-        if profile.provider == "qwen-character" and str(profile.qwen_mode or "custom").casefold() in {"custom", "clone"}:
+        if profile.provider == "qwen-character" and str(profile.qwen_mode or "custom").casefold() in {"custom", "clone", "design"}:
             return "shared:qwen:" + json.dumps([backend, profile.model_id or "auto", profile.qwen_mode or "custom"], separators=(",", ":"))
         if profile.provider == "chatterbox":
             return "shared:chatterbox:" + json.dumps([backend, profile.language or "en", profile.model_id == "chatterbox-multilingual"], separators=(",", ":"))
@@ -446,14 +446,28 @@ class CastAwareProvider(TTSProvider):
             provider.exaggeration = profile.exaggeration
             provider.cfg_weight = profile.cfg_weight
 
-    def synthesize(self, text: str, output_path: Path, voice: str | None = None) -> Path:
-        profile_name = voice.casefold() if voice else ""
+    @property
+    def recommended_batch_size(self) -> int:
+        """Use conservative Qwen batching for both narrator and cast chapters."""
+        if not any(
+            profile.provider == "qwen-character"
+            and str(profile.qwen_mode or "custom").casefold() == "design"
+            for profile in self.profiles.values()
+        ):
+            return int(getattr(self.narrator_provider, "recommended_batch_size", 1) or 1)
+        try:
+            from app.tts.qwen_character_runtime import best_accelerator
+            device = best_accelerator()
+            return 2 if device.memory_gb >= 12.0 and (
+                device.supported or device.backend == "cuda-candidate"
+            ) else 1
+        except Exception:
+            return 1
+
+    def _provider_for_voice(self, voice: str | None):
+        profile_name = str(voice or "").casefold()
         profile = self.profiles.get(profile_name)
         if profile is None:
-            # A name that is explicitly assigned to a character is not a
-            # generic fallback voice. Falling back to the narrator here would
-            # silently render a character in the wrong voice if the cast
-            # catalogue was incomplete or changed after routing was built.
             assigned_profile_names = {
                 str(name).strip().casefold()
                 for name in self.assignments.values()
@@ -464,7 +478,8 @@ class CastAwareProvider(TTSProvider):
                     f"The assigned character voice profile '{voice}' is unavailable. "
                     "Open Character Studio and assign an available saved voice profile, then retry."
                 )
-            return self.narrator_provider.synthesize(text, output_path, self.narrator_voice)
+            return self.narrator_provider, self.narrator_voice
+
         cache_key = self._provider_cache_key(profile_name, profile)
         cached = self._providers.get(cache_key)
         if cached is None:
@@ -481,4 +496,25 @@ class CastAwareProvider(TTSProvider):
         if cache_key.startswith(("shared:qwen:", "shared:chatterbox:")):
             self._configure_profile_request(provider, profile)
             provider_voice = profile.voice_id
+        return provider, provider_voice
+
+    def synthesize(self, text: str, output_path: Path, voice: str | None = None) -> Path:
+        provider, provider_voice = self._provider_for_voice(voice)
         return provider.synthesize(text, output_path, provider_voice)
+
+    def synthesize_batch(
+        self,
+        items: list[tuple[str, Path]],
+        voice: str | None = None,
+    ) -> list[Path]:
+        """Batch adjacent chunks only for one resolved speaker profile."""
+        if not items:
+            return []
+        provider, provider_voice = self._provider_for_voice(voice)
+        batch = getattr(provider, "synthesize_batch", None)
+        if callable(batch):
+            return batch(items)
+        return [
+            provider.synthesize(text, output, provider_voice)
+            for text, output in items
+        ]
