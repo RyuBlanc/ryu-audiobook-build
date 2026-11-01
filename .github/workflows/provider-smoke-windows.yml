@@ -123,8 +123,8 @@ jobs:
       - name: Download the actual Qwen VoiceDesign model
         shell: pwsh
         env:
-          HF_HOME: \${{ runner.temp }}\\ryu-qwen-hf
-          RYU_QWEN_MODEL_ROOT: \${{ runner.temp }}\\ryu-qwen-models
+          HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
         run: |
           python -c "import os; from huggingface_hub import snapshot_download; root=os.environ['RYU_QWEN_MODEL_ROOT']; snapshot_download(repo_id='Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign', local_dir=os.path.join(root,'design-1.7b'), allow_patterns=['*.json','*.safetensors','*.txt','*.model','*.npz','*.bin','tokenizer*','vocab*'])"
 
@@ -132,9 +132,9 @@ jobs:
         shell: pwsh
         env:
           PYTHONPATH: \${{ github.workspace }}
-          HF_HOME: \${{ runner.temp }}\\ryu-qwen-hf
-          RYU_QWEN_MODEL_ROOT: \${{ runner.temp }}\\ryu-qwen-models
-          RYU_QWEN_ACCEPTANCE_OUTPUT: \${{ github.workspace }}\\qwen-real-provider-artifacts
+          HF_HOME: ${{ runner.temp }}\ryu-qwen-hf
+          RYU_QWEN_MODEL_ROOT: ${{ runner.temp }}\ryu-qwen-models
+          RYU_QWEN_ACCEPTANCE_OUTPUT: ${{ github.workspace }}\qwen-real-provider-artifacts
           PYTHONWARNINGS: ignore
         run: python -B tests/smoke_qwen_real_preview.py
 

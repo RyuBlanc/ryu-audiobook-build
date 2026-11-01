@@ -50,6 +50,15 @@ jobs:
           PYTHONWARNINGS: ignore
         run: python -B tests/smoke_piper_edge.py
 
+      - name: Run offscreen native Character Studio UI and selected-profile preview acceptance
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          QT_QPA_PLATFORM: offscreen
+          RYU_STAGE3_ACCEPTANCE_OUTPUT: ${{ github.workspace }}\stage3-real-provider-artifacts
+          PYTHONWARNINGS: ignore
+        run: python -B tests/smoke_stage3_character_ui.py
+
       - name: Run real Stage 3 Voice Studio preview and multi-chapter audiobook acceptance
         shell: pwsh
         env:

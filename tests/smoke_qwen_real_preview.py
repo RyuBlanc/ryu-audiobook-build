@@ -64,7 +64,7 @@ def main() -> None:
     # downloaded test model; the worker, model loader and synthesis engine
     # are the production source files.
     worker_env = os.environ.copy()
-    worker_env["HF_HOME"] = str(MODEL_ROOT / "huggingface")
+    worker_env["HF_HOME"] = os.environ.get("HF_HOME") or str(MODEL_ROOT / "huggingface")
     worker_env["PYTHONPATH"] = str(ROOT) + os.pathsep + worker_env.get("PYTHONPATH", "")
     worker_env["PYTHONUTF8"] = "1"
     worker_env["PYTHONIOENCODING"] = "utf-8"
