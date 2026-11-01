@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 import subprocess
 import sys
+import re
 
 
 @dataclass(frozen=True)
@@ -91,8 +92,8 @@ def is_supported_intel_windows_device(adapter_name: str, cpu_name: str, os_capti
     )):
         return True
     # Integrated Arc graphics are validated on Core Ultra mobile H/V families.
-    return "core ultra" in cpu and any(
-        token in cpu for token in ("h processor", "v processor", " 1", " 2", " 3")
+    return "core ultra" in cpu and bool(
+        re.search(r"\\b\\d{3}[hv]\\b", cpu)
     )
 
 
