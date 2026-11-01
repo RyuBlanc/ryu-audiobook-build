@@ -140,17 +140,19 @@ def detect_accelerators() -> tuple[Accelerator, ...]:
         if already_listed:
             continue
         if "amd" in lowered or "radeon" in lowered:
-            found.append(Accelerator(
-                "directml", "cpu", name, memory, False,
-                "AMD GPU detected, but this Windows Qwen runtime has no certified "
-                "DirectML execution path. CPU fallback is used.",
-            ))
+            if not any(item.backend == "cuda" for item in found):
+                found.append(Accelerator(
+                    "directml", "cpu", name, memory, False,
+                    "AMD GPU detected, but this Windows Qwen runtime has no certified "
+                    "DirectML execution path. CPU fallback is used.",
+                ))
         elif "intel" in lowered or "arc" in lowered:
-            found.append(Accelerator(
-                "intel-runtime-missing", "cpu", name, memory, False,
-                "Intel GPU detected, but the required Intel XPU PyTorch runtime is "
-                "not installed. CPU fallback is used.",
-            ))
+            if not any(item.backend == "xpu" for item in found):
+                found.append(Accelerator(
+                    "intel-runtime-missing", "cpu", name, memory, False,
+                    "Intel GPU detected, but the required Intel XPU PyTorch runtime is "
+                    "not installed. CPU fallback is used.",
+                ))
 
     return tuple(found)
 
