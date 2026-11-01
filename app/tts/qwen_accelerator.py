@@ -150,11 +150,11 @@ def best_accelerator() -> Accelerator:
     experimental = next((item for item in devices if item.backend in {"directml", "intel-runtime-missing"}), None)
     if experimental:
         return Accelerator(
-            backend="cpu",
+            backend=experimental.backend,
             device="cpu",
-            name=f"CPU fallback ({experimental.name})",
-            memory_gb=0.0,
-            supported=True,
+            name=experimental.name,
+            memory_gb=experimental.memory_gb,
+            supported=False,
             reason=experimental.reason,
         )
     return Accelerator(
