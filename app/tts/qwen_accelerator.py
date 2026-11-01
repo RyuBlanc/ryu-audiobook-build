@@ -125,18 +125,18 @@ def detect_accelerators() -> tuple[Accelerator, ...]:
     for name, memory in adapters:
         lowered = name.casefold()
         if "amd" in lowered or "radeon" in lowered:
-            if not any(item.backend == "cuda" for item in found):
+            if not any(item.backend in {"rocm", "cuda"} for item in found):
                 found.append(Accelerator(
-                    "directml", "cpu", name, memory, False,
-                    "AMD GPU detected, but Windows Qwen3-TTS DirectML operator "
-                    "compatibility has not passed hardware acceptance. CPU fallback is used.",
+                    "rocm", "cpu", name, memory, False,
+                    "AMD GPU detected. The app-managed ROCm runtime has not yet been "
+                    "installed or validated on this adapter.",
                 ))
         elif "intel" in lowered or "arc" in lowered:
             if not any(item.backend == "xpu" for item in found):
                 found.append(Accelerator(
-                    "intel-runtime-missing", "cpu", name, memory, False,
-                    "Intel GPU detected, but the app-managed runtime does not yet have "
-                    "a verified Intel XPU PyTorch installation. CPU fallback is used.",
+                    "xpu", "cpu", name, memory, False,
+                    "Intel GPU detected. The app-managed XPU runtime has not yet been "
+                    "installed or validated on this adapter.",
                 ))
 
     return tuple(found)
