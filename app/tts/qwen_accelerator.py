@@ -198,9 +198,11 @@ def amd_windows_runtime_spec(
             }
         return None
 
-    if any(model in adapter for model in _AMD_ROCM_721_GPU_TARGETS) or any(
-        model in cpu for model in _AMD_ROCM_721_APU_TARGETS
-    ):
+    legacy_gpu_match = any(model in adapter for model in _AMD_ROCM_721_GPU_TARGETS)
+    # Avoid prefix matches for models not listed in the legacy Windows matrix.
+    if any(name in adapter for name in ("radeon rx 9070 gre", "radeon rx 7700 xt", "radeon ai pro r9700s")):
+        legacy_gpu_match = False
+    if legacy_gpu_match or any(model in cpu for model in _AMD_ROCM_721_APU_TARGETS):
         return {
             "rocm": "7.2.1",
             "arch": "",
@@ -227,13 +229,13 @@ def is_supported_intel_windows_device(adapter_name: str, cpu_name: str, os_capti
     cpu = _normalise_device_name(cpu_name)
     if "arc" not in adapter:
         return False
-    if re.search(r"\\barc\\s+[ab]\\d{3}\\b", adapter):
+    if re.search(r"\barc\s+[ab]\d{3}\b", adapter):
         return True
     # Meteor Lake H, Lunar Lake, Arrow Lake H and Panther Lake mobile SKUs.
     # Windows WMI names can include "(R)" and "(TM)" between Core/Ultra tokens.
     return bool(
-        re.search(r"\\bcore\\b.*\\bultra\\b", cpu)
-        and re.search(r"\\b\\d{3}[hv]\\b", cpu)
+        re.search(r"\bcore\b.*\bultra\b", cpu)
+        and re.search(r"\b\d{3}[hv]\b", cpu)
     )
 
 
