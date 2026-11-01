@@ -302,7 +302,7 @@ class QwenAcceleratorRuntimeInstallTests(unittest.TestCase):
                 return (0, "pip bootstrap ok")
             if "qwen-tts==" in command_text:
                 return (0, "Qwen package installed")
-            if "-c" in command and "import torch" in command[command.index("-c") + 1]:
+            if "-c" in command and "torch" in command[command.index("-c") + 1]:
                 return (0, self_test_output)
             return responses.pop(0)
 
