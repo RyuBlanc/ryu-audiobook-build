@@ -393,6 +393,7 @@ class PremiumV2Bridge(QObject):
                 "narrator.series.default.get": self._narrator_series_default_get,
                 "narrator.series.default.save": self._narrator_series_default_save,
                 "narrator.series.default.apply": self._narrator_series_default_apply,
+                "narrator.project.reset": self._narrator_project_reset,
                 "voice.preview": self._voice_preview,
                 "voice.preview.save": self._voice_preview_save,
                 "character.list": self._character_list,
@@ -524,6 +525,7 @@ class PremiumV2Bridge(QObject):
             "narrator.series.default.get": True,
             "narrator.series.default.save": True,
             "narrator.series.default.apply": True,
+            "narrator.project.reset": True,
             "voice.preview": True,
             "voice.preview.save": True,
             "character.list": True,
@@ -714,8 +716,15 @@ class PremiumV2Bridge(QObject):
             len(assigned_character_names) / len(character_names)
             if character_names else (1.0 if character_analysis_done else 0.0)
         )
-        # Narrator is book metadata; readiness requires a selected, saved TTS voice profile.
-        narrator_ready = bool(str(state.get("voice_profile") or "").strip())
+        # Resolve the effective narrator from the saved project override or the live
+        # series default. A missing/deleted profile is not considered ready.
+        narrator_selection = self._narrator_series_default_read(
+            project, state, self._project_series_name(project, state)
+        )
+        effective_narrator_profile = str(narrator_selection.get("effective_profile_name") or "")
+        narrator_ready = bool(
+            effective_narrator_profile and narrator_selection.get("profile_available")
+        )
         output_configured = bool(output_value)
         pronunciation_rules = (
             state.get("pronunciation_dictionary")
@@ -799,11 +808,12 @@ class PremiumV2Bridge(QObject):
             "language": str(state.get("language") or ""),
             "year": str(state.get("year") or ""),
             "genre": str(state.get("genre") or ""),
-            "narrator": str(state.get("narrator") or state.get("voice_profile") or ""),
-            "voice_profile": str(state.get("voice_profile") or ""),
-            "narrator_profile_source": str(state.get("narrator_profile_source") or ("project_override" if state.get("voice_profile") else "none")),
-            "series_narrator_profile": str((self._narrator_series_default_read(project, state, self._project_series_name(project, state)).get("profile_name") or "")),
+            "narrator": effective_narrator_profile or str(state.get("narrator") or ""),
+            "voice_profile": effective_narrator_profile,
+            "narrator_profile_source": str(narrator_selection.get("source") or "none"),
+            "series_narrator_profile": str(narrator_selection.get("profile_name") or ""),
             "narrator_voice_configured": narrator_ready,
+            "narrator_profile_available": bool(narrator_selection.get("profile_available")),
             "output_target_path": str(output_target),
             "output_folder": str(output_folder),
             "output_folder_ready": bool(output_folder_ready),
@@ -3891,17 +3901,37 @@ class PremiumV2Bridge(QObject):
                     record = loaded
             except (OSError, ValueError, json.JSONDecodeError):
                 raise ValueError("The saved series narrator preference could not be read. It has not been changed.")
-        project_profile = str(state.get("voice_profile") or "").strip()
+        stored_profile = str(state.get("voice_profile") or "").strip()
+        stored_source = str(state.get("narrator_profile_source") or "").strip().casefold()
         default_profile = str(record.get("profile_name") or "").strip()
-        source = "project" if project_profile else ("series" if default_profile else "none")
+
+        # Explicit project overrides win. A profile snapshot saved when a project
+        # inherited its series default is not an override: always resolve it from
+        # the current series record so later series changes propagate safely.
+        if stored_source in {"project_override", "project"}:
+            project_profile = stored_profile
+        elif stored_source in {"series_default", "none"}:
+            project_profile = ""
+        else:
+            # Older projects predate narrator_profile_source. Preserve their saved
+            # narrator profile as a project override rather than silently changing it.
+            project_profile = stored_profile
+
         effective = project_profile or default_profile
-        profile_exists = bool(effective and self._find_profile(effective))
+        source = (
+            "project_override" if project_profile
+            else ("series_default" if default_profile else "none")
+        )
+        profile = self._find_profile(effective) if effective else None
         return {
-            "series": series, "profile_name": default_profile or None,
+            "series": series,
+            "profile_name": default_profile or None,
             "project_profile_name": project_profile or None,
-            "effective_profile_name": effective or None, "source": source,
-            "profile_available": profile_exists if effective else False,
-            "updated_at": record.get("updated_at"), "saved": bool(default_profile),
+            "effective_profile_name": effective or None,
+            "source": source,
+            "profile_available": bool(profile) if effective else False,
+            "updated_at": record.get("updated_at"),
+            "saved": bool(default_profile),
         }
 
     def _narrator_series_default_get(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -3932,7 +3962,31 @@ class PremiumV2Bridge(QObject):
         temp_path.replace(path)
         return {"saved": True, "series": series, "profile_name": profile.name, "updated_at": record["updated_at"]}
 
+    def _narrator_project_reset(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Remove the project override and restore live inheritance from its series."""
+        project = self._active_project()
+        state = load_state(project.folder)
+        series = str(payload.get("series") or self._project_series_name(project, state)).strip()
+        state.pop("voice_profile", None)
+        state.pop("voice_id", None)
+        state.pop("backend", None)
+        state["narrator_profile_source"] = "series_default"
+        resolved = self._narrator_series_default_read(project, state, series)
+        state["narrator"] = str(resolved.get("effective_profile_name") or "")
+        state["narrator_series_default"] = str(resolved.get("profile_name") or "")
+        state["modified_at"] = self._now()
+        save_state(project.folder, state)
+        return {
+            "saved": True,
+            "reset": True,
+            "series": series,
+            "profile_name": resolved.get("effective_profile_name"),
+            "source": resolved.get("source") or "none",
+            "profile_available": bool(resolved.get("profile_available")),
+        }
+
     def _narrator_series_default_apply(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Compatibility action: applying the series default now restores inheritance."""
         project = self._active_project()
         state = load_state(project.folder)
         series = str(payload.get("series") or self._project_series_name(project, state)).strip()
@@ -3940,21 +3994,12 @@ class PremiumV2Bridge(QObject):
         profile_name = str(saved.get("profile_name") or "").strip()
         if not profile_name:
             raise ValueError("This series has no saved narrator default. Save a series default first.")
-        profile = self._find_profile(profile_name)
-        if profile is None:
+        if not saved.get("profile_available"):
             raise ValueError(
                 f"The series narrator profile '{profile_name}' is not currently available. "
                 "Restore or install the profile before applying it to this book."
             )
-        state.update({
-            "voice_profile": profile.name, "voice_id": profile.voice_id,
-            "backend": profile.backend or "automatic", "narrator": profile.name,
-            "narrator_profile_source": "series_default",
-            "narrator_series_default": profile.name, "modified_at": self._now(),
-        })
-        save_state(project.folder, state)
-        return {"saved": True, "applied": True, "series": series,
-                "profile_name": profile.name, "source": "series_default"}
+        return self._narrator_project_reset({"series": series})
 
     def _sync_saved_cast(
         self,
