@@ -93,7 +93,7 @@ def is_supported_intel_windows_device(adapter_name: str, cpu_name: str, os_capti
         return True
     # Integrated Arc graphics are validated on Core Ultra mobile H/V families.
     return "core ultra" in cpu and bool(
-        re.search(r"\\b\\d{3}[hv]\\b", cpu)
+        re.search(r"\b\d{3}[hv]\b", cpu)
     )
 
 
