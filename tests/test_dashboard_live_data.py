@@ -57,6 +57,9 @@ class DashboardLiveDataTests(unittest.TestCase):
                 "modified_at": "2026-10-23T00:00:00+00:00",
             }
             bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
+            # Dashboard readiness now requires a real saved narrator profile,
+            # not only a non-empty profile-name string in project metadata.
+            bridge._find_profile = lambda name: {"name": name} if name == "Amy" else None
             with mock.patch("app.ui.premium_v2_host.list_projects", return_value=[project]):
                 with mock.patch("app.ui.premium_v2_host.load_state", return_value=state):
                     summary = bridge._project_list({})[0]
@@ -157,6 +160,7 @@ class DashboardLiveDataTests(unittest.TestCase):
                 "voice_cast": {},
             }
             bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
+            bridge._find_profile = lambda name: {"name": name} if name == "Amy" else None
             with mock.patch("app.ui.premium_v2_host.load_state", return_value=state):
                 summary = bridge._project_summary(project)
 
@@ -299,6 +303,7 @@ class DashboardLiveDataTests(unittest.TestCase):
                 "pronunciation_dictionary": {"東京": "とうきょう"},
             }
             bridge = PremiumV2Bridge.__new__(PremiumV2Bridge)
+            bridge._find_profile = lambda name: {"name": name} if name == "Saved Narrator" else None
             with (
                 mock.patch("app.ui.premium_v2_host.load_state", return_value=state),
                 mock.patch("app.ui.premium_v2_host.audiobooks_root", return_value=output_root),
