@@ -291,11 +291,14 @@ class QwenAcceleratorRuntimeInstallTests(unittest.TestCase):
         from app.tts import qwen_character_runtime as runtime
 
         commands = []
+        pip_bootstrap_done = False
 
         def capture(command, timeout=120):
+            nonlocal pip_bootstrap_done
             commands.append(list(command))
             command_text = " ".join(str(value) for value in command)
-            if "pip" in command_text and "setuptools" in command_text:
+            if not pip_bootstrap_done:
+                pip_bootstrap_done = True
                 return (0, "pip bootstrap ok")
             if "qwen-tts==" in command_text:
                 return (0, "Qwen package installed")
