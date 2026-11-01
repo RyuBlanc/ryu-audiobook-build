@@ -4187,7 +4187,7 @@ class PremiumV2Bridge(QObject):
                 source_project_title=str(getattr(project, "title", "") or ""),
                 update_names=update_names,
                 update_voice=update_voice,
-                registry_path=registry_path,
+                path=registry_path,
             )
 
     def _character_library_bootstrap(self) -> None:

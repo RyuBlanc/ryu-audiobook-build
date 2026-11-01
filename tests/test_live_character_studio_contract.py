@@ -187,6 +187,26 @@ class LiveCharacterStudioContracts(unittest.TestCase):
         self.assertIn('const ambiguousSeriesMatch = (row.suggestions || []).slice(1).some(other => {', adapter)
         self.assertIn('if (ambiguousSeriesMatch) { skipped++; continue; }', adapter)
 
+    def test_selected_character_audition_uses_shared_premium_voice_preview_service(self):
+        adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        character_start = adapter.index("async function testSelectedCharacterVoice()")
+        character_end = adapter.index("function installCharacterStudioHandlers()", character_start)
+        character_audition = adapter[character_start:character_end]
+        self.assertIn("window.__ryuPreviewSavedProfile", character_audition)
+        self.assertIn("await previewSavedVoice(profile,", character_audition)
+        self.assertIn("window.__ryuPreviewSavedProfile = previewSavedProfile", adapter)
+        self.assertIn("call('voice.preview', payload)", adapter)
+        self.assertIn("await previewAudio.play()", adapter)
+
+    def test_character_library_bootstrap_uses_supported_registry_path_keyword(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        sync_start = host.index("    def _sync_saved_cast(")
+        sync_end = host.index("    def _character_library_bootstrap(", sync_start)
+        sync_method = host[sync_start:sync_end]
+        self.assertIn("sync_reusable_characters(", sync_method)
+        self.assertIn("path=registry_path", sync_method)
+        self.assertNotIn("registry_path=registry_path", sync_method)
+
     def test_qwen_design_preview_uses_design_model_without_production_anchor_setup(self):
         provider = (ROOT / "app/tts/providers/qwen_character.py").read_text(encoding="utf-8")
         worker = (ROOT / "app/tts/qwen_character_worker.py").read_text(encoding="utf-8")

@@ -5705,7 +5705,11 @@
         row.chapter_number + ':' + row.start + ':' + row.end === selectedKey
     );
     if (!selected) throw new Error('Select a saved dialogue row in the Assigned Cast inspector before testing voice.');
-    await previewSavedProfile(profile, String(selected.text || ''), current.name, {routeCharacterCast:false});
+    const previewSavedVoice = window.__ryuPreviewSavedProfile;
+    if (typeof previewSavedVoice !== 'function') {
+      throw new Error('The shared Voice Studio preview service is not ready. Re-enter Voice Studio and retry.');
+    }
+    await previewSavedVoice(profile, String(selected.text || ''), current.name, {routeCharacterCast:false});
   }
   function installCharacterStudioHandlers() {
     if (characterStudioCaptureBound) return;
@@ -8074,6 +8078,11 @@
       message('Playing ' + (label || profile.name) + ' · ' + Number(job.result.actual_duration_seconds || 0).toFixed(1) + ' seconds.');
       return job;
     };
+    // The shared preview routine is created during Premium V2 hydration, but
+    // Character Studio's selected-dialogue handler is authored in the outer
+    // adapter scope. Publish the existing function so the default UI invokes
+    // the exact same saved-profile job/player path without copying it.
+    window.__ryuPreviewSavedProfile = previewSavedProfile;
     document.addEventListener('click', e => {
       const button = e.target.closest('button');
       if (!button) return;
