@@ -263,6 +263,7 @@ class QwenAcceleratorDiscoveryTests(unittest.TestCase):
             selected = accelerator.best_accelerator()
             self.assertEqual(selected.backend, "cpu")
             self.assertTrue(selected.supported)
+            self.assertIn("AMD Radeon iGPU", accelerator.accelerator_report())
             self.assertIn("not certified", accelerator.accelerator_report())
 
     def test_accelerator_report_includes_uncertified_reason(self):
