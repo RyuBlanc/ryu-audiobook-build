@@ -127,16 +127,16 @@ def detect_accelerators() -> tuple[Accelerator, ...]:
         if "amd" in lowered or "radeon" in lowered:
             if not any(item.backend in {"rocm", "cuda"} for item in found):
                 found.append(Accelerator(
-                    "rocm", "cpu", name, memory, False,
-                    "AMD GPU detected. The app-managed ROCm runtime has not yet been "
-                    "installed or validated on this adapter.",
+                    "rocm-candidate", "cpu", name, memory, False,
+                    "AMD GPU detected. Install the AMD ROCm PyTorch runtime and verify "
+                    "torch.version.hip before Qwen uses this adapter.",
                 ))
         elif "intel" in lowered or "arc" in lowered:
             if not any(item.backend == "xpu" for item in found):
                 found.append(Accelerator(
-                    "xpu", "cpu", name, memory, False,
-                    "Intel GPU detected. The app-managed XPU runtime has not yet been "
-                    "installed or validated on this adapter.",
+                    "xpu-candidate", "cpu", name, memory, False,
+                    "Intel GPU detected. Install the PyTorch XPU wheels and verify "
+                    "torch.xpu.is_available() before Qwen uses this adapter.",
                 ))
 
     return tuple(found)
