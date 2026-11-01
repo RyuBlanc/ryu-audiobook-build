@@ -739,6 +739,7 @@ class ModelsPage(QWidget):
                 self.list.viewport().update()
 
         self._update_uninstall_button()
+        self._update_qwen_model_preference_status()
         self.status.setText("Model inventory refreshed from this PC.")
 
     def _update_operation_controls(self) -> None:

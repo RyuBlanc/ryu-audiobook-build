@@ -184,6 +184,7 @@ class CastAwareProvider(TTSProvider):
                 "voice": self.narrator_voice,
             }
         payload = {
+            "qwen_global_model_preference": get_qwen_model_preference(),
             "narrator": self.narrator_voice,
             "narrator_profile": self._profile_signature(self.narrator_profile),
             "narrator_engine": narrator_engine,
