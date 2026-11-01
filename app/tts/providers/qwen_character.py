@@ -238,7 +238,7 @@ class QwenCharacterProvider(TTSProvider):
             clone_kind = self.long_form_model_kind or best_long_form_clone_kind()
             if not model_installed(clone_kind):
                 raise RuntimeError(
-                    f"VoiceDesign long-form narration needs the selected Qwen Base model ({clone_kind}). "
+                    f"VoiceDesign stable identity needs the local Qwen Base model ({clone_kind}) selected by the global preference. "
                     "Open Models and install the selected global model size, or change the global preference in Models & Voice Engines."
                 )
         log_path = Path.home() / "Ryu's Audiobook" / "Settings" / "qwen_character_worker.log"

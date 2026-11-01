@@ -1863,9 +1863,10 @@ class RegressionTests(unittest.TestCase):
     def test_cast_provider_keeps_qwen_long_form_chunk_settings(self):
         source = Path("app/tts/cast_provider.py").read_text(encoding="utf-8")
         self.assertIn('profile.provider == "qwen-character"', source)
-        self.assertIn("limits.append(1800)", source)
-        self.assertIn('return getattr(self.narrator_provider, "recommended_chunk_sentences", 2)', source)
-        self.assertIn("return 8", source)
+        self.assertIn("limits.append(QwenCharacterProvider.recommended_chunk_chars)", source)
+        self.assertIn("QwenCharacterProvider.recommended_chunk_sentences", source)
+        self.assertIn("recommended_chunk_chars = 2400", Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8"))
+        self.assertIn("recommended_chunk_sentences = 10", Path("app/tts/providers/qwen_character.py").read_text(encoding="utf-8"))
 
     def test_qwen_three_phase_voice_studio_is_exposed(self):
         source = Path("app/ui/voice_page.py").read_text(encoding="utf-8")
