@@ -3,6 +3,15 @@ name: Provider Runtime Smoke
 on:
   push:
     branches: [main, stage-3/restart-from-stage2-closeout-1794]
+    # Avoid repeating multi-provider/model downloads for artifact-only or CI housekeeping commits.
+    # App, assets, tests, build, or dependency changes still run these real-provider checks.
+    paths:
+      - 'app/**'
+      - 'assets/**'
+      - 'tests/**'
+      - 'requirements*.txt'
+      - 'build.py'
+      - 'run_app.py'
   workflow_dispatch:
 
 permissions:
