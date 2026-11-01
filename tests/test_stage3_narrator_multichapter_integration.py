@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.chapters.detector import Chapter
+from app.core.character_identity import character_identity_key
 from app.tts.cast_provider import CastAwareProvider
 from app.tts.manager import GenerationManager
 from app.tts.profile_provider import ProfileBoundProvider
@@ -102,6 +103,12 @@ class Stage3NarratorMultiChapterIntegrationTests(unittest.TestCase):
             voice_id="ren-id",
             backend="automatic",
         )
+        other_mira_profile = VoiceProfile(
+            name="Other Series Mira Voice",
+            provider="piper",
+            voice_id="other-mira-id",
+            backend="automatic",
+        )
 
         # Production preflight resolves the same saved series narrator used to
         # build the provider and rejects unresolved dialogue before generation.
@@ -126,18 +133,28 @@ class Stage3NarratorMultiChapterIntegrationTests(unittest.TestCase):
         character_engines = {
             "Mira Voice": RecordingWavProvider("Mira engine"),
             "Ren Voice": RecordingWavProvider("Ren engine"),
+            "Other Series Mira Voice": RecordingWavProvider("Other Series Mira engine"),
         }
         character_profiles = {
             "Mira Voice": mira_profile,
             "Ren Voice": ren_profile,
+            "Other Series Mira Voice": other_mira_profile,
         }
-        cast_assignments = {"Mira": "Mira Voice", "Ren": "Ren Voice"}
+        # The legacy name-only map deliberately points Mira to the other series.
+        # The source-backed series identity must win for this book's assignment.
+        cast_assignments = {"Mira": "Other Series Mira Voice", "Ren": "Ren Voice"}
+        identity_assignments = {
+            character_identity_key("Mira", "The Series"): "Mira Voice",
+            character_identity_key("Mira", "Other Series"): "Other Series Mira Voice",
+            character_identity_key("Ren", "The Series"): "Ren Voice",
+        }
         provider = CastAwareProvider(
             narrator_provider,
             narrator_profile.voice_id,
             character_profiles,
             cast_assignments,
             narrator_profile=narrator_profile,
+            identity_assignments=identity_assignments,
         )
 
         def provider_for_saved_profile(profile):
@@ -203,6 +220,7 @@ class Stage3NarratorMultiChapterIntegrationTests(unittest.TestCase):
         self.assertTrue(any("The village was near." in item for item in narrator_text))
         self.assertTrue(any("Stay close." in item for item in mira_text))
         self.assertTrue(any("I can guide us." in item for item in ren_text))
+        self.assertFalse(character_engines["Other Series Mira Voice"].calls)
         # No character dialogue may leak to the narrator provider.
         self.assertFalse(any("Stay close." in item or "I can guide us." in item for item in narrator_text))
 

@@ -36,6 +36,7 @@ from app.ui.frontend_assets import (
     prepare_native_host_html,
 )
 from app.core.project import create_project, list_projects
+from app.core.character_identity import character_identity_key
 from app.core.character_library import (
     character_library_path as reusable_character_library_path,
     list_characters as list_reusable_characters,
@@ -2513,7 +2514,8 @@ class PremiumV2Bridge(QObject):
                     )
         for project in list_projects():
             state = load_state(project.folder)
-            if str(state.get("voice_profile") or "").casefold() == name.casefold():
+            narrator_source = str(state.get("narrator_profile_source") or "").strip().casefold()
+            if narrator_source not in {"series_default", "none"} and str(state.get("voice_profile") or "").casefold() == name.casefold():
                 raise ValueError(f'The profile is the selected narrator for "{project.title}". Select another narrator before deleting it.')
             assigned = state.get("characters") or []
             if any(isinstance(item, dict) and str(item.get("voice_profile") or "").casefold() == name.casefold()
@@ -4702,8 +4704,10 @@ class PremiumV2Bridge(QObject):
         # roster UI. Wrap the narrator with the existing cast-aware router when
         # at least one saved character has a valid voice assignment.
         cast_assignments: dict[str, str] = {}
+        cast_identity_assignments: dict[str, str] = {}
         cast_profiles: dict[str, Any] = {}
         available_profiles = {p.name.casefold(): p for p in load_profiles()}
+        project_series = self._project_series_name(project, state)
         for character in state.get("characters") or []:
             if not isinstance(character, dict):
                 continue
@@ -4717,6 +4721,13 @@ class PremiumV2Bridge(QObject):
                     f"'{assigned_name}', which is no longer available. Reassign its voice in Character Studio."
                 )
             cast_profiles[assigned_profile.name] = assigned_profile
+            character_series = str(
+                character.get("series") or character.get("series_name") or ""
+            ).strip()
+            if not character_series:
+                scope = str(character.get("scope") or "").strip()
+                match = re.match(r"(?i)^series\\s*[·:-]\\s*(.+)$", scope)
+                character_series = match.group(1).strip() if match else project_series
             character_names = [str(character.get("name") or "").strip()]
             aliases = character.get("aliases") or []
             if isinstance(aliases, list):
@@ -4724,13 +4735,18 @@ class PremiumV2Bridge(QObject):
             for character_name in character_names:
                 if character_name:
                     cast_assignments[character_name] = assigned_profile.name
-        if cast_assignments:
+                    if character_series:
+                        cast_identity_assignments[
+                            character_identity_key(character_name, character_series)
+                        ] = assigned_profile.name
+        if cast_assignments or cast_identity_assignments:
             from app.tts.cast_provider import CastAwareProvider
             provider = CastAwareProvider(
                 provider, voice, cast_profiles, cast_assignments,
                 narrating_character=str(state.get("narrating_character") or ""),
                 backend_override=str(state.get("backend") or "automatic"),
                 narrator_profile=profile,
+                identity_assignments=cast_identity_assignments,
             )
         output_text = str(payload.get("output_path") or state.get("output_path") or state.get("generation_target_path") or "").strip()
         if output_text:

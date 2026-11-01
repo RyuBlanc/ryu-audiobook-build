@@ -1772,12 +1772,12 @@
     const narratorPanel=document.createElement('section');narratorPanel.id='ryuCreateSeriesNarratorSetup';narratorPanel.hidden=true;
     narratorPanel.style.cssText='margin:14px 0;padding:14px;border:1px solid rgba(201,32,80,.4);border-radius:12px;background:rgba(201,32,80,.06)';
     const narratorHeading=document.createElement('div');narratorHeading.textContent='Series Narrator Voice';narratorHeading.style.cssText='font-weight:800;margin-bottom:5px';
-    const narratorHint=document.createElement('p');narratorHint.className='muted';narratorHint.textContent='Choose a saved Voice Studio profile for every project in this series. Preview the sample before creating the series.';narratorHint.style.cssText='font-size:12px;line-height:1.45;margin:0 0 10px';
+    const narratorHint=document.createElement('p');narratorHint.className='muted';narratorHint.textContent='Choose a saved Voice Studio profile for every project in this series and preview it before saving. You may also save a draft series without a narrator; audiobook generation will remain blocked until one is configured.';narratorHint.style.cssText='font-size:12px;line-height:1.45;margin:0 0 10px';
     const narratorProfileSelect=document.createElement('select');narratorProfileSelect.id='ryuCreateSeriesNarratorProfile';
     const narratorSamples=characterSavedProfiles();
     const addNarratorOption=(value,label)=>{const option=document.createElement('option');option.value=value;option.textContent=label;narratorProfileSelect.appendChild(option);};
     addNarratorOption('','Choose a saved Voice Studio profile');
-    for(const savedProfile of narratorSamples)addNarratorOption(savedProfile.name,savedProfile.name+' · '+savedProfile.provider);
+    for(const savedProfile of narratorSamples)addNarratorOption(savedProfile.name,characterSavedProfileLabel(savedProfile));
     narratorProfileSelect.style.cssText='box-sizing:border-box;width:100%;padding:10px;border-radius:9px;border:1px solid #343b4a;background:#0c1018;color:#f6f7fa;font:inherit';
     const narratorSampleText=document.createElement('textarea');narratorSampleText.id='ryuCreateSeriesNarratorSample';narratorSampleText.rows=3;
     narratorSampleText.value='Long ago, beneath a sky of silver stars, a new journey began.';
@@ -1788,10 +1788,21 @@
     const narratorPreviewButton=document.createElement('button');narratorPreviewButton.type='button';narratorPreviewButton.className='btn small';narratorPreviewButton.textContent='Preview Narrator';
     const narratorPlayButton=document.createElement('button');narratorPlayButton.type='button';narratorPlayButton.className='btn small secondary';narratorPlayButton.textContent='Play Narrator Preview';narratorPlayButton.disabled=true;
     const narratorStopButton=document.createElement('button');narratorStopButton.type='button';narratorStopButton.className='btn small ghost';narratorStopButton.textContent='Stop';narratorStopButton.disabled=true;
+    const narratorDraftButton=document.createElement('button');narratorDraftButton.type='button';narratorDraftButton.className='btn small ghost';narratorDraftButton.textContent='Save Draft Without Narrator';
+    narratorDraftButton.addEventListener('click',()=>{
+      narratorDraftWithoutVoice=true;
+      validatedSeriesNarratorPreview=null;
+      narratorPlayButton.disabled=true;
+      narratorStopButton.disabled=true;
+      narratorPlayButton.textContent='Play Narrator Preview';
+      narratorPreviewStatus.textContent='Draft series · narrator not configured. Production Studio will block audiobook generation until a valid series narrator is saved.';
+    });
     const narratorPreviewStatus=document.createElement('p');narratorPreviewStatus.className='muted';narratorPreviewStatus.id='ryuCreateSeriesNarratorStatus';narratorPreviewStatus.textContent='Narrator preview required before saving this new series.';narratorPreviewStatus.style.cssText='font-size:12px;line-height:1.4;margin:9px 0 0';
     let validatedSeriesNarratorPreview=null;
+    let narratorDraftWithoutVoice=false;
     const clearSeriesNarratorPreview=(reason='Narrator settings changed. Preview again before saving.')=>{
       validatedSeriesNarratorPreview=null;
+      narratorDraftWithoutVoice=false;
       narratorPreviewStatus.textContent=reason;
       narratorPlayButton.disabled=true;
       narratorStopButton.disabled=true;
@@ -1824,6 +1835,7 @@
         };
         narratorPreviewStatus.textContent='Preview ready · '+profileName+' · '+seconds+' seconds requested. Play it before saving the series.';
         narratorPlayButton.disabled=false;narratorStopButton.disabled=false;
+        if(previewAudio)previewAudio.addEventListener('ended',()=>{narratorPlayButton.textContent='Play Narrator Preview';},{once:true});
       }catch(error){
         clearSeriesNarratorPreview(error?.message||String(error));
         message(error?.message||String(error),true);
@@ -1832,8 +1844,8 @@
       }
     });
     narratorPlayButton.addEventListener('click',async()=>{
-      if(!validatedSeriesNarratorPreview||!voicePreviewValid||!previewAudio)throw new Error('Generate a valid narrator preview first.');
       try{
+        if(!validatedSeriesNarratorPreview||!voicePreviewValid||!previewAudio)throw new Error('Generate a valid narrator preview first.');
         if(!previewAudio.paused){previewAudio.pause();narratorPlayButton.textContent='Play Narrator Preview';}
         else{await previewAudio.play();narratorPlayButton.textContent='Pause Narrator Preview';}
       }catch(error){message('Narrator preview playback failed: '+(error?.message||String(error)),true);}
@@ -1844,7 +1856,7 @@
     });
     const narratorDurationRow=document.createElement('div');narratorDurationRow.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px';
     const narratorDurationLabel=document.createElement('span');narratorDurationLabel.textContent='Preview length';narratorDurationLabel.style.cssText='font-size:12px;color:#aeb6c5';
-    narratorDurationRow.append(narratorDurationLabel,narratorDuration,narratorPreviewButton,narratorPlayButton,narratorStopButton);
+    narratorDurationRow.append(narratorDurationLabel,narratorDuration,narratorPreviewButton,narratorPlayButton,narratorStopButton,narratorDraftButton);
     narratorPanel.append(narratorHeading,narratorHint,field('Narrator Voice',narratorProfileSelect),field('Sample Narration',narratorSampleText),narratorDurationRow,narratorPreviewStatus);
     const seriesNames=[...new Set(libraryCharacters.map(item=>String(item.series||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
     const addOption=(select,value,label)=>{const option=document.createElement('option');option.value=value;option.textContent=label;select.appendChild(option);};
@@ -1883,9 +1895,12 @@
             && validatedSeriesNarratorPreview.durationSeconds===currentDuration
             && voicePreviewValid
             && lastVoicePreviewPath===validatedSeriesNarratorPreview.outputPath;
-          if(!previewMatches)throw new Error('Preview and listen to the selected saved narrator profile before saving this new series.');
-          const savedNarrator=await call('narrator.series.default.save',{series,profile_name:narratorProfileName});
-          if(!savedNarrator?.saved)throw new Error('The series narrator default was not saved. The new series was not completed.');
+          if(previewMatches){
+            const savedNarrator=await call('narrator.series.default.save',{series,profile_name:narratorProfileName});
+            if(!savedNarrator?.saved)throw new Error('The series narrator default was not saved. The new series was not completed.');
+          }else if(!narratorDraftWithoutVoice){
+            throw new Error('Preview and listen to a saved narrator profile, or explicitly choose Save Draft Without Narrator.');
+          }
         }
         let character=libraryCharacters.find(item=>String(item.id||'')===characterSelect.value);
         if(characterSelect.value==='__new_character__'||isNewSeries){
@@ -1908,7 +1923,11 @@
           await refreshCharacters();
         }
         await refreshCharacterLibrary();await refreshVoices();await refreshAssignedCharacterForProfile({...profile,saved:true});
-        close();message('Assigned '+profile.name+' to '+primaryName+' · '+(assigned.character.series||series)+'.');
+        close();
+        const draftWarning=isNewSeries&&narratorDraftWithoutVoice
+          ?' · Draft series: narrator setup incomplete; audiobook generation is blocked until a narrator is configured.'
+          :'';
+        message('Assigned '+profile.name+' to '+primaryName+' · '+(assigned.character.series||series)+'.'+draftWarning);
       }catch(error){message(error?.message||String(error),true);assign.disabled=false;assign.textContent='Assign Voice';}
     });
     modal.append(title,hint,field('Series',seriesSelect),seriesCaption,narratorPanel,field('Character',characterSelect),charCaption,meta,actions);
@@ -2522,16 +2541,22 @@
       series_default:'Series Default',
       none:'Not Configured'
     })[String(seriesNarratorDefault?.source || project?.narrator_profile_source || 'none')] || 'Not Configured';
+    const narratorSetupLabel = seriesNarratorDefault?.effective_profile_name
+      ? (seriesNarratorDefault?.profile_available
+        ? 'Narrator setup ready'
+        : 'Narrator profile unavailable · generation blocked')
+      : 'Incomplete narration setup · choose a narrator before generation';
     const profileOptions = characterSavedProfiles().map(profile =>
-      '<option value="' + esc(profile.name) + '">' + esc(profile.name) + '</option>'
+      '<option value="' + esc(profile.name) + '">' + esc(characterSavedProfileLabel(profile)) + '</option>'
     ).join('');
     const seriesOptions = characterSavedProfiles().map(profile =>
-      '<option value="' + esc(profile.name) + '"' + (profile.name === savedName ? ' selected' : '') + '>' + esc(profile.name) + '</option>'
+      '<option value="' + esc(profile.name) + '"' + (profile.name === savedName ? ' selected' : '') + '>' + esc(characterSavedProfileLabel(profile)) + '</option>'
     ).join('');
     card.innerHTML = '<div style="font-weight:750;margin-bottom:5px">Project Narrator</div>' +
       '<div class="muted" style="font-size:12px;margin-bottom:8px">Active project: ' + esc(String(project?.title || '')) +
       ' · Current narrator: ' + esc(projectNarratorName || 'Not selected') +
-      ' · Source: ' + esc(sourceLabel) + '</div>' +
+      ' · Source: ' + esc(sourceLabel) +
+      ' · ' + esc(narratorSetupLabel) + '</div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">' +
       '<select id="projectNarratorProfile" class="input" style="min-width:220px;flex:1">' +
       '<option value="">Choose a saved narrator profile</option>' + profileOptions + '</select>' +
@@ -2614,6 +2639,12 @@
   }
   function characterSavedProfiles() {
     return voices.filter(item => item && item.saved === true && String(item.name || '').trim());
+  }
+  function characterSavedProfileLabel(profile) {
+    const name = String(profile?.name || '').trim();
+    const provider = String(profile?.provider || '').trim();
+    const model = String(profile?.model_id || profile?.model_name || profile?.model || '').trim();
+    return [name, provider, model].filter(Boolean).join(' · ');
   }
   function characterProfileByName(name) {
     const key = String(name || '').trim().toLowerCase();

@@ -55,6 +55,13 @@ class Stage3NarratorSegmentationContracts(unittest.TestCase):
         self.assertIn("The profile is the saved narrator default for series", host)
         self.assertIn("Change that series narrator default before deleting this profile.", host)
 
+    def test_production_cast_routing_uses_series_scoped_character_identity(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("from app.core.character_identity import character_identity_key", host)
+        self.assertIn("cast_identity_assignments: dict[str, str] = {}", host)
+        self.assertIn("character_identity_key(character_name, character_series)", host)
+        self.assertIn("identity_assignments=cast_identity_assignments", host)
+
     def test_generation_uses_effective_narrator_and_blocks_unresolved_dialogue(self):
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn("def _resolve_narrator_for_generation(", host)
@@ -74,7 +81,7 @@ class Stage3NarratorSegmentationContracts(unittest.TestCase):
         self.assertIn('id="previewProjectNarrator"', adapter)
         self.assertIn("call('narrator.preview'", adapter)
 
-    def test_new_series_creation_requires_a_saved_previewed_narrator(self):
+    def test_new_series_creation_supports_narrator_setup_or_explicit_incomplete_draft(self):
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         for token in (
             "ryuCreateSeriesNarratorSetup",
@@ -82,10 +89,13 @@ class Stage3NarratorSegmentationContracts(unittest.TestCase):
             "ryuCreateSeriesNarratorSample",
             "Preview Narrator",
             "Play Narrator Preview",
+            "Save Draft Without Narrator",
+            "narratorDraftWithoutVoice",
             "narrator.preview",
             "narrator.series.default.save",
-            "Preview and listen to the selected saved narrator profile before saving this new series.",
+            "Incomplete narration setup",
             "narratorPanel.hidden=!createSeries",
+            "characterSavedProfileLabel(savedProfile)",
         ):
             self.assertIn(token, adapter)
 

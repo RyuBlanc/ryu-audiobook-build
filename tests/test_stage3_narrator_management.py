@@ -117,6 +117,31 @@ class Stage3NarratorManagementTests(unittest.TestCase):
         self.assertEqual(record["provider"], "kokoro")
         self.assertEqual(record["voice_id"], "new-id")
 
+    def test_profile_delete_allows_stale_snapshot_when_project_inherits_new_series_default(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            defaults = root / "series-narrators"
+            defaults.mkdir()
+            (defaults / "series-123.json").write_text(json.dumps({
+                "series": "The Series",
+                "profile_name": "New Series Voice",
+                "provider": "piper",
+                "voice_id": "new-series-id",
+            }), encoding="utf-8")
+            project = SimpleNamespace(title="Book One", folder=root / "project")
+            old_profile = self._profile("Old Series Voice")
+            with patch("app.tts.voice_profile.load_saved_profiles", return_value=[old_profile]):
+                with patch("app.tts.voice_profile.save_profiles") as save_profiles:
+                    with patch("app.ui.premium_v2_host.settings_root", return_value=root):
+                        with patch("app.ui.premium_v2_host.list_projects", return_value=[project]):
+                            with patch("app.ui.premium_v2_host.load_state", return_value={
+                                "voice_profile": "Old Series Voice",
+                                "narrator_profile_source": "series_default",
+                            }):
+                                result = self.bridge._voice_delete({"profile_name": "Old Series Voice"})
+            self.assertTrue(result["deleted"])
+            save_profiles.assert_called_once_with([])
+
     def test_profile_delete_is_blocked_while_used_as_a_series_narrator_default(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
