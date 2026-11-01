@@ -610,20 +610,19 @@ def server(args) -> int:
         active_kind = clone_kind
 
         explicit_anchor = bool(str(request.get("anchor_path") or "").strip())
-        prompts = {}
+        locked_clone_prompts = {}
         for style, path in paths.items():
             transcript = _expression_anchor_text(request, style)
             use_xvector_only = explicit_anchor and style == "neutral" and not str(
                 request.get("anchor_text") or ""
             ).strip()
-            prompts[style] = model.create_voice_clone_prompt(
+            locked_clone_prompts[style] = model.create_voice_clone_prompt(
                 ref_audio=str(path),
                 ref_text=None if use_xvector_only else transcript,
                 x_vector_only_mode=use_xvector_only,
             )
-        locked_clone_prompts = prompts
         locked_anchors = paths
-        design_identity_cache[profile_key] = (prompts, paths, clone_kind)
+        design_identity_cache[profile_key] = (locked_clone_prompts, paths, clone_kind)
 
     print(
         json.dumps(
