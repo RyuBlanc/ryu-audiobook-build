@@ -370,6 +370,7 @@ def _runtime_version_is_current() -> bool:
             or data.get("bootstrap_version") != BOOTSTRAP_VERSION
             or data.get("qwen_tts") != QWEN_TTS_VERSION
             or data.get("accelerator") != best_accelerator().backend
+            or data.get("accelerator_name") != best_accelerator().name
             or not _python_works(VENV_PYTHON)
         ):
             return False
