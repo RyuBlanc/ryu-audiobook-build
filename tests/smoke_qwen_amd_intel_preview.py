@@ -47,9 +47,6 @@ def main() -> None:
 
     model_dirs = {key: root / key for key in MODEL_IDS}
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1]) + os.pathsep + env.get("PYTHONPATH", "")
-    env["HF_HOME"] = os.environ.get("HF_HOME", str(root / "huggingface"))
-
     import unittest.mock as mock
 
     runtime_model_dirs = {key: root / key for key in MODEL_IDS}
