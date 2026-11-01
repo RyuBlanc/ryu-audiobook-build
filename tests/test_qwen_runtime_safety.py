@@ -166,5 +166,58 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
         self.assertEqual(runner.call_count, 4)
 
 
+class QwenCudaPrecisionTests(unittest.TestCase):
+    def test_cuda_uses_bfloat16_when_device_supports_it(self):
+        from types import SimpleNamespace
+        from app.tts.qwen_character_worker import _inference_dtype
+
+        bf16 = object()
+        fp16 = object()
+        fp32 = object()
+        torch = SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: True, is_bf16_supported=lambda: True),
+            bfloat16=bf16, float16=fp16, float32=fp32,
+        )
+        self.assertIs(_inference_dtype(torch, "cuda:0"), bf16)
+
+    def test_cuda_falls_back_to_float16_when_bfloat16_is_unavailable(self):
+        from types import SimpleNamespace
+        from app.tts.qwen_character_worker import _inference_dtype
+
+        bf16 = object()
+        fp16 = object()
+        fp32 = object()
+        torch = SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: True, is_bf16_supported=lambda: False),
+            bfloat16=bf16, float16=fp16, float32=fp32,
+        )
+        self.assertIs(_inference_dtype(torch, "cuda:0"), fp16)
+
+    def test_cuda_bfloat16_probe_failure_also_uses_float16(self):
+        from types import SimpleNamespace
+        from app.tts.qwen_character_worker import _inference_dtype
+
+        fp16 = object()
+        torch = SimpleNamespace(
+            cuda=SimpleNamespace(
+                is_available=lambda: True,
+                is_bf16_supported=lambda: (_ for _ in ()).throw(RuntimeError("unsupported probe")),
+            ),
+            bfloat16=object(), float16=fp16, float32=object(),
+        )
+        self.assertIs(_inference_dtype(torch, "cuda:0"), fp16)
+
+    def test_cpu_inference_keeps_float32(self):
+        from types import SimpleNamespace
+        from app.tts.qwen_character_worker import _inference_dtype
+
+        fp32 = object()
+        torch = SimpleNamespace(
+            cuda=SimpleNamespace(is_available=lambda: False),
+            bfloat16=object(), float16=object(), float32=fp32,
+        )
+        self.assertIs(_inference_dtype(torch, "cpu"), fp32)
+
+
 if __name__ == "__main__":
     unittest.main()

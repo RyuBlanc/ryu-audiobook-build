@@ -64,7 +64,7 @@ def _load_model(kind: str, backend: str, root: Path):
     else:
         device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
-    dtype = torch.bfloat16 if device.startswith("cuda") else torch.float32
+    dtype = _inference_dtype(torch, device)
     if device.startswith("cuda"):
         try:
             torch.set_float32_matmul_precision("high")
@@ -86,6 +86,17 @@ def _load_model(kind: str, backend: str, root: Path):
         except Exception:
             pass
     return model, device
+
+
+def _inference_dtype(torch, device: str):
+    """Choose a CUDA dtype supported by the active GPU, otherwise CPU FP32."""
+    if not str(device).startswith("cuda"):
+        return torch.float32
+    try:
+        supports_bf16 = bool(torch.cuda.is_bf16_supported())
+    except Exception:
+        supports_bf16 = False
+    return torch.bfloat16 if supports_bf16 else torch.float16
 
 
 def _is_cuda_oom(exc: BaseException) -> bool:
