@@ -704,7 +704,14 @@ def install_runtime(progress=None, force_repair: bool = False) -> None:
 
     python = _install_portable_python(progress)
     python = _create_or_repair_venv(progress)
-    _install_runtime_packages(python, progress)
+    selected_backend = _install_runtime_packages(python, progress)
+    active_device = best_accelerator()
+    if selected_backend != active_device.backend:
+        raise RuntimeError(
+            "Qwen backend installation did not match detected GPU hardware. "
+            f"Installed: {selected_backend}; detected: {active_device.backend} "
+            f"({active_device.name}). Qwen runtime was not marked ready."
+        )
 
     MARKER.write_text(
         json.dumps(
