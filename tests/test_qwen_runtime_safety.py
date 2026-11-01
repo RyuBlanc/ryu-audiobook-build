@@ -315,7 +315,12 @@ class QwenAcceleratorRuntimeInstallTests(unittest.TestCase):
     def test_amd_rocm_windows_uses_official_rocm_721_python312_wheels(self):
         from app.tts.qwen_accelerator import Accelerator
         adapter = Accelerator("rocm", "cpu", "AMD Radeon RX 9070", 16.0, False, "candidate")
-        results = [(0, "torch installed"), (0, "unused")]
+        results = [
+            (0, "pip bootstrapped"),
+            (0, "AMD ROCm installed"),
+            (0, "Qwen package installed"),
+            (0, "torch=2.9.1+rocm7.2.1 torchaudio=2.9.1+rocm7.2.1 hip=7.2.1 cuda=True xpu=False"),
+        ]
         commands, messages = self._run_install(
             adapter, "nt", results,
             "torch=2.9.1+rocm7.2.1 torchaudio=2.9.1+rocm7.2.1 hip=7.2.1 cuda=True xpu=False",
@@ -330,7 +335,11 @@ class QwenAcceleratorRuntimeInstallTests(unittest.TestCase):
         from app.tts.qwen_accelerator import Accelerator
         adapter = Accelerator("xpu", "cpu", "Intel Arc Graphics", 8.0, False, "candidate")
         commands, messages = self._run_install(
-            adapter, "nt", [(0, "Intel XPU torch installed")],
+            adapter, "nt", [
+                (0, "pip bootstrapped"),
+                (0, "Intel XPU torch installed"),
+                (0, "Qwen package installed"),
+            ],
             "torch=2.9.1 torchaudio=2.9.1 hip=None cuda=False xpu=True",
         )
         joined = " ".join(str(value) for command in commands for value in command)
