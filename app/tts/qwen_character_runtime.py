@@ -211,7 +211,7 @@ def _create_or_repair_venv(progress=None) -> Path:
     return VENV_PYTHON
 
 
-def _install_runtime_packages(python: Path, progress=None) -> None:
+def _install_runtime_packages(python: Path, progress=None) -> str:
     if progress:
         progress("Installing PyTorch for the local character engine…")
 
@@ -223,34 +223,33 @@ def _install_runtime_packages(python: Path, progress=None) -> None:
         raise RuntimeError(f"Qwen runtime pip bootstrap failed: {detail[-2500:]}")
 
     adapters = detect_accelerators()
-    windows_adapters = [item for item in adapters if item.backend in {"directml", "intel-runtime-missing"}]
-    amd_windows_candidate = next(
-        (item for item in windows_adapters if "amd" in item.name.casefold() or "radeon" in item.name.casefold()),
-        None,
+    amd_candidate = next(
+        (item for item in adapters if item.backend == "rocm-candidate"), None
     )
-    intel_windows_candidate = next(
-        (item for item in windows_adapters if "intel" in item.name.casefold() or "arc" in item.name.casefold()),
-        None,
+    intel_candidate = next(
+        (item for item in adapters if item.backend == "xpu-candidate"), None
     )
-    accelerator = best_accelerator()
+    active = best_accelerator()
 
-    torch_install_commands: list[tuple[str, list[str]]] = []
-    if accelerator.backend == "cuda":
-        torch_install_commands.extend([
-            ("NVIDIA CUDA 12.8", [
-                "--index-url", "https://download.pytorch.org/whl/cu128",
-                f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}",
-            ]),
-            ("NVIDIA CUDA 12.6", [
-                "--index-url", "https://download.pytorch.org/whl/cu126",
-                f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}",
-            ]),
+    install_plan: list[tuple[str, list[str], str]] = []
+    if active.backend == "cuda":
+        install_plan.extend([
+            (
+                "NVIDIA CUDA 12.8",
+                ["--index-url", "https://download.pytorch.org/whl/cu128",
+                 f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}"],
+                "cuda",
+            ),
+            (
+                "NVIDIA CUDA 12.6",
+                ["--index-url", "https://download.pytorch.org/whl/cu126",
+                 f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}"],
+                "cuda",
+            ),
         ])
-    elif os.name == "nt" and amd_windows_candidate:
-        # AMD's official Windows PyTorch bundle requires Python 3.12 and
-        # matching drivers; keep the exact wheels pinned as documented by AMD.
+    elif amd_candidate and os.name == "nt":
         rocm_root = "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1"
-        rocm_packages = [
+        packages = [
             f"{rocm_root}/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl",
             f"{rocm_root}/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl",
             f"{rocm_root}/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl",
@@ -258,102 +257,88 @@ def _install_runtime_packages(python: Path, progress=None) -> None:
             f"{rocm_root}/torch-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl",
             f"{rocm_root}/torchaudio-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl",
         ]
-        torch_install_commands.append(("AMD ROCm 7.2.1 (Windows)", rocm_packages))
-    elif os.name == "nt" and intel_windows_candidate:
-        torch_install_commands.append((
-            "Intel XPU",
-            [
-                "--index-url", "https://download.pytorch.org/whl/xpu",
-                "torch", "torchaudio",
-            ],
+        install_plan.append(("AMD ROCm 7.2.1 (Windows)", packages, "rocm"))
+    elif intel_candidate and os.name == "nt":
+        install_plan.append((
+            "Intel XPU (Windows)",
+            ["--index-url", "https://download.pytorch.org/whl/xpu", "torch", "torchaudio"],
+            "xpu",
         ))
-    elif accelerator.backend == "rocm" and sys.platform.startswith("linux"):
-        torch_install_commands.append((
+    elif active.backend == "rocm" and sys.platform.startswith("linux"):
+        install_plan.append((
             "AMD ROCm",
-            [
-                "--index-url", "https://download.pytorch.org/whl/rocm6.4",
-                f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}",
-            ],
+            ["--index-url", "https://download.pytorch.org/whl/rocm6.4",
+             f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}"],
+            "rocm",
         ))
-    elif accelerator.backend == "xpu":
-        torch_install_commands.append((
+    elif active.backend == "xpu":
+        install_plan.append((
             "Intel XPU",
-            [
-                "--index-url", "https://download.pytorch.org/whl/xpu",
-                "torch", "torchaudio",
-            ],
+            ["--index-url", "https://download.pytorch.org/whl/xpu", "torch", "torchaudio"],
+            "xpu",
         ))
 
-    # CPU fallback is always last and only used if accelerator wheels cannot
-    # be installed or verified. Preserve a usable app, but report the reason.
-    torch_install_commands.append((
-        "CPU compatibility fallback",
-        [
-            "--index-url", "https://download.pytorch.org/whl/cpu",
-            f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}",
-        ],
-    ))
+    # CPU is deliberately used only when no supported GPU is present. A
+    # detected AMD/Intel GPU must not be silently marked accelerated if its
+    # backend-specific installation or self-test fails.
+    target_backend = install_plan[0][2] if install_plan else "cpu"
+    target_label = install_plan[0][0] if install_plan else "CPU compatibility"
+    if not install_plan:
+        install_plan.append((
+            target_label,
+            ["--index-url", "https://download.pytorch.org/whl/cpu",
+             f"torch=={TORCH_VERSION}", f"torchaudio=={TORCHAUDIO_VERSION}"],
+            "cpu",
+        ))
 
-    torch_error = ""
-    selected_install_label = "CPU compatibility fallback"
-    for label, package_args in torch_install_commands:
+    install_error = ""
+    for label, package_args, expected_backend in install_plan:
         if progress:
             progress(f"Installing PyTorch {TORCH_VERSION} ({label})…")
         code, detail = _run_capture(
             [str(python), "-m", "pip", "install", "--upgrade", "--no-cache-dir", *package_args],
             timeout=3600,
         )
-        if code == 0:
-            selected_install_label = label
-            torch_error = ""
-            break
-        torch_error = detail
+        if code != 0:
+            install_error = detail
+            continue
 
-    if torch_error:
-        raise RuntimeError(
-            "PyTorch installation failed for the offline character engine. "
-            f"Detected adapter: {accelerator.name} ({accelerator.backend}). "
-            f"Last error: {torch_error[-3500:]}"
+        check = (
+            "import torch, torchaudio, qwen_tts; "
+            "print('torch=' + torch.__version__); "
+            "print('torchaudio=' + torchaudio.__version__); "
+            "print('cuda=' + str(torch.cuda.is_available())); "
+            "print('hip=' + str(getattr(torch.version, 'hip', None))); "
+            "xpu=getattr(torch, 'xpu', None); "
+            "print('xpu=' + str(bool(xpu is not None and xpu.is_available())))"
+        )
+        test_code, test_detail = _run_capture(
+            [str(python), "-c", check], timeout=240
+        )
+        if test_code != 0:
+            install_error = test_detail
+            continue
+        normalized = test_detail.replace(" ", "")
+        backend_ok = (
+            expected_backend == "cpu"
+            or (expected_backend == "cuda" and "cuda=True" in normalized)
+            or (expected_backend == "rocm" and "hip=None" not in normalized and "cuda=True" in normalized)
+            or (expected_backend == "xpu" and "xpu=True" in normalized)
+        )
+        if backend_ok:
+            if progress:
+                progress(f"Qwen runtime backend ready • {label}. {test_detail[-700:]}")
+            return expected_backend
+        install_error = (
+            f"Installed {label} but backend self-test did not activate {expected_backend}. "
+            + test_detail[-2500:]
         )
 
-    if progress:
-        progress("Installing the official Qwen3-TTS Python package…")
-    code, detail = _run_capture(
-        [
-            str(python), "-m", "pip", "install", "--upgrade",
-            f"qwen-tts=={QWEN_TTS_VERSION}",
-        ],
-        timeout=2400,
+    raise RuntimeError(
+        "The selected GPU runtime did not pass its backend self-test. "
+        "Qwen has not marked this adapter as accelerated; repair the driver or "
+        "backend installation and retry. " + install_error[-3500:]
     )
-    if code != 0:
-        raise RuntimeError(
-            f"Qwen3-TTS package installation failed: {detail[-3500:]}"
-        )
-
-    if progress:
-        progress("Testing the offline character Python runtime…")
-    check = (
-        "import torch, torchaudio, qwen_tts; "
-        "print('torch=' + torch.__version__); "
-        "print('torchaudio=' + torchaudio.__version__); "
-        "print('cuda=' + str(torch.cuda.is_available())); "
-        "print('hip=' + str(getattr(torch.version, 'hip', None))); "
-        "xpu=getattr(torch, 'xpu', None); "
-        "print('xpu=' + str(bool(xpu is not None and xpu.is_available())))"
-    )
-    code, detail = _run_capture([str(python), "-c", check], timeout=180)
-    if code != 0:
-        raise RuntimeError(
-            f"Qwen3-TTS runtime self-test failed: {detail[-3500:]}"
-        )
-
-    if selected_install_label.startswith("AMD ROCm") and "hip=None" in detail.replace(" ", ""):
-        raise RuntimeError("AMD ROCm wheels were installed but the active PyTorch build has no HIP runtime.")
-    if selected_install_label.startswith("Intel XPU") and "xpu=True" not in detail.replace(" ", ""):
-        raise RuntimeError("Intel XPU wheels were installed but PyTorch did not activate an XPU device.")
-
-    if progress:
-        progress(f"Offline character runtime ready • {selected_install_label}. {detail[-700:]}")
 
 
 def _runtime_self_test(python: Path) -> tuple[bool, str]:
