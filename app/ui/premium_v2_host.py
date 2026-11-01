@@ -4635,6 +4635,15 @@ class PremiumV2Bridge(QObject):
                          result={"suggestions": suggestions, "count": len(suggestions)})
         return {"job_id": job_id, "state": "completed", "suggestions": suggestions, "count": len(suggestions)}
 
+    @staticmethod
+    def _character_series_for_voice_assignment(character: dict[str, Any], default_series: str) -> str:
+        series = str(character.get("series") or character.get("series_name") or "").strip()
+        if series:
+            return series
+        scope = str(character.get("scope") or "").strip()
+        match = re.match(r"(?i)^series\s*[·:-]\s*(.+)$", scope)
+        return match.group(1).strip() if match else str(default_series or "").strip()
+
     def _resolve_narrator_for_generation(self, project, state: dict[str, Any], chapters):
         """Resolve the effective saved narrator and fail closed on unresolved dialogue."""
         series = self._project_series_name(project, state)
@@ -4721,13 +4730,9 @@ class PremiumV2Bridge(QObject):
                     f"'{assigned_name}', which is no longer available. Reassign its voice in Character Studio."
                 )
             cast_profiles[assigned_profile.name] = assigned_profile
-            character_series = str(
-                character.get("series") or character.get("series_name") or ""
-            ).strip()
-            if not character_series:
-                scope = str(character.get("scope") or "").strip()
-                match = re.match(r"(?i)^series\\s*[·:-]\\s*(.+)$", scope)
-                character_series = match.group(1).strip() if match else project_series
+            character_series = self._character_series_for_voice_assignment(
+                character, project_series
+            )
             character_names = [str(character.get("name") or "").strip()]
             aliases = character.get("aliases") or []
             if isinstance(aliases, list):

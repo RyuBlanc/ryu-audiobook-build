@@ -55,6 +55,12 @@ class Stage3NarratorSegmentationContracts(unittest.TestCase):
         self.assertIn("The profile is the saved narrator default for series", host)
         self.assertIn("Change that series narrator default before deleting this profile.", host)
 
+    def test_production_cast_series_scope_fallback_uses_tested_series_parser(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("def _character_series_for_voice_assignment(", host)
+        self.assertIn('re.match(r"(?i)^series\\s*[·:-]\\s*(.+)$", scope)', host)
+        self.assertIn("self._character_series_for_voice_assignment(", host)
+
     def test_production_cast_routing_uses_series_scoped_character_identity(self):
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         self.assertIn("from app.core.character_identity import character_identity_key", host)

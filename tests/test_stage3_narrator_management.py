@@ -117,6 +117,25 @@ class Stage3NarratorManagementTests(unittest.TestCase):
         self.assertEqual(record["provider"], "kokoro")
         self.assertEqual(record["voice_id"], "new-id")
 
+    def test_character_voice_assignment_series_resolves_series_scope_and_explicit_identity(self):
+        resolve = PremiumV2Bridge._character_series_for_voice_assignment
+        self.assertEqual(
+            resolve({"scope": "Series · The Series"}, "Book Series"),
+            "The Series",
+        )
+        self.assertEqual(
+            resolve({"scope": "Series: Another Series"}, "Book Series"),
+            "Another Series",
+        )
+        self.assertEqual(
+            resolve({"series": "Explicit Series", "scope": "Series · Other Series"}, "Book Series"),
+            "Explicit Series",
+        )
+        self.assertEqual(
+            resolve({"scope": "Current book only"}, "Book Series"),
+            "Book Series",
+        )
+
     def test_profile_delete_allows_stale_snapshot_when_project_inherits_new_series_default(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
