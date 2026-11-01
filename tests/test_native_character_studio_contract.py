@@ -42,6 +42,21 @@ class NativeCharacterStudioContractTests(unittest.TestCase):
         self.assertIn("self._player.setSource(QUrl.fromLocalFile(path))", panel)
         self.assertIn("self._player.play()", panel)
 
+    def test_dialogue_link_route_avoids_qt_numeric_host_normalization(self):
+        from PySide6.QtCore import QUrl
+        from app.ui.native_character_studio import _decode_dialogue_link, _dialogue_link
+
+        rendered = _dialogue_link(1, 34, 47)
+        parsed = QUrl(rendered)
+        self.assertEqual(rendered, "dialogue://chapter/1/34/47")
+        self.assertEqual(parsed.host(), "chapter")
+        self.assertEqual(_decode_dialogue_link(parsed), (1, 34, 47))
+
+        # Keep links from an already-open legacy panel readable as well.
+        legacy = QUrl("dialogue://1/34/47")
+        self.assertEqual(legacy.host(), "0.0.0.1")
+        self.assertEqual(_decode_dialogue_link(legacy), (1, 34, 47))
+
 
 if __name__ == "__main__":
     unittest.main()

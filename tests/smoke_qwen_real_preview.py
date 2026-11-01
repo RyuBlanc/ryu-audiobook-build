@@ -165,6 +165,42 @@ def main() -> None:
                 "REAL_QWEN_EXPRESSION_AUDIO=PASS "
                 "styles=warm,angry model=Qwen-VoiceDesign"
             )
+
+            japanese_preview_path = OUTPUT_ROOT / "qwen-voicedesign-japanese-pronunciation.wav"
+            japanese_result = build_voice_preview(
+                "Rimuruが来た。",
+                provider,
+                "Stage 3 Qwen VoiceDesign",
+                japanese_preview_path,
+                pronunciation_dictionary=[
+                    {
+                        "written_form": "Rimuru",
+                        "spoken_form": "リムル",
+                        "enabled": True,
+                    }
+                ],
+                narration_speed=1.0,
+                pacing_profile="off",
+                max_chars=100,
+                target_seconds=2.0,
+            )
+            if japanese_result.source_text != "リムルが来た。":
+                raise RuntimeError(
+                    "Qwen Japanese preview did not receive the corrected source text: "
+                    + repr(japanese_result.source_text)
+                )
+            if (japanese_result.applied_rule_counts or {}).get("Rimuru") != 1:
+                raise RuntimeError(
+                    "Qwen Japanese preview did not apply the saved pronunciation rule: "
+                    + repr(japanese_result.applied_rule_counts)
+                )
+            if not japanese_preview_path.is_file() or japanese_preview_path.stat().st_size < 1024:
+                raise RuntimeError("Qwen did not produce Japanese pronunciation preview audio.")
+            print(
+                "REAL_QWEN_JAPANESE_PRONUNCIATION=PASS "
+                f"actual={_duration(japanese_preview_path):.3f}s "
+                "language=Auto spoken_form=リムル"
+            )
             print(
                 "QWEN_VS01_CPU_60S_TARGET="
                 + ("MET" if elapsed < 60.0 else "NOT_MET_ON_HOSTED_CPU")

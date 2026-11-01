@@ -65,6 +65,56 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
         self.assertTrue(any("(CPU)…" in message for message in progress))
         self.assertEqual(runner.call_count, 6)
 
+    def test_stdout_drain_uses_captured_queue_after_close_clears_provider_state(self):
+        import queue
+        import threading
+        from types import SimpleNamespace
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+
+        read_blocked = threading.Event()
+        release_reader = threading.Event()
+
+        class BlockingStdout:
+            def __init__(self):
+                self.calls = 0
+
+            def readline(self):
+                self.calls += 1
+                if self.calls == 1:
+                    return '{"ready": true}\n'
+                read_blocked.set()
+                release_reader.wait(timeout=3.0)
+                return ""
+
+        provider = QwenCharacterProvider(
+            voice_id="stdout-race-test",
+            backend="cpu",
+            model_kind="design-1.7b",
+            qwen_mode="design-preview",
+        )
+        output_queue = queue.Queue()
+        worker = SimpleNamespace(stdout=BlockingStdout())
+        provider._worker = worker
+        provider._stdout_queue = output_queue
+
+        reader = threading.Thread(
+            target=provider._drain_stdout,
+            args=(worker, output_queue),
+            daemon=True,
+        )
+        reader.start()
+        self.assertTrue(read_blocked.wait(timeout=2.0))
+
+        # This is the state transition performed by QwenCharacterProvider.close().
+        provider._worker = None
+        provider._stdout_queue = None
+        release_reader.set()
+        reader.join(timeout=2.0)
+
+        self.assertFalse(reader.is_alive(), "Qwen stdout reader did not terminate.")
+        self.assertEqual(output_queue.get_nowait(), '{"ready": true}')
+        self.assertIsNone(output_queue.get_nowait())
+
     def test_cpu_only_pc_attempts_cpu_pytorch_directly(self):
         from pathlib import Path
         from unittest.mock import patch

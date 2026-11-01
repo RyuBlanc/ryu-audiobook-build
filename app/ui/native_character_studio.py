@@ -36,6 +36,47 @@ from app.ui.voice_page import VoicePreviewWorker
 _QUOTE_FALLBACK = re.compile(r"“[^”\n]{2,}”|「[^」\n]{2,}」|『[^』\n]{2,}』|\"[^\"\n]{2,}\"")
 
 
+def _dialogue_link(chapter_number: int, start: int, end: int) -> str:
+    """Build an unambiguous custom URL that Qt will not reinterpret as an IPv4 host."""
+    return f"dialogue://chapter/{int(chapter_number)}/{int(start)}/{int(end)}"
+
+
+def _decode_dialogue_link(url: QUrl) -> tuple[int, int, int] | None:
+    """Decode new path-based dialogue URLs and legacy numeric-host links.
+
+    QUrl canonicalizes a numeric authority such as dialogue://1/... to
+    dialogue://0.0.0.1/.... New links use a non-numeric chapter host; old
+    links remain accepted for an already-open UI.
+    """
+    try:
+        parsed = url if isinstance(url, QUrl) else QUrl(str(url))
+        host = str(parsed.host() or "").casefold()
+        parts = [part for part in parsed.path().split("/") if part]
+        if host == "chapter":
+            if len(parts) != 3:
+                return None
+            chapter_number, start, end = (int(part) for part in parts)
+        else:
+            if len(parts) != 2:
+                return None
+            try:
+                chapter_number = int(host)
+            except ValueError:
+                if not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", host):
+                    return None
+                octets = [int(part) for part in host.split(".")]
+                if any(part < 0 or part > 255 for part in octets):
+                    return None
+                chapter_number = int.from_bytes(bytes(octets), "big")
+            start, end = (int(part) for part in parts)
+        if chapter_number < 1 or start < 0 or end <= start:
+            return None
+        return chapter_number, start, end
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+
 class NativeDialogueAnalysisWorker(QThread):
     """Analyze source dialogue off the UI thread and rank only series-scoped candidates."""
 
@@ -1003,7 +1044,7 @@ class NativeCharacterDialoguePanel(QWidget):
             else:
                 bg, accent = "transparent", "#b9c0ce"
                 label = "Skipped suggestion" if skipped else "Unassigned · click to review"
-            url = f"dialogue://{int(chapter.number)}/{start}/{end}"
+            url = _dialogue_link(int(chapter.number), start, end)
             pieces.append(
                 '<a href="' + url + '" style="color:' + accent + ';background:' + bg +
                 ';border-left:3px solid ' + accent + ';text-decoration:none;padding:1px 3px;">' +
@@ -1030,12 +1071,10 @@ class NativeCharacterDialoguePanel(QWidget):
             self.manual_status.setText(message + ". Green passages are saved assignments; plain text is unassigned.")
 
     def _decode_link(self, url: QUrl) -> dict | None:
-        try:
-            chapter_number = int(url.host())
-            parts = [part for part in url.path().split("/") if part]
-            start, end = int(parts[0]), int(parts[1])
-        except (TypeError, ValueError, IndexError):
+        route = _decode_dialogue_link(url)
+        if route is None:
             return None
+        chapter_number, start, end = route
         chapter = self._chapter_by_number(chapter_number)
         if chapter is None:
             return None

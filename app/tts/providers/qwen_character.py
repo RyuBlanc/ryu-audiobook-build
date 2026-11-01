@@ -243,9 +243,12 @@ class QwenCharacterProvider(TTSProvider):
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
             if sys.platform == "win32" else 0,
         )
-        self._stdout_queue = queue.Queue()
+        stdout_queue = queue.Queue()
+        self._stdout_queue = stdout_queue
+        worker = self._worker
         self._stdout_thread = threading.Thread(
             target=self._drain_stdout,
+            args=(worker, stdout_queue),
             name="RyuQwenCharacterStdout",
             daemon=True,
         )
@@ -266,14 +269,21 @@ class QwenCharacterProvider(TTSProvider):
         self.close()
         raise RuntimeError(str(detail))
 
-    def _drain_stdout(self) -> None:
-        if self._worker is None or self._worker.stdout is None or self._stdout_queue is None:
+    def _drain_stdout(self, worker, output_queue: queue.Queue[str | None]) -> None:
+        """Drain one worker into its captured queue, even while close() clears shared state."""
+        stdout = getattr(worker, "stdout", None)
+        if stdout is None:
+            output_queue.put(None)
             return
         try:
-            for line in iter(self._worker.stdout.readline, ""):
-                self._stdout_queue.put(line.rstrip("\r\n"))
+            for line in iter(stdout.readline, ""):
+                output_queue.put(line.rstrip("\r\n"))
+        except (OSError, ValueError):
+            # close() intentionally closes the pipe to stop the worker. The
+            # queue is owned by this thread and remains valid until its sentinel.
+            pass
         finally:
-            self._stdout_queue.put(None)
+            output_queue.put(None)
 
     def _read_response(self, timeout: float, heartbeat: str = "") -> dict:
         q = self._stdout_queue
