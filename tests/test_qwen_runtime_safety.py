@@ -424,11 +424,11 @@ class QwenAcceleratorRuntimeInstallTests(unittest.TestCase):
             adapter,
             "nt",
             [(0, "AMD ROCm packages installed")],
-            "torch=2.14.0+rocm10.1.0
+            """torch=2.14.0+rocm10.1.0
 torchaudio=2.11.0.3+rocm10.1.0
 hip=10.1.0
 cuda=True
-xpu=False",
+xpu=False""",
             "25H2",
         )
         joined = " ".join(str(value) for command in commands for value in command)
@@ -446,11 +446,11 @@ xpu=False",
             adapter,
             "nt",
             [(0, "AMD ROCm packages installed")],
-            "torch=2.9.1+rocm7.2.1
+            """torch=2.9.1+rocm7.2.1
 torchaudio=2.9.1+rocm7.2.1
 hip=7.2.1
 cuda=True
-xpu=False",
+xpu=False""",
             "24H2",
         )
         joined = " ".join(str(value) for command in commands for value in command)
@@ -486,11 +486,11 @@ xpu=False",
             adapter,
             "nt",
             [(0, "Intel XPU wheels installed")],
-            "torch=2.9.1
+            """torch=2.9.1
 torchaudio=2.9.1
 hip=None
 cuda=False
-xpu=True",
+xpu=True""",
         )
         joined = " ".join(str(value) for command in commands for value in command)
         self.assertIn("https://download.pytorch.org/whl/xpu", joined)
@@ -506,11 +506,11 @@ xpu=True",
                 adapter,
                 "nt",
                 [(0, "ROCm packages installed")],
-                "torch=2.14.0+rocm10.1.0
+                """torch=2.14.0+rocm10.1.0
 torchaudio=2.11.0.3+rocm10.1.0
 hip=None
 cuda=False
-xpu=False",
+xpu=False""",
             )
 
     def test_intel_xpu_install_rejects_if_xpu_is_not_available(self):
@@ -522,11 +522,11 @@ xpu=False",
                 adapter,
                 "nt",
                 [(0, "XPU wheels installed")],
-                "torch=2.9.1
+                """torch=2.9.1
 torchaudio=2.9.1
 hip=None
 cuda=False
-xpu=False",
+xpu=False""",
             )
 
 
