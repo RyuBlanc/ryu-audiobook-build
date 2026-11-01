@@ -295,6 +295,15 @@ JS_DRIVER = r"""
   // The default Premium V2 Character Studio highlights an unresolved quoted
   // passage as Needs Speaker Review; use its real popover and save action.
   await go('characters');
+  const autoNarration = await waitFor(() =>
+    [...document.querySelectorAll('#manualStory .ryu-narrator-passage')]
+      .find(node => node.textContent.includes('The lantern glowed.')),
+    10000, 'automatic Narrator passage in the source text'
+  );
+  check('CS-09 ordinary narration is automatically classified as Narrator',
+    autoNarration.textContent.includes('The lantern glowed.') &&
+    autoNarration.classList.contains('ryu-narrator-passage'),
+    {text:autoNarration.textContent.trim(),className:autoNarration.className});
   const unresolved = await waitFor(() => {
     const buttons = [...document.querySelectorAll('#manualStory [data-manual-dialogue]')];
     return buttons.find(button => button.textContent.includes('I can guide us.'));
@@ -343,6 +352,32 @@ JS_DRIVER = r"""
   const seriesSaved = await call('narrator.series.default.get',{series:'Stage 3 Premium V2 Acceptance'});
   check('CS-10 series default saved from Voice Studio profile', seriesSaved.profile_name === 'Stage 3 Narrator • Piper Lessac',
     {profile:seriesSaved.profile_name,source:seriesSaved.source});
+
+  // Exercise the same saved-profile sample-preview route used during Create Series.
+  const seriesSetupPreview = await call('narrator.preview', {
+    series_setup_preview:true,
+    profile_name:'Stage 3 Narrator • Piper Lessac',
+    text:'The river road was quiet. The lanterns waited beyond the gate.',
+    duration_seconds:10
+  });
+  if (!seriesSetupPreview?.job_id) throw new Error('Create Series narrator setup did not queue its selected-profile preview.');
+  const seriesSetupJob = await waitForVoiceJob('Stage 3 Narrator • Piper Lessac', 90000);
+  const seriesSetupPlayBefore = window.__stage3PlayCalls;
+  const seriesSetupAudio = new Audio(seriesSetupJob.result.file_url);
+  await seriesSetupAudio.play();
+  check('CS-10 Create Series sample preview uses saved narrator profile and plays generated audio',
+    Boolean(seriesSetupJob.result?.output_path && seriesSetupJob.result?.actual_duration_seconds > 0 &&
+      window.__stage3PlayCalls > seriesSetupPlayBefore),
+    {profile:'Stage 3 Narrator • Piper Lessac',actual:seriesSetupJob.result.actual_duration_seconds,
+      output:seriesSetupJob.result.output_path,playCalls:window.__stage3PlayCalls-seriesSetupPlayBefore});
+  report.previews.push({
+    kind:'series-setup-preview',
+    profile:'Stage 3 Narrator • Piper Lessac',
+    source_text:'The river road was quiet. The lanterns waited beyond the gate.',
+    output_path:seriesSetupJob.result.output_path,
+    actual_duration_seconds:seriesSetupJob.result.actual_duration_seconds,
+    audio_play_calls:window.__stage3PlayCalls-seriesSetupPlayBefore
+  });
 
   const projectSelect = document.querySelector('#projectNarratorProfile');
   if (!projectSelect || ![...projectSelect.options].some(option => option.value === 'Stage 3 Override Narrator • Piper Ryan')) {
@@ -500,13 +535,12 @@ def main() -> None:
         settings.setValue("project/active_folder", str(project_folder.resolve()))
         settings.sync()
 
+        app = QApplication.instance() or QApplication([])
+        app.setQuitOnLastWindowClosed(False)
         from PySide6.QtWebEngineCore import QWebEngineProfile
         browser_profile = QWebEngineProfile.defaultProfile()
         browser_profile.setCachePath(str(output_root / "web-cache"))
         browser_profile.setPersistentStoragePath(str(output_root / "web-storage"))
-
-        app = QApplication.instance() or QApplication([])
-        app.setQuitOnLastWindowClosed(False)
         window = host_module.PremiumV2Window()
         window.show()
 
