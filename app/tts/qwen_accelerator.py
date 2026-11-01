@@ -200,9 +200,16 @@ def amd_windows_runtime_spec(
 
     legacy_gpu_match = any(model in adapter for model in _AMD_ROCM_721_GPU_TARGETS)
     # Avoid prefix matches for models not listed in the legacy Windows matrix.
-    if any(name in adapter for name in ("radeon rx 9070 gre", "radeon rx 7700 xt", "radeon ai pro r9700s")):
+    if any(name in adapter for name in (
+        "radeon rx 9070 gre", "radeon rx 7700 xt", "radeon rx 9060 xt lp",
+        "radeon ai pro r9700s",
+    )):
         legacy_gpu_match = False
-    if legacy_gpu_match or any(model in cpu for model in _AMD_ROCM_721_APU_TARGETS):
+    legacy_apu_match = (
+        any(model in cpu for model in _AMD_ROCM_721_APU_TARGETS)
+        and not re.search(r"\bpro\b", cpu)
+    )
+    if legacy_gpu_match or legacy_apu_match:
         return {
             "rocm": "7.2.1",
             "arch": "",
