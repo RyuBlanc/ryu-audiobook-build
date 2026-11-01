@@ -51,7 +51,7 @@ CUSTOM_SPEAKERS = (
 TORCH_VERSION = "2.9.1"
 TORCHAUDIO_VERSION = "2.9.1"
 QWEN_TTS_VERSION = "0.1.1"
-BOOTSTRAP_VERSION = 3
+BOOTSTRAP_VERSION = 4
 
 
 def _python_works(path: Path) -> bool:
@@ -216,26 +216,51 @@ def _install_runtime_packages(python: Path, progress=None) -> None:
     if code != 0:
         raise RuntimeError(f"Qwen runtime pip bootstrap failed: {detail[-2500:]}")
 
-    # Prefer CUDA wheels on NVIDIA systems, but never make NVIDIA detection
-    # a hard prerequisite for a usable runtime. A detected GPU can still have
-    # an unsupported driver, CUDA wheel resolution failure, or limited network
-    # access to the CUDA index. In that case, fall back to the CPU wheel so
-    # Qwen remains usable instead of leaving the user with a broken install.
-    if _has_nvidia_gpu():
+    from app.tts.qwen_accelerator import best_accelerator
+    accelerator = best_accelerator()
+
+    # AMD ROCm PyTorch wheels are Linux-only. Windows AMD/Intel devices are
+    # identified for the Models Center but are not marked Qwen-accelerated
+    # until a compatible transformer stack passes real-hardware acceptance.
+    if accelerator.backend == "cuda":
         torch_indexes = (
-            "https://download.pytorch.org/whl/cu128",
-            "https://download.pytorch.org/whl/cu126",
-            "https://download.pytorch.org/whl/cpu",
+            ("CUDA 12.8", "https://download.pytorch.org/whl/cu128"),
+            ("CUDA 12.6", "https://download.pytorch.org/whl/cu126"),
+            ("CPU compatibility", "https://download.pytorch.org/whl/cpu"),
         )
+    elif accelerator.backend == "rocm" and sys.platform.startswith("linux"):
+        torch_indexes = (
+            ("AMD ROCm 6.4", "https://download.pytorch.org/whl/rocm6.4"),
+            ("CPU compatibility", "https://download.pytorch.org/whl/cpu"),
+        )
+    elif accelerator.backend == "xpu":
+        # Intel's XPU-enabled torch distributions are not interchangeable with
+        # the standard CPU index. Keep an existing validated XPU environment;
+        # a fresh install must not overwrite it with CPU wheels.
+        check_xpu = (
+            "import torch; "
+            "assert getattr(torch, 'xpu', None) is not None and torch.xpu.is_available(), "
+            "'Intel XPU PyTorch runtime is not installed'"
+        )
+        check_code, check_detail = _run_capture(
+            [str(python), "-c", check_xpu], timeout=60
+        )
+        if check_code != 0:
+            raise RuntimeError(
+                "Intel GPU detected, but the isolated Qwen environment does not "
+                "contain a validated Intel XPU PyTorch build. Install the Intel "
+                "XPU runtime for this device before enabling Qwen acceleration. "
+                + check_detail[-1200:]
+            )
+        torch_indexes = ()
     else:
-        torch_indexes = ("https://download.pytorch.org/whl/cpu",)
+        torch_indexes = (
+            ("CPU compatibility (GPU backend not certified)", "https://download.pytorch.org/whl/cpu"),
+        )
 
     torch_error = ""
-    for index_url in torch_indexes:
+    for label, index_url in torch_indexes:
         if progress:
-            label = "CUDA 12.8" if "cu128" in index_url else (
-                "CUDA 12.6" if "cu126" in index_url else "CPU"
-            )
             progress(f"Installing PyTorch {TORCH_VERSION} ({label})…")
         code, detail = _run_capture(
             [
@@ -253,8 +278,8 @@ def _install_runtime_packages(python: Path, progress=None) -> None:
 
     if torch_error:
         raise RuntimeError(
-            "PyTorch installation failed for the offline character engine "
-            "after trying the available CUDA options and CPU fallback. "
+            "PyTorch installation failed for the offline character engine. "
+            f"Selected accelerator: {accelerator.backend} ({accelerator.name}). "
             f"Last error: {torch_error[-3500:]}"
         )
 
