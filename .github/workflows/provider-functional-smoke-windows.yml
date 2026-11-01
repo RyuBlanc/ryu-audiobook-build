@@ -55,7 +55,17 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
           PYTHONWARNINGS: ignore
+          RYU_STAGE3_ACCEPTANCE_OUTPUT: ${{ github.workspace }}\stage3-real-provider-artifacts
         run: python -B tests/smoke_stage3_real_multichapter.py
+
+      - name: Upload real Stage 3 preview and audiobook evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Stage3-Real-Audio-Acceptance-${{ github.run_number }}
+          path: stage3-real-provider-artifacts/
+          if-no-files-found: warn
+          retention-days: 30
 
   chatterbox:
     name: Chatterbox Nano real synthesis

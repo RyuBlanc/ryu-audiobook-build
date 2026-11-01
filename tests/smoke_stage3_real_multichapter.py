@@ -6,6 +6,7 @@ recording/deterministic WAV providers from the unit-test integration fixture.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import subprocess
 import tempfile
@@ -65,9 +66,17 @@ def _duration_seconds(path: Path) -> float:
 def _preview_acceptance(model_path: Path, output_root: Path) -> None:
     """Exercise the actual preview builder at all four supported durations."""
     provider = RecordingPiperProvider(model_path)
+    short_sentences = (
+        "The lantern glowed.",
+        "Mira watched.",
+        "Rain fell.",
+        "Footsteps echoed.",
+        "The door opened.",
+        "The valley shimmered.",
+    )
     source_text = " ".join(
-        f"Sentence {number} describes the journey through the quiet valley and the distant town."
-        for number in range(1, 321)
+        short_sentences[index % len(short_sentences)]
+        for index in range(2400)
     )
     for requested in (10, 30, 60, 90):
         output = output_root / f"piper-preview-{requested}.wav"
@@ -84,7 +93,10 @@ def _preview_acceptance(model_path: Path, output_root: Path) -> None:
         )
         elapsed = time.perf_counter() - started
         actual = _duration_seconds(result.output_path)
-        if not (requested * 0.95 <= actual <= requested + 1.0):
+        # Real engines emit complete sentence units. Keep the fixture's
+        # sentence boundaries short and require the result to stay within
+        # one second of the selected UI target without cutting mid-word.
+        if not (requested - 1.0 <= actual <= requested + 1.0):
             raise RuntimeError(
                 f"Real Piper preview duration mismatch: requested={requested}s actual={actual:.3f}s"
             )
@@ -328,10 +340,17 @@ def _real_multichapter_acceptance(models: dict[str, Path], output_root: Path) ->
 
 def main() -> None:
     models = _require_models()
-    with tempfile.TemporaryDirectory(prefix="ryu-stage3-real-provider-") as temp:
-        output_root = Path(temp)
+    persistent_output = os.environ.get("RYU_STAGE3_ACCEPTANCE_OUTPUT", "").strip()
+    if persistent_output:
+        output_root = Path(persistent_output)
+        output_root.mkdir(parents=True, exist_ok=True)
         _preview_acceptance(models["en_US-lessac-medium"], output_root)
         _real_multichapter_acceptance(models, output_root)
+    else:
+        with tempfile.TemporaryDirectory(prefix="ryu-stage3-real-provider-") as temp:
+            output_root = Path(temp)
+            _preview_acceptance(models["en_US-lessac-medium"], output_root)
+            _real_multichapter_acceptance(models, output_root)
     print("STAGE_3_REAL_PROVIDER_ACCEPTANCE=PASS")
 
 
