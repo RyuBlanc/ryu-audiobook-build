@@ -1,6 +1,7 @@
 import hashlib
 import json
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -331,6 +332,42 @@ class Stage3NarratorManagementTests(unittest.TestCase):
                     "chapter_number": 1, "start": start, "end": end,
                     "text": text[start:end], "duration_seconds": 30,
                 })
+
+    def test_series_setup_preview_queues_real_voice_preview_worker_without_active_project(self):
+        profile = self._profile("Series Narrator")
+        self.bridge._assert_no_active_model_lifecycle = lambda _action: None
+
+        def no_active_project():
+            raise ValueError("Open a local project from the Library first.")
+
+        self.bridge._active_project = no_active_project
+        self.bridge._preview_profile_from_payload = lambda payload, state: profile
+        self.bridge._new_job = lambda *_args: "series-preview-job"
+        self.bridge._job_update = lambda job_id, **changes: {"job_id": job_id, **changes}
+        self.bridge._jobs_lock = threading.RLock()
+        self.bridge._preview_cancel_events = {}
+
+        with patch("app.ui.premium_v2_host.threading.Thread") as thread_class:
+            result = self.bridge._voice_preview({
+                "allow_projectless_preview": True,
+                "profile_name": profile.name,
+                "text": "Long ago, the journey began.",
+                "duration_seconds": 10,
+                "route_character_cast": False,
+            })
+
+        self.assertEqual(result["job_id"], "series-preview-job")
+        self.assertEqual(result["profile_name"], "Series Narrator")
+        self.assertEqual(result["duration_seconds"], 10)
+        thread_class.assert_called_once()
+        args = thread_class.call_args.kwargs["args"]
+        self.assertEqual(args[0], "series-preview-job")
+        self.assertIs(args[1], profile)
+        self.assertEqual(args[2], "Long ago, the journey began.")
+        self.assertEqual(args[3], 10)
+        self.assertEqual(args[4], {})
+        self.assertFalse(args[6])
+        thread_class.return_value.start.assert_called_once()
 
     def test_series_setup_narrator_preview_uses_selected_saved_voice_without_project(self):
         profile = self._profile("Series Narrator")

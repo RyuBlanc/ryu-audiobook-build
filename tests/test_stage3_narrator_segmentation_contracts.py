@@ -76,6 +76,13 @@ class Stage3NarratorSegmentationContracts(unittest.TestCase):
         self.assertIn("self._resolve_narrator_for_generation(project, state, chapters)", host)
         self.assertIn('"narrator_profile_source": str(narrator_selection.get("source") or "none")', host)
 
+    def test_create_series_preview_uses_the_existing_voice_preview_job_worker(self):
+        host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn('if not payload.get("allow_projectless_preview")', host)
+        self.assertIn('"allow_projectless_preview": True', host)
+        self.assertIn("threading.Thread(", host)
+        self.assertIn("self._preview_worker", host)
+
     def test_narrator_preview_requires_source_backed_narration_and_reuses_voice_preview(self):
         host = (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
         adapter = (ROOT / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
