@@ -386,6 +386,7 @@ required_modules = [
     "app.tts.cast_provider",
     "app.tts.chatterbox_runtime",
     "app.tts.qwen_character_runtime",
+    "app.tts.qwen_accelerator",
     "app.tts.providers.kokoro",
     "app.tts.providers.qwen_character",
     "app.ui.workflow",
