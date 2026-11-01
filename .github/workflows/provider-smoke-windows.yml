@@ -261,7 +261,7 @@ jobs:
 
 
   qwen-backend-discovery:
-    name: Qwen accelerator discovery and backend self-test
+    name: Qwen accelerator discovery and runtime installer unit tests
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -272,21 +272,21 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install CPU-only discovery test dependencies
+      - name: Install CPU test dependencies
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.9.1 torchaudio==2.9.1
-          python -c "import torch; print('torch=' + torch.__version__); print('cuda=' + str(torch.cuda.is_available()))"
 
-      - name: Run accelerator discovery regression tests and syntax checks
+      - name: Run Qwen accelerator discovery and installer tests
         shell: pwsh
         env:
           PYTHONPATH: ${{ github.workspace }}
           PYTHONWARNINGS: ignore
         run: |
           python -B -m unittest tests.test_qwen_runtime_safety.QwenAcceleratorDiscoveryTests -v
+          python -B -m unittest tests.test_qwen_runtime_safety.QwenAcceleratorRuntimeInstallTests -v
           python -B -m py_compile app/tts/qwen_accelerator.py app/tts/qwen_character_runtime.py app/tts/qwen_character_worker.py tests/smoke_qwen_amd_intel_preview.py
           python -B -c "from app.tts.qwen_accelerator import accelerator_report; print(accelerator_report())"
 
