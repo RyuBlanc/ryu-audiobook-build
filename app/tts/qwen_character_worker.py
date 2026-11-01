@@ -60,7 +60,7 @@ def _load_model(kind: str, backend: str, root: Path):
         device = "cuda:0"
     else:
         raise RuntimeError(
-            f"Requested Qwen backend '{requested}' is unavailable or not certified. "
+                f"Requested Qwen backend '{requested}' is unavailable or not certified. "
             f"Detected: {selected.backend} ({selected.name}). {selected.reason}"
         )
 
