@@ -137,9 +137,16 @@ def best_accelerator() -> Accelerator:
         match = next((item for item in devices if item.backend == backend and item.supported), None)
         if match:
             return match
-    experimental = next((item for item in devices if item.backend == "directml"), None)
+    experimental = next((item for item in devices if item.backend in {"directml", "intel-runtime-missing"}), None)
     if experimental:
-        return experimental
+        return Accelerator(
+            backend="cpu",
+            device="cpu",
+            name=f"CPU fallback ({experimental.name})",
+            memory_gb=0.0,
+            supported=True,
+            reason=experimental.reason,
+        )
     return Accelerator("cpu", "cpu", "CPU", 0.0, True,
                        "No supported Qwen GPU backend detected")
 
