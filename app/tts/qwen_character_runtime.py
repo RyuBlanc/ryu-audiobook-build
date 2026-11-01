@@ -13,6 +13,12 @@ from functools import lru_cache
 
 from app.core.paths import models_root
 from app.version import APP_VERSION
+from app.tts.qwen_accelerator import (
+    accelerator_report,
+    best_accelerator,
+    detect_accelerators,
+    model_selection_memory_gb,
+)
 
 # Qwen3-TTS currently publishes a stable Python 3.12 package/runtime path.
 # The official qwen-tts package is 0.1.1 and supports Python 3.12. We keep this
