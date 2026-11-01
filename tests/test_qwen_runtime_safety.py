@@ -115,6 +115,30 @@ class QwenRuntimeSafetyTests(unittest.TestCase):
         self.assertEqual(output_queue.get_nowait(), '{"ready": true}')
         self.assertIsNone(output_queue.get_nowait())
 
+    def test_close_tolerates_already_closed_qwen_streams(self):
+        from types import SimpleNamespace
+        from app.tts.providers.qwen_character import QwenCharacterProvider
+
+        class AlreadyClosedStream:
+            def close(self):
+                raise ValueError("I/O operation on closed file")
+
+        provider = QwenCharacterProvider(
+            voice_id="closed-stream-test",
+            backend="cpu",
+            model_kind="design-1.7b",
+            qwen_mode="design-preview",
+        )
+        provider._worker = SimpleNamespace(
+            stdin=AlreadyClosedStream(),
+            stdout=AlreadyClosedStream(),
+            poll=lambda: 0,
+        )
+        provider.close()
+        self.assertIsNone(provider._worker)
+        self.assertIsNone(provider._stdout_queue)
+        self.assertIsNone(provider._stdout_thread)
+
     def test_cpu_only_pc_attempts_cpu_pytorch_directly(self):
         from pathlib import Path
         from unittest.mock import patch

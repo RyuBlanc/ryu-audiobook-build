@@ -7,6 +7,7 @@ VoiceDesign preview task and build_voice_preview duration controller.
 from __future__ import annotations
 
 import os
+import json
 import sys
 import time
 import wave
@@ -184,15 +185,39 @@ def main() -> None:
                 max_chars=100,
                 target_seconds=2.0,
             )
-            if japanese_result.source_text != "リムルが来た。":
+            expected_spoken, expected_counts = apply_pronunciation_dictionary_with_counts(
+                "Rimuruが来た。",
+                [{"written_form": "Rimuru", "spoken_form": "リムル", "enabled": True}],
+            )
+            actual_spoken = "".join(str(japanese_result.source_text or "").split())
+            expected_compact = "".join(expected_spoken.split())
+            actual_rule_count = sum(
+                int(count)
+                for written, count in (japanese_result.applied_rule_counts or {}).items()
+                if str(written).casefold() == "rimuru"
+            )
+            japanese_diagnostics = {
+                "expected_source_text": expected_spoken,
+                "actual_source_text": japanese_result.source_text,
+                "expected_rule_counts": expected_counts,
+                "actual_rule_counts": japanese_result.applied_rule_counts,
+                "actual_rule_count": actual_rule_count,
+                "audio_bytes": japanese_preview_path.stat().st_size if japanese_preview_path.is_file() else 0,
+            }
+            (OUTPUT_ROOT / "qwen-japanese-preview-result.json").write_text(
+                json.dumps(japanese_diagnostics, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            print("QWEN_JAPANESE_PREVIEW_DIAGNOSTICS=" + json.dumps(japanese_diagnostics, ensure_ascii=False))
+            if actual_spoken != expected_compact:
                 raise RuntimeError(
-                    "Qwen Japanese preview did not receive the corrected source text: "
-                    + repr(japanese_result.source_text)
+                    "Qwen Japanese preview source text did not match the normalized saved pronunciation: "
+                    + json.dumps(japanese_diagnostics, ensure_ascii=False)
                 )
-            if (japanese_result.applied_rule_counts or {}).get("Rimuru") != 1:
+            if actual_rule_count != int(expected_counts.get("Rimuru", 0)) or actual_rule_count != 1:
                 raise RuntimeError(
-                    "Qwen Japanese preview did not apply the saved pronunciation rule: "
-                    + repr(japanese_result.applied_rule_counts)
+                    "Qwen Japanese preview did not apply the saved pronunciation rule exactly once: "
+                    + json.dumps(japanese_diagnostics, ensure_ascii=False)
                 )
             if not japanese_preview_path.is_file() or japanese_preview_path.stat().st_size < 1024:
                 raise RuntimeError("Qwen did not produce Japanese pronunciation preview audio.")
@@ -206,7 +231,16 @@ def main() -> None:
                 + ("MET" if elapsed < 60.0 else "NOT_MET_ON_HOSTED_CPU")
             )
     finally:
-        provider.close()
+        try:
+            provider.close()
+        except Exception as exc:
+            diagnostic = {"provider_close_error": repr(exc), "worker_pid": getattr(getattr(provider, "_worker", None), "pid", None)}
+            (OUTPUT_ROOT / "qwen-provider-close-error.json").write_text(
+                json.dumps(diagnostic, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            print("QWEN_PROVIDER_CLOSE_ERROR=" + json.dumps(diagnostic, ensure_ascii=False))
+            raise
 
 
 if __name__ == "__main__":

@@ -183,7 +183,7 @@ def main() -> None:
             # Open the real source-backed assignment dialog from its dialogue://
             # link, choose Mira and her saved Audio Profile, then click Assign.
             source = str(project.chapters[0].text)
-            dialogue = "Stay close."
+            dialogue = "“Stay close.”"
             start = source.index(dialogue)
             end = start + len(dialogue)
             dialog_outcome = {"polls": 0}

@@ -496,7 +496,7 @@ class QwenCharacterProvider(TTSProvider):
             try:
                 if worker.stdin:
                     worker.stdin.close()
-            except OSError:
+            except (OSError, ValueError):
                 pass
             try:
                 if worker.poll() is None:
