@@ -240,6 +240,17 @@ class QwenAcceleratorDiscoveryTests(unittest.TestCase):
                 self.assertEqual(accelerator.best_accelerator().backend, backend)
                 self.assertEqual(accelerator.best_accelerator().device, device)
 
+    def test_shared_system_memory_is_not_misreported_as_gpu_vram(self):
+        from unittest.mock import patch
+        from app.tts import qwen_accelerator as accelerator
+
+        directml = accelerator.Accelerator(
+            "directml", "directml", "Intel UHD Graphics", 0.0, False,
+            "Shared memory is not dedicated VRAM",
+        )
+        with patch.object(accelerator, "detect_accelerators", return_value=(directml,)):
+            self.assertEqual(accelerator.model_selection_memory_gb(), 0.0)
+
     def test_uncertified_directml_adapter_is_reported_not_selected(self):
         from unittest.mock import patch
         from app.tts import qwen_accelerator as accelerator
@@ -252,17 +263,6 @@ class QwenAcceleratorDiscoveryTests(unittest.TestCase):
             selected = accelerator.best_accelerator()
             self.assertEqual(selected.backend, "directml")
             self.assertFalse(selected.supported)
-
-    def test_shared_system_memory_is_not_misreported_as_gpu_vram(self):
-        from unittest.mock import patch
-        from app.tts import qwen_accelerator as accelerator
-
-        directml = accelerator.Accelerator(
-            "directml", "directml", "Intel UHD Graphics", 0.0, False,
-            "Shared memory is not dedicated VRAM",
-        )
-        with patch.object(accelerator, "detect_accelerators", return_value=(directml,)):
-            self.assertEqual(accelerator.model_selection_memory_gb(), 0.0)
 
     def test_accelerator_report_includes_uncertified_reason(self):
         from unittest.mock import patch
