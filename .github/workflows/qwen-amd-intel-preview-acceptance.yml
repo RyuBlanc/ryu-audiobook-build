@@ -21,7 +21,7 @@ concurrency:
 jobs:
   qwen-non-nvidia-preview:
     name: Real Qwen 1.7B VoiceDesign under 60 seconds on AMD ROCm / Intel XPU
-    runs-on: [self-hosted, AMD-INTEL]
+    runs-on: [self-hosted, Windows, X64, AMD-INTEL]
     timeout-minutes: 120
     steps:
       - name: Checkout
