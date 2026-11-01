@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ryu-audiobook-provider-smoke-stage3
+  group: ryu-audiobook-provider-smoke-stage4
   cancel-in-progress: true
 
 jobs:

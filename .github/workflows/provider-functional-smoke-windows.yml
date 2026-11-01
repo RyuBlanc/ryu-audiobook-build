@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ryu-audiobook-provider-functional-stage3
+  group: ryu-audiobook-provider-functional-stage4
   cancel-in-progress: true
 
 jobs:
@@ -60,6 +60,7 @@ jobs:
         run: python -B tests/smoke_stage3_character_ui.py
 
       - name: Run real Stage 3 Voice Studio preview and multi-chapter audiobook acceptance
+        if: always()
         shell: pwsh
         env:
           PYTHONPATH: ${{ github.workspace }}

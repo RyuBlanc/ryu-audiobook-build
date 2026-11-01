@@ -238,13 +238,13 @@ def main() -> None:
                     if dialog is not None:
                         dialog.reject()
 
-            linked_passage = panel._decode_link(QUrl(f"dialog://1/{start}/{end}"))
+            linked_passage = panel._decode_link(QUrl(f"dialogue://1/{start}/{end}"))
             if not linked_passage or linked_passage.get("text") != dialogue:
                 raise RuntimeError(
                     f"Source-linked dialogue URL did not resolve to the exact selected passage: {linked_passage!r}"
                 )
             QTimer.singleShot(100, accept_real_assignment_dialog)
-            panel._manual_link_clicked(QUrl(f"dialog://1/{start}/{end}"))
+            panel._manual_link_clicked(QUrl(f"dialogue://1/{start}/{end}"))
             if dialog_outcome.get("error"):
                 raise RuntimeError(dialog_outcome["error"])
             if not dialog_outcome.get("accepted"):
