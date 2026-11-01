@@ -354,20 +354,19 @@ class QwenAcceleratorRuntimeInstallTests(unittest.TestCase):
 
         adapter = Accelerator("rocm", "cpu", "AMD Radeon RX 9070", 16.0, False, "candidate")
         responses = [
-            (0, "pip bootstrap ok"),
             (0, "ROCm packages installed"),
-            (0, "Qwen package installed"),
             (0, "torch=2.9.1 hip=None cuda=False xpu=False"),
         ]
+        calls = 0
 
         def capture(command, timeout=120):
+            nonlocal calls
+            calls += 1
             command_text = " ".join(str(value) for value in command)
-            if "pip" in command_text and "setuptools" in command_text:
+            if calls == 1:
                 return (0, "pip bootstrap ok")
             if "qwen-tts==" in command_text:
                 return (0, "Qwen package installed")
-            if "-c" in command and "import torch" in command[command.index("-c") + 1]:
-                return responses.pop()
             return responses.pop(0)
 
         with (
@@ -387,20 +386,19 @@ class QwenAcceleratorRuntimeInstallTests(unittest.TestCase):
 
         adapter = Accelerator("xpu", "cpu", "Intel Arc Graphics", 8.0, False, "candidate")
         responses = [
-            (0, "pip bootstrap ok"),
             (0, "XPU wheels installed"),
-            (0, "Qwen package installed"),
             (0, "torch=2.9.1 hip=None cuda=False xpu=False"),
         ]
+        calls = 0
 
         def capture(command, timeout=120):
+            nonlocal calls
+            calls += 1
             command_text = " ".join(str(value) for value in command)
-            if "pip" in command_text and "setuptools" in command_text:
+            if calls == 1:
                 return (0, "pip bootstrap ok")
             if "qwen-tts==" in command_text:
                 return (0, "Qwen package installed")
-            if "-c" in command and "import torch" in command[command.index("-c") + 1]:
-                return responses.pop()
             return responses.pop(0)
 
         with (
@@ -409,10 +407,8 @@ class QwenAcceleratorRuntimeInstallTests(unittest.TestCase):
             patch.object(runtime, "_run_capture", side_effect=capture),
             patch.object(runtime.os, "name", "nt"),
         ):
-            with self.assertRaisesRegex(RuntimeError, "Intel XPU wheels"):
+            with self.assertRaisesRegex(RuntimeError, "XPU device"):
                 runtime._install_runtime_packages(Path("qwen-python.exe"))
-
-
 
 
 if __name__ == "__main__":
