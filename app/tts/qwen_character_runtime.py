@@ -672,6 +672,7 @@ def install_runtime(progress=None, force_repair: bool = False) -> None:
 
     if _runtime_version_is_current() and not force_repair:
         if progress:
+            progress(accelerator_report())
             progress("Qwen3-TTS local runtime is already installed.")
         return
 
