@@ -1805,11 +1805,12 @@
       const sampleText=String(narratorSampleText.value||'');
       const seconds=Number(narratorDuration.value||30);
       const selectedProfile=narratorSamples.find(item=>item.name===profileName&&item.saved===true);
-      if(!selectedProfile)throw new Error('Choose an available saved Voice Studio narrator profile.');
-      if(!sampleText.trim())throw new Error('Enter sample narration text before previewing.');
-      narratorPreviewButton.disabled=true;narratorPreviewButton.textContent='Generating…';
-      clearSeriesNarratorPreview('Generating narrator preview · '+profileName);
+      narratorPreviewButton.disabled=true;narratorPreviewButton.textContent='Checking…';
       try{
+        if(!selectedProfile)throw new Error('Choose an available saved Voice Studio narrator profile.');
+        if(!sampleText.trim())throw new Error('Enter sample narration text before previewing.');
+        narratorPreviewButton.textContent='Generating…';
+        clearSeriesNarratorPreview('Generating narrator preview · '+profileName);
         const started=await call('narrator.preview',{
           series_setup_preview:true,profile_name:profileName,text:sampleText,duration_seconds:seconds
         });

@@ -37,7 +37,9 @@ class Stage3NarratorManagementTests(unittest.TestCase):
         return path
 
     def _profile(self, name):
-        return SimpleNamespace(name=name)
+        return SimpleNamespace(
+            name=name, provider="piper", voice_id="voice-id", backend="automatic"
+        )
 
     def test_inherited_project_uses_current_series_default_not_stale_snapshot(self):
         self._write_series_default("Series Voice V2")

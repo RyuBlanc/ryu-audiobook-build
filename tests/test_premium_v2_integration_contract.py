@@ -144,7 +144,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("def load_premium_v2_adapter(path: Path) -> str:", asset_loader)
         self.assertIn('target.read_text(encoding="utf-8")', asset_loader)
         self.assertIn("premium_v2_backend_adapter.js", self.build)
-        self.assertIn("function preparePreviewPlayback(job, requestedSeconds)", script)
+        self.assertIn("function preparePreviewPlayback(job, requestedSeconds, options = {})", script)
         self.assertIn("previewAudio.play()", script)
         self.assertIn("previewAudio.pause()", script)
         self.assertIn("lengthGroup?.querySelector('.seg button.active')", script)
