@@ -396,6 +396,7 @@ def runtime_ready() -> bool:
             data.get("ready") is True
             and data.get("bootstrap_version") == BOOTSTRAP_VERSION
             and data.get("qwen_tts") == QWEN_TTS_VERSION
+            and data.get("accelerator") == best_accelerator().backend
         )
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return False
