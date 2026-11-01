@@ -219,5 +219,64 @@ class QwenCudaPrecisionTests(unittest.TestCase):
         self.assertIs(_inference_dtype(torch, "cpu"), fp32)
 
 
+
+class QwenAcceleratorDiscoveryTests(unittest.TestCase):
+    def test_accelerator_policy_prefers_cuda_then_rocm_then_xpu(self):
+        from unittest.mock import patch
+        from app.tts import qwen_accelerator as accelerator
+
+        cases = [
+            ("cuda", "cuda:0"),
+            ("rocm", "cuda:0"),
+            ("xpu", "xpu:0"),
+        ]
+        for backend, device in cases:
+            with self.subTest(backend=backend), patch.object(
+                accelerator, "detect_accelerators",
+                return_value=(accelerator.Accelerator(
+                    backend, device, backend.upper(), 8.0, True, "test"
+                ),),
+            ):
+                self.assertEqual(accelerator.best_accelerator().backend, backend)
+                self.assertEqual(accelerator.best_accelerator().device, device)
+
+    def test_uncertified_directml_adapter_is_reported_not_selected(self):
+        from unittest.mock import patch
+        from app.tts import qwen_accelerator as accelerator
+
+        directml = accelerator.Accelerator(
+            "directml", "directml", "AMD Radeon iGPU", 0.0, False,
+            "DirectML operator compatibility not certified",
+        )
+        with patch.object(accelerator, "detect_accelerators", return_value=(directml,)):
+            selected = accelerator.best_accelerator()
+            self.assertEqual(selected.backend, "directml")
+            self.assertFalse(selected.supported)
+
+    def test_shared_system_memory_is_not_misreported_as_gpu_vram(self):
+        from unittest.mock import patch
+        from app.tts import qwen_accelerator as accelerator
+
+        directml = accelerator.Accelerator(
+            "directml", "directml", "Intel UHD Graphics", 0.0, False,
+            "Shared memory is not dedicated VRAM",
+        )
+        with patch.object(accelerator, "detect_accelerators", return_value=(directml,)):
+            self.assertEqual(accelerator.model_selection_memory_gb(), 0.0)
+
+    def test_accelerator_report_includes_uncertified_reason(self):
+        from unittest.mock import patch
+        from app.tts import qwen_accelerator as accelerator
+
+        device = accelerator.Accelerator(
+            "directml", "directml", "AMD Radeon", 0.0, False,
+            "Qwen DirectML not certified",
+        )
+        with patch.object(accelerator, "detect_accelerators", return_value=(device,)):
+            report = accelerator.accelerator_report()
+        self.assertIn("not certified", report)
+        self.assertIn("Qwen DirectML not certified", report)
+
+
 if __name__ == "__main__":
     unittest.main()
