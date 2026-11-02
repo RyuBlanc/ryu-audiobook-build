@@ -1145,7 +1145,7 @@ def assemble_m4b(
     probe = subprocess.run(
         [
             ffmpeg_path(), "-v", "error", "-i", str(output_path),
-            "-map", "0:a:0", "-t", "0.25", "-f", "null", "-",
+            "-map", "0:a:0", "-f", "null", "-",
         ],
         capture_output=True,
         text=True,

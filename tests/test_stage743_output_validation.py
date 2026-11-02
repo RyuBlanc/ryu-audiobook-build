@@ -112,7 +112,7 @@ class Stage743OutputValidationTests(unittest.TestCase):
             decode = subprocess.run(
                 [
                     imageio_ffmpeg.get_ffmpeg_exe(), "-v", "error",
-                    "-i", str(output), "-map", "0:a:0", "-t", "0.25",
+                    "-i", str(output), "-map", "0:a:0",
                     "-f", "null", "-",
                 ],
                 capture_output=True,
