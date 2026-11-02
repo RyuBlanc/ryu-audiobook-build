@@ -23,6 +23,7 @@ Step 3 implements and verifies the Preview, Synthesis and Audio Assembly gates f
 - Step 3 correction: the Generate-page action now sends the current selected chapter number and rejects an empty/stale selection; the backend independently validates that chapter and no longer falls back to a different chapter for a production preview.
 - Chapter number/title are attached to the completed preview result and retained by the frontend. The existing native Save As flow now suggests a filename containing the actual chapter number/title, even if the user changes chapter selection before saving.
 - Added regression coverage for missing/stale/empty selected chapters, backend forwarding, preview-result identity and frontend save wiring.
+- Second audit found successful production cleanup deleted all per-chapter WAVs and manifests immediately after packaging. That made later full-book mix preview impossible and forced full narration re-synthesis for sound-design-only changes. Step 3 retains these project-local checkpoints after successful export; changed pronunciation invalidates only chapters whose prepared narration chunks change, while a new sound-design configuration is applied to a fresh M4B assembly using the retained narration.
 
 ## Step 3 acceptance checklist
 
@@ -32,7 +33,7 @@ Step 3 implements and verifies the Preview, Synthesis and Audio Assembly gates f
 - [ ] Opening, Next Chapter and Closing cues verified once at the correct boundaries in real output.
 - [ ] Volume, fades, offsets and measured duration compared between preview and final output.
 - [ ] Provider/FFmpeg failure, cancel, retry and temporary-file cleanup verified.
-- [ ] Chapter checkpoints verified after pronunciation/sound-assignment changes; unrelated chapters remain reusable.
+- [ ] Chapter checkpoints verified after pronunciation/sound-assignment changes; unrelated chapters remain reusable. Automated regression covers selective chapter invalidation and sound-only reassembly from retained narration.
 - [ ] Full unittest suite, frozen application, installer, manifest, malware scan and artifact upload pass on the final Step 3 checkpoint SHA.
 - [ ] Target-PC listening and installed-app interaction recorded separately from CI evidence.
 

@@ -270,8 +270,10 @@ class GenerationManager:
         )
 
     def _run_body(self, output_path: Path | None, title: str, author: str, cover: Path | None, metadata: dict[str, str]) -> None:
-        # This directory is deliberately called working: it is not the user's
-        # audiobook library and can be removed after a successful package build.
+        # Keep this project-local directory as a reusable synthesis checkpoint.
+        # Sound-design-only changes must be able to reassemble the book without
+        # repeating expensive narration synthesis, and full-book mix preview
+        # consumes the same saved chapter narration.
         self.audio_root.mkdir(parents=True, exist_ok=True)
         completed = 0
         self.failed = []
@@ -466,9 +468,9 @@ class GenerationManager:
                     chapter_bgm_strategy=self.chapter_bgm_strategy,
                 )
                 self._emit(len(self.chapters), len(self.chapters), 1, "m4b-complete")
-                # Only delete intermediate files after the final M4B has been
-                # created and validated.
-                self._clean_working_audio()
+                # Preserve per-chapter WAVs, manifests and signatures after a
+                # successful package. Later mix previews and sound-design-only
+                # reassembly must reuse this narration without a new TTS pass.
             except Exception as exc:
                 packaging_failed = True
                 packaging_error = str(exc)
@@ -504,6 +506,7 @@ class GenerationManager:
         )
 
     def _clean_working_audio(self) -> None:
+        """Explicit destructive cleanup; never called as part of successful export."""
         if self.audio_root.exists():
             for child in self.audio_root.iterdir():
                 if child.is_dir():

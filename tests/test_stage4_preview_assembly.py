@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.tts.preview import PreviewCancelledError, build_voice_preview
+from app.tts.manager import GenerationManager
 from app.ui import full_book_preview
 
 
@@ -199,6 +200,80 @@ class PreviewAssemblyTests(unittest.TestCase):
             self.assertFalse((preview_root / "sound_mix_preview_job.m4a").exists())
             failed = next(row for _job, row in host.updates if row.get("state") == "failed")
             self.assertIn("FFmpeg mix failed", failed["message"])
+
+
+    def test_successful_export_keeps_reusable_chunks_for_mix_preview_and_sound_only_reassembly(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio_root = root / "working_audio"
+            output = root / "final-book.m4b"
+            chapters = [
+                SimpleNamespace(number=1, title="MiraChapter", text="Mira spoke clearly."),
+                SimpleNamespace(number=2, title="OtherChapter", text="A river crossed the valley."),
+            ]
+            old_track = root / "book-theme-old.wav"
+            new_track = root / "book-theme-new.wav"
+            synthesized = []
+            assemblies = []
+
+            class Provider:
+                def synthesize(self, text, path, voice=None):
+                    chapter_dir = Path(path).parent.parent.name
+                    synthesized.append((chapter_dir, text))
+                    _write_wav(Path(path), 0.25)
+
+            def render(dictionary, music_path):
+                manager = GenerationManager(
+                    Provider(), "Narrator", chapters, audio_root,
+                    pronunciation_dictionary=dictionary,
+                    narration_speed=1.0, pacing_profile="off",
+                    background_audio_path=music_path,
+                    background_audio_volume=0.2,
+                    chapter_bgm_strategy="same",
+                )
+                manager._run_body(output, "Test Book", "Author", None, {"title": "Test Book"})
+
+            def fake_assemble(chapter_dirs, output_path, *args, **kwargs):
+                assemblies.append({
+                    "chapters": [Path(item).name for item in chapter_dirs],
+                    "background_audio_path": kwargs.get("background_audio_path"),
+                    "chapter_bgm_strategy": kwargs.get("chapter_bgm_strategy"),
+                })
+                destination = Path(output_path)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(b"M4B" * 1024)
+                return destination
+
+            first_dictionary = [
+                {"written_form": "Mira", "spoken_form": "Mee-rah", "enabled": True}
+            ]
+            changed_dictionary = [
+                {"written_form": "Mira", "spoken_form": "My-rah", "enabled": True}
+            ]
+            with patch("app.tts.manager.assemble_m4b", side_effect=fake_assemble):
+                render(first_dictionary, old_track)
+
+                first_chunk = audio_root / "001_MiraChapter" / "chunks" / "00001.wav"
+                second_chunk = audio_root / "002_OtherChapter" / "chunks" / "00001.wav"
+                self.assertTrue(first_chunk.is_file())
+                self.assertTrue(second_chunk.is_file())
+                self.assertTrue((audio_root / "001_MiraChapter" / "chunk_manifest.json").is_file())
+                self.assertEqual(len(synthesized), 2)
+
+                # A pronunciation change only invalidates the chapter containing
+                # the changed written term; unrelated chapter audio remains reusable.
+                # A changed sound-design selection is applied by a fresh M4B assembly.
+                render(changed_dictionary, new_track)
+
+            self.assertEqual(len(synthesized), 3)
+            self.assertEqual([row[0] for row in synthesized[2:]], ["001_MiraChapter"])
+            self.assertEqual(len(assemblies), 2)
+            self.assertEqual(assemblies[0]["background_audio_path"], old_track)
+            self.assertEqual(assemblies[1]["background_audio_path"], new_track)
+            self.assertEqual(assemblies[1]["chapter_bgm_strategy"], "same")
+            self.assertTrue(first_chunk.is_file())
+            self.assertTrue(second_chunk.is_file())
+            self.assertTrue(output.is_file())
 
 if __name__ == "__main__":
     unittest.main()
