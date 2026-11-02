@@ -22,7 +22,7 @@ class PronunciationDictionaryUiTests(unittest.TestCase):
     def test_required_table_columns_have_exact_order_and_six_columns(self):
         start = HTML.index('<table class="dictionary-table"', HTML.index('id="pronunciation"'))
         end = HTML.index("</thead>", start)
-        headings = re.findall(r"<th[^>]*>(.*?)</th>", HTML[start:end], re.I | re.S)
+        headings = re.findall(r"<th(?=[ >])[^>]*>(.*?)</th>", HTML[start:end], re.I | re.S)
         self.assertEqual(["S.No", "Written", "Pronounce as", "Audio Preview", "Options", "Enable"], headings)
 
     def test_pronunciation_screen_has_saved_profile_search_scope_origin_and_bulk_controls(self):

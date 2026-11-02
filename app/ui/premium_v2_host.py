@@ -4591,10 +4591,13 @@ class PremiumV2Bridge(QObject):
         if not isinstance(enabled, bool):
             raise ValueError("Enabled must be a boolean.")
 
+        identity_keys = {key}
+        if original_key:
+            identity_keys.add(original_key)
         raw_match_count = sum(
             1 for row in raw_entries if isinstance(row, dict) and
             unicodedata.normalize("NFC", str(row.get("written_form") or row.get("written") or row.get("word") or ""))
-            .strip().casefold() in {key, original_key}
+            .strip().casefold() in identity_keys
         )
         value = {
             "written_form": word,
@@ -4713,13 +4716,14 @@ class PremiumV2Bridge(QObject):
     def _pronunciation_analyze(self, _payload: dict[str, Any]) -> dict[str, Any]:
         """Create conservative, disabled AI-origin review suggestions from this book."""
         project = self._active_project()
-        state = load_state(project.folder)
+        project_folder = getattr(project, "folder", None)
+        state = load_state(project_folder) if project_folder else {}
         existing = {
             unicodedata.normalize("NFC", str(e.get("written_form") or e.get("word") or "")).casefold()
             for e in self._pronunciation_list({})
         }
         names: set[str] = set()
-        for chapter in project.chapters:
+        for chapter in getattr(project, "chapters", []) or []:
             source_text = str(chapter.text or "")
             names.update(n.strip() for n in suggest_names_from_text(source_text) if len(n.strip()) > 1)
             # Confirmed Character Studio names/aliases are stronger evidence than

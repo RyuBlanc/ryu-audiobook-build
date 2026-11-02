@@ -574,7 +574,9 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
             "Automatic per-line AI speaker suggestions remain prototype-only",
             "Custom project-library and audio-assets root selection is not implemented",
             "call('diagnostics.export_logs')",
-            "termList.innerHTML = terms.map",
+            "function renderPronunciationRows()",
+            "call('pronunciation.list')",
+            "function renderPronunciationSuggestions(suggestions)",
             "call('voice.delete'",
         ):
             self.assertIn(token, adapter)

@@ -119,6 +119,31 @@ class PronunciationCandidateGuardTests(unittest.TestCase):
         self.assertTrue(result["suggestions"][0]["review_required"])
 
 
+    def test_analyzer_supports_lightweight_project_harness_and_marks_drafts_ai_disabled(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        from app.ui.premium_v2_host import PremiumV2Bridge
+        project = SimpleNamespace(
+            title="Series A",
+            chapters=[SimpleNamespace(number=1,title="Chapter 1",text="John Smith spoke.")],
+        )
+        bridge = SimpleNamespace(
+            _active_project=lambda:project,
+            _pronunciation_list=lambda _payload:[],
+            _new_job=Mock(return_value="pronunciation-job"),
+            _job_update=Mock(),
+            _now=lambda:"2026-10-25T00:00:00",
+        )
+        with patch("app.ui.premium_v2_host.suggest_names_from_text",return_value=["John Smith"]):
+            result = PremiumV2Bridge._pronunciation_analyze(bridge,{})
+        suggestion = result["suggestions"][0]
+        self.assertEqual("ai",suggestion["origin"])
+        self.assertFalse(suggestion["enabled"])
+        self.assertTrue(suggestion["review_required"])
+        self.assertEqual("John Smith",suggestion["spoken_form"])
+        bridge._pronunciation_list.assert_called_once_with({})
+
+
 
 if __name__ == "__main__":
     unittest.main()
