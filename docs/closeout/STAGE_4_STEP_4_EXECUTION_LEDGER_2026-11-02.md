@@ -3,7 +3,7 @@ Audit date: 2 November 2026
 
 Repository: https://github.com/RyuBlanc/ryu-audiobook-build
 Working branch: `stage-4/step-4-audio-assembly`
-Current functional source head before this closeout/artifact-checkpoint commit: `626623170137c0d160ef7cef575803f3d5feac06`
+Current functional source head before the final artifact-checkpoint commit: `fd99dc7b382fe94fce84877c8b8ac021fd2ebd2c`
 
 ## Stage 4 sequencing status
 
@@ -64,6 +64,10 @@ The stable chapter BGM migration intentionally returns each saved assignment und
 Fix in assets/frontend/premium_v2_backend_adapter.js: renderSoundMixSummary() now builds a single effective override row per actual project chapter, resolving stable ID first and numeric fallback second. Active BGM rows, missing-track counts, assigned-chapter count and fallback track aggregation use this de-duplicated chapter list. Numeric aliases remain available for compatibility.
 
 Added tests/test_stage2_sound_ui_contract.py::test_mix_summary_counts_each_stable_chapter_once_despite_legacy_number_aliases. #2080 passes this regression and the full 1,059-test suite. A fresh packaged UI acceptance/build is required to prove the runtime fix in the frozen Windows executable.
+### GEN-08 — Production preview and job controls
+Production Studio now has dedicated Play, Stop and Download Preview controls, an explicit preview status and playback-time readout. These are separate from Voice Studio's own preview controls. Playback and stop operate on the same validated preview audio created by `production.preview`; Download uses the same native save action and retains narrator/chapter naming. Controls stay disabled until validated audio exists, and playback status/time are synchronized with the active preview.
+
+`tests/test_stage2_sound_ui_contract.py::test_final_production_preview_generation_and_job_buttons_are_present_and_connected` verifies the rendered Production Studio controls and their frontend/backend wiring: chapter Preview, Generate Book, Pause, Cancel, Play, Stop, Download, full-book Mix Preview, sound-draft flush, registered bridge commands and capabilities. Run #2083 passed this contract as part of the full suite.
 ## Verification history
 
 | Build | Run ID | Result | Notes |
@@ -85,16 +89,19 @@ Added tests/test_stage2_sound_ui_contract.py::test_mix_summary_counts_each_stabl
 | #2078 | 41445626058 | Cancelled | Codec-robust preview/final comparison and strict legacy-folder matching were superseded by a subsequent manifest-migration retry push. Not a test failure. |
 | #2079 | 41446257120 | Success | 1,058 tests passed; frontend syntax and isolated Qt lifecycle checks passed. Covered persistent chapter IDs, stable-ID frontend save payload, and retryable narration-manifest migration. |
 | #2080 | 41447145259 | Success | 1,059 tests passed in 49.413 seconds; frontend syntax and isolated Qt lifecycle checks passed. Added Mix Summary de-duplication coverage for stable IDs plus numeric compatibility aliases. Tests-only; build job skipped. |
+| #2081 | 41447780375 | Failed | 1,059 tests passed, but packaged frozen-app acceptance failed because the restart validator read chapter BGM only by numeric keys while current chapters persist assignments by stable ID. No installer/Defender/artifact steps were reached. Validator corrected to resolve `chapters.json` IDs first. |
+| #2082 | 41452945525 | Failed | Frontend syntax and Qt lifecycle passed; 1,061 tests ran with one failure in the newly added production-button contract. The contract incorrectly expected Voice Studio `playPreview` inside Production Studio markup. Corrected by adding dedicated Production Studio playback/stop/download/status/time controls and asserting those actual controls. |
+| #2083 | 41454123181 | Success | 1,061 tests passed in 51.288 seconds; frontend syntax and isolated Qt lifecycle passed. Verified stable-ID packaged persistence validator, Production Studio controls and bridge actions. Tests-only; build job skipped. |
 
-Latest full regression: #2080 **1,059 tests passed** in 49.413 seconds. Frontend JavaScript syntax validation and isolated native Qt lifecycle regression also passed. Run #2080: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41447145259.
+Latest full regression: #2083 **1,061 tests passed** in 51.288 seconds. Frontend JavaScript syntax validation and isolated native Qt lifecycle regression also passed. Run #2083: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41454123181.
 
-Preceding migration retry run #2079 passed **1,058 tests**: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41446257120.
+Preceding validation runs: #2080 passed **1,059 tests** (https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41447145259); #2079 passed **1,058 tests** (https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41446257120).
 
-#2080 was a tests-only checkpoint; its build job was skipped and it produced no Windows installer/portable/hash artifacts. #2077 was the first artifact-checkpoint attempt and failed at packaged Mix Summary acceptance before any installer/Defender/artifact steps. A new full artifact checkpoint is required on the corrected current head.
+#2080 and #2083 were tests-only checkpoints; their build jobs were skipped and they produced no Windows installer/portable/hash artifacts. #2077 failed at packaged Mix Summary acceptance; #2081 failed at stable-ID BGM persistence acceptance. Both causes have source/validator corrections and are covered by the #2083 passing suite, but the corrected frozen-app acceptance still must pass. #2082 had one incorrect static-HTML contract assertion; dedicated Production Studio controls were added in #2083. A fresh full artifact checkpoint is required on the current head.
 
 ## Remaining Step 4 gates
 
-1. Run a fresh final Windows package checkpoint on the corrected Mix Summary source: full regression, frozen EXE, bundled assets/modules, packaged Sound Design UI acceptance, installer compilation, SHA-256 manifest, fail-closed Microsoft Defender scans and all required artifact uploads. The #2077 failure is resolved in source but still requires packaged runtime verification.
+1. Run a fresh final Windows package checkpoint on the current source: full regression, frozen EXE, bundled assets/modules, packaged Sound Design UI acceptance (stable-ID persistence and Mix Summary), Production Studio UI/control checks, installer compilation, SHA-256 manifest, fail-closed Microsoft Defender scans and all required artifact uploads. The #2077, #2081 and #2082 causes are corrected in source/tests; packaged runtime acceptance remains the release gate.
 2. Record exact source SHA, build/run ID, installer/portable/manifest artifact IDs, sizes, hashes and expiry.
 3. Perform target-PC installed-app acceptance and real audio listening. CI does not establish that the user’s Windows machine successfully installs or that the resulting audiobook sounds correct.
 4. Exercise real final audiobook generation/recovery on the target PC and inspect a generated M4B for actual playback, chapter navigation, metadata, cover, bitrate and complete decoding.
@@ -108,9 +115,9 @@ This Step 4 artifact checkpoint is not a Version 1.2.0 release. Do not bump the 
 
 - Stage: Stage 4, Step 4 — final closure.
 - Branch: `stage-4/step-4-audio-assembly`.
-- Functional source SHA before this ledger/artifact-checkpoint commit: `626623170137c0d160ef7cef575803f3d5feac06`.
-- Latest passing tests-only run: #2080 / 41447145259 (1,059 tests).
-- Previous passing migration retry run: #2079 / 41446257120 (1,058 tests).
-- Latest failed Step 4 package attempt: #2077 / 41445167744; the Mix Summary alias-count issue is corrected in #2080 source. No installer/portable/manifest artifacts were uploaded from #2077.
+- Functional source SHA before this ledger/artifact-checkpoint commit: `fd99dc7b382fe94fce84877c8b8ac021fd2ebd2c`.
+- Latest passing tests-only run: #2083 / 41454123181 (1,061 tests).
+- Previous passing source run: #2080 / 41447145259 (1,059 tests).
+- Failed package attempts retained: #2077 (Mix Summary duplicate aliases), #2081 (acceptance checked legacy numeric keys rather than stable IDs), #2082 (incorrect Production preview-control contract). Corrected current code passed #2083 regression; these runtime gates must pass in the fresh package.
 - Latest successful Windows package before Step 4: #2062 on the Step 3 branch; it is not a Step 4 package.
-- Next action: rerun full artifact checkpoint on the corrected source and inspect packaged UI, installer, Defender and artifact outcomes. Target-PC installation/listening acceptance remains open.
+- Next action: final Windows artifact checkpoint on `fd99dc7…`; inspect packaged UI, stable-ID persistence, installer, Defender and artifact outcomes. Target-PC installation/listening acceptance remains open.
