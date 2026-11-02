@@ -511,16 +511,24 @@ class AudiobookBrain:
             # container type. Runtime/structured-output adapters may return a
             # mapping implementation other than a built-in dict.
             nested_music = raw.get('music')
-            if isinstance(nested_music, dict):
-                # Direct key access is intentional: keep the current structured
-                # schema distinct from the older flat scene fields.
+            # Keep this extraction isolated and report the concrete payload in
+            # the CI diagnostic while the structured scene contract is verified.
+            try:
                 music_style = nested_music['style'] if 'style' in nested_music else ''
                 music_intensity = nested_music['intensity'] if 'intensity' in nested_music else 0.0
-            else:
+            except (TypeError, KeyError):
                 music_style = raw.get('music_style', '')
                 music_intensity = raw.get('music_intensity', 0.0)
-            if str(raw.get('summary') or '').startswith('The protagonist enters the abandoned station'):
-                print("SCENE_MUSIC_INSIDE", repr(nested_music), repr(music_style), repr(music_intensity))
+            print(
+                "SCENE_MUSIC_INSIDE",
+                type(raw).__name__,
+                repr(raw.get('summary')),
+                repr(raw.keys()),
+                type(nested_music).__name__,
+                repr(nested_music),
+                repr(music_style),
+                repr(music_intensity),
+            )
 
             ambience_payload = raw.get('ambience')
             ambience = ambience_payload if isinstance(ambience_payload, list) else []
