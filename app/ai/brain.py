@@ -504,33 +504,26 @@ class AudiobookBrain:
                 continue
 
             direction_payload = raw.get('narrator_direction')
-            direction = direction_payload if isinstance(direction_payload, dict) else {}
-            music_payload = raw.get('music')
-            music_details = music_payload if isinstance(music_payload, dict) else {}
-
-            # Resolve the nested fields explicitly. Legacy flat fields are used
-            # only when the current nested field is absent/empty.
-            pace_value = direction.get('pace')
-            if pace_value is None or not str(pace_value).strip():
-                pace_value = raw.get('pace', 'natural')
-            energy_value = direction.get('energy')
-            if energy_value is None or not str(energy_value).strip():
-                energy_value = raw.get('energy', 'medium')
-            delivery_value = direction.get('delivery')
-            if delivery_value is None or not str(delivery_value).strip():
-                delivery_value = raw.get('delivery', '')
-
-            music_style_value = music_details.get('style')
-            if music_style_value is None or not str(music_style_value).strip():
-                music_style_value = raw.get('music_style', '')
-            music_intensity_value = music_details.get('intensity')
-            if music_intensity_value is None:
-                music_intensity_value = raw.get('music_intensity', 0.0)
+            if not isinstance(direction_payload, dict):
+                direction_payload = {}
+            nested_music_payload = raw.get('music')
+            has_nested_music = isinstance(nested_music_payload, dict)
+            if not has_nested_music:
+                nested_music_payload = {}
 
             ambience_payload = raw.get('ambience')
-            ambience = ambience_payload if isinstance(ambience_payload, list) else []
+            if not isinstance(ambience_payload, list):
+                ambience_payload = []
             sfx_payload = raw.get('sfx')
-            sfx = sfx_payload if isinstance(sfx_payload, list) else []
+            if not isinstance(sfx_payload, list):
+                sfx_payload = []
+
+            if has_nested_music:
+                music_style = nested_music_payload.get('style', '')
+                music_intensity = nested_music_payload.get('intensity', 0.0)
+            else:
+                music_style = raw.get('music_style', '')
+                music_intensity = raw.get('music_intensity', 0.0)
 
             out['scenes'].append({
                 'summary': str(raw.get('summary', '')).strip(),
@@ -538,16 +531,16 @@ class AudiobookBrain:
                 'time': str(raw.get('time', '')).strip(),
                 'mood': str(raw.get('mood', 'neutral')).strip() or 'neutral',
                 'narrator_direction': {
-                    'pace': str(pace_value).strip() or 'natural',
-                    'energy': str(energy_value).strip() or 'medium',
-                    'delivery': str(delivery_value).strip(),
+                    'pace': str(direction_payload.get('pace', raw.get('pace', 'natural'))).strip() or 'natural',
+                    'energy': str(direction_payload.get('energy', raw.get('energy', 'medium'))).strip() or 'medium',
+                    'delivery': str(direction_payload.get('delivery', raw.get('delivery', ''))).strip(),
                 },
-                'ambience': [str(value).strip() for value in ambience if str(value).strip()][:3],
+                'ambience': [str(value).strip() for value in ambience_payload if str(value).strip()][:3],
                 'music': {
-                    'style': str(music_style_value).strip() or None,
-                    'intensity': self._numeric_intensity(music_intensity_value),
+                    'style': str(music_style).strip() or None,
+                    'intensity': self._numeric_intensity(music_intensity),
                 },
-                'sfx': [str(value).strip() for value in sfx if str(value).strip()][:4],
+                'sfx': [str(value).strip() for value in sfx_payload if str(value).strip()][:4],
                 'confidence': _numeric_score(raw.get('confidence', 0.0)),
             })
         for note in data.get('continuity_notes', []) or []:
