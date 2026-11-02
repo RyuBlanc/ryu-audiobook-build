@@ -127,9 +127,10 @@ class PronunciationCandidateGuardTests(unittest.TestCase):
             title="Series A",
             chapters=[SimpleNamespace(number=1,title="Chapter 1",text="John Smith spoke.")],
         )
+        list_mock = Mock(return_value=[])
         bridge = SimpleNamespace(
             _active_project=lambda:project,
-            _pronunciation_list=lambda _payload:[],
+            _pronunciation_list=list_mock,
             _new_job=Mock(return_value="pronunciation-job"),
             _job_update=Mock(),
             _now=lambda:"2026-10-25T00:00:00",
@@ -141,7 +142,7 @@ class PronunciationCandidateGuardTests(unittest.TestCase):
         self.assertFalse(suggestion["enabled"])
         self.assertTrue(suggestion["review_required"])
         self.assertEqual("John Smith",suggestion["spoken_form"])
-        bridge._pronunciation_list.assert_called_once_with({})
+        list_mock.assert_called_once_with({})
 
 
 
