@@ -48,11 +48,9 @@ class EffectiveGenerationConfigurationTests(unittest.TestCase):
                 "author": "Saved Author",
                 "publisher": "Saved Publisher",
                 "series": "Dragon Chronicles",
-                "series_number": "4",
                 "language": "ja-JP",
                 "year": "2026",
                 "genre": "Fantasy",
-                "description": "Saved project description must reach the final M4B.",
                 "cover_path": str(cover),
                 "audio_bitrate": 192,
                 "narration_speed": 0.95,
@@ -157,11 +155,9 @@ class EffectiveGenerationConfigurationTests(unittest.TestCase):
                     "narrator": "Saved Narrator",
                     "publisher": "Saved Publisher",
                     "series": "Dragon Chronicles",
-                    "series_number": "4",
                     "language": "ja-JP",
                     "year": "2026",
                     "genre": "Fantasy",
-                    "description": "Saved project description must reach the final M4B.",
                 },
             )
             manager.start.assert_called_once()
