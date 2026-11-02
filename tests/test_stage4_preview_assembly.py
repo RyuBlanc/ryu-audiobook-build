@@ -120,6 +120,25 @@ class PreviewAssemblyTests(unittest.TestCase):
             self.assertEqual(captured["args"][3], [moved_chapter_folder])
             self.assertNotEqual(captured["args"][3], [stale_number_folder])
 
+    def test_legacy_checkpoint_without_manifest_requires_matching_number_and_title(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            wrong = root / "working_audio" / "001_OtherChapter"
+            _write_wav(wrong / "chunks" / "00001.wav")
+            selected = SimpleNamespace(
+                number=1, title="Opening", chapter_id="new-opening-id",
+            )
+            self.assertIsNone(full_book_preview._saved_chapter_audio_dir(
+                root / "working_audio", selected
+            ))
+
+            right = root / "working_audio" / "001_Opening"
+            _write_wav(right / "chunks" / "00001.wav")
+            self.assertEqual(
+                full_book_preview._saved_chapter_audio_dir(root / "working_audio", selected),
+                right,
+            )
+
     def test_full_book_preview_cancellation_discards_partial_output_and_staging(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); source = self._chapter_fixture(root)

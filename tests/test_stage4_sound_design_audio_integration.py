@@ -10,6 +10,7 @@ import tempfile
 import threading
 import unittest
 import wave
+from unittest.mock import patch
 from types import SimpleNamespace
 
 from app.audio import assembler
@@ -189,6 +190,30 @@ class Stage4SoundDesignAudioIntegrationTests(unittest.TestCase):
                 ("chapter-based", "manual", "chapter-based", True),
                 ("voice-only", "off", "same", False),
             )
+            comparison_frequencies = (220, 330, 400, 600, 800, 1000)
+            config_keys = (
+                "metadata", "bitrate", "narration_speed",
+                "background_audio_path", "background_audio_volume",
+                "narration_volume", "cue_audio_volume",
+                "ambience_audio_path", "ambience_audio_volume",
+                "background_audio_fade_in", "background_audio_fade_out",
+                "background_audio_mode", "auto_music_style", "auto_music_variation",
+                "chapter_transition_sound", "story_effects_enabled",
+                "story_effect_volume", "sound_cue_style", "opening_cue_path",
+                "page_turn_cue_path", "ending_cue_path", "chapter_bgm_overrides",
+                "chapter_bgm_strategy",
+            )
+
+            def spectral_signature(samples: array, rate: int, at: float) -> tuple[float, ...]:
+                energies = [
+                    self._tone_energy(samples, rate, at, frequency)
+                    for frequency in comparison_frequencies
+                ]
+                total = sum(energies)
+                if total <= 0:
+                    raise AssertionError(f"No measurable audio energy near {at:.2f}s.")
+                return tuple(value / total for value in energies)
+
             for name, mode, strategy, cues_enabled in scenarios:
                 with self.subTest(scenario=name):
                     chapter_root = root / name / "working_audio"
@@ -203,10 +228,8 @@ class Stage4SoundDesignAudioIntegrationTests(unittest.TestCase):
                             chapter_dir / "chunks" / "00001.wav", 1000, 1.2, 0.14
                         )
                         narration = {
-                            "chapter": number,
-                            "chapter_id": chapter_id,
-                            "title": title,
-                            "narration_text": f"{title} narration.",
+                            "chapter": number, "chapter_id": chapter_id,
+                            "title": title, "narration_text": f"{title} narration.",
                         }
                         (chapter_dir / "narration.json").write_text(
                             json.dumps(narration), encoding="utf-8"
@@ -232,12 +255,9 @@ class Stage4SoundDesignAudioIntegrationTests(unittest.TestCase):
                         if strategy == "chapter-based" else {}
                     )
                     state = {
-                        "title": f"Parity {name}",
-                        "author": "Ryu Parity Test",
-                        "narrator": "Saved Narrator",
-                        "language": "en",
-                        "genre": "Fantasy",
-                        "audio_bitrate": 192,
+                        "title": f"Parity {name}", "author": "Ryu Parity Test",
+                        "narrator": "Saved Narrator", "language": "en",
+                        "genre": "Fantasy", "audio_bitrate": 192,
                         "narration_speed": 1.0,
                         "background_audio_mode": mode,
                         "background_audio_enabled": mode != "off",
@@ -255,8 +275,7 @@ class Stage4SoundDesignAudioIntegrationTests(unittest.TestCase):
                         "sound_cue_style": "library",
                         "story_effects_enabled": False,
                         "story_effect_volume": 0.18,
-                        "auto_music_style": "auto",
-                        "auto_music_track_path": "",
+                        "auto_music_style": "auto", "auto_music_track_path": "",
                         "chapter_bgm_strategy": strategy,
                         "chapter_bgm_overrides": overrides,
                     }
@@ -268,44 +287,66 @@ class Stage4SoundDesignAudioIntegrationTests(unittest.TestCase):
                     preview_output = root / f"{name}-preview.m4b"
                     final_output = root / f"{name}-final.m4b"
                     host = PreviewHost()
-                    full_book_preview._render_full_book_preview(
-                        host, f"preview-{name}",
-                        SimpleNamespace(folder=chapter_root.parent),
-                        chapter_dirs, chapter_titles, preview_output,
-                        state["title"], state["author"], metadata, 192, state,
-                        threading.Event(),
-                    )
+                    preview_calls = []
+                    real_assemble = assembler.assemble_m4b
+
+                    def capture_preview_assembly(*args, **kwargs):
+                        preview_calls.append((args, dict(kwargs)))
+                        return real_assemble(*args, **kwargs)
+
+                    with patch.object(
+                        assembler, "assemble_m4b", side_effect=capture_preview_assembly
+                    ):
+                        full_book_preview._render_full_book_preview(
+                            host, f"preview-{name}",
+                            SimpleNamespace(folder=chapter_root.parent),
+                            chapter_dirs, chapter_titles, preview_output,
+                            state["title"], state["author"], metadata, 192, state,
+                            threading.Event(),
+                        )
                     completed = next(
                         row for job_id, row in host.updates
                         if job_id == f"preview-{name}" and row.get("state") == "completed"
                     )
                     self.assertTrue(preview_output.is_file())
                     self.assertEqual(completed["result"]["chapter_count"], 2)
+                    self.assertEqual(len(preview_calls), 1)
 
                     sound_enabled = mode != "off"
+                    final_kwargs = {
+                        "chapter_titles": chapter_titles, "metadata": metadata, "bitrate": 192,
+                        "narration_speed": 1.0,
+                        "background_audio_path": book_music if sound_enabled else None,
+                        "background_audio_volume": 0.35,
+                        "narration_volume": 0.85, "cue_audio_volume": 0.30,
+                        "ambience_audio_path": None, "ambience_audio_volume": 0,
+                        "background_audio_fade_in": 0, "background_audio_fade_out": 0,
+                        "background_audio_mode": mode,
+                        "auto_music_style": "auto", "auto_music_variation": None,
+                        "chapter_transition_sound": cues_enabled,
+                        "story_effects_enabled": False, "story_effect_volume": 0.18,
+                        "sound_cue_style": "library",
+                        "opening_cue_path": opening if cues_enabled else None,
+                        "page_turn_cue_path": next_chapter if cues_enabled else None,
+                        "ending_cue_path": closing if cues_enabled else None,
+                        "chapter_bgm_overrides": overrides if sound_enabled else {},
+                        "chapter_bgm_strategy": strategy,
+                    }
+                    preview_kwargs = preview_calls[0][1]
+                    preview_configuration = {
+                        key: preview_kwargs.get(key) for key in config_keys
+                    }
+                    final_configuration = {
+                        key: final_kwargs.get(key) for key in config_keys
+                    }
+                    self.assertEqual(
+                        preview_configuration, final_configuration,
+                        f"{name}: saved preview configuration must match final assembly exactly",
+                    )
+
                     rendered = assembler.assemble_m4b(
                         chapter_dirs, final_output, state["title"], state["author"],
-                        chapter_titles=chapter_titles, metadata=metadata, bitrate=192,
-                        narration_speed=1.0,
-                        background_audio_path=book_music if sound_enabled else None,
-                        background_audio_volume=0.35,
-                        narration_volume=0.85,
-                        cue_audio_volume=0.30,
-                        background_audio_fade_in=0,
-                        background_audio_fade_out=0,
-                        ambience_audio_volume=0,
-                        background_audio_mode=mode,
-                        auto_music_style="auto",
-                        auto_music_variation=None,
-                        chapter_transition_sound=cues_enabled,
-                        story_effects_enabled=False,
-                        story_effect_volume=0.18,
-                        sound_cue_style="library",
-                        opening_cue_path=opening if cues_enabled else None,
-                        page_turn_cue_path=next_chapter if cues_enabled else None,
-                        ending_cue_path=closing if cues_enabled else None,
-                        chapter_bgm_overrides=overrides if sound_enabled else {},
-                        chapter_bgm_strategy=strategy,
+                        **final_kwargs,
                     )
                     self.assertEqual(rendered, final_output)
 
@@ -318,18 +359,22 @@ class Stage4SoundDesignAudioIntegrationTests(unittest.TestCase):
                     self.assertEqual(preview_rate, final_rate)
                     self.assertEqual(len(preview_audio), len(final_audio))
                     self.assertGreater(len(final_audio), self.sample_rate)
-                    rms_error = math.sqrt(
-                        sum((left - right) ** 2 for left, right in zip(preview_audio, final_audio))
-                        / len(final_audio)
+
+                    anchors = (
+                        (0.10, 0.60, 1.50, 2.10, 2.90)
+                        if cues_enabled else (0.60, 1.80)
                     )
-                    signal_rms = math.sqrt(
-                        sum(value * value for value in final_audio) / len(final_audio)
-                    )
-                    self.assertLess(
-                        rms_error / max(signal_rms, 1.0),
-                        0.02,
-                        f"{name}: preview and final audio differ beyond encoding tolerance",
-                    )
+                    for at in anchors:
+                        preview_signature = spectral_signature(preview_audio, preview_rate, at)
+                        final_signature = spectral_signature(final_audio, final_rate, at)
+                        spectral_distance = sum(
+                            abs(left - right)
+                            for left, right in zip(preview_signature, final_signature)
+                        ) / 2.0
+                        self.assertLess(
+                            spectral_distance, 0.04,
+                            f"{name}: decoded preview/final sound layers diverge near {at:.2f}s",
+                        )
 
     def test_same_and_chapter_based_bgm_render_the_selected_strategy_without_fallback(self):
         with tempfile.TemporaryDirectory() as temporary:

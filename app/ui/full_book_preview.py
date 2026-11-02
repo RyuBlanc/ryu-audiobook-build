@@ -29,8 +29,17 @@ def _saved_chapter_audio_dir(audio_root: Path, chapter) -> Path | None:
             continue
         manifest_path = candidate / "narration.json"
         if not manifest_path.is_file():
-            if candidate.name.startswith(f"{number:03d}_"):
-                prefix_matches.append(candidate)
+            prefix = f"{number:03d}_"
+            # Very old folders without narration manifests are usable only
+            # when both their displayed number and sanitized folder title match.
+            if candidate.name.startswith(prefix):
+                folder_title = candidate.name[len(prefix):].strip()
+                safe_title = re.sub(
+                    r'[<>:"/\\|?*]+', "_",
+                    str(getattr(chapter, "title", "") or "").strip(),
+                ) or "chapter"
+                if folder_title.casefold() == safe_title.casefold():
+                    prefix_matches.append(candidate)
             continue
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
