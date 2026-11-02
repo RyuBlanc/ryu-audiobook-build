@@ -1,6 +1,7 @@
 """Full-book Sound Design preview worker built from existing chapter narration."""
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import tempfile
@@ -8,6 +9,60 @@ import threading
 import uuid
 from pathlib import Path
 from typing import Any
+
+
+def _saved_chapter_audio_dir(audio_root: Path, chapter) -> Path | None:
+    """Find saved narration by stable chapter ID, with strict legacy matching."""
+    if not audio_root.is_dir():
+        return None
+    chapter_id = str(getattr(chapter, "chapter_id", "") or "").strip()
+    number = int(getattr(chapter, "number", 0) or 0)
+    title = str(getattr(chapter, "title", "") or "").strip().casefold()
+    stable_matches: list[Path] = []
+    legacy_matches: list[Path] = []
+    prefix_matches: list[Path] = []
+    for candidate in audio_root.iterdir():
+        if not candidate.is_dir() or not (candidate / "chunks").is_dir():
+            continue
+        chunks = list((candidate / "chunks").glob("*.wav"))
+        if not chunks:
+            continue
+        manifest_path = candidate / "narration.json"
+        if not manifest_path.is_file():
+            if candidate.name.startswith(f"{number:03d}_"):
+                prefix_matches.append(candidate)
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(manifest, dict):
+            continue
+        saved_id = str(manifest.get("chapter_id") or "").strip()
+        if saved_id:
+            if chapter_id and saved_id == chapter_id:
+                stable_matches.append(candidate)
+            continue
+        try:
+            saved_number = int(manifest.get("chapter") or 0)
+        except (TypeError, ValueError):
+            saved_number = 0
+        saved_title = str(manifest.get("title") or "").strip().casefold()
+        # Legacy manifests are accepted only on exact source chapter number
+        # and title. This prevents a reordered chapter from borrowing another
+        # chapter's audio merely because its directory has the current prefix.
+        if saved_number == number and saved_title == title and title:
+            legacy_matches.append(candidate)
+        elif not saved_number and saved_title == title and title and candidate.name.startswith(f"{number:03d}_"):
+            # Compatibility for pre-number manifests used by older releases.
+            legacy_matches.append(candidate)
+    matches = stable_matches or legacy_matches or prefix_matches
+    if len(matches) > 1:
+        raise ValueError(
+            f"Multiple saved narration folders match chapter '{getattr(chapter, 'title', number)}'. "
+            "Resolve duplicate chapter checkpoints before previewing the book."
+        )
+    return matches[0] if matches else None
 
 
 def start_full_book_preview(host) -> dict[str, Any]:
@@ -38,16 +93,11 @@ def start_full_book_preview(host) -> dict[str, Any]:
     chapter_dirs: list[Path] = []
     missing: list[str] = []
     for chapter in chapters:
-        prefix = f"{int(chapter.number):03d}_"
-        candidates = sorted(
-            path for path in audio_root.glob(prefix + "*")
-            if path.is_dir() and (path / "chunks").is_dir()
-            and any((path / "chunks").glob("*.wav"))
-        ) if audio_root.is_dir() else []
-        if not candidates:
+        saved_dir = _saved_chapter_audio_dir(audio_root, chapter)
+        if saved_dir is None:
             missing.append(str(chapter.title or f"Chapter {chapter.number}"))
         else:
-            chapter_dirs.append(candidates[0])
+            chapter_dirs.append(saved_dir)
     if missing:
         detail = ", ".join(missing[:4])
         if len(missing) > 4:

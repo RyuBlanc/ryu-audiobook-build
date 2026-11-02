@@ -72,6 +72,52 @@ class PreviewAssemblyTests(unittest.TestCase):
             completed = next(row for _job, row in host.updates if row.get("state") == "completed")
             self.assertEqual(completed["result"]["duration_seconds"], 12.5)
 
+    def test_full_book_preview_finds_saved_chapter_audio_by_stable_id_after_reorder(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            audio_root = root / "working_audio"
+            stale_number_folder = audio_root / "001_Opening"
+            moved_chapter_folder = audio_root / "003_Opening"
+            for folder, chapter_id, number in (
+                (stale_number_folder, "another-chapter", 1),
+                (moved_chapter_folder, "stable-opening", 3),
+            ):
+                _write_wav(folder / "chunks" / "00001.wav")
+                (folder / "narration.json").write_text(
+                    __import__("json").dumps({
+                        "chapter": number, "chapter_id": chapter_id,
+                        "title": "Opening", "narration_text": "Opening narration.",
+                    }),
+                    encoding="utf-8",
+                )
+            chapter = SimpleNamespace(
+                number=1, chapter_id="stable-opening", title="Opening",
+                text="Opening narration.", skip_for_generation=False,
+            )
+            project = SimpleNamespace(folder=root, title="Book", chapters=[chapter])
+            host = _Host()
+            host._active_project = lambda: project
+            host._new_job = lambda *args: "stable-preview"
+            host._now = lambda: "2026-11-02T18:00:00+05:30"
+            captured = {}
+
+            class _Thread:
+                def __init__(self, *, target, args, daemon, name):
+                    captured.update(target=target, args=args, daemon=daemon, name=name)
+                def start(self):
+                    captured["started"] = True
+
+            state = {"background_audio_mode": "off", "background_audio_enabled": False}
+            with patch("app.core.state.load_state", return_value=state), \\
+                 patch("app.core.paths.app_root", return_value=root / "app"), \\
+                 patch("threading.Thread", _Thread):
+                result = full_book_preview.start_full_book_preview(host)
+
+            self.assertTrue(captured["started"])
+            self.assertEqual(result["state"], "running")
+            self.assertEqual(captured["args"][3], [moved_chapter_folder])
+            self.assertNotEqual(captured["args"][3], [stale_number_folder])
+
     def test_full_book_preview_cancellation_discards_partial_output_and_staging(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); source = self._chapter_fixture(root)
