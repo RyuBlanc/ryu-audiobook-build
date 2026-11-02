@@ -80,14 +80,27 @@ jobs:
           & $nodeExe --check 'installer\ryu_installer.js'
           if ($LASTEXITCODE -ne 0) { throw "Installer JavaScript syntax validation failed with exit code $LASTEXITCODE." }
 
-      - name: Run regression tests
+      - name: Run isolated native Qt lifecycle regression
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
-          $env:PYTHONPATH = (Get-Location).Path
+          $repoRoot = (Get-Location).Path
+          $testsRoot = Join-Path $repoRoot 'tests'
+          $env:PYTHONPATH = "$repoRoot;$testsRoot"
           $env:PYTHONDONTWRITEBYTECODE = '1'
-          & $pythonExe -B -m unittest discover -s tests -v
+          & $pythonExe -B -m unittest test_regressions.RegressionTests.test_voice_preview_invalidation_ignores_deleted_qt_status_widget -v
+          if ($LASTEXITCODE -ne 0) { throw "Isolated Qt lifecycle regression failed with exit code $LASTEXITCODE." }
+
+      - name: Run full regression suite (remaining tests)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          $repoRoot = (Get-Location).Path
+          $env:PYTHONPATH = "$repoRoot"
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B tests/run_regression_suite.py
           if ($LASTEXITCODE -ne 0) { throw "Regression tests failed with exit code $LASTEXITCODE." }
 
   # On feature branches, run the full regression suite without packaging or
