@@ -30,6 +30,7 @@ def dialogue_segment_for_selection(
     chapter: Chapter,
     start: int,
     end: int,
+    project_folder=None,
 ) -> DialogueSegment | None:
     """Return a fast, local speaker suggestion for one selected dialogue.
 
@@ -134,6 +135,53 @@ def dialogue_segment_for_selection(
         aliases,
         last_speaker,
     )
+
+    # Explicitly confirmed series/book-local speaker examples can improve
+    # later suggestions. They remain suggestions only: a remembered match is
+    # never written back as an assignment until the user confirms it.
+    if project_folder is not None and candidates:
+        try:
+            from app.chapters.character_learning import (
+                learning_scope_for_project,
+                load_learning_examples,
+                rank_speaker_suggestions,
+            )
+            learning_scope = learning_scope_for_project(project_folder)
+            if learning_scope:
+                known_characters = [
+                    {"name": name, "series": learning_scope}
+                    for name in candidates
+                ]
+                learned = rank_speaker_suggestions(
+                    chapter_text=text,
+                    start=best_start,
+                    end=best_end,
+                    known_characters=known_characters,
+                    learning_examples=load_learning_examples(learning_scope),
+                    last_speaker=last_speaker or "",
+                    last_speaker_series=learning_scope,
+                )
+                combined = {item[0].casefold(): item for item in suggestions}
+                for item in learned:
+                    name = str(item.get("name") or "").strip()
+                    if not name:
+                        continue
+                    candidate = (
+                        name,
+                        max(0.0, min(1.0, float(item.get("confidence") or 0.0))),
+                        str(item.get("evidence") or "Matches a confirmed local character example."),
+                    )
+                    previous = combined.get(name.casefold())
+                    if previous is None or candidate[1] > previous[1]:
+                        combined[name.casefold()] = candidate
+                suggestions = sorted(
+                    combined.values(),
+                    key=lambda item: (-item[1], item[0].casefold()),
+                )[:5]
+        except (OSError, ValueError, TypeError):
+            # Learning memory is optional and must never disable ordinary
+            # source-grounded dialogue assignment when its local store is unreadable.
+            pass
 
     if exact_manual is not None:
         exact_name = str(exact_manual.get("speaker", "")).strip()
