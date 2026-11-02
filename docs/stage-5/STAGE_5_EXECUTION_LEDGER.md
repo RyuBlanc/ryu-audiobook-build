@@ -128,3 +128,8 @@ The prior Stage 4 pronunciation-generation fixture has been updated with valid p
 ## 14. Validator escape correction
 
 The ten-field validator commit had over-escaped the Python NUL-character replacement and Release Year digit regex in its generated source. These are corrected in the follow-up: the normalizer removes actual NUL bytes, and the year validator uses the intended four-digit decimal expression. The exact-commit full regression must confirm that a complete metadata record with a real four-digit year and valid project cover passes the gate.
+
+
+## 15. #2096 packaged metadata acceptance failure and correction
+
+Run [#2096](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41543922208) passed the full regression suite, frozen application build, frozen EXE verification and bundled assets. Its packaged Sound Design acceptance exercised the metadata editor through the forced save failure and successful retry; all earlier packaged checks passed. The single final assertion failed because the immediate post-save cover check expected forward slashes in the Windows path. The restart assertion had already been corrected to normalize backslashes, but this earlier assertion had not. The saved cover is stored at the expected project-local `assets\\cover.png`; the test now normalizes the separator consistently and reports the exact mismatched metadata keys if another field ever differs.

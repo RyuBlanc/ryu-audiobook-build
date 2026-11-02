@@ -1290,16 +1290,29 @@
         document.querySelector("#productionBookTitle")?.textContent.trim() === String(expectedMetadata.title || "");
     }, 15000);
     const savedMetadata = await invoke("project.get_active", {});
-    must(String(savedMetadata.title || "") === String(expectedMetadata.title || "") &&
-      String(savedMetadata.author || "") === String(expectedMetadata.author || "") &&
-      String(savedMetadata.publisher || "") === String(expectedMetadata.publisher || "") &&
-      String(savedMetadata.series || "") === String(expectedMetadata.series || "") &&
-      String(savedMetadata.series_volume || "") === String(expectedMetadata.series_volume || "") &&
-      String(savedMetadata.language || "") === String(expectedMetadata.language || "") &&
-      String(savedMetadata.year || "") === String(expectedMetadata.year || "") &&
-      String(savedMetadata.genre || "") === String(expectedMetadata.genre || "") &&
-      String(savedMetadata.cover_path || "").toLowerCase().endsWith("assets/cover.png"),
-      "The metadata save response did not reflect the saved project fields and valid cover.");
+    const normalizedSavedCoverPath = String(savedMetadata.cover_path || "")
+      .split(String.fromCharCode(92)).join("/").toLowerCase();
+    const expectedSavedMetadata = {
+      title:String(expectedMetadata.title || ""),
+      author:String(expectedMetadata.author || ""),
+      publisher:String(expectedMetadata.publisher || ""),
+      series:String(expectedMetadata.series || ""),
+      series_volume:String(expectedMetadata.series_volume || ""),
+      language:String(expectedMetadata.language || ""),
+      year:String(expectedMetadata.year || ""),
+      genre:String(expectedMetadata.genre || "")
+    };
+    const metadataMismatches = Object.entries(expectedSavedMetadata)
+      .filter(([key, value]) => String(savedMetadata[key] || "") !== value)
+      .map(([key, value]) => key + ": expected " + JSON.stringify(value) +
+        ", received " + JSON.stringify(savedMetadata[key]));
+    if (!normalizedSavedCoverPath.endsWith("/assets/cover.png")) {
+      metadataMismatches.push("cover_path: expected project-local /assets/cover.png, received " +
+        JSON.stringify(savedMetadata.cover_path));
+    }
+    must(metadataMismatches.length === 0,
+      "The metadata save response did not reflect saved project fields: " +
+      metadataMismatches.join("; "));
     must(savedMetadata.metadata_complete === false &&
       (savedMetadata.metadata_missing_fields || []).includes("Narrator"),
       "The saved metadata gate did not identify the missing real narrator profile.");

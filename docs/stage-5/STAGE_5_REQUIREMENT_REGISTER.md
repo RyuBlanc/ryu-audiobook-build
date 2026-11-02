@@ -13,7 +13,7 @@ Allowed statuses: OPEN; IN PROGRESS; CODE CHANGED — NOT VERIFIED; AUTOMATED TE
 
 | ID | Priority | Requirement | Status | Implementation / evidence | Remaining work |
 |---|---|---|---|---|---|
-| PROD-01 | P0 | Input Project Details button and functional editor | CODE CHANGED — NOT VERIFIED | Step 5.1 Premium V2 dialog and toolbar control | Exact-commit CI and Windows runtime acceptance |
+| PROD-01 | P0 | Input Project Details button and functional editor | CODE CHANGED — NOT VERIFIED | Step 5.1 Premium V2 dialog and toolbar control | Exact-commit CI and Windows runtime acceptance; #2096 passed the UI save/retry flow but exposed a Windows path-separator defect in the acceptance assertion, corrected in the next checkpoint |
 | PROD-02 | P0 | Complete metadata fields and real historical values | CODE CHANGED — NOT VERIFIED | Project-scoped bridge save/history; values from local projects and Character Library | CI plus history/project isolation/restart acceptance |
 | PROD-03 | P0 | Saved-metadata completion gate | CODE CHANGED — NOT VERIFIED | Shared validator, live warning/complete state and backend generation guard | CI, unsaved-edit and save-failure acceptance |
 | PROD-04 | P0 | Metadata persistence and final output tags | CODE CHANGED — NOT VERIFIED | Project-scoped metadata transaction; Series Volume mapped to M4B `series_number`; unsupported-for-M4B cover formats normalized to PNG | Exact-commit regression and packaged M4B tag/cover acceptance in Step 5.5 |
