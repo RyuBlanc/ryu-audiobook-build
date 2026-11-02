@@ -262,7 +262,7 @@
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
   let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
-  let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], pronunciationEnabled = true, activePronunciationSeries = '', lastPronunciationPreview = null, pronunciationSelectionKeys = new Set(), selectedSoundPath = null, selectedCuePath = null, pendingCueSlot = null, pendingCueAssignments = Object.create(null), cueChangesDirty = false, cueSaveError = '', cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null, chapterBgmDraftDirty = false, mixLevelsDirty = false, soundPreviewKind = null, soundPreviewPath = null;
+  let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], pronunciationEnabled = true, activePronunciationSeries = '', lastPronunciationPreview = null, pronunciationRowPreviewState = new Map(), pronunciationSelectionKeys = new Set(), selectedSoundPath = null, selectedCuePath = null, pendingCueSlot = null, pendingCueAssignments = Object.create(null), cueChangesDirty = false, cueSaveError = '', cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null, chapterBgmDraftDirty = false, mixLevelsDirty = false, soundPreviewKind = null, soundPreviewPath = null;
   let chapterBgmCandidateTrackPath = null, chapterBgmCandidateChapter = null, chapterBgmSavePromise = null, cueSavePromise = null;
   let chapterStrategySavePromise = null;
   let chapterBgmAutoSaveTimer = null, cueAutoSaveTimer = null, chapterBgmDraftRevision = 0;
@@ -3958,8 +3958,8 @@
           '<td><div class="pron-audio-actions">' +
             '<button type="button" class="btn small secondary" data-pron-audio-play="written" data-pron-index="' + index + '"' + (disabled ? ' disabled' : '') + '>▶ Written</button>' +
             '<button type="button" class="btn small secondary" data-pron-audio-play="spoken" data-pron-index="' + index + '"' + (disabled ? ' disabled' : '') + '>▶ Pronounce as</button>' +
-            '<button type="button" class="btn small ghost" data-pron-audio-pause>Ⅱ</button>' +
-            '<button type="button" class="btn small ghost" data-pron-audio-replay>↻</button>' +
+            '<button type="button" class="btn small ghost" data-pron-audio-pause="' + index + '"' + (disabled ? ' disabled' : '') + '>Ⅱ</button>' +
+            '<button type="button" class="btn small ghost" data-pron-audio-replay="' + index + '"' + (disabled ? ' disabled' : '') + '>↻</button>' +
           '</div></td>' +
           '<td><div class="pron-options">' +
             '<button type="button" class="btn small ghost" data-pron-edit="' + index + '">Edit</button>' +
@@ -4038,7 +4038,7 @@
       : 'Global pronunciation is OFF. All pronunciation substitutions are bypassed.');
     return result;
   }
-  async function playPronunciationEntryPreview(profileName, textValue, label) {
+  async function playPronunciationEntryPreview(profileName, textValue, label, rowIdentity = '', previewKind = 'written') {
     const profile = voices.find(item => item && item.saved === true &&
       String(item.name || '').toLowerCase() === String(profileName || '').toLowerCase());
     if (!profile) throw new Error('Choose an available saved Voice Studio profile before previewing a pronunciation entry.');
@@ -4048,7 +4048,16 @@
       route_character_cast:false,apply_pronunciation_rules:false
     };
     const data = await call('voice.preview',request);
-    lastPronunciationPreview = {...request,label:String(label || profile.name)};
+    lastPronunciationPreview = {
+      ...request,label:String(label || profile.name),
+      rowIdentity:String(rowIdentity || ''),previewKind:String(previewKind || 'written')
+    };
+    if (rowIdentity) {
+      pronunciationRowPreviewState.set(String(rowIdentity), {
+        profile_name:profile.name,text:String(textValue),
+        label:String(label || profile.name),previewKind:String(previewKind || 'written')
+      });
+    }
     await monitorJob(data.job_id, async job => {
       const url = job?.result?.file_url;
       if (!url) throw new Error('The pronunciation preview completed without a playable audio file.');
@@ -7276,6 +7285,8 @@
     // Current-book identity is scoped to the active project. Do not carry a
     // multi-select or pending AI review list into another project's dictionary.
     pronunciationSelectionKeys.clear();
+    pronunciationRowPreviewState.clear();
+    lastPronunciationPreview = null;
     window.ryuPendingPronunciationSuggestions = [];
     renderPronunciationSuggestions([]);
     await refreshTerms();
@@ -8845,30 +8856,42 @@
           const textValue = button.dataset.pronAudioPlay === 'written'
             ? (term.written_form || term.word || '')
             : (term.spoken_form || term.pronunciation || '');
-          await playPronunciationEntryPreview(profileName,textValue,
-            (button.dataset.pronAudioPlay === 'written' ? 'Written term' : 'Corrected pronunciation') + ': ' + (term.written_form || term.word));
+          await playPronunciationEntryPreview(
+            profileName,textValue,
+            (button.dataset.pronAudioPlay === 'written' ? 'Written term' : 'Corrected pronunciation') + ': ' + (term.written_form || term.word),
+            pronunciationSelectionKey(term),button.dataset.pronAudioPlay
+          );
         });
         return;
       }
       if (button.matches('[data-pron-audio-pause]')) {
         stop();
-        if (previewAudio) previewAudio.pause();
-        else message('There is no pronunciation preview currently playing.',true);
+        const term = terms[Number(button.dataset.pronAudioPause)];
+        if (!term) { message('This pronunciation row is stale. Refresh the dictionary and retry.',true); return; }
+        const identity = pronunciationSelectionKey(term);
+        if (!previewAudio || lastPronunciationPreview?.rowIdentity !== identity) {
+          message('This row does not own the currently playing pronunciation preview.',true);
+          return;
+        }
+        previewAudio.pause();
         return;
       }
       if (button.matches('[data-pron-audio-replay]')) {
         run(async () => {
-          if (previewAudio && previewAudio.src) {
+          const term = terms[Number(button.dataset.pronAudioReplay)];
+          if (!term) throw new Error('This pronunciation row is stale. Refresh the dictionary and retry.');
+          const identity = pronunciationSelectionKey(term);
+          const savedPreview = pronunciationRowPreviewState.get(identity);
+          if (previewAudio && previewAudio.src && lastPronunciationPreview?.rowIdentity === identity) {
             previewAudio.currentTime = 0;
             await previewAudio.play();
             return;
           }
-          if (!lastPronunciationPreview) throw new Error('Play a pronunciation entry before requesting replay.');
-          await playPronunciationEntryPreview(
-            lastPronunciationPreview.profile_name,
-            lastPronunciationPreview.text,
-            lastPronunciationPreview.label
-          );
+          const profileName = savedPreview?.profile_name || $('pronPreviewProfile')?.value || '';
+          const textValue = savedPreview?.text || term.written_form || term.word || '';
+          const label = savedPreview?.label || ('Written term: ' + (term.written_form || term.word));
+          const kind = savedPreview?.previewKind || 'written';
+          await playPronunciationEntryPreview(profileName,textValue,label,identity,kind);
         });
         return;
       }
