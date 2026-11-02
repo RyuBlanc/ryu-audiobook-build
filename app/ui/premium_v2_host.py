@@ -2858,37 +2858,79 @@ class PremiumV2Bridge(QObject):
         return start_full_book_preview(self)
 
     def _render_sound_design_preview(self, source: Path, job_id: str, state: dict[str, Any]) -> Path:
-        """Render a short audition using the active book's real music/cue assignments."""
+        """Render a short audition using the active book's effective saved sound assignments."""
         from app.audio.assembler import _concat_audio_files, _duration_ms, _run
-        from app.audio.library import validate_saved_audio_paths
+        from app.audio.library import effective_background_audio_mode, validate_saved_audio_paths
+
+        # Use the same master switch and saved-asset validation as Production and
+        # Full-book Mix Preview. In particular, Voice Only must suppress retained
+        # BGM and cue preferences instead of merely skipping their validation.
+        audio_mode = effective_background_audio_mode(state)
         validate_saved_audio_paths(state)
+        sound_enabled = audio_mode != "off"
+        transition_enabled = sound_enabled and bool(state.get("chapter_transition_sound", False))
 
         preview_root = app_root() / "Previews"
         preview_root.mkdir(parents=True, exist_ok=True)
-        audio_source = Path(source).resolve()
+        original_source = Path(source).resolve()
+        audio_source = original_source
         opening = Path(str(state.get("opening_cue_path") or "")).expanduser()
-        if opening.is_file():
+        if transition_enabled and opening.is_file():
             with_opening = preview_root / f"sound-preview-opening-{job_id}.m4a"
             _concat_audio_files(opening, audio_source, with_opening, "192k")
             audio_source = with_opening
 
         music_path = None
-        volume = max(0.0, min(0.50, float(state.get("background_audio_volume") if state.get("background_audio_volume") is not None else 0.18)))
-        first_override = (state.get("chapter_bgm_overrides") or {}).get("1", {})
-        if str(state.get("background_audio_mode") or "off").lower() == "manual" and isinstance(first_override, dict):
-            rule = str(first_override.get("rule") or "default").lower()
-            if rule == "none":
-                music_path = None
-            elif rule == "custom":
-                music_path = Path(str(first_override.get("path") or "")).expanduser()
-                volume = max(0.0, min(0.50, float(first_override.get("volume", volume))))
+        volume = max(
+            0.0,
+            min(
+                0.50,
+                float(
+                    state.get("background_audio_volume")
+                    if state.get("background_audio_volume") is not None else 0.18
+                ),
+            ),
+        )
+        overrides_value = state.get("chapter_bgm_overrides")
+        overrides = overrides_value if isinstance(overrides_value, dict) else {}
+        raw_strategy = str(
+            state.get("chapter_bgm_strategy")
+            or ("custom" if overrides else "same")
+        ).strip().casefold()
+        if raw_strategy in {"same", "same-bgm", "same_bgm"}:
+            chapter_based = False
+        elif raw_strategy in {"custom", "chapter-based", "chapter_based", "chapter"}:
+            chapter_based = True
+        else:
+            raise ValueError(f"Unsupported chapter BGM strategy: {raw_strategy}")
+
+        # The short audition represents the first chapter. Same BGM uses only
+        # the book-level selection; Chapter-Based BGM uses only chapter 1's
+        # explicit assignment. Missing/default chapter rules are silent and
+        # never fall back to the retained book-default preference.
+        if sound_enabled and audio_mode == "manual":
+            if chapter_based:
+                first_override = overrides.get("1")
+                if not isinstance(first_override, dict):
+                    first_override = {}
+                rule = str(first_override.get("rule") or "none").strip().casefold()
+                if rule == "default":
+                    rule = "none"
+                if rule == "custom":
+                    raw_music = str(first_override.get("path") or "").strip()
+                    if not raw_music:
+                        raise ValueError(
+                            "Chapter 1 uses custom BGM but no track is saved. Reassign it in Sound Design."
+                        )
+                    music_path = Path(raw_music).expanduser()
+                    override_volume = first_override.get("volume")
+                    if override_volume is not None:
+                        volume = max(0.0, min(0.50, float(override_volume)))
+                elif rule != "none":
+                    raise ValueError(f"Unsupported chapter-based BGM rule for chapter 1: {rule}")
             else:
-                raw_music = str(state.get("background_audio_path") or "")
+                raw_music = str(state.get("background_audio_path") or "").strip()
                 music_path = Path(raw_music).expanduser() if raw_music else None
-                volume = max(0.0, min(0.50, float(first_override.get("volume", volume))))
-        elif str(state.get("background_audio_mode") or "off").lower() == "manual":
-            raw_music = str(state.get("background_audio_path") or "")
-            music_path = Path(raw_music).expanduser() if raw_music else None
 
         if music_path and not music_path.is_file():
             raise FileNotFoundError(f"Selected background music is missing: {music_path}")
@@ -2897,7 +2939,10 @@ class PremiumV2Bridge(QObject):
         duration_seconds = max(0.1, duration_ms / 1000.0)
         if music_path and volume > 0:
             fade_in = max(0.0, min(30.0, float(state.get("background_audio_fade_in", 2.0))))
-            fade_out = max(0.0, min(30.0, float(state.get("background_audio_fade_out", 3.0)), duration_seconds))
+            fade_out = max(
+                0.0,
+                min(30.0, float(state.get("background_audio_fade_out", 3.0)), duration_seconds),
+            )
             fade_out_start = max(0.0, duration_seconds - fade_out)
             music_filters = [f"volume={volume:.4f}"]
             if fade_in:
@@ -2921,7 +2966,7 @@ class PremiumV2Bridge(QObject):
             raise RuntimeError("The Sound Design mix preview could not be rendered.")
         if abs(_duration_ms(output) - duration_ms) > 1800:
             raise RuntimeError("The Sound Design mix preview changed duration unexpectedly.")
-        if audio_source != Path(source).resolve():
+        if audio_source != original_source:
             audio_source.unlink(missing_ok=True)
         return output
 
