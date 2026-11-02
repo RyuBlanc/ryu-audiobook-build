@@ -393,6 +393,115 @@ class MetadataBridgeTests(unittest.TestCase):
             self.assertEqual(old_cover.read_bytes(), b"original cover bytes")
             self.assertEqual(project.title, "Original Title")
 
+    def test_webp_cover_is_converted_to_png_for_m4b_embedding(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            folder = root / "book-project"
+            folder.mkdir()
+            project = Project("Book", folder, None, [])
+            project.save()
+            save_state(folder, {"author": "Author", "language": "en", "genre": "Fantasy"})
+            source_cover = root / "cover.webp"
+            source_cover.write_bytes(b"valid webp bytes")
+            bridge = MetadataBridgeHarness(project)
+            class ConvertedImage:
+                def isNull(self):
+                    return False
+                def save(self, path, image_format):
+                    Path(path).write_bytes(b"converted png bytes")
+                    return image_format == "PNG"
+            class Reader:
+                def __init__(self, path):
+                    self.path = path
+                def setAutoTransform(self, enabled):
+                    self.auto_transform = enabled
+                def read(self):
+                    return ConvertedImage()
+                def errorString(self):
+                    return ""
+
+            with patch.object(host, "QImageReader", Reader):
+                with patch.object(host, "persist_project_cover") as persist:
+                    result = bridge._project_metadata_save({
+                        "expected_project_folder": str(folder),
+                        "title": "Book",
+                        "author": "Author",
+                        "publisher": "",
+                        "series": "",
+                        "series_volume": "",
+                        "language": "en",
+                        "year": "2026",
+                        "genre": "Fantasy",
+                        "cover_path": str(source_cover),
+                    })
+
+            saved_cover = Path(load_state(folder)["cover_path"])
+            self.assertTrue(result["saved"])
+            self.assertEqual(saved_cover.suffix, ".png")
+            self.assertEqual(saved_cover.read_bytes(), b"converted png bytes")
+            persist.assert_not_called()
+
+    def test_failed_metadata_commit_restores_existing_cover_when_converting_webp(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            folder = root / "book-project"
+            folder.mkdir()
+            project = Project("Original Title", folder, None, [])
+            project.save()
+            state_file = folder / "state.json"
+            save_state(folder, {"author": "Author", "language": "en", "genre": "Fantasy"})
+            assets = folder / "assets"
+            assets.mkdir()
+            existing_cover = assets / "cover.png"
+            existing_cover.write_bytes(b"original embedded cover")
+            original_project = project.project_file.read_text(encoding="utf-8")
+            original_state = state_file.read_text(encoding="utf-8")
+            source_cover = root / "replacement.webp"
+            source_cover.write_bytes(b"replacement webp bytes")
+            bridge = MetadataBridgeHarness(project)
+            atomic_write = Project._atomic_write_text
+
+            class ConvertedImage:
+                def isNull(self):
+                    return False
+                def save(self, path, image_format):
+                    Path(path).write_bytes(b"replacement png bytes")
+                    return image_format == "PNG"
+            class Reader:
+                def __init__(self, path):
+                    self.path = path
+                def setAutoTransform(self, enabled):
+                    self.auto_transform = enabled
+                def read(self):
+                    return ConvertedImage()
+                def errorString(self):
+                    return ""
+
+            def fail_state_write(path, content):
+                if Path(path).name == "state.json":
+                    raise OSError("simulated state write failure")
+                return atomic_write(path, content)
+
+            with patch.object(host, "QImageReader", Reader):
+                with patch.object(Project, "_atomic_write_text", side_effect=fail_state_write):
+                    with self.assertRaisesRegex(OSError, "previous project details were restored"):
+                        bridge._project_metadata_save({
+                            "expected_project_folder": str(folder),
+                            "title": "New Title",
+                            "author": "New Author",
+                            "publisher": "",
+                            "series": "",
+                            "series_volume": "",
+                            "language": "ja",
+                            "year": "2026",
+                            "genre": "Fantasy",
+                            "cover_path": str(source_cover),
+                        })
+            self.assertEqual(project.project_file.read_text(encoding="utf-8"), original_project)
+            self.assertEqual(state_file.read_text(encoding="utf-8"), original_state)
+            self.assertEqual(existing_cover.read_bytes(), b"original embedded cover")
+            self.assertEqual(project.title, "Original Title")
+
     def test_full_generation_is_blocked_when_saved_metadata_is_incomplete(self):
         with tempfile.TemporaryDirectory() as temp:
             folder = Path(temp) / "book"

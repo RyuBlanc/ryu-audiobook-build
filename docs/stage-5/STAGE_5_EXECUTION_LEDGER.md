@@ -101,3 +101,8 @@ The project cover chooser continues to accept the cover formats supported by the
 ## 9. #2089 regression failure and correction
 
 Run [#2089](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41540647868) completed with one test error: `test_metadata_save_rolls_back_project_json_when_state_write_fails`. The injected failure rejected every write to `state.json`, including the rollback rewrite even though the atomic write had failed before replacing the original file. The transaction now tracks successful replacements and rolls back only the files whose atomic write completed. The original state file is left untouched when its attempted atomic write raises before commit. Added cover-format conversion and cover-rollback tests to guard M4B-compatible PNG normalization.
+
+
+## 10. Supported cover-format regression coverage
+
+Stage 5 metadata tests now exercise the Premium V2 save path for WebP covers: the source is decoded, normalized to a PNG accepted by the M4B assembler, saved into project-local assets and referenced by the persisted project state. A paired failure test confirms the previous embedded PNG cover remains intact when the subsequent state.json write fails.
