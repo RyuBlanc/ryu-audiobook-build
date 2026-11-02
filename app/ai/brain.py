@@ -113,6 +113,42 @@ CORE_SCHEMA = {
             "confidence": {"type": "number"},
             "evidence": {"type": "string"}
         }, "required": ["quote", "speaker", "confidence", "evidence"]}},
+        "chapter_summary": {"type": "string"},
+        "chapter_purpose": {"type": "string"},
+        "chapter_purpose_evidence": {"type": "string"},
+        "themes": {"type": "array", "maxItems": 4, "items": {
+            "type": "object", "additionalProperties": false, "properties": {
+                "name": {"type": "string"}, "interpretation": {"type": "string"},
+                "evidence_quote": {"type": "string"}, "confidence": {"type": "number"}
+            }
+        }},
+        "emotional_beats": {"type": "array", "maxItems": 5, "items": {
+            "type": "object", "additionalProperties": false, "properties": {
+                "emotion": {"type": "string"}, "intensity": {"type": "number"},
+                "note": {"type": "string"}, "evidence_quote": {"type": "string"},
+                "confidence": {"type": "number"}
+            }
+        }},
+        "key_events": {"type": "array", "maxItems": 6, "items": {
+            "type": "object", "additionalProperties": false, "properties": {
+                "event": {"type": "string"}, "event_type": {"type": "string"},
+                "evidence_quote": {"type": "string"}, "confidence": {"type": "number"}
+            }
+        }},
+        "character_observations": {"type": "array", "maxItems": 8, "items": {
+            "type": "object", "additionalProperties": false, "properties": {
+                "character": {"type": "string"}, "motivation": {"type": "string"},
+                "goal": {"type": "string"}, "change": {"type": "string"},
+                "evidence_quote": {"type": "string"}, "confidence": {"type": "number"}
+            }
+        }},
+        "relationships": {"type": "array", "maxItems": 4, "items": {
+            "type": "object", "additionalProperties": false, "properties": {
+                "character_a": {"type": "string"}, "character_b": {"type": "string"},
+                "dynamic": {"type": "string"}, "evidence_quote": {"type": "string"},
+                "confidence": {"type": "number"}
+            }
+        }},
         "pronunciation": {"type": "array", "maxItems": 12, "items": {"type": "object", "additionalProperties": False, "properties": {
             "written": {"type": "string"},
             "spoken": {"type": "string"},
@@ -292,8 +328,16 @@ class AudiobookBrain:
         book_context: dict[str, Any] | None = None,
         progress: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
-        text = (chapter.text or '').strip()
-        result = {'chapter': chapter.number, 'title': chapter.title, 'characters': [], 'dialogue': [], 'scenes': [], 'pronunciation': [], 'continuity_notes': []}
+        original_text = chapter.text or ''
+        leading_source_offset = len(original_text) - len(original_text.lstrip())
+        text = original_text.strip()
+        result = {
+            'chapter': chapter.number, 'title': chapter.title,
+            'characters': [], 'dialogue': [], 'scenes': [], 'pronunciation': [],
+            'continuity_notes': [], 'themes': [], 'emotional_beats': [],
+            'key_events': [], 'character_observations': [], 'relationships': [],
+            'chapter_summary': '', 'chapter_purpose': '',
+        }
         if not text:
             result['warnings'] = [
                 f'Chapter {chapter.number} has no body text; AI analysis was skipped.'
@@ -301,8 +345,12 @@ class AudiobookBrain:
             self._save_chapter(result)
             return result
         chunks = self._chunks(text)
+        window_chars = max(1, int(self.config.context_chars))
+        overlap_chars = min(max(0, int(self.config.overlap_chars)), window_chars - 1)
+        chunk_stride = window_chars - overlap_chars
         seen = set()
         for idx, chunk in enumerate(chunks, 1):
+            source_offset = leading_source_offset + (idx - 1) * chunk_stride
             context = book_context or {}
             if isinstance(context.get("characters"), list):
                 known_characters = [
@@ -341,9 +389,20 @@ class AudiobookBrain:
                 progress(f'Analyzing chapter {chapter.number} • excerpt {idx}/{len(chunks)} • character/dialogue pass')
             try:
                 core_raw = self.llm.complete(
-                    PROMPT + '\nFocus ONLY on characters, dialogue ownership and pronunciation. Return JSON only.',
-                    '/no_think ' + common_context + '\nDo not guess a speaker. Keep dialogue.quote exact. Only include pronunciation terms that truly occur in this excerpt. Keep the response compact.',
-                    max_tokens=1450,
+                    PROMPT + (
+                        '\nAnalyze characters, dialogue ownership, pronunciation and chapter story. '
+                        'Return chapter_summary, chapter_purpose, themes, emotional_beats, key_events, '
+                        'character_observations and relationships as well as the existing fields. '
+                        'Every story observation must have evidence_quote copied exactly from this excerpt. '
+                        'Do not invent events, motives or dialogue. Omit unsupported observations. JSON only.'
+                    ),
+                    '/no_think ' + common_context + (
+                        '\nDo not guess a speaker. Keep dialogue.quote exact. Only include pronunciation '
+                        'terms that truly occur in this excerpt. For each theme, emotional beat, key event, '
+                        'character observation and relationship, include a short exact evidence_quote from '
+                        'this excerpt. Omit any item without direct textual evidence.'
+                    ),
+                    max_tokens=2000,
                     temperature=0.05,
                     response_schema=CORE_SCHEMA,
                 )
@@ -361,7 +420,7 @@ class AudiobookBrain:
                         '/no_think Extract only the factual character, dialogue and pronunciation information from this excerpt. '
                         'Preserve exact dialogue quotes. Use at most 12 pronunciation entries and keep each reason very short. '
                         f'Chapter: {chapter.title}\nExcerpt:\n{chunk}',
-                        max_tokens=1050,
+                        max_tokens=1500,
                         temperature=0.0,
                         response_schema=CORE_SCHEMA,
                     )
@@ -371,7 +430,11 @@ class AudiobookBrain:
                     result.setdefault('warnings', []).append(
                         f'AI core pass fallback for chapter {chapter.number}, excerpt {idx}: {second_error}'
                     )
-            self._merge(result, core_data, seen, source_text=chunk)
+            self._merge(
+                result, core_data, seen,
+                source_text=chunk,
+                source_offset=source_offset,
+            )
 
             if progress:
                 progress(f'Analyzing chapter {chapter.number} • excerpt {idx}/{len(chunks)} • scene pass')
@@ -465,16 +528,86 @@ class AudiobookBrain:
 
         def build_report() -> dict[str, Any]:
             continuity: list[str] = []
+            themes_by_key: dict[str, dict[str, Any]] = {}
+            emotional_arc: list[dict[str, Any]] = []
+            character_arcs: dict[str, dict[str, Any]] = {}
+            relationship_rows: list[dict[str, Any]] = []
+            key_events: list[dict[str, Any]] = []
+            chapter_summaries: list[dict[str, Any]] = []
+
             for chapter_result in results:
+                number = int(chapter_result.get("chapter") or 0)
+                title = str(chapter_result.get("title") or "")
+                summary = str(chapter_result.get("chapter_summary") or "").strip()
+                purpose = str(chapter_result.get("chapter_purpose") or "").strip()
+                if summary or purpose:
+                    chapter_summaries.append({
+                        "chapter": number, "chapter_title": title,
+                        "summary": summary, "purpose": purpose,
+                    })
                 for note in chapter_result.get("continuity_notes", []) or []:
                     clean_note = str(note or "").strip()
                     if clean_note and clean_note not in continuity:
                         continuity.append(clean_note)
+
+                for item in chapter_result.get("themes", []) or []:
+                    if not isinstance(item, dict):
+                        continue
+                    name = str(item.get("name") or "").strip()
+                    if not name:
+                        continue
+                    key = unicodedata.normalize("NFC", name).casefold()
+                    entry = themes_by_key.setdefault(key, {"name": name, "observations": []})
+                    entry["observations"].append({
+                        "chapter": number, "chapter_title": title,
+                        "interpretation": str(item.get("interpretation") or ""),
+                        "confidence": _numeric_score(item.get("confidence", 0.0)),
+                        "evidence": item.get("evidence"),
+                    })
+
+                for item in chapter_result.get("emotional_beats", []) or []:
+                    if isinstance(item, dict):
+                        emotional_arc.append({
+                            **item, "chapter": number, "chapter_title": title,
+                        })
+
+                for item in chapter_result.get("character_observations", []) or []:
+                    if not isinstance(item, dict):
+                        continue
+                    name = str(item.get("character") or "").strip()
+                    if not name:
+                        continue
+                    key = unicodedata.normalize("NFC", name).casefold()
+                    arc = character_arcs.setdefault(key, {"character": name, "observations": []})
+                    arc["observations"].append({
+                        "chapter": number, "chapter_title": title,
+                        "motivation": str(item.get("motivation") or ""),
+                        "goal": str(item.get("goal") or ""),
+                        "change": str(item.get("change") or ""),
+                        "confidence": _numeric_score(item.get("confidence", 0.0)),
+                        "evidence": item.get("evidence"),
+                    })
+
+                for item in chapter_result.get("relationships", []) or []:
+                    if isinstance(item, dict):
+                        relationship_rows.append({**item, "chapter": number, "chapter_title": title})
+                for item in chapter_result.get("key_events", []) or []:
+                    if isinstance(item, dict):
+                        key_events.append({**item, "chapter": number, "chapter_title": title})
+
             return {
                 "version": 1,
-                "analysis_schema_version": 2,
+                "analysis_schema_version": 3,
                 "book_bible": bible,
                 "chapters": results,
+                "chapter_summaries": chapter_summaries,
+                "book_themes": list(themes_by_key.values()),
+                "emotional_arc": emotional_arc,
+                "character_arcs": {
+                    value["character"]: value for value in character_arcs.values()
+                },
+                "relationships": relationship_rows,
+                "key_events": key_events,
                 "pronunciation": aggregate_pronunciation(),
                 "continuity_notes": continuity,
                 "learning_scope": str(base_context.get("learning_scope") or ""),
@@ -504,7 +637,22 @@ class AudiobookBrain:
                     continue
                 name = str(char.get("name", "")).strip()
                 if name:
-                    bible.setdefault(name, char)
+                    entry = bible.setdefault(name, dict(char))
+                    if entry is not char:
+                        for field in ("aliases", "traits"):
+                            old_values = entry.get(field) if isinstance(entry.get(field), list) else []
+                            new_values = char.get(field) if isinstance(char.get(field), list) else []
+                            merged = list(dict.fromkeys(
+                                str(value).strip()
+                                for value in [*old_values, *new_values]
+                                if str(value or "").strip()
+                            ))
+                            if merged:
+                                entry[field] = merged[:12]
+                        if _numeric_score(char.get("confidence", 0.0)) > _numeric_score(entry.get("confidence", 0.0)):
+                            for field in ("role", "voice_direction", "confidence"):
+                                if field in char:
+                                    entry[field] = char[field]
 
             for candidate in item.get("pronunciation", []) or []:
                 if not isinstance(candidate, dict):

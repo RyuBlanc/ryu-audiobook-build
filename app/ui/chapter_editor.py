@@ -6,6 +6,7 @@ from PySide6.QtCore import QEvent, QItemSelectionModel, QTimer, QThread, Signal,
 from PySide6.QtGui import QColor, QIcon, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QGridLayout,
+    QDialog,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -189,6 +190,7 @@ class ChapterEditorPage(QWidget):
             ("Split", self.split),
             ("Mark Selection as Chapter", self.mark_selection_as_chapter),
             ("Analyze Book with AI", self.analyze_with_ai),
+            ("View AI Analysis Report", self.view_ai_analysis_report),
             ("Clean Book Text", self.clean_book_text),
             ("View Characters & Dialogue", self.view_characters),
             ("Merge Next", self.merge),
@@ -832,9 +834,14 @@ class ChapterEditorPage(QWidget):
         self.ai_status_label.setText("Audiobook AI: analysis complete")
         import time
         elapsed = int(max(0.0, time.monotonic() - (self.ai_started_at or time.monotonic())))
+        theme_count = len(result.get("book_themes") or [])
+        emotional_count = len(result.get("emotional_arc") or [])
+        character_arc_count = len(result.get("character_arcs") or {})
         self.ai_eta_label.setText(
             f"Elapsed: {elapsed // 60}:{elapsed % 60:02d} • "
-            f"High-confidence dialogue assignments: {assignments_added}"
+            f"{theme_count} theme(s) • {emotional_count} emotional beat(s) • "
+            f"{character_arc_count} character arc(s) • "
+            f"{assignments_added} high-confidence dialogue assignment(s)"
         )
         self._set_editor_busy(False)
         self.refresh(self.list.currentRow())
@@ -842,6 +849,129 @@ class ChapterEditorPage(QWidget):
         self.save_status.setText(
             f"✓ Audiobook AI analysis saved • {assignments_added} high-confidence dialogue assignments"
         )
+
+    def view_ai_analysis_report(self) -> None:
+        """Display the saved offline book report in the installed application."""
+        import json
+
+        if not self.project_folder:
+            QMessageBox.information(
+                self, "Audiobook AI Report",
+                "Open this book through the Library before viewing its saved analysis.",
+            )
+            return
+        report_path = Path(self.project_folder) / "analysis" / "audiobook_brain.json"
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            QMessageBox.information(
+                self, "Audiobook AI Report",
+                "No saved report is available yet. Run Analyze Book with AI first.",
+            )
+            return
+
+        sections = ["RYU AUDIOBOOK — OFFLINE AI ANALYSIS"]
+        sections.append(
+            f"Schema {report.get('analysis_schema_version', 1)} • "
+            f"Learning scope: {report.get('learning_scope') or 'Book local'}"
+        )
+        summaries = report.get("chapter_summaries") or []
+        if summaries:
+            sections.append("\nCHAPTER SUMMARIES & PURPOSE")
+            for row in summaries:
+                if isinstance(row, dict):
+                    sections.append(
+                        f"Chapter {row.get('chapter', '?')} — {row.get('chapter_title', '')}\n"
+                        f"Summary: {row.get('summary') or 'Not available'}\n"
+                        f"Purpose: {row.get('purpose') or 'Not available'}"
+                    )
+
+        themes = report.get("book_themes") or []
+        if themes:
+            sections.append("\nRECURRING THEMES")
+            for theme in themes:
+                if not isinstance(theme, dict):
+                    continue
+                sections.append(
+                    f"{theme.get('name', 'Theme')} — "
+                    f"{len(theme.get('observations') or [])} chapter observation(s)"
+                )
+                for observation in (theme.get("observations") or [])[:8]:
+                    if not isinstance(observation, dict):
+                        continue
+                    evidence = observation.get("evidence") or {}
+                    quote = evidence.get("quote")
+                    sections.append(
+                        f"  • Chapter {observation.get('chapter', '?')}: "
+                        f"{observation.get('interpretation') or ''}"
+                        + (f" — evidence: “{quote}”" if quote else "")
+                    )
+
+        emotional = report.get("emotional_arc") or []
+        if emotional:
+            sections.append("\nEMOTIONAL JOURNEY")
+            for beat in emotional:
+                if not isinstance(beat, dict):
+                    continue
+                evidence = beat.get("evidence") or {}
+                sections.append(
+                    f"Chapter {beat.get('chapter', '?')} — {beat.get('emotion', 'Emotion')} "
+                    f"(intensity {_numeric_score(beat.get('intensity', 0.0)):.2f}) "
+                    f"{beat.get('note') or ''}"
+                    + (f" — “{evidence.get('quote')}”" if evidence.get("quote") else "")
+                )
+
+        arcs = report.get("character_arcs") or {}
+        if arcs:
+            sections.append("\nCHARACTER DEVELOPMENT")
+            for name, arc in arcs.items():
+                if not isinstance(arc, dict):
+                    continue
+                sections.append(str(name))
+                for observation in arc.get("observations") or []:
+                    if not isinstance(observation, dict):
+                        continue
+                    evidence = observation.get("evidence") or {}
+                    sections.append(
+                        f"  • Chapter {observation.get('chapter', '?')}: "
+                        f"Motivation: {observation.get('motivation') or '—'}; "
+                        f"Goal: {observation.get('goal') or '—'}; "
+                        f"Change: {observation.get('change') or '—'}"
+                        + (f" — “{evidence.get('quote')}”" if evidence.get("quote") else "")
+                    )
+
+        relationships = report.get("relationships") or []
+        if relationships:
+            sections.append("\nRELATIONSHIP DYNAMICS")
+            for row in relationships:
+                if isinstance(row, dict):
+                    sections.append(
+                        f"{row.get('character_a', '?')} ↔ {row.get('character_b', '?')}: "
+                        f"{row.get('dynamic') or ''}"
+                    )
+
+        pronunciation = report.get("pronunciation") or []
+        if pronunciation:
+            sections.append("\nPRONUNCIATION REVIEW")
+            for item in pronunciation:
+                if isinstance(item, dict):
+                    sections.append(
+                        f"{item.get('written', '')} → {item.get('spoken', '')} "
+                        f"(confidence {_numeric_score(item.get('confidence', 0.0)):.2f})"
+                    )
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Audiobook AI — Analysis Report")
+        dialog.resize(900, 720)
+        layout = QVBoxLayout(dialog)
+        report_view = QTextEdit(dialog)
+        report_view.setReadOnly(True)
+        report_view.setPlainText("\n\n".join(sections))
+        layout.addWidget(report_view)
+        close_button = QPushButton("Close", dialog)
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button)
+        dialog.exec()
 
     def _ai_worker_finished(self) -> None:
         self.ai_worker = None

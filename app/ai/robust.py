@@ -15,7 +15,7 @@ def _safe_list(value: Any, limit: int = 12) -> list:
     return value[:limit] if isinstance(value, list) else []
 
 
-def _safe_merge(self, out: dict, data: Any, seen: set[str], source_text: str = "") -> None:
+def _safe_merge(self, out: dict, data: Any, seen: set[str], source_text: str = "", source_offset: int = 0) -> None:
     if not isinstance(data, dict):
         return
 
@@ -41,6 +41,144 @@ def _safe_merge(self, out: dict, data: Any, seen: set[str], source_text: str = "
             out["characters"].append(item)
         elif item["confidence"] > _numeric_score(existing.get("confidence", 0.0)):
             existing.update(item)
+
+    def evidence_for(raw: dict) -> dict[str, Any] | None:
+        quote = str(raw.get("evidence_quote") or "").strip()
+        if not quote:
+            return None
+        positions: list[int] = []
+        cursor = 0
+        while len(positions) < 20:
+            found = source_text.find(quote, cursor)
+            if found < 0:
+                break
+            positions.append(found)
+            cursor = found + 1
+        if not positions:
+            return None
+        absolute_start = int(source_offset) + positions[0]
+        return {
+            "quote": quote,
+            "start": absolute_start,
+            "end": absolute_start + len(quote),
+            "match_count_in_excerpt": len(positions),
+        }
+
+    summary = str(data.get("chapter_summary") or "").strip()
+    if summary:
+        segments = out.setdefault("chapter_summary_segments", [])
+        if summary not in segments and len(segments) < 12:
+            segments.append(summary[:700])
+
+    purpose = str(data.get("chapter_purpose") or "").strip()
+    purpose_evidence = evidence_for({"evidence_quote": data.get("chapter_purpose_evidence")})
+    if purpose and purpose_evidence:
+        out.setdefault("chapter_purpose_observations", []).append({
+            "purpose": purpose[:500],
+            "confidence": _numeric_score(data.get("chapter_purpose_confidence", 0.7)),
+            "evidence": purpose_evidence,
+        })
+
+    def merge_evidence_rows(field: str, limit: int, minimum: float) -> None:
+        target = out.setdefault(field, [])
+        for raw_item in _safe_list(data.get(field), limit):
+            if not isinstance(raw_item, dict):
+                continue
+            evidence = evidence_for(raw_item)
+            if evidence is None:
+                continue
+            confidence = _numeric_score(raw_item.get("confidence", 0.0))
+            if confidence < minimum:
+                continue
+            item: dict[str, Any] = {
+                "confidence": confidence,
+                "evidence": evidence,
+            }
+            if field == "themes":
+                name = str(raw_item.get("name") or "").strip()[:120]
+                if not name:
+                    continue
+                item.update({
+                    "name": name,
+                    "interpretation": str(raw_item.get("interpretation") or "").strip()[:500],
+                })
+                identity = (name.casefold(), evidence["start"])
+                match = lambda row: (str(row.get("name") or "").casefold(), row.get("evidence", {}).get("start"))
+            elif field == "emotional_beats":
+                emotion = str(raw_item.get("emotion") or "").strip()[:80]
+                if not emotion:
+                    continue
+                item.update({
+                    "emotion": emotion,
+                    "intensity": _numeric_score(raw_item.get("intensity", 0.5)),
+                    "note": str(raw_item.get("note") or "").strip()[:300],
+                })
+                identity = (emotion.casefold(), evidence["start"])
+                match = lambda row: (str(row.get("emotion") or "").casefold(), row.get("evidence", {}).get("start"))
+            elif field == "key_events":
+                event = str(raw_item.get("event") or "").strip()[:320]
+                if not event:
+                    continue
+                item.update({
+                    "event": event,
+                    "event_type": str(raw_item.get("event_type") or "event").strip()[:80],
+                })
+                identity = (event.casefold(), evidence["start"])
+                match = lambda row: (str(row.get("event") or "").casefold(), row.get("evidence", {}).get("start"))
+            elif field == "character_observations":
+                character = str(raw_item.get("character") or "").strip()[:120]
+                if not character:
+                    continue
+                known = {
+                    str(row.get("name") or "").casefold()
+                    for row in out.get("characters", []) if isinstance(row, dict)
+                }
+                if character.casefold() not in source_text.casefold() and character.casefold() not in known:
+                    continue
+                item.update({
+                    "character": character,
+                    "motivation": str(raw_item.get("motivation") or "").strip()[:300],
+                    "goal": str(raw_item.get("goal") or "").strip()[:300],
+                    "change": str(raw_item.get("change") or "").strip()[:300],
+                })
+                identity = (character.casefold(), evidence["start"])
+                match = lambda row: (str(row.get("character") or "").casefold(), row.get("evidence", {}).get("start"))
+            else:
+                name_a = str(raw_item.get("character_a") or "").strip()[:120]
+                name_b = str(raw_item.get("character_b") or "").strip()[:120]
+                if not name_a or not name_b or name_a.casefold() == name_b.casefold():
+                    continue
+                known = {
+                    str(row.get("name") or "").casefold()
+                    for row in out.get("characters", []) if isinstance(row, dict)
+                }
+                visible = source_text.casefold()
+                if not all(name.casefold() in visible or name.casefold() in known for name in (name_a, name_b)):
+                    continue
+                item.update({
+                    "character_a": name_a,
+                    "character_b": name_b,
+                    "dynamic": str(raw_item.get("dynamic") or "").strip()[:360],
+                })
+                identity = (
+                    min(name_a.casefold(), name_b.casefold()),
+                    max(name_a.casefold(), name_b.casefold()),
+                    evidence["start"],
+                )
+                match = lambda row: (
+                    min(str(row.get("character_a") or "").casefold(), str(row.get("character_b") or "").casefold()),
+                    max(str(row.get("character_a") or "").casefold(), str(row.get("character_b") or "").casefold()),
+                    row.get("evidence", {}).get("start"),
+                )
+            if not any(match(existing) == identity for existing in target if isinstance(existing, dict)):
+                if len(target) < 100:
+                    target.append(item)
+
+    merge_evidence_rows("themes", 4, 0.60)
+    merge_evidence_rows("emotional_beats", 5, 0.55)
+    merge_evidence_rows("key_events", 6, 0.60)
+    merge_evidence_rows("character_observations", 8, 0.60)
+    merge_evidence_rows("relationships", 4, 0.60)
 
     for raw in _safe_list(data.get("dialogue"), 24):
         if not isinstance(raw, dict):
@@ -250,6 +388,16 @@ def _safe_analyze_chapter(self, chapter, book_context=None, progress=None):
             "warnings": [f"AI analysis recovered with deterministic fallback: {exc}"],
         })
     _fallback_pronunciations(text, result)
+    segments = result.pop("chapter_summary_segments", [])
+    if segments and not result.get("chapter_summary"):
+        result["chapter_summary"] = " ".join(dict.fromkeys(
+            str(value).strip() for value in segments if str(value).strip()
+        ))[:2400]
+    purpose_rows = result.pop("chapter_purpose_observations", [])
+    if purpose_rows:
+        best = max(purpose_rows, key=lambda row: float(row.get("confidence") or 0.0))
+        result["chapter_purpose"] = str(best.get("purpose") or "")
+        result["chapter_purpose_evidence"] = best.get("evidence")
     self._save_chapter(result)
     return result
 
