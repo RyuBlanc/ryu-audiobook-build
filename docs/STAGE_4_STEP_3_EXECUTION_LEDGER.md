@@ -70,3 +70,17 @@ The Step 2 real imported-book AI report checks; pronunciation save/edit/reload; 
 - **Manual gate:** target-PC listening and installed Windows app interaction remain open. Step 3 must not be described as fully signed off until those checks are recorded.
 - **Packaging gate:** the artifact-checkpoint Windows build and its Defender/artifact outcomes must be recorded from the current candidate before handoff.
 
+## Run #2062 Windows package checkpoint — 2 November 2026
+
+- Exact commit: `48ddf8c10be041e2539c05109d63e03d72c42591` on `stage-4/step-3-preview-assembly`.
+- Workflow: [Run #2062 — all jobs succeeded](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41428339093).
+- Full test job: **1,045 tests passed**; frontend JavaScript validation and isolated native Qt lifecycle regression passed.
+- Build job: frozen application, bundled voice assets/critical modules, packaged Sound Design Music Library acceptance, Inno Setup/core installer, functional HTML installer, logo checks and SHA-256 generation all passed.
+- Microsoft Defender's exact logs report no threats for the portable app executable, full setup executable, and core setup executable. All three scans were completed; the fail-closed guard rejects skipped scans.
+- Artifacts, all valid and expiring 2026-12-02 UTC:
+  - Installer `Ryu-Audiobook-Installer-2062`, ID `13134421971`, 883,668,723 bytes.
+  - Release hash manifest `Ryu-Audiobook-Release-SHA256-2062`, ID `13133869127`, 777 bytes.
+  - Portable app `Ryu-Audiobook-Portable-2062`, ID `13133589773`, 1,367,672,127 bytes.
+- The conditional GitHub Release publish step was skipped; artifacts were uploaded to the workflow run. No published GitHub Release is claimed.
+- This is an automated Windows runner/package result. It does not replace target-PC installation, listening or interactive acceptance.
+
