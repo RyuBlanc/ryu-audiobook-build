@@ -106,3 +106,8 @@ Run [#2089](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/4154064
 ## 10. Supported cover-format regression coverage
 
 Stage 5 metadata tests now exercise the Premium V2 save path for WebP covers: the source is decoded, normalized to a PNG accepted by the M4B assembler, saved into project-local assets and referenced by the persisted project state. A paired failure test confirms the previous embedded PNG cover remains intact when the subsequent state.json write fails.
+
+
+## 11. Packaged Production metadata acceptance added
+
+The Windows frozen-app acceptance script is extended to exercise the Stage 5 metadata dialog inside the actual packaged executable. It verifies all ten field controls, the read-only selected narrator, history dropdown values from a second real saved project, unsaved/incomplete gating, preview remaining enabled, a deterministic first-save failure that leaves project files unchanged, a successful retry, project-local PNG cover persistence, and the exact remaining Narrator field. The same acceptance harness then starts a **new frozen-app process** and verifies that title, author, publisher, series/volume, language, year, genre and cover are restored from the active project. A valid one-pixel PNG is generated as a fixture and decoded by the real Qt image reader.

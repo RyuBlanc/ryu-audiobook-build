@@ -13,6 +13,7 @@ import sys
 import tempfile
 import uuid
 import wave
+import zlib
 import winreg
 
 
@@ -207,6 +208,47 @@ def validate_imported_audio_metadata(
             raise AssertionError(f"Imported cue metadata mismatch for {path.name}: {metadata!r}")
 
 
+def write_png_fixture(path: Path) -> None:
+    """Write a tiny valid RGBA PNG which QImageReader can decode in the frozen app."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        checksum = zlib.crc32(kind + payload) & 0xFFFFFFFF
+        return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", checksum)
+
+    header = struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0)
+    scanline = b"\\x00\\xff\\x00\\x00\\xff"
+    content = (
+        b"\\x89PNG\\r\\n\\x1a\\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(scanline))
+        + chunk(b"IEND", b"")
+    )
+    path.write_bytes(content)
+
+
+def validate_saved_metadata(project_folder: Path, expected: dict) -> dict:
+    """Verify real project metadata and project-local cover after the first app process."""
+    project_folder = Path(project_folder).resolve()
+    project_data = json.loads((project_folder / "project.json").read_text(encoding="utf-8"))
+    state = json.loads((project_folder / "state.json").read_text(encoding="utf-8"))
+    if project_data.get("title") != expected["title"]:
+        raise AssertionError(f"Saved metadata title mismatch: {project_data.get('title')!r}.")
+    for key in ("author", "publisher", "series", "series_volume", "language", "year", "genre"):
+        if str(state.get(key) or "") != str(expected[key]):
+            raise AssertionError(f"Saved metadata {key} mismatch: {state.get(key)!r}.")
+    cover_value = str(state.get("cover_path") or "").strip()
+    if not cover_value:
+        raise AssertionError("Metadata cover was not saved to project state.")
+    cover_path = Path(cover_value).resolve()
+    if not cover_path.is_file() or cover_path.parent != (project_folder / "assets").resolve():
+        raise AssertionError(f"Cover was not preserved in this project's assets: {cover_path}.")
+    if cover_path.suffix.casefold() != ".png":
+        raise AssertionError(f"Packaged cover hand-off did not normalize to PNG: {cover_path.name}.")
+    return {"title": project_data["title"], **{key: state.get(key) for key in expected}, "cover_path": str(cover_path)}
+
+
 def _run(args: argparse.Namespace) -> int:
     repo_root = Path(__file__).resolve().parents[1]
 
@@ -228,6 +270,27 @@ def _run(args: argparse.Namespace) -> int:
     cue_alpha_source = temp_root / f"{cue_alpha_title}.wav"
     cue_beta_source = temp_root / f"{cue_beta_title}.wav"
     long_cue_source = temp_root / f"RYU_ACCEPTANCE_{token}_CUE_TOO_LONG.wav"
+    metadata_cover_source = temp_root / f"RYU_ACCEPTANCE_{token}_BOOK_COVER.png"
+    metadata_expected = {
+        "title": f"Stage 5 Metadata Acceptance {token}",
+        "author": f"Stage 5 Author {token}",
+        "publisher": f"Stage 5 Publisher {token}",
+        "series": f"Stage 5 Series {token}",
+        "series_volume": "9",
+        "language": "en-GB",
+        "year": "2026",
+        "genre": "Fantasy",
+    }
+    metadata_history = {
+        "author": f"Historical Author {token}",
+        "publisher": f"Historical Press {token}",
+        "series": f"Historical Series {token}",
+        "series_volume": "7",
+        "language": "fr",
+        "year": "2024",
+        "genre": "Mystery",
+    }
+    write_png_fixture(metadata_cover_source)
     write_tone_fixture(alpha_source, 440.0)
     write_tone_fixture(beta_source, 660.0)
     write_tone_fixture(cue_alpha_source, 880.0, duration_seconds=4.0)
@@ -334,6 +397,13 @@ def _run(args: argparse.Namespace) -> int:
         "background_audio_mode": "off", "background_audio_enabled": False,
         "background_audio_volume": 0.18, "chapter_bgm_strategy": "same",
         "chapter_bgm_overrides": {}, "sound_cues": {"opening": None, "chapter": None, "closing": None},
+        "author": metadata_history["author"],
+        "publisher": metadata_history["publisher"],
+        "series": metadata_history["series"],
+        "series_volume": metadata_history["series_volume"],
+        "language": metadata_history["language"],
+        "year": metadata_history["year"],
+        "genre": metadata_history["genre"],
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
     previous_active = get_active_project_setting()
@@ -372,6 +442,10 @@ def _run(args: argparse.Namespace) -> int:
         "expected_category": "fantasy", "expected_volume": 0.42,
         "project_folder": str(project_folder.resolve()),
         "secondary_project_folder": str(secondary_project_folder.resolve()),
+        "original_project_title": project_title,
+        "metadata": metadata_expected,
+        "metadata_history": metadata_history,
+        "metadata_cover_path": str(metadata_cover_source.resolve()),
     }, ensure_ascii=True, indent=2), encoding="utf-8")
 
     environment = os.environ.copy()
@@ -437,6 +511,8 @@ def _run(args: argparse.Namespace) -> int:
             expected_cue_paths=cue_paths,
         )
         validate_imported_audio_metadata(music_imported_paths + category_imported_paths, cue_paths, music_category_map)
+        saved_metadata = validate_saved_metadata(project_folder, metadata_expected)
+        print("PACKAGED METADATA PROJECT FILES VERIFIED: " + json.dumps(saved_metadata, ensure_ascii=False))
 
         # Relaunch the same frozen executable with a read-only restart phase.
         # This is the persistence acceptance, not an in-process refresh.

@@ -119,6 +119,10 @@
           config.fail_next_manifest_save = false;
           return Promise.resolve({success:false,error:{message:"Deterministic packaged-acceptance manifest-save failure."}});
         }
+        if (command === "project.metadata.save" && config.fail_next_metadata_save === true) {
+          config.fail_next_metadata_save = false;
+          return Promise.resolve({success:false,error:{message:"Deterministic packaged-acceptance metadata-save failure."}});
+        }
         const result = originalInvoke(command, request);
         if (command === "sound.preview_book") {
           return Promise.resolve(result).then(response => {
@@ -138,6 +142,25 @@
     record("native_bridge", true, "Real Qt WebChannel bridge connected; the UI import action delegates to the native backend.");
 
     if (config.phase === "restart") {
+      const persistedProject = await invoke("project.get_active", {});
+      const expectedMetadata = config.metadata || {};
+      must(persistedProject && String(persistedProject.folder || "") === String(config.project_folder || ""),
+        "The active project identity was not restored after application restart.");
+      must(String(persistedProject.title || "") === String(expectedMetadata.title || "") &&
+        String(persistedProject.author || "") === String(expectedMetadata.author || "") &&
+        String(persistedProject.publisher || "") === String(expectedMetadata.publisher || "") &&
+        String(persistedProject.series || "") === String(expectedMetadata.series || "") &&
+        String(persistedProject.series_volume || "") === String(expectedMetadata.series_volume || "") &&
+        String(persistedProject.language || "") === String(expectedMetadata.language || "") &&
+        String(persistedProject.year || "") === String(expectedMetadata.year || "") &&
+        String(persistedProject.genre || "") === String(expectedMetadata.genre || ""),
+        "Production metadata was not restored from the saved project after application restart.");
+      must(String(persistedProject.cover_path || "").toLowerCase().endsWith("assets/cover.png") ||
+        String(persistedProject.cover_path || "").toLowerCase().endsWith("assets\\\\cover.png"),
+        "The project-local PNG cover was not resolved after application restart.");
+      record("production_metadata_application_restart", true,
+        "Book title, author, publisher, series/volume, language, year, genre and project-local cover were reloaded by a new frozen-app process.");
+
       const catalogue = await invoke("sound.catalog", {});
       const saved = await invoke("sound.chapter_bgm.get", {});
       const cues = await invoke("sound.cues.get", {});
@@ -1190,6 +1213,101 @@
       "Production Studio unique assigned-track summary is incorrect after handoff.");
     record("production_handoff_save_error_gate_and_retry", true,
       "A failed save blocked navigation; retry opened Production with live metadata, output destination, readiness fields and exact unique chapter-track count.");
+
+    const metadataButton = document.querySelector("#openProjectDetails");
+    must(metadataButton, "Production Studio Input Project Details button is missing.");
+    metadataButton.click();
+    await waitFor("Input Project Details dialog", function () {
+      return Boolean(document.querySelector("#inputProjectDetailsDialog")?.open);
+    }, 12000);
+
+    const metadataFields = [
+      "metadataTitle", "metadataAuthor", "metadataNarrator", "metadataPublisher",
+      "metadataSeries", "metadataSeriesVolume", "metadataLanguage", "metadataYear",
+      "metadataGenre", "metadataCoverPath"
+    ];
+    for (const id of metadataFields) {
+      must(document.getElementById(id), "Input Project Details field is missing: " + id);
+    }
+    must(document.querySelector("#metadataNarrator")?.readOnly === true,
+      "Narrator must be retrieved from the selected Voice Studio profile, not typed as a static label.");
+    const history = config.metadata_history || {};
+    const historyFields = [
+      ["metadataHistoryAuthor", history.author],
+      ["metadataHistoryPublisher", history.publisher],
+      ["metadataHistorySeries", history.series],
+      ["metadataHistorySeries_volume", history.series_volume],
+      ["metadataHistoryLanguage", history.language],
+      ["metadataHistoryYear", history.year],
+      ["metadataHistoryGenre", history.genre]
+    ];
+    for (const [id, expected] of historyFields) {
+      const values = [...(document.getElementById(id)?.querySelectorAll("option") || [])].map(option => option.value);
+      must(values.includes(String(expected || "")), "A real saved historical value was not loaded into " + id + ".");
+    }
+
+    const expectedMetadata = config.metadata || {};
+    const metadataInputValues = {
+      metadataTitle:expectedMetadata.title,
+      metadataAuthor:expectedMetadata.author,
+      metadataPublisher:expectedMetadata.publisher,
+      metadataSeries:expectedMetadata.series,
+      metadataSeriesVolume:expectedMetadata.series_volume,
+      metadataLanguage:expectedMetadata.language,
+      metadataYear:expectedMetadata.year,
+      metadataGenre:expectedMetadata.genre,
+      metadataCoverPath:config.metadata_cover_path
+    };
+    for (const [id, value] of Object.entries(metadataInputValues)) {
+      const element = document.getElementById(id);
+      element.value = String(value || "");
+      element.dispatchEvent(new Event("input", {bubbles:true}));
+    }
+    must(document.querySelector("#productionMetadataStatus")?.textContent.includes("Unsaved changes"),
+      "Unsaved project metadata did not mark the Production completion gate as pending.");
+    must(document.querySelector("#startGenerate")?.disabled === true,
+      "Full generation remained enabled while metadata edits were unsaved/incomplete.");
+    must(document.querySelector("#previewGenerate")?.disabled !== true,
+      "Preview generation was incorrectly blocked by incomplete metadata.");
+
+    config.fail_next_metadata_save = true;
+    document.querySelector("#projectMetadataSave").click();
+    await waitFor("metadata save failure status", function () {
+      return document.querySelector("#projectMetadataStatus")?.textContent.includes("Save failed");
+    }, 12000);
+    const afterFailedSave = await invoke("project.get_active", {});
+    must(String(afterFailedSave.title || "") === String(config.original_project_title || "") &&
+      !String(afterFailedSave.author || "").trim(),
+      "A failed metadata save changed the active project's saved metadata.");
+    must(document.querySelector("#inputProjectDetailsDialog")?.open === true &&
+      document.querySelector("#productionMetadataStatus")?.textContent.includes("Unsaved changes"),
+      "A failed metadata save closed the editor or lost the unsaved state.");
+
+    document.querySelector("#projectMetadataSave").click();
+    await waitFor("metadata save success and dialog close", function () {
+      return document.querySelector("#inputProjectDetailsDialog")?.open === false &&
+        document.querySelector("#productionBookTitle")?.textContent.trim() === String(expectedMetadata.title || "");
+    }, 15000);
+    const savedMetadata = await invoke("project.get_active", {});
+    must(String(savedMetadata.title || "") === String(expectedMetadata.title || "") &&
+      String(savedMetadata.author || "") === String(expectedMetadata.author || "") &&
+      String(savedMetadata.publisher || "") === String(expectedMetadata.publisher || "") &&
+      String(savedMetadata.series || "") === String(expectedMetadata.series || "") &&
+      String(savedMetadata.series_volume || "") === String(expectedMetadata.series_volume || "") &&
+      String(savedMetadata.language || "") === String(expectedMetadata.language || "") &&
+      String(savedMetadata.year || "") === String(expectedMetadata.year || "") &&
+      String(savedMetadata.genre || "") === String(expectedMetadata.genre || "") &&
+      String(savedMetadata.cover_path || "").toLowerCase().endsWith("assets/cover.png"),
+      "The metadata save response did not reflect the saved project fields and valid cover.");
+    must(savedMetadata.metadata_complete === false &&
+      (savedMetadata.metadata_missing_fields || []).includes("Narrator"),
+      "The saved metadata gate did not identify the missing real narrator profile.");
+    must(document.querySelector("#startGenerate")?.disabled === true &&
+      document.querySelector("#previewGenerate")?.disabled !== true &&
+      document.querySelector("#productionMetadataStatus")?.textContent.includes("Narrator"),
+      "After saving partial metadata, full generation was not blocked with the exact missing field while Preview remained available.");
+    record("production_metadata_dialog_history_save_error_and_gate", true,
+      "The packaged dialog loaded all fields and saved history, surfaced a forced save error, succeeded on retry, persisted a validated project cover and maintained the saved-data full-generation gate.");
 
     const productionVoiceOnly = document.querySelector('#generate [data-bgm-enabled="false"]');
     must(productionVoiceOnly, "Production Studio Voice Only mode toggle is missing.");
