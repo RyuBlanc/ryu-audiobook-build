@@ -102,28 +102,28 @@ class Project:
                 chapters_file,
                 json.dumps([asdict(chapter) for chapter in chapters], ensure_ascii=False, indent=2),
             )
-            # Attach IDs to legacy narration only when both number and title match exactly.
-            working_audio = folder / "working_audio"
-            by_number_title = {
-                (chapter.number, chapter.title.strip().casefold()): chapter.chapter_id
-                for chapter in chapters
-            }
-            if working_audio.is_dir():
-                for chapter_dir in working_audio.iterdir():
-                    manifest = chapter_dir / "narration.json"
-                    if not chapter_dir.is_dir() or not manifest.is_file():
-                        continue
-                    try:
-                        narration = json.loads(manifest.read_text(encoding="utf-8"))
-                        key = (int(narration.get("chapter") or 0), str(narration.get("title") or "").strip().casefold())
-                        chapter_id = by_number_title.get(key)
-                        if chapter_id and not str(narration.get("chapter_id") or "").strip():
-                            narration["chapter_id"] = chapter_id
-                            cls._atomic_write_text(
-                                manifest, json.dumps(narration, ensure_ascii=False, indent=2)
-                            )
-                    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-                        continue
+        # Attach IDs to legacy narration only when both number and title match exactly.
+        working_audio = folder / "working_audio"
+        by_number_title = {
+            (chapter.number, chapter.title.strip().casefold()): chapter.chapter_id
+            for chapter in chapters
+        }
+        if working_audio.is_dir():
+            for chapter_dir in working_audio.iterdir():
+                manifest = chapter_dir / "narration.json"
+                if not chapter_dir.is_dir() or not manifest.is_file():
+                    continue
+                try:
+                    narration = json.loads(manifest.read_text(encoding="utf-8"))
+                    key = (int(narration.get("chapter") or 0), str(narration.get("title") or "").strip().casefold())
+                    chapter_id = by_number_title.get(key)
+                    if chapter_id and not str(narration.get("chapter_id") or "").strip():
+                        narration["chapter_id"] = chapter_id
+                        cls._atomic_write_text(
+                            manifest, json.dumps(narration, ensure_ascii=False, indent=2)
+                        )
+                except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                    continue
         # Bind legacy number-keyed BGM assignments to stable chapter IDs
         # while loading the project, before chapter numbers can change.
         state_file = folder / "state.json"

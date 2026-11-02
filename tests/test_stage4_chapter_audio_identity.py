@@ -55,6 +55,31 @@ class StableChapterAudioIdentityTests(unittest.TestCase):
             self.assertEqual([chapter.chapter_id for chapter in second_load.chapters], first_ids)
             self.assertEqual([chapter.number for chapter in second_load.chapters], [1, 2])
 
+    def test_project_load_retries_legacy_manifest_identity_migration_when_chapters_already_have_ids(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            project = Project(
+                "Manifest Migration Retry",
+                folder,
+                chapters=[
+                    Chapter(1, "Opening", "Opening narration.", chapter_id="persisted-opening-id"),
+                ],
+            )
+            project.save()
+            chapter_dir = folder / "working_audio" / "001_Opening"
+            chapter_dir.mkdir(parents=True)
+            manifest = chapter_dir / "narration.json"
+            manifest.write_text(
+                json.dumps({"chapter": 1, "title": "Opening", "narration_text": "Opening narration."}),
+                encoding="utf-8",
+            )
+
+            loaded = Project.load(folder)
+            migrated = json.loads(manifest.read_text(encoding="utf-8"))
+
+            self.assertEqual(loaded.chapters[0].chapter_id, "persisted-opening-id")
+            self.assertEqual(migrated["chapter_id"], "persisted-opening-id")
+
     def test_chapter_editor_reorder_and_split_preserve_and_create_ids(self):
         chapters = [
             Chapter(1, "Opening", "First paragraph.\n\nSecond paragraph."),

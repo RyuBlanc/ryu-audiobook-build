@@ -308,6 +308,13 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("document.querySelectorAll('#sound .sound-view[data-sound-view]')", handler)
         self.assertLess(self.adapter.index("legacySoundTabs.replaceWith(cleanSoundTabs);"), handler_start)
 
+    def test_chapter_bgm_frontend_saves_and_resolves_stable_chapter_identity(self):
+        self.assertIn("const chapterRow = (chapterBgmState.chapters || []).find", self.adapter)
+        self.assertIn("const chapterId = String(chapterRow?.chapter_id || '').trim();", self.adapter)
+        self.assertIn("chapter_id:chapterId", self.adapter)
+        self.assertIn("const overrideFor = chapter => {", self.adapter)
+        self.assertIn("return (identity && overrides[identity]) || overrides[String(chapter?.number)] || {};", self.adapter)
+
     def test_chapter_bgm_assignments_survive_strategy_switch(self):
         start = self.host.index("    def _sound_chapter_bgm_save(")
         end = self.host.index("    def _sound_cues_get(", start)
