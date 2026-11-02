@@ -1252,6 +1252,7 @@ class RegressionTests(unittest.TestCase):
 
     def test_voice_preview_invalidation_ignores_deleted_qt_status_widget(self):
         import shiboken6
+        from PySide6.QtCore import QCoreApplication, QEvent
         from app.ui.voice_page import VoicePage
 
         page = VoicePage()
@@ -1270,7 +1271,13 @@ class RegressionTests(unittest.TestCase):
                 if layout is not None:
                     layout.removeWidget(status)
                 status.setParent(None)
-            shiboken6.delete(status)
+
+            # Use Qt's supported deferred-destruction path rather than calling
+            # shiboken.delete() directly on a widget whose signals are connected.
+            status.deleteLater()
+            QCoreApplication.sendPostedEvents(status, QEvent.Type.DeferredDelete)
+            self.assertFalse(shiboken6.isValid(status))
+
             page._invalidate_preview()
             self.assertIsNone(page.last_preview)
         finally:
