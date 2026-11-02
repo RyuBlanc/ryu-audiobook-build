@@ -170,8 +170,11 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
             "previewGenerate",
             "pauseGenerate",
             "cancelJob",
-            "playPreview",
-            "stopPreview",
+            "productionPreviewPlay",
+            "productionPreviewStop",
+            "productionPreviewDownload",
+            "productionPreviewStatus",
+            "productionPreviewTime",
         ):
             self.assertIn(
                 f'id="{control_id}"',
@@ -179,9 +182,16 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
                 f"Production UI control {control_id} is missing from the rendered page.",
             )
 
-        # Download is created only after a measured, playable preview exists.
+        # Voice Studio retains its own preview controls; Production Studio has its own player.
+        self.assertIn('id="playPreview"', self.html)
+        self.assertIn('id="stopPreview"', self.html)
         self.assertIn("download.id='downloadPreview';", self.adapter)
-        self.assertIn("if ($('downloadPreview')) $('downloadPreview').onclick=act", self.adapter)
+        self.assertIn("if ($('downloadPreview')) $('downloadPreview').onclick=act(downloadCurrentPreview);", self.adapter)
+        self.assertIn("if ($('productionPreviewDownload')) $('productionPreviewDownload').onclick=act(downloadCurrentPreview);", self.adapter)
+        self.assertIn("if ($('productionPreviewPlay')) $('productionPreviewPlay').onclick=act", self.adapter)
+        self.assertIn("if ($('productionPreviewStop')) $('productionPreviewStop').onclick", self.adapter)
+        self.assertIn("syncProductionPreviewControls();", self.adapter)
+        self.assertIn("if(productionTime)productionTime.textContent=time;", self.adapter)
         self.assertIn("if ($('previewGenerate')) $('previewGenerate').onclick=act", self.adapter)
         self.assertIn("call('production.preview'", self.adapter)
         self.assertIn("if ($('startGenerate')) $('startGenerate').onclick=act", self.adapter)
@@ -195,6 +205,8 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("if ($('stopPreview')) $('stopPreview').onclick", self.adapter)
         self.assertIn("soundButton.id === 'soundPreviewBook'", self.adapter)
         self.assertIn("await flushSoundDesignState({requireExplicitCueClear:true});", self.adapter)
+        self.assertIn('button type="button">90s</button>', self.html)
+        self.assertIn('button type="button">90 seconds</button>', self.html)
 
         for command in (
             '"production.preview": self._production_preview',

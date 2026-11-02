@@ -1677,6 +1677,19 @@
     if($('useNarrator'))$('useNarrator').disabled=!voicePreviewValid;
     if($('assignCharacter'))$('assignCharacter').disabled=!voicePreviewValid||!saved;
     if($('downloadPreview'))$('downloadPreview').disabled=!voicePreviewValid||!lastVoicePreviewPath;
+    syncProductionPreviewControls();
+  }
+  function syncProductionPreviewControls(){
+    const playable=Boolean(voicePreviewValid&&previewAudio);
+    const playing=Boolean(playable&&!previewAudio.paused);
+    const play=$('productionPreviewPlay'),stop=$('productionPreviewStop'),download=$('productionPreviewDownload');
+    if(play){play.disabled=!playable;play.textContent=playing?'Ⅱ Pause preview':'▶ Play preview';}
+    if(stop)stop.disabled=!playable;
+    if(download)download.disabled=!voicePreviewValid||!lastVoicePreviewPath;
+    const status=$('productionPreviewStatus');
+    if(status)status.textContent=voicePreviewValid
+      ?'Preview ready · '+(Number(previewAudio?.duration)>0?Number(previewAudio.duration).toFixed(1)+' seconds':'loading duration')
+      :'Generate a chapter preview to enable playback and download.';
   }
   function invalidateVoicePreview(){
     voicePreviewEpoch++;voicePreviewValid=false;lastVoicePreviewPath=null;lastVoicePreviewProfileName='';lastVoicePreviewChapterNumber=null;lastVoicePreviewChapterTitle='';
@@ -5721,7 +5734,13 @@
     await startImportPayload({file_name:file.name,title:file.name.replace(/\.[^.]+$/,''),content_base64:btoa(binary)}, file.name);
   }
   function formatPlaybackTime(value){const seconds=Math.max(0,Math.floor(Number(value)||0));return String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');}
-  function syncPreviewPlaybackTime(){const node=$('previewPlaybackTime');if(!node)return;node.textContent=formatPlaybackTime(previewAudio?.currentTime||0)+' / '+formatPlaybackTime(previewAudio?.duration||0);}
+  function syncPreviewPlaybackTime(){
+    const time=formatPlaybackTime(previewAudio?.currentTime||0)+' / '+formatPlaybackTime(previewAudio?.duration||0);
+    const voiceTime=$('previewPlaybackTime'),productionTime=$('productionPreviewTime');
+    if(voiceTime)voiceTime.textContent=time;
+    if(productionTime)productionTime.textContent=time;
+    syncProductionPreviewControls();
+  }
   function preparePreviewPlayback(job, requestedSeconds, options = {}) {
     const url=job?.result?.file_url,actual=Number(job?.result?.actual_duration_seconds),requested=Number(requestedSeconds||job?.result?.requested_duration_seconds||0),play=$('playPreview');
     const totalElapsed = Number(job?.result?.total_seconds);
@@ -7623,6 +7642,7 @@
       const duration=group?.querySelector('button.active')?.textContent.match(/\d+/)?.[0]||'30';
       invalidateVoicePreview();
       const previewToken=voicePreviewEpoch;
+      if($('productionPreviewStatus'))$('productionPreviewStatus').textContent='Generating selected-chapter preview…';
       if($('previewState'))$('previewState').textContent='Preparing · 2%';
       if($('validation'))$('validation').textContent='Preparing selected chapter preview · 2%';
       const data=await call('production.preview',{profile_name:name,chapter_number:chapterNumber,duration_seconds:Number(duration)});
@@ -7634,7 +7654,7 @@
     });
     if ($('playPreview')) $('playPreview').onclick=act(async()=>{if(!previewAudio||!voicePreviewValid)throw new Error('Generate a validated preview first.');if(!previewAudio.paused){previewAudio.pause();$('playPreview').textContent='▶ Play';}else{await previewAudio.play();$('playPreview').textContent='Ⅱ Pause';}});
     if ($('stopPreview')) $('stopPreview').onclick=()=>{if(previewAudio){previewAudio.pause();previewAudio.currentTime=0;}if($('playPreview'))$('playPreview').textContent='▶ Play';syncPreviewPlaybackTime();};
-    if ($('downloadPreview')) $('downloadPreview').onclick=act(async()=>{
+    const downloadCurrentPreview=async()=>{
       if(!voicePreviewValid||!lastVoicePreviewPath)throw new Error('Generate a validated preview before downloading it.');
       const baseName=(lastVoicePreviewProfileName||currentVoiceName()||'Ryu Voice Preview').replace(/[<>:"\/\\|?*\x00-\x1f]+/g,'-').trim()||'Ryu Voice Preview';
       const chapterSuffix=lastVoicePreviewChapterNumber
@@ -7644,7 +7664,19 @@
       const result=await call('voice.preview.save',{source_path:lastVoicePreviewPath,suggested_name:name.replace(/\s+/g,'_')});
       if(result.cancelled){message('Preview save cancelled.');return;}
       message('Voice preview saved to '+result.path);
+    };
+    if ($('downloadPreview')) $('downloadPreview').onclick=act(downloadCurrentPreview);
+    if ($('productionPreviewDownload')) $('productionPreviewDownload').onclick=act(downloadCurrentPreview);
+    if ($('productionPreviewPlay')) $('productionPreviewPlay').onclick=act(async()=>{
+      if(!previewAudio||!voicePreviewValid)throw new Error('Generate a validated production preview first.');
+      if(!previewAudio.paused)previewAudio.pause();
+      else await previewAudio.play();
+      syncPreviewPlaybackTime();
     });
+    if ($('productionPreviewStop')) $('productionPreviewStop').onclick=()=>{
+      if(previewAudio){previewAudio.pause();previewAudio.currentTime=0;}
+      syncPreviewPlaybackTime();
+    };
     if ($('startGenerate')) $('startGenerate').onclick=act(async()=>{
       await flushSoundDesignState();
       const [activeProject, savedSettings] = await Promise.all([
