@@ -56,6 +56,11 @@ class PronunciationDictionaryUiTests(unittest.TestCase):
         self.assertIn("call('pronunciation.delete_many'", ADAPTER)
         self.assertIn("call('pronunciation.settings.save'", ADAPTER)
         self.assertIn("await monitorJob(started.job_id", ADAPTER)
+        self.assertIn("job.type === 'pronunciation-analysis'", ADAPTER)
+        self.assertIn("row.confidence", ADAPTER)
+        self.assertIn("row.ipa", ADAPTER)
+        self.assertIn("row.reason", ADAPTER)
+        self.assertIn("row.alternatives", ADAPTER)
         self.assertIn("project.get_active", ADAPTER)
         self.assertIn("pronAnalysisStatus", HTML)
 

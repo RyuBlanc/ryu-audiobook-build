@@ -5176,6 +5176,14 @@
           writeTextIfChanged($('aiProgressText'), job.stage || job.message || job.state);
           writeStyleIfChanged($('aiProgressBar'), 'width', pct + '%');
         }
+        if (originVisible && originPage === 'pronunciation' && job.type === 'pronunciation-analysis') {
+          const status = $('pronAnalysisStatus');
+          if (status) {
+            status.hidden = false;
+            writeTextIfChanged(status, (job.stage || job.state) + ' · ' + Math.round(pct) + '%' +
+              (job.message ? ' · ' + job.message : ''));
+          }
+        }
         if (originVisible && originPage === 'voices' && job.type === 'voice-preview') {
           writeStyleIfChanged($('previewProgress'), 'width', pct + '%');
         }

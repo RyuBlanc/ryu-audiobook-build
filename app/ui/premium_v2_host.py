@@ -4796,7 +4796,7 @@ class PremiumV2Bridge(QObject):
                 for candidate in candidates:
                     candidate = str(candidate or "").strip()
                     if len(candidate) > 1 and re.search(
-                        r"(?i)(?<![\\w])" + re.escape(candidate) + r"(?![\\w])", source_text
+                        r"(?i)(?<![\w])" + re.escape(candidate) + r"(?![\\w])", source_text
                     ):
                         names.add(candidate)
         suggestions = [{
@@ -4834,7 +4834,7 @@ class PremiumV2Bridge(QObject):
             finally:
                 brain.close()
 
-            source_text = "\\n\\n".join(str(chapter.text or "") for chapter in project.chapters)
+            source_text = "\n\n".join(str(chapter.text or "") for chapter in project.chapters)
             seen = set(existing)
             suggestions = []
             for raw in analysis.get("pronunciation", []) if isinstance(analysis, dict) else []:
@@ -4845,11 +4845,11 @@ class PremiumV2Bridge(QObject):
                     spoken = _normalize_pronunciation_text(raw.get("spoken"), "Pronunciation", 1000)
                 except ValueError:
                     continue
-                native_script = bool(re.search(r"[\\u3040-\\u30ff\\u3400-\\u9fff\\uf900-\\ufaff\\uac00-\\ud7af]", written))
+                native_script = bool(re.search(r"[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uac00-\ud7af]", written))
                 present = (
                     written.casefold() in source_text.casefold()
                     if native_script else
-                    bool(re.search(r"(?i)(?<![\\w])" + re.escape(written) + r"(?![\\w])", source_text))
+                    bool(re.search(r"(?i)(?<![\w])" + re.escape(written) + r"(?![\\w])", source_text))
                 )
                 if not present:
                     continue
