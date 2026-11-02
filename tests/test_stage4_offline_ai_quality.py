@@ -9,6 +9,22 @@ from app.ai.brain import AudiobookBrain, BrainConfig
 
 
 class OfflineAiAnalysisQualityTests(unittest.TestCase):
+
+    def _brain_with_stubbed_chapters(self, chapters, chapter_results):
+        brain = AudiobookBrain.__new__(AudiobookBrain)
+        calls = []
+        saved_reports = []
+
+        def analyze(chapter, book_context=None, progress=None):
+            calls.append((chapter.number, book_context))
+            if callable(progress):
+                progress(f"Analyzed chapter {chapter.number}")
+            return chapter_results[chapter.number]
+
+        brain.analyze_chapter = analyze
+        brain._save_book = lambda report: saved_reports.append(report)
+        return brain, calls, saved_reports
+
     def test_long_chapter_chunks_preserve_configured_overlap_and_full_coverage(self):
         brain = AudiobookBrain.__new__(AudiobookBrain)
         brain.config = BrainConfig(context_chars=100, overlap_chars=20)
