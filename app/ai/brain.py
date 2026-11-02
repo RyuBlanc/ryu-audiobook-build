@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
+import unicodedata
 from typing import Any, Callable
 
 from app.chapters.detector import Chapter
@@ -482,7 +483,7 @@ class AudiobookBrain:
         for idx, chapter in enumerate(chapters, 1):
             def chapter_progress(message: str, idx=idx):
                 if progress:
-                    match = re.search(r"excerpt (\\d+)/(\\d+)", message)
+                    match = re.search(r"excerpt (\d+)/(\d+)", message)
                     if match:
                         excerpt_index = int(match.group(1))
                         excerpt_total = max(1, int(match.group(2)))

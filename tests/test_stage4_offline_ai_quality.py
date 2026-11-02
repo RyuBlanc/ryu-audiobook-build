@@ -50,25 +50,7 @@ class OfflineAiAnalysisQualityTests(unittest.TestCase):
             }],
             "continuity_notes": ["The station's power is already out."],
         }
-        observed = {}
-        original_merge = brain._merge_scenes
-        method = getattr(original_merge, "__func__", original_merge)
-        code = getattr(method, "__code__", None)
-        print(
-            "SCENE_METHOD_INFO",
-            getattr(code, "co_filename", None),
-            getattr(code, "co_firstlineno", None),
-            "SCENE_MUSIC_INSIDE" in getattr(code, "co_consts", ()),
-        )
-
-        def capture_scene_payload(out, data):
-            observed["input_music"] = data["scenes"][0].get("music")
-            original_merge(out, data)
-            observed["output_music"] = out["scenes"][0].get("music")
-
-        brain._merge_scenes = capture_scene_payload
         brain._merge_scenes(result, scene_payload)
-        print("SCENE_MUSIC_DIAGNOSTIC", repr(observed))
 
         scene = result["scenes"][0]
         self.assertEqual(scene["narrator_direction"], {
