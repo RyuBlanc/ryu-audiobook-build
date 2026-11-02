@@ -262,7 +262,7 @@
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
   let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
-  let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], selectedSoundPath = null, selectedCuePath = null, pendingCueSlot = null, pendingCueAssignments = Object.create(null), cueChangesDirty = false, cueSaveError = '', cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null, chapterBgmDraftDirty = false, mixLevelsDirty = false, soundPreviewKind = null, soundPreviewPath = null;
+  let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], pronunciationEnabled = true, activePronunciationSeries = '', lastPronunciationPreview = null, selectedSoundPath = null, selectedCuePath = null, pendingCueSlot = null, pendingCueAssignments = Object.create(null), cueChangesDirty = false, cueSaveError = '', cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null, chapterBgmDraftDirty = false, mixLevelsDirty = false, soundPreviewKind = null, soundPreviewPath = null;
   let chapterBgmCandidateTrackPath = null, chapterBgmCandidateChapter = null, chapterBgmSavePromise = null, cueSavePromise = null;
   let chapterStrategySavePromise = null;
   let chapterBgmAutoSaveTimer = null, cueAutoSaveTimer = null, chapterBgmDraftRevision = 0;
@@ -3866,35 +3866,178 @@
   function pronunciationScopeKey(term) {
     return String(term.scope_type || 'current_book') + ':' + String(term.scope_id || '');
   }
+  function renderPronunciationRows() {
+    const body = $('pronDictionaryBody');
+    if (!body) return;
+    const query = String($('pronSearchAdvanced')?.value || '').trim().toLocaleLowerCase();
+    const scopeFilter = $('pronScopeFilter')?.value || 'all';
+    const originFilter = $('pronOriginFilter')?.value || 'all';
+    const savedProfiles = voices.filter(profile => profile && profile.saved === true && profile.name);
+    const profileSelect = $('pronPreviewProfile');
+    if (profileSelect) {
+      const signature = JSON.stringify(savedProfiles.map(profile => [profile.name,profile.provider]));
+      const previous = profileSelect.value;
+      if (profileSelect.dataset.savedProfileSignature !== signature) {
+        profileSelect.replaceChildren();
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = savedProfiles.length ? 'Select saved voice profile' : 'No saved voice profiles';
+        profileSelect.appendChild(placeholder);
+        for (const profile of savedProfiles) {
+          const option = document.createElement('option');
+          option.value = profile.name;
+          option.textContent = profile.name + ' · ' + (profile.provider || 'Saved voice');
+          profileSelect.appendChild(option);
+        }
+        profileSelect.dataset.savedProfileSignature = signature;
+      }
+      profileSelect.value = savedProfiles.some(profile => profile.name === previous)
+        ? previous : (savedProfiles[0]?.name || '');
+      profileSelect.disabled = savedProfiles.length === 0;
+    }
+    const scopeSelect = $('newPronScope');
+    if (scopeSelect) {
+      const previousScope = scopeSelect.value || 'current_book';
+      const options = [
+        ['current_book','Current book'],
+        ['global_library','Global library']
+      ];
+      if (activePronunciationSeries) options.splice(1,0,['Series · ' + activePronunciationSeries,'Series · ' + activePronunciationSeries]);
+      const signature = JSON.stringify(options);
+      if (scopeSelect.dataset.scopeOptionsSignature !== signature) {
+        scopeSelect.replaceChildren();
+        for (const [value,label] of options) {
+          const option = document.createElement('option');
+          option.value = value;
+          option.textContent = label;
+          scopeSelect.appendChild(option);
+        }
+        scopeSelect.dataset.scopeOptionsSignature = signature;
+      }
+      scopeSelect.value = options.some(([value]) => value === previousScope) ? previousScope : 'current_book';
+    }
+    const visible = terms.map((term,index) => ({term,index})).filter(({term}) => {
+      const origin = String(term.origin || 'manual').toLowerCase();
+      const searchable = [
+        term.written_form, term.spoken_form, term.language,
+        term.scope, term.scope_type, term.scope_id, origin,
+        origin === 'ai' ? 'ai-generated ai generated' : 'manual manually entered'
+      ].map(value => String(value || '')).join(' ').toLocaleLowerCase();
+      const matchesQuery = !query || searchable.includes(query);
+      const matchesScope = scopeFilter === 'all' ||
+        (scopeFilter === 'series' ? term.scope_type === 'series' : term.scope_type === scopeFilter);
+      const matchesOrigin = originFilter === 'all' || origin === originFilter;
+      return matchesQuery && matchesScope && matchesOrigin;
+    });
+    if (!visible.length) {
+      body.innerHTML = '<tr><td colspan="6" class="muted">No saved pronunciation entries match these filters.</td></tr>';
+    } else {
+      body.innerHTML = visible.map(({term,index}, rowIndex) => {
+        const written = String(term.written_form || term.word || '');
+        const spoken = String(term.spoken_form || term.pronunciation || '');
+        const origin = String(term.origin || 'manual').toLowerCase() === 'ai' ? 'ai' : 'manual';
+        const scope = String(term.scope || 'Current book');
+        const scopeId = String(term.scope_id || '');
+        const scopeKey = pronunciationScopeKey(term);
+        const enabled = term.enabled !== false;
+        const disabled = savedProfiles.length === 0;
+        const safeLabel = esc(written);
+        return '<tr class="pron-row-' + origin + '" data-pron-row data-pron-index="' + index + '">' +
+          '<td><label><input class="pron-row-select" type="checkbox" data-pron-select="' + index + '" aria-label="Select ' + safeLabel + '"/>' +
+          '<span>' + (rowIndex + 1) + '</span></label></td>' +
+          '<td><b>' + safeLabel + '</b><span class="pron-origin-pill ' + origin + '">' + (origin === 'ai' ? 'AI' : 'Manual') + '</span></td>' +
+          '<td>' + esc(spoken) + '</td>' +
+          '<td><div class="pron-audio-actions">' +
+            '<button type="button" class="btn small secondary" data-pron-audio-play="written" data-pron-index="' + index + '"' + (disabled ? ' disabled' : '') + '>▶ Written</button>' +
+            '<button type="button" class="btn small secondary" data-pron-audio-play="spoken" data-pron-index="' + index + '"' + (disabled ? ' disabled' : '') + '>▶ Pronounce as</button>' +
+            '<button type="button" class="btn small ghost" data-pron-audio-pause>Ⅱ</button>' +
+            '<button type="button" class="btn small ghost" data-pron-audio-replay>↻</button>' +
+          '</div></td>' +
+          '<td><div class="pron-options">' +
+            '<button type="button" class="btn small ghost" data-pron-edit="' + index + '">Edit</button>' +
+            '<button type="button" class="btn small ghost" data-delete-pron="' + safeLabel + '" data-delete-scope="' + esc(scope) + '" data-delete-scope-id="' + esc(scopeId) + '">Delete</button>' +
+          '</div></td>' +
+          '<td><label class="pron-enable-switch" title="' + (enabled ? 'Disable rule' : 'Enable rule') + '">' +
+            '<input type="checkbox" data-pron-enabled="' + index + '"' + (enabled ? ' checked' : '') + ' aria-label="Enable pronunciation rule for ' + safeLabel + '"/><span></span></label></td>' +
+          '</tr>';
+      }).join('');
+    }
+    const selectedCount = body.querySelectorAll('[data-pron-select]:checked').length;
+    const bulk = $('deleteSelectedPron');
+    if (bulk) {
+      bulk.disabled = selectedCount === 0;
+      bulk.textContent = 'Delete selected (' + selectedCount + ')';
+    }
+  }
+  function renderPronunciationSuggestions(suggestions) {
+    const box = $('pronAiSuggestions');
+    if (!box) return;
+    const rows = Array.isArray(suggestions) ? suggestions : [];
+    if (!rows.length) {
+      box.hidden = true;
+      box.replaceChildren();
+      return;
+    }
+    box.hidden = false;
+    box.innerHTML = '<div class="toolbar"><div><b>Review AI pronunciation suggestions</b><p class="muted">These drafts are not saved or enabled until you accept them.</p></div><span class="badge warn">' + rows.length + ' to review</span></div>' +
+      rows.map((row,index) => '<div class="pron-ai-suggestion" data-pron-ai-row="' + index + '">' +
+        '<label><span>Written</span><input class="input" data-pron-ai-written="' + index + '" maxlength="500" value="' + esc(row.written_form || '') + '"/></label>' +
+        '<label><span>Pronounce as · review this draft</span><input class="input" data-pron-ai-spoken="' + index + '" maxlength="1000" value="' + esc(row.spoken_form || '') + '"/></label>' +
+        '<button type="button" class="btn small" data-pron-ai-accept="' + index + '">Accept disabled</button>' +
+        '<button type="button" class="btn small ghost" data-pron-ai-dismiss="' + index + '">Dismiss</button></div>'
+      ).join('');
+  }
   async function refreshTerms() {
     const requestToken = ++termsListEpoch;
-    const loaded = await call('pronunciation.list');
+    const [loaded, settings] = await Promise.all([
+      call('pronunciation.list'),
+      call('pronunciation.settings.get')
+    ]);
     if (requestToken !== termsListEpoch) return terms;
     terms = Array.isArray(loaded) ? loaded : [];
-    const list = $('pronDictionaryBody');
-    if (list) list.innerHTML = terms.map(t => {
-      const word = String(t.written_form || t.word || '');
-      const spoken = String(t.spoken_form || t.pronunciation || '');
-      const scope = String(t.scope || 'Current book');
-      const scopeKey = pronunciationScopeKey(t);
-      const language = String(t.language || 'Auto');
-      const status = t.enabled === false ? 'Disabled' : 'Enabled';
-      return '<tr><td><button type="button" class="btn small ghost" data-pron-table-term="' + esc(word) + '" data-pron-scope-key="' + esc(scopeKey) + '">' + esc(word) + '</button></td>' +
-        '<td>' + esc(spoken) + '</td><td>' + esc(language) + '</td><td>' + esc(scope) + '</td>' +
-        '<td>' + esc(t.test_status || 'Not tested') + '</td><td><span>' + status + '</span> ' +
-        '<button type="button" class="btn small ghost" data-delete-pron="' + esc(word) + '" data-delete-scope="' + esc(scope) + '" data-delete-scope-id="' + esc(String(t.scope_id || '')) + '" aria-label="Delete pronunciation rule for ' + esc(word) + '">Delete</button></td></tr>';
-    }).join('') || '<tr><td colspan="6" class="muted">No saved pronunciation rules for this book.</td></tr>';
-    const termList = $('pronTermList');
-    if (termList) {
-      const selected = $('pronWord')?.textContent?.trim();
-      const selectedKey = window.ryuPremiumSelectedPronunciationScopeKey || '';
-      termList.innerHTML = terms.map(t => {
-        const word = String(t.written_form || t.word || '');
-        const spoken = String(t.spoken_form || t.pronunciation || '');
-        const scopeKey = pronunciationScopeKey(t);
-        return '<button type="button" class="list-item ' + (word === selected && scopeKey === selectedKey ? 'active' : '') + '" data-pron-term="' + esc(word) + '" data-pron-scope-key="' + esc(scopeKey) + '"><b>' + esc(word) + '</b><span>' + esc(spoken) + ' · ' + esc(t.scope || 'Current book') + '</span></button>';
-      }).join('') || '<p class="muted">No saved pronunciation terms yet. Use Analyze book or Add entry.</p>';
+    pronunciationEnabled = settings?.enabled !== false;
+    activePronunciationSeries = String(settings?.series_name || '').trim();
+    for (const id of ['pronunciationGlobalToggle','productionPronunciationToggle']) {
+      const toggle = $(id);
+      if (toggle) toggle.checked = pronunciationEnabled;
     }
+    renderPronunciationRows();
+    return terms;
+  }
+  async function saveGlobalPronunciation(enabled) {
+    const result = await call('pronunciation.settings.save',{enabled:Boolean(enabled)});
+    pronunciationEnabled = result.enabled !== false;
+    for (const id of ['pronunciationGlobalToggle','productionPronunciationToggle']) {
+      const toggle = $(id);
+      if (toggle) toggle.checked = pronunciationEnabled;
+    }
+    message(pronunciationEnabled
+      ? 'Global pronunciation is ON. Individually enabled applicable rules will be used.'
+      : 'Global pronunciation is OFF. All pronunciation substitutions are bypassed.');
+    return result;
+  }
+  async function playPronunciationEntryPreview(profileName, textValue, label) {
+    const profile = voices.find(item => item && item.saved === true &&
+      String(item.name || '').toLowerCase() === String(profileName || '').toLowerCase());
+    if (!profile) throw new Error('Choose an available saved Voice Studio profile before previewing a pronunciation entry.');
+    if (!String(textValue || '').trim()) throw new Error('The selected pronunciation text is empty.');
+    const request = {profile_name:profile.name,text:String(textValue),duration_seconds:10,route_character_cast:false};
+    const data = await call('voice.preview',request);
+    lastPronunciationPreview = {...request,label:String(label || profile.name)};
+    await monitorJob(data.job_id, async job => {
+      const url = job?.result?.file_url;
+      if (!url) throw new Error('The pronunciation preview completed without a playable audio file.');
+      if (previewAudio) { previewAudio.pause(); previewAudio = null; }
+      previewAudio = new Audio(url);
+      previewAudio.onerror = () => message('The pronunciation preview audio could not be played.',true);
+      try {
+        await previewAudio.play();
+        message('Playing ' + lastPronunciationPreview.label + ' with ' + profile.name + ' · ' +
+          Number(job.result.actual_duration_seconds || 0).toFixed(1) + ' seconds.');
+      } catch (error) {
+        throw new Error(error?.message || 'The pronunciation preview could not be played.');
+      }
+    });
   }
   async function refreshSounds() {
     const requestToken = ++soundListEpoch;
@@ -7070,10 +7213,9 @@
       const q=$('pronTermSearch').value.trim().toLowerCase();
       $('pronTermList')?.querySelectorAll('[data-pron-term]').forEach(el=>el.hidden=!el.textContent.toLowerCase().includes(q));
     };
-    if ($('pronSearchAdvanced')) $('pronSearchAdvanced').oninput=()=>{
-      const q=$('pronSearchAdvanced').value.trim().toLowerCase();
-      $('pronDictionaryBody')?.querySelectorAll('tr,[data-pron-row]').forEach(el=>el.hidden=!el.textContent.toLowerCase().includes(q));
-    };
+    if ($('pronSearchAdvanced')) $('pronSearchAdvanced').oninput=renderPronunciationRows;
+    if ($('pronScopeFilter')) $('pronScopeFilter').onchange=renderPronunciationRows;
+    if ($('pronOriginFilter')) $('pronOriginFilter').onchange=renderPronunciationRows;
 
   async function openProjectWithPreservedDraft(folder) {
     const targetFolder = String(folder || '').trim();
@@ -7098,6 +7240,7 @@
     await refreshProjects();
     await refreshChapters();
     await refreshCharacters();
+    await refreshTerms();
 
     const listed = projects.find(project => String(project.folder || '') === targetFolder) || {};
     return {...listed, ...(opened && typeof opened === 'object' ? opened : {}), folder:targetFolder};
@@ -7420,6 +7563,7 @@
       ]);
       window.ryuPremiumActiveProject = activeProject || null;
       window.ryuPremiumApplicationSettings = savedSettings || {};
+      await refreshTerms();
       const bitrate = Number(activeProject?.audio_bitrate || savedSettings?.bitrate || 256);
       const data = await call('production.generate_book', {
         profile_name:selectedVoice || $('profileName')?.value || activeProject?.voice_profile,
@@ -7449,8 +7593,37 @@
       });
     });
     if ($('savePronTerm')) $('savePronTerm').onclick=act(async()=>{const result=await call('pronunciation.save',{written_form:$('pronWord')?.textContent?.trim()||'',spoken_form:$('pronValue')?.value||'',scope:$('pronScope')?.value||'Current book',handling_mode:$('pronHandling')?.value||'automatic',language:$('pronDetectedLanguage')?.textContent||'Auto'});window.ryuPremiumSelectedPronunciationScopeKey=pronunciationScopeKey(result.entry||{});await refreshTerms();message(result.conflict_resolved?'Pronunciation rule updated; the previous reading was replaced.':'Pronunciation rule saved locally.');});
-    if ($('saveNewPron')) $('saveNewPron').onclick=act(async()=>{await call('pronunciation.save',{written_form:$('newPronWritten')?.value||'',spoken_form:$('newPronValue')?.value||'',language:$('newPronLanguage')?.value||'Auto',scope:$('newPronScope')?.value||'current_book'});await refreshTerms();$('pronEntryModal')?.classList.remove('show');message('Pronunciation entry saved.');});
-    if ($('analyzePronunciation')) $('analyzePronunciation').onclick=act(async()=>{const r=await call('pronunciation.analyze');const list=$('pronDictionaryBody');if(list)list.innerHTML=(r.suggestions||[]).map(t=>'<div class="list-item"><b>'+esc(t.written_form)+'</b><span> → '+esc(t.spoken_form)+'</span></div>').join('')||'<p class="muted">No new suggestions found.</p>';message('Found '+(r.suggestions||[]).length+' suggestions to review.');});
+    if ($('saveNewPron')) $('saveNewPron').onclick=act(async()=>{
+      const edit = window.ryuPronunciationEditing || null;
+      const payload = {
+        written_form:$('newPronWritten')?.value || '',
+        spoken_form:$('newPronValue')?.value || '',
+        language:$('newPronLanguage')?.value || 'Auto-detect',
+        handling_mode:$('newPronHandling')?.value || 'automatic',
+        scope:$('newPronScope')?.value || 'current_book',
+        origin:edit?.origin || 'manual',
+        enabled:edit ? edit.enabled !== false : true
+      };
+      if (edit) {
+        payload.original_written_form = edit.written_form;
+        payload.original_scope = edit.scope;
+        payload.original_scope_id = edit.scope_id || '';
+      }
+      const result = await call('pronunciation.save',payload);
+      window.ryuPronunciationEditing = null;
+      if ($('newPronScope')) $('newPronScope').disabled = false;
+      await refreshTerms();
+      $('pronEntryModal')?.classList.remove('show');
+      message(result.conflict_resolved ? 'Pronunciation rule updated.' : (edit ? 'Pronunciation entry updated.' : 'Manual pronunciation entry saved.'));
+    });
+    if ($('analyzePronunciation')) $('analyzePronunciation').onclick=act(async()=>{
+      const result = await call('pronunciation.analyze');
+      window.ryuPendingPronunciationSuggestions = Array.isArray(result.suggestions) ? result.suggestions : [];
+      renderPronunciationSuggestions(window.ryuPendingPronunciationSuggestions);
+      message(window.ryuPendingPronunciationSuggestions.length
+        ? 'Found ' + window.ryuPendingPronunciationSuggestions.length + ' AI draft(s). Review and edit each before accepting; none are enabled automatically.'
+        : 'No new pronunciation suggestions were found in the saved book text.');
+    });
     if ($('editAssignedCharacter')) $('editAssignedCharacter').onclick=()=>{
       const name=window.ryuPremiumSelectedCharacter;
       const c=characters.find(x=>x.name===name);
@@ -8480,6 +8653,189 @@
     }
 
 
+    // Stage 4 Step 1: bind every Dictionary action to saved bridge records.
+    document.addEventListener('input', event => {
+      if (['pronSearchAdvanced'].includes(event.target?.id)) renderPronunciationRows();
+    }, true);
+    document.addEventListener('change', event => {
+      const target = event.target;
+      if (!target) return;
+      if (target.matches('[data-pron-select]')) {
+        const count = $('pronDictionaryBody')?.querySelectorAll('[data-pron-select]:checked').length || 0;
+        const button = $('deleteSelectedPron');
+        if (button) { button.disabled = count === 0; button.textContent = 'Delete selected (' + count + ')'; }
+        return;
+      }
+      if (target.matches('[data-pron-enabled]')) {
+        const index = Number(target.dataset.pronEnabled);
+        const term = terms[index];
+        if (!term) { target.checked = false; message('This pronunciation row is stale. Refresh the dictionary and retry.',true); return; }
+        const requested = target.checked;
+        void call('pronunciation.save',{
+          written_form:term.written_form || term.word,
+          spoken_form:term.spoken_form || term.pronunciation,
+          language:term.language || 'Auto',
+          handling_mode:term.handling_mode || 'automatic',
+          scope:term.scope || 'current_book',
+          scope_id:term.scope_id || '',
+          origin:term.origin || 'manual',
+          enabled:requested
+        }).then(async result => {
+          await refreshTerms();
+          message(requested ? 'Pronunciation rule enabled for the next valid synthesis.' : 'Pronunciation rule disabled; it will be excluded from preview and generation.');
+        }).catch(error => {
+          target.checked = !requested;
+          message(error?.message || String(error),true);
+        });
+        return;
+      }
+      if (target.matches('#pronunciationGlobalToggle,#productionPronunciationToggle')) {
+        const requested = target.checked;
+        void saveGlobalPronunciation(requested).catch(error => {
+          target.checked = !requested;
+          const peer = target.id === 'pronunciationGlobalToggle' ? $('productionPronunciationToggle') : $('pronunciationGlobalToggle');
+          if (peer) peer.checked = !requested;
+          message(error?.message || String(error),true);
+        });
+      }
+    }, true);
+    document.addEventListener('click', event => {
+      const button = event.target?.closest?.('button');
+      if (!button) return;
+      const stop = () => { event.preventDefault(); event.stopImmediatePropagation(); };
+      const run = fn => { stop(); void Promise.resolve().then(fn).catch(error => message(error?.message || String(error),true)); };
+      if (button.id === 'addPronunciationAdvanced') {
+        run(() => {
+          window.ryuPronunciationEditing = null;
+          $('pronEntryModalTitle').textContent = 'Add dictionary entry';
+          $('newPronWritten').value = '';
+          $('newPronValue').value = '';
+          $('newPronLanguage').value = 'Auto-detect';
+          $('newPronHandling').value = 'automatic';
+          $('newPronScope').disabled = false;
+          $('newPronScope').value = 'current_book';
+          $('pronEntryModal')?.classList.add('show');
+          $('newPronWritten')?.focus();
+        });
+        return;
+      }
+      if (button.matches('[data-close-pron]')) {
+        stop();
+        window.ryuPronunciationEditing = null;
+        if ($('newPronScope')) $('newPronScope').disabled = false;
+        $('pronEntryModal')?.classList.remove('show');
+        return;
+      }
+      if (button.matches('[data-pron-edit]')) {
+        run(() => {
+          const term = terms[Number(button.dataset.pronEdit)];
+          if (!term) throw new Error('This pronunciation entry is stale. Refresh the dictionary and try again.');
+          window.ryuPronunciationEditing = {
+            written_form:term.written_form || term.word || '',
+            scope:term.scope || 'Current book',
+            scope_id:term.scope_id || '',
+            origin:term.origin || 'manual',
+            enabled:term.enabled !== false
+          };
+          $('pronEntryModalTitle').textContent = 'Edit pronunciation entry';
+          $('newPronWritten').value = term.written_form || term.word || '';
+          $('newPronValue').value = term.spoken_form || term.pronunciation || '';
+          $('newPronLanguage').value = term.language || 'Auto-detect';
+          $('newPronHandling').value = term.handling_mode || 'automatic';
+          $('newPronScope').value = term.scope_type === 'current_book' ? 'current_book' :
+            (term.scope_type === 'global_library' ? 'global_library' : term.scope || '');
+          $('newPronScope').disabled = true;
+          $('pronEntryModal')?.classList.add('show');
+          $('newPronWritten')?.focus();
+        });
+        return;
+      }
+      if (button.id === 'deleteSelectedPron') {
+        run(async () => {
+          const selected = [...($('pronDictionaryBody')?.querySelectorAll('[data-pron-select]:checked') || [])]
+            .map(input => terms[Number(input.dataset.pronSelect)])
+            .filter(Boolean)
+            .map(term => ({
+              written_form:term.written_form || term.word,
+              scope:term.scope || 'current_book',
+              scope_id:term.scope_id || ''
+            }));
+          if (!selected.length) throw new Error('Select one or more pronunciation rows before bulk deletion.');
+          if (!window.confirm('Delete ' + selected.length + ' selected pronunciation entry/entries from their exact scopes?')) return;
+          const result = await call('pronunciation.delete_many',{entries:selected});
+          await refreshTerms();
+          message('Deleted ' + Number(result.deleted || 0) + ' selected pronunciation entry/entries.');
+        });
+        return;
+      }
+      if (button.matches('[data-pron-audio-play]')) {
+        run(async () => {
+          const term = terms[Number(button.dataset.pronIndex)];
+          if (!term) throw new Error('This pronunciation row is stale. Refresh the dictionary and retry.');
+          const profileName = $('pronPreviewProfile')?.value || '';
+          const textValue = button.dataset.pronAudioPlay === 'written'
+            ? (term.written_form || term.word || '')
+            : (term.spoken_form || term.pronunciation || '');
+          await playPronunciationEntryPreview(profileName,textValue,
+            (button.dataset.pronAudioPlay === 'written' ? 'Written term' : 'Corrected pronunciation') + ': ' + (term.written_form || term.word));
+        });
+        return;
+      }
+      if (button.matches('[data-pron-audio-pause]')) {
+        stop();
+        if (previewAudio) previewAudio.pause();
+        else message('There is no pronunciation preview currently playing.',true);
+        return;
+      }
+      if (button.matches('[data-pron-audio-replay]')) {
+        run(async () => {
+          if (previewAudio && previewAudio.src) {
+            previewAudio.currentTime = 0;
+            await previewAudio.play();
+            return;
+          }
+          if (!lastPronunciationPreview) throw new Error('Play a pronunciation entry before requesting replay.');
+          await playPronunciationEntryPreview(
+            lastPronunciationPreview.profile_name,
+            lastPronunciationPreview.text,
+            lastPronunciationPreview.label
+          );
+        });
+        return;
+      }
+      if (button.matches('[data-pron-ai-dismiss]')) {
+        run(() => {
+          const index = Number(button.dataset.pronAiDismiss);
+          const list = window.ryuPendingPronunciationSuggestions || [];
+          list.splice(index,1);
+          renderPronunciationSuggestions(list);
+          message('AI draft dismissed; no dictionary entry was saved.');
+        });
+        return;
+      }
+      if (button.matches('[data-pron-ai-accept]')) {
+        run(async () => {
+          const index = Number(button.dataset.pronAiAccept);
+          const list = window.ryuPendingPronunciationSuggestions || [];
+          const suggestion = list[index];
+          if (!suggestion) throw new Error('This AI suggestion is stale. Analyze the saved book again.');
+          const written = $('pronAiSuggestions')?.querySelector('[data-pron-ai-written="' + index + '"]')?.value || '';
+          const spoken = $('pronAiSuggestions')?.querySelector('[data-pron-ai-spoken="' + index + '"]')?.value || '';
+          if (!written.trim() || !spoken.trim()) throw new Error('Review both Written and Pronounce as before accepting this AI suggestion.');
+          await call('pronunciation.save',{
+            written_form:written,spoken_form:spoken,language:suggestion.language || 'Auto-detect',
+            handling_mode:suggestion.handling_mode || 'automatic',scope:'current_book',
+            origin:'ai',enabled:false
+          });
+          list.splice(index,1);
+          window.ryuPendingPronunciationSuggestions = list;
+          renderPronunciationSuggestions(list);
+          await refreshTerms();
+          message('AI pronunciation draft saved as a disabled entry. Review it in the dictionary and enable it only after confirmation.');
+        });
+        return;
+      }
+    }, true);
     // Last high-value Stage 8.2.9 guards: bind the legacy pronunciation modal and
     // voice-test matrix to saved backend data; never let mock model actions claim success.
     document.addEventListener('click', e => {

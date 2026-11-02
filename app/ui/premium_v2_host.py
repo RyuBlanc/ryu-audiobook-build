@@ -232,6 +232,9 @@ def _clean_pronunciation_entries(entries: list[dict[str, Any]], scope_type: str,
             continue
         seen.add(key)
         row = dict(raw)
+        origin = str(raw.get("origin") or raw.get("source") or "manual").strip().casefold()
+        if origin not in {"manual", "ai"}:
+            origin = "manual"
         row.update({
             "written_form": written,
             "spoken_form": spoken,
@@ -241,6 +244,7 @@ def _clean_pronunciation_entries(entries: list[dict[str, Any]], scope_type: str,
                 "Global library" if scope_type == "global_library" else f"Series · {scope_id}"
             ),
             "enabled": raw.get("enabled", True) is not False,
+            "origin": origin,
         })
         row.pop("written", None)
         row.pop("spoken", None)
@@ -251,7 +255,13 @@ def _clean_pronunciation_entries(entries: list[dict[str, Any]], scope_type: str,
 
 
 def _effective_pronunciation_dictionary(state: dict[str, Any]) -> list[dict[str, Any]]:
-    """Combine synthesis rules in Current book > matching Series > Global order."""
+    """Return no substitutions when the project-level pronunciation master switch is OFF.
+
+    With the master switch ON, preserve Current book > matching Series > Global
+    precedence and individually enabled-entry filtering.
+    """
+    if state.get("pronunciation_enabled", True) is False:
+        return []
     scoped: list[list[dict[str, Any]]] = []
     book_rows = state.get("pronunciation_dictionary")
     scoped.append(_clean_pronunciation_entries(
@@ -417,6 +427,9 @@ class PremiumV2Bridge(QObject):
                 "pronunciation.list": self._pronunciation_list,
                 "pronunciation.save": self._pronunciation_save,
                 "pronunciation.delete": self._pronunciation_delete,
+                "pronunciation.delete_many": self._pronunciation_delete_many,
+                "pronunciation.settings.get": self._pronunciation_settings_get,
+                "pronunciation.settings.save": self._pronunciation_settings_save,
                 "pronunciation.analyze": self._pronunciation_analyze,
                 "production.generate_book": self._production_generate_book,
                 "production.preview": self._production_preview,
@@ -550,6 +563,9 @@ class PremiumV2Bridge(QObject):
             "pronunciation.list": True,
             "pronunciation.save": True,
             "pronunciation.delete": True,
+            "pronunciation.delete_many": True,
+            "pronunciation.settings.get": True,
+            "pronunciation.settings.save": True,
             "pronunciation.analyze": True,
             "production.generate_book": True,
             "production.preview": True,
@@ -4508,33 +4524,27 @@ class PremiumV2Bridge(QObject):
         return {"imported": imported, "count": len(list_reusable_characters()), "merged_by_name_and_series": True}
 
     def _pronunciation_list(self, _payload: dict[str, Any]) -> list[dict[str, Any]]:
+        """List only this book, its matching series and the shared global library."""
         project = self._active_project()
         state = load_state(project.folder)
-        # Legacy scope labels were stored inside project state but were never
-        # shared across projects. Keep those rows book-local during migration.
         entries = _clean_pronunciation_entries(
             state.get("pronunciation_dictionary") if isinstance(state.get("pronunciation_dictionary"), list) else [],
             "current_book",
         )
+        series_name = str(state.get("series") or state.get("series_name") or "").strip()
+        if series_name:
+            entries.extend(_clean_pronunciation_entries(
+                _read_pronunciation_store(_pronunciation_scope_path("series", series_name)),
+                "series", series_name,
+            ))
         entries.extend(_clean_pronunciation_entries(
             _read_pronunciation_store(_pronunciation_scope_path("global_library")),
             "global_library",
         ))
-        series_dir = settings_root() / "pronunciation_dictionary_series"
-        if series_dir.exists():
-            for path in sorted(series_dir.glob("*.json")):
-                for row in _read_pronunciation_store(path):
-                    try:
-                        scope_type, scope_id, _label = _parse_pronunciation_scope(
-                            row.get("scope") or "series", row.get("scope_id")
-                        )
-                    except ValueError:
-                        continue
-                    if scope_type == "series":
-                        entries.extend(_clean_pronunciation_entries([row], "series", scope_id))
         return entries
 
     def _pronunciation_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Add or edit a rule in one scope while retaining its manual/AI provenance."""
         project = self._active_project()
         word = _normalize_pronunciation_text(payload.get("written_form", payload.get("word", "")), "Written term", 500)
         spoken = _normalize_pronunciation_text(payload.get("spoken_form", payload.get("pronunciation", "")), "Pronunciation", 1000)
@@ -4545,29 +4555,45 @@ class PremiumV2Bridge(QObject):
         handling_mode = _normalize_pronunciation_text(
             payload.get("handling_mode") or payload.get("mode") or "automatic", "Handling mode", 100
         )
-        enabled = payload.get("enabled", True)
-        if not isinstance(enabled, bool):
-            raise ValueError("Enabled must be a boolean.")
+        original_word = str(payload.get("original_written_form") or "").strip()
+        original_key = ""
+        if original_word:
+            original_word = _normalize_pronunciation_text(original_word, "Original written term", 500)
+            original_scope_type, original_scope_id, _ = _parse_pronunciation_scope(
+                payload.get("original_scope") or payload.get("scope") or "current_book",
+                payload.get("original_scope_id") if payload.get("original_scope_id") is not None else payload.get("scope_id"),
+            )
+            if (original_scope_type, original_scope_id) != (scope_type, scope_id):
+                raise ValueError("Edit the pronunciation entry in its existing scope. Create a new entry to move it to another scope.")
+            original_key = original_word.casefold()
+
         if scope_type == "current_book":
             state = load_state(project.folder)
             raw_entries = state.get("pronunciation_dictionary")
             raw_entries = raw_entries if isinstance(raw_entries, list) else []
-            raw_match_count = sum(
-                1 for row in raw_entries if isinstance(row, dict) and
-                unicodedata.normalize("NFC", str(row.get("written_form") or row.get("written") or row.get("word") or "")).strip().casefold() == word.casefold()
-            )
-            entries = _clean_pronunciation_entries(raw_entries, "current_book")
         else:
             path = _pronunciation_scope_path(scope_type, scope_id)
             raw_entries = _read_pronunciation_store(path)
-            raw_match_count = sum(
-                1 for row in raw_entries if
-                unicodedata.normalize("NFC", str(row.get("written_form") or row.get("written") or row.get("word") or "")).strip().casefold() == word.casefold()
-            )
-            entries = _clean_pronunciation_entries(raw_entries, scope_type, scope_id)
+
+        entries = _clean_pronunciation_entries(raw_entries, scope_type, scope_id)
         key = word.casefold()
-        matching = [row for row in entries if row["written_form"].casefold() == key]
-        old_spoken = matching[0]["spoken_form"] if matching else None
+        new_matches = [row for row in entries if row["written_form"].casefold() == key]
+        original_matches = [row for row in entries if original_key and row["written_form"].casefold() == original_key]
+        old_match = original_matches[0] if original_matches else (new_matches[0] if new_matches else None)
+        previous_spoken = old_match.get("spoken_form") if old_match else None
+        origin = str(payload.get("origin") or (old_match or {}).get("origin") or "manual").strip().casefold()
+        if origin not in {"manual", "ai"}:
+            raise ValueError("Pronunciation entry origin must be manual or ai.")
+        enabled_default = (old_match or {}).get("enabled", True)
+        enabled = payload.get("enabled", enabled_default)
+        if not isinstance(enabled, bool):
+            raise ValueError("Enabled must be a boolean.")
+
+        raw_match_count = sum(
+            1 for row in raw_entries if isinstance(row, dict) and
+            unicodedata.normalize("NFC", str(row.get("written_form") or row.get("written") or row.get("word") or ""))
+            .strip().casefold() in {key, original_key}
+        )
         value = {
             "written_form": word,
             "spoken_form": spoken,
@@ -4577,9 +4603,12 @@ class PremiumV2Bridge(QObject):
             "scope_id": scope_id,
             "scope": scope_label,
             "enabled": enabled,
+            "origin": origin,
             "updated_at": self._now(),
         }
-        entries = [row for row in entries if row["written_form"].casefold() != key]
+        # Editing a written term is an upsert, not a second row. Remove both the
+        # old identity and any existing destination duplicate in this same scope.
+        entries = [row for row in entries if row["written_form"].casefold() not in {key, original_key}]
         entries.append(value)
         if scope_type == "current_book":
             state["pronunciation_dictionary"] = entries
@@ -4590,8 +4619,8 @@ class PremiumV2Bridge(QObject):
             "entry": value,
             "count": len(entries),
             "saved": True,
-            "updated_existing": bool(matching),
-            "conflict_resolved": bool(matching and old_spoken != spoken),
+            "updated_existing": bool(old_match or new_matches),
+            "conflict_resolved": bool(old_match and previous_spoken != spoken),
             "duplicate_rows_collapsed": max(0, raw_match_count - 1),
         }
 
@@ -4619,20 +4648,113 @@ class PremiumV2Bridge(QObject):
             _write_pronunciation_store(_pronunciation_scope_path(scope_type, scope_id), kept)
         return {"count": len(kept), "deleted": deleted, "scope_type": scope_type, "scope_id": scope_id}
 
-    def _pronunciation_analyze(self, _payload: dict[str, Any]) -> dict[str, Any]:
+    def _pronunciation_delete_many(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Delete only the explicitly selected written-term/scope identities."""
+        selected = payload.get("entries")
+        if not isinstance(selected, list) or not selected:
+            raise ValueError("Select at least one pronunciation entry to delete.")
+        if len(selected) > 1000:
+            raise ValueError("A single bulk delete is limited to 1,000 pronunciation entries.")
+        grouped: dict[tuple[str, str], set[str]] = {}
+        for item in selected:
+            if not isinstance(item, dict):
+                raise ValueError("A selected pronunciation entry is invalid.")
+            word = _normalize_pronunciation_text(item.get("written_form"), "Written term", 500)
+            scope_type, scope_id, _label = _parse_pronunciation_scope(
+                item.get("scope") or item.get("scope_type") or "current_book",
+                item.get("scope_id"),
+            )
+            grouped.setdefault((scope_type, scope_id), set()).add(word.casefold())
+
         project = self._active_project()
-        existing = {str(e.get("written_form") or e.get("word") or "").casefold() for e in self._pronunciation_list({})}
-        names = set()
+        deleted_total = 0
+        for (scope_type, scope_id), keys in grouped.items():
+            if scope_type == "current_book":
+                state = load_state(project.folder)
+                raw_entries = state.get("pronunciation_dictionary")
+                raw_entries = raw_entries if isinstance(raw_entries, list) else []
+                entries = _clean_pronunciation_entries(raw_entries, "current_book")
+            else:
+                path = _pronunciation_scope_path(scope_type, scope_id)
+                entries = _clean_pronunciation_entries(
+                    _read_pronunciation_store(path), scope_type, scope_id
+                )
+            kept = [row for row in entries if row["written_form"].casefold() not in keys]
+            deleted_total += len(entries) - len(kept)
+            if len(kept) == len(entries):
+                continue
+            if scope_type == "current_book":
+                state["pronunciation_dictionary"] = kept
+                save_state(project.folder, state)
+            else:
+                _write_pronunciation_store(_pronunciation_scope_path(scope_type, scope_id), kept)
+        return {"deleted": deleted_total, "scopes_processed": len(grouped)}
+
+    def _pronunciation_settings_get(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        project = self._active_project()
+        state = load_state(project.folder)
+        return {
+            "enabled": state.get("pronunciation_enabled", True) is not False,
+            "series_name": str(state.get("series") or state.get("series_name") or "").strip(),
+        }
+
+    def _pronunciation_settings_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        enabled = payload.get("enabled")
+        if not isinstance(enabled, bool):
+            raise ValueError("Global pronunciation setting must be a boolean.")
+        project = self._active_project()
+        state = load_state(project.folder)
+        state["pronunciation_enabled"] = enabled
+        save_state(project.folder, state)
+        return {"saved": True, "enabled": enabled}
+
+    def _pronunciation_analyze(self, _payload: dict[str, Any]) -> dict[str, Any]:
+        """Create conservative, disabled AI-origin review suggestions from this book."""
+        project = self._active_project()
+        state = load_state(project.folder)
+        existing = {
+            unicodedata.normalize("NFC", str(e.get("written_form") or e.get("word") or "")).casefold()
+            for e in self._pronunciation_list({})
+        }
+        names: set[str] = set()
         for chapter in project.chapters:
-            names.update(n.strip() for n in suggest_names_from_text(chapter.text or "") if len(n.strip()) > 1)
-        suggestions = [{"written_form": name, "spoken_form": suggest_pronunciation(name),
-                        "language": "Auto-detect", "handling_mode": "automatic",
-                        "scope": "current_book", "enabled": False, "review_required": True}
-                       for name in sorted(names, key=str.casefold) if name.casefold() not in existing]
-        job_id = self._new_job("pronunciation-analysis", "Analyze pronunciation", "Find proper nouns for manual review", project)
-        self._job_update(job_id, state="completed", stage="Review suggestions", progress=100,
-                         message=f"Found {len(suggestions)} pronunciation suggestion(s); none enabled automatically",
-                         result={"suggestions": suggestions, "count": len(suggestions)})
+            source_text = str(chapter.text or "")
+            names.update(n.strip() for n in suggest_names_from_text(source_text) if len(n.strip()) > 1)
+            # Confirmed Character Studio names/aliases are stronger evidence than
+            # capitalization heuristics; include them only when present in text.
+            for character in state.get("characters") or []:
+                if not isinstance(character, dict):
+                    continue
+                candidates = [character.get("name"), *(character.get("aliases") or [])]
+                for candidate in candidates:
+                    candidate = str(candidate or "").strip()
+                    if len(candidate) > 1 and re.search(
+                        r"(?i)(?<![\w])" + re.escape(candidate) + r"(?![\w])", source_text
+                    ):
+                        names.add(candidate)
+        suggestions = [{
+            "written_form": name,
+            "spoken_form": suggest_pronunciation(name),
+            "language": "Auto-detect",
+            "handling_mode": "automatic",
+            "scope": "current_book",
+            "scope_type": "current_book",
+            "scope_id": "",
+            "origin": "ai",
+            "enabled": False,
+            "review_required": True,
+            "recommendation_note": "AI draft — review and edit this reading before saving; it is not enabled automatically.",
+        } for name in sorted(names, key=str.casefold)
+            if unicodedata.normalize("NFC", name).casefold() not in existing]
+        job_id = self._new_job(
+            "pronunciation-analysis", "Analyze pronunciation",
+            "Find relevant proper nouns for manual review", project
+        )
+        self._job_update(
+            job_id, state="completed", stage="Review suggestions", progress=100,
+            message=f"Found {len(suggestions)} pronunciation suggestion(s); none enabled automatically",
+            result={"suggestions": suggestions, "count": len(suggestions)},
+        )
         return {"job_id": job_id, "state": "completed", "suggestions": suggestions, "count": len(suggestions)}
 
     @staticmethod

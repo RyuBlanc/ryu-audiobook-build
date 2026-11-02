@@ -89,14 +89,17 @@ class PronunciationPersistenceTests(unittest.TestCase):
         self.assertEqual("global_library", rows_b[0]["scope_type"])
         self.assertTrue(host._pronunciation_scope_path("global_library").is_file())
 
-    def test_series_entries_are_separate_by_normalized_series_name(self):
+    def test_series_list_exposes_only_the_active_projects_matching_series(self):
         self.save(self.bridge_a, "Rimuru", "Ree-moo-roo", scope="Series · Slime")
         self.save(self.bridge_a, "Rimuru", "Rim-oo-roo", scope="Series · Other")
-        rows = [row for row in self.list(self.bridge_b) if row["scope_type"] == "series"]
-        self.assertEqual({"Slime", "Other"}, {row["scope_id"] for row in rows})
+        state_path = self.project_b / "state.json"
+        state_path.write_text(json.dumps({"series":"Slime"}), encoding="utf-8")
+        rows = self.list(self.bridge_b)
+        self.assertEqual({"Slime"}, {row["scope_id"] for row in rows if row["scope_type"] == "series"})
+        self.assertEqual("Ree-moo-roo", next(row["spoken_form"] for row in rows if row["scope_type"] == "series"))
         self.delete(self.bridge_b, "Rimuru", scope="Series · Slime")
-        rows = [row for row in self.list(self.bridge_b) if row["scope_type"] == "series"]
-        self.assertEqual({"Other"}, {row["scope_id"] for row in rows})
+        rows = self.list(self.bridge_b)
+        self.assertEqual(set(), {row["scope_id"] for row in rows if row["scope_type"] == "series"})
 
     def test_empty_delete_and_invalid_save_do_not_mutate_dictionary(self):
         self.save(self.bridge_a, "Mira", "Mee-rah")
@@ -149,6 +152,63 @@ class PronunciationPersistenceTests(unittest.TestCase):
             apply_pronunciation_dictionary("NYC Mira SeriesOnly GlobalOnly BookOnly Disabled", effective),
             "Book City Series Mira Series Reading Global Reading Book Reading Disabled",
         )
+
+
+    def test_manual_origin_is_persisted_and_preserved_during_enable_toggle(self):
+        self.save(self.bridge_a, "Rimuru", "Ree-moo-roo", origin="manual", enabled=False)
+        row = self.list(self.bridge_a)[0]
+        self.assertEqual("manual", row["origin"])
+        self.assertFalse(row["enabled"])
+        self.save(self.bridge_a, "Rimuru", "Ree-moo-roo", origin=row["origin"], enabled=True)
+        row = self.list(self.bridge_a)[0]
+        self.assertEqual("manual", row["origin"])
+        self.assertTrue(row["enabled"])
+
+    def test_ai_origin_survives_edit_and_remains_disabled_until_enabled(self):
+        self.save(self.bridge_a, "Rimuru", "Rimuru", origin="ai", enabled=False)
+        self.save(self.bridge_a, "Rimuru Tempest", "Rimuru Tem-pest",
+                  original_written_form="Rimuru", original_scope="Current book",
+                  origin="ai", enabled=False)
+        rows = self.list(self.bridge_a)
+        self.assertEqual(1, len(rows))
+        self.assertEqual("Rimuru Tempest", rows[0]["written_form"])
+        self.assertEqual("ai", rows[0]["origin"])
+        self.assertFalse(rows[0]["enabled"])
+
+    def test_global_pronunciation_switch_bypasses_rules_without_deleting_them(self):
+        with patch.object(host, "settings_root", return_value=self.settings):
+            self.save(self.bridge_a, "Mira", "Mee-rah", enabled=True)
+            before = host._effective_pronunciation_dictionary({"pronunciation_dictionary":[
+                {"written_form":"Mira","spoken_form":"Mee-rah","enabled":True}
+            ]})
+            self.assertEqual("Mee-rah", apply_pronunciation_dictionary("Mira", before))
+            result = host.PremiumV2Bridge._pronunciation_settings_save(self.bridge_a, {"enabled":False})
+            self.assertFalse(result["enabled"])
+            state = host.load_state(self.project_a)
+            effective = host._effective_pronunciation_dictionary({
+                **state, "pronunciation_dictionary":[
+                    {"written_form":"Mira","spoken_form":"Mee-rah","enabled":True}
+                ]
+            })
+            self.assertEqual([], effective)
+            self.assertEqual("Mira", apply_pronunciation_dictionary("Mira", effective))
+            listed = self.list(self.bridge_a)
+            self.assertEqual("Mee-rah", listed[0]["spoken_form"])
+
+    def test_bulk_delete_removes_only_explicit_selected_scope_identities(self):
+        self.save(self.bridge_a, "Mira", "Mee-rah")
+        self.save(self.bridge_a, "Rimuru", "Ree-moo-roo", scope="Global library")
+        self.save(self.bridge_a, "Rimuru", "Series reading", scope="Series · Slime")
+        result = host.PremiumV2Bridge._pronunciation_delete_many(self.bridge_a, {"entries":[
+            {"written_form":"Mira","scope":"Current book"},
+            {"written_form":"Rimuru","scope":"Global library"}
+        ]})
+        self.assertEqual(2, result["deleted"])
+        remaining = self.list(self.bridge_a)
+        self.assertEqual({("Rimuru","series","Slime")}, {
+            (row["written_form"],row["scope_type"],row["scope_id"])
+            for row in remaining
+        })
 
 if __name__ == "__main__":
     unittest.main()
