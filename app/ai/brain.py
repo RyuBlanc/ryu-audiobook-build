@@ -502,32 +502,50 @@ class AudiobookBrain:
         for raw in data.get('scenes', []) or []:
             if not isinstance(raw, dict):
                 continue
-            direction = raw.get('narrator_direction')
-            direction = direction if isinstance(direction, dict) else {}
-            music = raw.get('music')
-            music = music if isinstance(music, dict) else {}
-            ambience = raw.get('ambience')
-            ambience = ambience if isinstance(ambience, list) else []
-            sfx = raw.get('sfx')
-            sfx = sfx if isinstance(sfx, list) else []
+
+            direction_payload = raw.get('narrator_direction')
+            direction = direction_payload if isinstance(direction_payload, dict) else {}
+            music_payload = raw.get('music')
+            music_details = music_payload if isinstance(music_payload, dict) else {}
+
+            # Resolve the nested fields explicitly. Legacy flat fields are used
+            # only when the current nested field is absent/empty.
+            pace_value = direction.get('pace')
+            if pace_value is None or not str(pace_value).strip():
+                pace_value = raw.get('pace', 'natural')
+            energy_value = direction.get('energy')
+            if energy_value is None or not str(energy_value).strip():
+                energy_value = raw.get('energy', 'medium')
+            delivery_value = direction.get('delivery')
+            if delivery_value is None or not str(delivery_value).strip():
+                delivery_value = raw.get('delivery', '')
+
+            music_style_value = music_details.get('style')
+            if music_style_value is None or not str(music_style_value).strip():
+                music_style_value = raw.get('music_style', '')
+            music_intensity_value = music_details.get('intensity')
+            if music_intensity_value is None:
+                music_intensity_value = raw.get('music_intensity', 0.0)
+
+            ambience_payload = raw.get('ambience')
+            ambience = ambience_payload if isinstance(ambience_payload, list) else []
+            sfx_payload = raw.get('sfx')
+            sfx = sfx_payload if isinstance(sfx_payload, list) else []
+
             out['scenes'].append({
                 'summary': str(raw.get('summary', '')).strip(),
                 'location': str(raw.get('location', '')).strip(),
                 'time': str(raw.get('time', '')).strip(),
                 'mood': str(raw.get('mood', 'neutral')).strip() or 'neutral',
                 'narrator_direction': {
-                    # Read the current nested schema first; keep the flat
-                    # aliases for older saved/model payloads.
-                    'pace': str(direction.get('pace', raw.get('pace', 'natural'))).strip() or 'natural',
-                    'energy': str(direction.get('energy', raw.get('energy', 'medium'))).strip() or 'medium',
-                    'delivery': str(direction.get('delivery', raw.get('delivery', ''))).strip(),
+                    'pace': str(pace_value).strip() or 'natural',
+                    'energy': str(energy_value).strip() or 'medium',
+                    'delivery': str(delivery_value).strip(),
                 },
                 'ambience': [str(value).strip() for value in ambience if str(value).strip()][:3],
                 'music': {
-                    'style': str(music.get('style', raw.get('music_style', ''))).strip() or None,
-                    'intensity': self._numeric_intensity(
-                        music.get('intensity', raw.get('music_intensity', 0.0))
-                    ),
+                    'style': str(music_style_value).strip() or None,
+                    'intensity': self._numeric_intensity(music_intensity_value),
                 },
                 'sfx': [str(value).strip() for value in sfx if str(value).strip()][:4],
                 'confidence': _numeric_score(raw.get('confidence', 0.0)),
@@ -536,6 +554,7 @@ class AudiobookBrain:
             note = str(note).strip()
             if note and note not in out['continuity_notes']:
                 out['continuity_notes'].append(note)
+
     def _merge(self, out: dict[str, Any], data: dict[str, Any], seen: set[str], source_text: str = '') -> None:
         for character in data.get('characters', []) or []:
             if not isinstance(character, dict):
