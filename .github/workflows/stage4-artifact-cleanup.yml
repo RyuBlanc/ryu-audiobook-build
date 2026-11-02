@@ -50,7 +50,7 @@ jobs:
 
             // Retain earlier rollback/checkpoint package sets from the existing cleanup policy.
             const protectedRunNumbers = new Set([1441, 1536, 1637, 2084]);
-            const packageName = /^Ryu-Audiobook-(Windows|Installer|Portable|Release-SHA256)-(\\d+)$/;
+            const packageName = /^Ryu-Audiobook-(Windows|Installer|Portable|Release-SHA256)-(\d+)$/;
 
             const anchor = await github.rest.actions.getWorkflowRun({
               owner, repo, run_id: anchorRunId
