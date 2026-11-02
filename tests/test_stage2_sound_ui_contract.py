@@ -162,6 +162,55 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn("Object.keys(soundManifestPendingOverrides).length > 0", helper)
         self.assertIn("Sound Design changes are still saving or unsaved", helper)
 
+    def test_final_production_preview_generation_and_job_buttons_are_present_and_connected(self):
+        generate_start = self.html.index('<section class="page" id="generate">')
+        generate_markup = self.html[generate_start:]
+        for control_id in (
+            "startGenerate",
+            "previewGenerate",
+            "pauseGenerate",
+            "cancelJob",
+            "playPreview",
+            "stopPreview",
+        ):
+            self.assertIn(
+                f'id="{control_id}"',
+                generate_markup,
+                f"Production UI control {control_id} is missing from the rendered page.",
+            )
+
+        # Download is created only after a measured, playable preview exists.
+        self.assertIn("download.id='downloadPreview';", self.adapter)
+        self.assertIn("if ($('downloadPreview')) $('downloadPreview').onclick=act", self.adapter)
+        self.assertIn("if ($('previewGenerate')) $('previewGenerate').onclick=act", self.adapter)
+        self.assertIn("call('production.preview'", self.adapter)
+        self.assertIn("if ($('startGenerate')) $('startGenerate').onclick=act", self.adapter)
+        self.assertIn("await flushSoundDesignState();", self.adapter)
+        self.assertIn("call('production.generate_book'", self.adapter)
+        self.assertIn("if ($('pauseGenerate')) $('pauseGenerate').onclick=act", self.adapter)
+        self.assertIn("call('job.pause'", self.adapter)
+        self.assertIn("if ($('cancelJob')) $('cancelJob').onclick=act", self.adapter)
+        self.assertIn("call('job.cancel'", self.adapter)
+        self.assertIn("if ($('playPreview')) $('playPreview').onclick=act", self.adapter)
+        self.assertIn("if ($('stopPreview')) $('stopPreview').onclick", self.adapter)
+        self.assertIn("soundButton.id === 'soundPreviewBook'", self.adapter)
+        self.assertIn("await flushSoundDesignState({requireExplicitCueClear:true});", self.adapter)
+
+        for command in (
+            '"production.preview": self._production_preview',
+            '"production.generate_book": self._production_generate_book',
+            '"job.pause": self._job_pause',
+            '"job.cancel": self._job_cancel',
+        ):
+            self.assertIn(command, self.host)
+        for capability in (
+            '"production.preview": True',
+            '"production.generate_book": True',
+            '"job.pause": True',
+            '"job.cancel": True',
+        ):
+            self.assertIn(capability, self.host)
+
     def test_production_handoff_and_final_generation_flush_sound_design(self):
         handoff_start = self.adapter.index("soundButton.id === 'applySoundToProduction'")
         handoff_end = self.adapter.index("soundButton.id === 'saveChapterBgm'", handoff_start)

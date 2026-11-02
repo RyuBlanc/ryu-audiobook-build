@@ -144,6 +144,67 @@ class StableChapterAudioIdentityTests(unittest.TestCase):
             self.assertIn("1", state["chapter_bgm_overrides"])
             self.assertIn("2", state["chapter_bgm_overrides"])
 
+    def test_packaged_acceptance_validates_persisted_bgm_by_stable_chapter_id(self):
+        from tests.packaged_sound_ui_acceptance import validate_saved_music_state
+
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp)
+            default_track = folder / "book-default.wav"
+            first_track = folder / "chapter-one.wav"
+            second_track = folder / "chapter-two.wav"
+            chapters = [
+                {"number": 1, "title": "Opening", "chapter_id": "opening-stable-id"},
+                {"number": 2, "title": "Journey", "chapter_id": "journey-stable-id"},
+                {"number": 3, "title": "Ending", "chapter_id": "ending-stable-id"},
+            ]
+            (folder / "chapters.json").write_text(
+                json.dumps(chapters), encoding="utf-8"
+            )
+            state = {
+                "chapter_bgm_strategy": "custom",
+                "background_audio_path": "",
+                "background_audio_preferred_path": str(default_track),
+                "background_audio_enabled": True,
+                "background_audio_mode": "manual",
+                "background_audio_volume": 0.42,
+                "narration_audio_volume": 0.82,
+                "sound_cue_volume": 0.30,
+                "chapter_bgm_overrides": {
+                    "opening-stable-id": {
+                        "rule": "custom", "path": str(first_track), "volume": 0.37,
+                        "start_offset": "after_first_paragraph",
+                        "end_behavior": "continue_to_transition",
+                    },
+                    "journey-stable-id": {
+                        "rule": "custom", "path": str(second_track), "volume": 0.29,
+                        "start_offset": "after_10_seconds",
+                        "end_behavior": "stop_immediately",
+                    },
+                    "ending-stable-id": {"rule": "none", "volume": 0.15},
+                    # Conflicting aliases prove the acceptance validator uses
+                    # the stable IDs for modern chapters, not display numbers.
+                    "1": {"rule": "none"},
+                    "2": {"rule": "none"},
+                    "3": {"rule": "custom", "path": "stale-track.wav"},
+                },
+                "sound_cues": {"opening": None, "chapter": None, "closing": None},
+            }
+            state_path = folder / "state.json"
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+
+            validated = validate_saved_music_state(
+                state_path,
+                default_track,
+                expected_volume=0.42,
+                expected_narration_volume=0.82,
+                expected_cue_volume=0.30,
+                expected_chapter_paths=[first_track, second_track],
+            )
+            self.assertEqual(
+                validated["chapter_bgm_overrides"]["opening-stable-id"]["path"],
+                str(first_track),
+            )
+
     def test_chapter_bgm_save_prefers_stable_id_when_display_number_is_stale(self):
         with tempfile.TemporaryDirectory() as temp:
             folder = Path(temp)

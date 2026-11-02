@@ -795,11 +795,22 @@
         document.querySelector("#chapterVolumeValue")?.textContent.trim() === value + "%",
         "Chapter BGM live volume percentage did not match the edit.");
     }
+    function chapterOverrideFor(state, number) {
+      const chapter = (state?.chapters || []).find(row => Number(row.number) === Number(number));
+      const chapterId = String(chapter?.chapter_id || "").trim();
+      if (chapterId && state?.overrides?.[chapterId] && typeof state.overrides[chapterId] === "object") {
+        return state.overrides[chapterId];
+      }
+      // Older project/API compatibility only; modern projects use the stable ID above.
+      const legacy = state?.overrides?.[String(number)];
+      return legacy && typeof legacy === "object" ? legacy : {};
+    }
+
     async function waitForChapterSaveComplete(number, rule, expectedPath, expectedValues) {
       let latestState = null;
       await waitFor("Chapter " + number + " save completion and re-enabled editor", async function () {
         latestState = await invoke("sound.chapter_bgm.get", {});
-        const row = latestState.overrides && latestState.overrides[String(number)];
+        const row = chapterOverrideFor(latestState, number);
         const controls = [
           document.querySelector("#chapterVolume"),
           document.querySelector("#chapterStartOffset"),
@@ -827,7 +838,7 @@
         return await waitForChapterSaveComplete(number, rule, expectedPath, expectedValues);
       } catch (error) {
         const state = await invoke("sound.chapter_bgm.get", {});
-        const row = state.overrides && state.overrides[String(number)] || null;
+        const row = chapterOverrideFor(state, number);
         const status = document.querySelector("#chapterBgmSaveState")?.textContent.trim() || "(missing)";
         throw new Error("Chapter " + number + " values were not confirmed saved. " +
           JSON.stringify({expected:expectedValues || null, actual:row, status, cause:String(error)}));
@@ -838,7 +849,7 @@
     const stateBeforeCandidate = await invoke("sound.chapter_bgm.get", {});
     await chooseChapterCandidate(alpha.path, config.track_titles[0]);
     const stateAfterCandidate = await invoke("sound.chapter_bgm.get", {});
-    must(JSON.stringify(stateAfterCandidate.overrides["1"] || {}) === JSON.stringify(stateBeforeCandidate.overrides["1"] || {}),
+    must(JSON.stringify(chapterOverrideFor(stateAfterCandidate, 1)) === JSON.stringify(chapterOverrideFor(stateBeforeCandidate, 1)),
       "Candidate selection overwrote Chapter One's saved assignment before confirmation.");
     document.querySelector("#confirmChapterBgmTrack").click();
     // Select saves the candidate asynchronously and disables the editor controls
@@ -868,9 +879,9 @@
       volume:0.15, start_offset:"immediate", end_behavior:"fade_before_end"
     });
     let savedChapterState = await invoke("sound.chapter_bgm.get", {});
-    const chapterOneSaved = savedChapterState.overrides["1"] || {};
-    const chapterTwoSaved = savedChapterState.overrides["2"] || {};
-    const chapterThreeSaved = savedChapterState.overrides["3"] || {};
+    const chapterOneSaved = chapterOverrideFor(savedChapterState, 1);
+    const chapterTwoSaved = chapterOverrideFor(savedChapterState, 2);
+    const chapterThreeSaved = chapterOverrideFor(savedChapterState, 3);
     must(chapterOneSaved.start_offset === "after_first_paragraph" &&
       chapterOneSaved.end_behavior === "continue_to_transition" &&
       Math.abs(Number(chapterOneSaved.volume) - 0.37) < 0.005 &&
@@ -889,16 +900,16 @@
       return state.strategy === "same" && String(state.default_path || "") === String(alpha.path);
     }, 15000);
     savedChapterState = await invoke("sound.chapter_bgm.get", {});
-    must(savedChapterState.overrides["1"]?.path === alpha.path &&
-      savedChapterState.overrides["2"]?.path === beta.path &&
-      savedChapterState.overrides["3"]?.rule === "none",
+    must(chapterOverrideFor(savedChapterState, 1).path === alpha.path &&
+      chapterOverrideFor(savedChapterState, 2).path === beta.path &&
+      chapterOverrideFor(savedChapterState, 3).rule === "none",
       "Same BGM switching erased Chapter-Based assignments.");
     document.querySelector('#sound [data-bgm-strategy="custom"]').click();
     await waitFor("Chapter-Based restored after strategy switch", async function () {
       const state = await invoke("sound.chapter_bgm.get", {});
       return state.strategy === "custom" &&
-        String(state.overrides?.["1"]?.path || "") === String(alpha.path) &&
-        String(state.overrides?.["2"]?.path || "") === String(beta.path);
+        String(chapterOverrideFor(state, 1).path || "") === String(alpha.path) &&
+        String(chapterOverrideFor(state, 2).path || "") === String(beta.path);
     }, 15000);
     record("same_and_chapter_strategy_round_trip", true,
       "Same BGM restored the book-default preference; Chapter-Based restored the explicit assignments without fallback or loss.");

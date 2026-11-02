@@ -105,9 +105,52 @@ def validate_saved_music_state(
         raise AssertionError("Chapter BGM overrides were not saved as a mapping.")
     tracks = expected_chapter_paths or []
     if len(tracks) >= 2:
-        first = overrides.get("1") or {}
-        second = overrides.get("2") or {}
-        third = overrides.get("3") or {}
+        chapters_path = Path(state_path).parent / "chapters.json"
+        try:
+            chapter_rows = json.loads(chapters_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise AssertionError(
+                f"Chapter identity metadata could not be read from {chapters_path}: {exc}"
+            ) from exc
+        if not isinstance(chapter_rows, list):
+            raise AssertionError("The saved project chapter list is not a valid array.")
+        chapters_by_number = {
+            int(row.get("number") or 0): row
+            for row in chapter_rows if isinstance(row, dict)
+        }
+        seen_ids = {
+            str(row.get("chapter_id") or "").strip()
+            for row in chapter_rows if isinstance(row, dict)
+        }
+        seen_ids.discard("")
+        if len(seen_ids) != len([
+            row for row in chapter_rows
+            if isinstance(row, dict) and str(row.get("chapter_id") or "").strip()
+        ]):
+            raise AssertionError("The saved project contains duplicate stable chapter IDs.")
+
+        def saved_chapter_override(number: int) -> dict:
+            chapter = chapters_by_number.get(number)
+            if not isinstance(chapter, dict):
+                raise AssertionError(f"Chapter {number} is missing from chapters.json.")
+            chapter_id = str(chapter.get("chapter_id") or "").strip()
+            if chapter_id:
+                row = overrides.get(chapter_id)
+                if not isinstance(row, dict):
+                    raise AssertionError(
+                        f"Chapter {number} stable BGM assignment was not retained "
+                        f"for chapter_id={chapter_id!r}: {row!r}."
+                    )
+                return row
+            # Compatibility path for genuinely pre-ID projects only.
+            row = overrides.get(str(number))
+            if not isinstance(row, dict):
+                raise AssertionError(f"Legacy Chapter {number} BGM assignment was not retained.")
+            return row
+
+        first = saved_chapter_override(1)
+        second = saved_chapter_override(2)
+        third = saved_chapter_override(3)
         expected_first = Path(tracks[0]).resolve()
         expected_second = Path(tracks[1]).resolve()
         if first.get("rule") != "custom" or Path(str(first.get("path") or "")).resolve() != expected_first:
