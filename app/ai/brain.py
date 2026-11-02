@@ -117,33 +117,33 @@ CORE_SCHEMA = {
         "chapter_purpose": {"type": "string"},
         "chapter_purpose_evidence": {"type": "string"},
         "themes": {"type": "array", "maxItems": 4, "items": {
-            "type": "object", "additionalProperties": false, "properties": {
+            "type": "object", "additionalProperties": False, "properties": {
                 "name": {"type": "string"}, "interpretation": {"type": "string"},
                 "evidence_quote": {"type": "string"}, "confidence": {"type": "number"}
             }
         }},
         "emotional_beats": {"type": "array", "maxItems": 5, "items": {
-            "type": "object", "additionalProperties": false, "properties": {
+            "type": "object", "additionalProperties": False, "properties": {
                 "emotion": {"type": "string"}, "intensity": {"type": "number"},
                 "note": {"type": "string"}, "evidence_quote": {"type": "string"},
                 "confidence": {"type": "number"}
             }
         }},
         "key_events": {"type": "array", "maxItems": 6, "items": {
-            "type": "object", "additionalProperties": false, "properties": {
+            "type": "object", "additionalProperties": False, "properties": {
                 "event": {"type": "string"}, "event_type": {"type": "string"},
                 "evidence_quote": {"type": "string"}, "confidence": {"type": "number"}
             }
         }},
         "character_observations": {"type": "array", "maxItems": 8, "items": {
-            "type": "object", "additionalProperties": false, "properties": {
+            "type": "object", "additionalProperties": False, "properties": {
                 "character": {"type": "string"}, "motivation": {"type": "string"},
                 "goal": {"type": "string"}, "change": {"type": "string"},
                 "evidence_quote": {"type": "string"}, "confidence": {"type": "number"}
             }
         }},
         "relationships": {"type": "array", "maxItems": 4, "items": {
-            "type": "object", "additionalProperties": false, "properties": {
+            "type": "object", "additionalProperties": False, "properties": {
                 "character_a": {"type": "string"}, "character_b": {"type": "string"},
                 "dynamic": {"type": "string"}, "evidence_quote": {"type": "string"},
                 "confidence": {"type": "number"}
