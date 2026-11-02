@@ -262,7 +262,7 @@
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
   let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
-  let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], pronunciationEnabled = true, activePronunciationSeries = '', lastPronunciationPreview = null, selectedSoundPath = null, selectedCuePath = null, pendingCueSlot = null, pendingCueAssignments = Object.create(null), cueChangesDirty = false, cueSaveError = '', cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null, chapterBgmDraftDirty = false, mixLevelsDirty = false, soundPreviewKind = null, soundPreviewPath = null;
+  let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], pronunciationEnabled = true, activePronunciationSeries = '', lastPronunciationPreview = null, pronunciationSelectionKeys = new Set(), selectedSoundPath = null, selectedCuePath = null, pendingCueSlot = null, pendingCueAssignments = Object.create(null), cueChangesDirty = false, cueSaveError = '', cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null, chapterBgmDraftDirty = false, mixLevelsDirty = false, soundPreviewKind = null, soundPreviewPath = null;
   let chapterBgmCandidateTrackPath = null, chapterBgmCandidateChapter = null, chapterBgmSavePromise = null, cueSavePromise = null;
   let chapterStrategySavePromise = null;
   let chapterBgmAutoSaveTimer = null, cueAutoSaveTimer = null, chapterBgmDraftRevision = 0;
@@ -3866,6 +3866,9 @@
   function pronunciationScopeKey(term) {
     return String(term.scope_type || 'current_book') + ':' + String(term.scope_id || '');
   }
+  function pronunciationSelectionKey(term) {
+    return pronunciationScopeKey(term) + '|' + String(term.written_form || term.word || '').normalize('NFC').toLocaleLowerCase();
+  }
   function renderPronunciationRows() {
     const body = $('pronDictionaryBody');
     if (!body) return;
@@ -3939,11 +3942,13 @@
         const scope = String(term.scope || 'Current book');
         const scopeId = String(term.scope_id || '');
         const scopeKey = pronunciationScopeKey(term);
+        const selectionKey = pronunciationSelectionKey(term);
+        const selected = pronunciationSelectionKeys.has(selectionKey);
         const enabled = term.enabled !== false;
         const disabled = savedProfiles.length === 0;
         const safeLabel = esc(written);
-        return '<tr class="pron-row-' + origin + '" data-pron-row data-pron-index="' + index + '">' +
-          '<td><label><input class="pron-row-select" type="checkbox" data-pron-select="' + index + '" aria-label="Select ' + safeLabel + '"/>' +
+        return '<tr class="pron-row-' + origin + (selected ? ' pron-row-selected' : '') + '" data-pron-row data-pron-index="' + index + '">' +
+          '<td><label><input class="pron-row-select" type="checkbox" data-pron-select="' + index + '" aria-label="Select ' + safeLabel + '"' + (selected ? ' checked' : '') + '/>' +
           '<span>' + (rowIndex + 1) + '</span></label></td>' +
           '<td><b>' + safeLabel + '</b><span class="pron-origin-pill ' + origin + '">' + (origin === 'ai' ? 'AI' : 'Manual') + '</span></td>' +
           '<td>' + esc(spoken) + '</td>' +
@@ -3962,7 +3967,7 @@
           '</tr>';
       }).join('');
     }
-    const selectedCount = body.querySelectorAll('[data-pron-select]:checked').length;
+    const selectedCount = pronunciationSelectionKeys.size;
     const bulk = $('deleteSelectedPron');
     if (bulk) {
       bulk.disabled = selectedCount === 0;
@@ -3978,11 +3983,15 @@
       box.replaceChildren();
       return;
     }
+    const scopes = [['current_book','Current book']];
+    if (activePronunciationSeries) scopes.push(['Series · ' + activePronunciationSeries,'Series · ' + activePronunciationSeries]);
+    scopes.push(['global_library','Global library']);
     box.hidden = false;
     box.innerHTML = '<div class="toolbar"><div><b>Review AI pronunciation suggestions</b><p class="muted">These drafts are not saved or enabled until you accept them.</p></div><span class="badge warn">' + rows.length + ' to review</span></div>' +
       rows.map((row,index) => '<div class="pron-ai-suggestion" data-pron-ai-row="' + index + '">' +
         '<label><span>Written</span><input class="input" data-pron-ai-written="' + index + '" maxlength="500" value="' + esc(row.written_form || '') + '"/></label>' +
         '<label><span>Pronounce as · review this draft</span><input class="input" data-pron-ai-spoken="' + index + '" maxlength="1000" value="' + esc(row.spoken_form || '') + '"/></label>' +
+        '<label><span>Save scope</span><select class="select" data-pron-ai-scope="' + index + '">' + scopes.map(([value,label]) => '<option value="' + esc(value) + '">' + esc(label) + '</option>').join('') + '</select></label>' +
         '<button type="button" class="btn small" data-pron-ai-accept="' + index + '">Accept disabled</button>' +
         '<button type="button" class="btn small ghost" data-pron-ai-dismiss="' + index + '">Dismiss</button></div>'
       ).join('');
@@ -3995,6 +4004,8 @@
     ]);
     if (requestToken !== termsListEpoch) return terms;
     terms = Array.isArray(loaded) ? loaded : [];
+    const validSelectionKeys = new Set(terms.map(pronunciationSelectionKey));
+    pronunciationSelectionKeys = new Set([...pronunciationSelectionKeys].filter(key => validSelectionKeys.has(key)));
     pronunciationEnabled = settings?.enabled !== false;
     activePronunciationSeries = String(settings?.series_name || '').trim();
     for (const id of ['pronunciationGlobalToggle','productionPronunciationToggle']) {
@@ -8661,9 +8672,12 @@
       const target = event.target;
       if (!target) return;
       if (target.matches('[data-pron-select]')) {
-        const count = $('pronDictionaryBody')?.querySelectorAll('[data-pron-select]:checked').length || 0;
-        const button = $('deleteSelectedPron');
-        if (button) { button.disabled = count === 0; button.textContent = 'Delete selected (' + count + ')'; }
+        const term = terms[Number(target.dataset.pronSelect)];
+        if (!term) return;
+        const key = pronunciationSelectionKey(term);
+        if (target.checked) pronunciationSelectionKeys.add(key);
+        else pronunciationSelectionKeys.delete(key);
+        renderPronunciationRows();
         return;
       }
       if (target.matches('[data-pron-enabled]')) {
@@ -8752,9 +8766,7 @@
       }
       if (button.id === 'deleteSelectedPron') {
         run(async () => {
-          const selected = [...($('pronDictionaryBody')?.querySelectorAll('[data-pron-select]:checked') || [])]
-            .map(input => terms[Number(input.dataset.pronSelect)])
-            .filter(Boolean)
+          const selected = terms.filter(term => pronunciationSelectionKeys.has(pronunciationSelectionKey(term)))
             .map(term => ({
               written_form:term.written_form || term.word,
               scope:term.scope || 'current_book',
@@ -8763,6 +8775,7 @@
           if (!selected.length) throw new Error('Select one or more pronunciation rows before bulk deletion.');
           if (!window.confirm('Delete ' + selected.length + ' selected pronunciation entry/entries from their exact scopes?')) return;
           const result = await call('pronunciation.delete_many',{entries:selected});
+          pronunciationSelectionKeys.clear();
           await refreshTerms();
           message('Deleted ' + Number(result.deleted || 0) + ' selected pronunciation entry/entries.');
         });
@@ -8821,10 +8834,11 @@
           if (!suggestion) throw new Error('This AI suggestion is stale. Analyze the saved book again.');
           const written = $('pronAiSuggestions')?.querySelector('[data-pron-ai-written="' + index + '"]')?.value || '';
           const spoken = $('pronAiSuggestions')?.querySelector('[data-pron-ai-spoken="' + index + '"]')?.value || '';
+          const scope = $('pronAiSuggestions')?.querySelector('[data-pron-ai-scope="' + index + '"]')?.value || 'current_book';
           if (!written.trim() || !spoken.trim()) throw new Error('Review both Written and Pronounce as before accepting this AI suggestion.');
           await call('pronunciation.save',{
             written_form:written,spoken_form:spoken,language:suggestion.language || 'Auto-detect',
-            handling_mode:suggestion.handling_mode || 'automatic',scope:'current_book',
+            handling_mode:suggestion.handling_mode || 'automatic',scope,
             origin:'ai',enabled:false
           });
           list.splice(index,1);
