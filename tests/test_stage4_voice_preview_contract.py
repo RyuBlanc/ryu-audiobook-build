@@ -145,7 +145,7 @@ class VoicePreviewContractTests(unittest.TestCase):
 
     def test_preview_worker_reports_requested_and_measured_duration(self):
         profile = SimpleNamespace(
-            name="Saved Narrator", provider="qwen-character", voice_id="requested-voice-id"
+            name="Saved Narrator", provider="piper", voice_id="requested-voice-id"
         )
         provider = object()
         updates = []
@@ -179,7 +179,7 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertEqual(completed["result"]["actual_duration_seconds"], 30.4)
         self.assertEqual(completed["result"]["voices_used"], ["voice-id"])
         self.assertEqual(completed["result"]["selected_profile"], "Saved Narrator")
-        self.assertEqual(completed["result"]["selected_provider"], "qwen-character")
+        self.assertEqual(completed["result"]["selected_provider"], "piper")
         self.assertEqual(completed["result"]["selected_voice_id"], "requested-voice-id")
         self.assertEqual(completed["result"]["chapter_number"], 3)
         self.assertEqual(completed["result"]["chapter_title"], "The Return")

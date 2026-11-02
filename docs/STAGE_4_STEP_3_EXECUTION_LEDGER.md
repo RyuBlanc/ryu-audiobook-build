@@ -32,7 +32,10 @@ Step 3 implements and verifies the Preview, Synthesis and Audio Assembly gates f
 - **Run #2054** (2026-11-02): 1,041 tests passed; Premium V2 JavaScript syntax and isolated Qt lifecycle checks passed. Workflow push trigger was enabled for this branch; artifact job intentionally skipped for the focused implementation commit.
 - **Run #2055** (2026-11-02): 1,042 tests passed, including successful-export checkpoint retention, selective pronunciation invalidation, and sound-only M4B reassembly with the changed BGM path.
 - **Run #2056** (2026-11-02): 1,043 tests passed, including the Generate-page stale-preview completion guard.
-- The artifact-checkpoint commit following these focused runs is the Step 3 Windows package candidate. Its frozen-app, installer, bundled-asset, manifest, malware-scan and artifact-upload outcomes must be recorded from the actual workflow before claiming package acceptance.
+
+- **Run #2057** (2026-11-02): 1,043 tests, one failure in the newly tightened preview metadata *test fixture*. The fixture declared a Qwen provider but omitted the warm-provider-cache API used by the Qwen path, so its mock bridge failed before provider creation. This did not indicate an application runtime regression. Corrected the contract fixture to use Piper while still asserting selected profile/provider/voice/chapter identity. Run #2057 did not reach the build job; rerun from the corrected artifact-checkpoint commit.
+
+- The corrected artifact-checkpoint commit is the Step 3 Windows package candidate. Its frozen-app, installer, bundled-asset, manifest, malware-scan and artifact-upload outcomes must be recorded from the actual workflow before claiming package acceptance.
 
 ## Step 3 acceptance checklist
 
