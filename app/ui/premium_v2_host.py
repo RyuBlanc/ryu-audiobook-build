@@ -4594,6 +4594,11 @@ class PremiumV2Bridge(QObject):
             raise ValueError("The original pronunciation entry no longer exists. Refresh the dictionary before editing.")
         old_match = original_matches[0] if original_matches else (new_matches[0] if new_matches else None)
         previous_spoken = old_match.get("spoken_form") if old_match else None
+        requested_origin = str(payload.get("origin") or "").strip().casefold()
+        if old_match and old_match.get("origin") == "manual" and requested_origin == "ai":
+            raise ValueError(
+                "A manual pronunciation entry already exists in this scope. Refresh the dictionary and edit that entry manually; an AI suggestion cannot overwrite or reclassify it."
+            )
         origin = str(payload.get("origin") or (old_match or {}).get("origin") or "manual").strip().casefold()
         if origin not in {"manual", "ai"}:
             raise ValueError("Pronunciation entry origin must be manual or ai.")

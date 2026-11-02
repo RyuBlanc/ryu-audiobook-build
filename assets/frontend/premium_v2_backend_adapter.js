@@ -7673,14 +7673,21 @@
           job.message = 'Pronunciation analysis completed for another project; its suggestions were not shown in the currently open project.';
           return;
         }
-        window.ryuPendingPronunciationSuggestions = Array.isArray(job?.result?.suggestions)
-          ? job.result.suggestions : [];
+        // Reload the active project's complete applicable dictionary at job
+        // completion. A user may have added a manual/series/global entry while
+        // AI analysis was running; suppress those now-duplicate suggestions.
+        await refreshTerms();
+        const currentKeys = new Set(terms.map(term =>
+          String(term.written_form || term.word || '').normalize('NFC').toLocaleLowerCase()));
+        const completedSuggestions = Array.isArray(job?.result?.suggestions) ? job.result.suggestions : [];
+        window.ryuPendingPronunciationSuggestions = completedSuggestions.filter(suggestion =>
+          !currentKeys.has(String(suggestion.written_form || '').normalize('NFC').toLocaleLowerCase()));
         renderPronunciationSuggestions(window.ryuPendingPronunciationSuggestions);
         if (status) {
           status.hidden = false;
           status.textContent = window.ryuPendingPronunciationSuggestions.length
             ? window.ryuPendingPronunciationSuggestions.length + ' AI suggestion(s) ready for review. None have been saved or enabled.'
-            : 'No new high-confidence pronunciation suggestions were found.';
+            : 'No new high-confidence pronunciation suggestions were found in the current dictionary.';
         }
       });
     });

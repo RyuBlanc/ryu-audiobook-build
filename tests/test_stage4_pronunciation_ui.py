@@ -65,6 +65,8 @@ class PronunciationDictionaryUiTests(unittest.TestCase):
         self.assertIn("row.reason", ADAPTER)
         self.assertIn("row.alternatives", ADAPTER)
         self.assertIn("project.get_active", ADAPTER)
+        self.assertIn("currentKeys", ADAPTER)
+        self.assertIn("completedSuggestions.filter", ADAPTER)
         self.assertIn("pronAnalysisStatus", HTML)
 
     def test_production_and_pronunciation_studio_use_the_same_global_toggle(self):

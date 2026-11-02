@@ -241,6 +241,16 @@ class PronunciationPersistenceTests(unittest.TestCase):
             )
         self.assertEqual(["Mira"], [row["written_form"] for row in self.list(self.bridge_a)])
 
+    def test_ai_suggestion_cannot_overwrite_or_reclassify_a_manual_entry(self):
+        self.save(self.bridge_a,"Mira","Mee-rah",origin="manual",enabled=True)
+        with self.assertRaisesRegex(ValueError,"AI suggestion cannot overwrite or reclassify"):
+            self.save(self.bridge_a,"Mira","My-rah",origin="ai",enabled=False,confidence=0.99)
+        rows=self.list(self.bridge_a)
+        self.assertEqual(1,len(rows))
+        self.assertEqual("manual",rows[0]["origin"])
+        self.assertTrue(rows[0]["enabled"])
+        self.assertEqual("Mee-rah",rows[0]["spoken_form"])
+
     def test_bulk_delete_removes_only_explicit_selected_scope_identities(self):
         self.save(self.bridge_a, "Mira", "Mee-rah")
         self.save(self.bridge_a, "Rimuru", "Ree-moo-roo", scope="Global library")
