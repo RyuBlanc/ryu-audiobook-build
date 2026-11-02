@@ -16,11 +16,9 @@ class OfflineAiAnalysisQualityTests(unittest.TestCase):
 
         self.assertEqual(chunks[0], source[:100])
         self.assertEqual(chunks[1], source[80:180])
-        self.assertEqual(chunks[2], source[160:240])
-        self.assertEqual(chunks[3], source[220:250])
-        self.assertEqual("".join(chunks[:1]) + "".join(
-            chunk[20:] for chunk in chunks[1:]
-        ), source)
+        self.assertEqual(chunks[2], source[160:250])
+        self.assertEqual(len(chunks), 3)
+        self.assertEqual(chunks[0] + chunks[1][20:] + chunks[2][20:], source)
 
     def test_scene_merge_reads_nested_schema_for_narrator_and_music_direction(self):
         brain = AudiobookBrain.__new__(AudiobookBrain)
