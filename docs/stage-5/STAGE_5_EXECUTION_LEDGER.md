@@ -123,3 +123,8 @@ Before the new packaged acceptance run began, source review caught a byte-escape
 The supplied Stage 5 detailed plan explicitly places all ten fields under the heading "Required metadata fields". The previous five-field gate was too permissive. The shared validator now requires every listed field: Book Title, Author, actual Narrator profile, Publisher, Series, Series Volume, Language, four-digit Release Year, Genre and a real non-empty JPG/JPEG/PNG cover path. The M4B cover formats are limited to the formats accepted by the assembler after the save path normalizes supported source images to PNG/JPEG/JPG.
 
 The prior Stage 4 pronunciation-generation fixture has been updated with valid publisher, series volume, year and cover values so that its original pronunciation-specific assertions continue to test pronunciation rather than failing the new Stage 5 preflight. The Step 5.1 metadata contract suite now separately proves each declared required field blocks completion when absent or invalid.
+
+
+## 14. Validator escape correction
+
+The ten-field validator commit had over-escaped the Python NUL-character replacement and Release Year digit regex in its generated source. These are corrected in the follow-up: the normalizer removes actual NUL bytes, and the year validator uses the intended four-digit decimal expression. The exact-commit full regression must confirm that a complete metadata record with a real four-digit year and valid project cover passes the gate.

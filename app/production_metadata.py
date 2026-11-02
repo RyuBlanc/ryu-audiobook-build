@@ -30,7 +30,7 @@ def normalize_metadata_text(value: Any, *, max_length: int = 500) -> str:
     """Normalize metadata without silently supplying a fake value."""
     if value is None:
         return ""
-    normalized = " ".join(str(value).replace("\\x00", " ").split())
+    normalized = " ".join(str(value).replace("\x00", " ").split())
     return normalized[:max(1, int(max_length))]
 
 
@@ -66,7 +66,7 @@ def missing_required_metadata_fields(
         "series": normalize_metadata_text(saved.get("series")),
         "series_volume": normalize_metadata_text(saved.get("series_volume"), max_length=120),
         "language": normalize_metadata_text(saved.get("language"), max_length=120),
-        "year": year if re.fullmatch(r"\\d{4}", year) else "",
+        "year": year if re.fullmatch(r"\d{4}", year) else "",
         "genre": normalize_metadata_text(saved.get("genre")),
         "cover_path": _validated_cover_path(saved.get("cover_path")),
     }
