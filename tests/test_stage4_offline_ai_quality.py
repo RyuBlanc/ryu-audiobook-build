@@ -32,7 +32,7 @@ class OfflineAiAnalysisQualityTests(unittest.TestCase):
             "continuity_notes": [],
         }
 
-        brain._merge_scenes(result, {
+        scene_payload = {
             "scenes": [{
                 "summary": "The protagonist enters the abandoned station.",
                 "location": "Abandoned station",
@@ -49,7 +49,18 @@ class OfflineAiAnalysisQualityTests(unittest.TestCase):
                 "confidence": 0.93,
             }],
             "continuity_notes": ["The station's power is already out."],
-        })
+        }
+        observed = {}
+        original_merge = brain._merge_scenes
+
+        def capture_scene_payload(out, data):
+            observed["input_music"] = data["scenes"][0].get("music")
+            original_merge(out, data)
+            observed["output_music"] = out["scenes"][0].get("music")
+
+        brain._merge_scenes = capture_scene_payload
+        brain._merge_scenes(result, scene_payload)
+        print("SCENE_MUSIC_DIAGNOSTIC", repr(observed))
 
         scene = result["scenes"][0]
         self.assertEqual(scene["narrator_direction"], {

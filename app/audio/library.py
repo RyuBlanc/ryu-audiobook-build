@@ -313,6 +313,21 @@ def effective_background_audio_mode(state):
  return audio_mode
 
 
+def is_chapter_transition_sound_enabled(state):
+ """Resolve the saved fixed-cue switch while preserving legacy cue assignments.
+
+ An explicit False is authoritative. Older projects may have saved cue paths
+ before the switch existed; in that case saved cue paths preserve their former
+ active behaviour.
+ """
+ configured = state.get("chapter_transition_sound")
+ if configured is not None:
+  return bool(configured)
+ return any(state.get(key) for key in (
+  "opening_cue_path", "page_turn_cue_path", "ending_cue_path",
+ ))
+
+
 def validate_saved_audio_paths(state):
  """Validate active saved assets and enforce Music Library / cue role separation."""
  overrides_value=state.get("chapter_bgm_overrides")
@@ -353,7 +368,7 @@ def validate_saved_audio_paths(state):
  # A saved cue is active only when the explicit chapter-transition
  # switch is on. Retained inactive paths must not block music-only output;
  # active paths remain fail-closed in the validation loop below.
- if bool(state.get("chapter_transition_sound",False)):
+ if is_chapter_transition_sound_enabled(state):
   for key,label in (
    ("opening_cue_path","opening cue"),
    ("page_turn_cue_path","next-chapter cue"),

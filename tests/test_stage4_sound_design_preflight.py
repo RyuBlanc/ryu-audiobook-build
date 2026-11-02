@@ -50,5 +50,27 @@ class SavedCuePreflightTests(unittest.TestCase):
                 })
 
 
+    def test_legacy_saved_cues_remain_active_when_transition_switch_key_is_absent(self):
+        import json
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            cue = root / "legacy-opening.wav"
+            cue.write_bytes(b"legacy cue")
+            cue.with_name(cue.name + ".license.json").write_text(
+                json.dumps({"role": "cue", "category": "opening"}),
+                encoding="utf-8",
+            )
+            with patch("app.audio.library.probe_audio_duration_seconds", return_value=3.0) as probe:
+                validate_saved_audio_paths({
+                    "background_audio_mode": "manual",
+                    "background_audio_enabled": True,
+                    "opening_cue_path": str(cue),
+                })
+            self.assertEqual([call.args[0] for call in probe.call_args_list], [cue])
+
+
+
 if __name__ == "__main__":
     unittest.main()

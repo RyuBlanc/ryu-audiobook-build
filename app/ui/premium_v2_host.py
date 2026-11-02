@@ -2860,7 +2860,7 @@ class PremiumV2Bridge(QObject):
     def _render_sound_design_preview(self, source: Path, job_id: str, state: dict[str, Any]) -> Path:
         """Render a short audition using the active book's effective saved sound assignments."""
         from app.audio.assembler import _concat_audio_files, _duration_ms, _run
-        from app.audio.library import effective_background_audio_mode, validate_saved_audio_paths
+        from app.audio.library import effective_background_audio_mode, is_chapter_transition_sound_enabled, validate_saved_audio_paths
 
         # Use the same master switch and saved-asset validation as Production and
         # Full-book Mix Preview. In particular, Voice Only must suppress retained
@@ -2868,7 +2868,7 @@ class PremiumV2Bridge(QObject):
         audio_mode = effective_background_audio_mode(state)
         validate_saved_audio_paths(state)
         sound_enabled = audio_mode != "off"
-        transition_enabled = sound_enabled and bool(state.get("chapter_transition_sound", False))
+        transition_enabled = sound_enabled and is_chapter_transition_sound_enabled(state)
 
         preview_root = app_root() / "Previews"
         preview_root.mkdir(parents=True, exist_ok=True)
@@ -5019,7 +5019,7 @@ class PremiumV2Bridge(QObject):
         if not chapters:
             raise ValueError("No chapters are eligible for generation. Restore chapter text or re-include a skipped chapter.")
         state = load_state(project.folder)
-        from app.audio.library import effective_background_audio_mode, validate_saved_audio_paths
+        from app.audio.library import effective_background_audio_mode, is_chapter_transition_sound_enabled, validate_saved_audio_paths
         background_audio_mode = effective_background_audio_mode(state)
         sound_enabled = background_audio_mode != "off"
         validate_saved_audio_paths(state)
@@ -5125,7 +5125,7 @@ class PremiumV2Bridge(QObject):
             ("custom" if state.get("chapter_bgm_overrides") else "same")
         ).strip().casefold()
         chapter_based_bgm = chapter_bgm_strategy in {"custom", "chapter-based", "chapter_based", "chapter"}
-        effective_chapter_transition_sound = sound_enabled and bool(state.get("chapter_transition_sound", False))
+        effective_chapter_transition_sound = sound_enabled and is_chapter_transition_sound_enabled(state)
         opening_cue_path = (
             Path(state["opening_cue_path"])
             if effective_chapter_transition_sound and state.get("opening_cue_path") else None

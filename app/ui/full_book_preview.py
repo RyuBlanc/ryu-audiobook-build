@@ -102,13 +102,13 @@ def start_full_book_preview(host) -> dict[str, Any]:
 def _render_full_book_preview(host, job_id, project, chapter_dirs, chapter_titles,
                               output, title, author, metadata, bitrate, state, cancel_event=None) -> None:
     from app.tts.preview import PreviewCancelledError
-    from app.audio.library import effective_background_audio_mode
+    from app.audio.library import effective_background_audio_mode, is_chapter_transition_sound_enabled
     background_audio_mode = effective_background_audio_mode(state)
     sound_enabled = background_audio_mode != "off"
     # Enforce Voice Only at the preview boundary, not only inside the mixer.
     # Saved preferences remain in project state for re-enabling later, but
     # inactive BGM/cue paths must never be handed to this preview job.
-    chapter_transition_sound = sound_enabled and bool(state.get("chapter_transition_sound", False))
+    chapter_transition_sound = sound_enabled and is_chapter_transition_sound_enabled(state)
     opening_cue_path = (
         Path(str(state["opening_cue_path"])) if chapter_transition_sound and state.get("opening_cue_path") else None
     )
