@@ -946,11 +946,11 @@ class VoicePreviewContractTests(unittest.TestCase):
                     )
 
                 with patch.object(premium_v2_host, "provider_from_profile",
-                                  return_value=(object(), "requested-narrator")), \\
-                     patch.object(premium_v2_host, "load_profiles", return_value=[]), \\
-                     patch.object(premium_v2_host, "app_root", return_value=root), \\
-                     patch.object(premium_v2_host, "build_voice_preview", side_effect=fake_build), \\
-                     patch.object(premium_v2_host, "_read_pronunciation_store", return_value=[]), \\
+                                  return_value=(object(), "requested-narrator")), \
+                     patch.object(premium_v2_host, "load_profiles", return_value=[]), \
+                     patch.object(premium_v2_host, "app_root", return_value=root), \
+                     patch.object(premium_v2_host, "build_voice_preview", side_effect=fake_build), \
+                     patch.object(premium_v2_host, "_read_pronunciation_store", return_value=[]), \
                      patch("app.audio.assembler._duration_ms", return_value=10_000):
                     premium_v2_host.PremiumV2Bridge._preview_worker(
                         host, f"pronunciation-{enabled}", profile, "Mira spoke.", 10,

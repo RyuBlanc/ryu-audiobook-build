@@ -320,14 +320,14 @@ class PreviewAssemblyTests(unittest.TestCase):
                 "background_audio_volume": 0.0,
             }
 
-            with patch.object(premium_v2_host, "provider_from_profile", return_value=(object(), "selected-voice")), \\
-                 patch.object(premium_v2_host, "load_profiles", return_value=[]), \\
-                 patch.object(premium_v2_host, "app_root", return_value=root), \\
-                 patch.object(premium_v2_host, "build_voice_preview", side_effect=fake_build), \\
-                 patch.object(premium_v2_host, "_read_pronunciation_store", return_value=[]), \\
-                 patch("app.audio.library.validate_saved_audio_paths"), \\
-                 patch("app.audio.assembler._concat_audio_files", side_effect=fake_concat), \\
-                 patch("app.audio.assembler._run", side_effect=fake_run), \\
+            with patch.object(premium_v2_host, "provider_from_profile", return_value=(object(), "selected-voice")), \
+                 patch.object(premium_v2_host, "load_profiles", return_value=[]), \
+                 patch.object(premium_v2_host, "app_root", return_value=root), \
+                 patch.object(premium_v2_host, "build_voice_preview", side_effect=fake_build), \
+                 patch.object(premium_v2_host, "_read_pronunciation_store", return_value=[]), \
+                 patch("app.audio.library.validate_saved_audio_paths"), \
+                 patch("app.audio.assembler._concat_audio_files", side_effect=fake_concat), \
+                 patch("app.audio.assembler._run", side_effect=fake_run), \
                  patch("app.audio.assembler._duration_ms", side_effect=[10_000, 10_700, 10_700]):
                 premium_v2_host.PremiumV2Bridge._preview_worker(
                     updates_host, "mix-cleanup", profile, "Mira spoke.", 10, state, threading.Event()
