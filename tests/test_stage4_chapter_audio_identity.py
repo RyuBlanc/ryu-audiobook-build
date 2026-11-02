@@ -79,7 +79,9 @@ class StableChapterAudioIdentityTests(unittest.TestCase):
             with patch.object(host, "load_state", return_value=state), \
                  patch.object(host, "save_state") as save:
                 result = host.PremiumV2Bridge._sound_chapter_bgm_get(bridge, {})
-            self.assertEqual(set(result["overrides"]), set(ids))
+            self.assertTrue(set(ids).issubset(set(result["overrides"])))
+            self.assertIn("1", result["overrides"])
+            self.assertIn("2", result["overrides"])
             self.assertEqual(result["overrides"][ids[0]]["volume"], 0.21)
             self.assertEqual(result["overrides"][ids[1]]["volume"], 0.32)
             self.assertEqual([row["chapter_id"] for row in result["chapters"]], ids)

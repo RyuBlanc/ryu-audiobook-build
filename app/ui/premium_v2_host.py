@@ -6845,23 +6845,25 @@ class PremiumV2Bridge(QObject):
         last_saved_at = state.get("sound_design_saved_at") or last_manifest.get("updated_at")
         chapters_by_number = {str(chapter.number): chapter for chapter in project.chapters}
         migrated = dict(stored)
-        # Promote legacy numeric assignments to stable IDs. Keep number aliases
-        # for older narration manifests; the assembler prefers chapter_id.
+        # Promote legacy numeric assignments to stable IDs when the project model
+        # provides them. Number-only adapters remain supported during migration.
         for number_key, chapter in chapters_by_number.items():
+            identity = str(getattr(chapter, "chapter_id", "") or "").strip()
             legacy_value = stored.get(number_key)
-            identity_key = str(chapter.chapter_id)
-            if identity_key not in migrated and isinstance(legacy_value, dict):
-                migrated[identity_key] = dict(legacy_value)
+            if identity and identity not in migrated and isinstance(legacy_value, dict):
+                migrated[identity] = dict(legacy_value)
         if migrated != stored:
             state["chapter_bgm_overrides"] = migrated
             save_state(project.folder, state)
             stored = migrated
         overrides: dict[str, dict[str, Any]] = {}
         for chapter in project.chapters:
-            key = str(chapter.chapter_id)
+            number_key = str(chapter.number)
+            identity = str(getattr(chapter, "chapter_id", "") or "").strip()
+            key = identity or number_key
             value = stored.get(key)
             if not isinstance(value, dict):
-                value = stored.get(str(chapter.number), {})
+                value = stored.get(number_key, {})
             if not isinstance(value, dict):
                 continue
             row = dict(value)
@@ -6872,6 +6874,9 @@ class PremiumV2Bridge(QObject):
             row["title"] = track["title"] if available else None
             row["available"] = available if row.get("rule") == "custom" else True
             overrides[key] = row
+            # Preserve the number-key contract for older UI callers. The
+            # adapter prefers the stable key whenever it is available.
+            overrides[number_key] = row
         default_track = catalog.get(default_path)
         default_available = bool(default_track and str(default_track.get("role") or "music").casefold() != "cue"
                                  and Path(default_path).is_file())
@@ -6895,7 +6900,11 @@ class PremiumV2Bridge(QObject):
                 and str(value.get("path") or "").strip()
             }),
             "chapters": [
-                {"number": chapter.number, "title": chapter.title, "chapter_id": chapter.chapter_id}
+                {
+                    "number": chapter.number,
+                    "title": chapter.title,
+                    "chapter_id": getattr(chapter, "chapter_id", None),
+                }
                 for chapter in project.chapters
             ],
         }
@@ -7002,7 +7011,8 @@ class PremiumV2Bridge(QObject):
             overrides = {}
         else:
             overrides = dict(overrides)
-        identity_key = str(chapter.chapter_id)
+        chapter_identity = str(getattr(chapter, "chapter_id", "") or "").strip()
+        identity_key = chapter_identity or str(number)
         if identity_key not in overrides and isinstance(overrides.get(str(number)), dict):
             overrides[identity_key] = dict(overrides[str(number)])
         overrides[identity_key] = {
@@ -7021,7 +7031,7 @@ class PremiumV2Bridge(QObject):
         state["modified_at"] = saved_at
         state["sound_design_saved_at"] = saved_at
         save_state(project.folder, state)
-        return {"saved": True, "number": number, "chapter_id": chapter.chapter_id, "title": chapter.title,
+        return {"saved": True, "number": number, "chapter_id": getattr(chapter, "chapter_id", None), "title": chapter.title,
                 "rule": rule, "path": path, "track_title": title,
                 "strategy": "custom", "override_count": len(overrides)}
 
