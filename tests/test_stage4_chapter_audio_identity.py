@@ -55,6 +55,21 @@ class StableChapterAudioIdentityTests(unittest.TestCase):
         self.assertNotEqual(editor.chapters[2].chapter_id, first_id)
         self.assertNotEqual(editor.chapters[2].chapter_id, second_id)
 
+    def test_chapter_editor_merge_keeps_leading_chapter_identity(self):
+        first = Chapter(1, "Opening", "Opening narration.")
+        second = Chapter(2, "Continuation", "Continuation narration.")
+        first_id = first.chapter_id
+        removed_id = second.chapter_id
+
+        editor = ChapterEditor([first, second])
+        editor.merge_with_next(0)
+
+        self.assertEqual(len(editor.chapters), 1)
+        self.assertEqual(editor.chapters[0].chapter_id, first_id)
+        self.assertNotEqual(editor.chapters[0].chapter_id, removed_id)
+        self.assertIn("Opening narration.", editor.chapters[0].text)
+        self.assertIn("Continuation narration.", editor.chapters[0].text)
+
     def test_sound_chapter_bgm_get_migrates_legacy_number_keys_to_chapter_ids(self):
         with tempfile.TemporaryDirectory() as temp:
             folder = Path(temp)
