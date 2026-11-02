@@ -144,7 +144,9 @@ class VoicePreviewContractTests(unittest.TestCase):
                 bridge._new_job.assert_not_called()
 
     def test_preview_worker_reports_requested_and_measured_duration(self):
-        profile = SimpleNamespace(name="Saved Narrator")
+        profile = SimpleNamespace(
+            name="Saved Narrator", provider="qwen-character", voice_id="requested-voice-id"
+        )
         provider = object()
         updates = []
 
@@ -166,7 +168,8 @@ class VoicePreviewContractTests(unittest.TestCase):
                  patch.object(premium_v2_host, "build_voice_preview", side_effect=fake_build) as build, \
                  patch("app.audio.assembler._duration_ms", return_value=30_400):
                 premium_v2_host.PremiumV2Bridge._preview_worker(
-                    bridge, "preview-job", profile, "A longer source passage.", 30, {}
+                    bridge, "preview-job", profile, "A longer source passage.", 30,
+                    {"_preview_chapter_number": 3, "_preview_chapter_title": "The Return"}
                 )
 
         provider_factory.assert_called_once_with(profile)
@@ -175,6 +178,11 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertEqual(completed["result"]["requested_duration_seconds"], 30)
         self.assertEqual(completed["result"]["actual_duration_seconds"], 30.4)
         self.assertEqual(completed["result"]["voices_used"], ["voice-id"])
+        self.assertEqual(completed["result"]["selected_profile"], "Saved Narrator")
+        self.assertEqual(completed["result"]["selected_provider"], "qwen-character")
+        self.assertEqual(completed["result"]["selected_voice_id"], "requested-voice-id")
+        self.assertEqual(completed["result"]["chapter_number"], 3)
+        self.assertEqual(completed["result"]["chapter_title"], "The Return")
         self.assertEqual(completed["result"]["segments"], 3)
 
     def test_preview_worker_fails_closed_when_duration_cannot_be_measured(self):

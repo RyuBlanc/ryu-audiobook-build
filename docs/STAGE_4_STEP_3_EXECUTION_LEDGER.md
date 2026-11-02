@@ -26,6 +26,14 @@ Step 3 implements and verifies the Preview, Synthesis and Audio Assembly gates f
 - Added regression coverage for missing/stale/empty selected chapters, backend forwarding, preview-result identity and frontend save wiring.
 - Second audit found successful production cleanup deleted all per-chapter WAVs and manifests immediately after packaging. That made later full-book mix preview impossible and forced full narration re-synthesis for sound-design-only changes. Step 3 retains these project-local checkpoints after successful export; changed pronunciation invalidates only chapters whose prepared narration chunks change, while a new sound-design configuration is applied to a fresh M4B assembly using the retained narration.
 
+
+## Focused Windows verification history
+
+- **Run #2054** (2026-11-02): 1,041 tests passed; Premium V2 JavaScript syntax and isolated Qt lifecycle checks passed. Workflow push trigger was enabled for this branch; artifact job intentionally skipped for the focused implementation commit.
+- **Run #2055** (2026-11-02): 1,042 tests passed, including successful-export checkpoint retention, selective pronunciation invalidation, and sound-only M4B reassembly with the changed BGM path.
+- **Run #2056** (2026-11-02): 1,043 tests passed, including the Generate-page stale-preview completion guard.
+- The artifact-checkpoint commit following these focused runs is the Step 3 Windows package candidate. Its frozen-app, installer, bundled-asset, manifest, malware-scan and artifact-upload outcomes must be recorded from the actual workflow before claiming package acceptance.
+
 ## Step 3 acceptance checklist
 
 - [ ] Chapter-specific preview/download: selected chapter, selected narrator, supported duration, actual duration, playback and native save verified on the packaged app.
