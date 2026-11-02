@@ -837,5 +837,16 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("close_preview_provider_cache", host[host.index("class PremiumV2Window"):])
 
 
+
+    def test_dictionary_row_preview_can_preserve_literal_written_and_spoken_text(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1]
+        adapter = (root / "assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (root / "app/ui/premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("apply_pronunciation_rules:false", adapter)
+        self.assertIn('state["_bypass_pronunciation_dictionary"] = True', host)
+        self.assertIn('[] if state.get("_bypass_pronunciation_dictionary")', host)
+        self.assertIn('else _effective_pronunciation_dictionary(state)', host)
+
 if __name__ == "__main__":
     unittest.main()

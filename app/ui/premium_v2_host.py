@@ -2794,6 +2794,14 @@ class PremiumV2Bridge(QObject):
         route_character_cast = payload.get("route_character_cast", True)
         if not isinstance(route_character_cast, bool):
             raise ValueError("Character cast routing must be a boolean preview option.")
+        apply_pronunciation_rules = payload.get("apply_pronunciation_rules", True)
+        if not isinstance(apply_pronunciation_rules, bool):
+            raise ValueError("Pronunciation preview handling must be a boolean option.")
+        if not apply_pronunciation_rules:
+            # Row-level Written vs Pronounce-as comparison must synthesize exactly
+            # the text the user selected rather than being transformed by the rule
+            # being tested. Ordinary previews keep the saved project/global rules.
+            state["_bypass_pronunciation_dictionary"] = True
         include_sound_design = bool(payload.get("include_sound_design"))
         if include_sound_design:
             state["_include_sound_design_preview"] = True
@@ -3086,7 +3094,10 @@ class PremiumV2Bridge(QObject):
             heartbeat_thread.start()
             result = build_voice_preview(
                 text_value, provider, voice, output,
-                pronunciation_dictionary=_effective_pronunciation_dictionary(state),
+                pronunciation_dictionary=(
+                    [] if state.get("_bypass_pronunciation_dictionary")
+                    else _effective_pronunciation_dictionary(state)
+                ),
                 narration_speed=float(state.get("narration_speed") or 0.90),
                 pacing_profile=str(state.get("pacing_profile") or "natural"),
                 max_chars=max(1400, seconds * 240), progress_callback=progress,

@@ -4032,7 +4032,10 @@
       String(item.name || '').toLowerCase() === String(profileName || '').toLowerCase());
     if (!profile) throw new Error('Choose an available saved Voice Studio profile before previewing a pronunciation entry.');
     if (!String(textValue || '').trim()) throw new Error('The selected pronunciation text is empty.');
-    const request = {profile_name:profile.name,text:String(textValue),duration_seconds:10,route_character_cast:false};
+    const request = {
+      profile_name:profile.name,text:String(textValue),duration_seconds:10,
+      route_character_cast:false,apply_pronunciation_rules:false
+    };
     const data = await call('voice.preview',request);
     lastPronunciationPreview = {...request,label:String(label || profile.name)};
     await monitorJob(data.job_id, async job => {
@@ -7251,6 +7254,11 @@
     await refreshProjects();
     await refreshChapters();
     await refreshCharacters();
+    // Current-book identity is scoped to the active project. Do not carry a
+    // multi-select or pending AI review list into another project's dictionary.
+    pronunciationSelectionKeys.clear();
+    window.ryuPendingPronunciationSuggestions = [];
+    renderPronunciationSuggestions([]);
     await refreshTerms();
 
     const listed = projects.find(project => String(project.folder || '') === targetFolder) || {};

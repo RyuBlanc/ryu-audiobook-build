@@ -49,6 +49,8 @@ class PronunciationDictionaryUiTests(unittest.TestCase):
         self.assertIn("term.scope_type", ADAPTER)
         self.assertIn("data-pron-enabled", ADAPTER)
         self.assertIn("data-pron-audio-play", ADAPTER)
+        self.assertIn("apply_pronunciation_rules:false", ADAPTER)
+        self.assertIn("_bypass_pronunciation_dictionary", (ROOT / "app/ui/premium_v2_host.py").read_text(encoding="utf-8"))
         self.assertIn("pronunciationSelectionKeys", ADAPTER)
         self.assertIn("data-pron-ai-scope", ADAPTER)
         self.assertIn("call('pronunciation.delete_many'", ADAPTER)
