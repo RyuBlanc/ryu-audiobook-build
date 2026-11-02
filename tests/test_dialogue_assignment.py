@@ -158,12 +158,13 @@ class DialogueAssignmentTests(unittest.TestCase):
             previous_start = previous_text.index("“")
             previous_end = previous_text.index("”", previous_start) + 1
             previous_chapter = Chapter(1, "The Oath", previous_text)
-            record_project_speaker_assignment(root, previous_chapter, {
+            saved = record_project_speaker_assignment(root, previous_chapter, {
                 "start": previous_start,
                 "end": previous_end,
                 "speaker": "Souei",
                 "source": "manual",
             })
+            self.assertTrue(saved["saved"], saved)
 
             next_text = (
                 "Souei checked the eastern route from the gate. "

@@ -107,7 +107,32 @@ def dialogue_segment_for_selection(
         name for name in discovered_names
         if _is_plausible_name(name)
     }
-    candidates = list(dict.fromkeys(manual_speakers + sorted(discovered)))
+    learned_examples = []
+    learning_scope = ""
+    learned_speakers = []
+    if project_folder is not None:
+        try:
+            from app.chapters.character_learning import (
+                learning_scope_for_project,
+                load_learning_examples,
+            )
+            learning_scope = learning_scope_for_project(project_folder)
+            if learning_scope:
+                learned_examples = load_learning_examples(learning_scope)
+                learned_speakers = list(dict.fromkeys(
+                    str(row.get("speaker") or "").strip()
+                    for row in learned_examples
+                    if isinstance(row, dict)
+                    and str(row.get("speaker") or "").strip()
+                ))
+        except (OSError, ValueError, TypeError):
+            learned_examples = []
+            learned_speakers = []
+            learning_scope = ""
+
+    candidates = list(dict.fromkeys(
+        manual_speakers + sorted(discovered) + learned_speakers
+    ))
 
     last_speaker = None
     previous_manual = [
@@ -139,45 +164,39 @@ def dialogue_segment_for_selection(
     # Explicitly confirmed series/book-local speaker examples can improve
     # later suggestions. They remain suggestions only: a remembered match is
     # never written back as an assignment until the user confirms it.
-    if project_folder is not None and candidates:
+    if learning_scope and candidates:
         try:
-            from app.chapters.character_learning import (
-                learning_scope_for_project,
-                load_learning_examples,
-                rank_speaker_suggestions,
-            )
-            learning_scope = learning_scope_for_project(project_folder)
-            if learning_scope:
-                known_characters = [
-                    {"name": name, "series": learning_scope}
-                    for name in candidates
-                ]
-                learned = rank_speaker_suggestions(
+            from app.chapters.character_learning import rank_speaker_suggestions
+            known_characters = [
+                {"name": name, "series": learning_scope}
+                for name in candidates
+            ]
+            learned = rank_speaker_suggestions(
                     chapter_text=text,
                     start=best_start,
                     end=best_end,
                     known_characters=known_characters,
-                    learning_examples=load_learning_examples(learning_scope),
-                    last_speaker=last_speaker or "",
-                    last_speaker_series=learning_scope,
+                    learning_examples=learned_examples,
+                last_speaker=last_speaker or "",
+                last_speaker_series=learning_scope,
+            )
+            combined = {item[0].casefold(): item for item in suggestions}
+            for item in learned:
+                name = str(item.get("name") or "").strip()
+                if not name:
+                    continue
+                candidate = (
+                    name,
+                    max(0.0, min(1.0, float(item.get("confidence") or 0.0))),
+                    str(item.get("evidence") or "Matches a confirmed local character example."),
                 )
-                combined = {item[0].casefold(): item for item in suggestions}
-                for item in learned:
-                    name = str(item.get("name") or "").strip()
-                    if not name:
-                        continue
-                    candidate = (
-                        name,
-                        max(0.0, min(1.0, float(item.get("confidence") or 0.0))),
-                        str(item.get("evidence") or "Matches a confirmed local character example."),
-                    )
-                    previous = combined.get(name.casefold())
-                    if previous is None or candidate[1] > previous[1]:
-                        combined[name.casefold()] = candidate
-                suggestions = sorted(
-                    combined.values(),
-                    key=lambda item: (-item[1], item[0].casefold()),
-                )[:5]
+                previous = combined.get(name.casefold())
+                if previous is None or candidate[1] > previous[1]:
+                    combined[name.casefold()] = candidate
+            suggestions = sorted(
+                combined.values(),
+                key=lambda item: (-item[1], item[0].casefold()),
+            )[:5]
         except (OSError, ValueError, TypeError):
             # Learning memory is optional and must never disable ordinary
             # source-grounded dialogue assignment when its local store is unreadable.
