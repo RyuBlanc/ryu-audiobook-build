@@ -7603,10 +7603,15 @@
       const group=[...document.querySelectorAll('#generate .segmented')].find(el=>[...el.querySelectorAll('button')].some(b=>/10s|30s|60s|90s/i.test(b.textContent)));
       const duration=group?.querySelector('button.active')?.textContent.match(/\d+/)?.[0]||'30';
       invalidateVoicePreview();
+      const previewToken=voicePreviewEpoch;
       if($('previewState'))$('previewState').textContent='Preparing · 2%';
       if($('validation'))$('validation').textContent='Preparing selected chapter preview · 2%';
       const data=await call('production.preview',{profile_name:name,chapter_number:chapterNumber,duration_seconds:Number(duration)});
-      await monitorJob(data.job_id,job=>preparePreviewPlayback(job,Number(duration),{profileName:name}));
+      if(previewToken!==voicePreviewEpoch)return;
+      await monitorJob(data.job_id,job=>{
+        if(previewToken!==voicePreviewEpoch)return true;
+        return preparePreviewPlayback(job,Number(duration),{profileName:name});
+      });
     });
     if ($('playPreview')) $('playPreview').onclick=act(async()=>{if(!previewAudio||!voicePreviewValid)throw new Error('Generate a validated preview first.');if(!previewAudio.paused){previewAudio.pause();$('playPreview').textContent='▶ Play';}else{await previewAudio.play();$('playPreview').textContent='Ⅱ Pause';}});
     if ($('stopPreview')) $('stopPreview').onclick=()=>{if(previewAudio){previewAudio.pause();previewAudio.currentTime=0;}if($('playPreview'))$('playPreview').textContent='▶ Play';syncPreviewPlaybackTime();};

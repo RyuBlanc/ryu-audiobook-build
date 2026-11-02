@@ -894,5 +894,17 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("const chapterSuffix=lastVoicePreviewChapterNumber", adapter)
         self.assertIn("voice.preview.save", adapter)
 
+
+    def test_generate_preview_ignores_stale_completion_after_newer_request(self):
+        adapter = Path("assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("if ($('previewGenerate')) $('previewGenerate').onclick")
+        end = adapter.index("if ($('playPreview')) $('playPreview').onclick", start)
+        handler = adapter[start:end]
+        self.assertIn("invalidateVoicePreview();", handler)
+        self.assertIn("const previewToken=voicePreviewEpoch;", handler)
+        self.assertIn("if(previewToken!==voicePreviewEpoch)return;", handler)
+        self.assertIn("if(previewToken!==voicePreviewEpoch)return true;", handler)
+        self.assertIn("preparePreviewPlayback(job,Number(duration),{profileName:name})", handler)
+
 if __name__ == "__main__":
     unittest.main()
