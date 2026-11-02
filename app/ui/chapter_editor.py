@@ -6,7 +6,6 @@ from PySide6.QtCore import QEvent, QItemSelectionModel, QTimer, QThread, Signal,
 from PySide6.QtGui import QColor, QIcon, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QGridLayout,
-    QDialog,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -960,18 +959,16 @@ class ChapterEditorPage(QWidget):
                         f"(confidence {_numeric_score(item.get('confidence', 0.0)):.2f})"
                     )
 
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Audiobook AI — Analysis Report")
-        dialog.resize(900, 720)
-        layout = QVBoxLayout(dialog)
-        report_view = QTextEdit(dialog)
+        # Use a standalone read-only editor window instead of a nested dialog.
+        # Keeping a strong reference prevents Qt from destroying it before the
+        # user has finished reviewing the saved report.
+        report_view = QTextEdit()
+        report_view.setWindowTitle("Audiobook AI — Analysis Report")
+        report_view.resize(900, 720)
         report_view.setReadOnly(True)
         report_view.setPlainText("\n\n".join(sections))
-        layout.addWidget(report_view)
-        close_button = QPushButton("Close", dialog)
-        close_button.clicked.connect(dialog.accept)
-        layout.addWidget(close_button)
-        dialog.exec()
+        self._ai_report_window = report_view
+        report_view.show()
 
     def _ai_worker_finished(self) -> None:
         self.ai_worker = None
