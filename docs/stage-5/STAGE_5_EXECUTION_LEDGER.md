@@ -111,3 +111,8 @@ Stage 5 metadata tests now exercise the Premium V2 save path for WebP covers: th
 ## 11. Packaged Production metadata acceptance added
 
 The Windows frozen-app acceptance script is extended to exercise the Stage 5 metadata dialog inside the actual packaged executable. It verifies all ten field controls, the read-only selected narrator, history dropdown values from a second real saved project, unsaved/incomplete gating, preview remaining enabled, a deterministic first-save failure that leaves project files unchanged, a successful retry, project-local PNG cover persistence, and the exact remaining Narrator field. The same acceptance harness then starts a **new frozen-app process** and verifies that title, author, publisher, series/volume, language, year, genre and cover are restored from the active project. A valid one-pixel PNG is generated as a fixture and decoded by the real Qt image reader.
+
+
+## 12. Packaged metadata acceptance fixture correction
+
+Before the new packaged acceptance run began, source review caught a byte-escape issue in the one-pixel PNG fixture and an over-escaped Windows path assertion. The fixture now emits the PNG signature, RGBA scanline and chunks from explicit byte values; the restart assertion normalizes backslashes to forward slashes before testing the project-local cover path.

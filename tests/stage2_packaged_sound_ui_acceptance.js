@@ -155,8 +155,9 @@
         String(persistedProject.year || "") === String(expectedMetadata.year || "") &&
         String(persistedProject.genre || "") === String(expectedMetadata.genre || ""),
         "Production metadata was not restored from the saved project after application restart.");
-      must(String(persistedProject.cover_path || "").toLowerCase().endsWith("assets/cover.png") ||
-        String(persistedProject.cover_path || "").toLowerCase().endsWith("assets\\\\cover.png"),
+      const normalizedCoverPath = String(persistedProject.cover_path || "")
+        .split(String.fromCharCode(92)).join("/").toLowerCase();
+      must(normalizedCoverPath.endsWith("/assets/cover.png"),
         "The project-local PNG cover was not resolved after application restart.");
       record("production_metadata_application_restart", true,
         "Book title, author, publisher, series/volume, language, year, genre and project-local cover were reloaded by a new frozen-app process.");

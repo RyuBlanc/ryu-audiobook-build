@@ -218,9 +218,10 @@ def write_png_fixture(path: Path) -> None:
         return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", checksum)
 
     header = struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0)
-    scanline = b"\\x00\\xff\\x00\\x00\\xff"
+    scanline = bytes((0, 255, 0, 0, 255))
+    signature = bytes((137, 80, 78, 71, 13, 10, 26, 10))
     content = (
-        b"\\x89PNG\\r\\n\\x1a\\n"
+        signature
         + chunk(b"IHDR", header)
         + chunk(b"IDAT", zlib.compress(scanline))
         + chunk(b"IEND", b"")
