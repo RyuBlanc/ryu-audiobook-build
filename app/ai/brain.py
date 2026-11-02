@@ -506,26 +506,26 @@ class AudiobookBrain:
             direction_payload = raw.get('narrator_direction')
             if not isinstance(direction_payload, dict):
                 direction_payload = {}
-            nested_music_payload = raw.get('music')
-            has_nested_music = isinstance(nested_music_payload, dict)
-            if not has_nested_music:
-                nested_music_payload = {}
 
-            ambience_payload = raw.get('ambience')
-            if not isinstance(ambience_payload, list):
-                ambience_payload = []
-            sfx_payload = raw.get('sfx')
-            if not isinstance(sfx_payload, list):
-                sfx_payload = []
-
-            if has_nested_music:
-                music_style = nested_music_payload.get('style', '')
-                music_intensity = nested_music_payload.get('intensity', 0.0)
+            # Read nested music by capability rather than relying on a concrete
+            # container type. Runtime/structured-output adapters may return a
+            # mapping implementation other than a built-in dict.
+            nested_music = raw.get('music')
+            nested_get = getattr(nested_music, 'get', None)
+            nested_music_available = callable(nested_get)
+            if nested_music_available:
+                music_style = nested_get('style', '')
+                music_intensity = nested_get('intensity', 0.0)
             else:
                 music_style = raw.get('music_style', '')
                 music_intensity = raw.get('music_intensity', 0.0)
 
-            out['scenes'].append({
+            ambience_payload = raw.get('ambience')
+            ambience = ambience_payload if isinstance(ambience_payload, list) else []
+            sfx_payload = raw.get('sfx')
+            sfx = sfx_payload if isinstance(sfx_payload, list) else []
+
+            scene_record = {
                 'summary': str(raw.get('summary', '')).strip(),
                 'location': str(raw.get('location', '')).strip(),
                 'time': str(raw.get('time', '')).strip(),
@@ -535,14 +535,16 @@ class AudiobookBrain:
                     'energy': str(direction_payload.get('energy', raw.get('energy', 'medium'))).strip() or 'medium',
                     'delivery': str(direction_payload.get('delivery', raw.get('delivery', ''))).strip(),
                 },
-                'ambience': [str(value).strip() for value in ambience_payload if str(value).strip()][:3],
+                'ambience': [str(value).strip() for value in ambience if str(value).strip()][:3],
                 'music': {
                     'style': str(music_style).strip() or None,
                     'intensity': self._numeric_intensity(music_intensity),
                 },
-                'sfx': [str(value).strip() for value in sfx_payload if str(value).strip()][:4],
+                'sfx': [str(value).strip() for value in sfx if str(value).strip()][:4],
                 'confidence': _numeric_score(raw.get('confidence', 0.0)),
-            })
+            }
+            out['scenes'].append(scene_record)
+
         for note in data.get('continuity_notes', []) or []:
             note = str(note).strip()
             if note and note not in out['continuity_notes']:

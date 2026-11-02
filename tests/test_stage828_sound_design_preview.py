@@ -518,7 +518,7 @@ class Stage828SoundDesignPreviewTests(unittest.TestCase):
         library = Path("app/audio/library.py").read_text(encoding="utf-8")
         self.assertIn("def effective_background_audio_mode(state):", library)
         self.assertIn("audio_mode=effective_background_audio_mode(state)", library)
-        self.assertIn("effective_background_audio_mode, validate_saved_audio_paths", host)
+        self.assertIn("effective_background_audio_mode, is_chapter_transition_sound_enabled, validate_saved_audio_paths", host)
         self.assertIn("from app.audio.library import validate_saved_audio_paths", preview)
         self.assertIn("from app.audio.library import effective_background_audio_mode", preview)
         self.assertIn("background_audio_mode = effective_background_audio_mode(state)", host)

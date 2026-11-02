@@ -304,7 +304,7 @@ class SoundDesignCatalogueTests(unittest.TestCase):
         self.assertIn('Path(state["opening_cue_path"])\n            if effective_chapter_transition_sound and state.get("opening_cue_path") else None', generation)
         self.assertIn('page_turn_cue_path=page_turn_cue_path,', generation)
         self.assertIn('ending_cue_path=ending_cue_path,', generation)
-        self.assertIn("chapter_transition_sound = sound_enabled and bool(state.get(\"chapter_transition_sound\", False))", preview_source)
+        self.assertIn("chapter_transition_sound = sound_enabled and is_chapter_transition_sound_enabled(state)", preview_source)
         self.assertIn('opening_cue_path = (', preview_source)
         self.assertIn('Path(str(state["opening_cue_path"])) if chapter_transition_sound and state.get("opening_cue_path") else None', preview_source)
         self.assertIn('page_turn_cue_path=page_turn_cue_path,', preview_source)
