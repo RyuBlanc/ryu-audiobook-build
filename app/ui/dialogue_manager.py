@@ -253,7 +253,9 @@ class DialogueAssignmentManagerDialog(QDialog):
         start, end, raw = selected
         self.preview.setText(f"<b>Dialogue</b><br>{str(raw).strip()}")
         self._clear_character_checks()
-        self.current_segment = dialogue_segment_for_selection(chapter, start, end)
+        self.current_segment = dialogue_segment_for_selection(
+            chapter, start, end, project_folder=self.project_folder
+        )
 
         if self.current_segment and self.current_segment.suggestions:
             top = self.current_segment.suggestions[0]
