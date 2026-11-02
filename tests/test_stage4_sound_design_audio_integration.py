@@ -2,14 +2,18 @@
 from __future__ import annotations
 
 from array import array
+import json
 import math
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
 import unittest
 import wave
+from types import SimpleNamespace
 
 from app.audio import assembler
+from app.ui import full_book_preview
 
 
 class Stage4SoundDesignAudioIntegrationTests(unittest.TestCase):
@@ -160,6 +164,172 @@ class Stage4SoundDesignAudioIntegrationTests(unittest.TestCase):
             self._assert_tone(decoded, rate, 0.60, 1000, (220, 400, 600, 800))
             self._assert_tone(decoded, rate, 1.80, 1000, (220, 400, 600, 800))
             self._assert_tone(decoded, rate, 3.00, 1000, (220, 400, 600, 800))
+
+    def test_full_book_preview_matches_final_assembly_for_all_three_sound_scenarios(self):
+        class PreviewHost:
+            def __init__(self):
+                self._preview_cancel_events = {}
+                self._jobs_lock = threading.RLock()
+                self.updates = []
+
+            def _job_update(self, job_id, **changes):
+                self.updates.append((job_id, changes))
+                return changes
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            book_music = self._write_tone(root / "book-music.wav", 220, 1.0, 0.65)
+            chapter_music = self._write_tone(root / "chapter-one.wav", 330, 1.0, 0.65)
+            opening = self._write_tone(root / "opening.wav", 400, 0.2, 0.65)
+            next_chapter = self._write_tone(root / "next.wav", 600, 0.2, 0.65)
+            closing = self._write_tone(root / "closing.wav", 800, 0.2, 0.65)
+
+            scenarios = (
+                ("same-bgm", "manual", "same", True),
+                ("chapter-based", "manual", "chapter-based", True),
+                ("voice-only", "off", "same", False),
+            )
+            for name, mode, strategy, cues_enabled in scenarios:
+                with self.subTest(scenario=name):
+                    chapter_root = root / name / "working_audio"
+                    chapter_dirs = []
+                    chapter_titles = []
+                    chapter_ids = ("parity-opening", "parity-ending")
+                    for number, (title, chapter_id) in enumerate(
+                        zip(("Opening", "Ending"), chapter_ids), start=1
+                    ):
+                        chapter_dir = chapter_root / f"{number:03d}_{title}"
+                        self._write_tone(
+                            chapter_dir / "chunks" / "00001.wav", 1000, 1.2, 0.14
+                        )
+                        narration = {
+                            "chapter": number,
+                            "chapter_id": chapter_id,
+                            "title": title,
+                            "narration_text": f"{title} narration.",
+                        }
+                        (chapter_dir / "narration.json").write_text(
+                            json.dumps(narration), encoding="utf-8"
+                        )
+                        (chapter_dir / "chunk_manifest.json").write_text(
+                            json.dumps({"chunks": [{
+                                "file": "00001.wav", "text": narration["narration_text"]
+                            }]}),
+                            encoding="utf-8",
+                        )
+                        chapter_dirs.append(chapter_dir)
+                        chapter_titles.append(title)
+
+                    overrides = (
+                        {
+                            chapter_ids[0]: {
+                                "rule": "custom", "path": str(chapter_music),
+                                "volume": 0.35, "start_offset": "immediate",
+                                "end_behavior": "stop_immediately",
+                            },
+                            chapter_ids[1]: {"rule": "none"},
+                        }
+                        if strategy == "chapter-based" else {}
+                    )
+                    state = {
+                        "title": f"Parity {name}",
+                        "author": "Ryu Parity Test",
+                        "narrator": "Saved Narrator",
+                        "language": "en",
+                        "genre": "Fantasy",
+                        "audio_bitrate": 192,
+                        "narration_speed": 1.0,
+                        "background_audio_mode": mode,
+                        "background_audio_enabled": mode != "off",
+                        "background_audio_path": str(book_music),
+                        "background_audio_volume": 0.35,
+                        "narration_audio_volume": 0.85,
+                        "sound_cue_volume": 0.30,
+                        "background_audio_fade_in": 0,
+                        "background_audio_fade_out": 0,
+                        "ambience_audio_volume": 0,
+                        "chapter_transition_sound": cues_enabled,
+                        "opening_cue_path": str(opening),
+                        "page_turn_cue_path": str(next_chapter),
+                        "ending_cue_path": str(closing),
+                        "sound_cue_style": "library",
+                        "story_effects_enabled": False,
+                        "story_effect_volume": 0.18,
+                        "auto_music_style": "auto",
+                        "auto_music_track_path": "",
+                        "chapter_bgm_strategy": strategy,
+                        "chapter_bgm_overrides": overrides,
+                    }
+                    metadata = {
+                        "title": state["title"], "author": state["author"],
+                        "narrator": state["narrator"], "language": "en",
+                        "genre": "Fantasy",
+                    }
+                    preview_output = root / f"{name}-preview.m4b"
+                    final_output = root / f"{name}-final.m4b"
+                    host = PreviewHost()
+                    full_book_preview._render_full_book_preview(
+                        host, f"preview-{name}",
+                        SimpleNamespace(folder=chapter_root.parent),
+                        chapter_dirs, chapter_titles, preview_output,
+                        state["title"], state["author"], metadata, 192, state,
+                        threading.Event(),
+                    )
+                    completed = next(
+                        row for job_id, row in host.updates
+                        if job_id == f"preview-{name}" and row.get("state") == "completed"
+                    )
+                    self.assertTrue(preview_output.is_file())
+                    self.assertEqual(completed["result"]["chapter_count"], 2)
+
+                    sound_enabled = mode != "off"
+                    rendered = assembler.assemble_m4b(
+                        chapter_dirs, final_output, state["title"], state["author"],
+                        chapter_titles=chapter_titles, metadata=metadata, bitrate=192,
+                        narration_speed=1.0,
+                        background_audio_path=book_music if sound_enabled else None,
+                        background_audio_volume=0.35,
+                        narration_volume=0.85,
+                        cue_audio_volume=0.30,
+                        background_audio_fade_in=0,
+                        background_audio_fade_out=0,
+                        ambience_audio_volume=0,
+                        background_audio_mode=mode,
+                        auto_music_style="auto",
+                        auto_music_variation=None,
+                        chapter_transition_sound=cues_enabled,
+                        story_effects_enabled=False,
+                        story_effect_volume=0.18,
+                        sound_cue_style="library",
+                        opening_cue_path=opening if cues_enabled else None,
+                        page_turn_cue_path=next_chapter if cues_enabled else None,
+                        ending_cue_path=closing if cues_enabled else None,
+                        chapter_bgm_overrides=overrides if sound_enabled else {},
+                        chapter_bgm_strategy=strategy,
+                    )
+                    self.assertEqual(rendered, final_output)
+
+                    preview_audio, preview_rate = self._decode(
+                        preview_output, root / f"{name}-preview.wav"
+                    )
+                    final_audio, final_rate = self._decode(
+                        final_output, root / f"{name}-final.wav"
+                    )
+                    self.assertEqual(preview_rate, final_rate)
+                    self.assertEqual(len(preview_audio), len(final_audio))
+                    self.assertGreater(len(final_audio), self.sample_rate)
+                    rms_error = math.sqrt(
+                        sum((left - right) ** 2 for left, right in zip(preview_audio, final_audio))
+                        / len(final_audio)
+                    )
+                    signal_rms = math.sqrt(
+                        sum(value * value for value in final_audio) / len(final_audio)
+                    )
+                    self.assertLess(
+                        rms_error / max(signal_rms, 1.0),
+                        0.02,
+                        f"{name}: preview and final audio differ beyond encoding tolerance",
+                    )
 
     def test_same_and_chapter_based_bgm_render_the_selected_strategy_without_fallback(self):
         with tempfile.TemporaryDirectory() as temporary:
