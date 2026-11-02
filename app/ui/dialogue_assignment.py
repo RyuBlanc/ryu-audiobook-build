@@ -22,6 +22,10 @@ from app.chapters.assignment_utils import (
     format_character_registry_entry,
     normalize_assignment,
 )
+from app.chapters.character_learning import (
+    record_project_speaker_assignment,
+    remove_project_speaker_assignment_feedback,
+)
 
 
 class DialogueAssignmentDialog(QDialog):
@@ -318,7 +322,21 @@ class DialogueAssignmentDialog(QDialog):
             mode=self.mode.currentData() or "chorus",
         )
 
-        # Replace only the exact same selected dialogue span.
+        # Replace only the exact same selected dialogue span. Remove any
+        # earlier confirmed single-speaker memory before recording the user's
+        # new explicit choice (chorus assignments are not single-speaker truth).
+        previous_assignment = next(
+            (
+                item for item in getattr(self.chapter, "dialogue_assignments", [])
+                if int(item.get("start", -1)) == assignment["start"]
+                and int(item.get("end", -1)) == assignment["end"]
+            ),
+            None,
+        )
+        if previous_assignment is not None:
+            remove_project_speaker_assignment_feedback(
+                self.project_folder, self.chapter, previous_assignment
+            )
         self.chapter.dialogue_assignments = [
             item
             for item in getattr(self.chapter, "dialogue_assignments", [])
@@ -328,5 +346,8 @@ class DialogueAssignmentDialog(QDialog):
             )
         ]
         self.chapter.dialogue_assignments.append(assignment)
+        record_project_speaker_assignment(
+            self.project_folder, self.chapter, assignment
+        )
         self.assigned = True
         self.accept()
