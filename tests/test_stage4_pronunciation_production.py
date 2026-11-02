@@ -50,6 +50,9 @@ class ProductionPronunciationConnectivityTests(unittest.TestCase):
             settings=SimpleNamespace(value=lambda _key, default=None: default),
         )
         state = {
+            "author": "Saved Author",
+            "language": "en",
+            "genre": "Fantasy",
             "series": "Slime",
             "pronunciation_enabled": enabled,
             "pronunciation_dictionary": [

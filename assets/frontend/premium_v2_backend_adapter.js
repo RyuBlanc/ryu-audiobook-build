@@ -271,6 +271,7 @@
   let cueClearAllStaged = false;
   let providerCatalogs = Object.create(null), providerCatalogEpochs = Object.create(null), voiceListEpoch = 0, modelListEpoch = 0, projectListEpoch = 0, characterListEpoch = 0, termsListEpoch = 0, soundListEpoch = 0, historyListEpoch = 0, librarySearchTimer = null, soundSearchTimer = null;
   let dashboardProject = null, selectedAudiobookFolder = null, miniPlayerDismissed = false;
+  let metadataDialogProjectFolder = '', metadataDialogDirty = false, metadataDialogEpoch = 0;
   let activeProjectCardFolder = null, projectCardStatusObserver = null;
   let activeProjectCardEpoch = 0;
   const soundCategoryGroups = Object.freeze({
@@ -4650,6 +4651,202 @@
       (kind === 'warn' ? 'var(--amber)' : 'var(--muted)');
   }
 
+  function setMetadataDialogStatus(value, kind = 'info') {
+    const node = $('projectMetadataStatus');
+    if (!node) return;
+    node.textContent = String(value || '');
+    node.style.color = kind === 'ready' ? 'var(--green)' :
+      (kind === 'warn' ? 'var(--amber)' : (kind === 'error' ? 'var(--danger)' : 'var(--muted)'));
+  }
+
+  function renderProductionMetadataGate(active) {
+    const status = $('productionMetadataStatus');
+    const start = $('startGenerate');
+    if (!active?.folder) {
+      if (status) {
+        status.textContent = 'Open a saved project to validate its details.';
+        status.style.color = 'var(--amber)';
+      }
+      if (start) {
+        start.disabled = true;
+        start.title = 'Open a project and complete Input Project Details first.';
+      }
+      return;
+    }
+    const unsaved = metadataDialogDirty && metadataDialogProjectFolder === String(active.folder);
+    const missing = Array.isArray(active.metadata_missing_fields) ? active.metadata_missing_fields : [];
+    const complete = active.metadata_complete === true;
+    if (status) {
+      status.textContent = unsaved
+        ? 'Unsaved changes — save Input Project Details before full generation.'
+        : (complete
+          ? 'Project details saved and validated.'
+          : 'Incomplete metadata — complete: ' + (missing.join(', ') || 'required project details') + '.');
+      status.style.color = complete && !unsaved ? 'var(--green)' : 'var(--amber)';
+    }
+    if (start) {
+      start.disabled = !complete || unsaved;
+      start.title = start.disabled
+        ? (unsaved ? 'Save or discard Input Project Details changes before generation.'
+          : 'Complete the missing required metadata before full generation.')
+        : 'Generate the full audiobook using saved project configuration.';
+    }
+  }
+
+  function populateMetadataHistory(field, values) {
+    const list = $('metadataHistory' + field[0].toUpperCase() + field.slice(1));
+    if (!list) return;
+    const rows = Array.isArray(values) ? values : [];
+    list.replaceChildren(...rows.map(value => {
+      const option = document.createElement('option');
+      option.value = String(value ?? '');
+      return option;
+    }));
+  }
+
+  async function openProjectMetadataDialog() {
+    const dialog = $('inputProjectDetailsDialog');
+    if (!dialog) throw new Error('Input Project Details dialog is unavailable in this build.');
+    const requestEpoch = ++metadataDialogEpoch;
+    const active = await call('project.get_active');
+    if (!active?.folder) throw new Error('Open a saved project from the Library before editing its details.');
+    const history = await call('project.metadata.history', {
+      expected_project_folder: active.folder
+    });
+    if (requestEpoch !== metadataDialogEpoch) return;
+    if (String(history?.project_folder || '') !== String(active.folder)) {
+      throw new Error('The active project changed while its metadata was loading. Reopen Input Project Details.');
+    }
+    metadataDialogProjectFolder = String(active.folder);
+    metadataDialogDirty = false;
+    $('metadataTitle').value = String(active.title || '');
+    $('metadataAuthor').value = String(active.author || '');
+    $('metadataNarrator').value = String(active.voice_profile || active.narrator || '');
+    $('metadataPublisher').value = String(active.publisher || '');
+    $('metadataSeries').value = String(active.series || active.series_name || '');
+    $('metadataSeriesVolume').value = String(active.series_volume || '');
+    $('metadataLanguage').value = String(active.language || '');
+    $('metadataYear').value = String(active.year || '');
+    $('metadataGenre').value = String(active.genre || '');
+    $('metadataCoverPath').value = String(active.cover_path || '');
+    const coverName = $('metadataCoverName');
+    if (coverName) coverName.textContent = active.cover_path ? String(active.cover_path).split(/[\\/]/).pop() : 'No cover selected';
+    const coverPreview = $('metadataCoverPreview');
+    if (coverPreview) {
+      coverPreview.dataset.coverPath = String(active.cover_path || '');
+      applyProjectCover(coverPreview, active.cover_path || '');
+    }
+    const values = history?.values || {};
+    for (const field of ['author','publisher','series','series_volume','language','year','genre']) {
+      populateMetadataHistory(field, values[field]);
+    }
+    setMetadataDialogStatus(
+      active.metadata_complete === true
+        ? 'Saved project details loaded.'
+        : 'Missing required details: ' + (active.metadata_missing_fields || []).join(', '),
+      active.metadata_complete === true ? 'ready' : 'warn'
+    );
+    renderProductionMetadataGate(active);
+    if (!dialog.open) dialog.showModal();
+  }
+
+  function wireProjectMetadataDialog() {
+    const dialog = $('inputProjectDetailsDialog');
+    if (!dialog || dialog.dataset.ryuMetadataBound === '1') return;
+    dialog.dataset.ryuMetadataBound = '1';
+    const form = $('projectMetadataForm');
+    const markDirty = () => {
+      metadataDialogDirty = true;
+      setMetadataDialogStatus('Unsaved changes. Save to persist these details to the active project.', 'warn');
+      renderProductionMetadataGate(window.ryuPremiumActiveProject || null);
+    };
+    form?.addEventListener('input', event => {
+      if (event.target?.id !== 'metadataNarrator') markDirty();
+    });
+    const coverButton = $('metadataChooseCover');
+    if (coverButton) coverButton.onclick = async () => {
+      try {
+        if (!metadataDialogProjectFolder) throw new Error('Reload the active project details and try again.');
+        const result = await call('project.metadata.cover.choose', {
+          expected_project_folder: metadataDialogProjectFolder
+        });
+        if (result?.cancelled) return;
+        if (String(result?.project_folder || '') !== metadataDialogProjectFolder) {
+          throw new Error('The active project changed while selecting the cover. Reopen the dialog.');
+        }
+        $('metadataCoverPath').value = String(result.cover_path || '');
+        const name = $('metadataCoverName');
+        if (name) name.textContent = String(result.filename || 'Cover selected');
+        const preview = $('metadataCoverPreview');
+        if (preview) {
+          preview.dataset.coverPath = String(result.cover_path || '');
+          applyProjectCover(preview, result.cover_path || '');
+        }
+        markDirty();
+      } catch (error) {
+        setMetadataDialogStatus(error?.message || String(error), 'error');
+        message(error?.message || String(error), true);
+      }
+    };
+    const close = () => {
+      if (metadataDialogDirty && !window.confirm('Discard unsaved Input Project Details changes?')) return;
+      metadataDialogDirty = false;
+      dialog.close();
+      renderProductionMetadataGate(window.ryuPremiumActiveProject || null);
+    };
+    if ($('projectMetadataClose')) $('projectMetadataClose').onclick = close;
+    dialog.addEventListener('cancel', event => {
+      if (metadataDialogDirty) {
+        event.preventDefault();
+        close();
+      }
+    });
+    if ($('projectMetadataSave')) $('projectMetadataSave').onclick = async () => {
+      const button = $('projectMetadataSave');
+      if (!metadataDialogProjectFolder) {
+        setMetadataDialogStatus('Reload the active project before saving.', 'error');
+        return;
+      }
+      button.disabled = true;
+      setMetadataDialogStatus('Saving project details…', 'info');
+      try {
+        const result = await call('project.metadata.save', {
+          expected_project_folder: metadataDialogProjectFolder,
+          title: $('metadataTitle').value,
+          author: $('metadataAuthor').value,
+          publisher: $('metadataPublisher').value,
+          series: $('metadataSeries').value,
+          series_volume: $('metadataSeriesVolume').value,
+          language: $('metadataLanguage').value,
+          year: $('metadataYear').value,
+          genre: $('metadataGenre').value,
+          cover_path: $('metadataCoverPath').value
+        });
+        if (result?.saved !== true || String(result.project_folder || '') !== metadataDialogProjectFolder) {
+          throw new Error('The backend did not confirm that these project details were saved.');
+        }
+        metadataDialogDirty = false;
+        setMetadataDialogStatus('Project details saved successfully.', 'ready');
+        dialog.close();
+        await refreshProjects();
+        await refreshProductionSummary();
+        message('Input Project Details saved to the active project.');
+      } catch (error) {
+        metadataDialogDirty = true;
+        setMetadataDialogStatus('Save failed: ' + (error?.message || String(error)), 'error');
+        renderProductionMetadataGate(window.ryuPremiumActiveProject || null);
+        message(error?.message || String(error), true);
+      } finally {
+        button.disabled = false;
+      }
+    };
+    const open = $('openProjectDetails');
+    if (open) open.onclick = async () => {
+      try { await openProjectMetadataDialog(); }
+      catch (error) { message(error?.message || String(error), true); }
+    };
+  }
+
   async function refreshProductionSummary() {
     const active = await call('project.get_active');
     if (!active || !active.folder) {
@@ -4659,6 +4856,7 @@
       setProductionStatus('productionNarrator', 'Not set');
       setProductionStatus('productionVoiceCastCount', 'No saved character assignments');
       setProductionStatus('productionOutputSummary', 'No output target configured');
+      renderProductionMetadataGate(null);
       setProductionStatus('productionBookImported', 'No active project', 'warn');
       setProductionStatus('productionChaptersReady', 'No active project', 'warn');
       setProductionStatus('productionNarratorReady', 'No active project', 'warn');
@@ -4674,10 +4872,13 @@
     const language = String(active.language || '').trim() || 'Language not set';
     const publisher = String(active.publisher || '').trim();
     const series = String(active.series_name || active.series || '').trim();
+    const seriesVolume = String(active.series_volume || '').trim();
+    const genre = String(active.genre || '').trim();
     setProductionStatus('productionBookTitle', String(active.title || 'Untitled audiobook'));
     setProductionStatus('productionBookMetadata', [author, language,
+      genre ? 'Genre ' + genre : 'Genre not set',
       publisher ? 'Publisher ' + publisher : 'Publisher not set',
-      series ? 'Series ' + series : ''].filter(Boolean).join(' · '));
+      series ? 'Series ' + series + (seriesVolume ? ' · Volume ' + seriesVolume : '') : ''].filter(Boolean).join(' · '));
     setProductionStatus('productionNarrator',
       String(active.narrator || active.voice_profile || '').trim() || 'Not set');
 
@@ -4743,6 +4944,7 @@
       : (outputReady ? 'Writable · ' + String(active.output_folder || '')
         : 'Output folder is missing or not writable');
     setProductionStatus('productionOutputReady', outputStatus, outputReady ? 'ready' : 'warn');
+    renderProductionMetadataGate(active);
     return active;
   }
 
@@ -9283,6 +9485,7 @@
     // The prototype action controls were replaced before any async work above;
     // only backend-owned Voice Studio actions remain active here.
 
+    wireProjectMetadataDialog();
     const productionPage = $('generate');
     if (productionPage && !window.__ryuProductionPageObserver) {
       window.__ryuProductionPageObserver = new MutationObserver(() => {

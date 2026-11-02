@@ -26,7 +26,7 @@ from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QApplication, QFileDialog, QLabel, QMainWindow, QProgressBar, QPushButton, QStackedWidget, QVBoxLayout, QWidget
-from PySide6.QtGui import QDesktopServices, QPixmap
+from PySide6.QtGui import QDesktopServices, QImageReader, QPixmap
 
 from app.core.paths import app_root, audiobooks_root, ensure_roots, library_root, settings_root
 from app.ui.frontend_assets import (
@@ -35,7 +35,7 @@ from app.ui.frontend_assets import (
     premium_v2_logo_candidates,
     prepare_native_host_html,
 )
-from app.core.project import create_project, list_projects
+from app.core.project import Project, create_project, list_projects
 from app.core.character_identity import character_identity_key
 from app.core.character_library import (
     character_library_path as reusable_character_library_path,
@@ -60,6 +60,7 @@ from app.tts.profile_provider import provider_from_profile
 from app.tts.pronunciation_suggester import suggest_names_from_text, suggest_pronunciation
 from app.tts.voice_profile import load_profiles
 from app.core.state import load_state, save_state
+from app.production_metadata import missing_required_metadata_fields, normalize_metadata_text
 from app.version import APP_NAME, full_version
 
 log = logging.getLogger(__name__)
@@ -376,6 +377,9 @@ class PremiumV2Bridge(QObject):
                 "project.trash.purge": self._project_trash_purge,
                 "project.open": self._project_open,
                 "project.get_active": self._project_get_active,
+                "project.metadata.history": self._project_metadata_history,
+                "project.metadata.save": self._project_metadata_save,
+                "project.metadata.cover.choose": self._project_metadata_cover_choose,
                 "chapter.list": self._chapter_list,
                 "chapter.update": self._chapter_update,
                 "chapter.dialogue.assign": self._chapter_dialogue_assign,
@@ -512,6 +516,9 @@ class PremiumV2Bridge(QObject):
             "project.trash.purge": True,
             "project.open": True,
             "project.get_active": True,
+            "project.metadata.history": True,
+            "project.metadata.save": True,
+            "project.metadata.cover.choose": True,
             "chapter.list": True,
             "chapter.update": True,
             "chapter.dialogue.assign": True,
@@ -744,6 +751,9 @@ class PremiumV2Bridge(QObject):
         narrator_ready = bool(
             effective_narrator_profile and narrator_selection.get("profile_available")
         )
+        metadata_missing = missing_required_metadata_fields(
+            project.title, state, effective_narrator_profile if narrator_ready else ""
+        )
         output_configured = bool(output_value)
         pronunciation_rules = (
             state.get("pronunciation_dictionary")
@@ -814,6 +824,10 @@ class PremiumV2Bridge(QObject):
         return {
             "title": project.title,
             "series_name": self._project_series_name(project, state),
+            "series_volume": str(state.get("series_volume") or ""),
+            "genre": str(state.get("genre") or ""),
+            "metadata_complete": not metadata_missing,
+            "metadata_missing_fields": metadata_missing,
             "folder": str(project.folder.resolve()),
             "source_path": str(project.source_path) if project.source_path else None,
             "chapter_count": chapter_count,
@@ -1022,6 +1036,140 @@ class PremiumV2Bridge(QObject):
             self.settings.sync()
             return None
         return self._project_summary(selected)
+
+    def _metadata_expected_project(self, project, payload: dict[str, Any]) -> None:
+        """Reject delayed metadata requests after the active project changes."""
+        expected = str(payload.get("expected_project_folder") or "").strip()
+        if not expected:
+            raise ValueError("Reload Input Project Details and select the active project before saving.")
+        try:
+            expected_path = Path(expected).expanduser().resolve()
+            active_path = Path(project.folder).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise ValueError("The active project identity could not be verified.") from exc
+        if expected_path != active_path:
+            raise RuntimeError("The active project changed. Reopen Input Project Details before saving to prevent cross-project metadata changes.")
+
+    def _project_metadata_history(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Return saved metadata choices from local projects and Character Library."""
+        project = self._active_project()
+        self._metadata_expected_project(project, payload)
+        keys = ("author", "publisher", "series", "series_volume", "language", "year", "genre")
+        values: dict[str, list[str]] = {key: [] for key in keys}
+        seen: dict[str, set[str]] = {key: set() for key in keys}
+
+        def add(key: str, raw: Any) -> None:
+            value = normalize_metadata_text(raw)
+            folded = value.casefold()
+            if value and folded not in seen[key]:
+                values[key].append(value)
+                seen[key].add(folded)
+
+        for saved_project in list_projects():
+            state = load_state(saved_project.folder)
+            for key in keys:
+                add(key, state.get(key))
+            add("series", self._project_series_name(saved_project, state))
+        for character in list_reusable_characters():
+            if isinstance(character, dict):
+                add("series", character.get("series"))
+        return {"project_folder": str(project.folder.resolve()), "values": values}
+
+    def _project_metadata_cover_choose(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Choose, decode-validate and copy cover art into this project's assets."""
+        project = self._active_project()
+        self._metadata_expected_project(project, payload)
+        path, _ = QFileDialog.getOpenFileName(
+            None, "Select Audiobook Cover", "",
+            "Images (*.jpg *.jpeg *.png *.webp *.gif *.bmp *.tif *.tiff)",
+        )
+        if not path:
+            return {"cancelled": True}
+        reader = QImageReader(path)
+        reader.setAutoTransform(True)
+        image = reader.read()
+        if image.isNull():
+            detail = reader.errorString() or "The selected image could not be decoded."
+            raise ValueError(f"Choose a valid supported cover image. {detail}")
+        cover = persist_project_cover(Path(path), project.folder)
+        return {
+            "cancelled": False,
+            "cover_path": str(cover),
+            "filename": cover.name,
+            "project_folder": str(project.folder.resolve()),
+        }
+
+    def _project_metadata_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Persist metadata against the exact project opened in the dialog."""
+        project = self._active_project()
+        self._metadata_expected_project(project, payload)
+        title = normalize_metadata_text(payload.get("title"), max_length=500)
+        if not title:
+            raise ValueError("Book Title cannot be empty.")
+        metadata = {
+            "author": normalize_metadata_text(payload.get("author")),
+            "publisher": normalize_metadata_text(payload.get("publisher")),
+            "series": normalize_metadata_text(payload.get("series")),
+            "series_volume": normalize_metadata_text(payload.get("series_volume"), max_length=120),
+            "language": normalize_metadata_text(payload.get("language"), max_length=120),
+            "year": normalize_metadata_text(payload.get("year"), max_length=4),
+            "genre": normalize_metadata_text(payload.get("genre")),
+        }
+        if metadata["year"] and not re.fullmatch(r"\d{4}", metadata["year"]):
+            raise ValueError("Release Year must be a four-digit year, for example 2026.")
+
+        state = load_state(project.folder)
+        cover_value = str(payload.get("cover_path") or "").strip()
+        cover_path: Path | None = None
+        if cover_value:
+            candidate = Path(cover_value).expanduser().resolve()
+            if not candidate.is_file():
+                raise FileNotFoundError("The selected cover image is no longer available. Choose it again.")
+            reader = QImageReader(str(candidate))
+            reader.setAutoTransform(True)
+            image = reader.read()
+            if image.isNull():
+                raise ValueError("The selected cover image is not a valid supported image.")
+            try:
+                candidate.relative_to(Path(project.folder).resolve())
+                cover_path = candidate
+            except ValueError:
+                cover_path = persist_project_cover(candidate, project.folder)
+            metadata["cover_path"] = str(cover_path)
+            state["cover_detection_attempted"] = True
+        else:
+            state.pop("cover_path", None)
+
+        selection = self._narrator_series_default_read(
+            project, state, self._project_series_name(project, state)
+        )
+        narrator_profile = normalize_metadata_text(selection.get("effective_profile_name"))
+        state.update(metadata)
+        state["narrator"] = narrator_profile
+        if metadata["series"]:
+            state["series_name"] = metadata["series"]
+        else:
+            state.pop("series_name", None)
+        state["modified_at"] = self._now()
+
+        project_payload = {
+            "title": title,
+            "source_file": project.source_path.name if project.source_path else None,
+        }
+        project_payload_text = json.dumps(project_payload, ensure_ascii=False, indent=2)
+        state_payload_text = json.dumps(state, ensure_ascii=False, indent=2)
+        active_again = self._active_project()
+        if Path(active_again.folder).resolve() != Path(project.folder).resolve():
+            raise RuntimeError("The active project changed before metadata could be committed.")
+        Project._atomic_write_text(project.project_file, project_payload_text)
+        Project._atomic_write_text(project.folder / "state.json", state_payload_text)
+        project.title = title
+        return {
+            "saved": True,
+            "project_folder": str(project.folder.resolve()),
+            "title": title,
+            "cover_path": str(cover_path) if cover_path else "",
+        }
 
     def _active_project(self):
         folder = str(self.settings.value("project/active_folder", "") or "")
@@ -5066,6 +5214,12 @@ class PremiumV2Bridge(QObject):
         # that this project will use for production.
         profile, narrator_selection = self._resolve_narrator_for_generation(project, state, chapters)
         profile_name = profile.name
+        metadata_missing = missing_required_metadata_fields(project.title, state, profile_name)
+        if metadata_missing:
+            raise ValueError(
+                "Full audiobook generation is blocked until required Input Project Details are saved. "
+                "Complete: " + ", ".join(metadata_missing) + "."
+            )
         provider, voice = provider_from_profile(profile)
         # Include the full selected narrator profile in resumable chunk identity
         # even when this book has no character-specific voice assignments.

@@ -1,0 +1,76 @@
+# Stage 5 — Execution Ledger
+
+Audit date: 2 November 2026  
+Repository: https://github.com/RyuBlanc/ryu-audiobook-build  
+Stage 4 checkpoint: [Build Windows App #2084](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41455259436)  
+Stage 4 checkpoint SHA: `ace9630d2d6b4a745c029906e0624637d4e3fdd3`  
+Stage 5 branch: `stage-5/step-1-production-metadata`
+
+## 1. Repository baseline and branch decision
+
+- GitHub Actions reported 770 total workflow runs during the baseline audit.
+- Stage 4 checkpoint #2084 succeeded on `stage-4/step-4-audio-assembly` at `ace9630d2d6b4a745c029906e0624637d4e3fdd3`.
+- #2084 passed the Regression Tests job (1,061 tests) and Windows application/package acceptance jobs, with installer/portable/hash artifacts present. The public release step was skipped by its release condition.
+- The Stage 4 completion record leaves target-PC installed application acceptance and real-audio listening pending. Automated evidence does not replace those manual gates.
+- Default branch `main` was at `356b536499be8d3679d96496f24f3836864cb47e`, but it is **diverged** from the Stage 4 checkpoint. `main` is 30 commits ahead of the shared ancestor; the Stage 4 branch is 1,641 commits ahead of `main`. The Stage 4 branch contains the Production Studio work and Stage 5 source baseline.
+- Windows build attempts #2085–#2087 on `main` were skipped because maintenance-only commits intentionally short-circuit the Build Windows App job. Later Provider Functional/Runtime Smoke runs #405/#406 passed on the `main` maintenance SHA, but do not prove a Windows app package.
+- The latest verified Stage 4 packaged baseline is #2084 / `ace9630d2d6b4a745c029906e0624637d4e3fdd3`. No unverified merge/cherry-pick from divergent `main` is included.
+- Stage 5 branch `stage-5/step-1-production-metadata` was created directly from the exact #2084 SHA.
+
+## 2. Actions history reconciliation from #2084 through latest
+
+| Run | Workflow | SHA / branch | Conclusion | Reconciliation |
+|---|---|---|---|---|
+| [#2084](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41455259436) | Build Windows App | `ace9630d2d6b` / Stage 4 Step 4 | Success | Immutable Stage 4 baseline; retained |
+| [#2085](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41478867813) | Build Windows App | `0000689e1e30` / main | Skipped | Maintenance-commit guard; not a code failure |
+| [#2086](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41479038823) | Build Windows App | `ca22ea9cc221` / main | Skipped | Maintenance-commit guard; not a code failure |
+| [#2087](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41479474195) | Build Windows App | `356b536499be` / main | Skipped | Maintenance-commit guard; not a code failure |
+| [#403](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41478867769) | Provider Functional Smoke | `0000689e1e30` / main | Cancelled | Newer push superseded the run; provider workflow has cancel-in-progress concurrency |
+| [#404](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41478867955) | Provider Runtime Smoke | `0000689e1e30` / main | Cancelled | Superseded by newer push; concurrency cancellation |
+| [#405 attempt A](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41479038642) | Provider Runtime Smoke | `ca22ea9cc221` / main | Cancelled | Superseded by next push; concurrency cancellation |
+| [#404 attempt B](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41479039136) | Provider Functional Smoke | `ca22ea9cc221` / main | Cancelled | Superseded by next push; concurrency cancellation |
+| [#405 final](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41479474602) | Provider Functional Smoke | `356b536499be` / main | Success | Matching-HEAD functional smoke jobs passed |
+| [#406 final](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41479474408) | Provider Runtime Smoke | `356b536499be` / main | Success | Matching-HEAD runtime smoke jobs passed |
+
+Storage-cleanup workflow runs in the same interval are housekeeping, not product acceptance. Cancelled provider attempts were superseded by newer pushes due workflow concurrency; final same-HEAD provider functional/runtime runs passed. Newer skipped Windows runs did not produce an alternative package. Older Stage 4 test/package failures remain recorded in the Stage 4 ledger; their causes were corrected by later commits and checkpoint #2084. No failed Stage 5 run exists at Stage 5 start.
+
+## 3. Step 5.1 source audit
+
+Existing behaviour retained:
+- Native Generate already had editable metadata controls, local-project history dropdowns and saved-state restore.
+- Cover helpers copy supported formats into project-local `assets`; EPUB/DOCX/PDF cover extraction already exists.
+- Production Studio already had an active-project summary, output target/format/bitrate data and seven readiness indicators.
+- Sound Design's `renderSoundMixSummary()` already derives from saved BGM state, de-duplicates stable chapter IDs/legacy aliases and distinguishes Same BGM, Chapter-Based BGM and Voice Only.
+- Production Studio already used real chapter-preview/generation job bridge commands. Step 5.1 does not create a competing generation engine.
+
+Step 5.1 gaps:
+- Premium V2 Production Studio had no Input Project Details dialog/button.
+- Production summary omitted Genre and Series Volume.
+- No dedicated project-scoped Premium V2 metadata save/history bridge contract existed.
+- No saved-data metadata completion state was displayed.
+- Full generation lacked an independent backend metadata completion guard.
+
+The seven existing readiness indicators and live music/output calculations are retained, not replaced with fixed green values.
+
+## 4. Step 5.1 execution substeps
+
+1. 5.1.1 — Input Project Details control and functional dialog.
+2. 5.1.2 — Real active-project metadata, narrator profile, Character Library series, cover picker and historical values.
+3. 5.1.3 — Saved-metadata completion gate; unsaved edits/save failures remain warnings; previews remain available.
+4. 5.1.4 — Dynamic project summary including Genre and Series Volume.
+5. 5.1.5 — Preserve accurate Same BGM / Chapter-Based BGM / Voice Only summary and unique track counting.
+6. 5.1.6 — Preserve the seven backend-derived readiness indicators.
+7. 5.1.7 — Exact-commit regression for metadata, history, save errors, project isolation, gate, summary, readiness and persistence.
+
+Gate policy: Book Title, Author, actual selected Narrator profile, Language and Genre are mandatory. Publisher, Series, Series Volume, Release Year and Cover Image are optional descriptive tags. The source requirements enumerate fields but do not explicitly classify mandatory tags; this policy is documented in the requirement register.
+
+## 5. Current status
+
+- Step 5.1: IN PROGRESS.
+- Step 5.1 source and tests are committed together for one exact-commit CI checkpoint.
+- Steps 5.2–5.5: OPEN; sequential execution only after the preceding exit condition passes.
+- No version bump, tag or public release during Stage 5 implementation.
+
+## 6. Manual acceptance boundary
+
+CI cannot establish installed Windows app launch/navigation/resizing, visual dialog quality across required display sizes, real narrator-profile refresh, cover persistence after an actual app restart, or real M4B metadata/cover embedding and listening quality. These remain explicit runtime acceptance items and must not be marked VERIFIED COMPLETE from CI alone.

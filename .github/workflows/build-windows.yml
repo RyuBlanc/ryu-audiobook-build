@@ -29,6 +29,7 @@ on:
       - stage-4/step-1-pronunciation-studio
       - stage-4/step-3-preview-assembly
       - stage-4/step-4-audio-assembly
+      - stage-5/**
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.
