@@ -1252,38 +1252,43 @@ class RegressionTests(unittest.TestCase):
 
     def test_voice_preview_invalidation_ignores_deleted_qt_status_widget(self):
         import shiboken6
+        from types import SimpleNamespace
         from PySide6.QtCore import QCoreApplication, QEvent
+        from PySide6.QtWidgets import QApplication, QLabel, QWidget
         from app.ui.voice_page import VoicePage
 
-        page = VoicePage()
-        try:
-            # Closing stacked pages can destroy a child widget before its
-            # preview-setting signals are disconnected. The callback must
-            # tolerate a surviving Python wrapper with a deleted Qt object.
-            status = page.status
-            self.assertTrue(
-                shiboken6.isValid(status),
-                "Voice Studio must reparent its status label into the guided UI before replacing scroll content.",
-            )
-            parent = status.parentWidget()
-            if parent is not None:
-                layout = parent.layout()
-                if layout is not None:
-                    layout.removeWidget(status)
-                status.setParent(None)
+        # This guard only needs a deleted child widget and the real invalidation
+        # method. Do not construct the full VoicePage here: its unrelated
+        # QMediaPlayer/QAudioOutput stack makes this native-lifecycle test
+        # dependent on the machine's multimedia plugins.
+        app = QApplication.instance() or QApplication([])
+        parent = QWidget()
+        status = QLabel(parent)
+        self.assertTrue(shiboken6.isValid(status))
+        status.setParent(None)
+        status.deleteLater()
+        QCoreApplication.sendPostedEvents(status, QEvent.Type.DeferredDelete)
+        self.assertFalse(shiboken6.isValid(status))
 
-            # Use Qt's supported deferred-destruction path rather than calling
-            # shiboken.delete() directly on a widget whose signals are connected.
-            status.deleteLater()
-            QCoreApplication.sendPostedEvents(status, QEvent.Type.DeferredDelete)
-            self.assertFalse(shiboken6.isValid(status))
-
-            page._invalidate_preview()
-            self.assertIsNone(page.last_preview)
-        finally:
-            if shiboken6.isValid(page):
-                page.close()
-                page.deleteLater()
+        page_state = SimpleNamespace(
+            status=status,
+            _is_live_qt_object=VoicePage._is_live_qt_object,
+            _discard_preview_output=VoicePage._discard_preview_output,
+            _refresh_assignment_actions=lambda: None,
+            last_preview=None,
+            last_preview_elapsed_seconds=2.0,
+            _preview_request_id=5,
+            _preview_requested_signature="stale",
+            _preview_profile_signature=("old-profile",),
+        )
+        VoicePage._invalidate_preview(page_state)
+        self.assertIsNone(page_state.last_preview)
+        self.assertIsNone(page_state.last_preview_elapsed_seconds)
+        self.assertIsNone(page_state._preview_requested_signature)
+        self.assertIsNone(page_state._preview_profile_signature)
+        self.assertFalse(page_state._invalidating_preview)
+        parent.close()
+        parent.deleteLater()
 
     def test_qwen_clone_draft_identity_is_stable_before_profile_save(self):
         from types import SimpleNamespace
