@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from uuid import uuid4
 import re
 
 from app.documents.parser import remove_page_noise
@@ -19,6 +20,12 @@ class Chapter:
     review_status: str = "needs_review"
     # Explicitly exclude this chapter from audiobook generation while keeping its text.
     skip_for_generation: bool = False
+    # Stable identity follows this chapter when its display number/title changes.
+    chapter_id: str = field(default_factory=lambda: uuid4().hex)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.chapter_id, str) or not self.chapter_id.strip():
+            self.chapter_id = uuid4().hex
 
 
 def detect_chapters(text: str) -> list[Chapter]:

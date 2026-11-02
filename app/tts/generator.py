@@ -121,6 +121,26 @@ def prepare_chapter_plan(
     completed WAV file on every run.
     """
     chapter_dir = output_root / f"{chapter.number:03d}_{safe_name(chapter.title)}"
+    chapter_id = str(getattr(chapter, "chapter_id", "") or "").strip()
+    if chapter_id and output_root.is_dir():
+        matching_dirs: list[Path] = []
+        for candidate in output_root.iterdir():
+            manifest_path = candidate / "narration.json"
+            if not candidate.is_dir() or not manifest_path.is_file():
+                continue
+            try:
+                saved_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                continue
+            if str(saved_manifest.get("chapter_id") or "").strip() == chapter_id:
+                matching_dirs.append(candidate)
+        if len(matching_dirs) > 1:
+            raise RuntimeError(
+                f"Multiple generation checkpoint folders have the same chapter identity ({chapter_id}). "
+                "Keep one valid chapter checkpoint before retrying."
+            )
+        if matching_dirs:
+            chapter_dir = matching_dirs[0]
     chunks_dir = chapter_dir / "chunks"
     chunks_dir.mkdir(parents=True, exist_ok=True)
 
@@ -129,6 +149,7 @@ def prepare_chapter_plan(
         chapter_dir / "narration.json",
         {
             "chapter": chapter.number,
+            "chapter_id": chapter_id or None,
             "title": chapter.title,
             "source_characters": len(chapter.text),
             "narration_characters": len(narration.narration_text),
@@ -189,6 +210,7 @@ def prepare_chapter_plan(
     chunk_manifest = {
         "version": 1,
         "chapter": chapter.number,
+        "chapter_id": chapter_id or None,
         "title": chapter.title,
         "narration_speed": float(narration_speed),
         "pacing_profile": str(pacing_profile),

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -83,7 +84,9 @@ class StableChapterAudioIdentityTests(unittest.TestCase):
             self.assertEqual(result["overrides"][ids[1]]["volume"], 0.32)
             self.assertEqual([row["chapter_id"] for row in result["chapters"]], ids)
             save.assert_called_once()
-            self.assertEqual(set(state["chapter_bgm_overrides"]), set(ids))
+            self.assertTrue(set(ids).issubset(set(state["chapter_bgm_overrides"])))
+            self.assertIn("1", state["chapter_bgm_overrides"])
+            self.assertIn("2", state["chapter_bgm_overrides"])
 
     def test_chapter_bgm_save_prefers_stable_id_when_display_number_is_stale(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -121,6 +124,44 @@ class StableChapterAudioIdentityTests(unittest.TestCase):
             self.assertEqual(result["chapter_id"], selected.chapter_id)
             self.assertIn(selected.chapter_id, state["chapter_bgm_overrides"])
             self.assertNotIn("1", state["chapter_bgm_overrides"])
+
+    def test_generator_reuses_chapter_checkpoint_directory_after_reorder(self):
+        from app.tts.generator import generate_chapter
+
+        class RecordingProvider:
+            recommended_chunk_chars = 1400
+            recommended_chunk_sentences = 1
+
+            def __init__(self):
+                self.calls = 0
+
+            def synthesize(self, text, output_path, voice=None):
+                self.calls += 1
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                with wave.open(str(output_path), "wb") as stream:
+                    stream.setnchannels(1)
+                    stream.setsampwidth(2)
+                    stream.setframerate(22050)
+                    stream.writeframes(b"\\x00\\x00" * 2205)
+                return output_path
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "working_audio"
+            provider = RecordingProvider()
+            source_text = "A short chapter. Same voice."
+            original = Chapter(1, "Opening", source_text, chapter_id="stable-opening")
+            first = generate_chapter(original, provider, "Narrator", root,
+                                      narration_speed=1.0, pacing_profile="off")
+            original_dir = first.output_path
+            calls_after_first = provider.calls
+            moved = Chapter(2, "Opening", source_text, chapter_id="stable-opening")
+            second = generate_chapter(moved, provider, "Narrator", root,
+                                       narration_speed=1.0, pacing_profile="off")
+            self.assertEqual(second.output_path, original_dir)
+            self.assertEqual(provider.calls, calls_after_first)
+            saved = json.loads((original_dir / "narration.json").read_text(encoding="utf-8"))
+            self.assertEqual(saved["chapter"], 2)
+            self.assertEqual(saved["chapter_id"], "stable-opening")
 
     def test_assembler_resolves_chapter_bgm_by_identity_before_legacy_number(self):
         resolver = getattr(assembler, "_chapter_bgm_override_for", None)

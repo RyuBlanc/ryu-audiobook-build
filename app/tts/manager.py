@@ -262,7 +262,9 @@ class GenerationManager:
     def _chapter_requires_paragraph_boundary(self, chapter: Chapter) -> bool:
         if self.chapter_bgm_strategy != "chapter-based":
             return False
-        override = self.chapter_bgm_overrides.get(str(chapter.number), {})
+        override = self.chapter_bgm_overrides.get(str(getattr(chapter, "chapter_id", "") or ""), {})
+        if not isinstance(override, dict) or not override:
+            override = self.chapter_bgm_overrides.get(str(chapter.number), {})
         return bool(
             isinstance(override, dict)
             and str(override.get("rule") or "").casefold() == "custom"

@@ -4536,6 +4536,10 @@
     }
     if (!rows.some(ch => Number(ch.number) === Number(selectedBgmChapter))) selectedBgmChapter = Number(rows[0].number);
     const overrides = chapterBgmState.overrides || {};
+    const overrideFor = chapter => {
+      const identity = String(chapter?.chapter_id || '').trim();
+      return (identity && overrides[identity]) || overrides[String(chapter?.number)] || {};
+    };
     const strategy = chapterBgmState.strategy || 'same';
     const chapterBased = ['custom', 'chapter-based', 'chapter_based'].includes(strategy);
     const ruleFor = row => {
@@ -4546,13 +4550,13 @@
       return value;
     };
     if (list) list.innerHTML = rows.map(ch => {
-      const o = overrides[String(ch.number)] || {};
+      const o = overrideFor(ch);
       const rule = ruleFor(o);
       const label = rule === 'custom' ? (o.title || (o.available === false ? 'Missing custom track' : 'Custom track')) : rule === 'none' ? 'No BGM' : 'Book default';
       return '<button type="button" class="chapter-bgm-item ' + (Number(ch.number) === Number(selectedBgmChapter) ? 'active' : '') + (rule === 'custom' ? ' override' : '') + '" data-chapter-bgm="' + Number(ch.number) + '"><b>' + esc('Chapter ' + ch.number + ' · ' + ch.title) + '</b><small>' + esc(label) + '</small></button>';
     }).join('');
     const chapter = rows.find(ch => Number(ch.number) === Number(selectedBgmChapter)) || rows[0];
-    const current = overrides[String(chapter.number)] || {};
+    const current = overrideFor(chapter);
     const rule = ruleFor(current);
     selectedBgmTrackPath = rule === 'custom' ? (current.path || null) : null;
     if (chapterBgmCandidateChapter !== Number(chapter.number)) {
@@ -4845,9 +4849,12 @@
             throw new Error('Choose a track and press Select before saving a custom chapter assignment.');
           }
           const chapterNumber = Number(selectedBgmChapter);
+          const chapterRow = (chapterBgmState.chapters || []).find(ch => Number(ch.number) === chapterNumber);
+          const chapterId = String(chapterRow?.chapter_id || '').trim();
+          if (!chapterId) throw new Error('The selected chapter identity is unavailable. Refresh Chapter BGM before saving.');
           const selects = document.querySelectorAll('#sound [data-sound-view="chapters"] .chapter-mix-row select');
           const payload = {
-            number:chapterNumber, rule, path:rule === 'custom' ? selectedBgmTrackPath : null,
+            number:chapterNumber, chapter_id:chapterId, rule, path:rule === 'custom' ? selectedBgmTrackPath : null,
             volume:Math.max(0, Math.min(0.50, Number($('chapterVolume')?.value ?? 18)/100)),
             start_offset:['immediate','after_first_paragraph','after_10_seconds'][selects[0]?.selectedIndex || 0],
             end_behavior:['fade_before_end','continue_to_transition','stop_immediately'][selects[1]?.selectedIndex || 0]

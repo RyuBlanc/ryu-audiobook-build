@@ -446,6 +446,27 @@ def _chapter_number_for_bgm(chapter_dir: Path, fallback: int) -> int:
             pass
     return int(fallback)
 
+def _chapter_bgm_override_for(
+    chapter_dir: Path,
+    fallback: int,
+    overrides: dict[str, dict] | None,
+) -> dict:
+    """Resolve stable chapter assignment first, retaining legacy number fallback."""
+    if not isinstance(overrides, dict):
+        return {}
+    try:
+        narration = json.loads((chapter_dir / "narration.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        narration = {}
+    chapter_id = str(narration.get("chapter_id") or "").strip() if isinstance(narration, dict) else ""
+    if chapter_id:
+        selected = overrides.get(chapter_id)
+        if isinstance(selected, dict):
+            return selected
+    source_number = _chapter_number_for_bgm(chapter_dir, fallback)
+    selected = overrides.get(str(source_number), {})
+    return selected if isinstance(selected, dict) else {}
+
 def assemble_m4b(
     chapter_dirs: list[Path],
     output_path: Path,
@@ -845,9 +866,9 @@ def assemble_m4b(
             chapter_music_files: list[Path] = []
             for chapter_index, (chapter_file, chapter_dir) in enumerate(zip(chapters, chapter_dirs), start=1):
                 source_chapter_number = _chapter_number_for_bgm(chapter_dir, chapter_index)
-                override = effective_overrides.get(str(source_chapter_number), {})
-                if not isinstance(override, dict):
-                    override = {}
+                override = _chapter_bgm_override_for(
+                    chapter_dir, source_chapter_number, effective_overrides
+                )
                 rule = str(override.get("rule") or "none").strip().lower()
                 # Older projects may have persisted "default" overrides. Under
                 # the frozen Chapter-Based strategy that means no assigned track,

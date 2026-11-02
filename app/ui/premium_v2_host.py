@@ -6843,8 +6843,25 @@ class PremiumV2Bridge(QObject):
         bgm_enabled = bool(state.get("background_audio_enabled", saved_mode != "off")) and saved_mode != "off"
         last_manifest = state.get("sound_manifest") if isinstance(state.get("sound_manifest"), dict) else {}
         last_saved_at = state.get("sound_design_saved_at") or last_manifest.get("updated_at")
+        chapters_by_number = {str(chapter.number): chapter for chapter in project.chapters}
+        migrated = dict(stored)
+        # Promote legacy numeric assignments to stable IDs. Keep number aliases
+        # for older narration manifests; the assembler prefers chapter_id.
+        for number_key, chapter in chapters_by_number.items():
+            legacy_value = stored.get(number_key)
+            identity_key = str(chapter.chapter_id)
+            if identity_key not in migrated and isinstance(legacy_value, dict):
+                migrated[identity_key] = dict(legacy_value)
+        if migrated != stored:
+            state["chapter_bgm_overrides"] = migrated
+            save_state(project.folder, state)
+            stored = migrated
         overrides: dict[str, dict[str, Any]] = {}
-        for key, value in stored.items():
+        for chapter in project.chapters:
+            key = str(chapter.chapter_id)
+            value = stored.get(key)
+            if not isinstance(value, dict):
+                value = stored.get(str(chapter.number), {})
             if not isinstance(value, dict):
                 continue
             row = dict(value)
@@ -6854,7 +6871,7 @@ class PremiumV2Bridge(QObject):
             row["path"] = raw_path if available else None
             row["title"] = track["title"] if available else None
             row["available"] = available if row.get("rule") == "custom" else True
-            overrides[str(key)] = row
+            overrides[key] = row
         default_track = catalog.get(default_path)
         default_available = bool(default_track and str(default_track.get("role") or "music").casefold() != "cue"
                                  and Path(default_path).is_file())
@@ -6877,7 +6894,10 @@ class PremiumV2Bridge(QObject):
                 if isinstance(value, dict) and value.get("rule") == "custom"
                 and str(value.get("path") or "").strip()
             }),
-            "chapters": [{"number": chapter.number, "title": chapter.title} for chapter in project.chapters],
+            "chapters": [
+                {"number": chapter.number, "title": chapter.title, "chapter_id": chapter.chapter_id}
+                for chapter in project.chapters
+            ],
         }
 
     def _sound_chapter_bgm_save(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -6928,13 +6948,23 @@ class PremiumV2Bridge(QObject):
             state["sound_design_saved_at"] = saved_at
             save_state(project.folder, state)
             return self._sound_chapter_bgm_get({})
-        try:
-            number = int(payload.get("number"))
-        except (TypeError, ValueError):
-            raise ValueError("Choose a valid chapter before saving its BGM.")
-        chapter = next((item for item in project.chapters if item.number == number), None)
-        if chapter is None:
-            raise ValueError("The selected chapter no longer exists. Refresh Chapter Studio.")
+        chapter_id = str(payload.get("chapter_id") or "").strip()
+        if chapter_id:
+            chapter = next(
+                (item for item in project.chapters if str(item.chapter_id) == chapter_id),
+                None,
+            )
+            if chapter is None:
+                raise ValueError("The selected chapter has changed. Refresh Chapter Studio before saving BGM.")
+            number = chapter.number
+        else:
+            try:
+                number = int(payload.get("number"))
+            except (TypeError, ValueError):
+                raise ValueError("Choose a valid chapter before saving its BGM.")
+            chapter = next((item for item in project.chapters if item.number == number), None)
+            if chapter is None:
+                raise ValueError("The selected chapter no longer exists. Refresh Chapter Studio.")
         saved_strategy = str(
             state.get("chapter_bgm_strategy") or ("custom" if state.get("chapter_bgm_overrides") else "same")
         ).strip().lower()
@@ -6970,7 +7000,12 @@ class PremiumV2Bridge(QObject):
         overrides = state.get("chapter_bgm_overrides")
         if not isinstance(overrides, dict):
             overrides = {}
-        overrides[str(number)] = {
+        else:
+            overrides = dict(overrides)
+        identity_key = str(chapter.chapter_id)
+        if identity_key not in overrides and isinstance(overrides.get(str(number)), dict):
+            overrides[identity_key] = dict(overrides[str(number)])
+        overrides[identity_key] = {
             "rule": rule, "path": path, "volume": volume,
             "start_offset": start_offset, "end_behavior": end_behavior,
         }
@@ -6986,7 +7021,7 @@ class PremiumV2Bridge(QObject):
         state["modified_at"] = saved_at
         state["sound_design_saved_at"] = saved_at
         save_state(project.folder, state)
-        return {"saved": True, "number": number, "title": chapter.title,
+        return {"saved": True, "number": number, "chapter_id": chapter.chapter_id, "title": chapter.title,
                 "rule": rule, "path": path, "track_title": title,
                 "strategy": "custom", "override_count": len(overrides)}
 
