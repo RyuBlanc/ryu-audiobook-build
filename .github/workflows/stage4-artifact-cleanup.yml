@@ -1,0 +1,144 @@
+name: Stage 4 Artifact Cleanup
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/stage4-artifact-cleanup.yml
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type CLEAN_STAGE4 to confirm the bounded Stage 4 cleanup"
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: ryu-audiobook-stage4-artifact-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Preserve #2084 and remove superseded package artifacts
+    if: >-
+      ${{ (github.event_name == 'push' &&
+            startsWith(github.event.head_commit.message || '', '[maintenance] Actions Storage Cleanup'))
+          || (github.event_name == 'workflow_dispatch' &&
+              inputs.confirmation == 'CLEAN_STAGE4') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify Stage 4 checkpoint and prune superseded package artifacts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            // Immutable Stage 4 retention anchor: do not change this to a Stage 5 run.
+            const anchorRunId = 41455259436;
+            const anchorRunNumber = 2084;
+            const anchorBranch = 'stage-4/step-4-audio-assembly';
+            const anchorSha = 'ace9630d2d6b4a745c029906e0624637d4e3fdd3';
+            const expectedNames = [
+              'Ryu-Audiobook-Installer-2084',
+              'Ryu-Audiobook-Portable-2084',
+              'Ryu-Audiobook-Release-SHA256-2084',
+            ];
+
+            // Retain earlier rollback/checkpoint package sets from the existing cleanup policy.
+            const protectedRunNumbers = new Set([1441, 1536, 1637, 2084]);
+            const packageName = /^Ryu-Audiobook-(Windows|Installer|Portable|Release-SHA256)-(\\d+)$/;
+
+            const anchor = await github.rest.actions.getWorkflowRun({
+              owner, repo, run_id: anchorRunId
+            });
+            if (anchor.data.run_number !== anchorRunNumber ||
+                anchor.data.conclusion !== 'success' ||
+                anchor.data.head_branch !== anchorBranch ||
+                anchor.data.head_sha !== anchorSha) {
+              core.setFailed('Cleanup stopped: Stage 4 checkpoint #2084 identity/status did not match the protected baseline.');
+              return;
+            }
+
+            const anchorArtifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              { owner, repo, run_id: anchorRunId, per_page: 100 }
+            );
+            const anchorNames = new Set(
+              anchorArtifacts.filter(a => !a.expired).map(a => a.name)
+            );
+            const missing = expectedNames.filter(name => !anchorNames.has(name));
+            if (missing.length) {
+              core.setFailed('Cleanup stopped: #2084 is missing required unexpired artifacts: ' + missing.join(', '));
+              return;
+            }
+
+            core.info('Verified protected Stage 4 checkpoint #2084.');
+            core.info('Protected branch: ' + anchorBranch);
+            core.info('Protected SHA: ' + anchorSha);
+            core.info('Verified artifacts: ' + expectedNames.join(', '));
+
+            const allArtifacts = await github.paginate(
+              github.rest.actions.listArtifactsForRepo,
+              { owner, repo, per_page: 100 }
+            );
+
+            let deleted = 0;
+            let keptProtected = 0;
+            let keptNewer = 0;
+            let keptOther = 0;
+            let expiredSkipped = 0;
+            const deletionErrors = [];
+
+            for (const artifact of allArtifacts) {
+              if (artifact.expired) {
+                expiredSkipped++;
+                continue;
+              }
+
+              const match = String(artifact.name || '').match(packageName);
+              if (!match) {
+                // Test evidence, logs, checkpoints and unrelated artifacts remain untouched.
+                keptOther++;
+                continue;
+              }
+
+              const runNumber = Number(match[2]);
+              if (protectedRunNumbers.has(runNumber)) {
+                keptProtected++;
+                continue;
+              }
+              if (runNumber >= anchorRunNumber) {
+                keptNewer++;
+                continue;
+              }
+
+              try {
+                await github.rest.actions.deleteArtifact({
+                  owner, repo, artifact_id: artifact.id
+                });
+                deleted++;
+                core.info('Deleted superseded package artifact: ' + artifact.name);
+              } catch (error) {
+                deletionErrors.push(artifact.name + ': ' + String(error.message || error));
+                core.error('Could not delete ' + artifact.name + ': ' + String(error.message || error));
+              }
+            }
+
+            core.info('CLEANUP SUMMARY');
+            core.info('Superseded package artifacts deleted: ' + deleted);
+            core.info('Protected rollback/checkpoint package artifacts retained: ' + keptProtected);
+            core.info('Package artifacts at/after #2084 retained: ' + keptNewer);
+            core.info('Non-package/test-evidence artifacts retained: ' + keptOther);
+            core.info('Already-expired artifacts skipped: ' + expiredSkipped);
+            core.info('Workflow runs and their logs were not deleted.');
+
+            if (deletionErrors.length) {
+              core.setFailed('Cleanup encountered ' + deletionErrors.length +
+                ' artifact deletion error(s). See the per-artifact errors above.');
+            } else {
+              core.info('Stage 4 artifact cleanup completed. Build #2084 and all three of its required artifacts remain protected.');
+            }
