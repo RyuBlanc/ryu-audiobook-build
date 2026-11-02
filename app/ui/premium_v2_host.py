@@ -6864,7 +6864,9 @@ class PremiumV2Bridge(QObject):
             value = stored.get(key)
             if not isinstance(value, dict):
                 value = stored.get(number_key, {})
-            if not isinstance(value, dict):
+            # Do not manufacture a visible "No BGM" override for chapters
+            # with no saved assignment; an empty object is not a saved rule.
+            if not isinstance(value, dict) or not value:
                 continue
             row = dict(value)
             raw_path = str(row.get("path") or "")
