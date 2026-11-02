@@ -350,14 +350,18 @@ def validate_saved_audio_paths(state):
   if auto_path:
    fields.append((auto_path,"automatic BGM selection",None,"music"))
 
- for key,label in (
-  ("opening_cue_path","opening cue"),
-  ("page_turn_cue_path","next-chapter cue"),
-  ("ending_cue_path","closing cue"),
- ):
-  raw=state.get(key)
-  if raw:
-   fields.append((raw,label,5.0,"cue"))
+ # A saved cue is active only when the explicit chapter-transition
+ # switch is on. Retained inactive paths must not block music-only output;
+ # active paths remain fail-closed in the validation loop below.
+ if bool(state.get("chapter_transition_sound",False)):
+  for key,label in (
+   ("opening_cue_path","opening cue"),
+   ("page_turn_cue_path","next-chapter cue"),
+   ("ending_cue_path","closing cue"),
+  ):
+   raw=state.get(key)
+   if raw:
+    fields.append((raw,label,5.0,"cue"))
 
  for raw,label,max_duration,expected_role in fields:
   path=Path(str(raw)).expanduser()
