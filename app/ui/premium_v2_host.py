@@ -4870,11 +4870,14 @@ class PremiumV2Bridge(QObject):
         """Run the same local audiobook AI used by the Director and return review-only rules."""
         try:
             from app.ai.brain import AudiobookBrain
+            from app.ai.learning_context import load_project_learning_context
             from app.tts.pronunciation_suggester import is_common_english_phrase
+            learning_context = load_project_learning_context(Path(project.folder))
             brain = AudiobookBrain(Path(project.folder))
             try:
                 analysis = brain.analyze_book(
                     project.chapters,
+                    learning_context=learning_context,
                     progress=lambda fraction, detail: self._job_update(
                         job_id,
                         stage=str(detail or "Analyzing book pronunciation"),

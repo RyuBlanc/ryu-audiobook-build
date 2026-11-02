@@ -321,6 +321,21 @@ class AudiobookBrain:
                 + '\nChapter: ' + chapter.title
                 + f'\nExcerpt {idx}/{len(chunks)}:\n{chunk}'
             )
+            pronunciation_memory = context.get("pronunciation_memory")
+            if isinstance(pronunciation_memory, list) and pronunciation_memory:
+                common_context += (
+                    '\nUser-approved pronunciation memory (use the exact saved spoken form '
+                    'when the written term matches; do not silently replace it with a guess): '
+                    + json.dumps(pronunciation_memory[:40], ensure_ascii=False)
+                )
+            speaker_memory = context.get("speaker_learning_examples")
+            if isinstance(speaker_memory, list) and speaker_memory:
+                common_context += (
+                    '\nPreviously confirmed speaker examples from this same book/series. '
+                    'Use them only as contextual evidence; never auto-assign a speaker or '
+                    'override an explicit local source tag: '
+                    + json.dumps(speaker_memory[:16], ensure_ascii=False)
+                )
             if progress:
                 progress(f'Analyzing chapter {chapter.number} • excerpt {idx}/{len(chunks)} • character/dialogue pass')
             try:
@@ -429,15 +444,45 @@ class AudiobookBrain:
             pass
         return {'characters': characters, 'dialogue': dialogue, 'pronunciation': []}
 
-    def analyze_book(self, chapters: list[Chapter], progress: Callable[[float, str], None] | None = None) -> dict[str, Any]:
-        bible = {}
-        results = []
+    def analyze_book(
+        self,
+        chapters: list[Chapter],
+        progress: Callable[[float, str], None] | None = None,
+        learning_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Analyze chapters in sequence and persist one backward-compatible book report."""
+        bible: dict[str, dict[str, Any]] = {}
+        results: list[dict[str, Any]] = []
+        base_context = dict(learning_context or {})
+        pronunciation_by_key: dict[str, dict[str, Any]] = {}
+
+        def aggregate_pronunciation() -> list[dict[str, Any]]:
+            aggregated: list[dict[str, Any]] = []
+            for item in pronunciation_by_key.values():
+                aggregated.append(item)
+            return aggregated
+
+        def build_report() -> dict[str, Any]:
+            continuity: list[str] = []
+            for chapter_result in results:
+                for note in chapter_result.get("continuity_notes", []) or []:
+                    clean_note = str(note or "").strip()
+                    if clean_note and clean_note not in continuity:
+                        continuity.append(clean_note)
+            return {
+                "version": 1,
+                "analysis_schema_version": 2,
+                "book_bible": bible,
+                "chapters": results,
+                "pronunciation": aggregate_pronunciation(),
+                "continuity_notes": continuity,
+                "learning_scope": str(base_context.get("learning_scope") or ""),
+            }
+
         for idx, chapter in enumerate(chapters, 1):
             def chapter_progress(message: str, idx=idx):
                 if progress:
-                    # Message is emitted at excerpt boundaries. Estimate within
-                    # the current chapter while keeping completed chapters exact.
-                    match = re.search(r"excerpt (\d+)/(\d+)", message)
+                    match = re.search(r"excerpt (\\d+)/(\\d+)", message)
                     if match:
                         excerpt_index = int(match.group(1))
                         excerpt_total = max(1, int(match.group(2)))
@@ -446,19 +491,83 @@ class AudiobookBrain:
                         fraction = (idx - 1) / max(1, len(chapters))
                     progress(max(0.0, min(0.999, fraction)), message)
 
-            item = self.analyze_chapter(chapter, bible, progress=chapter_progress)
+            book_context = dict(base_context)
+            # Later chapters see the accumulated character bible, but never
+            # let a supplied context replace the active book's actual cast.
+            book_context["characters"] = list(bible.values())
+            item = self.analyze_chapter(chapter, book_context, progress=chapter_progress)
             results.append(item)
-            for char in item.get('characters', []):
-                name = str(char.get('name', '')).strip()
+
+            for char in item.get("characters", []) or []:
+                if not isinstance(char, dict):
+                    continue
+                name = str(char.get("name", "")).strip()
                 if name:
                     bible.setdefault(name, char)
-            self._save_book({'version': 1, 'book_bible': bible, 'chapters': results})
+
+            for candidate in item.get("pronunciation", []) or []:
+                if not isinstance(candidate, dict):
+                    continue
+                written = unicodedata.normalize(
+                    "NFC", str(candidate.get("written") or candidate.get("written_form") or "")
+                ).strip()
+                spoken = unicodedata.normalize(
+                    "NFC", str(candidate.get("spoken") or candidate.get("spoken_form") or "")
+                ).strip()
+                if not written or not spoken:
+                    continue
+                key = written.casefold()
+                occurrence = {
+                    "chapter": int(item.get("chapter") or getattr(chapter, "number", idx)),
+                    "chapter_title": str(item.get("title") or getattr(chapter, "title", "")),
+                }
+                current = pronunciation_by_key.get(key)
+                if current is None:
+                    current = dict(candidate)
+                    current["written"] = written
+                    current["spoken"] = spoken
+                    current["occurrences"] = [occurrence]
+                    current["alternatives"] = list(dict.fromkeys(
+                        str(value).strip()
+                        for value in (candidate.get("alternatives") or [])
+                        if str(value or "").strip()
+                    ))[:4]
+                    pronunciation_by_key[key] = current
+                else:
+                    occurrences = current.setdefault("occurrences", [])
+                    if occurrence not in occurrences:
+                        occurrences.append(occurrence)
+                    if spoken.casefold() != str(current.get("spoken") or "").casefold():
+                        alternatives = current.setdefault("alternatives", [])
+                        if spoken not in alternatives and len(alternatives) < 4:
+                            alternatives.append(spoken)
+                        current["ambiguous_across_chapters"] = True
+                    try:
+                        new_confidence = float(candidate.get("confidence") or 0.0)
+                        old_confidence = float(current.get("confidence") or 0.0)
+                    except (TypeError, ValueError, OverflowError):
+                        new_confidence, old_confidence = 0.0, 0.0
+                    if new_confidence > old_confidence:
+                        for field in (
+                            "spoken", "ipa", "source_language", "script",
+                            "reason", "confidence",
+                        ):
+                            if field in candidate:
+                                current[field] = candidate[field]
+                    if current.get("ambiguous_across_chapters"):
+                        current["reason"] = (
+                            str(current.get("reason") or "").strip()
+                            + " Conflicting readings were found across chapters; review the alternatives."
+                        ).strip()
+
+            self._save_book(build_report())
             if progress:
                 progress(
                     idx / max(1, len(chapters)),
                     f"Completed chapter {idx}/{len(chapters)} • {chapter.title}",
                 )
-        return {'version': 1, 'book_bible': bible, 'chapters': results}
+
+        return build_report()
 
     def _chunks(self, text: str) -> list[str]:
         # Use a sliding window with real overlap so entities, dialogue tags,

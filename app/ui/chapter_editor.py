@@ -53,10 +53,16 @@ class AudiobookAIWorker(QThread):
     def run(self):
         brain = None
         try:
+            from app.ai.learning_context import load_project_learning_context
+            learning_context = load_project_learning_context(self.project_folder)
             brain = AudiobookBrain(self.project_folder)
             def update(fraction, message):
                 self.progress.emit(float(fraction), message)
-            self.finished_ok.emit(brain.analyze_book(self.chapters, progress=update))
+            self.finished_ok.emit(brain.analyze_book(
+                self.chapters,
+                progress=update,
+                learning_context=learning_context,
+            ))
         except Exception as exc:
             self.failed.emit(str(exc))
         finally:
