@@ -10,6 +10,9 @@ from app.chapters.character_learning import (
     record_assignment_feedback,
     remove_assignment_feedback,
     source_grounded_speaker_for_continuity,
+    learning_scope_for_project,
+    record_project_speaker_assignment,
+    remove_project_speaker_assignment_feedback,
 )
 from app.chapters.characters import _is_plausible_name
 
@@ -224,6 +227,64 @@ class CharacterLearningMemoryTests(unittest.TestCase):
         self.assertTrue(_is_plausible_name("Souei"))
         self.assertTrue(_is_plausible_name("Rimuru Tempest"))
         self.assertTrue(_is_plausible_name("綾小路清隆"))
+
+
+    def test_project_feedback_helper_records_only_confirmed_single_speaker_assignments(self):
+        from tempfile import TemporaryDirectory
+        from types import SimpleNamespace
+        from app.core.state import save_state
+
+        with TemporaryDirectory() as folder:
+            root = Path(folder)
+            save_state(root, {"series": "Slime series"})
+            source = 'Souei checked the gate. “The eastern route is clear.” He waited.'
+            start = source.index("“")
+            end = source.index("”", start) + 1
+            chapter = SimpleNamespace(number=3, title="The Oath", text=source)
+
+            saved = record_project_speaker_assignment(root, chapter, {
+                "start": start, "end": end, "speaker": "Souei",
+                "source": "manual",
+            })
+            self.assertTrue(saved["saved"])
+            self.assertEqual(learning_scope_for_project(root), "Slime series")
+            examples = load_learning_examples("Slime series")
+            self.assertEqual(len(examples), 1)
+            self.assertEqual(examples[0]["speaker"], "Souei")
+            self.assertEqual(examples[0]["source"], "explicit-user-confirmation")
+
+            chorus = record_project_speaker_assignment(root, chapter, {
+                "start": start, "end": end, "speakers": ["Souei", "Rimuru"],
+                "speaker": "Souei", "source": "manual",
+            })
+            self.assertFalse(chorus["saved"])
+            ai_guess = record_project_speaker_assignment(root, chapter, {
+                "start": start, "end": end, "speaker": "Rimuru",
+                "source": "ai",
+            })
+            self.assertFalse(ai_guess["saved"])
+            self.assertEqual(len(load_learning_examples("Slime series")), 1)
+
+            removed = remove_project_speaker_assignment_feedback(
+                root, chapter, {
+                    "start": start, "end": end, "speaker": "Souei",
+                    "source": "manual",
+                }
+            )
+            self.assertTrue(removed["removed"])
+            self.assertEqual(load_learning_examples("Slime series"), [])
+
+    def test_standalone_project_feedback_uses_stable_book_local_scope(self):
+        from tempfile import TemporaryDirectory
+        from app.core.state import save_state
+
+        with TemporaryDirectory() as folder:
+            root = Path(folder) / "StandaloneNovel"
+            root.mkdir()
+            save_state(root, {})
+            scope = learning_scope_for_project(root)
+            self.assertEqual(scope, "book:StandaloneNovel")
+
 
 
 if __name__ == "__main__":
