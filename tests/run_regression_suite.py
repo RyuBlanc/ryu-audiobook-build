@@ -12,10 +12,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
-ISOLATED_TEST_ID = (
+ISOLATED_TEST_IDS = {
     "test_regressions.RegressionTests."
-    "test_voice_preview_invalidation_ignores_deleted_qt_status_widget"
-)
+    "test_voice_preview_invalidation_ignores_deleted_qt_status_widget",
+    "tests.test_regressions.RegressionTests."
+    "test_voice_preview_invalidation_ignores_deleted_qt_status_widget",
+}
 
 
 def _cases(suite: unittest.TestSuite):
@@ -37,7 +39,7 @@ def main() -> int:
     )
     remaining = [
         case for case in _cases(discovered)
-        if case.id() != ISOLATED_TEST_ID
+        if case.id() not in ISOLATED_TEST_IDS
     ]
     suite = unittest.TestSuite(remaining)
     result = unittest.TextTestRunner(verbosity=2).run(suite)
