@@ -260,7 +260,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
+  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', lastVoicePreviewChapterNumber = null, lastVoicePreviewChapterTitle = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], pronunciationEnabled = true, activePronunciationSeries = '', lastPronunciationPreview = null, pronunciationRowPreviewState = new Map(), pronunciationSelectionKeys = new Set(), selectedSoundPath = null, selectedCuePath = null, pendingCueSlot = null, pendingCueAssignments = Object.create(null), cueChangesDirty = false, cueSaveError = '', cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null, chapterBgmDraftDirty = false, mixLevelsDirty = false, soundPreviewKind = null, soundPreviewPath = null;
   let chapterBgmCandidateTrackPath = null, chapterBgmCandidateChapter = null, chapterBgmSavePromise = null, cueSavePromise = null;
@@ -1679,7 +1679,7 @@
     if($('downloadPreview'))$('downloadPreview').disabled=!voicePreviewValid||!lastVoicePreviewPath;
   }
   function invalidateVoicePreview(){
-    voicePreviewEpoch++;voicePreviewValid=false;lastVoicePreviewPath=null;lastVoicePreviewProfileName='';
+    voicePreviewEpoch++;voicePreviewValid=false;lastVoicePreviewPath=null;lastVoicePreviewProfileName='';lastVoicePreviewChapterNumber=null;lastVoicePreviewChapterTitle='';
     if(previewAudio){try{previewAudio.pause();previewAudio.removeAttribute('src');previewAudio.load();}catch(_){}previewAudio=null;}
     if($('playPreview')){$('playPreview').disabled=true;$('playPreview').textContent='▶ Play';}
     if($('downloadPreview'))$('downloadPreview').disabled=true;
@@ -5710,14 +5710,14 @@
     const realTimeFactor = Number(job?.result?.real_time_factor);
     const performanceTargetMet = job?.result?.performance_target_met;
     if(!url||!Number.isFinite(actual)||actual<=0){
-      voicePreviewValid=false;lastVoicePreviewPath=null;if(play)play.disabled=true;if($('downloadPreview'))$('downloadPreview').disabled=true;
+      voicePreviewValid=false;lastVoicePreviewPath=null;lastVoicePreviewChapterNumber=null;lastVoicePreviewChapterTitle='';if(play)play.disabled=true;if($('downloadPreview'))$('downloadPreview').disabled=true;
       if($('previewState'))$('previewState').textContent='Failed';
       if($('validation'))$('validation').textContent=!url?'Preview job completed without a playable local audio file. Check the job details and retry.':'Preview job completed without a valid measured audio duration. The result cannot be marked ready.';
       updateVoiceActionButtons();return false;
     }
     if(previewAudio){previewAudio.pause();previewAudio=null;}
     previewAudio=new Audio(url);previewAudio.preload='auto';previewAudio.volume=previewVolume;
-    lastVoicePreviewPath=String(job?.result?.output_path||'');lastVoicePreviewProfileName=String(options.profileName||currentVoiceName());voicePreviewValid=Boolean(lastVoicePreviewPath);
+    lastVoicePreviewPath=String(job?.result?.output_path||'');lastVoicePreviewProfileName=String(options.profileName||currentVoiceName());lastVoicePreviewChapterNumber=Number(job?.result?.chapter_number)||null;lastVoicePreviewChapterTitle=String(job?.result?.chapter_title||'');voicePreviewValid=Boolean(lastVoicePreviewPath);
     previewAudio.ontimeupdate=syncPreviewPlaybackTime;previewAudio.onloadedmetadata=syncPreviewPlaybackTime;
     previewAudio.onplay=()=>{if(play)play.textContent='Ⅱ Pause';if($('wave'))$('wave').classList.add('playing');syncPreviewPlaybackTime();};
     previewAudio.onpause=()=>{if(play)play.textContent='▶ Play';if($('wave'))$('wave').classList.remove('playing');syncPreviewPlaybackTime();};
@@ -7594,12 +7594,29 @@
       message('Profile saved and assigned as the active narrator.');
     });
     if ($('generatePreview')) $('generatePreview').onclick=act(previewVoice);
-    if ($('previewGenerate')) $('previewGenerate').onclick=act(async()=>{const name=selectedVoice||$('profileName')?.value;const group=[...document.querySelectorAll('#generate .segmented')].find(el=>[...el.querySelectorAll('button')].some(b=>/10s|30s|60s/i.test(b.textContent)));const duration=group?.querySelector('button.active')?.textContent.match(/\d+/)?.[0]||'30';const data=await call('production.preview',{profile_name:name,duration_seconds:Number(duration)});await monitorJob(data.job_id,job=>preparePreviewPlayback(job,Number(duration)));});
+    if ($('previewGenerate')) $('previewGenerate').onclick=act(async()=>{
+      const chapterNumber=Number(window.ryuPremiumSelectedChapter||0);
+      const chapter=chapters.find(item=>Number(item.number)===chapterNumber);
+      if(!chapterNumber||!chapter||!String(chapter.text||'').trim())throw new Error('Select a non-empty chapter in Chapter Studio before generating its production preview.');
+      const name=String(selectedVoice||$('profileName')?.value||'').trim();
+      if(!name)throw new Error('Select and save a narrator voice profile before previewing this chapter.');
+      const group=[...document.querySelectorAll('#generate .segmented')].find(el=>[...el.querySelectorAll('button')].some(b=>/10s|30s|60s|90s/i.test(b.textContent)));
+      const duration=group?.querySelector('button.active')?.textContent.match(/\d+/)?.[0]||'30';
+      invalidateVoicePreview();
+      if($('previewState'))$('previewState').textContent='Preparing · 2%';
+      if($('validation'))$('validation').textContent='Preparing selected chapter preview · 2%';
+      const data=await call('production.preview',{profile_name:name,chapter_number:chapterNumber,duration_seconds:Number(duration)});
+      await monitorJob(data.job_id,job=>preparePreviewPlayback(job,Number(duration),{profileName:name}));
+    });
     if ($('playPreview')) $('playPreview').onclick=act(async()=>{if(!previewAudio||!voicePreviewValid)throw new Error('Generate a validated preview first.');if(!previewAudio.paused){previewAudio.pause();$('playPreview').textContent='▶ Play';}else{await previewAudio.play();$('playPreview').textContent='Ⅱ Pause';}});
     if ($('stopPreview')) $('stopPreview').onclick=()=>{if(previewAudio){previewAudio.pause();previewAudio.currentTime=0;}if($('playPreview'))$('playPreview').textContent='▶ Play';syncPreviewPlaybackTime();};
     if ($('downloadPreview')) $('downloadPreview').onclick=act(async()=>{
       if(!voicePreviewValid||!lastVoicePreviewPath)throw new Error('Generate a validated preview before downloading it.');
-      const name=(lastVoicePreviewProfileName||currentVoiceName()||'Ryu Voice Preview').replace(/[<>:"\/\\|?*\x00-\x1f]+/g,'-').trim()||'Ryu Voice Preview';
+      const baseName=(lastVoicePreviewProfileName||currentVoiceName()||'Ryu Voice Preview').replace(/[<>:"\/\\|?*\x00-\x1f]+/g,'-').trim()||'Ryu Voice Preview';
+      const chapterSuffix=lastVoicePreviewChapterNumber
+        ? '_Chapter_'+String(lastVoicePreviewChapterNumber).padStart(2,'0')+(lastVoicePreviewChapterTitle?'_'+lastVoicePreviewChapterTitle:'')
+        : '';
+      const name=(baseName+chapterSuffix+'_Preview').replace(/[<>:"\/\\|?*\x00-\x1f]+/g,'-').trim();
       const result=await call('voice.preview.save',{source_path:lastVoicePreviewPath,suggested_name:name.replace(/\s+/g,'_')});
       if(result.cancelled){message('Preview save cancelled.');return;}
       message('Voice preview saved to '+result.path);

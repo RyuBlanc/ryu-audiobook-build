@@ -2783,8 +2783,32 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Choose an installed voice or load a saved voice profile before previewing.")
         text_value = str(payload.get("text") or "")
         number = payload.get("chapter_number")
+        selected_chapter = None
+        if project is not None and number not in (None, ""):
+            try:
+                requested_chapter_number = int(number)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("Choose a valid chapter number for the preview.") from exc
+            selected_chapter = next(
+                (chapter for chapter in project.chapters
+                 if int(chapter.number) == requested_chapter_number),
+                None,
+            )
+            if selected_chapter is None:
+                raise ValueError("The selected chapter is no longer available. Refresh the chapter list and try again.")
+            if not str(selected_chapter.text or "").strip() and not text_value.strip():
+                raise ValueError("The selected chapter contains no narration text.")
+            state["_preview_chapter_number"] = int(selected_chapter.number)
+            state["_preview_chapter_title"] = str(
+                selected_chapter.title or f"Chapter {selected_chapter.number}"
+            )
         if not text_value.strip():
-            chapter = next((c for c in project.chapters if (c.text or "").strip() and (number is None or c.number == int(number))), None)
+            if project is None:
+                raise ValueError("Enter preview text or select a chapter with narration.")
+            chapter = selected_chapter or next(
+                (candidate for candidate in project.chapters if (candidate.text or "").strip()),
+                None,
+            )
             if chapter is None:
                 raise ValueError("Select a chapter that contains narration text.")
             text_value = chapter.text
@@ -3205,6 +3229,8 @@ class PremiumV2Bridge(QObject):
                                  "selected_profile": profile.name,
                                  "selected_provider": str(getattr(profile, "provider", "") or ""),
                                  "selected_voice_id": str(getattr(profile, "voice_id", "") or ""),
+                                 "chapter_number": state.get("_preview_chapter_number"),
+                                 "chapter_title": str(state.get("_preview_chapter_title") or ""),
                                  "pronunciation_replacements": replacements,
                                  "pronunciation_rule_counts": dict(rule_counts),
                              })
@@ -5277,10 +5303,25 @@ class PremiumV2Bridge(QObject):
 
     def _production_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
         project = self._active_project()
+        raw_chapter_number = payload.get("chapter_number")
+        if raw_chapter_number in (None, ""):
+            raise ValueError("Select a chapter in Chapter Studio before creating a chapter-specific production preview.")
+        try:
+            chapter_number = int(raw_chapter_number)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("Choose a valid chapter for the production preview.") from exc
+        chapter = next(
+            (item for item in project.chapters if int(item.number) == chapter_number),
+            None,
+        )
+        if chapter is None:
+            raise ValueError("The selected chapter is no longer available. Refresh the chapter list and try again.")
+        if not str(chapter.text or "").strip():
+            raise ValueError("The selected chapter contains no narration text to preview.")
         name = str(payload.get("profile_name") or load_state(project.folder).get("voice_profile") or "")
         if not name:
             raise ValueError("Select and save a narrator before creating a production preview.")
-        return self._voice_preview({**payload, "profile_name": name})
+        return self._voice_preview({**payload, "profile_name": name, "chapter_number": chapter_number})
 
     def _job_pause(self, payload: dict[str, Any]) -> dict[str, Any]:
         job_id = str(payload.get("job_id") or "")

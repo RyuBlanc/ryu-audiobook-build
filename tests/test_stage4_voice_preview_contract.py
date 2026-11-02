@@ -848,5 +848,51 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn('[] if state.get("_bypass_pronunciation_dictionary")', host)
         self.assertIn('else _effective_pronunciation_dictionary(state)', host)
 
+
+    def test_production_preview_requires_and_forwards_the_selected_chapter(self):
+        chapter = SimpleNamespace(number=3, title="The Return", text="Chapter three narration.")
+        project = SimpleNamespace(chapters=[chapter], folder=Path("unused"))
+        forwarded = Mock(return_value={"job_id": "production-preview"})
+        bridge = SimpleNamespace(_active_project=lambda: project, _voice_preview=forwarded)
+
+        with self.assertRaisesRegex(ValueError, "Select a chapter"):
+            premium_v2_host.PremiumV2Bridge._production_preview(
+                bridge, {"profile_name": "Saved Narrator", "duration_seconds": 30}
+            )
+        with self.assertRaisesRegex(ValueError, "no longer available"):
+            premium_v2_host.PremiumV2Bridge._production_preview(
+                bridge, {"profile_name": "Saved Narrator", "chapter_number": 99}
+            )
+
+        empty_project = SimpleNamespace(
+            chapters=[SimpleNamespace(number=4, title="Empty", text="")],
+            folder=Path("unused"),
+        )
+        bridge._active_project = lambda: empty_project
+        with self.assertRaisesRegex(ValueError, "no narration text"):
+            premium_v2_host.PremiumV2Bridge._production_preview(
+                bridge, {"profile_name": "Saved Narrator", "chapter_number": 4}
+            )
+
+        bridge._active_project = lambda: project
+        result = premium_v2_host.PremiumV2Bridge._production_preview(
+            bridge,
+            {"profile_name": "Saved Narrator", "chapter_number": "3", "duration_seconds": 30},
+        )
+        self.assertEqual(result["job_id"], "production-preview")
+        forwarded.assert_called_once_with({
+            "profile_name": "Saved Narrator", "chapter_number": 3, "duration_seconds": 30
+        })
+
+    def test_production_preview_uses_selected_chapter_and_preserves_download_identity(self):
+        adapter = Path("assets/frontend/premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("const chapterNumber=Number(window.ryuPremiumSelectedChapter||0)", adapter)
+        self.assertIn("chapters.find(item=>Number(item.number)===chapterNumber)", adapter)
+        self.assertIn("chapter_number:chapterNumber", adapter)
+        self.assertIn("lastVoicePreviewChapterNumber=Number(job?.result?.chapter_number)||null", adapter)
+        self.assertIn("lastVoicePreviewChapterTitle=String(job?.result?.chapter_title||'')", adapter)
+        self.assertIn("const chapterSuffix=lastVoicePreviewChapterNumber", adapter)
+        self.assertIn("voice.preview.save", adapter)
+
 if __name__ == "__main__":
     unittest.main()
