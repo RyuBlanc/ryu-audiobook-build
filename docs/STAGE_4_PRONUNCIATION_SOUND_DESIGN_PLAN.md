@@ -30,12 +30,14 @@ Make pronunciation handling and story-aware sound design predictable, persistent
 
 ## 4.3 Preview, synthesis and audio assembly
 
-- [ ] Test voice preview with pronunciation rules enabled and disabled, and verify the selected profile/provider is the one requested.
-- [ ] Test sound-design preview uses real assigned cues/music, reports the actual rendered duration, and cleans up temporary files.
-- [ ] Verify chapter transitions and opening/closing cues are applied once at the correct boundaries, including when BGM is off.
-- [ ] Test cancellation, provider/FFmpeg failures, retry, cleanup, and resumability for preview and final assembly.
-- [ ] Test generation signatures/checkpoints change when pronunciation rules or sound-design assignments change, without invalidating unrelated work.
-- [ ] Listen to representative speech/music/SFX mixes on the target PC; automated duration checks do not establish audio quality.
+- [x] Automated: test voice preview with pronunciation rules enabled and disabled, including the selected profile/provider/voice contract and disabled-entry filtering.
+- [x] Automated: test sound-design preview reads saved assignments, reports measured rendered duration, and removes temporary narration/cue staging files after a successful mix.
+- [x] Automated rendered-audio integration: verify opening, each Next Chapter, and closing cue once at the intended boundaries; verify Voice Only omits BGM and fixed cues.
+- [x] Automated: verify preview cancellation, provider/FFmpeg failure handling, partial-output cleanup, retry, provider/event cleanup, and resumable assembly checkpoints.
+- [x] Automated: verify pronunciation changes invalidate affected chapter audio only, unrelated chunks remain reusable, and sound-only changes reassemble from retained narration.
+- [ ] Manual target-PC listening remains required for speech/music/SFX quality, levels, fades, cue audibility, and preview/final parity; automated duration and decoded cue checks do not establish perceived audio quality.
+
+**Verification boundary:** The first five gates above are closed by source-level and automated Windows regression evidence, not by a claim of human listening. The final listening gate and installed-app acceptance remain open for the target Windows PC. See the Step 3 execution ledger for the exact run and remaining manual checklist.
 
 ## 4.4 Regression, packaging and acceptance
 

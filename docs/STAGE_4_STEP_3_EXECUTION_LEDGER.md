@@ -52,3 +52,21 @@ Step 3 implements and verifies the Preview, Synthesis and Audio Assembly gates f
 ## Carried-forward acceptance — not waived by Step 3 CI
 
 The Step 2 real imported-book AI report checks; pronunciation save/edit/reload; BGM/cue save/edit/clear/relink/reopen; real voice/profile auditions; and target-PC mix listening remain external acceptance items. Stage 1 hardware freeze/crash, Stage 2 supported-format import/edit/reopen, and Stage 3 Voice Studio/Character Studio persistence and actual voice acceptance also remain open. Do not label any of these complete from CI alone.
+
+## Latest Step 3 audit and automated verification — 2 November 2026
+
+- **Verified code head before the artifact checkpoint:** `130fb69be6715f34521426899c31dacb9e7b4b2f`.
+- **Run #2061:** [Windows test workflow](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41427723537) completed successfully on that head. The full regression suite ran **1,045 tests in 46.347 seconds**. Premium V2 JavaScript validation and isolated native Qt lifecycle regression also passed. The build job was intentionally skipped because this commit did not carry the artifact-checkpoint marker; a package checkpoint is being initiated separately.
+- Added a regression that exercises the real short-preview sound-design worker path, verifies the actual mixed output duration (10.7 seconds in the deterministic fixture), retains the rendered M4A, and confirms the intermediate voice-preview WAV and opening-cue staging M4A are deleted.
+- Fixed the corresponding worker cleanup: after a successful sound-design mix, the intermediate narration WAV is deleted while the mixed M4A remains the playable preview. Failure/cancel cleanup continues to remove both partial outputs.
+- Added a direct preview-worker regression for the project pronunciation master switch ON/OFF. Enabled book entries are forwarded, disabled entries are filtered, and OFF sends an empty effective dictionary. Selected profile/provider/voice identity remains covered by the existing preview contract tests.
+- **Failed attempts are accounted for:** #2059 exposed malformed test line continuations in the new fixtures; #2060 confirmed the syntax fix and ran 1,045 tests but exposed a missing `_include_sound_design_preview` flag in the new mix-test fixture. Both test-only issues were corrected. #2061 is the successful corrected test result; neither earlier failure is counted as a passing run.
+- The existing decoded M4B integration suite verifies opening, Next Chapter, and closing cue placement exactly once, checks Voice Only omission, and compares Same BGM versus Chapter-Based selections without fallback. Existing cancellation/retry and selective checkpoint-reuse tests also pass in the #2061 full suite.
+- Remaining limitation is unchanged: CI does not listen to the installed app. Target-PC acceptance remains required for real saved-book preview selection and Save As, actual pronunciation ON/OFF speech, real BGM/SFX level/fade/offset and cue audibility, preview/final listening parity, and interactive save/edit/reopen behavior.
+
+## Current Step 3 acceptance disposition
+
+- **Automated/code gates:** §4.3 items 1–5 are covered and pass on #2061 (1,045 tests).
+- **Manual gate:** target-PC listening and installed Windows app interaction remain open. Step 3 must not be described as fully signed off until those checks are recorded.
+- **Packaging gate:** the artifact-checkpoint Windows build and its Defender/artifact outcomes must be recorded from the current candidate before handoff.
+
