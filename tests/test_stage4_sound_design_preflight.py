@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.audio.library import validate_saved_audio_paths
+from app.core.state import load_state
 
 
 class SavedCuePreflightTests(unittest.TestCase):
@@ -71,6 +72,21 @@ class SavedCuePreflightTests(unittest.TestCase):
             self.assertEqual([call.args[0] for call in probe.call_args_list], [cue])
 
 
+
+
+    def test_fresh_and_legacy_project_state_defaults_master_bgm_to_eighteen_percent(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            fresh_project = root / "fresh-project"
+            self.assertEqual(load_state(fresh_project)["background_audio_volume"], 0.18)
+
+            legacy_project = root / "legacy-project"
+            legacy_project.mkdir()
+            (legacy_project / "state.json").write_text(
+                '{"title": "Legacy project"}',
+                encoding="utf-8",
+            )
+            self.assertEqual(load_state(legacy_project)["background_audio_volume"], 0.18)
 
 if __name__ == "__main__":
     unittest.main()

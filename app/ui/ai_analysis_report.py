@@ -295,6 +295,10 @@ class AIAnalysisReportWindow(QWidget):
         self.tabs.setDocumentMode(True)
         root.addWidget(self.tabs, 1)
 
+        # Populate from this project's saved analysis immediately on first open.
+        # The Refresh action remains available after subsequent analysis runs.
+        self.reload()
+
     def reload(self) -> None:
         try:
             raw = json.loads(self.report_path.read_text(encoding="utf-8"))
