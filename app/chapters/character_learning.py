@@ -99,6 +99,133 @@ def _series_key(value: str) -> str:
     return re.sub(r"(?i)^\s*series\s*[·:-]\s*", "", str(value or "").strip()).casefold()
 
 
+def learning_scope_for_project(project_folder: Path | str | None) -> str:
+    """Return the active series scope, or a stable book-only scope for standalone novels."""
+    if project_folder is None:
+        return ""
+    folder = Path(project_folder).expanduser()
+    try:
+        from app.core.state import load_state
+        state = load_state(folder)
+    except (OSError, ValueError, TypeError):
+        state = {}
+    series = str(
+        state.get("series") or state.get("series_name") or state.get("series_title") or ""
+    ).strip()
+    if series:
+        return series[:300]
+    try:
+        stable_name = folder.resolve().name
+    except OSError:
+        stable_name = folder.name
+    return ("book:" + stable_name)[:300] if stable_name else ""
+
+
+def _assignment_speaker_names(assignment: dict[str, Any] | None) -> list[str]:
+    if not isinstance(assignment, dict):
+        return []
+    raw = assignment.get("speakers")
+    if isinstance(raw, (list, tuple)):
+        names = list(dict.fromkeys(str(value).strip() for value in raw if str(value or "").strip()))
+        if names:
+            return names
+    name = str(assignment.get("speaker") or "").strip()
+    return [name] if name else []
+
+
+def record_project_speaker_assignment(
+    project_folder: Path | str | None,
+    chapter,
+    assignment: dict[str, Any],
+    *,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    """Persist one explicit, user-confirmed single-speaker assignment as local learning feedback.
+
+    AI-generated proposals and multi-speaker/chorus assignments are deliberately
+    excluded: this memory must contain confirmed single-speaker examples only.
+    """
+    if not isinstance(assignment, dict) or str(assignment.get("source") or "manual").casefold() != "manual":
+        return {"saved": False, "reason": "not-user-confirmed"}
+    speakers = _assignment_speaker_names(assignment)
+    if len(speakers) != 1:
+        return {"saved": False, "reason": "multi-speaker-assignment"}
+    source = str(getattr(chapter, "text", "") or "")
+    try:
+        start, end = int(assignment.get("start")), int(assignment.get("end"))
+    except (TypeError, ValueError, OverflowError):
+        return {"saved": False, "reason": "invalid-source-offsets"}
+    if start < 0 or end <= start or end > len(source):
+        return {"saved": False, "reason": "invalid-source-offsets"}
+    exact = source[start:end]
+    if not exact:
+        return {"saved": False, "reason": "empty-source-span"}
+
+    scope = learning_scope_for_project(project_folder)
+    if not scope:
+        return {"saved": False, "reason": "missing-learning-scope"}
+
+    aliases: list[str] = []
+    try:
+        from app.core.state import load_state
+        state = load_state(Path(project_folder).expanduser())
+        for character in state.get("characters") or []:
+            if not isinstance(character, dict):
+                continue
+            if str(character.get("name") or "").strip().casefold() == speakers[0].casefold():
+                raw_aliases = character.get("aliases") or []
+                if isinstance(raw_aliases, list):
+                    aliases = [str(value).strip() for value in raw_aliases if str(value or "").strip()]
+                break
+    except (OSError, ValueError, TypeError):
+        pass
+
+    return record_assignment_feedback(
+        series=scope,
+        speaker=speakers[0],
+        aliases=aliases,
+        chapter_text=source,
+        start=start,
+        end=end,
+        source_text=exact,
+        chapter_title=str(getattr(chapter, "title", "") or ""),
+        path=path,
+    )
+
+
+def remove_project_speaker_assignment_feedback(
+    project_folder: Path | str | None,
+    chapter,
+    assignment: dict[str, Any] | None,
+    *,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    """Remove feedback for an explicitly undone single-speaker assignment."""
+    if not isinstance(assignment, dict) or str(assignment.get("source") or "manual").casefold() != "manual":
+        return {"removed": False, "reason": "not-user-confirmed"}
+    speakers = _assignment_speaker_names(assignment)
+    if len(speakers) != 1:
+        return {"removed": False, "reason": "multi-speaker-assignment"}
+    scope = learning_scope_for_project(project_folder)
+    if not scope:
+        return {"removed": False, "reason": "missing-learning-scope"}
+    source = str(getattr(chapter, "text", "") or "")
+    try:
+        start, end = int(assignment.get("start")), int(assignment.get("end"))
+    except (TypeError, ValueError, OverflowError):
+        return {"removed": False, "reason": "invalid-source-offsets"}
+    if start < 0 or end <= start or end > len(source):
+        return {"removed": False, "reason": "stale-source-offsets"}
+    return remove_assignment_feedback(
+        series=scope,
+        chapter_text=source,
+        start=start,
+        end=end,
+        source_text=source[start:end],
+        path=path,
+    )
+
+
 def load_learning_examples(series: str, path: Path | None = None) -> list[dict[str, Any]]:
     """Load only examples from the requested series; unrelated books stay isolated."""
     wanted = _series_key(series)
