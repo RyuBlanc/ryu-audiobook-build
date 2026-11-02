@@ -4820,6 +4820,7 @@ class PremiumV2Bridge(QObject):
         """Run the same local audiobook AI used by the Director and return review-only rules."""
         try:
             from app.ai.brain import AudiobookBrain
+            from app.tts.pronunciation_suggester import is_common_english_phrase
             brain = AudiobookBrain(Path(project.folder))
             try:
                 analysis = brain.analyze_book(
@@ -4851,7 +4852,7 @@ class PremiumV2Bridge(QObject):
                     if native_script else
                     bool(re.search(r"(?i)(?<![\w])" + re.escape(written) + r"(?![\\w])", source_text))
                 )
-                if not present:
+                if not present or is_common_english_phrase(written):
                     continue
                 key = unicodedata.normalize("NFC", written).casefold()
                 if key in seen:

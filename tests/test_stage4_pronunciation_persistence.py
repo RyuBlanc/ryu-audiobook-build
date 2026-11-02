@@ -177,6 +177,7 @@ class PronunciationPersistenceTests(unittest.TestCase):
         fake_brain.close.assert_called_once_with()
         update = bridge._job_update.call_args.kwargs
         self.assertEqual("completed",update["state"])
+        self.assertEqual(1,len(update["result"]["suggestions"]))
         suggestion = update["result"]["suggestions"][0]
         self.assertEqual("Yamato",suggestion["written_form"])
         self.assertEqual("ai",suggestion["origin"])
@@ -195,8 +196,10 @@ class PronunciationPersistenceTests(unittest.TestCase):
         self.assertEqual("manual", row["origin"])
         self.assertTrue(row["enabled"])
 
-    def test_ai_origin_survives_edit_and_remains_disabled_until_enabled(self):
-        self.save(self.bridge_a, "Rimuru", "Rimuru", origin="ai", enabled=False)
+    def test_ai_origin_and_review_evidence_survive_edit_and_remain_disabled(self):
+        self.save(self.bridge_a, "Rimuru", "Rimuru", origin="ai", enabled=False,
+                  confidence=0.94, ipa="/ɾimɯɾɯ/", script="Latin",
+                  reason="Japanese proper name", alternatives=["Rim-oo-roo"])
         self.save(self.bridge_a, "Rimuru Tempest", "Rimuru Tem-pest",
                   original_written_form="Rimuru", original_scope="Current book",
                   origin="ai", enabled=False)
@@ -205,6 +208,9 @@ class PronunciationPersistenceTests(unittest.TestCase):
         self.assertEqual("Rimuru Tempest", rows[0]["written_form"])
         self.assertEqual("ai", rows[0]["origin"])
         self.assertFalse(rows[0]["enabled"])
+        self.assertEqual(0.94, rows[0]["confidence"])
+        self.assertEqual("/ɾimɯɾɯ/", rows[0]["ipa"])
+        self.assertEqual(["Rim-oo-roo"], rows[0]["alternatives"])
 
     def test_global_pronunciation_switch_bypasses_rules_without_deleting_them(self):
         with patch.object(host, "settings_root", return_value=self.settings):
