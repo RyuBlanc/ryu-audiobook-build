@@ -1199,9 +1199,13 @@ class PremiumV2Bridge(QObject):
         active_again = self._active_project()
         if Path(active_again.folder).resolve() != Path(project.folder).resolve():
             raise RuntimeError("The active project changed before metadata could be committed.")
+        project_file_written = False
+        state_file_written = False
         try:
             Project._atomic_write_text(project.project_file, project_payload_text)
+            project_file_written = True
             Project._atomic_write_text(state_file, state_payload_text)
+            state_file_written = True
             persisted_project = json.loads(project.project_file.read_text(encoding="utf-8"))
             persisted_state = json.loads(state_file.read_text(encoding="utf-8"))
             if persisted_project.get("title") != title:
@@ -1213,10 +1217,12 @@ class PremiumV2Bridge(QObject):
                 raise IOError("Saved narrator profile did not pass read-back verification.")
         except Exception as save_error:
             rollback_errors: list[str] = []
-            for path, original_text in (
-                (project.project_file, original_project_text),
-                (state_file, original_state_text),
+            for path, original_text, was_written in (
+                (state_file, original_state_text, state_file_written),
+                (project.project_file, original_project_text, project_file_written),
             ):
+                if not was_written:
+                    continue
                 try:
                     if original_text is None:
                         path.unlink(missing_ok=True)

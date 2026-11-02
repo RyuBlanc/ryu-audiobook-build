@@ -96,3 +96,8 @@ The new artifact-checkpoint run must pass the exact implementation tests and pac
 The Production M4B assembly path accepts the series-volume tag as `series_number`, not `series_volume`. The Stage 5 bridge now maps saved `state.json.series_volume` to `metadata.series_number`, and the existing generation-configuration regression asserts that exact hand-off.
 
 The project cover chooser continues to accept the cover formats supported by the project-cover subsystem. During metadata save, JPG/JPEG/PNG are copied as-is; supported WebP/GIF/BMP/TIFF inputs are decoded and normalized to PNG because the current M4B assembler's cover validator accepts JPG/JPEG/PNG. The conversion is part of metadata save and participates in rollback if either project metadata file fails to commit.
+
+
+## 9. #2089 regression failure and correction
+
+Run [#2089](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41540647868) completed with one test error: `test_metadata_save_rolls_back_project_json_when_state_write_fails`. The injected failure rejected every write to `state.json`, including the rollback rewrite even though the atomic write had failed before replacing the original file. The transaction now tracks successful replacements and rolls back only the files whose atomic write completed. The original state file is left untouched when its attempted atomic write raises before commit. Added cover-format conversion and cover-rollback tests to guard M4B-compatible PNG normalization.
