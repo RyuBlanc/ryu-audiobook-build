@@ -1005,15 +1005,28 @@
         Math.abs(Number(state.narration_volume) - 0.82) < 0.005 &&
         Math.abs(Number(state.cue_volume) - 0.30) < 0.005;
     }, 20000);
-    await waitFor("Mix summary live effective values", function () {
-      return document.querySelector("#mixStrategy")?.textContent.includes("Chapter-Based BGM") &&
-        document.querySelector("#mixOverrides")?.textContent.includes("3 chapters") &&
-        document.querySelector("#mixEffectiveTracks")?.textContent.includes(config.track_titles[0]) &&
-        document.querySelector("#mixEffectiveTracks")?.textContent.includes(config.track_titles[1]) &&
-        document.querySelector("#advancedMusicVolumeValue")?.textContent.trim() === "42%" &&
-        document.querySelector("#narrationVolumeValue")?.textContent.trim() === "82%" &&
-        document.querySelector("#cueVolumeValue")?.textContent.trim() === "30%";
-    }, 12000);
+    const mixSummarySnapshot = () => ({
+      strategy: document.querySelector("#mixStrategy")?.textContent.trim() || "",
+      overrides: document.querySelector("#mixOverrides")?.textContent.trim() || "",
+      effectiveTracks: document.querySelector("#mixEffectiveTracks")?.textContent.trim() || "",
+      bgmVolume: document.querySelector("#advancedMusicVolumeValue")?.textContent.trim() || "",
+      narrationVolume: document.querySelector("#narrationVolumeValue")?.textContent.trim() || "",
+      cueVolume: document.querySelector("#cueVolumeValue")?.textContent.trim() || ""
+    });
+    try {
+      await waitFor("Mix summary live effective values", function () {
+        return document.querySelector("#mixStrategy")?.textContent.includes("Chapter-Based BGM") &&
+          document.querySelector("#mixOverrides")?.textContent.includes("3 chapters") &&
+          document.querySelector("#mixEffectiveTracks")?.textContent.includes(config.track_titles[0]) &&
+          document.querySelector("#mixEffectiveTracks")?.textContent.includes(config.track_titles[1]) &&
+          document.querySelector("#advancedMusicVolumeValue")?.textContent.trim() === "42%" &&
+          document.querySelector("#narrationVolumeValue")?.textContent.trim() === "82%" &&
+          document.querySelector("#cueVolumeValue")?.textContent.trim() === "30%";
+      }, 12000);
+    } catch (error) {
+      throw new Error((error?.message || String(error)) +
+        ". Actual Mix Summary: " + JSON.stringify(mixSummarySnapshot()));
+    }
     const chapterSummaryState = await invoke("sound.chapter_bgm.get", {});
     const productionMusicSummary = document.querySelector("#productionMusicSummary")?.textContent.trim() || "";
     must(Number(chapterSummaryState.explicit_chapter_track_count) === 2 &&

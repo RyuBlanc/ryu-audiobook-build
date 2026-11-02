@@ -108,7 +108,7 @@ class Stage743OutputValidationTests(unittest.TestCase):
             self.assertIn("Chapter #0:1", report)
             self.assertRegex(report, r"Video: mjpeg.*attached pic|attached pic.*Video: mjpeg")
 
-            # FFmpeg must be able to decode a sample from the final packaged file.
+            # FFmpeg must be able to decode the complete primary audio stream from the final packaged file.
             decode = subprocess.run(
                 [
                     imageio_ffmpeg.get_ffmpeg_exe(), "-v", "error",

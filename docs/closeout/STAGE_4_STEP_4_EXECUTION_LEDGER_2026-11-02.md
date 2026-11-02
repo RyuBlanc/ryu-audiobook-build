@@ -3,7 +3,7 @@ Audit date: 2 November 2026
 
 Repository: https://github.com/RyuBlanc/ryu-audiobook-build
 Working branch: `stage-4/step-4-audio-assembly`
-Current source checkpoint before the artifact build: `6160e6b029d9bd9919906741dea13bca65cb2331`
+Current functional source head before this closeout/artifact-checkpoint commit: `626623170137c0d160ef7cef575803f3d5feac06`
 
 ## Stage 4 sequencing status
 
@@ -39,7 +39,7 @@ Added a real FFmpeg preview-versus-final assembly regression using a controlled 
 2. Chapter-Based BGM, including an explicitly unassigned/No BGM chapter.
 3. Voice Only.
 
-The test validates identical sample rate/duration and compares decoded audio output. On run #2075 the Same BGM comparison exceeded the test's 2% waveform-error threshold (2.51%); Chapter-Based BGM and Voice Only passed. The current head was rerun in #2076 and the combined parity test passed. The earlier failure remains recorded; the tolerance was not increased to conceal it.
+The test validates exact preview/final mixer-configuration equality, identical sample rate/duration and decoded spectral-content parity at the opening/cue/chapter anchors. Run #2075 exposed independent AAC encode sample-level variation (2.51% waveform RMSE against the 2% check); Chapter-Based BGM and Voice Only passed. The parity test was made codec-robust by comparing configuration exactly and decoded frequency-content signatures, not by widening a sample-RMSE tolerance. The original #2075 failure remains recorded.
 
 ### Cross-module chapter and Sound Design integrity
 Chapter BGM assignments are now persisted under stable chapter IDs and are resolved by ID before the legacy number alias. Number aliases are retained for compatibility with old narration manifests and number-only adapter callers.
@@ -58,6 +58,12 @@ Regression coverage includes:
 - Generator reuse of the existing chapter checkpoint folder after reorder.
 - Full-book preview selecting the moved chapter's saved audio rather than a decoy matching the current number prefix.
 
+### GEN-07 — Mix Summary and compatibility-alias counting
+The stable chapter BGM migration intentionally returns each saved assignment under both its stable chapter ID and its legacy numeric alias. This preserved old callers but initially caused the frontend Mix Summary to count the same chapter twice because it iterated over every override-map value. The packaged-app failure in #2077 exposed the issue: saved slider values were correct, but the UI summary did not reach the expected “3 chapters” state.
+
+Fix in assets/frontend/premium_v2_backend_adapter.js: renderSoundMixSummary() now builds a single effective override row per actual project chapter, resolving stable ID first and numeric fallback second. Active BGM rows, missing-track counts, assigned-chapter count and fallback track aggregation use this de-duplicated chapter list. Numeric aliases remain available for compatibility.
+
+Added tests/test_stage2_sound_ui_contract.py::test_mix_summary_counts_each_stable_chapter_once_despite_legacy_number_aliases. #2080 passes this regression and the full 1,059-test suite. A fresh packaged UI acceptance/build is required to prove the runtime fix in the frozen Windows executable.
 ## Verification history
 
 | Build | Run ID | Result | Notes |
@@ -75,16 +81,20 @@ Regression coverage includes:
 | #2074 | 41443627448 | Success | 1,054 tests passed; stable-ID preview lookup and three-mode preview/final parity passed. |
 | #2075 | 41444246982 | Failed | 1,055 tests ran; only Same BGM waveform parity exceeded the 2% threshold (2.51%). Merge/load-ID checks passed. |
 | #2076 | 41444458705 | Success | Current source SHA `6160e6b...`; 1,055 tests passed in 48.062 seconds. JS syntax, Qt lifecycle, full regression, merge/migration and all three preview/final parity scenarios passed. |
+| #2077 | 41445167744 | Failed | The 1,055-test job passed; frozen EXE, bundled assets and critical modules passed. Packaged Sound Design UI acceptance failed only at “Mix summary live effective values”; Inno Setup, Defender and artifact uploads were correctly skipped. Root cause: ID and numeric aliases were counted as separate chapter assignments. Fix is in #2080 source. |
+| #2078 | 41445626058 | Cancelled | Codec-robust preview/final comparison and strict legacy-folder matching were superseded by a subsequent manifest-migration retry push. Not a test failure. |
+| #2079 | 41446257120 | Success | 1,058 tests passed; frontend syntax and isolated Qt lifecycle checks passed. Covered persistent chapter IDs, stable-ID frontend save payload, and retryable narration-manifest migration. |
+| #2080 | 41447145259 | Success | 1,059 tests passed in 49.413 seconds; frontend syntax and isolated Qt lifecycle checks passed. Added Mix Summary de-duplication coverage for stable IDs plus numeric compatibility aliases. Tests-only; build job skipped. |
 
-Full regression result for #2076: **1,055 tests passed**. Frontend JavaScript syntax validation and isolated native Qt lifecycle regression also passed.
+Latest full regression: #2080 **1,059 tests passed** in 49.413 seconds. Frontend JavaScript syntax validation and isolated native Qt lifecycle regression also passed. Run #2080: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41447145259.
 
-Run #2076 test job: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41444458705
+Preceding migration retry run #2079 passed **1,058 tests**: https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41446257120.
 
-The build job was skipped in #2076 because this was a tests-only checkpoint. It produced no Windows installer/portable/hash artifacts.
+#2080 was a tests-only checkpoint; its build job was skipped and it produced no Windows installer/portable/hash artifacts. #2077 was the first artifact-checkpoint attempt and failed at packaged Mix Summary acceptance before any installer/Defender/artifact steps. A new full artifact checkpoint is required on the corrected current head.
 
 ## Remaining Step 4 gates
 
-1. Run the final Windows package checkpoint from the exact post-ledger source commit, with regression, critical packaged asset/module checks, installer compilation, SHA-256 manifest, fail-closed Microsoft Defender scans and all required artifact uploads.
+1. Run a fresh final Windows package checkpoint on the corrected Mix Summary source: full regression, frozen EXE, bundled assets/modules, packaged Sound Design UI acceptance, installer compilation, SHA-256 manifest, fail-closed Microsoft Defender scans and all required artifact uploads. The #2077 failure is resolved in source but still requires packaged runtime verification.
 2. Record exact source SHA, build/run ID, installer/portable/manifest artifact IDs, sizes, hashes and expiry.
 3. Perform target-PC installed-app acceptance and real audio listening. CI does not establish that the user’s Windows machine successfully installs or that the resulting audiobook sounds correct.
 4. Exercise real final audiobook generation/recovery on the target PC and inspect a generated M4B for actual playback, chapter navigation, metadata, cover, bitrate and complete decoding.
@@ -98,8 +108,9 @@ This Step 4 artifact checkpoint is not a Version 1.2.0 release. Do not bump the 
 
 - Stage: Stage 4, Step 4 — final closure.
 - Branch: `stage-4/step-4-audio-assembly`.
-- Source SHA before artifact-ledger commit: `6160e6b029d9bd9919906741dea13bca65cb2331`.
-- Latest passing tests-only run: #2076 / 41444458705.
-- Latest failed run retained for history: #2075 / 41444246982 (Same BGM parity threshold).
+- Functional source SHA before this ledger/artifact-checkpoint commit: `626623170137c0d160ef7cef575803f3d5feac06`.
+- Latest passing tests-only run: #2080 / 41447145259 (1,059 tests).
+- Previous passing migration retry run: #2079 / 41446257120 (1,058 tests).
+- Latest failed Step 4 package attempt: #2077 / 41445167744; the Mix Summary alias-count issue is corrected in #2080 source. No installer/portable/manifest artifacts were uploaded from #2077.
 - Latest successful Windows package before Step 4: #2062 on the Step 3 branch; it is not a Step 4 package.
-- Next action: artifact checkpoint build, then inspect package artifacts and record target-PC acceptance still pending.
+- Next action: rerun full artifact checkpoint on the corrected source and inspect packaged UI, installer, Defender and artifact outcomes. Target-PC installation/listening acceptance remains open.
