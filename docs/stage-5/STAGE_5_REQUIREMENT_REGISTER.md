@@ -47,8 +47,13 @@ Allowed statuses: OPEN; IN PROGRESS; CODE CHANGED — NOT VERIFIED; AUTOMATED TE
 
 ## Step 5.1 required-field policy
 
-The source requirements enumerate every metadata field but do not explicitly designate mandatory tags. Step 5.1 requires **Book Title, Author, actual selected Narrator profile, Language and Genre**. Publisher, Series, Series Volume, Release Year and Cover Image remain editable/savable optional tags. The UI identifies each missing mandatory field; saved optional metadata is still passed to final output where supported.
+The supplied Step 5.1.1 block labels all ten fields as **Required metadata fields**. The completion gate therefore requires **Book Title, Author, actual selected Narrator profile, Publisher, Series, Series Volume, Language, Release Year, Genre and a valid project-local Cover Image**. A missing, unsupported, empty or unavailable cover does not pass. The UI identifies every missing field and preview remains available while full-book generation is blocked.
 
 ## Evidence rules
 
 A button, static assertion, job submission, file existence or build alone does not prove completion. Record implementation commit, named tests/results, Actions run number/URL, runtime evidence where required, artifact identity where relevant and remaining limitations for every requirement. No core requirement may be removed or reprioritized.
+
+
+## Step 5.1 interpretation correction
+
+The first implementation gated only Title, Author, Narrator, Language and Genre. On re-reading the supplied Step 5.1.1 list, all ten entries are under the heading "Required metadata fields"; the gate and tests now cover all ten, including Publisher, Series, Series Volume, Release Year and a real M4B-compatible project cover. No field has been downgraded to optional.

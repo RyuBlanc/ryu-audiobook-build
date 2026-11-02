@@ -116,3 +116,10 @@ The Windows frozen-app acceptance script is extended to exercise the Stage 5 met
 ## 12. Packaged metadata acceptance fixture correction
 
 Before the new packaged acceptance run began, source review caught a byte-escape issue in the one-pixel PNG fixture and an over-escaped Windows path assertion. The fixture now emits the PNG signature, RGBA scanline and chunks from explicit byte values; the restart assertion normalizes backslashes to forward slashes before testing the project-local cover path.
+
+
+## 13. Required metadata scope correction
+
+The supplied Stage 5 detailed plan explicitly places all ten fields under the heading "Required metadata fields". The previous five-field gate was too permissive. The shared validator now requires every listed field: Book Title, Author, actual Narrator profile, Publisher, Series, Series Volume, Language, four-digit Release Year, Genre and a real non-empty JPG/JPEG/PNG cover path. The M4B cover formats are limited to the formats accepted by the assembler after the save path normalizes supported source images to PNG/JPEG/JPG.
+
+The prior Stage 4 pronunciation-generation fixture has been updated with valid publisher, series volume, year and cover values so that its original pronunciation-specific assertions continue to test pronunciation rather than failing the new Stage 5 preflight. The Step 5.1 metadata contract suite now separately proves each declared required field blocks completion when absent or invalid.

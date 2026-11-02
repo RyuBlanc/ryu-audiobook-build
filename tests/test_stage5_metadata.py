@@ -13,22 +13,76 @@ from app.ui import premium_v2_host as host
 
 
 class MetadataContractTests(unittest.TestCase):
-    def test_empty_saved_metadata_reports_each_missing_required_field(self):
+    def test_empty_saved_metadata_reports_all_nine_non_title_fields(self):
         self.assertEqual(
             missing_required_metadata_fields("Untitled", {}, ""),
-            ["Author", "Narrator", "Language", "Genre"],
+            [
+                "Author", "Narrator", "Publisher", "Series", "Series Volume",
+                "Language", "Release Year", "Genre", "Cover Image",
+            ],
         )
 
-    def test_complete_saved_metadata_uses_project_title_and_effective_profile(self):
-        state = {"author": "A. Writer", "language": "en-US", "genre": "Fantasy"}
-        self.assertEqual(
-            missing_required_metadata_fields("The First Book", state, "Saved Narrator"),
-            [],
-        )
+    def test_complete_saved_metadata_requires_all_ten_declared_fields(self):
+        with tempfile.TemporaryDirectory() as temp:
+            cover = Path(temp) / "cover.png"
+            cover.write_bytes(b"valid image fixture")
+            state = {
+                "author": "A. Writer",
+                "publisher": "Example Press",
+                "series": "Dragon Library",
+                "series_volume": "2",
+                "language": "en-US",
+                "year": "2026",
+                "genre": "Fantasy",
+                "cover_path": str(cover),
+            }
+            self.assertEqual(
+                missing_required_metadata_fields("The First Book", state, "Saved Narrator"),
+                [],
+            )
 
-    def test_optional_descriptive_fields_do_not_block_generation(self):
-        state = {"author": "A. Writer", "language": "en", "genre": "Fiction"}
-        self.assertEqual(missing_required_metadata_fields("A Book", state, "Narrator"), [])
+    def test_each_required_descriptive_field_blocks_completion_when_missing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            cover = Path(temp) / "cover.png"
+            cover.write_bytes(b"valid image fixture")
+            complete = {
+                "author": "A. Writer", "publisher": "Example Press",
+                "series": "Dragon Library", "series_volume": "2",
+                "language": "en", "year": "2026", "genre": "Fantasy",
+                "cover_path": str(cover),
+            }
+            for key, label in (
+                ("publisher", "Publisher"), ("series", "Series"),
+                ("series_volume", "Series Volume"), ("year", "Release Year"),
+                ("cover_path", "Cover Image"),
+            ):
+                incomplete = dict(complete)
+                incomplete[key] = ""
+                with self.subTest(field=key):
+                    self.assertIn(
+                        label,
+                        missing_required_metadata_fields("A Book", incomplete, "Narrator"),
+                    )
+
+    def test_missing_invalid_or_unsupported_cover_blocks_completion(self):
+        with tempfile.TemporaryDirectory() as temp:
+            cover = Path(temp) / "cover.webp"
+            cover.write_bytes(b"webp")
+            state = {
+                "author": "A. Writer", "publisher": "Example Press",
+                "series": "Dragon Library", "series_volume": "2",
+                "language": "en", "year": "2026", "genre": "Fantasy",
+                "cover_path": str(cover),
+            }
+            self.assertIn(
+                "Cover Image",
+                missing_required_metadata_fields("A Book", state, "Narrator"),
+            )
+            state["year"] = "26"
+            self.assertIn(
+                "Release Year",
+                missing_required_metadata_fields("A Book", state, "Narrator"),
+            )
 
     def test_metadata_normalization_removes_nulls_and_collapses_whitespace(self):
         self.assertEqual(normalize_metadata_text("  A\x00  book  title "), "A book title")

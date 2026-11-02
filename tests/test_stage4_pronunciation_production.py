@@ -17,6 +17,8 @@ class ProductionPronunciationConnectivityTests(unittest.TestCase):
         project_folder.mkdir(parents=True, exist_ok=True)
         output_root = root / "output"
         output_root.mkdir(parents=True, exist_ok=True)
+        cover = project_folder / "cover.png"
+        cover.write_bytes(b"valid cover fixture")
 
         project = SimpleNamespace(
             folder=project_folder,
@@ -51,9 +53,13 @@ class ProductionPronunciationConnectivityTests(unittest.TestCase):
         )
         state = {
             "author": "Saved Author",
+            "publisher": "Example Press",
             "language": "en",
             "genre": "Fantasy",
             "series": "Slime",
+            "series_volume": "1",
+            "year": "2026",
+            "cover_path": str(cover),
             "pronunciation_enabled": enabled,
             "pronunciation_dictionary": [
                 {"written_form": "NYC", "spoken_form": "Book City", "enabled": True},
