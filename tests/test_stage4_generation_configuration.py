@@ -162,7 +162,7 @@ class EffectiveGenerationConfigurationTests(unittest.TestCase):
             )
             manager.start.assert_called_once()
             start_args = manager.start.call_args
-            self.assertEqual(start_args.args[0], output)
+            self.assertEqual(start_args.args[0].resolve(), output.resolve())
             self.assertEqual(start_args.args[1], "Complete Configuration")
             self.assertEqual(start_args.args[2], "Saved Author")
             self.assertEqual(start_args.args[3], cover)
