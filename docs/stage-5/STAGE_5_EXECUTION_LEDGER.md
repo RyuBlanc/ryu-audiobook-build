@@ -89,3 +89,10 @@ The follow-up artifact-checkpoint source adds:
 - Additional regression coverage for second-file write failure/rollback, year bounds, cover picker validation and cover persistence after project reload.
 
 The new artifact-checkpoint run must pass the exact implementation tests and package job before Step 5.1 is eligible for closeout.
+
+
+## 8. M4B metadata hand-off verification
+
+The Production M4B assembly path accepts the series-volume tag as `series_number`, not `series_volume`. The Stage 5 bridge now maps saved `state.json.series_volume` to `metadata.series_number`, and the existing generation-configuration regression asserts that exact hand-off.
+
+The project cover chooser continues to accept the cover formats supported by the project-cover subsystem. During metadata save, JPG/JPEG/PNG are copied as-is; supported WebP/GIF/BMP/TIFF inputs are decoded and normalized to PNG because the current M4B assembler's cover validator accepts JPG/JPEG/PNG. The conversion is part of metadata save and participates in rollback if either project metadata file fails to commit.

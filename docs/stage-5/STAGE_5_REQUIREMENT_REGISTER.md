@@ -16,7 +16,7 @@ Allowed statuses: OPEN; IN PROGRESS; CODE CHANGED — NOT VERIFIED; AUTOMATED TE
 | PROD-01 | P0 | Input Project Details button and functional editor | CODE CHANGED — NOT VERIFIED | Step 5.1 Premium V2 dialog and toolbar control | Exact-commit CI and Windows runtime acceptance |
 | PROD-02 | P0 | Complete metadata fields and real historical values | CODE CHANGED — NOT VERIFIED | Project-scoped bridge save/history; values from local projects and Character Library | CI plus history/project isolation/restart acceptance |
 | PROD-03 | P0 | Saved-metadata completion gate | CODE CHANGED — NOT VERIFIED | Shared validator, live warning/complete state and backend generation guard | CI, unsaved-edit and save-failure acceptance |
-| PROD-04 | P0 | Metadata persistence and final output tags | CODE CHANGED — NOT VERIFIED | Existing project state plus project.json title persistence | M4B metadata/cover verification in Step 5.5 |
+| PROD-04 | P0 | Metadata persistence and final output tags | CODE CHANGED — NOT VERIFIED | Project-scoped metadata transaction; Series Volume mapped to M4B `series_number`; unsupported-for-M4B cover formats normalized to PNG | Exact-commit regression and packaged M4B tag/cover acceptance in Step 5.5 |
 | PROD-05 | P0 | Real generation progress | OPEN | Existing job model retained for audit | Verify actual generation progress and ETA |
 | PROD-06 | P0 | Separate preview/full-generation states | OPEN | Existing job model retained | Verify truthful independent operation state |
 | PROD-07 | P0 | 10/30/60/90-second real preview controls | OPEN | Existing duration controls retained | Exercise all durations against real audio |

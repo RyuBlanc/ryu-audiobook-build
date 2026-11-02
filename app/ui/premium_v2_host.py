@@ -46,7 +46,7 @@ from app.core.character_library import (
     sync_characters as sync_reusable_characters,
     update_character as update_reusable_character,
 )
-from app.documents.cover_art import COVER_IMAGE_EXTENSIONS, COVER_SOURCE_EXTENSIONS, extract_embedded_cover, persist_project_cover
+from app.documents.cover_art import MAX_COVER_BYTES, COVER_IMAGE_EXTENSIONS, COVER_SOURCE_EXTENSIONS, extract_embedded_cover, persist_project_cover
 from app.documents.parser import (
     SUPPORTED_EXTENSIONS, clean_import_noise, clean_text, detect_repeated_book_noise,
     extract_text, validate_chapter_text_coverage,
@@ -1126,6 +1126,8 @@ class PremiumV2Bridge(QObject):
             candidate = Path(cover_value).expanduser().resolve()
             if not candidate.is_file():
                 raise FileNotFoundError("The selected cover image is no longer available. Choose it again.")
+            if candidate.stat().st_size <= 0 or candidate.stat().st_size > MAX_COVER_BYTES:
+                raise ValueError("The selected cover image must be between 1 byte and 24 MB.")
             reader = QImageReader(str(candidate))
             reader.setAutoTransform(True)
             image = reader.read()
@@ -1133,15 +1135,36 @@ class PremiumV2Bridge(QObject):
                 raise ValueError("The selected cover image is not a valid supported image.")
             try:
                 candidate.relative_to(Path(project.folder).resolve())
-                cover_path = candidate
+                candidate_is_project_local = True
             except ValueError:
-                extension = candidate.suffix.casefold()
-                if extension == ".jpe":
-                    extension = ".jpg"
-                target = (Path(project.folder).resolve() / "assets" / ("cover" + extension))
+                candidate_is_project_local = False
+
+            extension = candidate.suffix.casefold()
+            output_cover_extensions = {".jpg", ".jpeg", ".png"}
+            if extension in output_cover_extensions:
+                if candidate_is_project_local:
+                    cover_path = candidate
+                else:
+                    target = (Path(project.folder).resolve() / "assets" / ("cover" + extension))
+                    prior_cover_bytes = target.read_bytes() if target.is_file() else None
+                    cover_backup = (target, prior_cover_bytes)
+                    cover_path = persist_project_cover(candidate, project.folder)
+            else:
+                # Production's M4B writer accepts JPG/JPEG/PNG only. Normalize
+                # every other supported project-cover input into a durable PNG.
+                assets = Path(project.folder).resolve() / "assets"
+                assets.mkdir(parents=True, exist_ok=True)
+                target = assets / "cover.png"
                 prior_cover_bytes = target.read_bytes() if target.is_file() else None
                 cover_backup = (target, prior_cover_bytes)
-                cover_path = persist_project_cover(candidate, project.folder)
+                temporary = assets / ".cover.png.stage5.tmp"
+                try:
+                    if not image.save(str(temporary), "PNG"):
+                        raise ValueError("The selected cover could not be converted to PNG for audiobook embedding.")
+                    temporary.replace(target)
+                finally:
+                    temporary.unlink(missing_ok=True)
+                cover_path = target.resolve()
             metadata["cover_path"] = str(cover_path)
             state["cover_detection_attempted"] = True
         else:
@@ -5368,7 +5391,9 @@ class PremiumV2Bridge(QObject):
         metadata = {"title": str(payload.get("title") or project.title),
                     "author": str(payload.get("author") or state.get("author") or ""),
                     "narrator": profile.name, "publisher": str(state.get("publisher") or ""),
-                    "series": str(state.get("series") or ""), "language": str(state.get("language") or ""),
+                    "series": str(state.get("series") or ""),
+                    "series_number": str(state.get("series_volume") or ""),
+                    "language": str(state.get("language") or ""),
                     "year": str(state.get("year") or ""), "genre": str(state.get("genre") or "")}
         chapter_bgm_strategy = str(
             state.get("chapter_bgm_strategy") or
