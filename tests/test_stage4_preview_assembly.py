@@ -313,6 +313,7 @@ class PreviewAssemblyTests(unittest.TestCase):
             )
             profile = SimpleNamespace(name="Saved Narrator", provider="piper", voice_id="selected-voice")
             state = {
+                "_include_sound_design_preview": True,
                 "background_audio_mode": "manual",
                 "background_audio_enabled": True,
                 "chapter_transition_sound": True,
