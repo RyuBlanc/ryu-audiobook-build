@@ -108,9 +108,11 @@ class PreviewAssemblyTests(unittest.TestCase):
                     captured["started"] = True
 
             state = {"background_audio_mode": "off", "background_audio_enabled": False}
-            with patch("app.core.state.load_state", return_value=state), \\
-                 patch("app.core.paths.app_root", return_value=root / "app"), \\
-                 patch("threading.Thread", _Thread):
+            with (
+                patch("app.core.state.load_state", return_value=state),
+                patch("app.core.paths.app_root", return_value=root / "app"),
+                patch("threading.Thread", _Thread),
+            ):
                 result = full_book_preview.start_full_book_preview(host)
 
             self.assertTrue(captured["started"])
