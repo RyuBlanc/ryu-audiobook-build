@@ -360,10 +360,12 @@ class AudiobookBrain:
             if progress:
                 progress(f'Analyzing chapter {chapter.number} • excerpt {idx}/{len(chunks)} • scene pass')
             scene_prompt = (
-                'Analyze ONLY scene direction for an audiobook. Return one compact JSON object with keys: '
-                'scenes and continuity_notes. Each scene must have summary, location, time, mood, pace, '
-                'energy, delivery, ambience, music_style, music_intensity, sfx, confidence. '
-                'Use short phrases. Never include quotes inside values unless necessary. JSON only.'
+                'Analyze ONLY scene direction for an audiobook. Return one compact JSON object with keys '
+                'scenes and continuity_notes. Each scene must contain summary, location, time, mood, '
+                'narrator_direction (an object with pace, energy, delivery), ambience (an array), '
+                'music (an object with style and numeric intensity from 0 to 1), sfx (an array), '
+                'and confidence (0 to 1). Use short phrases, keep every field in this exact nested shape, '
+                'and never include unsupported facts. JSON only.'
             )
             scene_user = (
                 f'Chapter: {chapter.title}\nExcerpt:\n{chunk}\n'
@@ -459,14 +461,22 @@ class AudiobookBrain:
         return {'version': 1, 'book_bible': bible, 'chapters': results}
 
     def _chunks(self, text: str) -> list[str]:
-        if len(text) <= self.config.context_chars:
+        # Use a sliding window with real overlap so entities, dialogue tags,
+        # scene transitions, and emotional beats at excerpt boundaries retain
+        # enough preceding context for the next local inference pass.
+        window = max(1, int(self.config.context_chars))
+        overlap = min(max(0, int(self.config.overlap_chars)), window - 1)
+        stride = window - overlap
+        if len(text) <= window:
             return [text]
-        out, start = [], 0
+        out: list[str] = []
+        start = 0
         while start < len(text):
-            end = min(len(text), start + self.config.context_chars)
+            end = min(len(text), start + window)
             out.append(text[start:end])
-            if end >= len(text): break
-            start = max(end - self.config.overlap_chars, end)
+            if end >= len(text):
+                break
+            start += stride
         return out
 
     @staticmethod
@@ -492,22 +502,34 @@ class AudiobookBrain:
         for raw in data.get('scenes', []) or []:
             if not isinstance(raw, dict):
                 continue
+            direction = raw.get('narrator_direction')
+            direction = direction if isinstance(direction, dict) else {}
+            music = raw.get('music')
+            music = music if isinstance(music, dict) else {}
+            ambience = raw.get('ambience')
+            ambience = ambience if isinstance(ambience, list) else []
+            sfx = raw.get('sfx')
+            sfx = sfx if isinstance(sfx, list) else []
             out['scenes'].append({
                 'summary': str(raw.get('summary', '')).strip(),
                 'location': str(raw.get('location', '')).strip(),
                 'time': str(raw.get('time', '')).strip(),
                 'mood': str(raw.get('mood', 'neutral')).strip() or 'neutral',
                 'narrator_direction': {
-                    'pace': str(raw.get('pace', 'natural')).strip() or 'natural',
-                    'energy': str(raw.get('energy', 'medium')).strip() or 'medium',
-                    'delivery': str(raw.get('delivery', '')).strip(),
+                    # Read the current nested schema first; keep the flat
+                    # aliases for older saved/model payloads.
+                    'pace': str(direction.get('pace', raw.get('pace', 'natural'))).strip() or 'natural',
+                    'energy': str(direction.get('energy', raw.get('energy', 'medium'))).strip() or 'medium',
+                    'delivery': str(direction.get('delivery', raw.get('delivery', ''))).strip(),
                 },
-                'ambience': list(raw.get('ambience', []) or [])[:3],
+                'ambience': [str(value).strip() for value in ambience if str(value).strip()][:3],
                 'music': {
-                    'style': str(raw.get('music_style', '')).strip() or None,
-                    'intensity': self._numeric_intensity(raw.get('music_intensity', 0.0)),
+                    'style': str(music.get('style', raw.get('music_style', ''))).strip() or None,
+                    'intensity': self._numeric_intensity(
+                        music.get('intensity', raw.get('music_intensity', 0.0))
+                    ),
                 },
-                'sfx': list(raw.get('sfx', []) or [])[:4],
+                'sfx': [str(value).strip() for value in sfx if str(value).strip()][:4],
                 'confidence': _numeric_score(raw.get('confidence', 0.0)),
             })
         for note in data.get('continuity_notes', []) or []:
