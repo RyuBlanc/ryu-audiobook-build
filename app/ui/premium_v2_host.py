@@ -4579,6 +4579,8 @@ class PremiumV2Bridge(QObject):
         key = word.casefold()
         new_matches = [row for row in entries if row["written_form"].casefold() == key]
         original_matches = [row for row in entries if original_key and row["written_form"].casefold() == original_key]
+        if original_word and not original_matches:
+            raise ValueError("The original pronunciation entry no longer exists. Refresh the dictionary before editing.")
         old_match = original_matches[0] if original_matches else (new_matches[0] if new_matches else None)
         previous_spoken = old_match.get("spoken_form") if old_match else None
         origin = str(payload.get("origin") or (old_match or {}).get("origin") or "manual").strip().casefold()

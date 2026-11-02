@@ -195,10 +195,23 @@ class PronunciationPersistenceTests(unittest.TestCase):
             listed = self.list(self.bridge_a)
             self.assertEqual("Mee-rah", listed[0]["spoken_form"])
 
+    def test_edit_rejects_a_stale_original_identity_without_creating_a_new_row(self):
+        self.save(self.bridge_a, "Mira", "Mee-rah")
+        with self.assertRaisesRegex(ValueError, "no longer exists"):
+            self.save(
+                self.bridge_a, "Mira Vale", "My-rah Vail",
+                original_written_form="Missing original", original_scope="Current book"
+            )
+        self.assertEqual(["Mira"], [row["written_form"] for row in self.list(self.bridge_a)])
+
     def test_bulk_delete_removes_only_explicit_selected_scope_identities(self):
         self.save(self.bridge_a, "Mira", "Mee-rah")
         self.save(self.bridge_a, "Rimuru", "Ree-moo-roo", scope="Global library")
         self.save(self.bridge_a, "Rimuru", "Series reading", scope="Series · Slime")
+        state_path = self.project_a / "state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["series"] = "Slime"
+        state_path.write_text(json.dumps(state), encoding="utf-8")
         result = host.PremiumV2Bridge._pronunciation_delete_many(self.bridge_a, {"entries":[
             {"written_form":"Mira","scope":"Current book"},
             {"written_form":"Rimuru","scope":"Global library"}
