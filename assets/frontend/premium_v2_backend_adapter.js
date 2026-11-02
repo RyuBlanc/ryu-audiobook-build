@@ -2014,6 +2014,9 @@
     void refreshProviderCatalog(activeProviderKey, false).catch(error => console.warn('[Ryu voice catalogue]', error));
     // A catalogue selection is not a saved custom profile; the profile name is supplied by the user.
     renderCharacterStudioLive();
+    // Keep Pronunciation Studio's per-row preview selector in sync with saved
+    // Voice Studio profiles after create, edit, import, or delete operations.
+    renderPronunciationRows();
     return voices;
   }
   function renderLiveChapterInsights() {
