@@ -3176,9 +3176,18 @@ class PremiumV2Bridge(QObject):
             synthesis_finished_at = time.monotonic()
             if cancel_event is not None and cancel_event.is_set():
                 raise PreviewCancelledError("Preview cancelled by user.")
-            preview_path = Path(result.output_path)
+            voice_preview_path = Path(result.output_path)
+            preview_path = voice_preview_path
             if state.get("_include_sound_design_preview"):
-                preview_path = self._render_sound_design_preview(preview_path, job_id, state)
+                preview_path = self._render_sound_design_preview(voice_preview_path, job_id, state)
+                # The mixed M4A is the playable result. The source narration WAV
+                # is an intermediate owned by this job, not a second saved preview.
+                if preview_path.resolve() != voice_preview_path.resolve():
+                    try:
+                        voice_preview_path.unlink(missing_ok=True)
+                    except OSError:
+                        log.warning("Could not remove the intermediate voice preview WAV: %s",
+                                    voice_preview_path, exc_info=True)
             if cancel_event is not None and cancel_event.is_set():
                 raise PreviewCancelledError("Preview cancelled by user.")
             duration = None

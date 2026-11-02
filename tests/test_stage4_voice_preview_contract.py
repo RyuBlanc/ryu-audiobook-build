@@ -914,5 +914,53 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("if(previewToken!==voicePreviewEpoch)return true;", handler)
         self.assertIn("preparePreviewPlayback(job,Number(duration),{profileName:name})", handler)
 
+
+    def test_preview_worker_applies_project_pronunciation_rules_only_when_enabled(self):
+        profile = SimpleNamespace(
+            name="Saved Narrator", provider="piper", voice_id="requested-narrator"
+        )
+        rule_rows = [
+            {"written_form": "Mira", "spoken_form": "Mee-rah", "enabled": True},
+            {"written_form": "Hidden", "spoken_form": "Ignored", "enabled": False},
+        ]
+        observed = []
+
+        for enabled in (True, False):
+            with self.subTest(pronunciation_enabled=enabled), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                host = SimpleNamespace(
+                    _job_update=lambda _job_id, **kwargs: kwargs,
+                    _jobs_lock=threading.RLock(),
+                    _preview_cancel_events={},
+                )
+
+                def fake_build(_text, _provider, _voice, output_path, **kwargs):
+                    observed.append(list(kwargs["pronunciation_dictionary"]))
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    output_path.write_bytes(b"preview audio fixture")
+                    return SimpleNamespace(
+                        output_path=output_path,
+                        voices_used=("requested-narrator",),
+                        segments=1,
+                        applied_rule_counts={"Mira": 1} if enabled else {},
+                    )
+
+                with patch.object(premium_v2_host, "provider_from_profile",
+                                  return_value=(object(), "requested-narrator")), \\
+                     patch.object(premium_v2_host, "load_profiles", return_value=[]), \\
+                     patch.object(premium_v2_host, "app_root", return_value=root), \\
+                     patch.object(premium_v2_host, "build_voice_preview", side_effect=fake_build), \\
+                     patch.object(premium_v2_host, "_read_pronunciation_store", return_value=[]), \\
+                     patch("app.audio.assembler._duration_ms", return_value=10_000):
+                    premium_v2_host.PremiumV2Bridge._preview_worker(
+                        host, f"pronunciation-{enabled}", profile, "Mira spoke.", 10,
+                        {"pronunciation_enabled": enabled, "pronunciation_dictionary": rule_rows},
+                        threading.Event(),
+                    )
+
+        enabled_rows, disabled_rows = observed
+        self.assertEqual([row["written_form"] for row in enabled_rows], ["Mira"])
+        self.assertEqual(disabled_rows, [])
+
 if __name__ == "__main__":
     unittest.main()

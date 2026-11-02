@@ -275,5 +275,73 @@ class PreviewAssemblyTests(unittest.TestCase):
             self.assertTrue(second_chunk.is_file())
             self.assertTrue(output.is_file())
 
+
+    def test_sound_design_preview_reports_measured_duration_and_removes_intermediate_narration(self):
+        from app.ui import premium_v2_host
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            preview_root = root / "Previews"
+            preview_root.mkdir(parents=True)
+            opening_cue = root / "opening-cue.wav"
+            opening_cue.write_bytes(b"cue asset")
+            updates_host = _Host()
+            updates_host._jobs_lock = threading.RLock()
+            updates_host._preview_cancel_events = {}
+
+            def fake_build(_text, _provider, _voice, output_path, **kwargs):
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(b"narration intermediate" * 100)
+                return SimpleNamespace(
+                    output_path=output_path,
+                    voices_used=("selected-voice",),
+                    segments=1,
+                    applied_rule_counts={"Mira": 1},
+                )
+
+            def fake_concat(_first, _second, output_path, _bitrate):
+                Path(output_path).write_bytes(b"opening plus narration" * 100)
+
+            def fake_run(command):
+                Path(str(command[-1])).write_bytes(b"rendered sound mix" * 200)
+
+            updates_host._render_sound_design_preview = (
+                lambda source, job_id, state:
+                premium_v2_host.PremiumV2Bridge._render_sound_design_preview(
+                    updates_host, source, job_id, state
+                )
+            )
+            profile = SimpleNamespace(name="Saved Narrator", provider="piper", voice_id="selected-voice")
+            state = {
+                "background_audio_mode": "manual",
+                "background_audio_enabled": True,
+                "chapter_transition_sound": True,
+                "opening_cue_path": str(opening_cue),
+                "background_audio_volume": 0.0,
+            }
+
+            with patch.object(premium_v2_host, "provider_from_profile", return_value=(object(), "selected-voice")), \\
+                 patch.object(premium_v2_host, "load_profiles", return_value=[]), \\
+                 patch.object(premium_v2_host, "app_root", return_value=root), \\
+                 patch.object(premium_v2_host, "build_voice_preview", side_effect=fake_build), \\
+                 patch.object(premium_v2_host, "_read_pronunciation_store", return_value=[]), \\
+                 patch("app.audio.library.validate_saved_audio_paths"), \\
+                 patch("app.audio.assembler._concat_audio_files", side_effect=fake_concat), \\
+                 patch("app.audio.assembler._run", side_effect=fake_run), \\
+                 patch("app.audio.assembler._duration_ms", side_effect=[10_000, 10_700, 10_700]):
+                premium_v2_host.PremiumV2Bridge._preview_worker(
+                    updates_host, "mix-cleanup", profile, "Mira spoke.", 10, state, threading.Event()
+                )
+
+            completed = next(
+                row for _job, row in updates_host.updates if row.get("state") == "completed"
+            )
+            self.assertEqual(completed["result"]["actual_duration_seconds"], 10.7)
+            self.assertEqual(completed["result"]["output_path"],
+                             str(preview_root / "sound_mix_preview_mix-cleanup.m4a"))
+            self.assertTrue((preview_root / "sound_mix_preview_mix-cleanup.m4a").is_file())
+            self.assertFalse((preview_root / "preview_mix-cleanup.wav").exists())
+            self.assertFalse((preview_root / "sound-preview-opening-mix-cleanup.m4a").exists())
+
 if __name__ == "__main__":
     unittest.main()
