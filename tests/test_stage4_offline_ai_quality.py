@@ -52,6 +52,14 @@ class OfflineAiAnalysisQualityTests(unittest.TestCase):
         }
         observed = {}
         original_merge = brain._merge_scenes
+        method = getattr(original_merge, "__func__", original_merge)
+        code = getattr(method, "__code__", None)
+        print(
+            "SCENE_METHOD_INFO",
+            getattr(code, "co_filename", None),
+            getattr(code, "co_firstlineno", None),
+            "SCENE_MUSIC_INSIDE" in getattr(code, "co_consts", ()),
+        )
 
         def capture_scene_payload(out, data):
             observed["input_music"] = data["scenes"][0].get("music")
