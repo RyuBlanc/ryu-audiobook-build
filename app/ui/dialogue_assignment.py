@@ -49,7 +49,9 @@ class DialogueAssignmentDialog(QDialog):
         self.end = max(self.start, min(int(end), len(chapter.text)))
         self.book_chapters = list(book_chapters or [chapter])
         self.project_folder = project_folder
-        self.selected_segment = dialogue_segment_for_selection(chapter, self.start, self.end)
+        self.selected_segment = dialogue_segment_for_selection(
+            chapter, self.start, self.end, project_folder=self.project_folder
+        )
         self.registry = build_book_character_registry(self.book_chapters, project_folder)
         self.characters: list[str] = [entry["name"] for entry in self.registry.values()]
         self.assigned = False
