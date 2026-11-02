@@ -138,20 +138,46 @@ def _safe_merge_scenes(self, out: dict, data: Any) -> None:
     for raw in _safe_list(data.get("scenes"), 8):
         if not isinstance(raw, dict):
             continue
-        direction = raw.get("narrator_direction") if isinstance(raw.get("narrator_direction"), dict) else {}
+        direction = raw.get("narrator_direction")
+        direction = direction if isinstance(direction, dict) else {}
+        nested_music = raw.get("music")
+        nested_music = nested_music if isinstance(nested_music, dict) else {}
+
+        pace = direction.get("pace") or raw.get("pace") or "natural"
+        energy = direction.get("energy") or raw.get("energy") or "medium"
+        delivery = direction.get("delivery") or raw.get("delivery") or ""
+        music_style = nested_music.get("style") or raw.get("music_style") or ""
+        music_intensity = (
+            nested_music.get("intensity")
+            if nested_music.get("intensity") is not None
+            else raw.get("music_intensity", 0.0)
+        )
+        ambience = [
+            str(value).strip()
+            for value in _safe_list(raw.get("ambience"), 3)
+            if str(value).strip()
+        ]
+        sfx = [
+            str(value).strip()
+            for value in _safe_list(raw.get("sfx"), 4)
+            if str(value).strip()
+        ]
         out.setdefault("scenes", []).append({
             "summary": str(raw.get("summary") or "").strip(),
             "location": str(raw.get("location") or "").strip(),
             "time": str(raw.get("time") or "").strip(),
             "mood": str(raw.get("mood") or "neutral").strip() or "neutral",
             "narrator_direction": {
-                "pace": str(raw.get("pace") or direction.get("pace") or "natural").strip() or "natural",
-                "energy": str(raw.get("energy") or direction.get("energy") or "medium").strip() or "medium",
-                "delivery": str(raw.get("delivery") or direction.get("delivery") or "").strip(),
+                "pace": str(pace).strip() or "natural",
+                "energy": str(energy).strip() or "medium",
+                "delivery": str(delivery).strip(),
             },
-            "ambience": [str(x).strip() for x in _safe_list(raw.get("ambience"), 3) if str(x).strip()],
-            "music": {"style": str(raw.get("music_style") or "").strip() or None, "intensity": _numeric_score(raw.get("music_intensity", 0.0))},
-            "sfx": [str(x).strip() for x in _safe_list(raw.get("sfx"), 4) if str(x).strip()],
+            "ambience": ambience,
+            "music": {
+                "style": str(music_style).strip() or None,
+                "intensity": _numeric_score(music_intensity),
+            },
+            "sfx": sfx,
             "confidence": _numeric_score(raw.get("confidence", 0.0)),
         })
 

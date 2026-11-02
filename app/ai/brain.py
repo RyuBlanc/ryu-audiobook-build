@@ -507,27 +507,13 @@ class AudiobookBrain:
             if not isinstance(direction_payload, dict):
                 direction_payload = {}
 
-            # Read nested music by capability rather than relying on a concrete
-            # container type. Runtime/structured-output adapters may return a
-            # mapping implementation other than a built-in dict.
             nested_music = raw.get('music')
-            # Keep this extraction isolated and report the concrete payload in
-            # the CI diagnostic while the structured scene contract is verified.
-            try:
-                music_style = nested_music['style'] if 'style' in nested_music else ''
-                music_intensity = nested_music['intensity'] if 'intensity' in nested_music else 0.0
-            except (TypeError, KeyError):
-                music_style = raw.get('music_style', '')
-                music_intensity = raw.get('music_intensity', 0.0)
-            print(
-                "SCENE_MUSIC_INSIDE",
-                type(raw).__name__,
-                repr(raw.get('summary')),
-                repr(raw.keys()),
-                type(nested_music).__name__,
-                repr(nested_music),
-                repr(music_style),
-                repr(music_intensity),
+            nested_music = nested_music if isinstance(nested_music, dict) else {}
+            music_style = nested_music.get('style') or raw.get('music_style', '')
+            music_intensity = (
+                nested_music.get('intensity')
+                if nested_music.get('intensity') is not None
+                else raw.get('music_intensity', 0.0)
             )
 
             ambience_payload = raw.get('ambience')
