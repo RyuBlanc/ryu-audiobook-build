@@ -4359,6 +4359,18 @@
     };
     const overrides = chapterBgmState.overrides && typeof chapterBgmState.overrides === 'object'
       ? chapterBgmState.overrides : {};
+    // The backend keeps stable-ID keys and numeric compatibility aliases in
+    // the same persisted map. Build one row per real project chapter so summary
+    // counts/levels never double-count the same assignment.
+    const chapterOverrideRows = Array.isArray(chapterBgmState.chapters)
+      ? chapterBgmState.chapters.map(chapter => {
+          const identity = String(chapter?.chapter_id || '').trim();
+          const stable = identity ? overrides[identity] : null;
+          const legacy = overrides[String(chapter?.number)];
+          const row = stable && typeof stable === 'object' ? stable : legacy;
+          return row && typeof row === 'object' ? row : null;
+        }).filter(Boolean)
+      : Object.values(overrides).filter(item => item && typeof item === 'object');
     const chapterBased = ['custom', 'chapter-based', 'chapter_based', 'chapter'].includes(String(chapterBgmState.strategy || 'same').toLowerCase());
     const masterEnabled = chapterBgmState.bgm_enabled === true;
     const bgmLevelInput = $('advancedMusicVolume');
@@ -4389,7 +4401,7 @@
       ? sounds.find(track => String(track.path || '') === defaultPath && isMusicSoundAsset(track))
       : null;
     const defaultAvailable = Boolean(defaultPath && chapterBgmState.default_available === true && defaultTrack);
-    const activeChapterRows = Object.values(overrides).filter(item =>
+    const activeChapterRows = chapterOverrideRows.filter(item =>
       item && item.rule === 'custom' && item.path && item.available !== false &&
       sounds.some(track => String(track.path || '') === String(item.path) && isMusicSoundAsset(track))
     );
@@ -4399,7 +4411,7 @@
       return masterEnabled && cue.available === true && Boolean(cue.path);
     });
     const missingDefault = !chapterBased && defaultPath && !defaultAvailable ? 1 : 0;
-    const missingChapterTracks = Object.values(overrides).filter(item =>
+    const missingChapterTracks = chapterOverrideRows.filter(item =>
       item && item.rule === 'custom' && (item.available === false || !item.path)
     ).length;
     const missingCues = ['opening','chapter','closing'].filter(slot => {
@@ -4407,7 +4419,7 @@
       return cue.missing === true || (cue.assigned === true && cue.available !== true);
     }).length;
     const missingCount = missingDefault + missingChapterTracks + missingCues;
-    const assignedOverrideCount = Object.values(overrides).filter(item => item && ['custom','none'].includes(item.rule)).length;
+    const assignedOverrideCount = chapterOverrideRows.filter(item => ['custom','none'].includes(item.rule)).length;
     const explicitChapterTrackCount = Number(chapterBgmState.explicit_chapter_track_count ??
       new Set(Object.values(overrides)
         .filter(item => item && item.rule === 'custom' && item.path)

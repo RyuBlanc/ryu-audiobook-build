@@ -563,6 +563,19 @@ class Stage2SoundDesignUiContractTests(unittest.TestCase):
         self.assertIn('state["background_audio_path"] = ""', strategy)
         self.assertIn('state["background_audio_preferred_path"] = preferred', strategy)
 
+    def test_mix_summary_counts_each_stable_chapter_once_despite_legacy_number_aliases(self):
+        renderer_start = self.adapter.index("function renderSoundMixSummary()")
+        renderer_end = self.adapter.index("function renderChapterBgm()", renderer_start)
+        renderer = self.adapter[renderer_start:renderer_end]
+        self.assertIn("Array.isArray(chapterBgmState.chapters)", renderer)
+        self.assertIn("const chapterOverrideRows =", renderer)
+        self.assertIn("const stable = identity ? overrides[identity] : null;", renderer)
+        self.assertIn("const legacy = overrides[String(chapter?.number)];", renderer)
+        self.assertIn("const assignedOverrideCount = chapterOverrideRows.filter", renderer)
+        self.assertIn("const activeChapterRows = chapterOverrideRows.filter", renderer)
+        self.assertNotIn("const assignedOverrideCount = Object.values(overrides)", renderer)
+        self.assertNotIn("const activeChapterRows = Object.values(overrides)", renderer)
+
     def test_production_summary_counts_unique_explicit_chapter_bgm_tracks(self):
         self.assertIn('"explicit_chapter_track_count": len({', self.host)
         self.assertIn("const explicitChapterTrackCount = Number(chapterBgmState.explicit_chapter_track_count ??", self.adapter)
