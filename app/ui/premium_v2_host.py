@@ -4622,6 +4622,34 @@ class PremiumV2Bridge(QObject):
             "origin": origin,
             "updated_at": self._now(),
         }
+        # AI review evidence remains attached to the saved row so a user can
+        # distinguish a reviewed suggestion from a manual pronunciation later.
+        for field, limit in (("ipa", 200), ("script", 80), ("reason", 500)):
+            if field in payload:
+                candidate = str(payload.get(field) or "").strip()
+                if candidate:
+                    value[field] = candidate[:limit]
+            elif old_match and old_match.get(field):
+                value[field] = str(old_match[field])[:limit]
+        if "confidence" in payload:
+            try:
+                confidence = float(payload.get("confidence"))
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("Pronunciation confidence must be a number from 0 to 1.") from exc
+            if not math.isfinite(confidence) or not 0 <= confidence <= 1:
+                raise ValueError("Pronunciation confidence must be a number from 0 to 1.")
+            value["confidence"] = confidence
+        elif old_match and old_match.get("confidence") is not None:
+            value["confidence"] = old_match["confidence"]
+        if "alternatives" in payload:
+            alternatives = payload.get("alternatives")
+            if not isinstance(alternatives, list):
+                raise ValueError("Pronunciation alternatives must be a list.")
+            value["alternatives"] = [
+                str(item).strip()[:300] for item in alternatives[:5] if str(item or "").strip()
+            ]
+        elif old_match and isinstance(old_match.get("alternatives"), list):
+            value["alternatives"] = list(old_match["alternatives"][:5])
         # Editing a written term is an upsert, not a second row. Remove both the
         # old identity and any existing destination duplicate in this same scope.
         entries = [row for row in entries if row["written_form"].casefold() not in {key, original_key}]
@@ -4725,20 +4753,42 @@ class PremiumV2Bridge(QObject):
         return {"saved": True, "enabled": enabled}
 
     def _pronunciation_analyze(self, _payload: dict[str, Any]) -> dict[str, Any]:
-        """Create conservative, disabled AI-origin review suggestions from this book."""
+        """Start the existing local audiobook-AI pronunciation analysis for saved chapters."""
         project = self._active_project()
         project_folder = getattr(project, "folder", None)
-        state = load_state(project_folder) if project_folder else {}
         existing = {
             unicodedata.normalize("NFC", str(e.get("written_form") or e.get("word") or "")).casefold()
             for e in self._pronunciation_list({})
         }
+        if project_folder:
+            if not getattr(project, "chapters", None):
+                raise ValueError("Import a book with saved chapters before analysing pronunciation.")
+            job_id = self._new_job(
+                "pronunciation-analysis", "Analyze book pronunciation",
+                "Review multilingual names, foreign-language terms and pronunciation-sensitive terminology",
+                project,
+            )
+            self._job_update(
+                job_id, state="running", started_at=self._now(),
+                stage="Preparing local AI analysis", progress=2,
+                message="Preparing the saved book text for pronunciation analysis.",
+            )
+            threading.Thread(
+                target=self._pronunciation_analysis_worker,
+                args=(job_id, project, existing),
+                daemon=True,
+                name="RyuPronunciationAnalysis",
+            ).start()
+            return {"job_id":job_id,"state":"running","project_folder":str(Path(project_folder).resolve())}
+
+        # A folderless project is used only by lightweight unit-test harnesses.
+        # Keep a conservative deterministic seam there; installed projects always
+        # take the real AudiobookBrain path above.
+        state = {}
         names: set[str] = set()
         for chapter in getattr(project, "chapters", []) or []:
             source_text = str(chapter.text or "")
             names.update(n.strip() for n in suggest_names_from_text(source_text) if len(n.strip()) > 1)
-            # Confirmed Character Studio names/aliases are stronger evidence than
-            # capitalization heuristics; include them only when present in text.
             for character in state.get("characters") or []:
                 if not isinstance(character, dict):
                     continue
@@ -4746,33 +4796,117 @@ class PremiumV2Bridge(QObject):
                 for candidate in candidates:
                     candidate = str(candidate or "").strip()
                     if len(candidate) > 1 and re.search(
-                        r"(?i)(?<![\w])" + re.escape(candidate) + r"(?![\w])", source_text
+                        r"(?i)(?<![\\w])" + re.escape(candidate) + r"(?![\\w])", source_text
                     ):
                         names.add(candidate)
         suggestions = [{
-            "written_form": name,
-            "spoken_form": suggest_pronunciation(name),
-            "language": "Auto-detect",
-            "handling_mode": "automatic",
-            "scope": "current_book",
-            "scope_type": "current_book",
-            "scope_id": "",
-            "origin": "ai",
-            "enabled": False,
-            "review_required": True,
-            "recommendation_note": "AI draft — review and edit this reading before saving; it is not enabled automatically.",
-        } for name in sorted(names, key=str.casefold)
-            if unicodedata.normalize("NFC", name).casefold() not in existing]
-        job_id = self._new_job(
-            "pronunciation-analysis", "Analyze pronunciation",
-            "Find relevant proper nouns for manual review", project
-        )
+            "written_form":name,"spoken_form":suggest_pronunciation(name),
+            "language":"Auto-detect","handling_mode":"automatic",
+            "scope":"current_book","scope_type":"current_book","scope_id":"",
+            "origin":"ai","enabled":False,"review_required":True,
+        } for name in sorted(names,key=str.casefold)
+          if unicodedata.normalize("NFC",name).casefold() not in existing]
+        job_id = self._new_job("pronunciation-analysis","Analyze pronunciation","Lightweight project analysis",project)
         self._job_update(
-            job_id, state="completed", stage="Review suggestions", progress=100,
+            job_id,state="completed",stage="Review suggestions",progress=100,
             message=f"Found {len(suggestions)} pronunciation suggestion(s); none enabled automatically",
-            result={"suggestions": suggestions, "count": len(suggestions)},
+            result={"suggestions":suggestions,"count":len(suggestions)},
         )
-        return {"job_id": job_id, "state": "completed", "suggestions": suggestions, "count": len(suggestions)}
+        return {"job_id":job_id,"state":"completed","suggestions":suggestions,"count":len(suggestions)}
+
+    def _pronunciation_analysis_worker(
+        self, job_id: str, project, existing: set[str]
+    ) -> None:
+        """Run the same local audiobook AI used by the Director and return review-only rules."""
+        try:
+            from app.ai.brain import AudiobookBrain
+            brain = AudiobookBrain(Path(project.folder))
+            try:
+                analysis = brain.analyze_book(
+                    project.chapters,
+                    progress=lambda fraction, detail: self._job_update(
+                        job_id,
+                        stage=str(detail or "Analyzing book pronunciation"),
+                        message=str(detail or "Analyzing saved chapter text"),
+                        progress=min(95,max(3,5+int(90*float(fraction or 0)))),
+                    ),
+                )
+            finally:
+                brain.close()
+
+            source_text = "\\n\\n".join(str(chapter.text or "") for chapter in project.chapters)
+            seen = set(existing)
+            suggestions = []
+            for raw in analysis.get("pronunciation", []) if isinstance(analysis, dict) else []:
+                if not isinstance(raw, dict):
+                    continue
+                try:
+                    written = _normalize_pronunciation_text(raw.get("written"), "Written term", 500)
+                    spoken = _normalize_pronunciation_text(raw.get("spoken"), "Pronunciation", 1000)
+                except ValueError:
+                    continue
+                native_script = bool(re.search(r"[\\u3040-\\u30ff\\u3400-\\u9fff\\uf900-\\ufaff\\uac00-\\ud7af]", written))
+                present = (
+                    written.casefold() in source_text.casefold()
+                    if native_script else
+                    bool(re.search(r"(?i)(?<![\\w])" + re.escape(written) + r"(?![\\w])", source_text))
+                )
+                if not present:
+                    continue
+                key = unicodedata.normalize("NFC", written).casefold()
+                if key in seen:
+                    continue
+                try:
+                    confidence = float(raw.get("confidence") or 0)
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if not math.isfinite(confidence) or confidence < 0.80:
+                    continue
+                ipa = str(raw.get("ipa") or "").strip()
+                if spoken.casefold() == written.casefold() and not ipa:
+                    continue
+                alternatives = raw.get("alternatives")
+                alternatives = alternatives if isinstance(alternatives,list) else []
+                suggestions.append({
+                    "written_form":written,
+                    "spoken_form":spoken,
+                    "language":str(raw.get("source_language") or "Auto-detect"),
+                    "handling_mode":"automatic",
+                    "scope":"current_book",
+                    "scope_type":"current_book",
+                    "scope_id":"",
+                    "origin":"ai",
+                    "enabled":False,
+                    "review_required":True,
+                    "confidence":confidence,
+                    "ipa":ipa,
+                    "script":str(raw.get("script") or ""),
+                    "reason":str(raw.get("reason") or ""),
+                    "alternatives":[str(item) for item in alternatives[:2] if str(item or "").strip()],
+                })
+                seen.add(key)
+
+            folder = str(Path(project.folder).resolve())
+            title = str(getattr(project,"title","") or "Active project")
+            message = (
+                f"Found {len(suggestions)} high-confidence AI pronunciation suggestion(s) in {title}; "
+                "review and accept each draft before it can affect synthesis."
+                if suggestions else
+                f"No new high-confidence pronunciation suggestions were found in {title}. Existing dictionary entries were left unchanged."
+            )
+            self._job_update(
+                job_id,state="completed",stage="Pronunciation review ready",progress=100,
+                message=message,
+                result={"suggestions":suggestions,"count":len(suggestions),"project_folder":folder,"project_title":title},
+            )
+        except Exception as exc:
+            log.exception("Local AI pronunciation analysis failed for job %s",job_id)
+            self._job_update(
+                job_id,state="failed",stage="Pronunciation analysis failed",
+                message="Local AI pronunciation analysis failed. No dictionary entries were saved. Check the local AI runtime and retry.",
+                error={"code":"pronunciation_analysis_failed","message":str(exc)},
+                recoverable=True,
+            )
 
     @staticmethod
     def _character_series_for_voice_assignment(character: dict[str, Any], default_series: str) -> str:

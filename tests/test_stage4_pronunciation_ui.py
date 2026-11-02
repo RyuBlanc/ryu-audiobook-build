@@ -55,6 +55,9 @@ class PronunciationDictionaryUiTests(unittest.TestCase):
         self.assertIn("data-pron-ai-scope", ADAPTER)
         self.assertIn("call('pronunciation.delete_many'", ADAPTER)
         self.assertIn("call('pronunciation.settings.save'", ADAPTER)
+        self.assertIn("await monitorJob(started.job_id", ADAPTER)
+        self.assertIn("project.get_active", ADAPTER)
+        self.assertIn("pronAnalysisStatus", HTML)
 
     def test_production_and_pronunciation_studio_use_the_same_global_toggle(self):
         self.assertIn('id="pronunciationGlobalToggle"', HTML)

@@ -154,6 +154,37 @@ class PronunciationPersistenceTests(unittest.TestCase):
         )
 
 
+    def test_local_ai_worker_returns_only_high_confidence_source_grounded_drafts(self):
+        from unittest.mock import Mock, patch
+        project = SimpleNamespace(
+            folder=self.project_a,
+            title="Series A",
+            chapters=[SimpleNamespace(number=1,title="Chapter 1",text="Mira met Yamato. The common word is very.")],
+        )
+        bridge = self.bridge_a
+        bridge._job_update = Mock()
+        fake_brain = Mock()
+        fake_brain.analyze_book.return_value = {"pronunciation":[
+            {"written":"Yamato","spoken":"Yah-mah-toh","source_language":"Japanese","script":"Latin","ipa":"","reason":"Japanese name used repeatedly","confidence":0.94,"alternatives":["Yah-mah-toe"]},
+            {"written":"Mira","spoken":"Mee-rah","source_language":"Japanese","script":"Latin","ipa":"","reason":"Already saved","confidence":0.98,"alternatives":[]},
+            {"written":"very","spoken":"veh-ree","source_language":"Japanese","script":"Latin","ipa":"","reason":"ordinary English word","confidence":0.99,"alternatives":[]},
+            {"written":"NotInBook","spoken":"Not-in-book","source_language":"Japanese","script":"Latin","ipa":"","reason":"Not present","confidence":0.99,"alternatives":[]},
+            {"written":"LowConfidence","spoken":"Low","source_language":"Japanese","script":"Latin","ipa":"","reason":"Weak evidence","confidence":0.55,"alternatives":[]},
+        ]}
+        self.save(bridge,"Mira","Mee-rah")
+        with patch("app.ai.brain.AudiobookBrain",return_value=fake_brain):
+            host.PremiumV2Bridge._pronunciation_analysis_worker(bridge,"job-ai",project,{ "mira" })
+        fake_brain.close.assert_called_once_with()
+        update = bridge._job_update.call_args.kwargs
+        self.assertEqual("completed",update["state"])
+        suggestion = update["result"]["suggestions"][0]
+        self.assertEqual("Yamato",suggestion["written_form"])
+        self.assertEqual("ai",suggestion["origin"])
+        self.assertFalse(suggestion["enabled"])
+        self.assertEqual("Japanese",suggestion["language"])
+        self.assertEqual(0.94,suggestion["confidence"])
+        self.assertEqual(["Yah-mah-toe"],suggestion["alternatives"])
+
     def test_manual_origin_is_persisted_and_preserved_during_enable_toggle(self):
         self.save(self.bridge_a, "Rimuru", "Ree-moo-roo", origin="manual", enabled=False)
         row = self.list(self.bridge_a)[0]

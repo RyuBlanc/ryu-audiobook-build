@@ -3991,6 +3991,14 @@
       rows.map((row,index) => '<div class="pron-ai-suggestion" data-pron-ai-row="' + index + '">' +
         '<label><span>Written</span><input class="input" data-pron-ai-written="' + index + '" maxlength="500" value="' + esc(row.written_form || '') + '"/></label>' +
         '<label><span>Pronounce as · review this draft</span><input class="input" data-pron-ai-spoken="' + index + '" maxlength="1000" value="' + esc(row.spoken_form || '') + '"/></label>' +
+        '<p class="pron-ai-evidence">' + esc([
+          row.language || 'Language not identified',
+          row.confidence == null ? '' : 'Confidence ' + Math.round(Number(row.confidence) * 100) + '%',
+          row.ipa ? 'IPA ' + row.ipa : '',
+          row.script || '',
+          row.reason || '',
+          Array.isArray(row.alternatives) && row.alternatives.length ? 'Alternatives: ' + row.alternatives.join(' / ') : ''
+        ].filter(Boolean).join(' · ')) + '</p>' +
         '<label><span>Save scope</span><select class="select" data-pron-ai-scope="' + index + '">' + scopes.map(([value,label]) => '<option value="' + esc(value) + '">' + esc(label) + '</option>').join('') + '</select></label>' +
         '<button type="button" class="btn small" data-pron-ai-accept="' + index + '">Accept disabled</button>' +
         '<button type="button" class="btn small ghost" data-pron-ai-dismiss="' + index + '">Dismiss</button></div>'
@@ -7636,12 +7644,34 @@
       message(result.conflict_resolved ? 'Pronunciation rule updated.' : (edit ? 'Pronunciation entry updated.' : 'Manual pronunciation entry saved.'));
     });
     if ($('analyzePronunciation')) $('analyzePronunciation').onclick=act(async()=>{
-      const result = await call('pronunciation.analyze');
-      window.ryuPendingPronunciationSuggestions = Array.isArray(result.suggestions) ? result.suggestions : [];
-      renderPronunciationSuggestions(window.ryuPendingPronunciationSuggestions);
-      message(window.ryuPendingPronunciationSuggestions.length
-        ? 'Found ' + window.ryuPendingPronunciationSuggestions.length + ' AI draft(s). Review and edit each before accepting; none are enabled automatically.'
-        : 'No new pronunciation suggestions were found in the saved book text.');
+      const projectAtStart = await call('project.get_active');
+      const started = await call('pronunciation.analyze');
+      if (!started?.job_id) throw new Error('The pronunciation analysis job was not created.');
+      window.ryuPendingPronunciationSuggestions = [];
+      renderPronunciationSuggestions([]);
+      const status = $('pronAnalysisStatus');
+      if (status) { status.hidden = false; status.textContent = 'Starting local AI analysis of saved chapter text…'; }
+      await monitorJob(started.job_id, async job => {
+        const activeNow = await call('project.get_active');
+        const originalFolder = String(projectAtStart?.folder || started.project_folder || '');
+        const resultFolder = String(job?.result?.project_folder || originalFolder);
+        if (!originalFolder || !resultFolder || String(activeNow?.folder || '') !== resultFolder) {
+          window.ryuPendingPronunciationSuggestions = [];
+          renderPronunciationSuggestions([]);
+          if (status) status.textContent = 'Analysis completed for a different project. Open that project to review its pronunciation suggestions.';
+          job.message = 'Pronunciation analysis completed for another project; its suggestions were not shown in the currently open project.';
+          return;
+        }
+        window.ryuPendingPronunciationSuggestions = Array.isArray(job?.result?.suggestions)
+          ? job.result.suggestions : [];
+        renderPronunciationSuggestions(window.ryuPendingPronunciationSuggestions);
+        if (status) {
+          status.hidden = false;
+          status.textContent = window.ryuPendingPronunciationSuggestions.length
+            ? window.ryuPendingPronunciationSuggestions.length + ' AI suggestion(s) ready for review. None have been saved or enabled.'
+            : 'No new high-confidence pronunciation suggestions were found.';
+        }
+      });
     });
     if ($('editAssignedCharacter')) $('editAssignedCharacter').onclick=()=>{
       const name=window.ryuPremiumSelectedCharacter;
@@ -8847,7 +8877,9 @@
           await call('pronunciation.save',{
             written_form:written,spoken_form:spoken,language:suggestion.language || 'Auto-detect',
             handling_mode:suggestion.handling_mode || 'automatic',scope,
-            origin:'ai',enabled:false
+            origin:'ai',enabled:false,confidence:suggestion.confidence,
+            ipa:suggestion.ipa || '',script:suggestion.script || '',
+            reason:suggestion.reason || '',alternatives:suggestion.alternatives || []
           });
           list.splice(index,1);
           window.ryuPendingPronunciationSuggestions = list;
