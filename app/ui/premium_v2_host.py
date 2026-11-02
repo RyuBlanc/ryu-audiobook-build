@@ -1091,11 +1091,11 @@ class PremiumV2Bridge(QObject):
         if image.isNull():
             detail = reader.errorString() or "The selected image could not be decoded."
             raise ValueError(f"Choose a valid supported cover image. {detail}")
-        cover = persist_project_cover(Path(path), project.folder)
+        selected = Path(path).expanduser().resolve()
         return {
             "cancelled": False,
-            "cover_path": str(cover),
-            "filename": cover.name,
+            "cover_path": str(selected),
+            "filename": selected.name,
             "project_folder": str(project.folder.resolve()),
         }
 
@@ -1112,7 +1112,7 @@ class PremiumV2Bridge(QObject):
             "series": normalize_metadata_text(payload.get("series")),
             "series_volume": normalize_metadata_text(payload.get("series_volume"), max_length=120),
             "language": normalize_metadata_text(payload.get("language"), max_length=120),
-            "year": normalize_metadata_text(payload.get("year"), max_length=4),
+            "year": normalize_metadata_text(payload.get("year"), max_length=10),
             "genre": normalize_metadata_text(payload.get("genre")),
         }
         if metadata["year"] and not re.fullmatch(r"\d{4}", metadata["year"]):
@@ -1121,6 +1121,7 @@ class PremiumV2Bridge(QObject):
         state = load_state(project.folder)
         cover_value = str(payload.get("cover_path") or "").strip()
         cover_path: Path | None = None
+        cover_backup: tuple[Path, bytes | None] | None = None
         if cover_value:
             candidate = Path(cover_value).expanduser().resolve()
             if not candidate.is_file():
@@ -1134,6 +1135,12 @@ class PremiumV2Bridge(QObject):
                 candidate.relative_to(Path(project.folder).resolve())
                 cover_path = candidate
             except ValueError:
+                extension = candidate.suffix.casefold()
+                if extension == ".jpe":
+                    extension = ".jpg"
+                target = (Path(project.folder).resolve() / "assets" / ("cover" + extension))
+                prior_cover_bytes = target.read_bytes() if target.is_file() else None
+                cover_backup = (target, prior_cover_bytes)
                 cover_path = persist_project_cover(candidate, project.folder)
             metadata["cover_path"] = str(cover_path)
             state["cover_detection_attempted"] = True
@@ -1158,11 +1165,62 @@ class PremiumV2Bridge(QObject):
         }
         project_payload_text = json.dumps(project_payload, ensure_ascii=False, indent=2)
         state_payload_text = json.dumps(state, ensure_ascii=False, indent=2)
+        state_file = project.folder / "state.json"
+        original_project_text = (
+            project.project_file.read_text(encoding="utf-8")
+            if project.project_file.is_file() else None
+        )
+        original_state_text = (
+            state_file.read_text(encoding="utf-8") if state_file.is_file() else None
+        )
         active_again = self._active_project()
         if Path(active_again.folder).resolve() != Path(project.folder).resolve():
             raise RuntimeError("The active project changed before metadata could be committed.")
-        Project._atomic_write_text(project.project_file, project_payload_text)
-        Project._atomic_write_text(project.folder / "state.json", state_payload_text)
+        try:
+            Project._atomic_write_text(project.project_file, project_payload_text)
+            Project._atomic_write_text(state_file, state_payload_text)
+            persisted_project = json.loads(project.project_file.read_text(encoding="utf-8"))
+            persisted_state = json.loads(state_file.read_text(encoding="utf-8"))
+            if persisted_project.get("title") != title:
+                raise IOError("Saved book title did not pass read-back verification.")
+            for key, value in metadata.items():
+                if persisted_state.get(key, "") != value:
+                    raise IOError(f"Saved {key} metadata did not pass read-back verification.")
+            if persisted_state.get("narrator", "") != narrator_profile:
+                raise IOError("Saved narrator profile did not pass read-back verification.")
+        except Exception as save_error:
+            rollback_errors: list[str] = []
+            for path, original_text in (
+                (project.project_file, original_project_text),
+                (state_file, original_state_text),
+            ):
+                try:
+                    if original_text is None:
+                        path.unlink(missing_ok=True)
+                    else:
+                        Project._atomic_write_text(path, original_text)
+                except Exception as rollback_error:
+                    rollback_errors.append(f"{path.name}: {rollback_error}")
+            if cover_backup is not None:
+                cover_target, previous_cover_bytes = cover_backup
+                try:
+                    if previous_cover_bytes is None:
+                        cover_target.unlink(missing_ok=True)
+                    else:
+                        cover_target.parent.mkdir(parents=True, exist_ok=True)
+                        temporary = cover_target.with_name("." + cover_target.name + ".rollback")
+                        temporary.write_bytes(previous_cover_bytes)
+                        temporary.replace(cover_target)
+                except Exception as rollback_error:
+                    rollback_errors.append(f"{cover_target.name}: {rollback_error}")
+            if rollback_errors:
+                raise RuntimeError(
+                    "Project metadata save failed and the previous values could not be fully restored: "
+                    + "; ".join(rollback_errors)
+                ) from save_error
+            raise OSError(
+                "Project metadata could not be saved. The previous project details were restored."
+            ) from save_error
         project.title = title
         return {
             "saved": True,

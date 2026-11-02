@@ -74,3 +74,18 @@ Gate policy: Book Title, Author, actual selected Narrator profile, Language and 
 ## 6. Manual acceptance boundary
 
 CI cannot establish installed Windows app launch/navigation/resizing, visual dialog quality across required display sizes, real narrator-profile refresh, cover persistence after an actual app restart, or real M4B metadata/cover embedding and listening quality. These remain explicit runtime acceptance items and must not be marked VERIFIED COMPLETE from CI alone.
+
+
+## 7. Step 5.1 follow-up hardening
+
+Run #2088 completed successfully on `e7aa0a2d2a3fafd8be949d24266892f9791e729f`: 1,070 tests passed, Premium V2 and packaged Sound Design JavaScript syntax passed, and the isolated native Qt lifecycle regression passed. The build job was skipped under the explicit feature-branch artifact-checkpoint rule.
+
+The follow-up artifact-checkpoint source adds:
+- A paired metadata write transaction covering project.json and state.json, with read-back verification and rollback to original contents on any failure.
+- Cover selection returns the validated source path without prematurely copying. Save copies the cover into project assets; a failed metadata transaction restores any overwritten cover bytes.
+- Long/short Release Year values are rejected, not truncated into a valid year.
+- Project switching is blocked while Input Project Details contains unsaved changes; closing a clean dialog is safe.
+- A confirmed backend save remains reported as saved even if a later list/summary refresh fails.
+- Additional regression coverage for second-file write failure/rollback, year bounds, cover picker validation and cover persistence after project reload.
+
+The new artifact-checkpoint run must pass the exact implementation tests and package job before Step 5.1 is eligible for closeout.

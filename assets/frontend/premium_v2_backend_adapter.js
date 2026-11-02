@@ -4809,6 +4809,7 @@
       }
       button.disabled = true;
       setMetadataDialogStatus('Saving project details…', 'info');
+      let persisted = false;
       try {
         const result = await call('project.metadata.save', {
           expected_project_folder: metadataDialogProjectFolder,
@@ -4825,12 +4826,11 @@
         if (result?.saved !== true || String(result.project_folder || '') !== metadataDialogProjectFolder) {
           throw new Error('The backend did not confirm that these project details were saved.');
         }
+        persisted = true;
         metadataDialogDirty = false;
         setMetadataDialogStatus('Project details saved successfully.', 'ready');
         dialog.close();
-        await refreshProjects();
-        await refreshProductionSummary();
-        message('Input Project Details saved to the active project.');
+        renderProductionMetadataGate(window.ryuPremiumActiveProject || null);
       } catch (error) {
         metadataDialogDirty = true;
         setMetadataDialogStatus('Save failed: ' + (error?.message || String(error)), 'error');
@@ -4838,6 +4838,16 @@
         message(error?.message || String(error), true);
       } finally {
         button.disabled = false;
+      }
+      if (persisted) {
+        try {
+          await refreshProjects();
+          await refreshProductionSummary();
+          message('Input Project Details saved to the active project.');
+        } catch (refreshError) {
+          message('Project details were saved, but the production summary could not refresh: ' +
+            (refreshError?.message || String(refreshError)), true);
+        }
       }
     };
     const open = $('openProjectDetails');
@@ -7502,6 +7512,14 @@
   async function openProjectWithPreservedDraft(folder) {
     const targetFolder = String(folder || '').trim();
     if (!targetFolder) throw new Error('Choose a local project before opening it.');
+
+    const metadataDialog = $('inputProjectDetailsDialog');
+    if (metadataDialog?.open) {
+      if (metadataDialogDirty) {
+        throw new Error('Save or explicitly discard Input Project Details before switching projects.');
+      }
+      metadataDialog.close();
+    }
 
     // This is the only path allowed to switch the backend's active project.
     // A failed save aborts the switch; all open routes then invalidate old

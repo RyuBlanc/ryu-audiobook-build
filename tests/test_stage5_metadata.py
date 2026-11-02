@@ -38,6 +38,7 @@ class MetadataBridgeHarness:
     _metadata_expected_project = host.PremiumV2Bridge._metadata_expected_project
     _project_metadata_history = host.PremiumV2Bridge._project_metadata_history
     _project_metadata_save = host.PremiumV2Bridge._project_metadata_save
+    _project_metadata_cover_choose = host.PremiumV2Bridge._project_metadata_cover_choose
 
     def __init__(self, project):
         self.project = project
@@ -139,6 +140,148 @@ class MetadataBridgeTests(unittest.TestCase):
             self.assertEqual(history["values"]["language"], ["en", "ja"])
             self.assertEqual(history["values"]["genre"], ["Fantasy", "Mystery"])
 
+    def test_metadata_save_rolls_back_project_json_when_state_write_fails(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp) / "book-project"
+            folder.mkdir()
+            project = Project("Original Title", folder, None, [])
+            project.save()
+            original_state = {
+                "author": "Original Author",
+                "language": "en",
+                "genre": "Fiction",
+                "publisher": "Original Press",
+                "year": "2020",
+            }
+            save_state(folder, original_state)
+            original_project_json = project.project_file.read_text(encoding="utf-8")
+            original_state_json = (folder / "state.json").read_text(encoding="utf-8")
+            bridge = MetadataBridgeHarness(project)
+            atomic_write = Project._atomic_write_text
+
+            def fail_state_write(path, content):
+                if Path(path).name == "state.json":
+                    raise OSError("simulated disk write failure")
+                return atomic_write(path, content)
+
+            with patch.object(Project, "_atomic_write_text", side_effect=fail_state_write):
+                with self.assertRaisesRegex(OSError, "previous project details were restored"):
+                    bridge._project_metadata_save({
+                        "expected_project_folder": str(folder),
+                        "title": "Partially Applied Title",
+                        "author": "New Author",
+                        "publisher": "New Press",
+                        "series": "",
+                        "series_volume": "",
+                        "language": "ja",
+                        "year": "2026",
+                        "genre": "Fantasy",
+                        "cover_path": "",
+                    })
+
+            self.assertEqual(project.project_file.read_text(encoding="utf-8"), original_project_json)
+            self.assertEqual((folder / "state.json").read_text(encoding="utf-8"), original_state_json)
+            self.assertEqual(project.title, "Original Title")
+
+    def test_metadata_save_rejects_short_and_long_release_year_values(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp) / "book-project"
+            folder.mkdir()
+            project = Project("Book", folder, None, [])
+            project.save()
+            save_state(folder, {"author": "Author", "language": "en", "genre": "Fantasy"})
+            before = (folder / "state.json").read_text(encoding="utf-8")
+            bridge = MetadataBridgeHarness(project)
+            for invalid_year in ("26", "20265"):
+                with self.subTest(year=invalid_year):
+                    with self.assertRaisesRegex(ValueError, "four-digit year"):
+                        bridge._project_metadata_save({
+                            "expected_project_folder": str(folder),
+                            "title": "Book",
+                            "author": "Author",
+                            "language": "en",
+                            "genre": "Fantasy",
+                            "year": invalid_year,
+                            "cover_path": "",
+                        })
+            self.assertEqual((folder / "state.json").read_text(encoding="utf-8"), before)
+
+    def test_cover_is_saved_project_locally_and_survives_project_reload(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            folder = root / "book-project"
+            folder.mkdir()
+            project = Project("Book", folder, None, [])
+            project.save()
+            save_state(folder, {"author": "Author", "language": "en", "genre": "Fantasy"})
+            external_cover = root / "cover.png"
+            external_cover.write_bytes(b"valid test cover bytes")
+            bridge = MetadataBridgeHarness(project)
+            class ValidImage:
+                def isNull(self):
+                    return False
+            class Reader:
+                def __init__(self, path):
+                    self.path = path
+                def setAutoTransform(self, enabled):
+                    self.auto_transform = enabled
+                def read(self):
+                    return ValidImage()
+                def errorString(self):
+                    return ""
+
+            with patch.object(host, "QImageReader", Reader):
+                result = bridge._project_metadata_save({
+                    "expected_project_folder": str(folder),
+                    "title": "Book",
+                    "author": "Author",
+                    "publisher": "",
+                    "series": "",
+                    "series_volume": "",
+                    "language": "en",
+                    "year": "2026",
+                    "genre": "Fantasy",
+                    "cover_path": str(external_cover),
+                })
+            saved = load_state(folder)
+            persisted_cover = Path(saved["cover_path"])
+            self.assertTrue(result["saved"])
+            self.assertTrue(persisted_cover.is_file())
+            self.assertEqual(persisted_cover.parent, (folder / "assets").resolve())
+            self.assertEqual(Project.load(folder).title, "Book")
+            self.assertEqual(persisted_cover.read_bytes(), external_cover.read_bytes())
+
+    def test_cover_picker_validates_and_returns_source_without_persisting_early(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = Path(temp) / "book-project"
+            folder.mkdir()
+            project = Project("Book", folder, None, [])
+            project.save()
+            source_cover = Path(temp) / "cover.png"
+            source_cover.write_bytes(b"image test")
+            bridge = MetadataBridgeHarness(project)
+            class ValidImage:
+                def isNull(self):
+                    return False
+            class Reader:
+                def __init__(self, path):
+                    self.path = path
+                def setAutoTransform(self, enabled):
+                    self.auto_transform = enabled
+                def read(self):
+                    return ValidImage()
+                def errorString(self):
+                    return ""
+
+            with patch.object(host.QFileDialog, "getOpenFileName", return_value=(str(source_cover), "Images")):
+                with patch.object(host, "QImageReader", Reader):
+                    with patch.object(host, "persist_project_cover") as persist:
+                        result = bridge._project_metadata_cover_choose({"expected_project_folder": str(folder)})
+            self.assertFalse(result["cancelled"])
+            self.assertEqual(result["cover_path"], str(source_cover.resolve()))
+            self.assertEqual(result["project_folder"], str(folder.resolve()))
+            persist.assert_not_called()
+
     def test_full_generation_is_blocked_when_saved_metadata_is_incomplete(self):
         with tempfile.TemporaryDirectory() as temp:
             folder = Path(temp) / "book"
@@ -179,6 +322,8 @@ class MetadataPremiumV2UiTests(unittest.TestCase):
             "project.metadata.cover.choose",
             "renderProductionMetadataGate",
             "metadata_missing_fields",
+            "Save or explicitly discard Input Project Details before switching projects.",
+            "Project details were saved, but the production summary could not refresh:",
         ):
             self.assertIn(marker, adapter)
 
