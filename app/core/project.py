@@ -124,6 +124,30 @@ class Project:
                             )
                     except (OSError, ValueError, TypeError, json.JSONDecodeError):
                         continue
+        # Bind legacy number-keyed BGM assignments to stable chapter IDs
+        # while loading the project, before chapter numbers can change.
+        state_file = folder / "state.json"
+        if state_file.is_file():
+            from app.core.state import load_state, save_state
+            state = load_state(folder)
+            stored_overrides = state.get("chapter_bgm_overrides")
+            if isinstance(stored_overrides, dict):
+                migrated_overrides = dict(stored_overrides)
+                for chapter in chapters:
+                    identity_key = str(chapter.chapter_id)
+                    legacy_value = stored_overrides.get(str(chapter.number))
+                    if identity_key not in migrated_overrides and isinstance(legacy_value, dict):
+                        migrated_overrides[identity_key] = dict(legacy_value)
+                if migrated_overrides != stored_overrides:
+                    state["chapter_bgm_overrides"] = migrated_overrides
+                    try:
+                        save_state(folder, state)
+                    except OSError as exc:
+                        raise RuntimeError(
+                            "Could not safely migrate this project's chapter BGM assignments. "
+                            "Make the project folder writable and reopen it before editing chapters."
+                        ) from exc
+
         source_name = metadata.get("source_file")
         source = folder / "source" / source_name if source_name else None
         return cls(metadata["title"], folder, source, chapters)

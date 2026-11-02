@@ -31,8 +31,22 @@ class StableChapterAudioIdentityTests(unittest.TestCase):
                 ]),
                 encoding="utf-8",
             )
+            legacy_overrides = {
+                "1": {"rule": "custom", "path": "opening-theme.wav", "volume": 0.2},
+                "2": {"rule": "none", "volume": 0.0},
+            }
+            (folder / "state.json").write_text(
+                json.dumps({"chapter_bgm_overrides": legacy_overrides}),
+                encoding="utf-8",
+            )
             first_load = Project.load(folder)
             first_ids = [chapter.chapter_id for chapter in first_load.chapters]
+            migrated_state = json.loads((folder / "state.json").read_text(encoding="utf-8"))
+            migrated_overrides = migrated_state["chapter_bgm_overrides"]
+            self.assertEqual(migrated_overrides[first_ids[0]], legacy_overrides["1"])
+            self.assertEqual(migrated_overrides[first_ids[1]], legacy_overrides["2"])
+            self.assertEqual(migrated_overrides["1"], legacy_overrides["1"])
+            self.assertEqual(migrated_overrides["2"], legacy_overrides["2"])
             self.assertTrue(all(first_ids))
             self.assertEqual(len(set(first_ids)), 2)
             saved = json.loads((folder / "chapters.json").read_text(encoding="utf-8"))
