@@ -8431,11 +8431,12 @@
           Boolean(requestChapterId&&selectedChapterId&&requestChapterId!==selectedChapterId)||
           Boolean(requestChapterId&&jobChapterId&&requestChapterId!==jobChapterId)) throw new Error('The Production preview no longer matches the active project and selected saved chapter. Generate it again.');
       if(!productionPreviewRequestChapterId&&jobChapterId)productionPreviewRequestChapterId=jobChapterId;
-      const folderName=projectFolder.replace(/\\\\/g,'/').split('/').filter(Boolean).pop()||'Ryu_Audiobook';
-      const projectBaseName=String(activeProject?.title||activeProject?.name||folderName)
-        .replace(/[<>:"/\\\\|?*\\x00-\\x1f]+/g,'-').trim()||'Ryu_Audiobook';
-      const suffix='_Chapter_'+String(chapterNumber).padStart(2,'0')+(lastVoicePreviewChapterTitle?'_'+lastVoicePreviewChapterTitle:'');
-      const suggestedName=(projectBaseName+suffix+'_Preview').replace(/[<>:"/\\\\|?*\\x00-\\x1f]+/g,'-').trim().replace(/\\s+/g,'_').slice(0,100);
+      const safeFilePart=value=>String(value||'').replace(/[<>:"\/\\|?*\x00-\x1f]+/g,'-').trim().replace(/\s+/g,'_');
+      const folderName=projectFolder.replace(/\\/g,'/').split('/').filter(Boolean).pop()||'Ryu_Audiobook';
+      const projectBaseName=safeFilePart(activeProject?.title||activeProject?.name||folderName)||'Ryu_Audiobook';
+      const chapterTitlePart=safeFilePart(lastVoicePreviewChapterTitle).slice(0,30);
+      const suffix='_Chapter_'+String(chapterNumber).padStart(2,'0')+(chapterTitlePart?'_'+chapterTitlePart:'')+'_Preview';
+      const suggestedName=(projectBaseName.slice(0,Math.max(12,100-suffix.length))+suffix).slice(0,100);
       const result=await call('production.preview.save',{job_id:productionPreviewJobId,project_folder:projectFolder,chapter_number:chapterNumber,chapter_id:productionPreviewRequestChapterId,source_path:lastVoicePreviewPath,suggested_name:suggestedName});
       if(result.cancelled){message('Production preview save cancelled.');return;}
       message('Production chapter preview saved to '+result.path);

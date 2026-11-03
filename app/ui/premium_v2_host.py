@@ -3244,7 +3244,7 @@ class PremiumV2Bridge(QObject):
             raise FileNotFoundError("The Production preview file is no longer available. Generate it again.")
         import re as _re
         suggested = str(payload.get("suggested_name") or "Ryu Production Preview").strip()
-        suggested = _re.sub(r'[<>:"/\\\\|?*\\x00-\\x1f]+', "-", suggested).strip(" .-")[:100] or "Ryu Production Preview"
+        suggested = _re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "-", suggested).strip(" .-")[:100] or "Ryu Production Preview"
         default_suffix = source.suffix.casefold()
         default_path = Path.home() / "Downloads" / f"{suggested}{default_suffix}"
 

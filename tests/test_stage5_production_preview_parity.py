@@ -156,6 +156,53 @@ class ProductionPreviewOwnershipTests(unittest.TestCase):
             self.assertEqual(destination.read_bytes(), source.read_bytes())
             self.assertGreater(destination.stat().st_size, 1024)
 
+    def test_production_preview_native_save_dialog_sanitizes_windows_filename_characters(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-production-preview-filename-") as temp:
+            root = Path(temp)
+            preview_root = root / "Previews"
+            preview_root.mkdir()
+            source = preview_root / "preview-filename.m4a"
+            source.write_bytes(b"\x00\x00\x00\x18ftypM4A " + (b"test-audio" * 256))
+            bridge = SimpleNamespace(
+                _jobs_lock=threading.RLock(),
+                _jobs={
+                    "job-filename": {
+                        "job_id": "job-filename",
+                        "type": "production-preview",
+                        "state": "completed",
+                        "project_folder": "project-A",
+                        "current_chapter": 2,
+                        "current_chapter_id": "chapter-2",
+                        "result": {"output_path": str(source)},
+                    }
+                },
+            )
+            dialog = {}
+            def capture_save_dialog(_parent, _title, default_path, _filters):
+                dialog["default_path"] = default_path
+                return "", ""
+
+            with patch.object(premium_v2_host, "app_root", return_value=root), patch.object(
+                premium_v2_host.QFileDialog, "getSaveFileName", side_effect=capture_save_dialog
+            ):
+                result = premium_v2_host.PremiumV2Bridge._production_preview_save(
+                    bridge,
+                    {
+                        "job_id": "job-filename",
+                        "project_folder": "project-A",
+                        "chapter_number": 2,
+                        "chapter_id": "chapter-2",
+                        "source_path": str(source),
+                        "suggested_name": "Book: A\\B/Chapter?Title*\\x00",
+                    },
+                )
+            self.assertTrue(result["cancelled"])
+            filename = Path(dialog["default_path"]).name
+            self.assertTrue(filename.endswith(".m4a"))
+            self.assertFalse(any(character in filename for character in '<>:"/\\\\|?*'))
+            self.assertFalse(any(ord(character) < 32 for character in filename))
+            self.assertIn("Book- A-B-Chapter-Title-", filename)
+
     def test_global_pronunciation_off_excludes_all_dictionary_rules(self):
         state = {
             "pronunciation_enabled": False,
@@ -248,9 +295,12 @@ class ProductionPreviewParitySourceContracts(unittest.TestCase):
         download = self.adapter_source[start:end]
         self.assertIn("activeProject?.title", download)
         self.assertIn("activeProject?.name", download)
+        self.assertIn(r"projectFolder.replace(/\\\\/g,'/')", download)
+        self.assertIn(r"replace(/[<>:" + r"\\/\\\\|?*\\x00-\\x1f]+/g,'-')", download)
+        self.assertIn(r"replace(/\\s+/g,'_')", download)
         self.assertIn("const suffix='_Chapter_'", download)
         self.assertIn("lastVoicePreviewChapterTitle", download)
-        self.assertIn("projectBaseName+suffix+'_Preview'", download)
+        self.assertIn("projectBaseName.slice(0,Math.max(12,100-suffix.length))+suffix", download)
         self.assertIn("suggested_name:suggestedName", download)
 
     def test_preview_and_final_generation_consume_the_effective_saved_voice_configuration(self):
