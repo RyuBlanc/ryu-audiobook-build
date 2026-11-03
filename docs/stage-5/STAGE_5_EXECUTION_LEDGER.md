@@ -261,3 +261,44 @@ Run #2113 on commit \`6f8b5e476b3bc2cbce7c5c0e2461d3cf20132b81\` completed 1,090
 ## 26. Imported cue source preservation correction
 
 A final data-safety audit found that \`resolve_cue_track(selected_path=...)\` returns the original user-selected cue file. The Production chapter preview's \`finally\` cleanup had included that returned source in its temporary-file deletion list for opening/page and closing cues. This could delete imported library assets after a preview. The renderer now cleans only the derived temporary leveled/concatenated files and leaves the original cue source untouched. A new regression checks both opening and ending user-owned cue files survive with their original bytes after a Production sound-design preview. This correction is required in the next exact-head regression and package checkpoint.
+
+
+## 27. Step 5.2 continuation — dedicated saved-chapter preview, narrator and ownership parity (3 November 2026)
+
+Starting point: user-provided successful artifact checkpoints #2114 and #2115, with #2115 on `c2434ce3c1e0d69e9e1bc56dc707d24c289b3acd` in `stage-5/step-1-production-metadata`.
+
+### Previous failure reconciliation
+
+- Build #2113 on `6f8b5e476b3bc2cbce7c5c0e2461d3cf20132b81` failed because the WAV-to-AAC/M4A preview branch referenced FFmpeg assembler helper `_run` without importing it. The missing import is present in `c1e362d3fa3829e4ac51222e61a68440523a9c4f` (#2114).
+- The #2115 checkpoint adds the cue-source cleanup correction: original imported opening/closing cue assets are not placed in the temporary deletion list. Its regression checks that both source files still exist and retain their exact bytes after preview.
+- The screenshot supplied on 3 November shows #2114 and #2115 successful and #2113 failed. The screenshot does not expose the Actions run IDs or the full per-job test/packaging summaries; those details are not inferred here.
+
+### Implementation added after #2115
+
+1. Commit `808bcb6bcd7f17d2caa42516885c1ee81568bb8b` — Premium V2 now creates a Production-only chapter selector from the active project's saved `chapter.list` records. Production preview no longer depends on the Chapter Studio current selection. It flushes pending chapter edits, re-fetches saved chapters, and validates project/chapter ownership before accepting playback.
+2. Commit `c57bb6e818a811259a9c459a91e3de3cce0a2604` — Production preview resolves the effective narrator from the saved project/series narrator resolver, matching the resolver used by full audiobook generation. Transient Voice Studio provider/voice-card values are stripped from the Production request. Preview job rows now retain the selected stable chapter ID, and Save rejects a mismatched chapter ID even when the chapter number is reused.
+3. Commit `a3dd0329eccb1c6fae62b062c7224f1082a7cdfc` — added `tests/test_stage5_production_preview_parity.py` covering saved narrator selection/fail-closed behavior, global pronunciation OFF, chapter-ID Save rejection and the preview/final integration seams.
+4. Commit `aac825b629dbfffbada91fdedb359401ea954594` — invalidate playable preview audio when the selected saved chapter is deleted, renumbered, renamed or its saved text changes. This protects against stale previews even if a chapter retains the same stable ID.
+5. Commit `8a4eba2b3ad5fa849b75ebb671e57b9932d8a763` — expanded the regression contract for chapter-content invalidation.
+
+### Existing configuration wiring confirmed by source inspection
+
+- PROD-08: Production's pronunciation switch is synchronized with Pronunciation Studio's project-level setting. The preview worker and full generation both call `_effective_pronunciation_dictionary(state)`; global OFF returns no substitutions, and global ON filters to individually enabled entries.
+- PROD-09: Production's BGM/Cues master switch uses the existing Sound Design save path after `flushSoundDesignState()`. Production preview and full generation consume the project's saved mode, track strategy, explicit chapter assignments, fixed cue paths and saved mix values. The existing Same BGM / Chapter-Based / Voice Only rules are preserved; no layered mix or silent book-default fallback was introduced.
+- GEN-06: Production preview now uses the saved effective narrator, the same saved pronunciation state and the existing native Sound Design renderer. Full generation uses the same saved project settings through `GenerationManager`. Existing Stage 4 Sound Design preview tests continue to cover Voice Only, Same BGM, Chapter-Based no-fallback, custom chapter track selection and cue behavior.
+
+### Requirement status at this source checkpoint
+
+- PROD-08 — CODE CHANGED — NOT VERIFIED; the saved toggle path exists and the new regression checks global OFF. Full ON/OFF + individual-entry runtime verification remains.
+- PROD-09 — CODE CHANGED — NOT VERIFIED; saved Sound Design flush/master switch and preview/final state handoff are present. Full mode/cue audio matrix remains.
+- PROD-15 — CODE CHANGED — NOT VERIFIED; saved chapter selector, selected-chapter synthesis, output ownership and chapter-ID Save validation are implemented. Exact-head CI and Windows playback/download/project-switch acceptance remain.
+- GEN-06 — CODE CHANGED — NOT VERIFIED; saved narrator and effective configuration paths are aligned in source. Scenario-matrix CI and real preview/final audio comparison remain.
+- Existing PROD-05/06/07 work and #2114/#2115 fixes are preserved; they are not restarted or rewritten.
+
+### Exact-head verification and release gate
+
+The Build Windows App workflow includes pushes to `stage-5/**`; commits with `[artifact-checkpoint]` also request the package job. This ledger update is being committed as the matching-candidate artifact checkpoint so the workflow can run the regression suite and Windows package from one exact SHA.
+
+The GitHub connector available in this session can fetch commit metadata, job details when a run ID is known, and PR-triggered commit runs, but does not expose the list of push-triggered workflow runs. Therefore the new candidate's Actions run number, job result, test count, installer/portable artifacts and artifact hashes must remain **PENDING** until they are visible in GitHub Actions or supplied by the user. No passing status is presumed.
+
+Installed Windows acceptance also remains pending: select each preview duration, generate real selected-chapter audio, listen to narrator/character voice, pronunciation and BGM/cue behavior, play/pause/stop/replay, save/download the preview, switch projects/chapters during generation, and confirm the full-book generation scope is unchanged. Do not close Step 5.2 or begin Step 5.3 until the exact-head automated/package checkpoint and required runtime acceptance are recorded.
