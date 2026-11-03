@@ -600,3 +600,16 @@ Implementation commits:
 The tests write only under the per-run acceptance temp folder; cleanup removes that folder in the harness `finally` block. The test seam does not bypass validation of job/project/chapter/source ownership, and ordinary desktop users continue to see the native Save As dialog.
 
 The current #2164 package run checks out `d99194a458daf488ee6f8665e5aeba20629ea28a` and does not include these later Save As test commits. Preserve its result as evidence for the BGM-state restoration fix. The next exact-head artifact checkpoint must include the Save As coverage and pass it, in addition to the 1,103+ regression suite, the complete frozen Production Preview acceptance, state/restart validator, installer, manifest/hash, Defender and artifact uploads.
+
+
+## Final Save As-inclusive Stage 5.2 candidate queued without superseding #2164 — 3 November 2026
+
+The current #2164 run (ID `41629135150`, SHA `d99194a458daf488ee6f8665e5aeba20629ea28a`) has passed its test job (1,103 tests), frozen app build/verification, bundled voice/critical-module checks and full packaged Sound Design/Production Preview acceptance. Its installer job is still active at the core Inno Setup payload step. Its checkout remains immutable at its recorded SHA and must be allowed to finish.
+
+To close the remaining PROD-15 Save As evidence gap, the branch now also contains:
+- `864f6b8397a8ed58882a195494c6534475dd1235`: acceptance-only deterministic Save As destination gated by the acceptance script/marker environment and restricted to that run's temp folder; production users still receive QFileDialog.
+- `d3a5f22ec4db0aa05e99629e713a629a34a639b8` and `75fc696ed6ec4f90e4866639f41e54a554b5ab97`: positive backend save-copy regression, including source/job ownership and byte-identical destination verification.
+- `8ed009859ab4d006268a751684714854fafc89f2`: packaged browser test clicks Save Production Preview and waits for the real success toast.
+- `fdf1316b112b0fb0da6e9558cf4cc52db04639ba`: Windows harness asserts non-empty copied M4A, ISO BMFF `ftyp` marker and named packaged check.
+
+A separate artifact-checkpoint push is now being queued against the latest branch SHA. Build Windows App concurrency is keyed by `github.run_id` with `cancel-in-progress: false`, so this new run must not cancel or replace active #2164. Both runs' results are recorded independently. The Save As-inclusive candidate is the authoritative Stage 5.2 final package gate after #2164's installer artifact run has completed; it must pass its tests/build, packaged Save As and preview matrix, state/restart validator and installer/hash/Defender/artifact uploads.
