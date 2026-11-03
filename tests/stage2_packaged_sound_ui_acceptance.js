@@ -1901,12 +1901,15 @@
         JSON.stringify({job:fullGenerationJob, expected:config.full_generation_output_path}));
     must(historyGenerationJob && historyGenerationJob.state === "completed" &&
       String(historyGenerationJob.job_id || "") === fullGenerationJobId &&
+      String(historyGenerationJob.project_folder || "") === String(config.full_generation_project_folder || "") &&
       normalizeOutputPath(historyGenerationJob.output_path) === expectedGenerationOutput,
-      "The completed full-generation job and durable History do not share the same job/output identity.");
+      "The completed full-generation job and durable History do not share the same job/project/output identity.");
     must(String(completedGenerationProject.folder || "") === String(config.full_generation_project_folder || "") &&
-      String(completedGenerationProject.generation_job_id || "") === fullGenerationJobId &&
+      completedGenerationProject.completed === true &&
+      String(completedGenerationProject.status || "").toLowerCase() === "completed" &&
+      Number(completedGenerationProject.completed_chapter_count || 0) === 1 &&
       normalizeOutputPath(completedGenerationProject.output_path) === expectedGenerationOutput,
-      "The completed full-generation output was not attached to its owning project and job.");
+      "The completed full-generation output was not visible on its owning project summary.");
     record("stage53_packaged_real_full_generation", true,
       "The frozen Windows app synthesized a real chapter with the saved bundled Offline Neural narrator, completed a full GenerationManager job, persisted its identical History job ID, and associated the M4B output only with its owning project.");
     await openProjectFromDashboard(config.project_folder, "Primary");

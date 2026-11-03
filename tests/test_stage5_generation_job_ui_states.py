@@ -49,7 +49,9 @@ class Stage53GenerationJobUiStateTests(unittest.TestCase):
         self.assertIn("stage53_packaged_real_full_generation", self.packaged)
         self.assertIn('document.querySelector("#startGenerate").click()', self.packaged)
         self.assertIn('invoke("history.list", {})', self.packaged)
-        self.assertIn('completedGenerationProject.generation_job_id', self.packaged)
+        self.assertIn('historyGenerationJob.project_folder', self.packaged)
+        self.assertIn('completedGenerationProject.completed === true', self.packaged)
+        self.assertNotIn('completedGenerationProject.generation_job_id', self.packaged)
 
 
 if __name__ == "__main__":
