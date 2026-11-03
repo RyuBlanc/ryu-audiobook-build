@@ -3173,16 +3173,35 @@ class PremiumV2Bridge(QObject):
         suggested = _re.sub(r'[<>:"/\\\\|?*\\x00-\\x1f]+', "-", suggested).strip(" .-")[:100] or "Ryu Production Preview"
         default_suffix = source.suffix.casefold()
         default_path = Path.home() / "Downloads" / f"{suggested}{default_suffix}"
-        selected, _filter = QFileDialog.getSaveFileName(
-            None, "Save Production Chapter Preview", str(default_path),
-            "Production preview audio (*.wav *.m4a);;WAV audio (*.wav);;M4A audio (*.m4a)"
-        )
-        if not selected:
-            return {"cancelled": True}
-        destination = Path(selected).expanduser()
-        if destination.suffix.casefold() != default_suffix:
-            destination = destination.with_suffix(default_suffix)
-        destination = destination.resolve()
+
+        # The frozen-app acceptance harness can exercise the real Save command
+        # without blocking the unattended Windows runner on a native file dialog.
+        # This path is enabled only when all three private acceptance variables
+        # are present, and the chosen file must remain inside the harness temp
+        # directory associated with its result marker. Normal desktop sessions
+        # always use the native Save As dialog below.
+        acceptance_script = str(os.environ.get("RYU_SOUND_UI_ACCEPTANCE_SCRIPT") or "").strip()
+        acceptance_marker = str(os.environ.get("RYU_SOUND_UI_ACCEPTANCE_MARKER") or "").strip()
+        acceptance_save_path = str(os.environ.get("RYU_SOUND_UI_ACCEPTANCE_PREVIEW_SAVE_PATH") or "").strip()
+        if acceptance_script and acceptance_marker and acceptance_save_path:
+            allowed_root = Path(acceptance_marker).expanduser().resolve().parent
+            destination = Path(acceptance_save_path).expanduser().resolve()
+            try:
+                destination.relative_to(allowed_root)
+            except ValueError as exc:
+                raise ValueError("The packaged preview Save As destination must remain inside its acceptance temp folder.") from exc
+            selected = str(destination)
+        else:
+            selected, _filter = QFileDialog.getSaveFileName(
+                None, "Save Production Chapter Preview", str(default_path),
+                "Production preview audio (*.wav *.m4a);;WAV audio (*.wav);;M4A audio (*.m4a)"
+            )
+            if not selected:
+                return {"cancelled": True}
+            destination = Path(selected).expanduser()
+            if destination.suffix.casefold() != default_suffix:
+                destination = destination.with_suffix(default_suffix)
+            destination = destination.resolve()
         if destination == source:
             raise ValueError("Choose a different destination from the temporary preview file.")
         shutil.copy2(source, destination)
