@@ -123,6 +123,8 @@ class ProductionPreviewParitySourceContracts(unittest.TestCase):
         self.assertIn("call('chapter.list')", self.adapter_source)
         self.assertIn("productionPreviewChapterSelect", self.adapter_source)
         self.assertIn("productionPreviewRequestChapterId", self.adapter_source)
+        self.assertIn("productionPreviewSelectedChapterSignature", self.adapter_source)
+        self.assertIn("String(currentRow.text || '')", self.adapter_source)
         self.assertIn("current_chapter_id", self.adapter_source)
         self.assertIn("chapter_id:productionPreviewRequestChapterId", self.adapter_source)
 
