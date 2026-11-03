@@ -1664,13 +1664,15 @@
     const productionPreviewPath = String(productionPreviewResult.output_path || completedProductionPreview.output_path || "");
     const productionPlaybackUrl = String(productionPreviewResult.file_url || "").toLowerCase();
     const productionPlaybackPath = String(productionPreviewResult.playback_output_path || "");
-    must(productionPreviewPath.toLowerCase().endsWith(".m4a") &&
-      Number(productionPreviewResult.actual_duration_seconds || 0) > 0 &&
+    const initialPreviewSeconds = Number(productionPreviewResult.actual_duration_seconds || 0);
+    must(Number(productionPreviewResult.requested_duration_seconds || 0) === 10 &&
+      initialPreviewSeconds >= 5 && initialPreviewSeconds <= 15 &&
+      productionPreviewPath.toLowerCase().endsWith(".m4a") &&
       productionPlaybackUrl.startsWith("file:") &&
       productionPlaybackUrl.endsWith(".wav") &&
       productionPlaybackPath.toLowerCase().endsWith(".wav") &&
       productionPreviewResult.playback_format === "wav",
-      "Production Preview must retain M4A for Save As and return its verified PCM WAV playback copy: " +
+      "Production Preview 10-second request must return a measured 5–15 second M4A and verified PCM WAV playback copy: " +
         JSON.stringify(productionPreviewResult));
     must(productionPreviewResult.sound_configuration?.background_audio_mode === "off" &&
       productionPreviewResult.sound_configuration?.fixed_cues_enabled === false,
@@ -1741,7 +1743,8 @@
     let previousDurationJobId = productionPreviewJobId;
     for (const target of [
       {label:"30s",seconds:30,button:durationControls[1]},
-      {label:"60s",seconds:60,button:durationControls[2]}
+      {label:"60s",seconds:60,button:durationControls[2]},
+      {label:"90s",seconds:90,button:durationControls[3]}
     ]) {
       target.button.click();
       await waitFor("Production Preview " + target.label + " real duration selection", function () {
