@@ -241,7 +241,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("self._import_cancel_events.pop(job_id, None)", host)
         self.assertIn('incoming_root = (app_root() / "incoming_imports").resolve()', host)
         self.assertIn("const canCancelImport = j.type === 'import'", adapter)
-        self.assertIn("call(commands[b.dataset.jobAction] || 'job.cancel'", adapter)
+        self.assertIn("await call(commands[actionName] || 'job.cancel'", adapter)
 
     def test_malformed_imports_report_actionable_format_specific_diagnostics(self):
         host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")

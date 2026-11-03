@@ -3354,6 +3354,14 @@ Rias Gremory
                 Chapter(2, "Chapter 2", "two"),
                 Chapter(3, "Chapter 3", "three"),
             ]
+            (completed_dir / "narration.json").write_text(
+                json.dumps({"chapter_id": chapters[0].chapter_id}),
+                encoding="utf-8",
+            )
+            (partial_dir / "narration.json").write_text(
+                json.dumps({"chapter_id": chapters[1].chapter_id}),
+                encoding="utf-8",
+            )
             state = inspect_generation_state(root, chapters)
             self.assertEqual(state.completed_chapters, (1,))
             self.assertEqual(state.partial_chapters, (2,))
