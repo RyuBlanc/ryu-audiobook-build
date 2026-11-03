@@ -2921,7 +2921,7 @@ class PremiumV2Bridge(QObject):
                 job for job in self._jobs.values()
                 if str(job.get("state") or "").casefold() in {"queued", "running", "cancel_requested"}
                 and str(job.get("type") or "").casefold() in {
-                    "voice-preview", "sound-design-preview", "audiobook-generation"
+                    "voice-preview", "sound-design-preview", "production-preview", "audiobook-generation"
                 }
             ]
         if active:
