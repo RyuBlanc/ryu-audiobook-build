@@ -1401,6 +1401,166 @@
     record("project_switch_restores_primary_sound_design", true,
       "Returning through Dashboard restored the original strategy, chapter BGM settings and all three cue slots.");
 
+    // Stage 5.2 packaged Production Preview acceptance: use the actual frozen
+    // application's Production chapter selector, preview worker, job monitor,
+    // sound renderer and audio controls (not a mocked bridge response).
+    window.go("generate");
+    await waitFor("Production Studio chapter preview controls", function () {
+      return document.querySelector("#generate")?.classList.contains("active") === true &&
+        Boolean(document.querySelector("#productionPreviewChapterSelect")) &&
+        Boolean(document.querySelector("#previewGenerate"));
+    }, 20000);
+    const savedPreviewChapters = await invoke("chapter.list", {});
+    must(Array.isArray(savedPreviewChapters) && savedPreviewChapters.length === 3,
+      "Production Preview did not load the three saved chapter records.");
+    const chosenPreviewChapter = savedPreviewChapters.find(chapter => Number(chapter.number) === 2);
+    must(chosenPreviewChapter && String(chosenPreviewChapter.text || "").trim(),
+      "The Production Preview acceptance chapter has no saved narration text.");
+    const chosenPreviewChapterId = String(chosenPreviewChapter.chapter_id || chosenPreviewChapter.id || "");
+    const productionChapterPicker = document.querySelector("#productionPreviewChapterSelect");
+    productionChapterPicker.value = "2";
+    productionChapterPicker.dispatchEvent(new Event("change", {bubbles:true}));
+    await waitFor("Production-owned Chapter Two selection", function () {
+      return productionChapterPicker.value === "2" &&
+        document.querySelector("#productionPreviewChapter")?.textContent.includes("Chapter 2");
+    }, 10000);
+    const durationButtons = Array.from(document.querySelectorAll("#generate .segmented button"));
+    const supportedPreviewDurations = ["10s", "30s", "60s", "90s"];
+    const durationControls = supportedPreviewDurations.map(label =>
+      durationButtons.find(button => String(button.textContent || "").trim().includes(label))
+    );
+    must(durationControls.every(Boolean),
+      "Production Preview must expose all 10/30/60/90-second duration options.");
+    for (let index = 0; index < durationControls.length; index++) {
+      durationControls[index].click();
+      await waitFor("Production Preview " + supportedPreviewDurations[index] + " duration selection", function () {
+        return durationControls[index].classList.contains("active");
+      }, 5000);
+    }
+    durationControls[0].click();
+    await waitFor("Production Preview 10-second duration restored", function () {
+      return durationControls[0].classList.contains("active");
+    }, 5000);
+
+    const productionVoiceOnlyToggle = document.querySelector('#generate [data-bgm-enabled="false"]');
+    must(productionVoiceOnlyToggle, "Production Preview acceptance cannot find its Voice Only configuration.");
+    productionVoiceOnlyToggle.click();
+    await waitFor("Production Preview saved Voice Only mode", async function () {
+      const state = await invoke("sound.chapter_bgm.get", {});
+      return state.background_audio_mode === "off" && state.bgm_enabled === false;
+    }, 15000);
+
+    const productionPreviewStart = document.querySelector("#previewGenerate");
+    must(productionPreviewStart && !productionPreviewStart.disabled,
+      "The real Production Preview action is not enabled for a saved chapter and narrator.");
+    productionPreviewStart.click();
+    let productionPreviewJob = null;
+    await waitFor("real Production Preview job start", async function () {
+      const jobs = await invoke("job.list", {include_hidden:true});
+      productionPreviewJob = Array.isArray(jobs)
+        ? jobs.find(job => job.type === "production-preview" &&
+            Number(job.current_chapter || 0) === 2 &&
+            ["queued", "running", "cancel_requested"].includes(String(job.state || "").toLowerCase()))
+        : null;
+      return Boolean(productionPreviewJob && productionPreviewJob.job_id);
+    }, 20000);
+    must(String(productionPreviewJob.project_folder || "") === String((await invoke("project.get_active", {})).folder || ""),
+      "Production Preview job was not scoped to the active project.");
+    must(!chosenPreviewChapterId || String(productionPreviewJob.current_chapter_id || "") === chosenPreviewChapterId,
+      "Production Preview job did not preserve the selected stable chapter identity.");
+    must(document.querySelector("#productionPreviewChapter")?.textContent.includes("Chapter 2"),
+      "Production Preview monitor did not display the selected chapter identity.");
+    const productionPreviewJobId = String(productionPreviewJob.job_id);
+    let completedProductionPreview = null;
+    await waitFor("real Production Preview audio completion", async function () {
+      const jobs = await invoke("job.list", {include_hidden:true});
+      const latest = Array.isArray(jobs)
+        ? jobs.find(job => String(job.job_id || "") === productionPreviewJobId)
+        : null;
+      if (!latest) return false;
+      const state = String(latest.state || "").toLowerCase();
+      if (state === "failed" || state === "cancelled") {
+        throw new Error("Production chapter preview ended " + state + ": " + String(latest.message || ""));
+      }
+      if (state === "completed") {
+        completedProductionPreview = latest;
+        return true;
+      }
+      return false;
+    }, 360000);
+    const productionPreviewResult = completedProductionPreview.result || {};
+    const productionPreviewPath = String(productionPreviewResult.output_path || completedProductionPreview.output_path || "");
+    must(productionPreviewPath.toLowerCase().endsWith(".m4a") &&
+      Number(productionPreviewResult.actual_duration_seconds || 0) > 0 &&
+      Number(productionPreviewResult.file_size || 0) >= 1024,
+      "Production Preview did not return a validated, measured AAC/M4A chapter file: " +
+        JSON.stringify(productionPreviewResult));
+    must(productionPreviewResult.sound_configuration?.background_audio_mode === "off" &&
+      productionPreviewResult.sound_configuration?.fixed_cues_enabled === false,
+      "Production Preview did not apply the saved Voice Only configuration: " +
+        JSON.stringify(productionPreviewResult.sound_configuration));
+    await waitFor("Production Preview playable/downloadable UI", function () {
+      const play = document.querySelector("#productionPreviewPlay");
+      const save = document.querySelector("#productionPreviewDownload");
+      return document.querySelector("#productionPreviewStatus")?.textContent.includes("Preview ready") &&
+        play && !play.disabled && save && !save.disabled;
+    }, 30000);
+    const productionPreviewPlay = document.querySelector("#productionPreviewPlay");
+    const productionPreviewStop = document.querySelector("#productionPreviewStop");
+    const productionPreviewReplay = document.querySelector("#productionPreviewReplay");
+    must(productionPreviewStop && productionPreviewReplay,
+      "Production Preview Play/Stop/Replay controls are incomplete.");
+    productionPreviewPlay.click();
+    await waitFor("Production Preview real playback start", function () {
+      return document.querySelector("#productionPreviewPlay")?.textContent.includes("Pause preview");
+    }, 12000);
+    productionPreviewPlay.click();
+    await waitFor("Production Preview playback pause", function () {
+      return document.querySelector("#productionPreviewPlay")?.textContent.includes("Play preview");
+    }, 8000);
+    productionPreviewStop.click();
+    productionPreviewReplay.click();
+    await waitFor("Production Preview replay", function () {
+      return document.querySelector("#productionPreviewPlay")?.textContent.includes("Pause preview");
+    }, 12000);
+    productionPreviewStop.click();
+    record("stage5_production_preview_real_chapter_audio_playback_and_duration_controls", true,
+      "The frozen app generated Chapter Two only, returned measured M4A audio, applied saved Voice Only mode, and passed Play/Pause/Stop/Replay with all four duration controls available.");
+
+    // Exercise a real cancellation request against a second, longer target.
+    // The chapter worker is deliberately started through the actual Production
+    // button so the dedicated job ID, Cancel Preview control and terminal state
+    // all use the real backend worker rather than a direct mocked call.
+    durationControls[3].click();
+    await waitFor("Production Preview 90-second cancellation target", function () {
+      return durationControls[3].classList.contains("active");
+    }, 5000);
+    productionPreviewStart.click();
+    await waitFor("Production Preview cancellation control enabled", function () {
+      const cancel = document.querySelector("#productionPreviewCancel");
+      return cancel && !cancel.disabled;
+    }, 15000);
+    const cancelPreviewButton = document.querySelector("#productionPreviewCancel");
+    cancelPreviewButton.click();
+    let cancelledPreviewJob = null;
+    await waitFor("Production Preview real cancellation completion", async function () {
+      const jobs = await invoke("job.list", {include_hidden:true});
+      cancelledPreviewJob = Array.isArray(jobs)
+        ? jobs.find(job => job.type === "production-preview" &&
+            Number(job.current_chapter || 0) === 2 &&
+            ["cancel_requested", "cancelled", "completed", "failed"].includes(String(job.state || "").toLowerCase()) &&
+            String(job.job_id || "") !== productionPreviewJobId)
+        : null;
+      if (!cancelledPreviewJob) return false;
+      const state = String(cancelledPreviewJob.state || "").toLowerCase();
+      if (state === "failed") throw new Error("Production Preview cancellation failed: " + String(cancelledPreviewJob.message || ""));
+      return state === "cancelled" || state === "completed";
+    }, 90000);
+    must(String(cancelledPreviewJob.state || "").toLowerCase() === "cancelled",
+      "Production Preview worker completed before its cancel request was honored.");
+    record("stage5_production_preview_real_cancellation", true,
+      "The Production Preview Cancel control cancelled its own in-flight production-preview job.");
+
     publish("passed");
   } catch (error) {
     errors.push(String(error && error.stack || error));
