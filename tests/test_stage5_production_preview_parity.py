@@ -39,7 +39,10 @@ class ProductionPreviewSavedNarratorTests(unittest.TestCase):
             "provider": "piper",
             "voice_id": "wrong-provider-voice",
             "duration_seconds": 30,
-            "include_sound_design": True,
+            "text": "UNTRUSTED WHOLE-BOOK TEXT MUST NOT BE USED",
+            "route_character_cast": False,
+            "apply_pronunciation_rules": False,
+            "include_sound_design": False,
         }
         with patch.object(premium_v2_host, "load_state", return_value={"voice_profile": "Old Project Snapshot"}):
             result = premium_v2_host.PremiumV2Bridge._production_preview(bridge, transient_payload)
@@ -49,6 +52,9 @@ class ProductionPreviewSavedNarratorTests(unittest.TestCase):
         self.assertEqual(captured["chapter_number"], 3)
         self.assertTrue(captured["_production_preview"])
         self.assertTrue(captured["include_sound_design"])
+        self.assertTrue(captured["route_character_cast"])
+        self.assertTrue(captured["apply_pronunciation_rules"])
+        self.assertNotIn("text", captured)
         self.assertNotIn("provider", captured)
         self.assertNotIn("voice_id", captured)
 
