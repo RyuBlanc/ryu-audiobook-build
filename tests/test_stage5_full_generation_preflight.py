@@ -117,7 +117,7 @@ class Stage53ProductionPreflightTests(unittest.TestCase):
             bridge, manager, manager_factory, result, state, output, profile = self._run_production(
                 root,
                 chapters,
-                payload={"profile_name": "Transient UI Voice", "bitrate": 256},
+                payload={"profile_name": "Transient UI Voice"},
             )
 
             self.assertEqual(result["state"], "running")
