@@ -345,3 +345,50 @@ Required exact-candidate checks:
 Installed-Windows runtime acceptance is still an external/hands-on gate: play the actual chapter preview at 10/30/60/90 seconds; test global pronunciation ON/OFF and individually disabled entries; test Same BGM, Chapter-Based BGM, Voice Only and opening/transition/closing cues; confirm playback, stop/replay, cancel and Save As; change projects/chapters during preview and confirm stale audio is blocked; compare the Production preview's saved narrator/configuration to a full-generation test. Do not claim these listening tests were executed by CI.
 
 **Current closure rule:** keep PROD-08, PROD-09, PROD-15 and GEN-06 at `CODE CHANGED — NOT VERIFIED` until the exact-candidate CI/package evidence and runtime acceptance are recorded. Do not open Stage 5.3 before those gates pass.
+
+
+## 30. Full Actions history audit and #2130 regression correction — 3 November 2026
+
+The push-triggered workflow history was queried directly and each failed run's test job was inspected. This replaces the earlier incomplete statement that push-run details were unavailable.
+
+### Successful packaged checkpoints retained
+
+- #2107, run ID `41562699194`, commit `6ef7dea5c028ba477d86511b353ad03583dfe44`: tests and build both passed; portable, installer and SHA-256 manifest artifacts were uploaded.
+- #2109, run ID `41566844270`, commit `97408889a44b58a508826c269e5872cfcaa16cfa`: tests and build both passed; portable, installer and manifest artifacts were uploaded.
+- #2114, run ID `41576361204`, commit `c1e362d3fa3829e4ac51222e61a68440523a9c4f`: tests and build both passed; the FFmpeg runner import correction was packaged.
+- #2115, run ID `41576648463`, commit `c2434ce3c1e0d69e9e1bc56dc707d24c289b3acd`: tests and build both passed. Test job completed with 1,091 tests in 51.872 seconds. Frozen Windows app, bundled voice assets, packaged Sound Design/Music Library acceptance, installers, portable ZIP and SHA-256 manifest completed. The user-imported cue preservation correction is in this checkpoint.
+
+#2115 artifact references:
+- Portable `Ryu-Audiobook-Portable-2115`: artifact ID `13206290064`, 1,367,555,427 bytes.
+- Installer `Ryu-Audiobook-Installer-2115`: artifact ID `13206250054`, 883,752,754 bytes.
+- SHA-256 manifest `Ryu-Audiobook-Release-SHA256-2115`: artifact ID `13205930319`, 774 bytes.
+
+### Failed runs and root causes
+
+- #2100 and #2103: early job-monitor refactoring broke existing polling source contracts and Production job-control assertions. The refresh public signatures were restored, the Production full-job ID was kept separate, and the controls' tests were updated. #2106's regression-only run passed 1,082 tests; #2107 then passed the packaged checkpoint.
+- #2108: four test failures from missing `production.preview.save` capability advertisement, stale saved Sound Design/pronunciation state at preview start, and outdated Stage 2/Stage 4 integration test contracts. The capability and save/refresh hand-off were corrected before #2109's successful packaged checkpoint.
+- #2111: 9 errors and 2 assertion failures from selected-chapter Sound Design renderer compatibility, projectless preview fixtures and Voice Studio versus Production Save As expectations. The renderer was made to use captured chapter context when no active-project accessor exists; cue/mix status and format-specific save tests were corrected.
+- #2112: four errors because the WAV-to-AAC/M4A branch still needed the assembler `_run` helper in its local import list. #2113 then isolated the missing import defect; #2114 added it and passed packaging.
+- #2116 and #2118: the Production-owned saved chapter selector changed the intended contract, but older Stage 4 tests still asserted Chapter Studio selection and the old preview callback.
+- #2125 and #2126: the same three stale Stage 4 assertions remained; quick subsequent pushes cancelled the next queued run.
+- #2130, run ID `41589494084`, exact head `c2c1f66801c5551530afccfb3a915325d11cc4a6`: JavaScript syntax check passed, isolated Qt lifecycle regression passed, then 1,100 tests ran with 3 failures and 1 error. The build job was skipped because the tests job failed. The failures were:
+  1. stale-completion test expected the old `profileName:name` callback rather than saved `previewProfileName`;
+  2. selected-chapter backend contract fixture expected the former Chapter Studio-only wording/payload;
+  3. selected-chapter source contract expected `window.ryuPremiumSelectedChapter` rather than the new Production-owned selector;
+  4. the new Stage 5 saved narrator test exposed that the backend validated a stable chapter ID but did not forward it into the preview worker payload.
+
+### Final fixes after #2130
+
+- Host commit `37102e4ba7557aa55448539e3971e27eff7870e1`: forwards the validated stable `chapter_id` to the Production preview worker job.
+- Host commit `ba49f5b687459b654910b607c51f17cf68087209`: retains an actionable chapter-selection error message compatible with the public contract while keeping Production-owned saved chapter selection.
+- Test commit `d67c79ffda73b1d1a01eba82f950f87af7285610`: rewrites the obsolete Stage 4 assertions to validate the Production-owned chapter selector, saved narrator resolution, stable chapter-ID handoff, stale-completion rejection and the new Production callback. The selected-chapter backend fixture now verifies the saved narrator and forced project settings.
+
+### Cancelled/superseded runs
+
+Runs #2101, #2102, #2104, #2105, #2117, #2119, #2120, #2121, #2123, #2124, #2127, #2128 and #2129 ended as cancelled while the same branch advanced. Their cancellation is attributable to rapid subsequent pushes/branch concurrency; the final verification candidate must supersede them. They are not reported as passing or as source-code test failures.
+
+### Exact candidate verification gate
+
+The next `[artifact-checkpoint]` must run on the final consolidated SHA after commits `37102e4`, `ba49f5b` and `d67c79f`. The expected run must have both `tests` and `build` jobs successful; test count, run ID, portable/installer/manifest artifact IDs and exact SHA values must be recorded from that run. A test pass with a skipped build is not sufficient to close Step 5.2.
+
+Installed Windows runtime acceptance (real chapter audio listening, duration matrix, pronunciation/BGM/cue matrix, playback/cancellation/save and project-switch isolation) remains distinct from CI and must be completed before declaring those user-facing flows runtime-verified.
