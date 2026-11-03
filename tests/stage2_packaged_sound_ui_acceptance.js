@@ -159,8 +159,10 @@
         .split(String.fromCharCode(92)).join("/").toLowerCase();
       must(normalizedCoverPath.endsWith("/assets/cover.png"),
         "The project-local PNG cover was not resolved after application restart.");
+      must(String(persistedProject.narrator || "") === String(config.narrator_profile_name || ""),
+        "The selected Voice Studio narrator profile was not restored after application restart.");
       record("production_metadata_application_restart", true,
-        "Book title, author, publisher, series/volume, language, year, genre and project-local cover were reloaded by a new frozen-app process.");
+        "Book metadata, project-local cover and the selected Voice Studio narrator profile were reloaded by a new frozen-app process.");
 
       const catalogue = await invoke("sound.catalog", {});
       const saved = await invoke("sound.chapter_bgm.get", {});
@@ -1215,6 +1217,20 @@
     record("production_handoff_save_error_gate_and_retry", true,
       "A failed save blocked navigation; retry opened Production with live metadata, output destination, readiness fields and exact unique chapter-track count.");
 
+    const narratorProfileName = String(config.narrator_profile_name || "").trim();
+    must(narratorProfileName, "The packaged Voice Studio narrator profile fixture is missing.");
+    const selectedNarrator = await invoke("voice.select", {
+      profile_name:narratorProfileName, backend:"automatic"
+    });
+    must(selectedNarrator && selectedNarrator.saved === true &&
+      String(selectedNarrator.name || "") === narratorProfileName,
+      "Voice Studio did not save the selected narrator profile through its real bridge command.");
+    await waitFor("real selected narrator in active project summary", async function () {
+      const refreshed = await invoke("project.get_active", {});
+      return String(refreshed.narrator || "") === narratorProfileName &&
+        String(refreshed.voice_profile || "") === narratorProfileName &&
+        refreshed.narrator_profile_available === true;
+    }, 12000);
     const metadataButton = document.querySelector("#openProjectDetails");
     must(metadataButton, "Production Studio Input Project Details button is missing.");
     metadataButton.click();
@@ -1230,8 +1246,9 @@
     for (const id of metadataFields) {
       must(document.getElementById(id), "Input Project Details field is missing: " + id);
     }
-    must(document.querySelector("#metadataNarrator")?.readOnly === true,
-      "Narrator must be retrieved from the selected Voice Studio profile, not typed as a static label.");
+    must(document.querySelector("#metadataNarrator")?.readOnly === true &&
+      String(document.querySelector("#metadataNarrator")?.value || "") === narratorProfileName,
+      "Narrator must display the actual selected Voice Studio profile in a read-only field.");
     const history = config.metadata_history || {};
     const historyFields = [
       ["metadataHistoryAuthor", history.author],
@@ -1313,15 +1330,17 @@
     must(metadataMismatches.length === 0,
       "The metadata save response did not reflect saved project fields: " +
       metadataMismatches.join("; "));
+    must(String(savedMetadata.narrator || "") === narratorProfileName,
+      "The metadata save did not preserve the selected Voice Studio narrator profile.");
     must(savedMetadata.metadata_complete === false &&
-      (savedMetadata.metadata_missing_fields || []).includes("Narrator"),
-      "The saved metadata gate did not identify the missing real narrator profile.");
+      (savedMetadata.metadata_missing_fields || []).includes("Publisher"),
+      "The saved metadata gate did not identify the intentionally missing required Publisher field.");
     must(document.querySelector("#startGenerate")?.disabled === true &&
       document.querySelector("#previewGenerate")?.disabled !== true &&
-      document.querySelector("#productionMetadataStatus")?.textContent.includes("Narrator"),
-      "After saving partial metadata, full generation was not blocked with the exact missing field while Preview remained available.");
+      document.querySelector("#productionMetadataStatus")?.textContent.includes("Publisher"),
+      "After saving partial metadata, full generation was not blocked with the exact missing Publisher field while Preview remained available.");
     record("production_metadata_dialog_history_save_error_and_gate", true,
-      "The packaged dialog loaded all fields and saved history, surfaced a forced save error, succeeded on retry, persisted a validated project cover and maintained the saved-data full-generation gate.");
+      "The packaged dialog loaded historical values, displayed a real selected Voice Studio narrator, surfaced a forced save error, succeeded on retry, persisted a validated project cover and blocked full generation for the missing required Publisher field.");
 
     const productionVoiceOnly = document.querySelector('#generate [data-bgm-enabled="false"]');
     must(productionVoiceOnly, "Production Studio Voice Only mode toggle is missing.");

@@ -16,6 +16,8 @@ import wave
 import zlib
 import winreg
 
+from app.tts.voice_profile import load_profiles
+
 
 _SETTINGS_PROJECT_KEY = r"Software\RyuBlanc\Ryu's Audiobook\project"
 _ACTIVE_PROJECT_VALUE = "active_folder"
@@ -275,13 +277,19 @@ def _run(args: argparse.Namespace) -> int:
     metadata_expected = {
         "title": f"Stage 5 Metadata Acceptance {token}",
         "author": f"Stage 5 Author {token}",
-        "publisher": f"Stage 5 Publisher {token}",
+        "publisher": "",
         "series": f"Stage 5 Series {token}",
         "series_volume": "9",
         "language": "en-GB",
         "year": "2026",
         "genre": "Fantasy",
     }
+    narrator_profile = next(
+        (profile for profile in load_profiles() if profile.name == "Offline Character • Anime Hero"),
+        None,
+    )
+    if narrator_profile is None:
+        raise RuntimeError("The packaged Voice Studio catalogue did not expose its built-in Anime Hero profile.")
     metadata_history = {
         "author": f"Historical Author {token}",
         "publisher": f"Historical Press {token}",
@@ -445,6 +453,7 @@ def _run(args: argparse.Namespace) -> int:
         "secondary_project_folder": str(secondary_project_folder.resolve()),
         "original_project_title": project_title,
         "metadata": metadata_expected,
+        "narrator_profile_name": narrator_profile.name,
         "metadata_history": metadata_history,
         "metadata_cover_path": str(metadata_cover_source.resolve()),
     }, ensure_ascii=True, indent=2), encoding="utf-8")
