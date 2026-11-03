@@ -176,6 +176,43 @@ class Stage53LiveGenerationIntegrationTests(unittest.TestCase):
             self.assertEqual(queue_job["output_path"], str(output.resolve()))
             self.assertEqual(history_job["output_path"], str(output.resolve()))
 
+            # Retry the completed project as a new job. The Production bridge
+            # must issue a distinct job ID while the real chunk generator reuses
+            # the compatible saved narrator/audio checkpoint without synthesizing
+            # the same narration again.
+            bridge.finished_event.clear()
+            local_provider.calls.clear()
+            retry_result = bridge._production_generate_book(
+                {"output_path": str(output), "profile_name": "Another Transient Voice"}
+            )
+            self.assertNotEqual(retry_result["job_id"], result["job_id"])
+            self.assertTrue(
+                bridge.finished_event.wait(15),
+                "the retry GenerationManager did not reach its completion callback",
+            )
+            self.assertEqual(local_provider.calls, [])
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 1024)
+
+            retried_project_state = load_state(project_folder)
+            self.assertEqual(retried_project_state["status"], "completed")
+            self.assertEqual(retried_project_state["generation_job_id"], retry_result["job_id"])
+            self.assertEqual(retried_project_state["output_path"], str(output.resolve()))
+
+            retry_queue_job = next(
+                row for row in bridge._job_list({"include_hidden": False})
+                if row["job_id"] == retry_result["job_id"]
+            )
+            retry_history_job = next(
+                row for row in bridge._history_list({})
+                if row["job_id"] == retry_result["job_id"]
+            )
+            self.assertEqual(retry_queue_job["state"], "completed")
+            self.assertEqual(retry_history_job["state"], "completed")
+            self.assertEqual(retry_queue_job["job_id"], retry_history_job["job_id"])
+            self.assertEqual(retry_queue_job["output_path"], str(output.resolve()))
+            self.assertEqual(retry_history_job["output_path"], str(output.resolve()))
+
             persisted_jobs = json_rows = __import__("json").loads(
                 (settings_root / "premium_v2_jobs.json").read_text(encoding="utf-8")
             )
