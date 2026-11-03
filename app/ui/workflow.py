@@ -33,6 +33,7 @@ from app.ui.voice_page import VoicePage
 from app.ui.hardware_page import HardwarePage
 from app.ui.models_page import ModelsPage
 from app.ui.voice_cast_page import VoiceCastPage
+from app.ui.character_library_page import CharacterLibraryPage
 from app.ui.loading_overlay import FrostedLoadingOverlay
 from app.ui.motion import reduced_motion_enabled
 
@@ -112,6 +113,7 @@ class ProjectWorkflow(QMainWindow):
         self._redetect_worker: RedetectChaptersWorker | None = None
         self._page_animation: QPropertyAnimation | None = None
         self._page_animation_widget: QWidget | None = None
+        self._last_imported_project_folder: str | None = None
 
         shell = QWidget()
         shell_layout = QVBoxLayout(shell)
@@ -163,6 +165,7 @@ class ProjectWorkflow(QMainWindow):
             ("Chapters", "☷"),
             ("Voice & Narration", "◉"),
             ("Voice Cast", "♙"),
+            ("Character Library", "♟"),
             ("Generate", "▶"),
             ("Models", "◆"),
             ("Hardware", "⚙"),
@@ -188,7 +191,7 @@ class ProjectWorkflow(QMainWindow):
         self.loading_overlay = FrostedLoadingOverlay(shell)
         self.loading_overlay.setGeometry(shell.rect())
 
-        self.library = LibraryPage(self.open_project)
+        self.library = LibraryPage(self.open_project, self._projects_deleted_from_library)
         self.import_page = ImportPage(self.handle_import)
         self.voice = VoicePage()
 
@@ -200,6 +203,8 @@ class ProjectWorkflow(QMainWindow):
             lambda: self.project.source_path if self.project else None,
         )
         self.stack.addWidget(self.voice_cast)
+        self.character_library = CharacterLibraryPage(self._open_character_studio_for_series)
+        self.stack.addWidget(self.character_library)
         self.stack.addWidget(ModelsPage())
         self.stack.addWidget(HardwarePage())
 
@@ -215,6 +220,38 @@ class ProjectWorkflow(QMainWindow):
         self._refresh_project_label()
         if hasattr(self, "loading_overlay") and self.centralWidget():
             self.loading_overlay.setGeometry(self.centralWidget().rect())
+
+    def _projects_deleted_from_library(self, projects: list[Project]) -> None:
+        """Clear recent-import status and detach any deleted active project."""
+        from app.core.import_status import clear_latest_import_for_folder
+        for deleted_project in projects:
+            clear_latest_import_for_folder(deleted_project.folder)
+        if hasattr(self, "import_page"):
+            self.import_page.refresh_latest_import()
+        current = self.project
+        if current is None:
+            return
+        current_path = str(Path(current.folder).resolve())
+        if not any(str(Path(project.folder).resolve()) == current_path for project in projects):
+            return
+        if self._page_animation is not None:
+            self._page_animation.stop()
+            if self._page_animation_widget is not None:
+                self._page_animation_widget.setGraphicsEffect(None)
+            self._page_animation = None
+            self._page_animation_widget = None
+        for attribute in ("editor", "generation"):
+            widget = getattr(self, attribute, None)
+            if widget is not None:
+                self.stack.removeWidget(widget)
+                widget.deleteLater()
+                setattr(self, attribute, None)
+        self._editor_index = -1
+        self._generation_index = -1
+        self.project = None
+        self._set_project_title("No book open")
+        self.select_section("Library")
+        self.library.refresh()
 
     def _set_project_title(self, title: str) -> None:
         self._project_title_full = title or "No book open"
@@ -241,6 +278,11 @@ class ProjectWorkflow(QMainWindow):
             self._page_animation_widget = None
 
         self.stack.setCurrentWidget(widget)
+        # Heavy studio pages already have their own responsive transitions; a
+        # whole-widget graphics effect can trigger black flashes on some GPUs.
+        # Restrict cross-page fades to lightweight navigation destinations.
+        if widget in {getattr(self, "editor", None), getattr(self, "generation", None), getattr(self, "voice_cast", None), getattr(self, "character_library", None)}:
+            return
         if reduced_motion_enabled() or not widget.isVisible():
             return
 
@@ -270,6 +312,7 @@ class ProjectWorkflow(QMainWindow):
         name = self.sidebar.item(row).data(32)
 
         if name == "Library":
+            self.library.refresh()
             self._show_page(self.library)
         elif name == "Import":
             self._show_page(self.import_page)
@@ -283,6 +326,9 @@ class ProjectWorkflow(QMainWindow):
         elif name == "Voice Cast":
             self.voice_cast.refresh_profiles()
             self._show_page(self.voice_cast)
+        elif name == "Character Library":
+            self.character_library.refresh()
+            self._show_page(self.character_library)
         elif name == "Generate":
             if self.project:
                 if self.generation:
@@ -297,9 +343,28 @@ class ProjectWorkflow(QMainWindow):
             else:
                 self._show_page(self.import_page)
         elif name == "Models":
-            self._show_page(self.stack.widget(4))
-        elif name == "Hardware":
             self._show_page(self.stack.widget(5))
+        elif name == "Hardware":
+            self._show_page(self.stack.widget(6))
+
+    def _open_character_studio_for_series(self, series: str = "") -> None:
+        """Open the live cast editor and make the requested series the working context."""
+        projects = [project for project in self.library.projects if project.folder.exists()]
+        chosen = next(
+            (project for project in projects if project.title.casefold() == str(series).casefold()),
+            None,
+        )
+        if chosen:
+            self.open_project(chosen)
+        else:
+            # Existing Character Studio is project-scoped; use the current book
+            # as the workspace when the series title is not an exact project title.
+            self.select_section("Voice Cast")
+        if self.project:
+            self.voice_cast.refresh_profiles()
+            if series:
+                self.voice_cast.load_series_for_editing(series)
+            self.select_section("Voice Cast")
 
     def select_section(self, name: str) -> None:
         for i in range(self.sidebar.count()):
@@ -310,27 +375,28 @@ class ProjectWorkflow(QMainWindow):
     def handle_import(self, path: Path) -> None:
         if self._import_worker is not None and self._import_worker.isRunning():
             return
-        self.loading_overlay.show_loading(
-            "Importing your book",
-            "Reading the source file, finding chapters and preparing your local project…",
-        )
+        self.import_page.begin_import(path)
         worker = ImportBookWorker(path)
         self._import_worker = worker
-        worker.status.connect(self.loading_overlay.set_detail)
+        # Import progress reflects real worker phases; parsing no longer runs on
+        # the UI thread before the worker starts. Avoid a full-window overlay here.
+        worker.status.connect(self.import_page.show_import_status)
         worker.completed.connect(self._import_completed)
-        worker.failed.connect(self._import_failed)
+        worker.failed.connect(lambda message: self._import_failed(path, message))
         worker.finished.connect(self._import_worker_finished)
         worker.start()
 
     def _import_completed(self, project: Project) -> None:
-        self.loading_overlay.dismiss()
+        self.import_page.show_import_completed(project)
+        self._last_imported_project_folder = str(project.folder.resolve())
         self.project = project
+        self.library.refresh()
         self._set_project_title(project.title)
         self.open_editor()
 
-    def _import_failed(self, message: str) -> None:
-        self.loading_overlay.dismiss()
-        QMessageBox.critical(self, "Import Failed", message)
+    def _import_failed(self, path: Path, message: str) -> None:
+        # Inline errors avoid a blocking modal flash and keep retry context visible.
+        self.import_page.show_import_failed(path, message)
 
     def _import_worker_finished(self) -> None:
         # Keep the QThread alive until Qt confirms its worker loop has ended.
