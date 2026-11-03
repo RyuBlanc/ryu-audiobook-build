@@ -323,4 +323,15 @@ This closeout verifies automated regression, frozen Windows application acceptan
 
 ### Stage boundary
 
-PROD-14 and GEN-01 through GEN-05 remain OPEN as Stage 5.3 Full Generation Engine, job-state unification and recovery scope. They are intentionally not included in the Stage 5.2 closure. Stage 5.2 is complete at #2165; proceed to Stage 5.3 without rewriting or restarting completed preview work.
+PROD-14 and GEN-01 through GEN-04 remain OPEN as Stage 5.3 Full Generation Engine, job-state unification and recovery scope. GEN-05 (chaptered M4B assembly, full-stream validation, metadata and cover) is Stage 5.4 scope. They are intentionally not included in the Stage 5.2 closure. Stage 5.2 is complete at #2165; proceed to Stage 5.3 without rewriting or restarting completed preview work.
+
+### Stage 5.3 restart-recovery checkpoint — 3 November 2026
+
+The restart-recovery slice has a successful exact-commit regression checkpoint:
+- [Build Windows App #2175](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41646828666), run ID `41646828666`, tested SHA `5a7b031faa9541d1918b47271945e816159fd57e`.
+- 1,106 tests passed in 49.257 seconds; frontend JavaScript syntax and isolated native Qt lifecycle checks passed.
+- The build job was skipped because this was a test-only checkpoint. It did not produce package artifacts.
+
+Verified coverage: paused/running interrupted jobs become failed and recoverable after restart; normalized jobs and History snapshots retain the same job ID; the owning project is marked recovery-required only when its saved `generation_job_id` matches; a stale job cannot overwrite a newer project generation. Starting a new generation clears the interruption marker.
+
+Status: PROD-14 and GEN-03 remain OPEN pending their broader integration/control acceptance matrices. GEN-01, GEN-02 and GEN-04 also remain OPEN. This checkpoint does not close Step 5.3.

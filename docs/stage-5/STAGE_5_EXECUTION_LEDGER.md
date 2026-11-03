@@ -659,12 +659,53 @@ Authoritative packaged checkpoint: [Build Windows App #2165](https://github.com/
 Stage 5.2 is CLOSED at #2165. The closeout does not claim a separate user-owned laptop listening session on NVIDIA/AMD/iGPU hardware. Hardware-specific perceptual quality and real full-book-vs-preview listening remain user-device acceptance considerations, not reasons to hold the automated/package stage open.
 
 ### Stage 5.3 handoff
-PROD-14 and GEN-01 through GEN-05 remain open and carry forward as Step 5.3 scope:
+PROD-14 and GEN-01 through GEN-04 remain open and carry forward as Step 5.3 scope:
 - PROD-14 — unify/verify status across Production, Background Jobs, History and output.
 - GEN-01 — full generation from saved project configuration.
 - GEN-02 — compatible resumable/recoverable checkpoints and invalidation.
 - GEN-03 — real pause/resume/cancel/retry/recovery, including process restart.
 - GEN-04 — empty/ineligible chapter handling and ordering.
-- GEN-05 — chaptered M4B assembly, full-stream validation, metadata and cover.
+
+GEN-05 — chaptered M4B assembly, full-stream validation, metadata and cover — is carried into Stage 5.4, consistent with the current requirement register.
 
 Stage 5.3 begins from the successful #2165 package baseline and the exact `a46d05dafa4ce3b722338b322ed5468533ce9294` source checkpoint. Do not reopen or redo Stage 5.2 preview work unless a new Stage 5.3 integration regression specifically requires a fix.
+
+
+## 32. Stage 5.3.1–5.3.2 restart recovery checkpoint — 3 November 2026
+
+### Implementation and regression evidence
+
+- Implementation commit: `53bcd3f203de02ba33483285499833cf16a6f2e6`.
+- Matching test-harness commit: `5a7b031faa9541d1918b47271945e816159fd57e`.
+- Successful workflow: [Build Windows App #2175](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41646828666).
+- Run ID: `41646828666`; exact tested SHA: `5a7b031faa9541d1918b47271945e816159fd57e`.
+- Tests job `125954254312`: SUCCESS; 1,106 tests in 49.257 seconds. Frontend JavaScript syntax and isolated native Qt lifecycle checks passed.
+- Build job `125955403809`: SKIPPED by the test-only checkpoint policy. This run did not produce Windows installer/portable/manifest artifacts; #2165 remains the latest packaged application checkpoint.
+
+### Verified restart-recovery correction
+
+- Durable job loading now treats `paused` as an interrupted state, alongside queued/running/pause-requested/cancel-requested/retrying jobs.
+- An interrupted job is persisted as `failed`, with stage `Interrupted by application restart`, an `interrupted` error, and `recoverable=true`.
+- Terminal interrupted snapshots are recorded in durable History using the same job ID.
+- Normalized job rows are persisted back to the durable queue so subsequent launches do not repeatedly reclassify stale active rows.
+- Project state is reconciled only for an `audiobook-generation` job whose `job_id` still matches the project's saved `generation_job_id`. The project is marked failed and receives a recovery-required marker and interruption details.
+- A stale interrupted job cannot overwrite a newer generation's project state.
+- Starting a new full-generation attempt clears the previous generation recovery marker before assigning the new job ID.
+- The two new regressions passed: paused/running job recovery after restart, and stale-job protection when a newer generation already owns the project.
+
+### Historical failed attempts and reconciliation
+
+- #2171 (`41645598222`, SHA `6889b5c9846e1ff07b7b88631f9afd2e8430805a`) and #2172 (`41645792507`, SHA `6206a908bcb032f0637d37e51456b3cae1313ca1`) failed because the test harness attached static helpers as instance methods.
+- #2173 (`41646073773`, SHA `2d2f6c250c806d0d7bd38e048b3a227abe8a4213`) was the valid red checkpoint: the two new tests exposed the paused-job restart and project-state reconciliation gaps.
+- #2174 (`41646658747`, SHA `53bcd3f203de02ba33483285499833cf16a6f2e6`) included the application fix but the test harness lacked a binding for the new reconciler method.
+- #2175 is the matching green checkpoint with the harness binding corrected. Earlier failures remain recorded and are not represented as successful runs.
+
+### Requirement status after this checkpoint
+
+- PROD-14: OPEN — this checkpoint verifies durable restart job identity/history and project-state reconciliation for interrupted audiobook-generation jobs; broader Production/Background Jobs/History/output consistency, project switching and stale asynchronous response coverage remain.
+- GEN-03: OPEN — application-restart handling for paused/running jobs is verified; live pause/resume/cancel/retry controls, cancellation behavior and end-to-end retry/recovery still require the remaining acceptance matrix.
+- GEN-01: OPEN — saved-input hand-off already exists in the Production bridge and prior regression contracts, but a complete actual full-book generation acceptance remains required.
+- GEN-02: OPEN — compatible chunk signatures, chapter identity and corrupt/missing WAV validation exist; broader changed narrator/cast/settings checkpoint invalidation and recovery acceptance remains.
+- GEN-04: OPEN — Production preflight filtering and all-empty rejection remain to be tested through the full Production bridge path and correct chapter ordering.
+
+This is a focused Stage 5.3 recovery checkpoint, not Step 5.3 closeout. Stage 5.1 and 5.2 remain closed; Stage 5.4 and 5.5 remain pending.
