@@ -190,7 +190,7 @@ class ProductionPreviewParitySourceContracts(unittest.TestCase):
         self.assertIn('"file_url": playback_path.resolve().as_uri()', worker)
         self.assertIn('"playback_output_path": str(playback_path)', worker)
         self.assertIn('"playback_format": playback_path.suffix.casefold().lstrip(".")', worker)
-        self.assertIn('"_run(["', worker)
+        self.assertIn("_run([", worker)
         self.assertIn('"c:a", "pcm_s16le"', worker)
         self.assertIn("abs(float(playback_duration) - float(duration)) > 1.5", worker)
 
