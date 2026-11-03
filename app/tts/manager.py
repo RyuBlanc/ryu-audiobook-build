@@ -181,7 +181,7 @@ class GenerationManager:
             self.pause_event.set()
 
     def resume(self) -> None:
-        """Continue a generation paused at a chapter boundary."""
+        """Continue a generation paused at a persisted chunk/batch checkpoint."""
         self.pause_event.clear()
 
     def _wait_if_paused(self, chapter: int, total: int) -> bool:
