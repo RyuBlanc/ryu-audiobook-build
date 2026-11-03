@@ -425,6 +425,7 @@ def _run(args: argparse.Namespace) -> int:
     set_active_project_setting(str(project_folder.resolve()))
 
     marker = temp_root / "acceptance-result.json"
+    production_preview_save_path = temp_root / "stage5-production-preview-save.m4a"
     config = temp_root / "acceptance-fixtures.json"
     category_imports = [
         {
@@ -470,6 +471,7 @@ def _run(args: argparse.Namespace) -> int:
     environment["RYU_SOUND_UI_ACCEPTANCE_SCRIPT"] = str(script)
     environment["RYU_SOUND_UI_ACCEPTANCE_CONFIG"] = str(config)
     environment["RYU_SOUND_UI_ACCEPTANCE_MARKER"] = str(marker)
+    environment["RYU_SOUND_UI_ACCEPTANCE_PREVIEW_SAVE_PATH"] = str(production_preview_save_path)
     environment["RYU_SOUND_UI_ACCEPTANCE_TIMEOUT_SECONDS"] = "840"
     environment.pop("RYU_UI_MODE", None)
     environment.pop("RYU_STARTUP_SMOKE_MARKER", None)
@@ -509,6 +511,24 @@ def _run(args: argparse.Namespace) -> int:
                 "Packaged Stage 2 UI acceptance failed: " + json.dumps(first_result, ensure_ascii=False)
                 + ("\nApplication output:\n" + output[-6000:] if output else "")
             )
+        if not production_preview_save_path.is_file() or production_preview_save_path.stat().st_size < 1024:
+            raise AssertionError(
+                "The packaged Production Preview Save As action did not create its expected non-empty M4A file: "
+                + str(production_preview_save_path)
+            )
+        with production_preview_save_path.open("rb") as saved_preview:
+            saved_preview.seek(4)
+            if saved_preview.read(4) != b"ftyp":
+                raise AssertionError(
+                    "The Production Preview Save As output is not a valid ISO Base Media/M4A file: "
+                    + str(production_preview_save_path)
+                )
+        if "stage5_production_preview_real_save_as" not in (first_result.get("checks") or {}):
+            raise AssertionError("The packaged UI did not report completion of the Production Preview Save As action.")
+        print(
+            "PACKAGED PRODUCTION PREVIEW SAVE AS VERIFIED: "
+            + json.dumps({"path":str(production_preview_save_path),"bytes":production_preview_save_path.stat().st_size}, ensure_ascii=False)
+        )
         if process.returncode != 0:
             raise RuntimeError(f"Packaged app returned exit code {process.returncode} after reporting success.")
 
