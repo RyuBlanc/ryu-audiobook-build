@@ -1701,6 +1701,26 @@
     record("stage5_production_preview_real_cancellation", true,
       "The Production Preview Cancel control cancelled its own in-flight production-preview job.");
 
+    // Preview acceptance deliberately switched the saved project to Voice Only
+    // to prove that BGM and cues were excluded. Restore the fixture's original
+    // enabled Chapter-Based mode before the native post-run persistence validator
+    // and restart phase execute. This is test cleanup, not a product-state change
+    // hidden from the real UI: use the same Production master control and verify
+    // the persisted project state through the native bridge.
+    const restoreProductionUseBgm = document.querySelector('#generate [data-bgm-enabled="true"]');
+    must(restoreProductionUseBgm,
+      "Production Studio Use BGM control is missing for restoration after preview acceptance.");
+    restoreProductionUseBgm.click();
+    await waitFor("Restore original enabled Chapter-Based BGM after preview acceptance", async function () {
+      const state = await invoke("sound.chapter_bgm.get", {});
+      return state.bgm_enabled === true &&
+        state.background_audio_mode === "manual" &&
+        ["custom", "chapter-based", "chapter_based", "chapter"].includes(String(state.strategy || "").toLowerCase()) &&
+        restoreProductionUseBgm.classList.contains("active");
+    }, 15000);
+    record("stage5_production_preview_restores_sound_master_state_for_restart_validation", true,
+      "After Voice Only parity tests and cancellation, the real Production master control restored the saved enabled Chapter-Based BGM state before process restart.");
+
     publish("passed");
   } catch (error) {
     errors.push(String(error && error.stack || error));
