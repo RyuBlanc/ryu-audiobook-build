@@ -5748,7 +5748,7 @@ class PremiumV2Bridge(QObject):
         project = self._active_project()
         raw_chapter_number = payload.get("chapter_number")
         if raw_chapter_number in (None, ""):
-            raise ValueError("Select a saved chapter in Production Studio before creating a chapter-specific preview.")
+            raise ValueError("Select a chapter saved in Production Studio before creating a chapter-specific preview.")
         try:
             chapter_number = int(raw_chapter_number)
         except (TypeError, ValueError, OverflowError) as exc:
