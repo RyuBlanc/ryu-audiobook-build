@@ -5,6 +5,8 @@ import json
 import tempfile
 import threading
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 from pathlib import Path
 
 from app.core.state import load_state, save_state
@@ -142,3 +144,60 @@ class Stage53DurableJobRecoveryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GenerationFinishOwnershipHarness:
+    """Call the real completion callback without constructing the Qt application."""
+
+    _generation_finished = host.PremiumV2Bridge._generation_finished
+
+    def __init__(self, job_id: str) -> None:
+        self._jobs_lock = threading.RLock()
+        self._generators = {job_id: object()}
+        self._job_update = Mock()
+
+
+class Stage53StaleGenerationCallbackTests(unittest.TestCase):
+    def test_late_success_cannot_overwrite_a_newer_project_generation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project_folder = root / "project"
+            project_folder.mkdir()
+            old_output = root / "older-job.m4b"
+            old_output.write_bytes(b"old-job-output" * 100)
+            new_output = root / "newer-job.m4b"
+            state = {
+                "status": "generating",
+                "generation_job_id": "newer-generation-job",
+                "generation_target_path": str(new_output),
+                "output_path": None,
+                "completed_chapters": [],
+            }
+            bridge = GenerationFinishOwnershipHarness("older-generation-job")
+            project = SimpleNamespace(folder=project_folder)
+            summary = SimpleNamespace(
+                output_path=old_output,
+                cancelled=False,
+                packaging_failed=False,
+                chapters_failed=[],
+                chapters_completed=1,
+                chapters_total=1,
+                chapters_completed_numbers=[1],
+                failure_details={},
+            )
+
+            with patch.object(host, "load_state", return_value=state), patch.object(host, "save_state") as save:
+                bridge._generation_finished(
+                    "older-generation-job", project, summary, old_output, "Old Narrator"
+                )
+
+            self.assertEqual(state["status"], "generating")
+            self.assertEqual(state["generation_job_id"], "newer-generation-job")
+            self.assertEqual(state["generation_target_path"], str(new_output))
+            self.assertIsNone(state["output_path"])
+            save.assert_not_called()
+            update = bridge._job_update.call_args.kwargs
+            self.assertEqual(update["state"], "completed")
+            self.assertIsNone(update["output_path"])
+            self.assertTrue(update["result"]["superseded"])
+            self.assertNotIn("older-generation-job", bridge._generators)
