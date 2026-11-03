@@ -49,7 +49,12 @@ class Stage8210ResumeChunkIntegrityTests(unittest.TestCase):
             cached_audio.write_bytes(b"old assembled chapter")
             cache_settings.write_text("256k|speed=1.000", encoding="utf-8")
 
-            revised = Chapter(1, "Chapter One", "Only one sentence remains.")
+            revised = Chapter(
+                1,
+                "Chapter One",
+                "Only one sentence remains.",
+                chapter_id=original.chapter_id,
+            )
             second = generate_chapter(revised, provider, "Narrator", root,
                                       narration_speed=1.0, pacing_profile="off")
 
