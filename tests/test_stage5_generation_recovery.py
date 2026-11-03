@@ -202,3 +202,62 @@ class Stage53StaleGenerationCallbackTests(unittest.TestCase):
             self.assertIsNone(update["output_path"])
             self.assertTrue(update["result"]["superseded"])
             self.assertNotIn("older-generation-job", bridge._generators)
+
+    def test_project_switch_keeps_late_completion_bound_to_original_project(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            project_a_folder = root / "project-a"
+            project_b_folder = root / "project-b"
+            project_a_folder.mkdir()
+            project_b_folder.mkdir()
+            output_a = root / "book-a.m4b"
+            output_a.write_bytes(b"project-a-output" * 100)
+            save_state(
+                project_a_folder,
+                {
+                    "status": "generating",
+                    "generation_job_id": "project-a-job",
+                    "output_path": None,
+                },
+            )
+            save_state(
+                project_b_folder,
+                {
+                    "status": "generating",
+                    "generation_job_id": "project-b-job",
+                    "output_path": None,
+                },
+            )
+
+            project_a = SimpleNamespace(folder=project_a_folder)
+            project_b = SimpleNamespace(folder=project_b_folder)
+            bridge = GenerationFinishOwnershipHarness("project-a-job")
+            # The UI has since switched to B; completion retains the captured A
+            # project reference and must not consult or overwrite B's current state.
+            bridge._active_project = Mock(return_value=project_b)
+            summary = SimpleNamespace(
+                output_path=output_a,
+                cancelled=False,
+                packaging_failed=False,
+                chapters_failed=[],
+                chapters_completed=1,
+                chapters_total=1,
+                chapters_completed_numbers=[1],
+                failure_details={},
+            )
+
+            bridge._generation_finished(
+                "project-a-job", project_a, summary, output_a, "Project A Narrator"
+            )
+
+            project_a_state = load_state(project_a_folder)
+            project_b_state = load_state(project_b_folder)
+            self.assertEqual(project_a_state["status"], "completed")
+            self.assertEqual(project_a_state["generation_job_id"], "project-a-job")
+            self.assertEqual(project_a_state["output_path"], str(output_a))
+            self.assertEqual(project_b_state["status"], "generating")
+            self.assertEqual(project_b_state["generation_job_id"], "project-b-job")
+            self.assertIsNone(project_b_state["output_path"])
+            update = bridge._job_update.call_args.kwargs
+            self.assertEqual(update["state"], "completed")
+            self.assertEqual(update["output_path"], str(output_a))
