@@ -1367,6 +1367,31 @@
     record("production_mode_toggles_share_sound_manifest", true,
       "Production Studio Voice Only and Use BGM controls persisted through the same Sound Design state.");
 
+    const productionPronunciationToggle = document.querySelector("#productionPronunciationToggle");
+    must(productionPronunciationToggle,
+      "Production Studio global Pronunciation ON/OFF control is missing.");
+    const initialPronunciationState = await invoke("pronunciation.settings.get", {});
+    must(typeof initialPronunciationState?.enabled === "boolean",
+      "The active project's saved global pronunciation setting is not available.");
+    productionPronunciationToggle.checked = false;
+    productionPronunciationToggle.dispatchEvent(new Event("change", {bubbles:true}));
+    await waitFor("Production global pronunciation OFF persistence and peer synchronization", async function () {
+      const settings = await invoke("pronunciation.settings.get", {});
+      return settings.enabled === false &&
+        productionPronunciationToggle.checked === false &&
+        document.querySelector("#pronunciationGlobalToggle")?.checked === false;
+    }, 15000);
+    productionPronunciationToggle.checked = true;
+    productionPronunciationToggle.dispatchEvent(new Event("change", {bubbles:true}));
+    await waitFor("Production global pronunciation ON persistence and peer synchronization", async function () {
+      const settings = await invoke("pronunciation.settings.get", {});
+      return settings.enabled === true &&
+        productionPronunciationToggle.checked === true &&
+        document.querySelector("#pronunciationGlobalToggle")?.checked === true;
+    }, 15000);
+    record("stage5_production_global_pronunciation_toggle_persistence", true,
+      "The actual Production Studio switch saved OFF then ON to the active project and synchronized the Pronunciation Studio switch both ways.");
+
     async function openProjectFromDashboard(folder, label) {
       window.go("dashboard");
       await waitFor("Dashboard recent project cards", function () {
