@@ -1688,7 +1688,7 @@
     if(play){play.disabled=!playable;play.textContent=playing?'Ⅱ Pause preview':'▶ Play preview';}
     if(stop)stop.disabled=!playable;
     if(replay)replay.disabled=!playable;
-    if(download)download.disabled=!voicePreviewValid||!lastVoicePreviewPath;
+    if(download)download.disabled=!voicePreviewValid||!lastVoicePreviewPath||!productionPreviewJobId||String(productionJobSnapshots.preview?.state||'').toLowerCase()!=='completed';
     const status=$('productionPreviewStatus');
     const previewJobState=String(productionJobSnapshots.preview?.state||'').toLowerCase();
     const previewJobOwnsStatus=PRODUCTION_ACTIVE_JOB_STATES.has(previewJobState)||['failed','cancelled'].includes(previewJobState);
@@ -8179,7 +8179,25 @@
       message('Voice preview saved to '+result.path);
     };
     if ($('downloadPreview')) $('downloadPreview').onclick=act(downloadCurrentPreview);
-    if ($('productionPreviewDownload')) $('productionPreviewDownload').onclick=act(downloadCurrentPreview);
+    const downloadProductionPreview=async()=>{
+      const job=productionJobSnapshots.preview;
+      if(!productionPreviewJobId||!job||String(job.job_id||'')!==String(productionPreviewJobId)) throw new Error('Generate a Production chapter preview before saving it.');
+      if(String(job.state||'').toLowerCase()!=='completed'||!voicePreviewValid||!lastVoicePreviewPath) throw new Error('Wait for the Production preview to complete and pass audio validation before saving it.');
+      const projectFolder=String(window.ryuPremiumActiveProject?.folder||'');
+      const chapterNumber=Number(lastVoicePreviewChapterNumber||0);
+      if(!projectFolder||projectFolder!==productionPreviewRequestProjectFolder||Number(job.current_chapter||0)!==chapterNumber) throw new Error('The Production preview no longer matches the active project and selected chapter. Generate it again.');
+      const baseName=(lastVoicePreviewProfileName||'Ryu Production Preview').replace(/[<>:"/\\\\|?*\\x00-\\x1f]+/g,'-').trim()||'Ryu Production Preview';
+      const suffix='_Chapter_'+String(chapterNumber).padStart(2,'0')+(lastVoicePreviewChapterTitle?'_'+lastVoicePreviewChapterTitle:'');
+      const suggestedName=(baseName+suffix+'_Preview').replace(/[<>:"/\\\\|?*\\x00-\\x1f]+/g,'-').trim().replace(/\\s+/g,'_').slice(0,100);
+      const result=await call('production.preview.save',{job_id:productionPreviewJobId,project_folder:projectFolder,chapter_number:chapterNumber,source_path:lastVoicePreviewPath,suggested_name:suggestedName});
+      if(result.cancelled){message('Production preview save cancelled.');return;}
+      message('Production chapter preview saved to '+result.path);
+    };
+    if ($('productionPreviewDownload')) {
+      $('productionPreviewDownload').textContent='Save Production Preview';
+      $('productionPreviewDownload').title='Save the validated preview for the active chapter and project';
+      $('productionPreviewDownload').onclick=act(downloadProductionPreview);
+    }
     if ($('productionPreviewPlay')) $('productionPreviewPlay').onclick=act(async()=>{
       if(!previewAudio||!voicePreviewValid)throw new Error('Generate a validated production preview first.');
       if(!previewAudio.paused)previewAudio.pause();

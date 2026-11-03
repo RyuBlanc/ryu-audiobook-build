@@ -85,3 +85,10 @@ The Generation Engine must show Idle rather than 0% when no job exists. A percen
 
 Run #2106 passed the consolidated regression suite on commit 97a4d3094dac80827bfc8ce1f0df0b12141d46e6 (1,082 tests, frontend syntax and native Qt lifecycle). The current follow-up includes additional idle/chapter status assertions and remains pending its own exact-head artifact checkpoint.
 
+
+
+## Step 5.2 packaged checkpoint #2107
+
+Run #2107 on commit `6ef7dea5c028ba477d86511b353ad03583dfe44b` passed 1,083 regression tests, frontend syntax, native Qt lifecycle, frozen app verification, bundled voice asset/critical-module checks, packaged Sound Design/Music Library acceptance, installer creation, hashes, and Defender scan. Installer, portable app and SHA-256 manifest uploaded; publication was skipped by workflow policy.
+
+The follow-up gives Production Preview its own Save command, checking completed job, project, chapter and generated WAV identity. Voice Studio retains its existing save route. Additional tests guard the persisted pronunciation and Sound Design settings used by preview/full generation. The follow-up is pending exact-head tests and another Windows packaged checkpoint. Installed-app real audio acceptance remains separate.

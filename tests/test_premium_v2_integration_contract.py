@@ -1428,5 +1428,42 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("Failed · ", adapter)
 
 
+
+    def test_production_preview_save_is_separate_from_voice_studio_save_and_validates_job_scope(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("const downloadProductionPreview=async()=>", adapter)
+        self.assertIn("call('production.preview.save'", adapter)
+        self.assertIn("call('voice.preview.save'", adapter)
+        self.assertIn("productionPreviewDownload').onclick=act(downloadProductionPreview)", adapter)
+        self.assertIn('"production.preview.save": self._production_preview_save', host)
+        self.assertIn('job.get("type") != "production-preview"', host)
+        self.assertIn('job.get("state") != "completed"', host)
+        self.assertIn('job.get("project_folder") or ""', host)
+        self.assertIn('job.get("current_chapter") or 0', host)
+        self.assertIn('result.get("output_path") or ""', host)
+        self.assertIn("source != expected", host)
+        self.assertIn("Save Production Chapter Preview", host)
+
+    def test_production_pronunciation_and_sound_design_state_are_saved_before_preview_and_full_generation(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        preview_start = adapter.index("if ($('previewGenerate'))")
+        preview_end = adapter.index("if ($('playPreview'))", preview_start)
+        preview_handler = adapter[preview_start:preview_end]
+        full_start = adapter.index("if ($('startGenerate'))")
+        full_end = adapter.index("if ($('pauseGenerate'))", full_start)
+        full_handler = adapter[full_start:full_end]
+        self.assertIn("await flushSoundDesignState()", preview_handler)
+        self.assertIn("await flushSoundDesignState()", full_handler)
+        self.assertIn("await refreshTerms()", full_handler)
+        self.assertIn("pronunciation.settings.save", adapter)
+        self.assertIn("sound.chapter_bgm.save", adapter)
+        self.assertIn("sound.save_manifest", adapter)
+        self.assertIn("def _pronunciation_settings_save", host)
+        self.assertIn('state["pronunciation_enabled"] = enabled', host)
+        self.assertIn("def _assert_no_active_audio_synthesis", host)
+
+
 if __name__ == "__main__":
     unittest.main()

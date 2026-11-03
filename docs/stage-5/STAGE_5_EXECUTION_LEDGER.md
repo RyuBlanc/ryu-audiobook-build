@@ -202,3 +202,17 @@ Further Step 5.2.2 hardening in this checkpoint:
 - The Production preview monitor now displays the real current chapter number and title recorded on its durable job, and includes that identity in active/completed/failed preview status.
 - Step 5.2 remains CODE CHANGED — NOT VERIFIED until the matching-head artifact checkpoint and packaged job complete. Manual installed-Windows acceptance of generation, preview playback/replay and cancellation remains a separate runtime item.
 
+
+
+## 19. Step 5.2 packaged checkpoint #2107
+
+The user confirmed [Stage 5 Step 5.2 artifact-checkpoint Run #2107](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41562699194) completed successfully on commit `6ef7dea5c028ba477d86511b353ad03583dfe44b`.
+
+Exact run evidence: 1,083 regression tests passed in 54.783 seconds; frontend JavaScript syntax, isolated native Qt lifecycle, frozen Windows app verification, bundled voice assets/critical modules, packaged Sound Design/Music Library acceptance, core and HTML installer creation, original-logo/hash checks and Microsoft Defender scan passed. Installer, portable app and SHA-256 manifest artifacts uploaded. Public release publication was skipped by workflow policy.
+
+Artifacts:
+- Portable `Ryu-Audiobook-Portable-2107`: ID `13198675557`; SHA-256 `1c015c1810a17a044b2101aa15db37b17e0d654902cbb2743c9a11c9d45933d4`.
+- Installer `Ryu-Audiobook-Installer-2107`: ID `13198164603`; SHA-256 `412987f572011f29fa335e6f51d0be9eb7eb05ea4ee7100c7c80ff0c6f27b79d`.
+- Manifest `Ryu-Audiobook-Release-SHA256-2107`: ID `13198319465`; SHA-256 `2fd986728feaebf331b8836938cf15712cdfe4db9ce7386149413c8f7784af70`.
+
+The follow-up separates Production Preview Save from generic Voice Studio save, validating the completed Production job, exact project folder, chapter number, and exact generated WAV path before native Save As. Regression contracts cover this command and the saved pronunciation/Sound Design hand-off before preview/full generation. These changes require exact-head tests and a new packaged Windows checkpoint before Step 5.2 sign-off. Installed-Windows real-audio listening, controls and resize/layout acceptance remain separate.

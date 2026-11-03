@@ -963,5 +963,55 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertEqual([row["written_form"] for row in enabled_rows], ["Mira"])
         self.assertEqual(disabled_rows, [])
 
+
+    def test_production_preview_save_rejects_wrong_job_project_chapter_and_source(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from app.ui import premium_v2_host
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            preview_root = root / "Previews"
+            preview_root.mkdir()
+            source = preview_root / "preview_prod-1.wav"
+            source.write_bytes(b"P" * 2048)
+            destination = root / "production-preview.wav"
+            bridge = SimpleNamespace(
+                _jobs_lock=threading.RLock(),
+                _jobs={"prod-1": {
+                    "type": "production-preview", "state": "completed",
+                    "project_folder": str(root / "project-a"), "current_chapter": 7,
+                    "result": {"output_path": str(source)},
+                }},
+            )
+            payload = {
+                "job_id": "prod-1", "project_folder": str(root / "project-a"),
+                "chapter_number": 7, "source_path": str(source),
+                "suggested_name": "Chapter 7 Preview",
+            }
+            with patch.object(premium_v2_host, "app_root", return_value=root), \
+                 patch.object(premium_v2_host.QFileDialog, "getSaveFileName",
+                              return_value=(str(destination), "WAV audio (*.wav)")) as dialog:
+                result = premium_v2_host.PremiumV2Bridge._production_preview_save(bridge, payload)
+            self.assertFalse(result["cancelled"])
+            self.assertEqual(result["chapter_number"], 7)
+            self.assertEqual(destination.read_bytes(), source.read_bytes())
+            dialog.assert_called_once()
+
+            for changes, expected_error in (
+                ({"job_id": "missing"}, "Only a completed Production preview"),
+                ({"project_folder": str(root / "project-b")}, "different project"),
+                ({"chapter_number": 8}, "different chapter"),
+                ({"source_path": str(destination)}, "does not belong"),
+            ):
+                with self.subTest(changes=changes):
+                    with patch.object(premium_v2_host, "app_root", return_value=root):
+                        with self.assertRaisesRegex(ValueError, expected_error):
+                            premium_v2_host.PremiumV2Bridge._production_preview_save(
+                                bridge, {**payload, **changes}
+                            )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -412,6 +412,7 @@ class PremiumV2Bridge(QObject):
                 "narrator.project.reset": self._narrator_project_reset,
                 "voice.preview": self._voice_preview,
                 "voice.preview.save": self._voice_preview_save,
+            "production.preview.save": self._production_preview_save,
                 "character.list": self._character_list,
                 "character.narration.segments.list": self._character_narration_segments_list,
                 "character.create": self._character_create,
@@ -3115,6 +3116,53 @@ class PremiumV2Bridge(QObject):
             raise ValueError("Choose a different destination from the temporary preview file.")
         shutil.copy2(source, destination)
         return {"cancelled": False, "path": str(destination), "bytes": destination.stat().st_size}
+
+    def _production_preview_save(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Save only the validated output belonging to the active Production preview job."""
+        job_id = str(payload.get("job_id") or "").strip()
+        project_folder = str(payload.get("project_folder") or "").strip()
+        source_value = str(payload.get("source_path") or "").strip()
+        try:
+            chapter_number = int(payload.get("chapter_number"))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("The Production preview chapter identity is invalid.") from exc
+        if not job_id or not project_folder or not source_value:
+            raise ValueError("A completed Production preview job, project and audio file are required.")
+        with self._jobs_lock:
+            job = dict(self._jobs.get(job_id) or {})
+        if job.get("type") != "production-preview" or job.get("state") != "completed":
+            raise ValueError("Only a completed Production preview can be saved.")
+        if str(job.get("project_folder") or "") != project_folder:
+            raise ValueError("This preview belongs to a different project. Reopen its project before saving.")
+        if int(job.get("current_chapter") or 0) != chapter_number:
+            raise ValueError("This preview belongs to a different chapter. Generate the selected chapter again.")
+        result = job.get("result") if isinstance(job.get("result"), dict) else {}
+        expected_source = str(result.get("output_path") or "").strip()
+        if not expected_source:
+            raise ValueError("The completed Production preview has no validated audio output.")
+        source = Path(source_value).expanduser().resolve()
+        expected = Path(expected_source).expanduser().resolve()
+        preview_root = (app_root() / "Previews").resolve()
+        if source != expected or source.parent != preview_root or source.suffix.casefold() != ".wav":
+            raise ValueError("The selected audio file does not belong to this Production preview job.")
+        if not source.is_file() or source.stat().st_size < 1024:
+            raise FileNotFoundError("The Production preview file is no longer available. Generate it again.")
+        import re as _re
+        suggested = str(payload.get("suggested_name") or "Ryu Production Preview").strip()
+        suggested = _re.sub(r'[<>:"/\\\\|?*\\x00-\\x1f]+', "-", suggested).strip(" .-")[:100] or "Ryu Production Preview"
+        default_path = Path.home() / "Downloads" / f"{suggested}.wav"
+        selected, _filter = QFileDialog.getSaveFileName(None, "Save Production Chapter Preview", str(default_path), "WAV audio (*.wav)")
+        if not selected:
+            return {"cancelled": True}
+        destination = Path(selected).expanduser()
+        if destination.suffix.casefold() != ".wav":
+            destination = destination.with_suffix(".wav")
+        destination = destination.resolve()
+        if destination == source:
+            raise ValueError("Choose a different destination from the temporary preview file.")
+        shutil.copy2(source, destination)
+        return {"cancelled": False, "path": str(destination), "bytes": destination.stat().st_size,
+                "job_id": job_id, "chapter_number": chapter_number}
 
     def _sound_preview_book(self, _payload: dict[str, Any]) -> dict[str, Any]:
         """Queue a full-book mix preview from saved narration without re-synthesis."""
