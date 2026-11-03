@@ -15,6 +15,7 @@ class DurableJobRecoveryHarness:
     """Exercise the production durable-job loader without constructing a Qt window."""
 
     _load_durable_jobs = host.PremiumV2Bridge._load_durable_jobs
+    _reconcile_interrupted_generation_project = host.PremiumV2Bridge._reconcile_interrupted_generation_project
     _terminal_job_state = staticmethod(host.PremiumV2Bridge._terminal_job_state)
     _persist_json_rows = host.PremiumV2Bridge._persist_json_rows
     _persist_jobs = host.PremiumV2Bridge._persist_jobs
