@@ -949,8 +949,14 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("if(previewToken!==voicePreviewEpoch)return;", handler)
         self.assertIn("if(previewToken!==voicePreviewEpoch)return false;", handler)
         self.assertIn("preparePreviewPlayback(job,Number(duration),{profileName:previewProfileName,preserveSummary:true})", handler)
-        self.assertIn("activeFolder!==productionPreviewRequestProjectFolder", handler)
+        self.assertIn("const activeProject=await call('project.get_active');", handler)
+        self.assertIn("const activeFolder=normalizeProjectFolderIdentity(activeProject?.folder);", handler)
+        self.assertIn("const requestFolder=normalizeProjectFolderIdentity(productionPreviewRequestProjectFolder);", handler)
+        self.assertIn("const jobFolder=normalizeProjectFolderIdentity(job?.project_folder);", handler)
+        self.assertIn("activeFolder!==requestFolder||jobFolder!==requestFolder", handler)
         self.assertIn("jobChapter!==productionPreviewRequestChapterNumber", handler)
+        self.assertIn("Boolean(requestChapterId&&jobChapterId&&requestChapterId!==jobChapterId)", handler)
+        self.assertIn("if(!productionPreviewRequestChapterId&&jobChapterId)", handler)
 
 
     def test_preview_worker_applies_project_pronunciation_rules_only_when_enabled(self):

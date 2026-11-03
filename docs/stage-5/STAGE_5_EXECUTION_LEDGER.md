@@ -500,3 +500,16 @@ Step 5.2 remains open until that exact-head packaged acceptance succeeds. User-m
 The six-second cue-import rejection and injected cue/manifest/metadata save failures in #2144 are deliberate negative acceptance cases. They were not the run's failure cause; the earlier packaged Sound Design, metadata and project-switch checks passed.
 
 The next exact-head run must pass all regressions, frozen app build, existing packaged Sound Design acceptance, Production Preview chapter-only M4A/playback/cancellation acceptance, installer packaging, release hashes, Defender checks and portable/installer/manifest upload. No Stage 5.2 requirement is marked complete based on source changes alone.
+
+
+## 35. #2145 regression result and stale contract correction — 3 November 2026
+
+Run #2145 on exact candidate `46bfaf3bd8cd04b878e2136f7d0840e1b95fafbe`:
+- Frontend JavaScript syntax validation passed.
+- Isolated native Qt lifecycle regression passed.
+- Full regression run: 1,102 tests, 1 failure.
+- The only failure was `test_generate_preview_ignores_stale_completion_after_newer_request`, which still asserted the superseded source string `activeFolder!==productionPreviewRequestProjectFolder`. The current implementation deliberately resolves the native active project through `project.get_active`, normalizes active/request/job paths, compares normalized folders and chapter number, then compares chapter IDs when both are available.
+- This was a stale source-contract assertion, not a runtime or ownership-guard failure. The test now asserts the native project lookup, normalized path comparisons, chapter-number guard and optional stable-ID comparison used by the actual handler.
+- No application code was changed in response to this test failure.
+
+The next artifact checkpoint is the deciding verification for this correction. Require its test job to pass and its Windows build job to pass the packaged Sound Design/Music Library and Production Preview generation/playback/cancellation acceptance before closing Stage 5.2.
