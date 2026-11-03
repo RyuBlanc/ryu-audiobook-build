@@ -568,3 +568,8 @@ Commit `8f8f1d538970eb0715fa03ae45117b6d0dbb96f6` updates only the packaged dura
 ### Final gate after #2158
 
 The next artifact checkpoint must pass the complete packaged acceptance, including the 90-second Chapter Three cancel request and confirmed `cancelled` terminal job state, and then complete installer, logo/hash, Defender and portable/installer/manifest uploads. Stage 5.2 remains open until that exact-head run succeeds and artifact IDs/hashes are recorded.
+
+
+## Final packaged candidate after #2158 duration-bound correction — 3 November 2026
+
+Implementation/test commit `8f8f1d538970eb0715fa03ae45117b6d0dbb96f6` applies bounded, target-aware preview duration acceptance. Evidence and failure analysis are recorded in Section 37 and the Stage 5 requirement register. The subsequent register/ledger updates document why #2158's 60-second preview result was valid and why the old ±5-second test assertion was too strict. The new matching-head `[artifact-checkpoint]` run is authoritative for the revised packaged acceptance. Its required outcomes are 1,103+ regression suite pass, frozen Windows build and verification, full packaged Sound Design/Production Preview acceptance (including real 10/30/60-second outputs, pronunciation ON/OFF persistence, playback controls and 90-second cancellation), installer build, release hashes, Defender and all release artifacts. Do not close Step 5.2 until that run and its artifact IDs/hashes are recorded.
