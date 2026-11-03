@@ -31,23 +31,24 @@ def inspect_generation_state(audio_root: Path, chapters) -> GenerationResumeStat
         return GenerationResumeState((), (), False)
 
     for chapter in chapters:
-        prefix = f"{int(chapter.number):03d}_"
-        candidates = sorted(
-            path for path in audio_root.glob(f"{prefix}*")
-            if path.is_dir()
-        )
-        if not candidates:
-            continue
-
         chapter_id = str(getattr(chapter, "chapter_id", "") or "").strip()
         if chapter_id:
-            matching = [
-                candidate for candidate in candidates
-                if str(_read_json(candidate / "narration.json").get("chapter_id") or "").strip() == chapter_id
-            ]
-            # A checkpoint with the same chapter number but a different stable
-            # identity belongs to another chapter revision and is not reusable.
-            candidates = matching
+            # Stable chapter identity is authoritative even when the saved
+            # chapter number/title has changed. This mirrors prepare_chapter_plan,
+            # which searches all checkpoint folders by chapter_id.
+            candidates = sorted(
+                path for path in audio_root.iterdir()
+                if path.is_dir()
+                and str(_read_json(path / "narration.json").get("chapter_id") or "").strip() == chapter_id
+            )
+        else:
+            prefix = f"{int(chapter.number):03d}_"
+            candidates = sorted(
+                path for path in audio_root.glob(f"{prefix}*")
+                if path.is_dir()
+            )
+        if not candidates:
+            continue
 
         if not candidates:
             continue

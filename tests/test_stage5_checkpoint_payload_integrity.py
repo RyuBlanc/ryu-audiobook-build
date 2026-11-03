@@ -67,6 +67,41 @@ class Stage54CheckpointPayloadIntegrityTests(unittest.TestCase):
             self.assertEqual(retried.chunks_completed, retried.chunks_total)
             self.assertTrue(is_valid_wav_chunk(retried.output_path / "chunks" / "00001.wav"))
 
+    def test_resume_inspector_finds_checkpoint_after_chapter_number_and_title_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "working_audio"
+            original = Chapter(1, "Original Title", "This is a stable checkpoint sentence.", chapter_id="stable-chapter-id")
+            provider = RecordingCheckpointProvider()
+            generated = generate_chapter(
+                original, provider, "Saved Narrator", root,
+                narration_speed=1.0, pacing_profile="off",
+            )
+            self.assertEqual(generated.output_path.name, "001_Original Title")
+
+            renamed = Chapter(7, "Renamed Title", "This is a stable checkpoint sentence.", chapter_id="stable-chapter-id")
+            state = inspect_generation_state(root, [renamed])
+
+            self.assertEqual(state.completed_chapters, (7,))
+            self.assertEqual(state.partial_chapters, ())
+            self.assertTrue(state.resume_available)
+
+    def test_resume_inspector_does_not_reuse_checkpoint_with_another_stable_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "working_audio"
+            original = Chapter(1, "Original Title", "This is a stable checkpoint sentence.", chapter_id="stable-chapter-id")
+            provider = RecordingCheckpointProvider()
+            generate_chapter(
+                original, provider, "Saved Narrator", root,
+                narration_speed=1.0, pacing_profile="off",
+            )
+
+            unrelated = Chapter(7, "Renamed Title", "This is a stable checkpoint sentence.", chapter_id="different-chapter-id")
+            state = inspect_generation_state(root, [unrelated])
+
+            self.assertEqual(state.completed_chapters, ())
+            self.assertEqual(state.partial_chapters, ())
+            self.assertFalse(state.resume_available)
+
     def test_resume_inspector_does_not_mark_truncated_checkpoint_complete(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "working_audio"
