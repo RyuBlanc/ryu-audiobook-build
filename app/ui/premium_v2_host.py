@@ -5779,15 +5779,21 @@ class PremiumV2Bridge(QObject):
                 f"The project's saved narrator profile '{name}' is unavailable. Restore or reassign it in Voice Studio."
             )
 
-        # Strip transient catalogue/provider selectors. _voice_preview will now
-        # resolve the exact persisted profile returned by the production narrator
-        # resolver; saved character assignments remain applied by the preview worker.
+        # Production preview is a saved-project operation, not an arbitrary
+        # text/provider audition. Always use the selected chapter's persisted
+        # text, effective saved narrator, assigned character voices, project
+        # pronunciation switch and the native Sound Design renderer. Reject
+        # caller flags that could make preview differ from final generation.
         preview_payload = dict(payload)
-        preview_payload.pop("provider", None)
-        preview_payload.pop("voice_id", None)
+        for key in ("provider", "voice_id", "text", "allow_projectless_preview",
+                    "_bypass_pronunciation_dictionary"):
+            preview_payload.pop(key, None)
         preview_payload.update({
             "profile_name": profile.name,
             "chapter_number": chapter_number,
+            "route_character_cast": True,
+            "apply_pronunciation_rules": True,
+            "include_sound_design": True,
             "_production_preview": True,
         })
         return self._voice_preview(preview_payload)
