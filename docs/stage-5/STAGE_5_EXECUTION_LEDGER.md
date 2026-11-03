@@ -251,3 +251,8 @@ A fresh exact-head regression and Windows package are required before Step 5.2 c
 ## 24. #2112 WAV-to-M4A preview correction
 
 Run #2112 on commit \`2334bd9e1e82317f49c33ab3e37fea01befe9692\` completed JavaScript syntax and native Qt lifecycle checks, then ran 1,089 tests with four errors. All four were the same output-format issue: when no cue or BGM was selected (Voice Only or an empty Chapter-Based rule), the synthesized source remained WAV but was copied to a \`.m4a\` path. The renderer now re-encodes WAV sources to AAC/M4A, while copying sources only when they are already M4A. A dedicated projectless Voice Only test verifies the real encode command and destination format. Exact-head regression and packaging pending.
+
+
+## 25. #2113 WAV encode import correction
+
+Run #2113 on commit \`6f8b5e476b3bc2cbce7c5c0e2461d3cf20132b81\` completed 1,090 tests with five errors, all from the same \`NameError\`: the new WAV-to-AAC/M4A branch referenced assembler \`_run\` without importing it in the renderer's local import list. The missing import is added; no other failures were reported. Exact-head regression and package verification pending.

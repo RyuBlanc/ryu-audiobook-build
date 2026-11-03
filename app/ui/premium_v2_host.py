@@ -3195,7 +3195,7 @@ class PremiumV2Bridge(QObject):
         from app.audio.assembler import (
             _chapter_bgm_fade_out, _chapter_bgm_override_for, _concat_audio_files,
             _duration_ms, _resolve_cue_audio, _mix_chapter_bgm, _scale_audio_gain,
-            _selected_music_recipe,
+            _run, _selected_music_recipe,
         )
         from app.audio.library import (
             effective_background_audio_mode, is_chapter_transition_sound_enabled,

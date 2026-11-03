@@ -111,3 +111,8 @@ Production chapter preview now enables the native Sound Design renderer and uses
 ## Step 5.2 #2112 correction
 
 #2112 (commit \`2334bd9e1e82317f49c33ab3e37fea01befe9692\`) passed JS syntax and native Qt lifecycle but failed four tests because a narration WAV could be copied into an M4A-named destination when no sound assets were active. The renderer now AAC-encodes WAV-only previews and copies only audio already rendered as M4A. A direct regression test covers projectless Voice Only output. Full regression and a matching Windows artifact checkpoint remain pending.
+
+
+## Step 5.2 #2113 correction
+
+#2113 (commit \`6f8b5e476b3bc2cbce7c5c0e2461d3cf20132b81\`) passed JS syntax and native Qt lifecycle but reported five errors, all a single missing local import for the FFmpeg \`_run\` helper in the WAV-to-M4A preview branch. The import is added. Full regression and packaged Windows checkpoint pending.
