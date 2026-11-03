@@ -39,15 +39,21 @@ point |
 | GEN-05 | P0 | Chaptered M4B validation, metadata and cover | OPEN | Stage 4 full-stream decode/assembly work preserved | Actual output validation and metadata/cover inspection |
 | GEN-06 | P0 | Preview/final effective configuration parity | VERIFIED — CONFIGURATION/PATH REGRESSION; SEE RUNTIME LIMIT | Production preview resolves the saved project/series narrator used by full generation; both paths consume the same project pronunciation state and saved Sound Design/BGM/cue configuration | Saved narrator, pronunciation, character-routing and Sound Design configuration parity regressions passed; perceptual comparison remains user-device acceptance |
 
-## Five-step execution sequence
+## ## Updated Stage 5 execution sequence and active handoff
 
 | Step | Scope | Requirement IDs | Exit condition |
 |---|---|---|---|
-| 5.1 | Input Project Details, metadata persistence/gate, dynamic summary, music/output summary, seven readiness indicators | PROD-01–04, PROD-10–13 | Active saved project data is accurate; incomplete/unsaved metadata blocks full generation; exact-commit tests pass |
-| 5.2 | Generation Engine interface, actual preview, duration controls, pronunciation/BGM toggles, chapter-specific preview/download | PROD-05–09, PROD-15, GEN-06 | Both preview workflows use real configuration and protect project/chapter ownership |
-| 5.3 | Full generation, saved inputs, checkpoint compatibility, pause/resume/cancel/retry/recovery and empty-chapter handling | PROD-14, GEN-01–04 | Generation safely resumes from compatible chunks; control operations are real; all-empty books are rejected |
-| 5.4 | M4B assembly, output metadata/cover, validation, Audiobooks handoff and cross-module consistency | GEN-05–06, PROD-10–15 | A real chaptered M4B validates and is associated with the correct project/job |
+| 5.1 | Input Project Details, metadata persistence/gate, dynamic summary, music/output summary and seven readiness indicators | PROD-01–04, PROD-10–13 | VERIFIED baseline retained; final M4B tag/cover inspection carried into 5.4 |
+| 5.2 | Generation Engine interface, actual preview, duration controls, pronunciation/BGM toggles and chapter-specific preview/download | PROD-05–09, PROD-15, GEN-06 | CLOSED — Build Windows App #2165, 1,104 tests and complete Windows packaged acceptance with installer/portable/manifest uploaded |
+| 5.3 | Full generation from saved inputs, cross-surface job state, checkpoint compatibility, pause/resume/cancel/retry/recovery and empty/ineligible chapter handling | PROD-14, GEN-01–04 | Full generation uses the saved project configuration; job state is consistent across Production/Background Jobs/History; checkpoints resume only when compatible; all control operations are real; invalid/empty chapters are handled safely |
+| 5.4 | M4B assembly, output metadata/cover, full validation, Audiobooks handoff and cross-module consistency | GEN-05, PROD-04, PROD-10–15 | A real chaptered M4B validates and is associated with the correct project/job; metadata, series volume and cover are inspected in the actual file |
 | 5.5 | Full regression, packaged Windows candidate and final Stage 5 sign-off | All applicable requirements and AB-02/AB-04/AB-07 dependencies | Exact candidate has passing regression/package evidence plus recorded Windows runtime and real-audio acceptance |
+
+### Current status
+- **Closed:** Steps 5.1 and 5.2.
+- **Active:** Step 5.3.
+- **Future:** Steps 5.4 and 5.5.
+- Stage 5.3 starting source baseline is the successful Build Windows App #2165 SHA `a46d05dafa4ce3b722338b322ed5468533ce9294`. Documentation-only closeout commits do not change the application baseline.
 
 ## Step 5.1 required-field policy
 
