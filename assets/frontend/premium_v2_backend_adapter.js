@@ -5771,7 +5771,7 @@
     if (isGeneration && state === 'running') {
       actions.push(action('pause','Pause','secondary'));
     } else if (isGeneration && state === 'pause_requested') {
-      actions.push('<small class="muted" role="status" aria-live="polite">Pausing at the next chapter boundary…</small>');
+      actions.push('<small class="muted" role="status" aria-live="polite">Pausing at the next saved chunk/batch boundary…</small>');
     } else if (isGeneration && state === 'paused') {
       actions.push(action('resume','Resume',''));
     }
