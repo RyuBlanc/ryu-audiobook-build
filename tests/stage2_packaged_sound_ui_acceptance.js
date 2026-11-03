@@ -1231,6 +1231,14 @@
         String(refreshed.voice_profile || "") === narratorProfileName &&
         refreshed.narrator_profile_available === true;
     }, 12000);
+    // The bridge command above is the saved project selection. Keep the visible
+    // Voice Studio profile field synchronized as well, because Production's
+    // start guard reads the visible current profile before the backend resolves
+    // the authoritative saved narrator again.
+    const activeProfileInput = document.querySelector("#profileName");
+    must(activeProfileInput, "Voice Studio selected profile field is missing.");
+    activeProfileInput.value = narratorProfileName;
+    activeProfileInput.dispatchEvent(new Event("input", {bubbles:true}));
     const metadataButton = document.querySelector("#openProjectDetails");
     must(metadataButton, "Production Studio Input Project Details button is missing.");
     metadataButton.click();
