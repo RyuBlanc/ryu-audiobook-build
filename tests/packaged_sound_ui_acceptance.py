@@ -354,7 +354,7 @@ def _run(args: argparse.Namespace) -> int:
         },
         {
             "number": 2, "title": "Acceptance Chapter Two",
-            "text": "First paragraph for the middle chapter.\n\nSecond paragraph verifies the ten-second start policy.",
+            "text": "First paragraph for the middle chapter.\n\nSecond paragraph verifies saved production preview durations.\n\n" + long_preview_paragraph,
             "dialogue_assignments": [], "review_status": "needs_review", "skip_for_generation": False,
         },
         {
