@@ -1177,14 +1177,21 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         start = adapter.index("if ($('startGenerate'))")
         end = adapter.index("['analyzeCharacters','runAiAnalysis']", start)
         production_controls = adapter[start:end]
-        self.assertIn("activeJobType!=='audiobook-generation'", production_controls)
-        self.assertIn("There is no active audiobook generation job to pause.", production_controls)
-        self.assertIn("There is no active audiobook generation job to cancel.", production_controls)
+        self.assertIn("productionFullJobId", production_controls)
+        self.assertIn("productionJobSnapshots.full", production_controls)
+        self.assertIn("await monitorProductionJob(data.job_id,'full')", production_controls)
+        self.assertIn("call('job.pause',{job_id:productionFullJobId})", production_controls)
+        self.assertIn("call('job.resume',{job_id:productionFullJobId})", production_controls)
+        self.assertIn("call('job.cancel',{job_id:productionFullJobId})", production_controls)
+        self.assertNotIn("activeJobType!=='audiobook-generation'", production_controls)
+        self.assertIn("There is no pausable full audiobook generation job.", production_controls)
+        self.assertIn("There is no active full audiobook generation job to cancel.", production_controls)
         monitor_start = adapter.index("async function monitorJob(")
         monitor_end = adapter.index("function requestElevenLabsApiKey()", monitor_start)
         monitor = adapter[monitor_start:monitor_end]
-        self.assertIn("if (activeJob === jobId) activeJobType = job.type || null;", monitor)
-        self.assertIn("activeJob = null; activeJobType = null;", monitor)
+        self.assertIn("const monitorToken = ++monitorEpoch;", monitor)
+        self.assertIn("let checking = false;", monitor)
+        self.assertIn("monitorToken !== monitorEpoch || checking", monitor)
 
     def test_monitor_job_serializes_ticks_ignores_stale_responses_and_clears_active_job(self):
         """A slow job-list response must not finish a job twice or mutate a newer task's UI."""
