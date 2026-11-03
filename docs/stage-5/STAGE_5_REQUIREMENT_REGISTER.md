@@ -183,3 +183,8 @@ The current status is still CODE CHANGED — NOT VERIFIED for PROD-05/06/07 and 
 - #2141 (`5d31633e013b73b68c04a973329c9ee6ac453b17`) passed tests and frozen build checks but its packaged UI test failed because it waited for the job-monitor chapter label before a preview job existed. The selector's own status element is the authoritative pre-job selection display; the test now checks it for both Chapter Two and the Chapter Three cancellation case.
 - The workflow concurrency key is changed to include `github.run_id`; this prevents new pushes replacing an older pending run. The next single exact-head checkpoint is required before marking PROD-05/06/07 and the later Production parity integrations as accepted.
 - PROD-08/09/15 and GEN-06 remain `CODE CHANGED — NOT VERIFIED` pending the packaged preview smoke and the required audio scenario matrix. PROD-14 and GEN-01–05 remain open for their separately planned Stage 5 integration steps; do not silently mark them complete as part of Step 5.2.
+
+
+## Production Preview pre-job selector status
+
+The exact selected chapter was stored in `productionPreviewSelectedChapter`, but the idle control synchronizer overwrote the selector's chapter-specific status with a generic prompt before any preview job existed. The synchronizer now preserves the selected chapter number in the idle status until a job becomes active. This is a UI status correction, not a change to chapter ownership or synthesis payload. The new regression verifies selected chapter state and pre-job status rendering. PROD-05/06/07 and the parity integration items remain CODE CHANGED — NOT VERIFIED until the exact-head package acceptance passes.

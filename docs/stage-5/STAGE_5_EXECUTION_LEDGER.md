@@ -438,3 +438,10 @@ Runs #2137–#2140 and earlier #2134/#2135 etc. were cancelled/superseded while 
 ### Step 5.2 current decision
 
 Do not move to Step 5.3 on the strength of #2136 alone. Require the next exact-head checkpoint to pass all 1,100+ regression tests, the real frozen Production Preview generation/playback/control/cancellation acceptance, and the full installer/portable/manifest package. Then record the matching run ID, SHA, test count, artifact IDs and hashes. The installed-Windows preview/final audio listening and full duration/pronunciation/Sound Design matrix remains a separate acceptance item if not exercised on the target user's installed hardware.
+
+
+## 32. Production selector pre-job status preservation — 3 November 2026
+
+The #2142 regression job passed 1,101 tests, including the selector harness contract, while its Windows package job began. Reviewing the actual UI function revealed one more mismatch: the selector change handler wrote a chapter-specific status, then `syncProductionPreviewControls()` immediately replaced it with a generic idle message when there was no preview job. The selected chapter state itself was correctly updated, but the user-facing selected-chapter status was not preserved.
+
+The follow-up source correction makes `syncProductionPreviewControls()` render the selected chapter's name/number while idle, retaining a neutral prompt when no saved chapter is selected. The contract test now verifies both the selector's selected state and the pre-job status rendering. The #2142 workflow is not cancelled; the per-run concurrency key keeps it independently auditable while this corrected head is verified.

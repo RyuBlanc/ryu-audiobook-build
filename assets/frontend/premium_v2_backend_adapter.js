@@ -1695,7 +1695,10 @@
     if(status&&voicePreviewValid){
       status.textContent='Preview ready · '+(Number(previewAudio?.duration)>0?Number(previewAudio.duration).toFixed(1)+' seconds':'loading duration');
     }else if(status&&!previewJobOwnsStatus&&!productionJobSnapshots.preview){
-      status.textContent='Generate a chapter preview to enable playback and download.';
+      const selectedNumber=Number(productionPreviewSelectedChapter||0);
+      status.textContent=selectedNumber>0
+        ? 'Chapter '+selectedNumber+' selected. Generate a new preview for this chapter.'
+        : 'Select a saved chapter before generating a preview.';
     }
   }
   function invalidateVoicePreview(){

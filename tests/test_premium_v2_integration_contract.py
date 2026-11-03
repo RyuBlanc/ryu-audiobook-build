@@ -1428,14 +1428,19 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
 
 
 
-    def test_production_preview_selector_exposes_selected_chapter_status_before_job_starts(self):
+    def test_production_preview_selector_keeps_selected_chapter_status_before_job_starts(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         start = adapter.index("function ensureProductionPreviewMonitorUi()")
         end = adapter.index("function monitorProductionJob(", start)
         selector = adapter[start:end]
+        controls_start = adapter.index("function syncProductionPreviewControls()")
+        controls_end = adapter.index("function invalidateVoicePreview()", controls_start)
+        preview_controls = adapter[controls_start:controls_end]
         self.assertIn("select.id = 'productionPreviewChapterSelect';", selector)
-        self.assertIn("'Chapter ' + chapterNumber + ' selected. Generate a new preview for this chapter.'", selector)
-        self.assertIn("syncProductionPreviewControls();", selector)
+        self.assertIn("productionPreviewSelectedChapter = chapterNumber;", selector)
+        self.assertIn("productionPreviewSelectedChapterId = String(chapter.chapter_id || chapter.id || '');", selector)
+        self.assertIn("const selectedNumber=Number(productionPreviewSelectedChapter||0);", preview_controls)
+        self.assertIn("'Chapter '+selectedNumber+' selected. Generate a new preview for this chapter.'", preview_controls)
 
 
     def test_production_idle_state_is_neutral_and_preview_chapter_identity_is_visible(self):
