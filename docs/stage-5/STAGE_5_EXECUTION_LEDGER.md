@@ -585,3 +585,18 @@ Implementation/test commit `8f8f1d538970eb0715fa03ae45117b6d0dbb96f6` applies bo
 ### Run cancellation policy / workflow behavior
 
 The current Build Windows App workflow sets concurrency group to include `github.run_id` and `cancel-in-progress: false`. A later push should neither cancel an already active run nor supersede another run in that branch queue. Recent green #2159/#2161 were test-only runs (build intentionally skipped), not cancelled packages. #2162 is a true packaged acceptance failure; #2158 is a true bounded-duration assertion failure. Earlier cancelled runs are historical attempts and should not be described as green. The next final checkpoint must be one exact SHA containing the restoration fix plus this ledger/register update, and its `tests` and `build` jobs must both succeed.
+
+
+## PROD-15 successful Save As evidence addition — 3 November 2026
+
+A final packaged-flow audit identified one verification gap: Production Preview exposed an enabled Save button and implemented a secure native Save As backend, but the Windows packaged acceptance did not click Save or assert the resulting file. To make PROD-15 evidence complete, a bounded acceptance-only save target and positive copy assertions were added without changing normal desktop behavior.
+
+Implementation commits:
+- `864f6b8397a8ed58882a195494c6534475dd1235`: the Save handler recognizes a deterministic destination only when the acceptance script, acceptance marker and save-path environment variables are present. It restricts the resolved destination to the marker's temp directory; otherwise the normal QFileDialog path is unchanged.
+- `d3a5f22ec4db0aa05e99629e713a629a34a639b8`, corrected by `75fc696ed6ec4f90e4866639f41e54a554b5ab97`: a positive backend test exercises a completed Production preview job and confirms the destination copy is byte-identical, non-empty, and returns the right job/chapter identity.
+- `8ed009859ab4d006268a751684714854fafc89f2`: the frozen browser acceptance clicks Production Preview Save and waits for the actual success toast.
+- `fdf1316b112b0fb0da6e9558cf4cc52db04639ba`: the Python Windows harness verifies that the saved M4A exists, is at least 1 KB, contains the ISO Base Media `ftyp` marker, and that the browser-side named acceptance check passed.
+
+The tests write only under the per-run acceptance temp folder; cleanup removes that folder in the harness `finally` block. The test seam does not bypass validation of job/project/chapter/source ownership, and ordinary desktop users continue to see the native Save As dialog.
+
+The current #2164 package run checks out `d99194a458daf488ee6f8665e5aeba20629ea28a` and does not include these later Save As test commits. Preserve its result as evidence for the BGM-state restoration fix. The next exact-head artifact checkpoint must include the Save As coverage and pass it, in addition to the 1,103+ regression suite, the complete frozen Production Preview acceptance, state/restart validator, installer, manifest/hash, Defender and artifact uploads.
