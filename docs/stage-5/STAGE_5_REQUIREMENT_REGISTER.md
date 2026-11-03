@@ -3,7 +3,7 @@
 Repository: https://github.com/RyuBlanc/ryu-audiobook-build  
 Execution branch: `stage-5/step-1-production-metadata`  
 Stable starting commit: `ace9630d2d6b4a745c029906e0624637d4e3fdd3`  
-Last updated: 2 November 2026
+Last updated: 3 November 2026
 
 ## Scope
 
@@ -20,20 +20,20 @@ Allowed statuses: OPEN; IN PROGRESS; CODE CHANGED — NOT VERIFIED; AUTOMATED TE
 | PROD-05 | P0 | Real generation progress | CODE CHANGED — NOT VERIFIED | Premium V2 full-generation ring now renders its own backend job's chapter, stage, measured elapsed time and backend ETA | Exact-commit regression and packaged Windows runtime acceptance pending |
 | PROD-06 | P0 | Separate preview/full-generation states | CODE CHANGED — NOT VERIFIED | Independent Production preview/full-generation monitors and job IDs; full controls are bound only to the full-generation job | Exact-commit concurrency/isolation and runtime acceptance pending |
 | PROD-07 | P0 | 10/30/60/90-second real preview controls | CODE CHANGED — NOT VERIFIED | Existing 10/30/60/90 selector and backend target-duration limiter preserved; explicit Play/Pause/Stop/Replay and Cancel Preview controls connected to the real preview job | Exact-commit duration matrix, audio validation, playback and cancellation acceptance pending |
-| PROD-08 | P1 | Live pronunciation toggle | OPEN | Existing Pronunciation integration retained | Test global Off and individually enabled rules |
-| PROD-09 | P1 | Live BGM/cue toggle | OPEN | Existing Sound Design integration retained | Test Same BGM, Chapter-Based BGM, Voice Only and cues |
+| PROD-08 | P1 | Live pronunciation toggle | CODE CHANGED — NOT VERIFIED | Production toggle mirrors Pronunciation Studio; saved global setting feeds `_effective_pronunciation_dictionary`, which excludes all rules when OFF and only retains individually enabled entries when ON | Exact-head regression and Windows runtime test of global/entry toggles and preview/full-generation parity |
+| PROD-09 | P1 | Live BGM/cue toggle | CODE CHANGED — NOT VERIFIED | Production toggle flushes pending Sound Design changes and persists the shared master state; preview and final generation read the same saved BGM strategy, chapter overrides, cues and mix values | Exact-head regression plus Windows audio matrix for Same BGM, Chapter-Based BGM, Voice Only and cue behavior |
 | PROD-10 | P1 | Dynamic project summary | CODE CHANGED — NOT VERIFIED | Active summary extended with Genre and Series Volume; saved project data retained | CI and project-switch/reopen acceptance |
 | PROD-11 | P1 | Accurate music summary | CODE CHANGED — NOT VERIFIED | Existing live Sound Design summary retained, including unique chapter-track aggregation | Exact-commit regression and runtime strategy checks |
 | PROD-12 | P1 | Accurate output summary | CODE CHANGED — NOT VERIFIED | Existing active project output path, format and bitrate summary retained | Verify against actual settings/job configuration |
 | PROD-13 | P1 | Seven-indicator live Readiness Center | CODE CHANGED — NOT VERIFIED | Existing seven backend-derived indicators retained | Exact-commit regression and runtime transitions |
 | PROD-14 | P0 | Consistent job state across Production, Background Jobs, History and output | OPEN | Existing stable job IDs/polling retained | Integration and cross-project/stale-state tests |
-| PROD-15 | P1 | Chapter-specific preview audio and download | OPEN | Existing preview bridge identified | Chapter-only synthesis, ownership, playback/download acceptance |
+| PROD-15 | P1 | Chapter-specific preview audio and download | CODE CHANGED — NOT VERIFIED | Dedicated selector is populated from active-project saved chapters; request validates saved chapter text/identity; job carries project, chapter number and stable chapter ID; playback/save reject stale ownership | Exact-head CI, 10/30/60/90 duration checks, real playback/download, project/chapter switch and deletion/edit acceptance |
 | GEN-01 | P0 | Real generation using saved project configuration | OPEN | Existing GenerationManager/config handoff retained | End-to-end generation with actual saved inputs |
 | GEN-02 | P1 | Compatible resumable/recoverable checkpoints | OPEN | Stage 4 stable chapter identity safeguards preserved | Compatibility invalidation and recovery acceptance |
 | GEN-03 | P1 | Real pause/resume/cancel/retry/recovery | OPEN | Existing job controls retained | Real-operation and restart recovery acceptance |
 | GEN-04 | P1 | Empty/ineligible chapter handling | OPEN | Existing preflight behavior retained | All-empty rejection and order-preservation tests |
 | GEN-05 | P0 | Chaptered M4B validation, metadata and cover | OPEN | Stage 4 full-stream decode/assembly work preserved | Actual output validation and metadata/cover inspection |
-| GEN-06 | P0 | Preview/final effective configuration parity | OPEN | Stage 4 parity regression foundation preserved | Complete scenario matrix and real audio validation |
+| GEN-06 | P0 | Preview/final effective configuration parity | CODE CHANGED — NOT VERIFIED | Production preview resolves the saved project/series narrator used by full generation; both paths consume the same project pronunciation state and saved Sound Design/BGM/cue configuration | Exact-head tests plus real preview/final audio comparison across pronunciation ON/OFF, Same BGM, Chapter-Based BGM, Voice Only and cues |
 
 ## Five-step execution sequence
 
@@ -121,3 +121,18 @@ Production chapter preview now enables the native Sound Design renderer and uses
 ## Step 5.2 imported cue preservation correction
 
 A data-safety audit found preview cleanup could delete the original imported opening/ending cue because the selected-path resolver returns the source path. Cleanup now removes only generated temporary outputs; a regression proves both original cue assets remain present and byte-identical after preview. Exact-head regression and Windows packaging pending.
+
+
+## Step 5.2 implementation follow-up — 3 November 2026
+
+Current implementation candidate: `8a4eba2b3ad5fa849b75ebb671e57b9932d8a763` on `stage-5/step-1-production-metadata`.
+
+- `808bcb6bcd7f17d2caa42516885c1ee81568bb8b`: adds the Production-only saved-chapter selector, refreshes from `chapter.list`, isolates preview request ownership from Chapter Studio selection, and checks the originating project and chapter before playback/download.
+- `c57bb6e818a811259a9c459a91e3de3cce0a2604`: resolves Production preview narration from the saved project/series narrator resolver used by full generation; adds a stable chapter ID to each preview job and validates it during Save.
+- `a3dd0329eccb1c6fae62b062c7224f1082a7cdfc`: introduces Stage 5.2 regressions for saved narrator resolution, global pronunciation OFF, stable chapter identity and parity wiring.
+- `aac825b629dbfffbada91fdedb359401ea954594`: invalidates a preview if the selected saved chapter is deleted, renumbered, renamed or its saved text changes, even where its chapter ID remains stable.
+- `8a4eba2b3ad5fa849b75ebb671e57b9932d8a763`: extends the regression contract for saved-chapter-content invalidation.
+
+Pronunciation and Sound Design control paths were already present in the existing Production adapter; source inspection confirmed that they synchronize with the saved Pronunciation/Sound Design state. The new tests record those contracts. No new mock settings or parallel engines were introduced.
+
+All four rows above remain `CODE CHANGED — NOT VERIFIED` until the exact-head regression and artifact-checkpoint workflow passes. Installed Windows behavior and real audio parity remain separate runtime acceptance; they are not inferred from source inspection or CI.
