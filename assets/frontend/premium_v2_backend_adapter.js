@@ -8141,6 +8141,8 @@
       const group=[...document.querySelectorAll('#generate .segmented')].find(el=>[...el.querySelectorAll('button')].some(b=>/10s|30s|60s|90s/i.test(b.textContent)));
       const duration=group?.querySelector('button.active')?.textContent.match(/\d+/)?.[0]||'30';
       if(![10,30,60,90].includes(Number(duration)))throw new Error('Preview duration must be 10, 30, 60, or 90 seconds.');
+      await flushSoundDesignState();
+      await refreshTerms();
       const activeProject=await call('project.get_active');
       productionPreviewRequestProjectFolder=String(activeProject?.folder||'');
       invalidateVoicePreview();

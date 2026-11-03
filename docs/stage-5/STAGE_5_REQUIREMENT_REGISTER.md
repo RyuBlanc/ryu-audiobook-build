@@ -92,3 +92,7 @@ Run #2106 passed the consolidated regression suite on commit 97a4d3094dac80827bf
 Run #2107 on commit `6ef7dea5c028ba477d86511b353ad03583dfe44b` passed 1,083 regression tests, frontend syntax, native Qt lifecycle, frozen app verification, bundled voice asset/critical-module checks, packaged Sound Design/Music Library acceptance, installer creation, hashes, and Defender scan. Installer, portable app and SHA-256 manifest uploaded; publication was skipped by workflow policy.
 
 The follow-up gives Production Preview its own Save command, checking completed job, project, chapter and generated WAV identity. Voice Studio retains its existing save route. Additional tests guard the persisted pronunciation and Sound Design settings used by preview/full generation. The follow-up is pending exact-head tests and another Windows packaged checkpoint. Installed-app real audio acceptance remains separate.
+
+## Step 5.2 exact-head correction after #2108
+
+#2108 ran 1,086 tests but failed four contracts. The new Production preview save security tests passed. The capability map now includes the Production save command; the Production chapter preview now flushes saved Sound Design state and refreshes saved pronunciation before starting; the Stage 2 UI contract expects the dedicated Production save button; and the Qwen cache test uses the exact preview method signature. Exact-head regression and packaged Windows verification are pending.

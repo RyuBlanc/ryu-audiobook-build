@@ -216,3 +216,13 @@ Artifacts:
 - Manifest `Ryu-Audiobook-Release-SHA256-2107`: ID `13198319465`; SHA-256 `2fd986728feaebf331b8836938cf15712cdfe4db9ce7386149413c8f7784af70`.
 
 The follow-up separates Production Preview Save from generic Voice Studio save, validating the completed Production job, exact project folder, chapter number, and exact generated WAV path before native Save As. Regression contracts cover this command and the saved pronunciation/Sound Design hand-off before preview/full generation. These changes require exact-head tests and a new packaged Windows checkpoint before Step 5.2 sign-off. Installed-Windows real-audio listening, controls and resize/layout acceptance remain separate.
+
+## 20. Step 5.2 exact-head correction after #2108
+
+Run #2108 on commit `bbebe9a9ee8c13ba0cedf26a9dcbc0b97cf52e35` completed with 1,086 tests and four failures. Both new Production Preview save tests passed. The failures exposed:
+- `production.preview.save` was in the dispatcher handler table but absent from `_capabilities()`; it is now advertised.
+- The Production chapter-preview handler did not flush the saved Sound Design/BGM/cue/mix state or refresh the saved pronunciation dictionary before submitting a preview; it now awaits `flushSoundDesignState()` and `refreshTerms()`.
+- Stage 2's UI contract still asserted the previous shared Voice Studio download handler on the Production button; it now asserts the dedicated Production save handler.
+- Stage 4's Qwen cache test used `def _production_preview` as a slice boundary, which also matched the new `def _production_preview_save`; it now uses the exact `def _production_preview(self, payload:` signature.
+
+The new exact-head workflow must pass before the Windows artifact checkpoint is accepted.
