@@ -889,7 +889,8 @@ class VoicePreviewContractTests(unittest.TestCase):
         )
         self.assertEqual(result["job_id"], "production-preview")
         forwarded.assert_called_once_with({
-            "profile_name": "Saved Narrator", "chapter_number": 3, "duration_seconds": 30
+            "profile_name": "Saved Narrator", "chapter_number": 3, "duration_seconds": 30,
+            "_production_preview": True,
         })
 
     def test_production_preview_uses_selected_chapter_and_preserves_download_identity(self):
@@ -911,8 +912,8 @@ class VoicePreviewContractTests(unittest.TestCase):
         self.assertIn("invalidateVoicePreview();", handler)
         self.assertIn("const previewToken=voicePreviewEpoch;", handler)
         self.assertIn("if(previewToken!==voicePreviewEpoch)return;", handler)
-        self.assertIn("if(previewToken!==voicePreviewEpoch)return true;", handler)
-        self.assertIn("preparePreviewPlayback(job,Number(duration),{profileName:name})", handler)
+        self.assertIn("if(previewToken!==voicePreviewEpoch)return false;", handler)
+        self.assertIn("preparePreviewPlayback(job,Number(duration),{profileName:name,preserveSummary:true})", handler)
 
 
     def test_preview_worker_applies_project_pronunciation_rules_only_when_enabled(self):
