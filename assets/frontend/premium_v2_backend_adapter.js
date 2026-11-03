@@ -5075,8 +5075,7 @@
           const rows = await call('job.list', {include_hidden:true});
           if (record.settled || productionMonitorEpochs[operation] !== token) return;
           const job = rows.find(row => String(row.job_id || '') === String(jobId));
-          const visibleRows = rows.filter(row => !row.hidden);
-          await refreshJobs(visibleRows);
+          await refreshJobs();
           if (!job || !PRODUCTION_TERMINAL_JOB_STATES.has(String(job.state || '').toLowerCase())) return;
           let previewReady = true;
           if (operation === 'preview' && job.state === 'completed' && typeof done === 'function') {
@@ -5105,7 +5104,7 @@
             message(job.message || 'Production preview is ready.', false);
           }
           await refreshHistory().catch(() => {});
-          await refreshJobs(visibleRows).catch(() => {});
+          await refreshJobs().catch(() => {});
           finish(job);
         } catch (error) {
           if (!record.errorShown && !record.settled) {
@@ -5575,17 +5574,17 @@
     }, 160);
   }
   let backendJobFilter = 'active';
-  async function refreshJobs(snapshot = null) {
+  async function refreshJobs() {
     // Multiple callers share one in-flight refresh so the 1.5s heartbeat, job
     // monitor and manual refresh cannot issue overlapping DOM updates.
     if (jobsRefreshPromise) return jobsRefreshPromise;
-    const refreshPromise = refreshJobsImpl(snapshot);
+    const refreshPromise = refreshJobsImpl();
     jobsRefreshPromise = refreshPromise;
     try { return await refreshPromise; }
     finally { if (jobsRefreshPromise === refreshPromise) jobsRefreshPromise = null; }
   }
-  async function refreshJobsImpl(snapshot = null) {
-    const allJobs = Array.isArray(snapshot) ? snapshot : await call('job.list', {include_hidden:false});
+  async function refreshJobsImpl() {
+    const allJobs = await call('job.list', {include_hidden:false});
     if (isVisiblePage('dashboard')) refreshDashboardGeneration(allJobs);
     if (isVisiblePage('generate')) renderProductionGeneration(allJobs);
     const jobs = allJobs.filter(j => backendJobFilter === 'all' ||
@@ -8132,6 +8131,7 @@
       if($('previewState'))$('previewState').textContent='Preparing';
       if($('validation'))$('validation').textContent='Preparing selected chapter preview.';
       const data=await call('production.preview',{profile_name:name,chapter_number:chapterNumber,duration_seconds:Number(duration),_production_preview:true});
+      if(previewToken!==voicePreviewEpoch)return;
       if(!data?.job_id)throw new Error('The Production preview job was not created.');
       productionPreviewJobId=String(data.job_id);
       await refreshJobs();
