@@ -1658,6 +1658,51 @@ class PremiumV2Bridge(QObject):
         self._history[snapshot["job_id"]] = snapshot
         self._persist_history()
 
+    def _reconcile_interrupted_generation_project(self, row: dict[str, Any]) -> bool:
+        """Mark only the project generation owned by an interrupted job as recoverable."""
+        if str(row.get("type") or "").strip().casefold() != "audiobook-generation":
+            return False
+        job_id = str(row.get("job_id") or "").strip()
+        folder_value = str(row.get("project_folder") or "").strip()
+        if not job_id or not folder_value:
+            return False
+
+        try:
+            project_folder = Path(folder_value).expanduser().resolve()
+            if not project_folder.is_dir():
+                return False
+            project_state = load_state(project_folder)
+            # A stale job must never overwrite the status of a newer generation
+            # that has already claimed this project.
+            if str(project_state.get("generation_job_id") or "").strip() != job_id:
+                return False
+            project_status = str(project_state.get("status") or "").strip().casefold()
+            if project_status not in {
+                "queued", "generating", "running", "paused",
+                "pause_requested", "cancel_requested", "retrying",
+            }:
+                return False
+
+            interrupted_at = self._now()
+            project_state.update({
+                "status": "failed",
+                "generation_recovery_required": True,
+                "generation_interrupted_at": interrupted_at,
+                "generation_interruption_reason": (
+                    "The application closed before this audiobook generation completed. "
+                    "Retry from Production Studio to reuse compatible saved checkpoints."
+                ),
+            })
+            save_state(project_folder, project_state)
+            return True
+        except Exception as exc:
+            row["project_recovery_error"] = str(exc)
+            log.exception(
+                "Could not reconcile project state for interrupted audiobook job %s",
+                job_id,
+            )
+            return False
+
     def _load_durable_jobs(self) -> None:
         path = self._jobs_path()
         try:
@@ -1666,17 +1711,46 @@ class PremiumV2Bridge(QObject):
             rows = []
         if not isinstance(rows, list):
             rows = []
+
+        interrupted_states = {
+            "queued", "running", "paused", "pause_requested",
+            "cancel_requested", "retrying",
+        }
+        jobs_changed = False
         for row in rows:
             if not isinstance(row, dict) or not row.get("job_id"):
                 continue
-            if row.get("state") in {"queued", "running", "pause_requested", "cancel_requested", "retrying"}:
-                row.update({"state": "failed", "stage": "Interrupted by application restart",
-                            "message": "The application closed before this task finished. Retry from the project to reuse valid checkpoints.",
-                            "error": {"code": "interrupted", "message": "Worker did not survive restart."},
-                            "recoverable": True, "updated_at": self._now()})
+            prior_state = str(row.get("state") or "").strip().casefold()
+            if prior_state in interrupted_states:
+                interrupted_at = self._now()
+                row.update({
+                    "state": "failed",
+                    "stage": "Interrupted by application restart",
+                    "message": (
+                        "The application closed before this task finished. "
+                        "Retry from the project to reuse valid checkpoints."
+                    ),
+                    "error": {
+                        "code": "interrupted",
+                        "message": "Worker did not survive restart.",
+                    },
+                    "recoverable": True,
+                    "eta_seconds": None,
+                    "updated_at": interrupted_at,
+                    "completed_at": interrupted_at,
+                })
+                self._reconcile_interrupted_generation_project(row)
+                jobs_changed = True
+
             self._jobs[str(row["job_id"])] = row
             if self._terminal_job_state(row):
                 self._record_history_job(row)
+
+        # Persist the normalized rows, otherwise every subsequent restart would
+        # rediscover the same running/paused jobs and the queue could disagree
+        # with the terminal snapshots already written to History.
+        if jobs_changed:
+            self._persist_jobs()
 
     def _new_job(self, job_type: str, title: str, description: str, project=None) -> str:
         job_id = uuid.uuid4().hex
@@ -5631,6 +5705,14 @@ class PremiumV2Bridge(QObject):
         # While a new generation is running, do not expose a prior file at the
         # same destination as the current audiobook. Keep the intended destination
         # separately; only publish output_path after the final file validates.
+        # A new explicit generation attempt consumes any prior interrupted-job
+        # marker; the newly issued job ID becomes the sole project owner.
+        for recovery_key in (
+            "generation_recovery_required",
+            "generation_interrupted_at",
+            "generation_interruption_reason",
+        ):
+            state.pop(recovery_key, None)
         state.update({"voice_profile": profile.name, "voice_id": profile.voice_id,
                       "narrator": profile.name,
                       "narrator_profile_source": str(narrator_selection.get("source") or "none"),
