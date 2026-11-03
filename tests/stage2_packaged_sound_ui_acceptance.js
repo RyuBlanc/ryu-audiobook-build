@@ -1514,12 +1514,32 @@
       productionPreviewResult.sound_configuration?.fixed_cues_enabled === false,
       "Production Preview did not apply the saved Voice Only configuration: " +
         JSON.stringify(productionPreviewResult.sound_configuration));
-    await waitFor("Production Preview playable/downloadable UI", function () {
-      const play = document.querySelector("#productionPreviewPlay");
-      const save = document.querySelector("#productionPreviewDownload");
-      return document.querySelector("#productionPreviewStatus")?.textContent.includes("Preview ready") &&
-        play && !play.disabled && save && !save.disabled;
-    }, 30000);
+    try {
+      await waitFor("Production Preview playable/downloadable UI", function () {
+        const play = document.querySelector("#productionPreviewPlay");
+        const save = document.querySelector("#productionPreviewDownload");
+        return document.querySelector("#productionPreviewStatus")?.textContent.includes("Preview ready") &&
+          play && !play.disabled && save && !save.disabled;
+      }, 30000);
+    } catch (error) {
+      const jobs = await invoke("job.list", {include_hidden:true});
+      const snapshot = Array.isArray(jobs)
+        ? jobs.find(job => String(job.job_id || "") === productionPreviewJobId)
+        : null;
+      throw new Error(String(error?.message || error) + ". Production Preview diagnostic=" + JSON.stringify({
+        status:document.querySelector("#productionPreviewStatus")?.textContent || null,
+        playDisabled:document.querySelector("#productionPreviewPlay")?.disabled ?? null,
+        saveDisabled:document.querySelector("#productionPreviewDownload")?.disabled ?? null,
+        voicePreviewState:document.querySelector("#previewState")?.textContent || null,
+        validation:document.querySelector("#validation")?.textContent || null,
+        jobState:snapshot?.state || null,
+        jobMessage:snapshot?.message || null,
+        jobChapter:snapshot?.current_chapter || null,
+        jobChapterId:snapshot?.current_chapter_id || null,
+        jobFolder:snapshot?.project_folder || null,
+        result:snapshot?.result || null
+      }));
+    }
     const productionPreviewPlay = document.querySelector("#productionPreviewPlay");
     const productionPreviewStop = document.querySelector("#productionPreviewStop");
     const productionPreviewReplay = document.querySelector("#productionPreviewReplay");

@@ -479,3 +479,24 @@ The current commit explicitly includes `[artifact-checkpoint]` to force the Wind
 No older run is to be cancelled or reported as a failure merely because a later commit exists. Workflow concurrency is now unique per run ID; all runs remain independently auditable.
 
 Step 5.2 remains open until that exact-head packaged acceptance succeeds. User-machine real-audio listening and preview/final pronunciation/BGM matrix remain separate manual acceptance items and must not be represented as completed by CI alone.
+
+
+## 34. #2144 packaged Production Preview failure — root-cause fixes — 3 November 2026
+
+### Run evidence
+
+- #2142 passed its 1,101-test regression job and frozen app checks, then failed before preview synthesis because the packaged test waited for the job-monitor chapter label before a job existed. The selector assertion was corrected.
+- #2143 passed 1,101 tests in 56.537 seconds; it was regression-only, so the artifact build was skipped by workflow policy.
+- #2144 passed its 1,101-test job, frontend syntax check, native Qt lifecycle test, frozen app build, frozen EXE check and bundled voice verification. Packaged Sound Design/Music Library acceptance reached Production Preview, the backend job completed with a measured AAC/M4A result, but the UI did not reach its ready state and the installer/package steps were skipped.
+
+### Corrections in this commit
+
+1. Added the missing `#productionPreviewStatus` status element to the dynamic Production Preview monitor. The adapter previously attempted to update this node without creating it, so the packaged acceptance could never observe the Ready state.
+2. Replaced cached `window.ryuPremiumActiveProject` completion checks with the native `project.get_active` response, and normalized Windows path separators/case before comparing active/request/job project ownership.
+3. Stable chapter IDs are now compared when both request and job expose an ID. For legacy/imported chapter rows without a frontend ID, the worker's stable ID is adopted before Save; project folder and chapter number ownership remain mandatory.
+4. Save uses the native active project and the same optional-ID matching rule, preserving the backend job's stable chapter identity.
+5. The packaged acceptance now prints a diagnostic snapshot of UI status/button states and the completed job's project/chapter/result whenever the Ready predicate times out. This turns any remaining issue into a specific assertion rather than an opaque wait.
+
+The six-second cue-import rejection and injected cue/manifest/metadata save failures in #2144 are deliberate negative acceptance cases. They were not the run's failure cause; the earlier packaged Sound Design, metadata and project-switch checks passed.
+
+The next exact-head run must pass all regressions, frozen app build, existing packaged Sound Design acceptance, Production Preview chapter-only M4A/playback/cancellation acceptance, installer packaging, release hashes, Defender checks and portable/installer/manifest upload. No Stage 5.2 requirement is marked complete based on source changes alone.

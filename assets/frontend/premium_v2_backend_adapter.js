@@ -1680,6 +1680,9 @@
     if($('downloadPreview'))$('downloadPreview').disabled=!voicePreviewValid||!lastVoicePreviewPath;
     syncProductionPreviewControls();
   }
+  function normalizeProjectFolderIdentity(value){
+    return String(value||'').trim().replace(/\\/g,'/').replace(/\/+$/,'').toLowerCase();
+  }
   function syncProductionPreviewControls(){
     const playable=Boolean(voicePreviewValid&&previewAudio);
     const playing=Boolean(playable&&!previewAudio.paused);
@@ -5191,7 +5194,21 @@
       monitor.append(chapter, progress, timing);
       controls.insertAdjacentElement('afterend', monitor);
     }
+    let previewStatus = $('productionPreviewStatus');
+    if (!previewStatus) {
+      previewStatus = document.createElement('small');
+      previewStatus.id = 'productionPreviewStatus';
+      previewStatus.className = 'muted';
+      previewStatus.setAttribute('role', 'status');
+      previewStatus.setAttribute('aria-live', 'polite');
+      previewStatus.style.cssText = 'display:block;width:100%;margin:4px 0 8px;box-sizing:border-box';
+      previewStatus.textContent = 'Select a saved chapter before generating a preview.';
+      const monitor = $('productionPreviewMonitor');
+      if (monitor) monitor.insertAdjacentElement('afterbegin', previewStatus);
+      else controls.appendChild(previewStatus);
+    }
     syncProductionPreviewChapterSelector();
+    syncProductionPreviewControls();
   }
   function monitorProductionJob(jobId, operation, done) {
     if (!['full','preview'].includes(operation)) return Promise.reject(new Error('Unknown Production Studio job operation.'));
@@ -8315,17 +8332,30 @@
       const previewProfileName=String(data.profile_name||name);
       productionPreviewJobId=String(data.job_id);
       await refreshJobs();
-      const completed=await monitorProductionJob(data.job_id,'preview',job=>{
+      const completed=await monitorProductionJob(data.job_id,'preview',async job=>{
         if(previewToken!==voicePreviewEpoch)return false;
-        const activeFolder=String(window.ryuPremiumActiveProject?.folder||'');
-        const jobFolder=String(job?.project_folder||'');
+        const activeProject=await call('project.get_active');
+        const activeFolder=normalizeProjectFolderIdentity(activeProject?.folder);
+        const requestFolder=normalizeProjectFolderIdentity(productionPreviewRequestProjectFolder);
+        const jobFolder=normalizeProjectFolderIdentity(job?.project_folder);
         const jobChapter=Number(job?.current_chapter||0);
-        if(activeFolder!==productionPreviewRequestProjectFolder||
-            jobFolder!==productionPreviewRequestProjectFolder||
-            jobChapter!==productionPreviewRequestChapterNumber||
-            String(job?.current_chapter_id||'')!==productionPreviewRequestChapterId){
-          if($('productionPreviewStatus'))$('productionPreviewStatus').textContent='This preview belongs to a different project or saved chapter. Generate a fresh preview for the current selection before playback or saving.';
+        const requestChapterId=String(productionPreviewRequestChapterId||'');
+        const jobChapterId=String(job?.current_chapter_id||'');
+        const ownershipProblem=!activeFolder||!requestFolder||!jobFolder||
+          activeFolder!==requestFolder||jobFolder!==requestFolder||
+          jobChapter!==productionPreviewRequestChapterNumber||
+          Boolean(requestChapterId&&jobChapterId&&requestChapterId!==jobChapterId);
+        if(ownershipProblem){
+          const detail='Preview ownership validation failed. '+
+            'Project active/request/job='+JSON.stringify([activeFolder,requestFolder,jobFolder])+
+            '; chapter request/job='+JSON.stringify([productionPreviewRequestChapterNumber,jobChapter])+
+            '; chapter IDs request/job='+JSON.stringify([requestChapterId,jobChapterId])+'.';
+          if($('productionPreviewStatus'))$('productionPreviewStatus').textContent=detail;
+          console.error('[Ryu Production preview ownership]',detail);
           return false;
+        }
+        if(!productionPreviewRequestChapterId&&jobChapterId){
+          productionPreviewRequestChapterId=jobChapterId;
         }
         return preparePreviewPlayback(job,Number(duration),{profileName:previewProfileName,preserveSummary:true});
       });
@@ -8349,17 +8379,23 @@
       const job=productionJobSnapshots.preview;
       if(!productionPreviewJobId||!job||String(job.job_id||'')!==String(productionPreviewJobId)) throw new Error('Generate a Production chapter preview before saving it.');
       if(String(job.state||'').toLowerCase()!=='completed'||!voicePreviewValid||!lastVoicePreviewPath) throw new Error('Wait for the Production preview to complete and pass audio validation before saving it.');
-      const projectFolder=String(window.ryuPremiumActiveProject?.folder||'');
+      const activeProject=await call('project.get_active');
+      const projectFolder=String(activeProject?.folder||'');
       const chapterNumber=Number(lastVoicePreviewChapterNumber||0);
       const selectedChapterNumber=Number(productionPreviewSelectedChapter||$('productionPreviewChapterSelect')?.value||0);
       const selectedChapter=chapters.find(item=>Number(item.number)===selectedChapterNumber);
       const selectedChapterId=String(selectedChapter?.chapter_id||selectedChapter?.id||'');
-      if(!projectFolder||projectFolder!==productionPreviewRequestProjectFolder||
-          String(job.project_folder||'')!==projectFolder||
+      const requestChapterId=String(productionPreviewRequestChapterId||'');
+      const jobChapterId=String(job.current_chapter_id||'');
+      if(!normalizeProjectFolderIdentity(projectFolder)||
+          normalizeProjectFolderIdentity(projectFolder)!==normalizeProjectFolderIdentity(productionPreviewRequestProjectFolder)||
+          normalizeProjectFolderIdentity(job.project_folder)!==normalizeProjectFolderIdentity(projectFolder)||
           Number(job.current_chapter||0)!==chapterNumber||
           selectedChapterNumber!==chapterNumber||
           productionPreviewRequestChapterNumber!==chapterNumber||
-          selectedChapterId!==productionPreviewRequestChapterId) throw new Error('The Production preview no longer matches the active project and selected saved chapter. Generate it again.');
+          Boolean(requestChapterId&&selectedChapterId&&requestChapterId!==selectedChapterId)||
+          Boolean(requestChapterId&&jobChapterId&&requestChapterId!==jobChapterId)) throw new Error('The Production preview no longer matches the active project and selected saved chapter. Generate it again.');
+      if(!productionPreviewRequestChapterId&&jobChapterId)productionPreviewRequestChapterId=jobChapterId;
       const baseName=(lastVoicePreviewProfileName||'Ryu Production Preview').replace(/[<>:"/\\\\|?*\\x00-\\x1f]+/g,'-').trim()||'Ryu Production Preview';
       const suffix='_Chapter_'+String(chapterNumber).padStart(2,'0')+(lastVoicePreviewChapterTitle?'_'+lastVoicePreviewChapterTitle:'');
       const suggestedName=(baseName+suffix+'_Preview').replace(/[<>:"/\\\\|?*\\x00-\\x1f]+/g,'-').trim().replace(/\\s+/g,'_').slice(0,100);

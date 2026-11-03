@@ -1428,7 +1428,7 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
 
 
 
-    def test_production_preview_selector_keeps_selected_chapter_status_before_job_starts(self):
+    def test_production_preview_selector_creates_status_and_keeps_selected_chapter_before_job(self):
         adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
         start = adapter.index("function ensureProductionPreviewMonitorUi()")
         end = adapter.index("function monitorProductionJob(", start)
@@ -1437,10 +1437,23 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         controls_end = adapter.index("function invalidateVoicePreview()", controls_start)
         preview_controls = adapter[controls_start:controls_end]
         self.assertIn("select.id = 'productionPreviewChapterSelect';", selector)
+        self.assertIn("previewStatus.id = 'productionPreviewStatus';", selector)
+        self.assertIn("previewStatus.setAttribute('aria-live', 'polite');", selector)
         self.assertIn("productionPreviewSelectedChapter = chapterNumber;", selector)
         self.assertIn("productionPreviewSelectedChapterId = String(chapter.chapter_id || chapter.id || '');", selector)
         self.assertIn("const selectedNumber=Number(productionPreviewSelectedChapter||0);", preview_controls)
         self.assertIn("'Chapter '+selectedNumber+' selected. Generate a new preview for this chapter.'", preview_controls)
+
+    def test_production_preview_completion_uses_native_project_and_optional_chapter_id_identity(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        start = adapter.index("const completed=await monitorProductionJob(data.job_id,'preview'")
+        end = adapter.index("if(completed?.state==='completed')", start)
+        completion = adapter[start:end]
+        self.assertIn("await call('project.get_active')", completion)
+        self.assertIn("normalizeProjectFolderIdentity(activeProject?.folder)", completion)
+        self.assertIn("Boolean(requestChapterId&&jobChapterId&&requestChapterId!==jobChapterId)", completion)
+        self.assertIn("if(!productionPreviewRequestChapterId&&jobChapterId)", completion)
+        self.assertIn("preparePreviewPlayback(job,Number(duration)", completion)
 
 
     def test_production_idle_state_is_neutral_and_preview_chapter_identity_is_visible(self):
