@@ -1589,6 +1589,17 @@
       return document.querySelector("#productionPreviewPlay")?.textContent.includes("Pause preview");
     }, 12000);
     productionPreviewStop.click();
+    const productionPreviewSaveButton = document.querySelector("#productionPreviewDownload");
+    must(productionPreviewSaveButton && !productionPreviewSaveButton.disabled,
+      "Save Production Preview remained disabled after the validated chapter audio completed.");
+    document.querySelector("#toasts")?.classList.remove("show");
+    productionPreviewSaveButton.click();
+    await waitFor("Production Preview actual Save As copy", function () {
+      return String(document.querySelector("#toasts")?.textContent || "")
+        .includes("Production chapter preview saved to");
+    }, 20000);
+    record("stage5_production_preview_real_save_as", true,
+      "The packaged Production Save button invoked the native validated-job save bridge and completed a real M4A copy into the isolated acceptance output folder.");
     record("stage5_production_preview_real_chapter_audio_playback_and_duration_controls", true,
       "The frozen app generated Chapter Two only, returned measured M4A audio with a PCM WAV playback URL, applied saved Voice Only mode, and passed Play/Pause/Stop/Replay with all four duration controls available.");
 
