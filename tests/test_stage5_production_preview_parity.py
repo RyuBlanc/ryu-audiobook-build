@@ -1,6 +1,7 @@
 """Stage 5.2 Production preview ownership and configuration parity contracts."""
 from __future__ import annotations
 
+import tempfile
 import threading
 import unittest
 from pathlib import Path
@@ -108,6 +109,52 @@ class ProductionPreviewSavedNarratorTests(unittest.TestCase):
 
 
 class ProductionPreviewOwnershipTests(unittest.TestCase):
+    def test_production_preview_save_copies_only_the_completed_job_audio(self):
+        with tempfile.TemporaryDirectory(prefix="ryu-production-preview-save-test-") as temp:
+            root = Path(temp)
+            preview_root = root / "Previews"
+            preview_root.mkdir()
+            source = preview_root / "preview-job.m4a"
+            source.write_bytes(b"\\x00\\x00\\x00\\x18ftypM4A " + (b"test-audio" * 256))
+            destination = root / "saved" / "Chapter_02_Preview.m4a"
+            bridge = SimpleNamespace(
+                _jobs_lock=threading.RLock(),
+                _jobs={
+                    "job-save": {
+                        "job_id": "job-save",
+                        "type": "production-preview",
+                        "state": "completed",
+                        "project_folder": "project-A",
+                        "current_chapter": 2,
+                        "current_chapter_id": "chapter-2",
+                        "result": {"output_path": str(source)},
+                    }
+                },
+            )
+            with patch.object(premium_v2_host, "app_root", return_value=root), patch.object(
+                premium_v2_host.QFileDialog,
+                "getSaveFileName",
+                return_value=(str(destination), "Production preview audio (*.wav *.m4a)"),
+            ):
+                result = premium_v2_host.PremiumV2Bridge._production_preview_save(
+                    bridge,
+                    {
+                        "job_id": "job-save",
+                        "project_folder": "project-A",
+                        "chapter_number": 2,
+                        "chapter_id": "chapter-2",
+                        "source_path": str(source),
+                        "suggested_name": "Chapter_02_Preview",
+                    },
+                )
+            self.assertFalse(result["cancelled"])
+            self.assertEqual(Path(result["path"]), destination.resolve())
+            self.assertEqual(result["job_id"], "job-save")
+            self.assertEqual(result["chapter_number"], 2)
+            self.assertEqual(result["bytes"], source.stat().st_size)
+            self.assertEqual(destination.read_bytes(), source.read_bytes())
+            self.assertGreater(destination.stat().st_size, 1024)
+
     def test_global_pronunciation_off_excludes_all_dictionary_rules(self):
         state = {
             "pronunciation_enabled": False,
