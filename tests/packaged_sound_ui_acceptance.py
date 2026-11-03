@@ -337,6 +337,15 @@ def _run(args: argparse.Namespace) -> int:
     project_folder = app_root / "Library" / f"Stage 2 UI Acceptance {token}"
     project_folder.mkdir(parents=True, exist_ok=False)
     project_title = f"Stage 2 UI Acceptance {token}"
+    # Chapter Three is intentionally long enough to keep a 90-second
+    # Production preview cancellable after the packaged UI has received its job ID.
+    # The existing full-book mix acceptance uses pre-rendered chunks below, so this
+    # does not add unrelated TTS work to the Sound Design fixtures.
+    long_preview_paragraph = (
+        "The traveller continued through the quiet valley, recording each landmark, "
+        "remembering the people who had helped along the road, and describing the "
+        "changing light as the journey moved toward the distant hills. "
+    ) * 70
     chapter_rows = [
         {
             "number": 1, "title": "Acceptance Chapter One",
@@ -350,7 +359,7 @@ def _run(args: argparse.Namespace) -> int:
         },
         {
             "number": 3, "title": "Acceptance Chapter Three",
-            "text": "This chapter explicitly remains narration only.",
+            "text": "This chapter explicitly remains narration only.\n\n" + long_preview_paragraph,
             "dialogue_assignments": [], "review_status": "needs_review", "skip_for_generation": False,
         },
     ]
