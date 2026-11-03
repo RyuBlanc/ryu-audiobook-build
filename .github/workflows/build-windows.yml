@@ -1,8 +1,35 @@
 name: Build Windows App
+run-name: ${{ github.event.head_commit.message || github.event_name }}
 
 on:
   push:
-    branches: [main, fix/voice-preview-responsive-emotion, feature/background-audio-mvp, stage-5/step-4-generation-engine]
+    branches:
+      - main
+      - fix/voice-preview-responsive-emotion
+      - feature/background-audio-mvp
+      - fix/import-qa-speaker-hover-hardware
+      - fix/stage-1-generation-stability
+      - stage-2/import-integrity
+      - stage-3/voice-studio-character-assignment
+      - stage-3/restart-from-stage2-closeout-1794
+      - stage-4-pronunciation-sound-design
+      - fix/installer-branding-accessibility
+      - fix/premium-v2-live-voice-chapter-workflow
+      - fix/voice-studio-event-state-suppression
+      - fix/live-character-studio-qwen-preview-latency
+      - fix/native-ui-font-scale-learning-ai
+      - fix/pronunciation-grounding-character-learning
+      - fix/installer-live-controls-space-and-logo
+      - fix/dashboard-live-data-project-covers-player
+      - fix/html-installer-transparent-logo
+      - recovery/build-1441-baseline
+      - stage1/build1536-clean-baseline
+      - stage-2/sound-design-music-library-post-stage1
+      - stage-2/sound-design-interactivity-repair
+      - stage-4/step-1-pronunciation-studio
+      - stage-4/step-3-preview-assembly
+      - stage-4/step-4-audio-assembly
+      - stage-5/**
   workflow_dispatch:
 
 # Build artifacts are produced and verified on every main build.
@@ -12,19 +39,99 @@ permissions:
   actions: write
 
 concurrency:
-  # Isolate per-branch workflow runs and never cancel regression evidence.
-  group: ryu-audiobook-windows-build-${{ github.ref }}
+  # Isolate each run so a later push cannot replace a pending run in this branch's
+  # queue. This intentionally avoids both active-run cancellation and pending-run
+  # supersession; fix commits remain independently auditable.
+  group: ryu-audiobook-windows-build-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
-  build:
-    # Cleanup-only commits must not publish a stale main-branch application package.
-    if: ${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message || '', '[maintenance] Actions Storage Cleanup') }}
+  tests:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          if ($pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "setup-python did not provide a real Python interpreter: $pythonExe"
+          }
+          & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 --upgrade pip
+          if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed with exit code $LASTEXITCODE." }
+          & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 -r requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw "Test dependency installation failed with exit code $LASTEXITCODE." }
+      - name: Validate frontend JavaScript syntax
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+          if ([string]::IsNullOrWhiteSpace($nodeExe) -or -not (Test-Path -LiteralPath $nodeExe -PathType Leaf)) {
+            throw 'Node.js is required to validate the Premium V2 frontend and installer scripts.'
+          }
+          & $nodeExe --check 'assets\frontend\premium_v2_backend_adapter.js'
+          if ($LASTEXITCODE -ne 0) { throw "Premium V2 backend adapter JavaScript syntax validation failed with exit code $LASTEXITCODE." }
+          & $nodeExe --check 'tests\stage2_packaged_sound_ui_acceptance.js'
+          if ($LASTEXITCODE -ne 0) { throw "Packaged Sound Design acceptance JavaScript syntax validation failed with exit code $LASTEXITCODE." }
+          & $nodeExe --check 'installer\ryu_installer.js'
+          if ($LASTEXITCODE -ne 0) { throw "Installer JavaScript syntax validation failed with exit code $LASTEXITCODE." }
+
+      - name: Run isolated native Qt lifecycle regression
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          $repoRoot = (Get-Location).Path
+          $testsRoot = Join-Path $repoRoot 'tests'
+          $env:PYTHONPATH = "$repoRoot;$testsRoot"
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B -m unittest test_regressions.RegressionTests.test_voice_preview_invalidation_ignores_deleted_qt_status_widget -v
+          if ($LASTEXITCODE -ne 0) { throw "Isolated Qt lifecycle regression failed with exit code $LASTEXITCODE." }
+
+      - name: Run full regression suite (remaining tests)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonExe = (Get-Command python.exe -ErrorAction Stop).Source
+          $repoRoot = (Get-Location).Path
+          $env:PYTHONPATH = "$repoRoot"
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B tests/run_regression_suite.py
+          if ($LASTEXITCODE -ne 0) { throw "Regression tests failed with exit code $LASTEXITCODE." }
+
+  # On feature branches, run the full regression suite without packaging or
+  # storage cleanup. Only explicit artifact checkpoints (and main/manual runs)
+  # may create release artifacts.
+  build:
+    if: ${{ github.ref == 'refs/heads/main' || contains(github.event.head_commit.message || '', '[artifact-checkpoint]') || github.event_name == 'workflow_dispatch' }}
+    needs: tests
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate installer JavaScript syntax
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
+          if ([string]::IsNullOrWhiteSpace($nodeExe) -or -not (Test-Path -LiteralPath $nodeExe -PathType Leaf)) {
+            throw 'Node.js is required to validate the functional HTML installer script.'
+          }
+          & $nodeExe --check 'installer\ryu_installer.js'
+          if ($LASTEXITCODE -ne 0) { throw "Installer JavaScript syntax validation failed with exit code $LASTEXITCODE." }
+          & $nodeExe --check 'assets\frontend\premium_v2_backend_adapter.js'
+          if ($LASTEXITCODE -ne 0) { throw "Premium V2 backend adapter syntax validation failed with exit code $LASTEXITCODE." }
+          & $nodeExe --check 'tests\stage2_packaged_sound_ui_acceptance.js'
+          if ($LASTEXITCODE -ne 0) { throw "Packaged Sound Design acceptance JavaScript syntax validation failed with exit code $LASTEXITCODE." }
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -32,9 +139,10 @@ jobs:
           python-version: '3.12'
 
       - name: Prepare, validate and build application
+        timeout-minutes: 60
         shell: pwsh
         env:
-          RYU_BUILD_NUMBER: ${{ github.run_number }}
+          RYU_BUILD_NUMBER: ${{ startsWith(github.ref, 'refs/heads/recovery/build-1441-baseline') && '1441-recovered' || github.run_number }}
         run: |
           $ErrorActionPreference = 'Stop'
           $env:PYTHONDONTWRITEBYTECODE = '1'
@@ -58,21 +166,15 @@ jobs:
           & $pythonExe -c "import sys; print(sys.executable); print(sys.version)"
 
           Write-Host '=== Install dependencies ==='
-          & $pythonExe -m pip install --upgrade pip
-          & $pythonExe -m pip install -r requirements.txt
+          & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 --upgrade pip
+          & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 -r requirements.txt
 
-          Write-Host '=== Run regression tests ==='
-          git reset --hard HEAD
-          git clean -ffdx
-
-          # Freeze the CI build number into Python source. Reading an environment
-          # variable at runtime made installed EXEs incorrectly display "Build dev".
+          # Freeze the CI build number into source so the installed EXE does not
+          # fall back to "Build dev" when launched outside the build environment.
           ('BUILD_NUMBER = "' + $env:RYU_BUILD_NUMBER + '"') | Set-Content -Path 'app\build_info.py' -Encoding ascii
 
           $env:PYTHONPATH = (Get-Location).Path
           $env:PYTHONDONTWRITEBYTECODE = '1'
-          & $pythonExe -B -m unittest discover -s tests -v
-          if ($LASTEXITCODE -ne 0) { throw "Regression tests failed with exit code $LASTEXITCODE." }
 
           Write-Host '=== Verify pinned Chatterbox Nano source ==='
           $source = Get-Content 'app\tts\chatterbox_runtime.py' -Raw
@@ -83,7 +185,8 @@ jobs:
           $cbZip = Join-Path $cbRoot 'chatterbox.zip'
           $cbExtract = Join-Path $cbRoot 'src'
           New-Item -ItemType Directory -Force -Path $cbRoot | Out-Null
-          curl.exe -L --fail --retry 3 -o $cbZip "https://github.com/resemble-ai/chatterbox/archive/$revision.zip"
+          Write-Host "Downloading pinned Chatterbox source revision $revision (180-second transfer cap)." 
+          curl.exe --connect-timeout 15 --max-time 180 -L --fail --retry 2 -o $cbZip "https://github.com/resemble-ai/chatterbox/archive/$revision.zip"
           Expand-Archive -Force $cbZip $cbExtract
           $ttsTurbo = Get-ChildItem $cbExtract -Recurse -Filter 'tts_turbo.py' | Select-Object -First 1
           $nanoExample = Get-ChildItem $cbExtract -Recurse -Filter 'example_tts_nano.py' | Select-Object -First 1
@@ -101,21 +204,185 @@ jobs:
 
           Write-Host '=== Download bundled offline Kokoro voices ==='
           New-Item -ItemType Directory -Force -Path 'bundled_models\kokoro' | Out-Null
-          curl.exe -L --fail --retry 3 -o 'bundled_models\kokoro\kokoro-v1.0.fp16.onnx' 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.fp16.onnx'
-          curl.exe -L --fail --retry 3 -o 'bundled_models\kokoro\voices-v1.0.bin' 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin'
+          Write-Host 'Downloading Kokoro ONNX model (maximum 600 seconds).' 
+          curl.exe --connect-timeout 15 --max-time 600 -L --fail --retry 2 -o 'bundled_models\kokoro\kokoro-v1.0.fp16.onnx' 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/kokoro-v1.0.fp16.onnx'
+          Write-Host 'Downloading Kokoro voice pack (maximum 240 seconds).' 
+          curl.exe --connect-timeout 15 --max-time 240 -L --fail --retry 2 -o 'bundled_models\kokoro\voices-v1.0.bin' 'https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1/voices-v1.0.bin'
           $model = Get-Item 'bundled_models\kokoro\kokoro-v1.0.fp16.onnx'
           $voices = Get-Item 'bundled_models\kokoro\voices-v1.0.bin'
           if ($model.Length -lt 100MB -or $voices.Length -lt 10MB) { throw 'Kokoro offline assets are incomplete.' }
 
+          Write-Host '=== Download CC0 audiobook BGM starter pack ==='
+          $starterRoot = Join-Path (Get-Location).Path 'assets\starter_audio'
+          $musicItems = @(
+            @{ Rel='music\calm\back_to_nature.mp3'; Url='https://opengameart.org/sites/default/files/back_to_nature.mp3'; Min=100000 },
+            @{ Rel='music\fantasy\bells_of_winter.mp3'; Url='https://opengameart.org/sites/default/files/bells_of_winter.mp3'; Min=100000 },
+            @{ Rel='music\fantasy\fairy_lights.mp3'; Url='https://opengameart.org/sites/default/files/fairy_lights.mp3'; Min=100000 },
+            @{ Rel='music\slice-of-life\homestead.mp3'; Url='https://opengameart.org/sites/default/files/homestead.mp3'; Min=100000 },
+            @{ Rel='music\adventure\jaunt.mp3'; Url='https://opengameart.org/sites/default/files/jaunt.mp3'; Min=100000 },
+            @{ Rel='music\calm\snow_day.mp3'; Url='https://opengameart.org/sites/default/files/snow_day.mp3'; Min=100000 },
+            @{ Rel='music\comedy\springly_sprigs.mp3'; Url='https://opengameart.org/sites/default/files/springly_sprigs.mp3'; Min=100000 },
+            @{ Rel='music\adventure\wandering_woodlands.mp3'; Url='https://opengameart.org/sites/default/files/wandering_woodlands.mp3'; Min=100000 },
+            @{ Rel='music\action\lets_battle.mp3'; Url='https://opengameart.org/sites/default/files/lets_battle.mp3'; Min=50000 },
+            @{ Rel='music\action\battle-theme.mp3'; Url='https://lpc.opengameart.org/sites/default/files/Battle.mp3'; Min=100000 },
+            @{ Rel='music\action\the_final_battle.ogg'; Url='https://opengameart.org/sites/default/files/the_final_battle.ogg'; Min=50000 },
+            @{ Rel='music\action\hope_orchestral_battle_music_bpm165.ogg'; Url='https://opengameart.org/sites/default/files/hope_orchestral_battle_music_bpm165.ogg'; Min=50000 },
+            @{ Rel='music\action\hard_battle_2_bpm140.mp3'; Url='https://opengameart.org/sites/default/files/hard_battle_2_bpm140.mp3'; Min=50000 },
+            @{ Rel='music\action\hard_battle_1_bpm170.mp3'; Url='https://opengameart.org/sites/default/files/hard_battle_1_bpm170.mp3'; Min=50000 },
+            @{ Rel='music\action\pop_boss_battle.mp3'; Url='https://opengameart.org/sites/default/files/pop_boss_battle.mp3'; Min=50000 },
+            @{ Rel='music\action\boss-battle-theme.mp3'; Url='https://opengameart.org/sites/default/files/CleytonRX%20-%20Battle%20RPG%20Theme.mp3'; Min=100000 },
+            @{ Rel='music\sci-fi\safe_space_loop.flac'; Url='https://opengameart.org/sites/default/files/safe_space_loop.flac'; Min=100000 },
+            # Supplemental CC0 mood tracks; unavailable sources are skipped.
+            @{ Rel='music\emotional\Aftermath.mp3'; Url='https://opengameart.org/sites/default/files/Aftermath.mp3'; Min=50000 },
+            @{ Rel='music\fantasy\hero_reprise.ogg'; Url='https://opengameart.org/sites/default/files/hero_reprise.ogg'; Min=50000 },
+            @{ Rel='music\sci-fi\subspace.mp3'; Url='https://opengameart.org/sites/default/files/subspace.mp3'; Min=100000 },
+            @{ Rel='music\sci-fi\subspace_loop.mp3'; Url='https://opengameart.org/sites/default/files/subspace_loop.mp3'; Min=100000 },
+            @{ Rel='music\horror\Sector.mp3'; Url='https://opengameart.org/sites/default/files/sector.mp3'; AltUrls=@('https://opengameart.org/sites/default/files/Sector.mp3','https://lpc.opengameart.org/sites/default/files/sector.mp3','https://lpc.opengameart.org/sites/default/files/Sector.mp3'); Min=30000 },
+            @{ Rel='music\mystery\Airy.mp3'; Url='https://opengameart.org/sites/default/files/airy.mp3'; AltUrls=@('https://opengameart.org/sites/default/files/Airy.mp3','https://lpc.opengameart.org/sites/default/files/airy.mp3','https://lpc.opengameart.org/sites/default/files/Airy.mp3'); Min=30000 },
+            @{ Rel='music\sci-fi\Pulse.mp3'; Url='https://opengameart.org/sites/default/files/pulse.mp3'; AltUrls=@('https://opengameart.org/sites/default/files/Pulse.mp3','https://lpc.opengameart.org/sites/default/files/pulse.mp3','https://lpc.opengameart.org/sites/default/files/Pulse.mp3'); Min=30000 },
+            @{ Rel='music\action\Urgent.mp3'; Url='https://opengameart.org/sites/default/files/urgent.mp3'; AltUrls=@('https://opengameart.org/sites/default/files/Urgent.mp3','https://lpc.opengameart.org/sites/default/files/urgent.mp3','https://lpc.opengameart.org/sites/default/files/Urgent.mp3'); Min=30000 },
+            @{ Rel='music\adventure\01_-_it_is_dangerous_to_be_lonely_without_a_sword.ogg'; Url='https://opengameart.org/sites/default/files/01_-_it_is_dangerous_to_be_lonely_without_a_sword.ogg'; Min=30000 }
+          )
+          foreach ($item in $musicItems) {
+            $target = Join-Path $starterRoot $item.Rel
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+            $candidateUrls = @($item.Url)
+            if ($item.ContainsKey('AltUrls')) { $candidateUrls += @($item.AltUrls) }
+            $downloaded = $false
+            foreach ($candidateUrl in $candidateUrls) {
+              try {
+                Write-Host "Trying starter track '$($item.Rel)' from $candidateUrl (45-second cap)."
+                curl.exe --connect-timeout 10 --max-time 45 -L --fail --retry 0 --silent --show-error -A 'RyuAudiobookStarterAudio/1.0' -o $target $candidateUrl
+                if ($LASTEXITCODE -ne 0) { throw "Download exit code $LASTEXITCODE from $candidateUrl" }
+                if (-not (Test-Path $target) -or (Get-Item $target).Length -lt $item.Min) {
+                  throw "File is missing or below minimum size from $candidateUrl"
+                }
+                Write-Host "Starter track ready: $($item.Rel) ($candidateUrl)"
+                $downloaded = $true
+                break
+              }
+              catch {
+                Write-Warning "Track source failed for $($item.Rel) at $candidateUrl : $($_.Exception.Message)"
+                Remove-Item -Force -ErrorAction SilentlyContinue $target
+              }
+            }
+            if (-not $downloaded) {
+              Write-Warning "Skipping unavailable supplemental starter track: $($item.Rel)"
+            }
+          }
+          $bundledMusic = @(Get-ChildItem (Join-Path $starterRoot 'music') -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Extension.ToLowerInvariant() -in @('.mp3','.ogg','.flac') })
+          if ($bundledMusic.Count -lt 14) { throw "Expected at least 14 real starter BGM tracks; found $($bundledMusic.Count)." }
+          $musicCategories = @(Get-ChildItem (Join-Path $starterRoot 'music') -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+          Write-Host "Downloaded $($bundledMusic.Count) real starter BGM tracks across categories: $($musicCategories -join ', ')."
+
+          Write-Host '=== Download physical-book sound-effect starter cues ==='
+          function Get-FreesoundPreview {
+            param([string]$PageUrl,[string]$Destination)
+            try {
+              $response = Invoke-WebRequest -Uri $PageUrl -UseBasicParsing -TimeoutSec 45 -Headers @{ 'User-Agent'='Mozilla/5.0 Ryu-Audiobook-asset-builder/1.0' }
+              $html = [System.Net.WebUtility]::HtmlDecode($response.Content).Replace('\/','/')
+              $found = [regex]::Matches($html, '(?:(?:https?:)?//(?:cdn\.)?freesound\.org)?/(?:data/)?previews/\d+/\d+_\d+-(?:hq|lq)\.mp3(?:\?[^"''\s]*)?')
+              if ($found.Count -eq 0) { Write-Warning "No public preview URL found on $PageUrl."; return $false }
+              $urls = @($found | ForEach-Object { $_.Value } | Select-Object -Unique)
+              $url = $urls | Where-Object { $_ -match '-hq\.mp3' } | Select-Object -First 1
+              if (-not $url) { $url = $urls | Select-Object -First 1 }
+              if ($url.StartsWith('//')) { $url = 'https:' + $url }
+              elseif ($url.StartsWith('/')) { $url = 'https://cdn.freesound.org' + $url }
+              New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Destination) | Out-Null
+              Write-Host "Downloading preview for $PageUrl (60-second cap)."
+              curl.exe --connect-timeout 10 --max-time 60 -L --fail --retry 1 --silent --show-error -A 'Mozilla/5.0 Ryu-Audiobook-asset-builder/1.0' -o $Destination $url
+              if ($LASTEXITCODE -ne 0 -or -not (Test-Path $Destination) -or (Get-Item $Destination).Length -lt 5000) {
+                Remove-Item -Force -ErrorAction SilentlyContinue $Destination
+                Write-Warning "Could not download preview for $PageUrl."
+                return $false
+              }
+              Write-Host "Downloaded CC0 public preview from $PageUrl"; return $true
+            }
+            catch { Write-Warning "Could not obtain public preview for $PageUrl : $($_.Exception.Message)"; return $false }
+          }
+          $tmpCueRoot = Join-Path $env:RUNNER_TEMP 'ryu-starter-cues'
+          New-Item -ItemType Directory -Force -Path $tmpCueRoot | Out-Null
+          $ffmpeg = & $pythonExe -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
+          $bookHandling = Join-Path $tmpCueRoot 'book-manipulations-preview.mp3'
+          if (Get-FreesoundPreview 'https://freesound.org/people/timothyd4y/sounds/478743/' $bookHandling) {
+            $openingOut = Join-Path $starterRoot 'cues\opening\book-opening.wav'
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $openingOut) | Out-Null
+            & $ffmpeg -y -i $bookHandling -t 2.8 -af 'afade=t=in:st=0:d=0.06,afade=t=out:st=2.35:d=0.4' -ac 2 -ar 44100 $openingOut
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $openingOut) -or (Get-Item $openingOut).Length -lt 5000) { Remove-Item -Force -ErrorAction SilentlyContinue $openingOut }
+            $endingOut = Join-Path $starterRoot 'cues\ending\book-closing-alt.wav'
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $endingOut) | Out-Null
+            & $ffmpeg -y -sseof -3.0 -i $bookHandling -t 2.7 -af 'afade=t=in:st=0:d=0.08,afade=t=out:st=2.2:d=0.4' -ac 2 -ar 44100 $endingOut
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $endingOut) -or (Get-Item $endingOut).Length -lt 5000) { Remove-Item -Force -ErrorAction SilentlyContinue $endingOut }
+          }
+          $pageTurnRaw = Join-Path $tmpCueRoot 'page-turn-preview.mp3'
+          if (Get-FreesoundPreview 'https://freesound.org/people/qubodup/sounds/442857/' $pageTurnRaw) {
+            $pageTurnOut = Join-Path $starterRoot 'cues\page\page-turn.mp3'
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $pageTurnOut) | Out-Null
+            Copy-Item -Force $pageTurnRaw $pageTurnOut
+          }
+          $pageSequenceRaw = Join-Path $tmpCueRoot 'page-turn-sequence.mp3'
+          if (Get-FreesoundPreview 'https://freesound.org/people/Bratok999/sounds/173563/' $pageSequenceRaw) {
+            foreach ($sample in @(@{Name='soft-page-turn.wav';Start='0.5';Duration='0.8'},@{Name='firm-page-turn.wav';Start='4.0';Duration='0.9'})) {
+              $sampleOut = Join-Path (Join-Path $starterRoot 'cues\page') $sample.Name
+              New-Item -ItemType Directory -Force -Path (Split-Path -Parent $sampleOut) | Out-Null
+              & $ffmpeg -y -ss $sample.Start -i $pageSequenceRaw -t $sample.Duration -af 'afade=t=in:st=0:d=0.04,afade=t=out:st=0.55:d=0.25' -ac 2 -ar 44100 $sampleOut
+              if ($LASTEXITCODE -ne 0 -or -not (Test-Path $sampleOut) -or (Get-Item $sampleOut).Length -lt 3000) { Remove-Item -Force -ErrorAction SilentlyContinue $sampleOut }
+            }
+          }
+          $bookClose = Join-Path $tmpCueRoot 'book-closing-preview.mp3'
+          if (Get-FreesoundPreview 'https://freesound.org/people/nekomimi07/sounds/410988/' $bookClose) {
+            $closeOut = Join-Path $starterRoot 'cues\ending\book-closing.mp3'
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $closeOut) | Out-Null
+            Copy-Item -Force $bookClose $closeOut
+          }
+
+          # Real page-turn variations were downloaded above from CC0 FreeSound sources.
+          foreach ($kind in @('opening','page','ending')) {
+            $folder = Join-Path $starterRoot ("cues\" + $kind)
+            $count = @(Get-ChildItem $folder -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension.ToLowerInvariant() -in @('.wav','.mp3','.ogg','.flac') }).Count
+            if ($count -lt 1) { throw "Starter pack is missing a real $kind sound cue." }
+          }
+          Write-Host 'Physical book opening, page-turn and closing cues are ready.'
+
+          Write-Host '=== Finalize manifest to include only downloaded audio files ==='
+          $manifestPath = Join-Path $starterRoot 'manifest.json'
+          $starterManifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $availableEntries = @()
+          foreach ($entry in $starterManifest.tracks) {
+            $relative = ([string]$entry.bundle_path).Replace('/', '\')
+            $assetPath = Join-Path $starterRoot $relative
+            if (Test-Path $assetPath -PathType Leaf) {
+              $availableEntries += $entry
+            }
+            else {
+              Write-Host "Excluding unavailable audio from packaged manifest: $relative"
+            }
+          }
+          $starterManifest.tracks = @($availableEntries)
+          $manifestJson = ConvertTo-Json -InputObject $starterManifest -Depth 20
+          [System.IO.File]::WriteAllText(
+            $manifestPath,
+            $manifestJson + [Environment]::NewLine,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+          $packagedMusicCount = @($starterManifest.tracks | Where-Object { $_.type -eq 'music' }).Count
+          $packagedCueCount = @($starterManifest.tracks | Where-Object { $_.type -eq 'cue' }).Count
+          Write-Host "Packaged audio manifest finalized: $packagedMusicCount real BGM tracks and $packagedCueCount real book cues."
+
+
           Write-Host '=== Verify application version ==='
           $env:PYTHONPATH = (Get-Location).Path
           $version = & $pythonExe -c "from app.version import full_version; print(full_version())"
-          $expected = 'v0.3.7'
+          $semanticVersion = & $pythonExe -c "from app.version import APP_VERSION; print(APP_VERSION)"
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($semanticVersion)) { throw "Could not determine APP_VERSION from the validated source." }
+          $expected = "v$semanticVersion"
           if (-not $version.StartsWith($expected) -or -not $version.EndsWith("Build $env:RYU_BUILD_NUMBER")) { throw "Unexpected application version: $version" }
           Write-Host "Application version verified: $version"
+          "RYU_APP_VERSION=$semanticVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
           Write-Host '=== Build Windows application ==='
           & $pythonExe build.py
+          if ($LASTEXITCODE -ne 0) { throw "Windows application build failed with exit code $LASTEXITCODE." }
 
           Write-Host '=== Live Audiobook AI + application integration smoke ==='
           $aiRoot = Join-Path $env:RUNNER_TEMP 'ryu-ai-smoke'
@@ -125,13 +392,15 @@ jobs:
           $llamaZip = Join-Path $aiRoot 'llama.zip'
           if (-not (Test-Path $aiBin)) {
             New-Item -ItemType Directory -Force -Path $aiBin | Out-Null
-            curl.exe -L --fail --retry 3 -o $llamaZip 'https://github.com/ggml-org/llama.cpp/releases/download/b11193/llama-b11193-bin-win-cpu-x64.zip'
+            Write-Host 'Downloading llama.cpp CPU runtime (maximum 300 seconds).'
+            curl.exe --connect-timeout 15 --max-time 300 -L --fail --retry 2 -o $llamaZip 'https://github.com/ggml-org/llama.cpp/releases/download/b11193/llama-b11193-bin-win-cpu-x64.zip'
             Expand-Archive -Force $llamaZip $aiBin
           }
           $server = Get-ChildItem $aiBin -Recurse -Filter 'llama-server.exe' | Select-Object -First 1
           if (-not $server) { throw 'llama-server.exe was not found.' }
           if (-not (Test-Path $aiModel)) {
-            curl.exe -L --fail --retry 3 -o "$aiModel.part" 'https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/ef4088322893040952513f532f736ddeab518403/Qwen3-0.6B-Q5_K_M.gguf?download=true'
+            Write-Host 'Downloading Qwen3 GGUF model for the integration smoke test (maximum 900 seconds).'
+            curl.exe --connect-timeout 20 --max-time 900 -L --fail --retry 2 -o "$aiModel.part" 'https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/ef4088322893040952513f532f736ddeab518403/Qwen3-0.6B-Q5_K_M.gguf?download=true'
             Move-Item -Force "$aiModel.part" $aiModel
           }
           $stdoutLog = Join-Path $aiRoot 'llama.stdout.log'
@@ -200,7 +469,8 @@ jobs:
           $target = Join-Path $root 'python312'
           $venv = Join-Path $root 'runtime'
           New-Item -ItemType Directory -Force -Path $root | Out-Null
-          curl.exe -L --fail --retry 3 -o $installer 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe'
+          Write-Host 'Downloading Python 3.12.10 bootstrap installer (maximum 240 seconds).'
+          curl.exe --connect-timeout 15 --max-time 240 -L --fail --retry 2 -o $installer 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe'
           $arguments = @('/quiet','/passive','InstallAllUsers=0','Include_launcher=0','Include_test=0','PrependPath=0','Shortcuts=0',"TargetDir=$target")
           $process = Start-Process -FilePath $installer -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
           if ($process.ExitCode -notin @(0,3010)) { throw "Private Python installer failed with exit code $($process.ExitCode)." }
@@ -211,8 +481,16 @@ jobs:
           $venvPython = Join-Path $venv 'Scripts\python.exe'
           if (-not (Test-Path $venvPython)) { throw 'Private Qwen venv was not created.' }
           & $venvPython -m pip --version
-          & $venvPython -m pip install --no-deps qwen-tts==0.1.1
+          & $venvPython -m pip install --disable-pip-version-check --timeout 60 --retries 2 --no-deps qwen-tts==0.1.1
           & $venvPython -c "import importlib.metadata as md; assert md.version('qwen-tts') == '0.1.1'; print('qwen_tts wheel bootstrap OK')"
+          # Install the release logo validator's dependency in the durable private interpreter.
+          # Do not rely on actions/setup-python's toolcache after the later installer steps.
+          & $privatePython -m pip install --disable-pip-version-check --timeout 60 --retries 2 'Pillow>=11,<13'
+          if ($LASTEXITCODE -ne 0) { throw "Private Python Pillow installation failed with exit code $LASTEXITCODE." }
+          $pillowProbe = & $privatePython -B -c "from PIL import Image; print('Private release Pillow=' + Image.__version__)" 2>&1
+          $pillowProbeExitCode = $LASTEXITCODE
+          $pillowProbe | Write-Host
+          if ($pillowProbeExitCode -ne 0) { throw "Private Python cannot import Pillow (exit $pillowProbeExitCode): $($pillowProbe -join ' ')" }
 
       - name: Verify frozen application
         shell: pwsh
@@ -222,7 +500,10 @@ jobs:
           if (-not (Test-Path $exe)) { throw "Frozen EXE not found: $exe" }
           $info = (Get-Item $exe).VersionInfo
           Write-Host "EXE FileVersion=$($info.FileVersion) ProductVersion=$($info.ProductVersion)"
-          if (-not $info.ProductVersion.StartsWith('0.3.7.')) { throw "Unexpected frozen EXE product version: $($info.ProductVersion)" }
+          $semanticVersion = $env:RYU_APP_VERSION
+          if ([string]::IsNullOrWhiteSpace($semanticVersion)) { throw "Application version was not exported by the validated build step." }
+          $expectedProductVersionPrefix = "$semanticVersion."
+          if (-not $info.ProductVersion.StartsWith($expectedProductVersionPrefix)) { throw "Expected frozen EXE product version to start with $expectedProductVersionPrefix but got $($info.ProductVersion)" }
 
           $marker = Join-Path $env:TEMP "RyuAudiobookFrozenSelfTest-$env:GITHUB_RUN_ID.ok"
           Remove-Item -Force $marker -ErrorAction SilentlyContinue
@@ -237,13 +518,68 @@ jobs:
           Remove-Item -Force $marker -ErrorAction SilentlyContinue
           Write-Host 'Frozen EXE offline synthesis self-test PASSED.'
 
-          $proc = Start-Process -FilePath $exe -PassThru
-          try {
-            Start-Sleep -Seconds 12
-            if ($proc.HasExited) { throw "Frozen EXE exited during startup smoke with code $($proc.ExitCode)." }
-            Write-Host 'Frozen EXE startup smoke PASSED.'
-          } finally {
-            if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          for ($launchAttempt = 1; $launchAttempt -le 3; $launchAttempt++) {
+            $marker = Join-Path $env:TEMP "RyuAudiobookStartupSmoke-$env:GITHUB_RUN_ID-$launchAttempt.json"
+            Remove-Item -Force $marker -ErrorAction SilentlyContinue
+            Remove-Item Env:RYU_STARTUP_SMOKE_MARKER -ErrorAction SilentlyContinue
+            $env:RYU_STARTUP_SMOKE_MARKER = $marker
+            $proc = $null
+            $ready = $false
+            $startup = $null
+            try {
+              # Test the packaged default: do not force a UI mode via the environment.
+              Remove-Item Env:RYU_UI_MODE -ErrorAction SilentlyContinue
+              $proc = Start-Process -FilePath $exe -PassThru
+              $deadline = (Get-Date).AddSeconds(90)
+              while ((Get-Date) -lt $deadline) {
+                $proc.Refresh()
+                if ($proc.HasExited) {
+                  throw "Frozen EXE exited before Premium V2 became ready on launch $launchAttempt/3 (exit code $($proc.ExitCode))."
+                }
+                if (Test-Path -LiteralPath $marker -PathType Leaf) {
+                  try {
+                    $startup = Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json
+                  } catch {
+                    throw "Premium V2 startup smoke marker for launch $launchAttempt/3 could not be parsed: $($_.Exception.Message)"
+                  }
+                  if ($startup.status -eq 'failed') {
+                    throw "The Premium V2 startup smoke reported failure on launch $launchAttempt/3: $($startup.detail)"
+                  }
+                  if ($startup.status -eq 'ready') {
+                    if ($startup.frontend -ne 'Premium V2') {
+                      throw "Startup marker for launch $launchAttempt/3 reported the wrong interface: $($startup.frontend)"
+                    }
+                    if ([string]::IsNullOrWhiteSpace([string]$startup.version)) {
+                      throw "Startup marker for launch $launchAttempt/3 is missing version/build metadata."
+                    }
+                    $expectedBuild = [string]$env:GITHUB_RUN_NUMBER
+                    if ($startup.version -notmatch ("\bBuild\s+" + [regex]::Escape($expectedBuild) + "\b")) {
+                      throw "Startup marker for launch $launchAttempt/3 reported an unexpected build number. Expected build number $expectedBuild; actual metadata: '$($startup.version)'."
+                    }
+                    $ready = $true
+                    Write-Host "Premium V2 startup readiness PASSED for launch $launchAttempt/3. Version=$($startup.version)"
+                    break
+                  }
+                }
+                Start-Sleep -Milliseconds 500
+              }
+              if (-not $ready) {
+                $detail = if (Test-Path -LiteralPath $marker -PathType Leaf) {
+                  Get-Content -LiteralPath $marker -Raw
+                } else {
+                  'No startup-ready marker was written by the running application.'
+                }
+                throw "The Premium V2 startup smoke did not reach Premium V2 readiness on launch $launchAttempt/3 within 90 seconds. $detail"
+              }
+            } finally {
+              if ($null -ne $proc) {
+                $proc.Refresh()
+                if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+              }
+              Remove-Item -Force $marker -ErrorAction SilentlyContinue
+              Remove-Item Env:RYU_STARTUP_SMOKE_MARKER -ErrorAction SilentlyContinue
+              Remove-Item Env:RYU_UI_MODE -ErrorAction SilentlyContinue
+            }
           }
 
       - name: Verify bundled voice assets and critical modules
@@ -278,7 +614,42 @@ jobs:
             throw 'Frozen package has no Kokoro voice pack.'
           }
           Write-Host "Bundled offline assets verified: Piper=$($piperModels.Count), Kokoro=$kokoroVoices"
+          $starterCandidates = @(
+            (Join-Path $exeDir 'assets\starter_audio'),
+            (Join-Path $exeDir '_internal\assets\starter_audio')
+          )
+          $starterRoot = $starterCandidates | Where-Object { Test-Path (Join-Path $_ 'manifest.json') } | Select-Object -First 1
+          if (-not $starterRoot) { throw 'Frozen EXE package has no starter-audio manifest.' }
+          $starterMusic = @(Get-ChildItem (Join-Path $starterRoot 'music') -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension.ToLowerInvariant() -in @('.mp3','.ogg','.flac') })
+          if ($starterMusic.Count -lt 14) { throw "Frozen package has fewer than 14 real starter BGM tracks; found $($starterMusic.Count)." }
+          foreach ($kind in @('opening','page','ending')) {
+            $cueFolder = Join-Path (Join-Path $starterRoot 'cues') $kind
+            $cueFiles = @(Get-ChildItem $cueFolder -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension.ToLowerInvariant() -in @('.wav','.mp3','.ogg','.flac') })
+            if ($cueFiles.Count -lt 1) { throw "Frozen package has no $kind book-cue audio." }
+          }
+          Write-Host "Bundled real starter audio verified: BGM=$($starterMusic.Count), with opening/page-turn/closing cue categories."
           Write-Host 'Critical application modules were already exercised by the frozen EXE self-test.'
+
+      - name: Run packaged Sound Design Music Library acceptance (including Stage 5.3 generation UI)
+        timeout-minutes: 20
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $privatePython = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap\python312\python.exe'
+          $pythonExe = $privatePython
+          if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            $pythonExe = $env:RYU_CI_PYTHON_EXE
+          }
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "Neither the durable private Python nor the setup-python interpreter is available for packaged Sound Design acceptance. Private=$privatePython; CI=$($env:RYU_CI_PYTHON_EXE)"
+          }
+          Write-Host "Using durable acceptance Python: $pythonExe"
+          & $pythonExe -c "import sys, winreg; print('Acceptance Python=' + sys.executable); print(sys.version)"
+          if ($LASTEXITCODE -ne 0) { throw "The selected acceptance Python could not import its Windows registry module (exit $LASTEXITCODE)." }
+          $env:PYTHONPATH = (Get-Location).Path
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -B 'tests\packaged_sound_ui_acceptance.py' --exe "dist\Ryu's Audiobook\Ryu's Audiobook.exe" --script 'tests\stage2_packaged_sound_ui_acceptance.js'
+          if ($LASTEXITCODE -ne 0) { throw "Packaged Sound Design Music Library acceptance failed with exit code $LASTEXITCODE." }
 
       - name: Install Inno Setup
         shell: pwsh
@@ -286,7 +657,7 @@ jobs:
           choco install innosetup -y --no-progress
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed with exit code $LASTEXITCODE." }
 
-      - name: Build installer
+      - name: Build core installer payload
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -298,20 +669,212 @@ jobs:
           if (-not $isccPath) { throw 'ISCC.exe was not found after Inno Setup installation.' }
           Write-Host "Using Inno Setup compiler: $isccPath"
           & $isccPath 'installer\RyuAudiobook.iss'
-          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed with exit code $LASTEXITCODE." }
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup core compilation failed with exit code $LASTEXITCODE." }
+          $coreInstaller = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Core Setup.exe"
+          if (-not (Test-Path $coreInstaller)) { throw "Core installer was not produced: $coreInstaller" }
+
+      - name: Restore Python for HTML installer packaging
+        id: html_python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build functional HTML installer
+        shell: pwsh
+        env:
+          HTML_PYTHON: ${{ steps.html_python.outputs.python-path }}
+        run: |
+          # Re-select Python after the long core-setup compile. Prefer the
+          # freshly restored setup-python interpreter, then use the private
+          # Python runtime already installed and smoke-tested earlier in this job.
+          $pythonExe = $env:HTML_PYTHON
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            $privatePython = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap\python312\python.exe'
+            if (Test-Path -LiteralPath $privatePython -PathType Leaf) {
+              $pythonExe = $privatePython
+              Write-Host "Using verified private Python fallback: $pythonExe"
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            $pathCandidate = (Get-Command python.exe -ErrorAction SilentlyContinue).Source
+            if (-not [string]::IsNullOrWhiteSpace($pathCandidate) -and $pathCandidate -notlike '*WindowsApps*' -and (Test-Path -LiteralPath $pathCandidate -PathType Leaf)) {
+              $pythonExe = $pathCandidate
+            }
+          }
+          if ([string]::IsNullOrWhiteSpace($pythonExe) -or $pythonExe -like '*WindowsApps*' -or -not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "No usable Python interpreter for HTML packaging. setup-python=$($env:HTML_PYTHON); private fallback=$privatePython"
+          }
+          Write-Host "Using HTML-installer Python: $pythonExe"
+          & $pythonExe -m pip --version
+          if ($LASTEXITCODE -ne 0) {
+            & $pythonExe -m ensurepip --upgrade
+            if ($LASTEXITCODE -ne 0) { throw "Could not bootstrap pip for HTML installer Python (exit $LASTEXITCODE)." }
+          }
+          $env:PYTHONPATH = (Get-Location).Path
+          $env:PYTHONDONTWRITEBYTECODE = '1'
+          & $pythonExe -m pip install --disable-pip-version-check --timeout 60 --retries 2 PyInstaller PySide6
+          if ($LASTEXITCODE -ne 0) { throw "HTML installer build dependencies failed to install (exit $LASTEXITCODE)." }
+          Write-Host '=== Package functional HTML setup interface ==='
+          & $pythonExe -B 'installer\build_html_installer.py'
+          if ($LASTEXITCODE -ne 0) { throw "HTML installer packaging failed with exit code $LASTEXITCODE." }
           $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
-          if (-not (Test-Path $installer)) { throw "Installer was not produced: $installer" }
-          Write-Host "Installer created: $installer"
+          if (-not (Test-Path $installer)) { throw "HTML installer frontend was not produced: $installer" }
+          Write-Host "Functional HTML installer created: $installer"
+
+      - name: Verify original logo transparency and generate release hashes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $masterLogo = Join-Path (Get-Location) 'assets\ryu_audiobook_logo_master.png'
+          $png = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.png'
+          $ico = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.ico'
+          $logoBmp = Join-Path (Get-Location) 'assets\ryu_audiobook_logo.bmp'
+          $panel = Join-Path (Get-Location) 'assets\installer_brand_panel.png'
+          $panelBmp = Join-Path (Get-Location) 'assets\installer_brand_panel.bmp'
+          $coreInstaller = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Core Setup.exe"
+          $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
+          $exe = Join-Path (Get-Location) "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
+          foreach ($path in @($masterLogo, $png, $ico, $logoBmp, $panel, $panelBmp, $coreInstaller, $installer, $exe)) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required release asset missing: $path" }
+          }
+
+          # Use the standalone private interpreter installed and verified during bootstrap.
+          # Never fall back to Get-Command python.exe: on Windows that may resolve to
+          # the Microsoft Store execution alias (exit code 9009) after toolcache changes.
+          $pythonExe = Join-Path $env:RUNNER_TEMP 'ryu-qwen-python-bootstrap\python312\python.exe'
+          if (-not (Test-Path -LiteralPath $pythonExe -PathType Leaf)) {
+            throw "Verified private Python for release logo validation is missing: $pythonExe"
+          }
+          $probeOutput = & $pythonExe -B -c "import sys; from PIL import Image; print('Release validator Python=' + sys.executable); print('Pillow=' + Image.__version__)" 2>&1
+          $probeExitCode = $LASTEXITCODE
+          $probeOutput | Write-Host
+          if ($probeExitCode -ne 0) {
+            throw "Verified private Python cannot import Pillow (exit $probeExitCode): $($probeOutput -join ' ')"
+          }
+          $logoValidationScript = @'
+          from pathlib import Path
+          import sys
+          from PIL import Image
+
+          master_path, png_path, logo_bmp_path, panel_bmp_path = map(Path, sys.argv[1:5])
+
+          def transparent_corners(image, label):
+              rgba = image.convert("RGBA")
+              corners = (
+                  rgba.getpixel((0, 0))[3],
+                  rgba.getpixel((rgba.width - 1, 0))[3],
+                  rgba.getpixel((0, rgba.height - 1))[3],
+                  rgba.getpixel((rgba.width - 1, rgba.height - 1))[3],
+              )
+              if any(alpha != 0 for alpha in corners):
+                  raise SystemExit(f"{label} must keep all four canvas corners fully transparent; alpha={corners}")
+
+          with Image.open(master_path) as master:
+              transparent_corners(master, "Approved master logo")
+
+          with Image.open(png_path) as opened:
+              rgba = opened.convert("RGBA")
+              width, height = rgba.size
+              alpha_counts = rgba.getchannel("A").histogram()
+              transparent = int(alpha_counts[0])
+              non_transparent = int(sum(alpha_counts[1:]))
+              total = int(width) * int(height)
+              if width < 1200 or height < 1200 or transparent < 1 or non_transparent < total * 0.1:
+                  raise SystemExit(
+                      f"Logo alpha/content/resolution check failed: dimensions={width}x{height}, "
+                      f"transparent={transparent}, nonTransparent={non_transparent}"
+                  )
+              transparent_corners(rgba, "Application logo PNG")
+              print(f"Logo resolution and transparency verified: {width}x{height}, transparent pixels={transparent}.")
+
+          for path, label in (
+              (logo_bmp_path, "Installer logo BMP"),
+              (panel_bmp_path, "Installer panel BMP"),
+          ):
+              with Image.open(path) as opened:
+                  corner = opened.convert("RGB").getpixel((0, 0))
+                  if corner != (5, 6, 10):
+                      raise SystemExit(f"{label} has the wrong matte: {corner[0]}, {corner[1]}, {corner[2]}")
+              print(f"{label} matte verified: RGB(5, 6, 10).")
+          '@
+          & $pythonExe -B -c $logoValidationScript $masterLogo $png $logoBmp $panelBmp
+          if ($LASTEXITCODE -ne 0) { throw "Logo transparency/matte validation failed with exit code $LASTEXITCODE." }
+          if ((Get-Item -LiteralPath $ico).Length -lt 1024) { throw 'Generated Windows ICO is unexpectedly small.' }
+          Write-Host "Generated Windows ICO exists and is non-trivial in size: $((Get-Item -LiteralPath $ico).Length) bytes."
+          $manifest = @()
+          foreach ($path in @($installer, $coreInstaller, $exe, $masterLogo, $png, $ico, $logoBmp, $panel, $panelBmp)) {
+            $hash = Get-FileHash -LiteralPath $path -Algorithm SHA256
+            $manifest += [pscustomobject]@{
+              file = [System.IO.Path]::GetRelativePath((Get-Location).Path, $path)
+              size_bytes = (Get-Item -LiteralPath $path).Length
+              sha256 = $hash.Hash.ToLowerInvariant()
+            }
+            Write-Host "SHA256 $($hash.Hash)  $path"
+          }
+          $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath 'release-sha256-manifest.json' -Encoding utf8
+          if (-not (Test-Path -LiteralPath 'release-sha256-manifest.json' -PathType Leaf)) { throw 'Release SHA-256 manifest was not created.' }
+
+      - name: Scan release executables with Microsoft Defender
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path (Get-Location) "dist\Ryu's Audiobook\Ryu's Audiobook.exe"
+          $installer = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Setup.exe"
+          $coreInstaller = Join-Path (Get-Location) "installer\installer-output\Ryu's Audiobook Core Setup.exe"
+          foreach ($path in @($exe, $installer, $coreInstaller)) {
+            if (-not (Test-Path $path)) { throw "Release executable missing for security scan: $path" }
+          }
+          $status = Get-MpComputerStatus -ErrorAction Stop
+          if (-not $status.AntivirusEnabled -or -not $status.AMServiceEnabled) {
+            throw 'Microsoft Defender Antivirus is not active on the build runner; refusing to publish unscanned executables.'
+          }
+          $mp = Join-Path $env:ProgramFiles 'Windows Defender\MpCmdRun.exe'
+          if (-not (Test-Path $mp)) {
+            $mp = Get-ChildItem "$env:ProgramData\Microsoft\Windows Defender\Platform\*\MpCmdRun.exe" -ErrorAction SilentlyContinue |
+              Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $mp -or -not (Test-Path $mp)) { throw 'Microsoft Defender command-line scanner was not found.' }
+          foreach ($path in @($exe, $installer, $coreInstaller)) {
+            Write-Host "Microsoft Defender custom scan: $path"
+            $scanOutput = @(& $mp -Scan -ScanType 3 -File $path -DisableRemediation 2>&1)
+            $scanExit = $LASTEXITCODE
+            $scanOutput | ForEach-Object { Write-Host $_ }
+            $scanText = $scanOutput -join "`n"
+            if ($scanExit -ne 0 -or $scanText -match '(?i)\bwas skipped\b|\bscan skipped\b') {
+              throw "Microsoft Defender did not complete a verifiable clean scan for '$path' (exit code $scanExit). Output: $scanText. No release artifacts will be uploaded."
+            }
+            if ($scanText -notmatch '(?i)scan finished|scan completed|no threats? found|no threats? detected') {
+              throw "Microsoft Defender did not provide a recognized completed-scan result for '$path'. Output: $scanText. No release artifacts will be uploaded."
+            }
+          }
+          Write-Host 'Microsoft Defender completed both release executable scans without reporting a detection.'
 
       - name: Upload Windows installer artifact
+        id: upload_installer
         uses: actions/upload-artifact@v4
         with:
-          name: Ryu-Audiobook-Windows-${{ github.run_number }}
-          path: |
-            installer/installer-output/Ryu's Audiobook Setup.exe
-            dist/Ryu's Audiobook/Ryu's Audiobook.exe
+          name: Ryu-Audiobook-Installer-${{ github.run_number }}
+          path: installer/installer-output/Ryu's Audiobook Setup.exe
           if-no-files-found: error
-          retention-days: 90
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload release SHA-256 manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Audiobook-Release-SHA256-${{ github.run_number }}
+          path: release-sha256-manifest.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload portable Windows application
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ryu-Audiobook-Portable-${{ github.run_number }}
+          path: dist/Ryu's Audiobook/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
 
       - name: Publish verified installer release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -319,5 +882,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "v0.3.7-build-${{ github.run_number }}"
-          gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, the Obsidian/Ember dragon-tech interface, cached frosted loading, smooth low-power progress and page transitions, a global Reduce Motion preference, 1,008 deterministic local BGM recipes, optional text-aware story sound effects, chapter transition cues, Qwen VoiceDesign preset isolation, Audiobook AI smoke validation, Chatterbox runtime validation, and installer verification. The BGM catalogue is recipe-generated locally; sound-effect placement is text-based and should be reviewed before publication." --target $env:GITHUB_SHA
+          $semanticVersion = $env:RYU_APP_VERSION
+          if ([string]::IsNullOrWhiteSpace($semanticVersion)) { throw "Application version was not exported by the validated build step for release tagging." }
+          $tag = "v$semanticVersion-build-${{ github.run_number }}"
+          gh release create $tag "installer/installer-output/Ryu's Audiobook Setup.exe" --title "Ryu's Audiobook $tag" --notes "Verified Windows build. Includes offline Piper + Kokoro voices, the Obsidian/Ember dragon-tech interface, global Reduce Motion preference, a local-first audio catalogue with 26 real starter BGM tracks across calm, fantasy, adventure, comedy, action, sci-fi, emotional, mystery, horror and slice-of-life moods, plus six real book opening/page-turn/closing sound cues. Add licensed tracks through Generate > Real BGM catalogue / Real audiobook cue files. Includes Qwen VoiceDesign preset isolation, audiobook AI smoke validation, Chatterbox runtime validation, frozen EXE checks and installer verification. Starter-track source and license notes are included beside the local audio library." --target $env:GITHUB_SHA

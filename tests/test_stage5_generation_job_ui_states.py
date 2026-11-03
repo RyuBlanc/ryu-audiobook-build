@@ -1,11 +1,11 @@
-"""Stage 5.3 UI-state contracts for generation controls in Background Jobs and Dashboard."""
+"""Stage 5.4 UI-state contracts for generation controls in Background Jobs and Dashboard."""
 from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class Stage53GenerationJobUiStateTests(unittest.TestCase):
+class Stage54GenerationJobUiStateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
@@ -18,11 +18,16 @@ class Stage53GenerationJobUiStateTests(unittest.TestCase):
         self.assertIn("state === 'running'", renderer)
         self.assertIn("state === 'pause_requested'", renderer)
         self.assertIn("state === 'paused'", renderer)
-        self.assertIn("Pausing at the next chapter boundary", renderer)
+        self.assertIn("Pausing at the next saved chunk/batch boundary", renderer)
+        self.assertIn("action(interrupted ? 'recover' : 'retry'", renderer)
+        self.assertIn("state === 'cancelled' && isGeneration", renderer)
         self.assertIn("Cancelling…", renderer)
         self.assertNotIn("['running','pause_requested'].includes(state) ? action('pause'", renderer)
         self.assertIn("backgroundGenerationJobActions(j, id, action, canControlGeneration, canCancelImport, canCancelPreview)", self.adapter)
-        for command in ("pause:'job.pause'", "resume:'job.resume'", "cancel:'job.cancel'"):
+        for command in (
+            "pause:'job.pause'", "resume:'job.resume'", "cancel:'job.cancel'",
+            "retry:'job.retry'", "recover:'job.recover'",
+        ):
             self.assertIn(command, self.adapter)
 
     def test_dashboard_control_keeps_stable_identity_and_pending_labels(self):

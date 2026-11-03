@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -570,6 +571,9 @@ class MetadataBridgeTests(unittest.TestCase):
                 _assert_no_active_model_lifecycle=Mock(),
                 _active_project=Mock(return_value=project),
                 _resolve_narrator_for_generation=Mock(return_value=(profile, {"source": "project_override"})),
+                _jobs_lock=threading.RLock(),
+                _jobs={},
+                _generators={},
             )
             with patch.object(host, "load_state", return_value={"background_audio_mode": "off", "language": "en"}):
                 with patch("app.audio.library.validate_saved_audio_paths"):
