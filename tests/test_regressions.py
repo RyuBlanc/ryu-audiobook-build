@@ -3333,8 +3333,12 @@ Rias Gremory
             root = Path(temp)
             completed_dir = root / "001_Chapter_1"
             completed_dir.mkdir(parents=True)
+            completed_chunks = completed_dir / "chunks"
+            completed_chunks.mkdir()
+            _write_wav(completed_chunks / "00001.wav", 0.05)
+            _write_wav(completed_chunks / "00002.wav", 0.05)
             (completed_dir / "generation.json").write_text(
-                '{"chunks_total": 2, "completed": [0, 1]}',
+                '{"chunks_total": 2, "completed": [0, 1], "generation_signature": "resume-inspector-fixture-v1"}',
                 encoding="utf-8",
             )
 
