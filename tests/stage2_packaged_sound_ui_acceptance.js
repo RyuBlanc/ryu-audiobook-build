@@ -1505,10 +1505,15 @@
     }, 360000);
     const productionPreviewResult = completedProductionPreview.result || {};
     const productionPreviewPath = String(productionPreviewResult.output_path || completedProductionPreview.output_path || "");
+    const productionPlaybackUrl = String(productionPreviewResult.file_url || "").toLowerCase();
+    const productionPlaybackPath = String(productionPreviewResult.playback_output_path || "");
     must(productionPreviewPath.toLowerCase().endsWith(".m4a") &&
       Number(productionPreviewResult.actual_duration_seconds || 0) > 0 &&
-      String(productionPreviewResult.file_url || "").toLowerCase().startsWith("file:"),
-      "Production Preview did not return a validated, measured AAC/M4A chapter file: " +
+      productionPlaybackUrl.startsWith("file:") &&
+      productionPlaybackUrl.endsWith(".wav") &&
+      productionPlaybackPath.toLowerCase().endsWith(".wav") &&
+      productionPreviewResult.playback_format === "wav",
+      "Production Preview must retain M4A for Save As and return its verified PCM WAV playback copy: " +
         JSON.stringify(productionPreviewResult));
     must(productionPreviewResult.sound_configuration?.background_audio_mode === "off" &&
       productionPreviewResult.sound_configuration?.fixed_cues_enabled === false,
