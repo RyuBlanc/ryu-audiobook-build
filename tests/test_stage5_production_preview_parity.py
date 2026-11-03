@@ -115,8 +115,9 @@ class ProductionPreviewOwnershipTests(unittest.TestCase):
             preview_root = root / "Previews"
             preview_root.mkdir()
             source = preview_root / "preview-job.m4a"
-            source.write_bytes(b"\\x00\\x00\\x00\\x18ftypM4A " + (b"test-audio" * 256))
+            source.write_bytes(b"\x00\x00\x00\x18ftypM4A " + (b"test-audio" * 256))
             destination = root / "saved" / "Chapter_02_Preview.m4a"
+            destination.parent.mkdir(parents=True, exist_ok=True)
             bridge = SimpleNamespace(
                 _jobs_lock=threading.RLock(),
                 _jobs={
