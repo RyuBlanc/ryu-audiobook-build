@@ -302,3 +302,15 @@ The Build Windows App workflow includes pushes to `stage-5/**`; commits with `[a
 The GitHub connector available in this session can fetch commit metadata, job details when a run ID is known, and PR-triggered commit runs, but does not expose the list of push-triggered workflow runs. Therefore the new candidate's Actions run number, job result, test count, installer/portable artifacts and artifact hashes must remain **PENDING** until they are visible in GitHub Actions or supplied by the user. No passing status is presumed.
 
 Installed Windows acceptance also remains pending: select each preview duration, generate real selected-chapter audio, listen to narrator/character voice, pronunciation and BGM/cue behavior, play/pause/stop/replay, save/download the preview, switch projects/chapters during generation, and confirm the full-book generation scope is unchanged. Do not close Step 5.2 or begin Step 5.3 until the exact-head automated/package checkpoint and required runtime acceptance are recorded.
+
+
+## 28. Step 5.2 final backend fail-closed correction — 3 November 2026
+
+Two further exact-scope safeguards were added after the first preview/parity candidate:
+
+- Commit `dba16d05349617d2eb4a45186dcc3feb0999b0d2`: `_production_preview` now discards caller-supplied `text`, transient `provider`/`voice_id`, projectless-preview allowance and pronunciation-bypass flags. It explicitly forces the selected saved chapter path, saved effective narrator, character-cast routing, effective saved pronunciation processing and native Sound Design renderer. The Sound Design renderer itself continues to apply the persisted master/mode/strategy; Voice Only therefore remains voice-only rather than bypassing the saved setting.
+- Commit `a31387d42a3fd4a3ab5be502b7d2ed947c9ddad5`: the regression now deliberately sends untrusted whole-book text and false character/pronunciation/sound flags, then asserts that Production Preview removes/overrides those values and uses the saved production inputs.
+
+This closes the backend loophole where a malformed or future UI request could accidentally preview caller-supplied text or skip a saved production setting. It also preserves the strict chapter-only synthesis requirement. Full suite and packaged Windows verification for this exact candidate remain pending.
+
+Implementation/test candidate before this ledger checkpoint: `a31387d42a3fd4a3ab5be502b7d2ed947c9ddad5`. The following ledger commit is the matching `[artifact-checkpoint]` push and should be treated as the exact workflow candidate once its SHA is confirmed. A green result, test count and artifacts must be recorded only after the Actions run is inspected.
