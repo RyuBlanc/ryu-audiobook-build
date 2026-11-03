@@ -5718,8 +5718,25 @@ class PremiumV2Bridge(QObject):
         bitrate = int(payload.get("bitrate") or state.get("audio_bitrate") or default_bitrate or 256)
         if not 128 <= bitrate <= 320:
             raise ValueError("Select a bitrate from 128 through 320 kbps.")
-        job_id = self._new_job("audiobook-generation", "Generate " + project.title,
-                               f"Render {len(chapters)} eligible chapter(s); skip {empty_skipped} empty and {excluded_skipped} excluded chapter(s)", project)
+        # Recheck under the same lock used to create the durable job row.
+        # Two concurrent Generate/Retry requests can both pass the early
+        # preflight check; only the first may claim this project's generation.
+        with self._jobs_lock:
+            active_for_project = [
+                row for row in getattr(self, "_jobs", {}).values()
+                if str(row.get("type") or "") == "audiobook-generation"
+                and str(row.get("project_folder") or "")
+                and Path(str(row.get("project_folder"))).expanduser().resolve() == project.folder.resolve()
+                and str(row.get("state") or "").casefold() in active_generation_states
+            ]
+            if active_for_project:
+                raise ValueError("This project already has an active audiobook generation job. Resume or cancel that job before starting another.")
+            job_id = self._new_job(
+                "audiobook-generation",
+                "Generate " + project.title,
+                f"Render {len(chapters)} eligible chapter(s); skip {empty_skipped} empty and {excluded_skipped} excluded chapter(s)",
+                project,
+            )
         # While a new generation is running, do not expose a prior file at the
         # same destination as the current audiobook. Keep the intended destination
         # separately; only publish output_path after the final file validates.
