@@ -50,6 +50,7 @@ class ProductionPreviewSavedNarratorTests(unittest.TestCase):
         self.assertEqual(result["profile_name"], saved_profile.name)
         self.assertEqual(captured["profile_name"], saved_profile.name)
         self.assertEqual(captured["chapter_number"], 3)
+        self.assertEqual(captured["chapter_id"], "chapter-stable-3")
         self.assertTrue(captured["_production_preview"])
         self.assertTrue(captured["include_sound_design"])
         self.assertTrue(captured["route_character_cast"])
@@ -57,6 +58,32 @@ class ProductionPreviewSavedNarratorTests(unittest.TestCase):
         self.assertNotIn("text", captured)
         self.assertNotIn("provider", captured)
         self.assertNotIn("voice_id", captured)
+
+
+    def test_production_preview_rejects_stale_chapter_id_before_synthesis(self):
+        chapter = SimpleNamespace(
+            number=2, title="Replacement Chapter", text="Replacement text.",
+            chapter_id="replacement-chapter-2",
+        )
+        project = SimpleNamespace(folder=Path("project-A"), chapters=[chapter])
+        called = []
+        bridge = SimpleNamespace(
+            _active_project=lambda: project,
+            _project_series_name=lambda _project, _state: "Series A",
+            _narrator_series_default_read=lambda _project, _state, _series: {
+                "effective_profile_name": "Saved narrator",
+                "profile_available": True,
+            },
+            _find_profile=lambda _name: SimpleNamespace(name="Saved narrator"),
+            _voice_preview=lambda _payload: called.append(True),
+        )
+        with patch.object(premium_v2_host, "load_state", return_value={}):
+            with self.assertRaisesRegex(ValueError, "identity changed before preview started"):
+                premium_v2_host.PremiumV2Bridge._production_preview(
+                    bridge,
+                    {"chapter_number": 2, "chapter_id": "deleted-chapter-2"},
+                )
+        self.assertEqual(called, [])
 
     def test_production_preview_fails_closed_when_saved_narrator_is_unavailable(self):
         chapter = SimpleNamespace(number=1, title="Opening", text="Saved text.", chapter_id="ch-1")
