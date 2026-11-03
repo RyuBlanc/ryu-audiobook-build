@@ -1397,7 +1397,13 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("_chapter_bgm_override_for(", host)
         self.assertIn("resolve_music_track(", host)
         self.assertIn("sound_configuration", host)
-        self.assertIn('project_getter = getattr(self, "_active_project", None)', host)
+        render_start = host.index("def _render_sound_design_preview(")
+        render_end = host.index("def _preview_worker(", render_start)
+        render_worker = host[render_start:render_end]
+        self.assertNotIn('project_getter = getattr(self, "_active_project", None)', render_worker)
+        self.assertIn('selected_index = int(state.get("_preview_chapter_index") or 1)', render_worker)
+        self.assertIn('state.get("_preview_chapter_is_first", selected_index == 1)', render_worker)
+        self.assertIn('state.get("_preview_chapter_is_last", selected_index == 1)', render_worker)
         self.assertIn('"cues_mixed": bool(cues_mixed)', host)
         self.assertIn("BGM mixed", adapter)
 
