@@ -30,12 +30,12 @@ point |
 | PROD-11 | P1 | Accurate music summary | VERIFIED — CI + PACKAGED ACCEPTANCE | Existing live Sound Design summary retained, including unique chapter-track aggregation | Exact-commit regression and runtime strategy checks |
 | PROD-12 | P1 | Accurate output summary | VERIFIED — CI + PACKAGED ACCEPTANCE | Existing active project output path, format and bitrate summary retained | Verify against actual settings/job configuration |
 | PROD-13 | P1 | Seven-indicator live Readiness Center | VERIFIED — CI + PACKAGED ACCEPTANCE | Existing seven backend-derived indicators retained | Exact-commit regression and runtime transitions |
-| PROD-14 | P0 | Consistent job state across Production, Background Jobs, History and output | OPEN | Existing stable job IDs/polling retained | Integration and cross-project/stale-state tests |
+| PROD-14 | P0 | Consistent job state across Production, Background Jobs, History and output | OPEN — AUTOMATED INTEGRATION MATRIX PASSED; PACKAGED ACCEPTANCE PENDING | Durable queue/History identity, restart reconciliation, stale completion ownership, project switching, and completed/failed/cancelled output isolation are covered by Stage 5.3 regression tests | Exact-commit Windows package acceptance and installed-app runtime transitions |
 | PROD-15 | P1 | Chapter-specific preview audio and download | VERIFIED — REAL PACKAGED PREVIEW + SAVE AS | Dedicated selector is populated from active-project saved chapters; request validates saved chapter text/identity; job carries project, chapter number and stable chapter ID; playback/save reject stale ownership | Exact-head CI, 10/30/60/90 duration checks, real playback/download, project/chapter switch and deletion/edit acceptance |
-| GEN-01 | P0 | Real generation using saved project configuration | OPEN | Existing GenerationManager/config handoff retained | End-to-end generation with actual saved inputs |
-| GEN-02 | P1 | Compatible resumable/recoverable checkpoints | OPEN | Stage 4 stable chapter identity safeguards preserved | Compatibility invalidation and recovery acceptance |
-| GEN-03 | P1 | Real pause/resume/cancel/retry/recovery | OPEN | Existing job controls retained | Real-operation and restart recovery acceptance |
-| GEN-04 | P1 | Empty/ineligible chapter handling | OPEN | Existing preflight behavior retained | All-empty rejection and order-preservation tests |
+| GEN-01 | P0 | Real generation using saved project configuration | OPEN — SAVED-INPUT GENERATION REGRESSION PASSED; PACKAGED/RUNTIME ACCEPTANCE PENDING | Production bridge consumes saved narrator/profile, metadata, pronunciation and Sound Design configuration; real GenerationManager and WAV chunk synthesis exercised with deterministic local provider | Exact-commit Windows package and installed runtime with the selected production provider/profile |
+| GEN-02 | P1 | Compatible resumable/recoverable checkpoints | OPEN — CHECKPOINT COMPATIBILITY REGRESSIONS PASSED; PACKAGED ACCEPTANCE PENDING | Unchanged saved profile reuses valid chunks; changed backend/voice identity and chapter text invalidate incompatible chunks; corrupt/missing WAV recovery and compatible retry reuse are tested | Exact-commit package and installed restart/recovery acceptance |
+| GEN-03 | P1 | Real pause/resume/cancel/retry/recovery | OPEN — REAL BRIDGE CONTROL / RESTART / RETRY REGRESSIONS PASSED; PACKAGED ACCEPTANCE PENDING | Actual manager pause/resume/cancel through job handlers, safe chapter-boundary behavior, interrupted paused/running job recovery, new retry job identity and checkpoint reuse are tested | Exact-commit Windows package and installed-app control/restart acceptance |
+| GEN-04 | P1 | Empty/ineligible chapter handling | OPEN — PRODUCTION PREFLIGHT REGRESSIONS PASSED; PACKAGED ACCEPTANCE PENDING | Actual Production bridge filters empty and excluded chapters in saved order and rejects no-chapter/all-empty/all-excluded projects before job creation | Exact-commit package and installed project preflight acceptance |
 | GEN-05 | P0 | Chaptered M4B validation, metadata and cover | OPEN | Stage 4 full-stream decode/assembly work preserved | Actual output validation and metadata/cover inspection |
 | GEN-06 | P0 | Preview/final effective configuration parity | VERIFIED — CONFIGURATION/PATH REGRESSION; SEE RUNTIME LIMIT | Production preview resolves the saved project/series narrator used by full generation; both paths consume the same project pronunciation state and saved Sound Design/BGM/cue configuration | Saved narrator, pronunciation, character-routing and Sound Design configuration parity regressions passed; perceptual comparison remains user-device acceptance |
 
@@ -335,3 +335,19 @@ The restart-recovery slice has a successful exact-commit regression checkpoint:
 Verified coverage: paused/running interrupted jobs become failed and recoverable after restart; normalized jobs and History snapshots retain the same job ID; the owning project is marked recovery-required only when its saved `generation_job_id` matches; a stale job cannot overwrite a newer project generation. Starting a new generation clears the interruption marker.
 
 Status: PROD-14 and GEN-03 remain OPEN pending their broader integration/control acceptance matrices. GEN-01, GEN-02 and GEN-04 also remain OPEN. This checkpoint does not close Step 5.3.
+
+### Stage 5.3 automated evidence update — 3 November 2026
+
+The Stage 5.3 implementation has now passed the following targeted, exact-commit regression checkpoints. These are test-only or documentation/test checkpoints; they do not create a new Windows package. Requirements remain OPEN until the exact-commit Windows artifact checkpoint and relevant installed-runtime acceptance are recorded.
+
+| Requirement | Latest focused evidence | Result |
+|---|---|---|
+| PROD-14 | #2183 stale completion ownership; #2189 project-switch ownership; #2191 terminal state matrix | Automated regression passed |
+| GEN-01 | #2180 actual Production bridge + GenerationManager + local-provider WAV synthesis; #2188 new retry job | Automated integration regression passed |
+| GEN-02 | #2184 saved profile compatibility; #2188 compatible retry reuse | Automated checkpoint regression passed |
+| GEN-03 | #2175 restart recovery; #2185 real bridge pause/resume/cancel; #2188 retry job | Automated control/recovery regression passed |
+| GEN-04 | #2180 saved eligible chapter filtering/order and all-empty/all-excluded rejection | Automated Production preflight regression passed |
+
+Authoritative combined Stage 5.3 regression checkpoint: [Build Windows App #2191](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41655941776), run ID `41655941776`, tested SHA `2668978eb383a5a6505a96690b06d71f0d1eb918`. Tests job `125986135018` passed 1,116 tests in 49.925 seconds; frontend syntax and isolated native Qt lifecycle checks passed. The Windows build job was skipped under the test-only checkpoint policy, so no installer/portable/manifest was produced by #2191.
+
+The real GenerationManager integration deliberately uses a deterministic local provider that writes valid WAV chunks; M4B assembly is held at a test stub because actual chaptered M4B assembly, metadata, chapters, decodability and cover inspection are Stage 5.4 GEN-05 scope. This Stage 5.3 evidence does not claim actual packaged-provider voice listening or hardware-specific TTS acceptance.

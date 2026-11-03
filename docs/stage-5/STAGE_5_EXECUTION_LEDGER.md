@@ -709,3 +709,59 @@ Stage 5.3 begins from the successful #2165 package baseline and the exact `a46d0
 - GEN-04: OPEN — Production preflight filtering and all-empty rejection remain to be tested through the full Production bridge path and correct chapter ordering.
 
 This is a focused Stage 5.3 recovery checkpoint, not Step 5.3 closeout. Stage 5.1 and 5.2 remain closed; Stage 5.4 and 5.5 remain pending.
+
+
+## 33. Stage 5.3 generation, recovery and job-state integration evidence — 3 November 2026
+
+### Verified application changes
+
+Application source changes in this Stage 5.3 slice are limited to `app/ui/premium_v2_host.py`:
+
+- Commit `53bcd3f203de02ba33483285499833cf16a6f2e6`: interrupted-job recovery now includes paused jobs as well as queued/running/pause-requested/cancel-requested/retrying jobs. Recovered jobs are durably marked failed/interrupted/recoverable, copied to History with the same job ID, and persisted back to the job store. The captured project is marked recovery-required only when its saved `generation_job_id` still matches the interrupted job. Starting a new generation clears the previous recovery marker.
+- Commit `24015bd07eb67dda7c3e7c856d42c0d7d9a1cb4c`: late generation completion callbacks are guarded by the project's current `generation_job_id`. A superseded callback may finish its own job/History record but cannot overwrite project state or attach its output to a newer generation.
+
+All other Stage 5.3 changes in this interval are regression tests and documentation. Existing GenerationManager, chunk generator, profile-signature, and Production configuration hand-off were preserved rather than rewritten.
+
+### Successful targeted acceptance checkpoints
+
+| Run | Run ID | Tested SHA | Result / coverage |
+|---|---:|---|---|
+| #2175 | `41646828666` | `5a7b031faa9541d1918b47271945e816159fd57e` | SUCCESS — 1,106 tests; restart recovery for paused/running jobs and stale interrupted-job protection |
+| #2180 | `41649548842` | `5d245a8345cf85d2d66738895650bc34490f02de` | SUCCESS — 1,109 tests; Production preflight, saved narrator/config and real local-provider generation/job/History integration |
+| #2183 | `41650977692` | `24015bd07eb67dda7c3e7c856d42c0d7d9a1cb4c` | SUCCESS — stale completion callback cannot overwrite a newer generation |
+| #2184 | `41651579605` | `8b22bc3bb3fba49435fa93c1fd5bda9ffc5310aa` | SUCCESS — 1,112 tests; unchanged profile reuses WAV checkpoints; changed saved backend/voice identity invalidates and regenerates |
+| #2185 | `41652183375` | `02c7f5e5037600c1fe580380cabad864b530c493` | SUCCESS — 1,114 tests; live job bridge pause/resume and cancel against real GenerationManager work at safe chapter boundaries |
+| #2188 | `41653992827` | `aea6ff37f2729188cb992c45feaae7beabc699bd` | SUCCESS — 1,114 tests; second Production attempt receives a new job ID and reuses compatible prior WAV chunks without repeat synthesis |
+| #2189 | `41654634677` | `03b001cd2a73922876bc6ede09c6183622a92b2e` | SUCCESS — 1,115 tests; late Project A completion remains associated with A after UI has switched to Project B |
+| #2191 | `41655941776` | `2668978eb383a5a6505a96690b06d71f0d1eb918` | SUCCESS — 1,116 tests; completed/failed/cancelled job, project, durable queue and History identity/output consistency matrix |
+
+Each successful test-only run passed frontend JavaScript syntax and isolated native Qt lifecycle validation. Their Windows build jobs were skipped by the artifact-checkpoint policy; none of these runs created a new installer/portable/manifest.
+
+### Production-path acceptance details
+
+- **GEN-01:** The actual Premium V2 `_production_generate_book` path is exercised with saved narrator/profile identity, saved metadata, pronunciation configuration, BGM mode and output. A deterministic local provider writes real WAV chunks through the actual GenerationManager/chunk generator. The test validates project completion, output association, queue and History identity, and retry under a new job ID. The assembly function is a test stub; this is not GEN-05 M4B validation.
+- **GEN-02:** Existing chapter ID and chunk signature logic is verified for unchanged saved narrator/profile reuse, changed saved backend/voice identity invalidation, changed chapter text, corrupt/missing WAV regeneration, and retry reuse.
+- **GEN-03:** Real manager operations are called through the Premium V2 job pause/resume/cancel handlers; restart recovery covers paused/running jobs; retry after completed work reuses compatible chunks without a duplicate TTS pass.
+- **GEN-04:** Production bridge filters empty and explicitly excluded chapters in saved chapter order, reports the skip counts, and rejects no-chapter, all-empty and all-excluded projects before creating a generation job.
+- **PROD-14:** Durable queue and History retain the same job identity. Completion/failure/cancellation states and output attachment are checked across project state, Background Jobs and History. Interrupted and stale callbacks are guarded. Project-switch ownership is tested across two persisted project folders.
+
+### Failure history and corrections
+
+- #2171/#2172: test harness attached static bridge helpers as instance methods; corrected in later harness commits.
+- #2173: valid red regression identified paused-job restart recovery and project reconciliation gaps; app correction passed #2175.
+- #2174: application recovery correction was present but its first harness omitted the reconciler delegate; corrected in #2175.
+- #2177: test supplied an explicit bitrate but expected the saved fallback; test corrected and saved fallback checked when no request override is supplied.
+- #2178/#2179: test-only Windows temporary-path aliases used short `RUNNER~1` and long `runneradmin` names; assertions were normalized in #2180.
+- #2181: stale completion test harness missed the static clock binding; corrected in #2182.
+- #2182: valid red regression confirmed a late success callback overwrote a newer project generation; application guard passed in #2183.
+- #2186/#2187: retry fixture let its deterministic provider patch exit before the asynchronous second attempt; logs showed the runner fell back to Piper without an installed model. The fixture now keeps provider/configuration patches active through the second completion callback; #2188 passed.
+- #2190: terminal-state test compared the callback's path spelling to a separately resolved Windows path; the test expectation now matches the callback's preserved path representation; #2191 passed.
+
+These failures remain historical attempts and are not represented as successful. Their resolutions are recorded in the matching later green checkpoints.
+
+### Stage 5.3 status and remaining boundary
+
+- **Automated integration evidence is green** for PROD-14 and GEN-01 through GEN-04 on the exact #2191 SHA.
+- **Step 5.3 remains ACTIVE** until the exact implementation candidate receives the Windows artifact-checkpoint run and package acceptance is inspected. Manual installed-app operation with an actual selected production TTS profile and real generated audiobook listening is not claimed as completed by the deterministic local-provider regression.
+- GEN-05, chaptered M4B assembly/metadata/cover/full-stream validation, remains Stage 5.4. The integration tests' assembler stub must not be misreported as actual M4B output validation.
+- Stage 5.1 and Stage 5.2 remain closed; no completed preview or metadata work was reopened.
