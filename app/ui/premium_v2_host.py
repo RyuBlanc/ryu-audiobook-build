@@ -3064,15 +3064,19 @@ class PremiumV2Bridge(QObject):
         include_sound_design = bool(payload.get("include_sound_design"))
         if include_sound_design:
             state["_include_sound_design_preview"] = True
-        job_id = self._new_job("sound-design-preview" if include_sound_design else "voice-preview",
-                               ("Sound Design mix preview · " if include_sound_design else "Preview · ") + profile.name,
+        production_preview = bool(payload.get("_production_preview"))
+        job_type = "production-preview" if production_preview else ("sound-design-preview" if include_sound_design else "voice-preview")
+        job_title = ("Production preview · " if production_preview else "Sound Design mix preview · " if include_sound_design else "Preview · ") + profile.name
+        job_id = self._new_job(job_type, job_title,
                                f"Generate up to {seconds} seconds using the selected provider", project)
         cancel_event = threading.Event()
         if not hasattr(self, "_preview_cancel_events"):
             self._preview_cancel_events = {}
         with getattr(self, "_jobs_lock", threading.RLock()):
             self._preview_cancel_events[job_id] = cancel_event
-        self._job_update(job_id, state="running", started_at=self._now(), stage="Preparing preview", progress=2)
+        self._job_update(job_id, state="running", started_at=self._now(), stage="Preparing preview", progress=2,
+                          current_chapter=int(selected_chapter.number) if selected_chapter else 0,
+                          chapters_total=len(project.chapters) if project is not None and selected_chapter else 0)
         threading.Thread(
             target=self._preview_worker,
             args=(job_id, profile, text_value, seconds, state, cancel_event, route_character_cast),
@@ -5573,7 +5577,7 @@ class PremiumV2Bridge(QObject):
         name = str(payload.get("profile_name") or load_state(project.folder).get("voice_profile") or "")
         if not name:
             raise ValueError("Select and save a narrator before creating a production preview.")
-        return self._voice_preview({**payload, "profile_name": name, "chapter_number": chapter_number})
+        return self._voice_preview({**payload, "profile_name": name, "chapter_number": chapter_number, "_production_preview": True})
 
     def _job_pause(self, payload: dict[str, Any]) -> dict[str, Any]:
         job_id = str(payload.get("job_id") or "")

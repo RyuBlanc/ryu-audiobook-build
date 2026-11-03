@@ -140,3 +140,39 @@ Run [#2098](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/4155094
 
 The packaged fixture now uses the stable built-in Voice Studio catalogue name `Offline Character • Anime Hero` directly. The frozen application's real `voice.select` command remains the authority: it must resolve and save the profile through the installed profile catalogue before the read-only metadata field and restart persistence assertions can pass. No application runtime dependency was added to the acceptance environment.
 
+
+
+## 17. Stage 5.2 Generation Engine implementation
+
+Baseline: Step 5.2 source audit began from successful packaged checkpoint #2099 on branch stage-5/step-1-production-metadata, commit d8e52ea894282c282c0785da867585d246ee4470.
+
+Source audit findings:
+- Premium V2 already used the real production.generate_book backend job and the real production.preview synthesis worker.
+- Full generation exposed one Generation Engine ring, while the Production preview was sent through the application-wide monitorJob singleton. The singleton owns one activeJob, one interval and one monitor epoch, so a new monitored task could supersede the previous monitor and could write its progress into the shared Generation Engine ring.
+- The preview worker already reports real segment progress, a measured elapsed heartbeat, actual output duration, total elapsed time, synthesis elapsed time and a backend-derived ETA when progress supports one.
+- Full generation already reports actual chapter/chunk/assembly progress, elapsed time, backend-derived ETA and safe pause/resume/cancel operations.
+- The backend already supports preview cancellation through job.cancel; the Production screen did not expose a separate Cancel Preview control.
+- The Production preview selector already forwards the selected 10/30/60/90-second duration to the backend target-duration limiter. The existing 30-second default and preview synthesis implementation were preserved.
+
+Implementation in this checkpoint:
+- Added independent Production-specific monitor slots for full audiobook generation and Production preview. The general monitorJob singleton remains unchanged for import, Voice Studio, Character Studio, Pronunciation and other unrelated workflows.
+- Bound full-generation Pause/Resume/Cancel exclusively to the full audiobook job ID; they no longer depend on the shared activeJob global.
+- Routed Production chapter preview jobs through the same real preview worker but tagged them with the durable job type production-preview, distinct from ordinary Voice Studio voice-preview jobs.
+- Persisted the selected chapter number and project chapter count on the preview job row so the Production panel can display the real selected chapter.
+- Added a separate Production preview progress/timing display, explicit Replay and Cancel Preview controls, and Background Jobs cancellation support for preview jobs.
+- The preview progress bar reads the job's real progress. Elapsed time uses the job's real start timestamp/elapsed field. Remaining time is shown only when the backend supplies a valid eta_seconds; measured generated duration and total/synthesis time come from the completed preview result.
+- Replay reuses the already validated preview audio. Playback and download remain disabled until preparePreviewPlayback verifies a real file URL and positive measured audio duration.
+
+Substep status at commit time:
+- 5.2.1 — Source/functional-flow audit: COMPLETE.
+- 5.2.2 — Idle/generating state and actual job progress display: CODE CHANGED — NOT VERIFIED.
+- 5.2.3 — Independent preview/full-generation state and controls: CODE CHANGED — NOT VERIFIED.
+- 5.2.4 — 10/30/60/90-second backend duration flow: EXISTING BACKEND FLOW PRESERVED; new UI wiring regression added; matching-head verification pending.
+- 5.2.5 — Play/Pause/Stop/Replay and real preview cancellation: CODE CHANGED — NOT VERIFIED.
+- 5.2.6 — Real timing, measured duration and failure display: CODE CHANGED — NOT VERIFIED.
+- 5.2.7 — Exact-commit regression and packaged Windows acceptance: PENDING CI.
+
+Requirements in scope: PROD-05, PROD-06 and PROD-07. PROD-08, PROD-09, PROD-15 and GEN-06 remain OPEN for their planned later integration step. No code-level work in this checkpoint closes Stage 5.1's outstanding manual acceptance or its metadata-gate policy reconciliation.
+
+The backend intentionally serializes synthesis and full audiobook generation. This implementation gives both operations independent ownership and state rendering; it does not claim that simultaneous preview and full-book synthesis are supported.
+

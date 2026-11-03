@@ -17,9 +17,9 @@ Allowed statuses: OPEN; IN PROGRESS; CODE CHANGED — NOT VERIFIED; AUTOMATED TE
 | PROD-02 | P0 | Complete metadata fields and real historical values | CODE CHANGED — NOT VERIFIED | Project-scoped bridge save/history; values from local projects and Character Library | CI plus history/project isolation/restart acceptance |
 | PROD-03 | P0 | Saved-metadata completion gate | CODE CHANGED — NOT VERIFIED | Shared validator, live warning/complete state and backend generation guard | CI, unsaved-edit and save-failure acceptance |
 | PROD-04 | P0 | Metadata persistence and final output tags | CODE CHANGED — NOT VERIFIED | Project-scoped metadata transaction; Series Volume mapped to M4B `series_number`; unsupported-for-M4B cover formats normalized to PNG | Exact-commit regression and packaged M4B tag/cover acceptance in Step 5.5 |
-| PROD-05 | P0 | Real generation progress | OPEN | Existing job model retained for audit | Verify actual generation progress and ETA |
-| PROD-06 | P0 | Separate preview/full-generation states | OPEN | Existing job model retained | Verify truthful independent operation state |
-| PROD-07 | P0 | 10/30/60/90-second real preview controls | OPEN | Existing duration controls retained | Exercise all durations against real audio |
+| PROD-05 | P0 | Real generation progress | CODE CHANGED — NOT VERIFIED | Premium V2 full-generation ring now renders its own backend job's chapter, stage, measured elapsed time and backend ETA | Exact-commit regression and packaged Windows runtime acceptance pending |
+| PROD-06 | P0 | Separate preview/full-generation states | CODE CHANGED — NOT VERIFIED | Independent Production preview/full-generation monitors and job IDs; full controls are bound only to the full-generation job | Exact-commit concurrency/isolation and runtime acceptance pending |
+| PROD-07 | P0 | 10/30/60/90-second real preview controls | CODE CHANGED — NOT VERIFIED | Existing 10/30/60/90 selector and backend target-duration limiter preserved; explicit Play/Pause/Stop/Replay and Cancel Preview controls connected to the real preview job | Exact-commit duration matrix, audio validation, playback and cancellation acceptance pending |
 | PROD-08 | P1 | Live pronunciation toggle | OPEN | Existing Pronunciation integration retained | Test global Off and individually enabled rules |
 | PROD-09 | P1 | Live BGM/cue toggle | OPEN | Existing Sound Design integration retained | Test Same BGM, Chapter-Based BGM, Voice Only and cues |
 | PROD-10 | P1 | Dynamic project summary | CODE CHANGED — NOT VERIFIED | Active summary extended with Genre and Series Volume; saved project data retained | CI and project-switch/reopen acceptance |
@@ -61,3 +61,19 @@ The first implementation gated only Title, Author, Narrator, Language and Genre.
 ## Step 5.1 narrator acceptance test isolation
 
 The packaged acceptance fixture names the deterministic built-in narrator profile `Offline Character • Anime Hero` without importing the heavyweight TTS provider module into the harness interpreter. The frozen application still performs real catalogue resolution and persistence through `voice.select`; an unknown or unavailable profile will fail the packaged test.
+
+
+## Step 5.2 implementation status
+
+Source audit and implementation checkpoint: branch stage-5/step-1-production-metadata; baseline commit d8e52ea894282c282c0785da867585d246ee4470. The implementation commit and matching GitHub Actions result will be appended to the execution ledger after this checkpoint is pushed and verified.
+
+- 5.2.1 source audit: COMPLETE.
+- 5.2.2 real idle/generating state: CODE CHANGED — NOT VERIFIED.
+- 5.2.3 independent preview/full job state: CODE CHANGED — NOT VERIFIED.
+- 5.2.4 preview duration controls: existing real duration pipeline preserved; exact-commit verification pending.
+- 5.2.5 preview playback and cancellation: CODE CHANGED — NOT VERIFIED.
+- 5.2.6 actual progress, elapsed time, ETA and failure handling: CODE CHANGED — NOT VERIFIED.
+- 5.2.7 matching-head regression and packaged Windows acceptance: PENDING.
+
+Do not mark PROD-05/06/07 AUTOMATED TESTS PASSED until the exact implementation commit's regression workflow completes successfully. Do not mark runtime acceptance complete from CI alone.
+

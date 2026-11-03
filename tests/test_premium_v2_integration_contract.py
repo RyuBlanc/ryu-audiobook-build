@@ -1368,5 +1368,44 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
 
 
 
+    def test_production_generation_and_preview_use_independent_job_monitors(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn("productionJobMonitors = {full:null,preview:null}", adapter)
+        self.assertIn("function monitorProductionJob(jobId, operation, done)", adapter)
+        self.assertIn("productionFullJobId", adapter)
+        self.assertIn("productionPreviewJobId", adapter)
+        self.assertIn("await monitorProductionJob(data.job_id,'full')", adapter)
+        self.assertIn("await monitorProductionJob(data.job_id,'preview'", adapter)
+        self.assertIn("call('job.pause',{job_id:productionFullJobId})", adapter)
+        self.assertIn("call('job.resume',{job_id:productionFullJobId})", adapter)
+        self.assertIn("call('job.cancel',{job_id:productionFullJobId})", adapter)
+        self.assertIn("call('job.cancel',{job_id:productionPreviewJobId})", adapter)
+        self.assertNotIn("activeJobType!=='audiobook-generation'", adapter)
+
+    def test_production_preview_reports_real_progress_timing_and_measured_duration(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("productionPreviewProgressBar", adapter)
+        self.assertIn("job.eta_seconds", adapter)
+        self.assertIn("job.started_at", adapter)
+        self.assertIn("actual_duration_seconds", adapter)
+        self.assertIn("total_seconds", adapter)
+        self.assertIn("synthesis_seconds", adapter)
+        self.assertIn("target_seconds=seconds", host)
+        self.assertIn("progress=min(95, max(2, 5 + int(90 * current / max(1, total))))", host)
+        self.assertIn("duration = round(_duration_ms(preview_path) / 1000.0, 2)", host)
+
+    def test_production_preview_is_a_typed_cancellable_job_with_real_chapter_identity(self):
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        self.assertIn('production_preview = bool(payload.get("_production_preview"))', host)
+        self.assertIn('job_type = "production-preview" if production_preview', host)
+        self.assertIn('"current_chapter": int(selected_chapter.number) if selected_chapter else 0', host)
+        self.assertIn('self._preview_cancel_events[job_id] = cancel_event', host)
+        self.assertIn('preview_cancel.set()', host)
+        self.assertIn("Cancel preview", adapter)
+        self.assertIn("productionPreviewReplay", adapter)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -260,7 +260,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', lastVoicePreviewChapterNumber = null, lastVoicePreviewChapterTitle = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8;
+  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', lastVoicePreviewChapterNumber = null, lastVoicePreviewChapterTitle = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8, productionFullJobId = null, productionPreviewJobId = null, productionJobSnapshots = {full:null,preview:null}, productionJobMonitors = {full:null,preview:null}, productionMonitorEpochs = {full:0,preview:0}, productionPreviewRequestProjectFolder = '';
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], pronunciationEnabled = true, activePronunciationSeries = '', lastPronunciationPreview = null, pronunciationRowPreviewState = new Map(), pronunciationSelectionKeys = new Set(), selectedSoundPath = null, selectedCuePath = null, pendingCueSlot = null, pendingCueAssignments = Object.create(null), cueChangesDirty = false, cueSaveError = '', cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null, chapterBgmDraftDirty = false, mixLevelsDirty = false, soundPreviewKind = null, soundPreviewPath = null;
   let chapterBgmCandidateTrackPath = null, chapterBgmCandidateChapter = null, chapterBgmSavePromise = null, cueSavePromise = null;
@@ -1684,13 +1684,19 @@
     const playable=Boolean(voicePreviewValid&&previewAudio);
     const playing=Boolean(playable&&!previewAudio.paused);
     const play=$('productionPreviewPlay'),stop=$('productionPreviewStop'),download=$('productionPreviewDownload');
+    const replay=$('productionPreviewReplay');
     if(play){play.disabled=!playable;play.textContent=playing?'Ⅱ Pause preview':'▶ Play preview';}
     if(stop)stop.disabled=!playable;
+    if(replay)replay.disabled=!playable;
     if(download)download.disabled=!voicePreviewValid||!lastVoicePreviewPath;
     const status=$('productionPreviewStatus');
-    if(status)status.textContent=voicePreviewValid
-      ?'Preview ready · '+(Number(previewAudio?.duration)>0?Number(previewAudio.duration).toFixed(1)+' seconds':'loading duration')
-      :'Generate a chapter preview to enable playback and download.';
+    const previewJobState=String(productionJobSnapshots.preview?.state||'').toLowerCase();
+    const previewJobOwnsStatus=PRODUCTION_ACTIVE_JOB_STATES.has(previewJobState)||['failed','cancelled'].includes(previewJobState);
+    if(status&&voicePreviewValid){
+      status.textContent='Preview ready · '+(Number(previewAudio?.duration)>0?Number(previewAudio.duration).toFixed(1)+' seconds':'loading duration');
+    }else if(status&&!previewJobOwnsStatus&&!productionJobSnapshots.preview){
+      status.textContent='Generate a chapter preview to enable playback and download.';
+    }
   }
   function invalidateVoicePreview(){
     voicePreviewEpoch++;voicePreviewValid=false;lastVoicePreviewPath=null;lastVoicePreviewProfileName='';lastVoicePreviewChapterNumber=null;lastVoicePreviewChapterTitle='';
@@ -4966,40 +4972,292 @@
       : minutes + ':' + String(remainder).padStart(2, '0');
   }
 
+  const PRODUCTION_ACTIVE_JOB_STATES = new Set(['queued','running','pause_requested','paused','cancel_requested','retrying']);
+  const PRODUCTION_TERMINAL_JOB_STATES = new Set(['completed','failed','cancelled']);
+  function productionJobIsActive(job) {
+    return Boolean(job && PRODUCTION_ACTIVE_JOB_STATES.has(String(job.state || '').toLowerCase()));
+  }
+  function productionJobDate(job) {
+    return Date.parse(job?.updated_at || job?.started_at || job?.queued_at || '') || 0;
+  }
+  function newestProductionJob(rows) {
+    return rows.slice().sort((a,b) => productionJobDate(b) - productionJobDate(a))[0] || null;
+  }
+  function productionElapsedSeconds(job) {
+    if (!job) return NaN;
+    const raw = job.elapsed_seconds;
+    const stored = raw !== null && raw !== undefined && raw !== '' ? Number(raw) : NaN;
+    if (String(job.state || '').toLowerCase() === 'running') {
+      const startedAt = Date.parse(job.started_at || '');
+      if (Number.isFinite(startedAt)) {
+        const liveElapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+        return Number.isFinite(stored) ? Math.max(stored, liveElapsed) : liveElapsed;
+      }
+    }
+    return stored;
+  }
+  function productionJobEtaSeconds(job) {
+    if (!job || String(job.state || '').toLowerCase() !== 'running') return NaN;
+    const raw = job.eta_seconds;
+    if (raw === null || raw === undefined || raw === '') return NaN;
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 0 ? value : NaN;
+  }
+  function ensureProductionPreviewMonitorUi() {
+    const controls = $('productionPreviewControls');
+    if (!controls) return;
+    const addButton = (id, label, className, anchor, insertAfter = true) => {
+      if ($(id)) return $(id);
+      const button = document.createElement('button');
+      button.id = id;
+      button.type = 'button';
+      button.className = className;
+      button.textContent = label;
+      button.disabled = true;
+      button.setAttribute('aria-label', label);
+      if (anchor) {
+        if (insertAfter) anchor.insertAdjacentElement('afterend', button);
+        else anchor.insertAdjacentElement('beforebegin', button);
+      } else {
+        controls.appendChild(button);
+      }
+      return button;
+    };
+    addButton('productionPreviewReplay', '↻ Replay', 'btn small secondary', $('productionPreviewPlay'));
+    addButton('productionPreviewCancel', 'Cancel preview', 'btn small danger', $('productionPreviewDownload'));
+    if (!$('productionPreviewMonitor')) {
+      const monitor = document.createElement('div');
+      monitor.id = 'productionPreviewMonitor';
+      monitor.className = 'production-preview-monitor';
+      monitor.setAttribute('aria-live', 'polite');
+      monitor.style.cssText = 'width:100%;max-width:100%;margin:8px auto 0;box-sizing:border-box';
+      const progress = document.createElement('div');
+      progress.className = 'progress';
+      progress.id = 'productionPreviewProgressTrack';
+      progress.setAttribute('role', 'progressbar');
+      progress.setAttribute('aria-label', 'Production preview generation progress');
+      progress.setAttribute('aria-valuemin', '0');
+      progress.setAttribute('aria-valuemax', '100');
+      progress.setAttribute('aria-valuenow', '0');
+      progress.style.cssText = 'width:100%;margin:6px 0 4px';
+      const fill = document.createElement('i');
+      fill.id = 'productionPreviewProgressBar';
+      fill.style.width = '0%';
+      progress.appendChild(fill);
+      const timing = document.createElement('small');
+      timing.id = 'productionPreviewTiming';
+      timing.className = 'muted';
+      timing.textContent = 'Preview timing will appear after a job starts.';
+      monitor.append(progress, timing);
+      controls.insertAdjacentElement('afterend', monitor);
+    }
+  }
+  function monitorProductionJob(jobId, operation, done) {
+    if (!['full','preview'].includes(operation)) return Promise.reject(new Error('Unknown Production Studio job operation.'));
+    const previous = productionJobMonitors[operation];
+    if (previous?.timer) clearInterval(previous.timer);
+    if (previous?.resolve) previous.resolve(null);
+    const token = ++productionMonitorEpochs[operation];
+    return new Promise(resolve => {
+      const record = {token, timer:null, checking:false, settled:false, resolve, errorShown:false};
+      productionJobMonitors[operation] = record;
+      const finish = job => {
+        if (record.settled) return;
+        record.settled = true;
+        if (record.timer) clearInterval(record.timer);
+        if (productionJobMonitors[operation] === record) productionJobMonitors[operation] = null;
+        resolve(job || null);
+      };
+      const tick = async () => {
+        if (record.settled || productionMonitorEpochs[operation] !== token || record.checking) return;
+        record.checking = true;
+        try {
+          const rows = await call('job.list', {include_hidden:true});
+          if (record.settled || productionMonitorEpochs[operation] !== token) return;
+          const job = rows.find(row => String(row.job_id || '') === String(jobId));
+          const visibleRows = rows.filter(row => !row.hidden);
+          await refreshJobs(visibleRows);
+          if (!job || !PRODUCTION_TERMINAL_JOB_STATES.has(String(job.state || '').toLowerCase())) return;
+          let previewReady = true;
+          if (operation === 'preview' && job.state === 'completed' && typeof done === 'function') {
+            try { previewReady = await done(job); }
+            catch (error) {
+              previewReady = false;
+              console.error('[Ryu Production preview validation]', error);
+              message('The preview job completed, but its audio could not be prepared: ' + (error?.message || String(error)), true);
+            }
+            if (!previewReady) {
+              const status = $('productionPreviewStatus');
+              if (status) status.textContent = 'Preview completed, but the audio did not pass playback validation. Retry the preview.';
+              message('The preview job ended, but its output did not pass playback validation. Check the preview status and retry.', true);
+            }
+          }
+          if (job.state !== 'completed') {
+            const detail = job.error?.message || job.message || ((job.title || 'Production job') + ' ' + job.state);
+            if (operation === 'preview' && $('productionPreviewStatus')) {
+              $('productionPreviewStatus').textContent = (job.state === 'failed' ? 'Preview failed · ' : 'Preview cancelled · ') + detail;
+            }
+            message(detail, true);
+          } else if (operation === 'full') {
+            message(job.message || 'Audiobook generation completed.', false);
+            await refreshProjects().catch(() => {});
+          } else if (previewReady) {
+            message(job.message || 'Production preview is ready.', false);
+          }
+          await refreshHistory().catch(() => {});
+          await refreshJobs(visibleRows).catch(() => {});
+          finish(job);
+        } catch (error) {
+          if (!record.errorShown && !record.settled) {
+            record.errorShown = true;
+            message('Production job status could not be refreshed: ' + (error?.message || String(error)), true);
+          }
+          console.error('[Ryu Production job monitor]', error);
+        } finally {
+          record.checking = false;
+        }
+      };
+      record.timer = setInterval(tick, 1000);
+      tick();
+    });
+  }
   function renderProductionGeneration(jobs = []) {
     const page = $('generate');
     if (!page || !isVisiblePage('generate')) return;
+    ensureProductionPreviewMonitorUi();
     const project = window.ryuPremiumActiveProject || null;
-    const activeStates = ['queued','running','pause_requested','paused','cancel_requested','retrying'];
-    const job = jobs.filter(row =>
-      String(row.type || '').toLowerCase() === 'audiobook-generation' &&
-      activeStates.includes(String(row.state || '').toLowerCase()) &&
-      (!project?.folder || String(row.project_folder || '') === String(project.folder))
-    ).sort((a,b) =>
-      (Date.parse(b.updated_at || b.started_at || b.queued_at || '') || 0) -
-      (Date.parse(a.updated_at || a.started_at || a.queued_at || '') || 0))[0] || null;
-    const completed = !job && Boolean(project?.completed && project?.output_path);
-    const percent = job ? Math.max(0, Math.min(100, Math.round(Number(job.progress || 0)))) : (completed ? 100 : 0);
+    const projectFolder = String(project?.folder || '').replace(/\\/g, '/').toLowerCase();
+    const projectRows = jobs.filter(row => {
+      if (!projectFolder) return true;
+      return String(row.project_folder || '').replace(/\\/g, '/').toLowerCase() === projectFolder;
+    });
+    const fullRows = projectRows.filter(row => String(row.type || '').toLowerCase() === 'audiobook-generation');
+    const pinnedFull = productionFullJobId
+      ? fullRows.find(row => String(row.job_id || '') === String(productionFullJobId))
+      : null;
+    const fullJob = pinnedFull || newestProductionJob(fullRows);
+    if (fullJob?.job_id) productionFullJobId = String(fullJob.job_id);
+    productionJobSnapshots.full = fullJob || null;
+
+    const previewRows = projectRows.filter(row =>
+      String(row.type || '').toLowerCase() === 'production-preview' ||
+      (productionPreviewJobId && String(row.job_id || '') === String(productionPreviewJobId))
+    );
+    const pinnedPreview = productionPreviewJobId
+      ? previewRows.find(row => String(row.job_id || '') === String(productionPreviewJobId))
+      : null;
+    const previewJob = pinnedPreview || newestProductionJob(previewRows);
+    productionPreviewJobId = previewJob?.job_id ? String(previewJob.job_id) : null;
+    productionJobSnapshots.preview = previewJob || null;
+
+    const fullState = String(fullJob?.state || '').toLowerCase();
+    const fullActive = productionJobIsActive(fullJob);
+    const completedOutput = !fullJob && Boolean(project?.completed && project?.output_path);
+    const fullPercent = fullJob
+      ? Math.max(0, Math.min(100, Math.round(Number(fullJob.progress || 0))))
+      : (completedOutput ? 100 : 0);
     const ring = $('genRing');
-    if (ring?.style) ring.style.setProperty('--progress', percent + '%');
-    setProductionStatus('genPercent', percent + '%');
-    setProductionStatus('genStage', job
-      ? String(job.stage || job.message || job.state || 'Generation running')
-      : (completed ? 'Audiobook ready' : 'Ready to generate'));
-    const chapter = Math.max(0, Number(job?.current_chapter || 0));
-    const total = Math.max(0, Number(job?.chapters_total || project?.chapter_count || 0));
-    setProductionStatus('genChapter', job
-      ? (chapter ? 'Chapter ' + chapter + (total ? ' of ' + total : '') : 'Waiting for first chapter')
-      : (completed ? (total ? total + ' chapters completed' : 'Completed output verified') : 'No chapter currently rendering'));
-    const elapsed = Number(job?.elapsed_seconds), eta = Number(job?.eta_seconds);
+    if (ring?.style) {
+      ring.style.setProperty('--progress', fullPercent + '%');
+      ring.setAttribute('role', 'progressbar');
+      ring.setAttribute('aria-valuemin', '0');
+      ring.setAttribute('aria-valuemax', '100');
+      ring.setAttribute('aria-valuenow', String(fullPercent));
+      ring.setAttribute('aria-valuetext', fullJob
+        ? String(fullJob.stage || fullJob.message || fullState) + ' · ' + fullPercent + '%'
+        : (completedOutput ? 'Audiobook ready' : 'Idle'));
+    }
+    setProductionStatus('genPercent', fullPercent + '%');
+    setProductionStatus('genStage', fullJob
+      ? String(fullJob.stage || fullJob.message || fullState || 'Generation running')
+      : (completedOutput ? 'Audiobook ready' : 'Ready to generate'));
+    const chapter = Math.max(0, Number(fullJob?.current_chapter || 0));
+    const total = Math.max(0, Number(fullJob?.chapters_total || project?.chapter_count || 0));
+    setProductionStatus('genChapter', fullJob
+      ? (chapter ? 'Chapter ' + chapter + (total ? ' of ' + total : '') : String(fullJob.stage || '').toLowerCase().includes('packag') ? 'Assembling final audiobook' : 'Waiting for first chapter')
+      : (completedOutput ? (total ? total + ' chapters completed' : 'Completed output verified') : 'No chapter currently rendering'));
+    const elapsed = productionElapsedSeconds(fullJob);
+    const eta = productionJobEtaSeconds(fullJob);
     setProductionStatus('elapsed', Number.isFinite(elapsed) && elapsed >= 0 ? formatProductionDuration(elapsed) : '—');
-    setProductionStatus('remaining', Number.isFinite(eta) && eta >= 0 ? formatProductionDuration(eta) : '—');
+    setProductionStatus('remaining', Number.isFinite(eta) ? formatProductionDuration(eta) : '—');
+
     const pause = $('pauseGenerate');
     if (pause) {
-      const canPause = Boolean(job && ['running','paused','pause_requested'].includes(String(job.state || '').toLowerCase()));
+      const canPause = Boolean(fullJob && ['running','paused'].includes(fullState));
       pause.disabled = !canPause;
-      pause.textContent = job && ['paused','pause_requested'].includes(String(job.state || '').toLowerCase()) ? 'Resume' : 'Pause';
+      pause.textContent = fullState === 'paused' ? 'Resume' : fullState === 'pause_requested' ? 'Pausing…' : 'Pause';
     }
+    const cancelFull = $('cancelJob');
+    if (cancelFull) {
+      cancelFull.disabled = !fullActive || fullState === 'cancel_requested';
+      cancelFull.textContent = fullState === 'cancel_requested' ? 'Cancelling…' : 'Cancel job';
+    }
+
+    const previewState = String(previewJob?.state || '').toLowerCase();
+    const previewActive = productionJobIsActive(previewJob);
+    const previewPercent = previewJob
+      ? Math.max(0, Math.min(100, Math.round(Number(previewJob.progress || 0))))
+      : 0;
+    const previewProgress = $('productionPreviewProgressBar');
+    const previewTrack = $('productionPreviewProgressTrack');
+    if (previewProgress?.style) previewProgress.style.width = previewPercent + '%';
+    if (previewTrack) {
+      previewTrack.setAttribute('aria-valuenow', String(previewPercent));
+      previewTrack.hidden = !previewJob;
+    }
+    const previewStatus = $('productionPreviewStatus');
+    if (previewStatus) {
+      let label = 'Generate a chapter preview to enable playback and download.';
+      if (previewActive) label = String(previewJob.stage || previewJob.message || previewState) + ' · ' + previewPercent + '%';
+      else if (previewState === 'completed') {
+        const actual = Number(previewJob.result?.actual_duration_seconds);
+        label = voicePreviewValid && Number.isFinite(actual) && actual > 0
+          ? 'Preview ready · ' + actual.toFixed(1) + ' seconds'
+          : 'Preview completed, but playback validation is not ready yet.';
+      } else if (previewState === 'failed') {
+        label = 'Preview failed · ' + String(previewJob.error?.message || previewJob.message || 'Check the job and retry.');
+      } else if (previewState === 'cancelled') {
+        label = 'Preview cancelled · Partial preview audio was discarded.';
+      } else if (voicePreviewValid && previewAudio) {
+        label = 'Preview ready · ' + (Number(previewAudio.duration) > 0 ? Number(previewAudio.duration).toFixed(1) + ' seconds' : 'loading duration');
+      }
+      previewStatus.textContent = label;
+    }
+    const previewTiming = $('productionPreviewTiming');
+    if (previewTiming) {
+      if (!previewJob) {
+        previewTiming.textContent = voicePreviewValid
+          ? 'Validated audio is available for playback and download.'
+          : 'Requested duration: select 10, 30, 60 or 90 seconds · default 30 seconds.';
+      } else {
+        const previewElapsed = productionElapsedSeconds(previewJob);
+        const previewEta = productionJobEtaSeconds(previewJob);
+        const requested = Number(previewJob.result?.requested_duration_seconds || 0);
+        const actual = Number(previewJob.result?.actual_duration_seconds || 0);
+        const totalSeconds = Number(previewJob.result?.total_seconds);
+        const synthesisSeconds = Number(previewJob.result?.synthesis_seconds);
+        if (previewState === 'completed' && Number.isFinite(actual) && actual > 0) {
+          previewTiming.textContent = 'Generated audio: ' + actual.toFixed(1) + 's' +
+            (requested > 0 ? ' · requested ' + requested + 's' : '') +
+            (Number.isFinite(totalSeconds) ? ' · total ' + totalSeconds.toFixed(1) + 's' : '') +
+            (Number.isFinite(synthesisSeconds) ? ' · synthesis ' + synthesisSeconds.toFixed(1) + 's' : '');
+        } else {
+          previewTiming.textContent = (Number.isFinite(previewElapsed) ? 'Elapsed ' + formatProductionDuration(previewElapsed) : 'Elapsed —') +
+            (Number.isFinite(previewEta) ? ' · remaining ' + formatProductionDuration(previewEta) : '');
+        }
+      }
+    }
+    const cancelPreview = $('productionPreviewCancel');
+    if (cancelPreview) {
+      cancelPreview.disabled = !previewActive || previewState === 'cancel_requested';
+      cancelPreview.textContent = previewState === 'cancel_requested' ? 'Cancelling preview…' : 'Cancel preview';
+    }
+    const fullStart = $('startGenerate');
+    const previewStart = $('previewGenerate');
+    const anyAudioActive = fullActive || previewActive;
+    if (fullStart) fullStart.disabled = anyAudioActive;
+    if (previewStart) previewStart.disabled = anyAudioActive;
+    syncProductionPreviewControls();
   }
 
   async function refreshChapterBgm() {
@@ -5317,17 +5575,17 @@
     }, 160);
   }
   let backendJobFilter = 'active';
-  async function refreshJobs() {
+  async function refreshJobs(snapshot = null) {
     // Multiple callers share one in-flight refresh so the 1.5s heartbeat, job
     // monitor and manual refresh cannot issue overlapping DOM updates.
     if (jobsRefreshPromise) return jobsRefreshPromise;
-    const refreshPromise = refreshJobsImpl();
+    const refreshPromise = refreshJobsImpl(snapshot);
     jobsRefreshPromise = refreshPromise;
     try { return await refreshPromise; }
     finally { if (jobsRefreshPromise === refreshPromise) jobsRefreshPromise = null; }
   }
-  async function refreshJobsImpl() {
-    const allJobs = await call('job.list', {include_hidden:false});
+  async function refreshJobsImpl(snapshot = null) {
+    const allJobs = Array.isArray(snapshot) ? snapshot : await call('job.list', {include_hidden:false});
     if (isVisiblePage('dashboard')) refreshDashboardGeneration(allJobs);
     if (isVisiblePage('generate')) renderProductionGeneration(allJobs);
     const jobs = allJobs.filter(j => backendJobFilter === 'all' ||
@@ -5351,11 +5609,12 @@
           const action = (name,label,cls) => '<button class="btn small ' + cls + '" data-job-action="' + name + '" data-job-id="' + id + '">' + label + '</button>';
           const canControlGeneration = j.type === 'audiobook-generation';
           const canCancelImport = j.type === 'import';
+          const canCancelPreview = ['voice-preview','production-preview','sound-design-preview'].includes(j.type);
           const actions = (canControlGeneration && ['running','pause_requested'].includes(state) ? action('pause','Pause','secondary') : '') +
             (canControlGeneration && ['paused','pause_requested'].includes(state) ? action('resume','Resume','') : '') +
-            ((state === 'queued' || (canControlGeneration && ['running','paused','pause_requested','cancel_requested'].includes(state)) || (canCancelImport && ['running','cancel_requested'].includes(state))) ? action('cancel','Cancel','ghost') : '') +
+            ((state === 'queued' || (canControlGeneration && ['running','paused','pause_requested','cancel_requested'].includes(state)) || (canCancelImport && ['running','cancel_requested'].includes(state)) || (canCancelPreview && ['queued','running','cancel_requested'].includes(state))) ? action('cancel','Cancel','ghost') : '') +
             (state === 'failed' && j.recoverable ? '<small>Retry by restarting this operation from its screen.</small>' : '') +
-            (['running','pause_requested'].includes(state) && !canControlGeneration && !canCancelImport ? '<small>Cancellation and pause are not supported for this operation.</small>' : '');
+            (['running','pause_requested'].includes(state) && !canControlGeneration && !canCancelImport && !canCancelPreview ? '<small>Cancellation and pause are not supported for this operation.</small>' : '');
           return '<article class="job-row" data-backend-job="' + id + '">' +
             '<b data-job-title>' + esc(j.title || j.type || id) + '</b>' +
             '<p data-job-stage>' + esc(j.stage || j.message || state) + '</p>' +
@@ -7852,25 +8111,40 @@
       message('Profile saved and assigned as the active narrator.');
     });
     if ($('generatePreview')) $('generatePreview').onclick=act(previewVoice);
+    ensureProductionPreviewMonitorUi();
     if ($('previewGenerate')) $('previewGenerate').onclick=act(async()=>{
       const chapterNumber=Number(window.ryuPremiumSelectedChapter||0);
       const chapter=chapters.find(item=>Number(item.number)===chapterNumber);
       if(!chapterNumber||!chapter||!String(chapter.text||'').trim())throw new Error('Select a non-empty chapter in Chapter Studio before generating its production preview.');
+      if(productionJobIsActive(productionJobSnapshots.full))throw new Error('Finish or cancel the full audiobook generation before starting a preview.');
+      if(productionJobIsActive(productionJobSnapshots.preview))throw new Error('A Production preview is already running.');
       const name=String(selectedVoice||$('profileName')?.value||'').trim();
       if(!name)throw new Error('Select and save a narrator voice profile before previewing this chapter.');
       const group=[...document.querySelectorAll('#generate .segmented')].find(el=>[...el.querySelectorAll('button')].some(b=>/10s|30s|60s|90s/i.test(b.textContent)));
       const duration=group?.querySelector('button.active')?.textContent.match(/\d+/)?.[0]||'30';
+      if(![10,30,60,90].includes(Number(duration)))throw new Error('Preview duration must be 10, 30, 60, or 90 seconds.');
+      const activeProject=await call('project.get_active');
+      productionPreviewRequestProjectFolder=String(activeProject?.folder||'');
       invalidateVoicePreview();
       const previewToken=voicePreviewEpoch;
-      if($('productionPreviewStatus'))$('productionPreviewStatus').textContent='Generating selected-chapter preview…';
-      if($('previewState'))$('previewState').textContent='Preparing · 2%';
-      if($('validation'))$('validation').textContent='Preparing selected chapter preview · 2%';
-      const data=await call('production.preview',{profile_name:name,chapter_number:chapterNumber,duration_seconds:Number(duration)});
-      if(previewToken!==voicePreviewEpoch)return;
-      await monitorJob(data.job_id,job=>{
-        if(previewToken!==voicePreviewEpoch)return true;
-        return preparePreviewPlayback(job,Number(duration),{profileName:name});
+      if($('productionPreviewStatus'))$('productionPreviewStatus').textContent='Starting selected-chapter preview…';
+      if($('productionPreviewTiming'))$('productionPreviewTiming').textContent='Waiting for the preview worker to start.';
+      if($('previewState'))$('previewState').textContent='Preparing';
+      if($('validation'))$('validation').textContent='Preparing selected chapter preview.';
+      const data=await call('production.preview',{profile_name:name,chapter_number:chapterNumber,duration_seconds:Number(duration),_production_preview:true});
+      if(!data?.job_id)throw new Error('The Production preview job was not created.');
+      productionPreviewJobId=String(data.job_id);
+      await refreshJobs();
+      const completed=await monitorProductionJob(data.job_id,'preview',job=>{
+        if(previewToken!==voicePreviewEpoch)return false;
+        const activeFolder=String(window.ryuPremiumActiveProject?.folder||'');
+        if(productionPreviewRequestProjectFolder&&activeFolder&&activeFolder!==productionPreviewRequestProjectFolder){
+          if($('productionPreviewStatus'))$('productionPreviewStatus').textContent='Preview completed for another project. Reopen its project before playing or downloading this audio.';
+          return false;
+        }
+        return preparePreviewPlayback(job,Number(duration),{profileName:name,preserveSummary:true});
       });
+      if(completed?.state==='completed')await refreshJobs();
     });
     if ($('playPreview')) $('playPreview').onclick=act(async()=>{if(!previewAudio||!voicePreviewValid)throw new Error('Generate a validated preview first.');if(!previewAudio.paused){previewAudio.pause();$('playPreview').textContent='▶ Play';}else{await previewAudio.play();$('playPreview').textContent='Ⅱ Pause';}});
     if ($('stopPreview')) $('stopPreview').onclick=()=>{if(previewAudio){previewAudio.pause();previewAudio.currentTime=0;}if($('playPreview'))$('playPreview').textContent='▶ Play';syncPreviewPlaybackTime();};
@@ -7897,7 +8171,22 @@
       if(previewAudio){previewAudio.pause();previewAudio.currentTime=0;}
       syncPreviewPlaybackTime();
     };
+    if ($('productionPreviewReplay')) $('productionPreviewReplay').onclick=act(async()=>{
+      if(!previewAudio||!voicePreviewValid)throw new Error('Generate and validate a Production preview before replaying it.');
+      previewAudio.pause();
+      previewAudio.currentTime=0;
+      await previewAudio.play();
+      syncPreviewPlaybackTime();
+    });
+    if ($('productionPreviewCancel')) $('productionPreviewCancel').onclick=act(async()=>{
+      const job=productionJobSnapshots.preview;
+      if(!productionPreviewJobId||!productionJobIsActive(job))throw new Error('There is no active Production preview to cancel.');
+      if(String(job.state||'').toLowerCase()==='cancel_requested')throw new Error('Production preview cancellation has already been requested.');
+      await call('job.cancel',{job_id:productionPreviewJobId});
+      await refreshJobs();
+    });
     if ($('startGenerate')) $('startGenerate').onclick=act(async()=>{
+      if(productionJobIsActive(productionJobSnapshots.full)||productionJobIsActive(productionJobSnapshots.preview))throw new Error('Another Production audio operation is already running. Finish or cancel it before starting full generation.');
       await flushSoundDesignState();
       const [activeProject, savedSettings] = await Promise.all([
         call('project.get_active'),
@@ -7911,12 +8200,28 @@
         profile_name:selectedVoice || $('profileName')?.value || activeProject?.voice_profile,
         bitrate
       });
-      await monitorJob(data.job_id);
+      if(!data?.job_id)throw new Error('The full audiobook generation job was not created.');
+      productionFullJobId=String(data.job_id);
+      await refreshJobs();
+      await monitorProductionJob(data.job_id,'full');
       await refreshProductionSummary();
       await refreshJobs();
     });
-    if ($('pauseGenerate')) $('pauseGenerate').onclick=act(async()=>{if(!activeJob||activeJobType!=='audiobook-generation')throw new Error('There is no active audiobook generation job to pause.');await call('job.pause',{job_id:activeJob});await refreshJobs();});
-    if ($('cancelJob')) $('cancelJob').onclick=act(async()=>{if(!activeJob||activeJobType!=='audiobook-generation')throw new Error('There is no active audiobook generation job to cancel.');await call('job.cancel',{job_id:activeJob});await refreshJobs();});
+    if ($('pauseGenerate')) $('pauseGenerate').onclick=act(async()=>{
+      const job=productionJobSnapshots.full;
+      const state=String(job?.state||'').toLowerCase();
+      if(!productionFullJobId||!job||!['running','paused'].includes(state))throw new Error('There is no pausable full audiobook generation job.');
+      if(state==='paused')await call('job.resume',{job_id:productionFullJobId});
+      else await call('job.pause',{job_id:productionFullJobId});
+      await refreshJobs();
+    });
+    if ($('cancelJob')) $('cancelJob').onclick=act(async()=>{
+      const job=productionJobSnapshots.full;
+      if(!productionFullJobId||!productionJobIsActive(job))throw new Error('There is no active full audiobook generation job to cancel.');
+      if(String(job.state||'').toLowerCase()==='cancel_requested')throw new Error('Full audiobook cancellation has already been requested.');
+      await call('job.cancel',{job_id:productionFullJobId});
+      await refreshJobs();
+    });
     ['analyzeCharacters','runAiAnalysis'].forEach(id=>{if($(id))$(id).onclick=act(async()=>{const data=await call('character.analyze');await monitorJob(data.job_id,refreshCharacters);});});
     if ($('previewPronTerm')) $('previewPronTerm').onclick=act(async()=>{
       const profile = $('pronQuickVoice')?.value || '';
