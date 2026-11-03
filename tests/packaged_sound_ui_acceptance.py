@@ -283,10 +283,10 @@ def _run(args: argparse.Namespace) -> int:
         "year": "2026",
         "genre": "Fantasy",
     }
-    # Keep the fixture independent from heavyweight TTS/runtime imports. The
-    # selected name must still resolve through the frozen app's real voice.select
-    # bridge, which rejects names not present in its live voice catalogue.
-    narrator_profile_name = "Offline Character • Anime Hero"
+    # Use the bundled Piper profile for a real, deterministic packaged preview.
+    # The app separately verifies its Qwen worker/runtime bootstrap; this UI
+    # acceptance must not depend on downloading Qwen TTS model weights at runtime.
+    narrator_profile_name = "Offline Neural • Amy"
     metadata_history = {
         "author": f"Historical Author {token}",
         "publisher": f"Historical Press {token}",
