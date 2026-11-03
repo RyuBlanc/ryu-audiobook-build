@@ -3076,6 +3076,7 @@ class PremiumV2Bridge(QObject):
             self._preview_cancel_events[job_id] = cancel_event
         self._job_update(job_id, state="running", started_at=self._now(), stage="Preparing preview", progress=2,
                           current_chapter=int(selected_chapter.number) if selected_chapter else 0,
+                          current_chapter_title=str(selected_chapter.title or "") if selected_chapter else "",
                           chapters_total=len(project.chapters) if project is not None and selected_chapter else 0)
         threading.Thread(
             target=self._preview_worker,

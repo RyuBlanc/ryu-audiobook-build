@@ -77,3 +77,11 @@ Source audit and implementation checkpoint: branch stage-5/step-1-production-met
 
 Do not mark PROD-05/06/07 AUTOMATED TESTS PASSED until the exact implementation commit's regression workflow completes successfully. Do not mark runtime acceptance complete from CI alone.
 
+
+
+## Step 5.2.2 clarification
+
+The Generation Engine must show Idle rather than 0% when no job exists. A percentage is displayed only when it comes from an actual job or a verified completed output. The chapter-preview monitor shows the selected chapter number/title from the backend job record; it must not infer a chapter from a static UI label. Failed full-generation status displays the backend error message.
+
+Run #2106 passed the consolidated regression suite on commit 97a4d3094dac80827bfc8ce1f0df0b12141d46e6 (1,082 tests, frontend syntax and native Qt lifecycle). The current follow-up includes additional idle/chapter status assertions and remains pending its own exact-head artifact checkpoint.
+

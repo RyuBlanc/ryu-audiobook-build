@@ -176,3 +176,29 @@ Requirements in scope: PROD-05, PROD-06 and PROD-07. PROD-08, PROD-09, PROD-15 a
 
 The backend intentionally serializes synthesis and full audiobook generation. This implementation gives both operations independent ownership and state rendering; it does not claim that simultaneous preview and full-book synthesis are supported.
 
+
+
+## 18. Step 5.2 regression hardening and exact-head results
+
+The first artifact checkpoint attempt, run #2100 on commit 1db667937a97b67dc08d02ce0dfe518216627091, passed dependency installation, frontend JavaScript syntax validation and the isolated native Qt lifecycle regression, but the full suite reported 8 failures/errors (1,082 tests). The failures exposed contracts that needed to be preserved or deliberately updated:
+- Four existing polling/UI-stability tests located refreshJobsImpl() by its original zero-argument function signature. Passing an optional snapshot parameter changed that source contract unnecessarily. The adapter now keeps refreshJobs() / refreshJobsImpl() unchanged and uses the monitor's normal shared job refresh.
+- The Production Pause/Resume/Cancel contract still expected the old global activeJob target. The test now verifies the independent productionFullJobId path while retaining the generic monitorJob regression checks for unrelated modules.
+- Stage 4 preview contract tests expected the old preview command shape. They now verify the explicit _production_preview job type and the stale-request guard.
+- The new Production preview job now also participates in _assert_no_active_audio_synthesis, so other backend entry points cannot start a second audio synthesis while a Production preview is active.
+
+Runs #2101, #2102, #2104 and #2105 were cancelled as the same branch received the next focused correction commits; these did not provide pass/fail evidence for the final source.
+
+Run #2103 was an intermediate commit (81cd91919fda4ba85cc0974d13b30cbc25226013) and failed on the remaining old refresh/preview contract assertions. Those were corrected before the final consolidated regression run.
+
+Run #2106 completed successfully on commit 97a4d3094dac80827bfc8ce1f0df0b12141d46e6:
+- 1,082 regression tests passed in 48.684 seconds.
+- Premium V2 frontend JavaScript syntax validation passed.
+- Isolated native Qt lifecycle regression passed.
+- The build/package job was skipped because this commit was a regression-only correction, not an artifact checkpoint.
+
+Further Step 5.2.2 hardening in this checkpoint:
+- The full-generation progress text now displays Idle instead of an invented 0% when no job exists; it reports a percentage only for a real job or verified completed output.
+- Failed full-generation jobs show the actual backend error/message in the Generation Engine status.
+- The Production preview monitor now displays the real current chapter number and title recorded on its durable job, and includes that identity in active/completed/failed preview status.
+- Step 5.2 remains CODE CHANGED — NOT VERIFIED until the matching-head artifact checkpoint and packaged job complete. Manual installed-Windows acceptance of generation, preview playback/replay and cancellation remains a separate runtime item.
+

@@ -5044,11 +5044,15 @@
       fill.id = 'productionPreviewProgressBar';
       fill.style.width = '0%';
       progress.appendChild(fill);
+      const chapter = document.createElement('small');
+      chapter.id = 'productionPreviewChapter';
+      chapter.className = 'muted';
+      chapter.textContent = 'Select a saved chapter for preview.';
       const timing = document.createElement('small');
       timing.id = 'productionPreviewTiming';
       timing.className = 'muted';
       timing.textContent = 'Preview timing will appear after a job starts.';
-      monitor.append(progress, timing);
+      monitor.append(chapter, progress, timing);
       controls.insertAdjacentElement('afterend', monitor);
     }
   }
@@ -5152,6 +5156,12 @@
     const fullState = String(fullJob?.state || '').toLowerCase();
     const fullActive = productionJobIsActive(fullJob);
     const completedOutput = !fullJob && Boolean(project?.completed && project?.output_path);
+    const fullError = String(fullJob?.error?.message || fullJob?.message || '').trim();
+    const fullStageLabel = fullState === 'failed'
+      ? 'Failed · ' + (fullError || 'Generation failed. Retry from Production Studio or inspect Background Jobs.')
+      : fullState === 'cancelled'
+        ? 'Cancelled'
+        : String(fullJob?.stage || fullJob?.message || fullState || 'Generation running');
     const fullPercent = fullJob
       ? Math.max(0, Math.min(100, Math.round(Number(fullJob.progress || 0))))
       : (completedOutput ? 100 : 0);
@@ -5163,12 +5173,12 @@
       ring.setAttribute('aria-valuemax', '100');
       ring.setAttribute('aria-valuenow', String(fullPercent));
       ring.setAttribute('aria-valuetext', fullJob
-        ? String(fullJob.stage || fullJob.message || fullState) + ' · ' + fullPercent + '%'
+        ? fullStageLabel + ' · ' + fullPercent + '%'
         : (completedOutput ? 'Audiobook ready' : 'Idle'));
     }
-    setProductionStatus('genPercent', fullPercent + '%');
+    setProductionStatus('genPercent', fullJob ? fullPercent + '%' : (completedOutput ? '100%' : 'Idle'));
     setProductionStatus('genStage', fullJob
-      ? String(fullJob.stage || fullJob.message || fullState || 'Generation running')
+      ? fullStageLabel
       : (completedOutput ? 'Audiobook ready' : 'Ready to generate'));
     const chapter = Math.max(0, Number(fullJob?.current_chapter || 0));
     const total = Math.max(0, Number(fullJob?.chapters_total || project?.chapter_count || 0));
@@ -5194,6 +5204,14 @@
 
     const previewState = String(previewJob?.state || '').toLowerCase();
     const previewActive = productionJobIsActive(previewJob);
+    const previewChapterNumber = Math.max(0, Number(previewJob?.current_chapter || previewJob?.result?.chapter_number || window.ryuPremiumSelectedChapter || 0));
+    const previewChapterRow = chapters.find(item => Number(item.number) === previewChapterNumber);
+    const previewChapterTitle = String(previewJob?.current_chapter_title || previewJob?.result?.chapter_title || previewChapterRow?.title || '').trim();
+    const previewChapterLabel = previewChapterNumber
+      ? 'Chapter ' + previewChapterNumber + (previewChapterTitle ? ' · ' + previewChapterTitle : '')
+      : 'Select a saved chapter for preview.';
+    const previewChapterElement = $('productionPreviewChapter');
+    if (previewChapterElement) previewChapterElement.textContent = previewChapterLabel;
     const previewPercent = previewJob
       ? Math.max(0, Math.min(100, Math.round(Number(previewJob.progress || 0))))
       : 0;
@@ -5206,19 +5224,20 @@
     }
     const previewStatus = $('productionPreviewStatus');
     if (previewStatus) {
+      const chapterPrefix = previewChapterNumber > 0 ? previewChapterLabel + ' · ' : '';
       let label = 'Generate a chapter preview to enable playback and download.';
-      if (previewActive) label = String(previewJob.stage || previewJob.message || previewState) + ' · ' + previewPercent + '%';
+      if (previewActive) label = chapterPrefix + String(previewJob.stage || previewJob.message || previewState) + ' · ' + previewPercent + '%';
       else if (previewState === 'completed') {
         const actual = Number(previewJob.result?.actual_duration_seconds);
-        label = voicePreviewValid && Number.isFinite(actual) && actual > 0
+        label = chapterPrefix + (voicePreviewValid && Number.isFinite(actual) && actual > 0
           ? 'Preview ready · ' + actual.toFixed(1) + ' seconds'
-          : 'Preview completed, but playback validation is not ready yet.';
+          : 'Preview completed, but playback validation is not ready yet.');
       } else if (previewState === 'failed') {
-        label = 'Preview failed · ' + String(previewJob.error?.message || previewJob.message || 'Check the job and retry.');
+        label = chapterPrefix + 'Preview failed · ' + String(previewJob.error?.message || previewJob.message || 'Check the job and retry.');
       } else if (previewState === 'cancelled') {
-        label = 'Preview cancelled · Partial preview audio was discarded.';
+        label = chapterPrefix + 'Preview cancelled · Partial preview audio was discarded.';
       } else if (voicePreviewValid && previewAudio) {
-        label = 'Preview ready · ' + (Number(previewAudio.duration) > 0 ? Number(previewAudio.duration).toFixed(1) + ' seconds' : 'loading duration');
+        label = chapterPrefix + 'Preview ready · ' + (Number(previewAudio.duration) > 0 ? Number(previewAudio.duration).toFixed(1) + ' seconds' : 'loading duration');
       }
       previewStatus.textContent = label;
     }

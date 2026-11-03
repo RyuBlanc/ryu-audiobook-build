@@ -1415,5 +1415,18 @@ class PremiumV2IntegrationContractTests(unittest.TestCase):
         self.assertIn("productionPreviewReplay", adapter)
 
 
+
+    def test_production_idle_state_is_neutral_and_preview_chapter_identity_is_visible(self):
+        adapter = (ROOT / "assets" / "frontend" / "premium_v2_backend_adapter.js").read_text(encoding="utf-8")
+        host = (ROOT / "app" / "ui" / "premium_v2_host.py").read_text(encoding="utf-8")
+        self.assertIn("fullJob ? fullPercent + '%' : (completedOutput ? '100%' : 'Idle')", adapter)
+        self.assertIn("id = 'productionPreviewChapter'", adapter)
+        self.assertIn("previewChapterNumber", adapter)
+        self.assertIn("previewChapterLabel", adapter)
+        self.assertIn("current_chapter_title=str(selected_chapter.title or \"\") if selected_chapter else \"\"", host)
+        self.assertIn("fullState === 'failed'", adapter)
+        self.assertIn("Failed · ", adapter)
+
+
 if __name__ == "__main__":
     unittest.main()
