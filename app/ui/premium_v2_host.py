@@ -3304,33 +3304,16 @@ class PremiumV2Bridge(QObject):
         validate_saved_audio_paths(state)
         sound_enabled = audio_mode != "off"
         transition_enabled = sound_enabled and is_chapter_transition_sound_enabled(state)
-        project_getter = getattr(self, "_active_project", None)
-        project = project_getter() if callable(project_getter) else None
+        # The preview job owns the chapter/project snapshot captured when it
+        # was created. Do not query _active_project() from this worker: the user
+        # may have switched projects while synthesis was running, and a late
+        # lookup would mix live navigation state into the original job.
         selected_number = int(state.get("_preview_chapter_number") or 1)
-        eligible = []
         selected_index = int(state.get("_preview_chapter_index") or 1)
-        selected_chapter = None
-        if project is not None:
-            eligible = [
-                chapter for chapter in project.chapters
-                if not getattr(chapter, "skip_for_generation", False) and str(chapter.text or "").strip()
-            ]
-            selected_chapter = next(
-                (chapter for chapter in eligible if int(chapter.number) == selected_number),
-                None,
-            )
-            if selected_chapter is not None:
-                selected_index = eligible.index(selected_chapter) + 1
         is_first_chapter = bool(state.get("_preview_chapter_is_first", selected_index == 1))
         is_last_chapter = bool(state.get("_preview_chapter_is_last", selected_index == 1))
-        chapter_title = str(
-            state.get("_preview_chapter_title")
-            or (selected_chapter.title if selected_chapter is not None else "Preview")
-        )
-        chapter_text = str(
-            state.get("_preview_chapter_text")
-            or (selected_chapter.text if selected_chapter is not None else "")
-        )
+        chapter_title = str(state.get("_preview_chapter_title") or "Preview")
+        chapter_text = str(state.get("_preview_chapter_text") or "")
 
         preview_root = app_root() / "Previews"
         preview_root.mkdir(parents=True, exist_ok=True)

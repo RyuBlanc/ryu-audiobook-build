@@ -153,13 +153,15 @@ class SoundDesignPreviewConfigurationTests(unittest.TestCase):
             source = root / "preview.wav"
             source.write_bytes(b"narration" * 256)
             track = self._asset(root, "chapter-two.wav")
-            project = SimpleNamespace(chapters=[
-                SimpleNamespace(number=1, title="One", text="Opening", skip_for_generation=False),
-                SimpleNamespace(number=2, title="Two", text="Middle", skip_for_generation=False),
-            ])
+            # These values are captured by _voice_preview before the worker
+            # starts. The active project may change while synthesis is running.
             state = {
                 "_preview_chapter_number": 2, "_preview_chapter_title": "Two",
+                "_preview_chapter_text": "Project A saved chapter text",
                 "_preview_chapter_id": "stable-chapter-two",
+                "_preview_chapter_index": 2,
+                "_preview_chapter_is_first": False,
+                "_preview_chapter_is_last": True,
                 "background_audio_mode": "manual", "background_audio_enabled": True,
                 "chapter_bgm_strategy": "chapter-based",
                 "chapter_bgm_overrides": {
@@ -173,7 +175,11 @@ class SoundDesignPreviewConfigurationTests(unittest.TestCase):
                 calls.append((str(path), volume))
                 Path(output).write_bytes(b"mixed chapter" * 256)
                 return Path(output)
-            bridge = SimpleNamespace(_active_project=lambda: project)
+            bridge = SimpleNamespace(
+                _active_project=lambda: self.fail(
+                    "A running preview must not read the newly active project."
+                )
+            )
             with patch.object(premium_v2_host, "app_root", return_value=app_root), \
                  patch("app.audio.library.validate_saved_audio_paths"), \
                  patch("app.audio.assembler._duration_ms", return_value=10000), \
@@ -184,6 +190,7 @@ class SoundDesignPreviewConfigurationTests(unittest.TestCase):
             self.assertEqual(calls[0][0], str(track))
             self.assertEqual(calls[0][1], 0.25)
             self.assertEqual(state["_preview_sound_configuration"]["chapter_number"], 2)
+            self.assertEqual(state["_preview_sound_configuration"]["chapter_title"], "Two")
             self.assertEqual(state["_preview_sound_configuration"]["chapter_bgm_strategy"], "chapter-based")
 
     def test_automatic_chapter_preview_selects_real_library_music_from_chapter_recipe(self):
