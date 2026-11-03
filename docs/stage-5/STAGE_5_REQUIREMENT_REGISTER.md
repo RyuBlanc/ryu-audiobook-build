@@ -148,3 +148,23 @@ Implementation commits:
 - `4cf063dccb5a586242dabc7b69d0b640c82891a1` — regression covers the request-time stale chapter-ID rejection and checks that stale requests never invoke synthesis.
 
 These changes remain `CODE CHANGED — NOT VERIFIED` until the final exact-commit Windows Actions regression and packaging workflow passes.
+
+
+## Step 5.2 failed-run audit and regression correction — 3 November 2026
+
+### Workflow evidence reviewed
+
+- #2114 (run ID `41576361204`) and #2115 (run ID `41576648463`) completed with both `tests` and `build` jobs successful. The exact run artifacts and hashes are retained in the execution ledger.
+- #2116, #2118, #2125, #2126 and #2130 failed in the full regression suite after JavaScript syntax validation and isolated Qt lifecycle validation had passed. Their recurring failures were stale Stage 4 assertions that expected Production Preview to use Chapter Studio's selected chapter and the previous Voice Preview playback callback.
+- #2130 additionally exposed that the new Production Preview saved-narrator test expected a chapter ID in the forwarded backend payload, while `_production_preview` had validated but not forwarded that ID.
+- #2127, #2128 and #2129, together with earlier #2101/#2102/#2104/#2105 and #2117/#2119/#2120/#2121/#2123/#2124, were cancelled while rapid commits on the same branch advanced the pending candidate. They are superseded runs, not evidence that the final source failed. The final checkpoint must be judged by its own run.
+
+### Corrections now present in source
+
+- `app/ui/premium_v2_host.py`: forwards the validated stable `chapter_id` into the Production preview worker job; keeps request-time stale-ID rejection; continues to force saved narrator, saved chapter text, character routing, pronunciation and Sound Design configuration.
+- `tests/test_stage4_voice_preview_contract.py`: replaces obsolete Chapter Studio-driven assertions with Production-owned saved chapter selector, chapter-ID handoff, stale-completion guard and Production-preview-specific callback expectations. The backend contract fixture now supplies the persisted narrator resolver and asserts that only the saved narrator/configuration is forwarded.
+- `tests/test_stage5_production_preview_parity.py`: retains the explicit assertion that the stable chapter ID reaches the preview request and keeps regressions for transient input rejection and stale chapter replacement.
+
+The three Stage 4 failures and one Stage 5 error in #2130 are addressed by these edits. The next artifact checkpoint must confirm this on the exact SHA; no result is presumed.
+
+Step 5.2's original execution-ledger scope is PROD-05/06/07 (real progress, independent preview/full job state, duration controls and playback/cancellation/timing). PROD-08/09/15 and GEN-06 were later planned integration items and have been implemented in the same branch, but their full manual audio matrix is still separate from the Stage 5.2 CI exit test. PROD-14 and GEN-01–05 remain tracked for later Stage 5 integration/recovery scope and are not silently marked complete here.
