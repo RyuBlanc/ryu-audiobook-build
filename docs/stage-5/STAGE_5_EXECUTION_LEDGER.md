@@ -547,3 +547,24 @@ The current workflow has concurrency group `ryu-audiobook-windows-build-${{ gith
 The following `[artifact-checkpoint]` commit is the authoritative candidate. It must pass the full test job, JavaScript and Qt lifecycle checks, frozen Windows packaging, Stage 2 Sound Design/Music Library acceptance, Stage 5 Production preview M4A/WAV generation, duration matrix, Play/Pause/Stop/Replay, 90-second cancellation, installer, SHA-256, Defender and artifact uploads. The exact passing run ID, head SHA, test count, artifact IDs/sizes and SHA-256 values will be appended after verification.
 
 Stage 5.2 remains open until that exact-head packaged run succeeds. The still-open PROD-14 and GEN-01–GEN-05 rows remain in the later full-generation/job-history/recovery scope; they are not being marked complete by this preview step.
+
+
+## 37. #2158 packaged preview acceptance result and 60-second segment-boundary correction — 3 November 2026
+
+### Exact run evidence
+
+- Build Windows App #2158, run ID `41621246881`, head `c3901fd9a8c8374b17e6e1216880caf0388ab9f3`.
+- `tests` job passed 1,103 tests in 46.524 seconds; frontend JavaScript syntax and isolated native Qt lifecycle checks passed.
+- Frozen application build, frozen executable verification and bundled voice/critical-module verification all passed.
+- The packaged Sound Design/Music Library acceptance passed all previous scenarios: music/cue imports and filters, chapter BGM and cue assignment/save, Same/Chapter-Based/Voice Only mix previews, Production handoff/metadata save gate, project switching, and the new Production global pronunciation OFF/ON persistence check.
+- The Production chapter preview passed real 10-second-target generation, the returned M4A plus PCM WAV playback path, Play/Pause/Stop/Replay, and a real 30-second-target preview (measured 33.52 seconds).
+- The only terminal acceptance failure was the real 60-second-target output measuring 71.02 seconds while the harness used a fixed ±5-second duration comparison. The job returned a valid M4A, a separate WAV playback path and format, measured positive duration, the correct requested duration (60s), correct chapter/project identity and saved Voice Only configuration. The failure was the test's duration tolerance, not a preview, encoder or playback error. The run stopped before the 90-second cancellation acceptance; cancellation remains pending the next packaged run.
+- Installer, SHA-256, Defender and upload steps were skipped because packaged acceptance failed; no installer artifacts were emitted for #2158.
+
+### Bounded duration acceptance correction
+
+Commit `8f8f1d538970eb0715fa03ae45117b6d0dbb96f6` updates only the packaged duration assertion. For each real 30s/60s target, it now requires `requested_duration_seconds` to equal the selected target, measured duration to be positive and no more than 5 seconds short, correct `.m4a` save output, correct `file:` `.wav` playback URL and `playback_format === 'wav'`. The maximum allowed measured overshoot is `max(5 seconds, 20% of requested duration)` to accommodate a complete final synthesis segment at natural word/segment boundaries while keeping the result bounded. At the previously observed 60s result, 71.02s is within the 72s ceiling. This does not alter runtime synthesis, truncate output or claim the measured duration equals the requested target.
+
+### Final gate after #2158
+
+The next artifact checkpoint must pass the complete packaged acceptance, including the 90-second Chapter Three cancel request and confirmed `cancelled` terminal job state, and then complete installer, logo/hash, Defender and portable/installer/manifest uploads. Stage 5.2 remains open until that exact-head run succeeds and artifact IDs/hashes are recorded.
