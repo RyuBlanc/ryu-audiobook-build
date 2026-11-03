@@ -1604,8 +1604,30 @@
       "Production Preview job was not scoped to the active project.");
     must(!chosenPreviewChapterId || String(productionPreviewJob.current_chapter_id || "") === chosenPreviewChapterId,
       "Production Preview job did not preserve the selected stable chapter identity.");
-    must(document.querySelector("#productionPreviewChapter")?.textContent.includes("Chapter 2"),
-      "Production Preview monitor did not display the selected chapter identity.");
+    try {
+      await waitFor("Production Preview monitor selected chapter identity", function () {
+        const label = String(document.querySelector("#productionPreviewChapter")?.textContent || "");
+        const expectedTitle = String(chosenPreviewChapter.title || "");
+        return label.includes("Chapter 2") && (!expectedTitle || label.includes(expectedTitle));
+      }, 15000);
+    } catch (error) {
+      const latestJobs = await invoke("job.list", {include_hidden:true});
+      const latestPreviewJob = Array.isArray(latestJobs)
+        ? latestJobs.find(job => String(job.job_id || "") === String(productionPreviewJob.job_id || ""))
+        : null;
+      throw new Error(String(error?.message || error) + ". Production preview monitor diagnostic=" + JSON.stringify({
+        monitorChapter:document.querySelector("#productionPreviewChapter")?.textContent || null,
+        monitorStatus:document.querySelector("#productionPreviewStatus")?.textContent || null,
+        generatePageActive:document.querySelector("#generate")?.classList.contains("active") || false,
+        selectedChapter:document.querySelector("#productionPreviewChapterSelect")?.value || null,
+        jobState:latestPreviewJob?.state || null,
+        jobStage:latestPreviewJob?.stage || null,
+        jobChapter:latestPreviewJob?.current_chapter || null,
+        jobChapterTitle:latestPreviewJob?.current_chapter_title || null,
+        jobChapterId:latestPreviewJob?.current_chapter_id || null,
+        jobProject:latestPreviewJob?.project_folder || null
+      }));
+    }
     const productionPreviewJobId = String(productionPreviewJob.job_id);
     let completedProductionPreview = null;
     await waitFor("real Production Preview audio completion", async function () {
