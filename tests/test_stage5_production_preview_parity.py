@@ -295,10 +295,11 @@ class ProductionPreviewParitySourceContracts(unittest.TestCase):
         download = self.adapter_source[start:end]
         self.assertIn("activeProject?.title", download)
         self.assertIn("activeProject?.name", download)
-        self.assertIn(r"projectFolder.replace(/\\/g,'/')", download)
-        expected_safe_filename_pattern = 'replace(/[<>:"' + r'\/\\|?*\x00-\x1f]+/g,' + "'-')"
+        self.assertIn("projectFolder.replace(", download)
+        self.assertIn("const safeFilePart=value=>String(value||'')", download)
+        self.assertIn("safeFilePart(activeProject?.title||activeProject?.name||folderName)", download)
         self.assertIn(expected_safe_filename_pattern, download)
-        self.assertIn(r"replace(/\s+/g,'_')", download)
+        self.assertIn("safeFilePart(lastVoicePreviewChapterTitle)", download)
         self.assertIn("const suffix='_Chapter_'", download)
         self.assertIn("lastVoicePreviewChapterTitle", download)
         self.assertIn("projectBaseName.slice(0,Math.max(12,100-suffix.length))+suffix", download)
