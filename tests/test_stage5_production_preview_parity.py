@@ -178,6 +178,22 @@ class ProductionPreviewParitySourceContracts(unittest.TestCase):
         self.assertIn("chapter_bgm_strategy=chapter_bgm_strategy", self.host_source)
         self.assertIn("chapter_bgm_overrides=", self.host_source)
 
+
+    def test_preview_worker_keeps_m4a_download_output_and_creates_browser_playback_wav(self):
+        worker = self.host_source[
+            self.host_source.index("def _preview_worker("):
+            self.host_source.index("def _character_list(", self.host_source.index("def _preview_worker("))
+        ]
+        self.assertIn('if preview_path.suffix.casefold() == ".m4a":', worker)
+        self.assertIn('playback_path = folder / f"preview_playback_{job_id}.wav"', worker)
+        self.assertIn('"output_path": str(preview_path)', worker)
+        self.assertIn('"file_url": playback_path.resolve().as_uri()', worker)
+        self.assertIn('"playback_output_path": str(playback_path)', worker)
+        self.assertIn('"playback_format": playback_path.suffix.casefold().lstrip(".")', worker)
+        self.assertIn('"_run(["', worker)
+        self.assertIn('"c:a", "pcm_s16le"', worker)
+        self.assertIn("abs(float(playback_duration) - float(duration)) > 1.5", worker)
+
     def test_preview_and_final_generation_consume_the_effective_saved_voice_configuration(self):
         self.assertIn('"_production_preview": True', self.host_source)
         self.assertIn("self._narrator_series_default_read(project, state, series)", self.host_source)
