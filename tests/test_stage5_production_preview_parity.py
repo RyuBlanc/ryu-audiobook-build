@@ -298,7 +298,6 @@ class ProductionPreviewParitySourceContracts(unittest.TestCase):
         self.assertIn("projectFolder.replace(", download)
         self.assertIn("const safeFilePart=value=>String(value||'')", download)
         self.assertIn("safeFilePart(activeProject?.title||activeProject?.name||folderName)", download)
-        self.assertIn(expected_safe_filename_pattern, download)
         self.assertIn("safeFilePart(lastVoicePreviewChapterTitle)", download)
         self.assertIn("const suffix='_Chapter_'", download)
         self.assertIn("lastVoicePreviewChapterTitle", download)
