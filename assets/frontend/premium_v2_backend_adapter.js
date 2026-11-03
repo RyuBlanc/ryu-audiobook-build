@@ -8306,7 +8306,7 @@
       if($('productionPreviewTiming'))$('productionPreviewTiming').textContent='Waiting for the preview worker to start.';
       if($('previewState'))$('previewState').textContent='Preparing';
       if($('validation'))$('validation').textContent='Preparing selected chapter preview.';
-      const data=await call('production.preview',{profile_name:name,chapter_number:chapterNumber,duration_seconds:Number(duration),include_sound_design:true,_production_preview:true});
+      const data=await call('production.preview',{profile_name:name,chapter_number:chapterNumber,chapter_id:chapterId,duration_seconds:Number(duration),include_sound_design:true,_production_preview:true});
       if(previewToken!==voicePreviewEpoch)return;
       if(!data?.job_id)throw new Error('The Production preview job was not created.');
       const previewProfileName=String(data.profile_name||name);
