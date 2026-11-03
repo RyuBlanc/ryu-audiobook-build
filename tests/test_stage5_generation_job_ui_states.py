@@ -42,15 +42,18 @@ class Stage53GenerationJobUiStateTests(unittest.TestCase):
         self.assertIn('command === "job.list"', self.packaged)
         self.assertIn('["job.pause","job.resume","job.cancel"]', self.packaged)
 
-    def test_production_preview_monitor_acceptance_waits_for_backend_poll(self):
+    def test_production_preview_monitor_acceptance_reopens_page_before_render_assertion(self):
         preview_start = self.packaged.index("real Production Preview job start")
+        reopen = self.packaged.index('window.go("generate")', preview_start)
+        visible = self.packaged.index("Production Preview monitor page is visible", preview_start)
         monitor_wait = self.packaged.index("Production Preview monitor selected chapter identity", preview_start)
         audio_completion = self.packaged.index("real Production Preview audio completion", preview_start)
-        self.assertLess(preview_start, monitor_wait)
+        self.assertLess(preview_start, reopen)
+        self.assertLess(reopen, visible)
+        self.assertLess(visible, monitor_wait)
         self.assertLess(monitor_wait, audio_completion)
         self.assertIn("Production preview monitor diagnostic", self.packaged)
         self.assertIn("latestPreviewJob?.current_chapter_id", self.packaged)
-
     def test_frozen_app_acceptance_runs_real_saved_profile_full_generation(self):
         packaged_runner = (ROOT / "tests" / "packaged_sound_ui_acceptance.py").read_text(encoding="utf-8")
         self.assertIn("full_generation_project_folder", packaged_runner)

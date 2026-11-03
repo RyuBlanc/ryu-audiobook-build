@@ -1604,11 +1604,25 @@
       "Production Preview job was not scoped to the active project.");
     must(!chosenPreviewChapterId || String(productionPreviewJob.current_chapter_id || "") === chosenPreviewChapterId,
       "Production Preview job did not preserve the selected stable chapter identity.");
+    // A job can finish while the user has navigated away from Production.
+    // The monitor is page-scoped and intentionally stops repainting while hidden.
+    // Re-open Generate before asserting its visible snapshot, then allow the page
+    // observer/job poll to synchronize the latest backend job into the monitor.
+    if (!document.querySelector("#generate")?.classList.contains("active")) {
+      window.go("generate");
+    }
+    await waitFor("Production Preview monitor page is visible", function () {
+      const page = document.querySelector("#generate");
+      return Boolean(page && page.classList.contains("active") &&
+        !page.classList.contains("hidden") && page.getClientRects().length > 0);
+    }, 15000);
     try {
       await waitFor("Production Preview monitor selected chapter identity", function () {
         const label = String(document.querySelector("#productionPreviewChapter")?.textContent || "");
         const expectedTitle = String(chosenPreviewChapter.title || "");
-        return label.includes("Chapter 2") && (!expectedTitle || label.includes(expectedTitle));
+        const page = document.querySelector("#generate");
+        return Boolean(page && page.classList.contains("active") &&
+          label.includes("Chapter 2") && (!expectedTitle || label.includes(expectedTitle)));
       }, 15000);
     } catch (error) {
       const latestJobs = await invoke("job.list", {include_hidden:true});
