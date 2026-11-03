@@ -136,3 +136,15 @@ Current implementation candidate: `8a4eba2b3ad5fa849b75ebb671e57b9932d8a763` on 
 Pronunciation and Sound Design control paths were already present in the existing Production adapter; source inspection confirmed that they synchronize with the saved Pronunciation/Sound Design state. The new tests record those contracts. No new mock settings or parallel engines were introduced.
 
 All four rows above remain `CODE CHANGED — NOT VERIFIED` until the exact-head regression and artifact-checkpoint workflow passes. Installed Windows behavior and real audio parity remain separate runtime acceptance; they are not inferred from source inspection or CI.
+
+
+### Additional request-time identity guard — 3 November 2026
+
+The final chapter-preview request now carries the selected saved chapter's stable ID. The backend compares it with the active project's current chapter ID before creating the synthesis job and fails closed if it changed. This complements the existing job ownership and download checks, so a deleted/replaced chapter cannot be synthesized under a stale selector and cannot be played or saved under a reused number.
+
+Implementation commits:
+- `2bdb88840662e9b18143dfb5cc0eb5819a9aa85a` — backend request-time stable chapter-ID validation.
+- `50d519193609bb5c3f9d025f744114ff87b7eff7` — frontend includes selected stable chapter ID in the Production preview request.
+- `4cf063dccb5a586242dabc7b69d0b640c82891a1` — regression covers the request-time stale chapter-ID rejection and checks that stale requests never invoke synthesis.
+
+These changes remain `CODE CHANGED — NOT VERIFIED` until the final exact-commit Windows Actions regression and packaging workflow passes.
