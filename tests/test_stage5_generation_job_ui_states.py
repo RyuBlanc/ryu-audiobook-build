@@ -21,7 +21,7 @@ class Stage53GenerationJobUiStateTests(unittest.TestCase):
         self.assertIn("Pausing at the next chapter boundary", renderer)
         self.assertIn("Cancelling…", renderer)
         self.assertNotIn("['running','pause_requested'].includes(state) ? action('pause'", renderer)
-        self.assertIn("backgroundGenerationJobActions(j, id, action)", self.adapter)
+        self.assertIn("backgroundGenerationJobActions(j, id, action, canControlGeneration, canCancelImport, canCancelPreview)", self.adapter)
         for command in ("pause:'job.pause'", "resume:'job.resume'", "cancel:'job.cancel'"):
             self.assertIn(command, self.adapter)
 
