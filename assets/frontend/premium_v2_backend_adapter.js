@@ -260,7 +260,7 @@
     if (error) console.error('[Ryu backend]', text);
   };
   const act = fn => async event => { event?.preventDefault?.(); try { await fn(event); } catch (e) { message(e?.message || String(e), true); } };
-  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', lastVoicePreviewChapterNumber = null, lastVoicePreviewChapterTitle = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8, productionFullJobId = null, productionPreviewJobId = null, productionJobSnapshots = {full:null,preview:null}, productionJobMonitors = {full:null,preview:null}, productionMonitorEpochs = {full:0,preview:0}, productionPreviewRequestProjectFolder = '';
+  let selectedVoice = null, selectedVoiceId = null, selectedVoiceProvider = null, profileEditOriginalName = '', activeJob = null, activeJobType = null, poll = null, monitorEpoch = 0, jobsRefreshPromise = null, chapterListEpoch = 0, chapterSelectionEpoch = 0, cueListEpoch = 0, cueSearchTimer = null, previewAudio = null, lastVoicePreviewPath = null, lastVoicePreviewProfileName = '', lastVoicePreviewChapterNumber = null, lastVoicePreviewChapterTitle = '', voicePreviewValid = false, voicePreviewEpoch = 0, previewVolume = 0.85, voiceAssignmentEpoch = 0, playerAudio = null, soundPreviewAudio = null, cueSearchUnavailableNotified = false, chapterSaveTimer = null, chapterSavePromise = Promise.resolve(), activePlayerChapters = [], playerPositionSaveAt = 0, playerRate = 1, playerVolume = 0.8, productionFullJobId = null, productionPreviewJobId = null, productionJobSnapshots = {full:null,preview:null}, productionJobMonitors = {full:null,preview:null}, productionMonitorEpochs = {full:0,preview:0}, productionPreviewRequestProjectFolder = '', productionPreviewSelectionProjectFolder = '', productionPreviewSelectedChapter = null, productionPreviewSelectedChapterId = '', productionPreviewRequestChapterNumber = 0, productionPreviewRequestChapterId = '';
   let elevenCandidates = [], selectedElevenCandidate = null, elevenDesignSeed = 7300;
   let chapters = [], characters = [], voices = [], terms = [], projects = [], sounds = [], pronunciationEnabled = true, activePronunciationSeries = '', lastPronunciationPreview = null, pronunciationRowPreviewState = new Map(), pronunciationSelectionKeys = new Set(), selectedSoundPath = null, selectedCuePath = null, pendingCueSlot = null, pendingCueAssignments = Object.create(null), cueChangesDirty = false, cueSaveError = '', cueAssignments = {}, chapterBgmState = {strategy:'same',overrides:{}}, selectedBgmChapter = null, selectedBgmTrackPath = null, chapterBgmDraftDirty = false, mixLevelsDirty = false, soundPreviewKind = null, soundPreviewPath = null;
   let chapterBgmCandidateTrackPath = null, chapterBgmCandidateChapter = null, chapterBgmSavePromise = null, cueSavePromise = null;
@@ -2374,6 +2374,8 @@
     }
     if (requestToken !== chapterListEpoch) return chapters;
     chapters = Array.isArray(loaded) ? loaded : [];
+    ensureProductionPreviewMonitorUi();
+    syncProductionPreviewChapterSelector();
     // Narrator spans are a derived view over the authoritative chapter source.
     // Refresh only after the new chapter text has been loaded so stale offsets
     // cannot be displayed for an edited/reordered/split/merged chapter.
@@ -5003,9 +5005,116 @@
     const value = Number(raw);
     return Number.isFinite(value) && value >= 0 ? value : NaN;
   }
+  function syncProductionPreviewChapterSelector() {
+    const select = $('productionPreviewChapterSelect');
+    if (!select) return;
+    const projectFolder = String(window.ryuPremiumActiveProject?.folder || '');
+    if (projectFolder !== productionPreviewSelectionProjectFolder) {
+      const previousFolder = productionPreviewSelectionProjectFolder;
+      productionPreviewSelectionProjectFolder = projectFolder;
+      productionPreviewSelectedChapter = null;
+      productionPreviewSelectedChapterId = '';
+      if (previousFolder && previousFolder !== projectFolder) {
+        // A completed preview belongs to its original project. Clear only the
+        // playable UI reference; keep the durable job ID so an active original
+        // job can still be cancelled and its status remains visible in History.
+        invalidateVoicePreview();
+        if ($('productionPreviewStatus')) {
+          $('productionPreviewStatus').textContent = 'Project changed. Generate a fresh preview for the selected project before playback or saving.';
+        }
+      }
+    }
+    const rows = (Array.isArray(chapters) ? chapters : []).filter(chapter =>
+      Number.isInteger(Number(chapter?.number)) && Number(chapter.number) > 0
+    );
+    const currentNumber = Number(productionPreviewSelectedChapter || 0);
+    const currentRow = rows.find(chapter => Number(chapter.number) === currentNumber);
+    const currentId = String(currentRow?.chapter_id || currentRow?.id || '');
+    if (currentRow && productionPreviewSelectedChapterId && currentId &&
+        productionPreviewSelectedChapterId !== currentId) {
+      // Chapter numbers can be reused after deletion/reordering. A changed
+      // stable chapter ID invalidates any preview previously associated with it.
+      invalidateVoicePreview();
+      productionPreviewSelectedChapter = null;
+      productionPreviewSelectedChapterId = '';
+    }
+    if (!rows.length) {
+      productionPreviewSelectedChapter = null;
+      productionPreviewSelectedChapterId = '';
+    } else if (!currentRow || !productionPreviewSelectedChapter) {
+      const studioNumber = Number(window.ryuPremiumSelectedChapter || 0);
+      const fallback = rows.find(chapter => Number(chapter.number) === studioNumber) || rows[0];
+      productionPreviewSelectedChapter = Number(fallback.number);
+      productionPreviewSelectedChapterId = String(fallback.chapter_id || fallback.id || '');
+    } else if (!productionPreviewSelectedChapterId) {
+      productionPreviewSelectedChapterId = currentId;
+    }
+
+    const signature = JSON.stringify(rows.map(chapter => [
+      Number(chapter.number), String(chapter.chapter_id || chapter.id || ''),
+      String(chapter.title || '')
+    ]));
+    if (select.dataset.chapterSignature !== signature) {
+      const options = rows.map(chapter => {
+        const option = document.createElement('option');
+        option.value = String(Number(chapter.number));
+        option.textContent = 'Chapter ' + Number(chapter.number) + ' · ' +
+          String(chapter.title || 'Untitled chapter');
+        return option;
+      });
+      if (!options.length) {
+        const empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = 'No saved chapters available';
+        empty.disabled = true;
+        options.push(empty);
+      }
+      select.replaceChildren(...options);
+      select.dataset.chapterSignature = signature;
+    }
+    const selectedValue = productionPreviewSelectedChapter ? String(productionPreviewSelectedChapter) : '';
+    if (select.value !== selectedValue) select.value = selectedValue;
+    select.disabled = !rows.length ||
+      productionJobIsActive(productionJobSnapshots.full) ||
+      productionJobIsActive(productionJobSnapshots.preview);
+  }
+
   function ensureProductionPreviewMonitorUi() {
     const controls = $('productionPreviewControls');
     if (!controls) return;
+    if (!$('productionPreviewChapterSelectWrap')) {
+      const picker = document.createElement('label');
+      picker.id = 'productionPreviewChapterSelectWrap';
+      picker.className = 'production-preview-chapter-picker';
+      picker.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:100%;min-width:0;margin:0 0 8px;box-sizing:border-box';
+      const caption = document.createElement('span');
+      caption.className = 'muted';
+      caption.textContent = 'Preview chapter';
+      const select = document.createElement('select');
+      select.id = 'productionPreviewChapterSelect';
+      select.setAttribute('aria-label', 'Select a saved chapter for Production preview');
+      select.style.cssText = 'flex:1 1 220px;min-width:0;max-width:100%;padding:8px 10px;border:1px solid var(--border,rgba(128,128,128,.35));border-radius:8px;background:var(--input-bg,transparent);color:inherit';
+      select.addEventListener('change', () => {
+        const chapterNumber = Number(select.value);
+        const chapter = chapters.find(item => Number(item.number) === chapterNumber);
+        if (!chapter) {
+          syncProductionPreviewChapterSelector();
+          return;
+        }
+        if (chapterNumber === Number(productionPreviewSelectedChapter)) return;
+        productionPreviewSelectedChapter = chapterNumber;
+        productionPreviewSelectedChapterId = String(chapter.chapter_id || chapter.id || '');
+        invalidateVoicePreview();
+        if ($('productionPreviewStatus')) {
+          $('productionPreviewStatus').textContent =
+            'Chapter ' + chapterNumber + ' selected. Generate a new preview for this chapter.';
+        }
+        if ($('productionPreviewTiming')) $('productionPreviewTiming').textContent = 'No preview generated for this chapter yet.';
+        syncProductionPreviewControls();
+      });
+      picker.append(caption, select);
+      controls.insertAdjacentElement('afterbegin', picker);
+    }
     const addButton = (id, label, className, anchor, insertAfter = true) => {
       if ($(id)) return $(id);
       const button = document.createElement('button');
@@ -5055,6 +5164,7 @@
       monitor.append(chapter, progress, timing);
       controls.insertAdjacentElement('afterend', monitor);
     }
+    syncProductionPreviewChapterSelector();
   }
   function monitorProductionJob(jobId, operation, done) {
     if (!['full','preview'].includes(operation)) return Promise.reject(new Error('Unknown Production Studio job operation.'));
@@ -5279,6 +5389,7 @@
     const fullStart = $('startGenerate');
     const previewStart = $('previewGenerate');
     const anyAudioActive = fullActive || previewActive;
+    syncProductionPreviewChapterSelector();
     if (fullStart) fullStart.disabled = anyAudioActive;
     if (previewStart) previewStart.disabled = anyAudioActive;
     syncProductionPreviewControls();
@@ -8137,9 +8248,8 @@
     if ($('generatePreview')) $('generatePreview').onclick=act(previewVoice);
     ensureProductionPreviewMonitorUi();
     if ($('previewGenerate')) $('previewGenerate').onclick=act(async()=>{
-      const chapterNumber=Number(window.ryuPremiumSelectedChapter||0);
-      const chapter=chapters.find(item=>Number(item.number)===chapterNumber);
-      if(!chapterNumber||!chapter||!String(chapter.text||'').trim())throw new Error('Select a non-empty chapter in Chapter Studio before generating its production preview.');
+      const chapterNumber=Number(productionPreviewSelectedChapter||$('productionPreviewChapterSelect')?.value||0);
+      if(!chapterNumber)throw new Error('Select a saved chapter in the Production preview chapter selector.');
       if(productionJobIsActive(productionJobSnapshots.full))throw new Error('Finish or cancel the full audiobook generation before starting a preview.');
       if(productionJobIsActive(productionJobSnapshots.preview))throw new Error('A Production preview is already running.');
       const name=String(selectedVoice||$('profileName')?.value||'').trim();
@@ -8147,10 +8257,25 @@
       const group=[...document.querySelectorAll('#generate .segmented')].find(el=>[...el.querySelectorAll('button')].some(b=>/10s|30s|60s|90s/i.test(b.textContent)));
       const duration=group?.querySelector('button.active')?.textContent.match(/\d+/)?.[0]||'30';
       if(![10,30,60,90].includes(Number(duration)))throw new Error('Preview duration must be 10, 30, 60, or 90 seconds.');
+      await flushChapterDraftBeforeSwitch();
+      const activeProject=await call('project.get_active');
+      if(!activeProject?.folder)throw new Error('Open a saved project before creating a Production preview.');
+      const knownFolder=String(window.ryuPremiumActiveProject?.folder||'');
+      if(knownFolder&&knownFolder!==String(activeProject.folder))throw new Error('The active project changed while the Production preview was being prepared. Refresh the chapter list and try again.');
+      const savedChapters=await call('chapter.list');
+      chapters=Array.isArray(savedChapters)?savedChapters:[];
+      window.ryuPremiumChapters=chapters;
+      syncProductionPreviewChapterSelector();
+      const chapter=chapters.find(item=>Number(item.number)===chapterNumber);
+      if(!chapter||!String(chapter.text||'').trim())throw new Error('The selected saved chapter is empty or no longer available. Refresh Chapter Studio and try again.');
+      if(Number(productionPreviewSelectedChapter||0)!==chapterNumber)throw new Error('The selected preview chapter changed while the saved chapter list was refreshing. Select it again and retry.');
+      const chapterId=String(chapter.chapter_id||chapter.id||'');
+      if(productionPreviewSelectedChapterId&&chapterId&&productionPreviewSelectedChapterId!==chapterId)throw new Error('The selected chapter identity changed. Refresh the saved chapter list and try again.');
       await flushSoundDesignState();
       await refreshTerms();
-      const activeProject=await call('project.get_active');
-      productionPreviewRequestProjectFolder=String(activeProject?.folder||'');
+      productionPreviewRequestProjectFolder=String(activeProject.folder);
+      productionPreviewRequestChapterNumber=chapterNumber;
+      productionPreviewRequestChapterId=chapterId;
       invalidateVoicePreview();
       const previewToken=voicePreviewEpoch;
       if($('productionPreviewStatus'))$('productionPreviewStatus').textContent='Starting selected-chapter preview…';
@@ -8160,16 +8285,22 @@
       const data=await call('production.preview',{profile_name:name,chapter_number:chapterNumber,duration_seconds:Number(duration),include_sound_design:true,_production_preview:true});
       if(previewToken!==voicePreviewEpoch)return;
       if(!data?.job_id)throw new Error('The Production preview job was not created.');
+      const previewProfileName=String(data.profile_name||name);
       productionPreviewJobId=String(data.job_id);
       await refreshJobs();
       const completed=await monitorProductionJob(data.job_id,'preview',job=>{
         if(previewToken!==voicePreviewEpoch)return false;
         const activeFolder=String(window.ryuPremiumActiveProject?.folder||'');
-        if(productionPreviewRequestProjectFolder&&activeFolder&&activeFolder!==productionPreviewRequestProjectFolder){
-          if($('productionPreviewStatus'))$('productionPreviewStatus').textContent='Preview completed for another project. Reopen its project before playing or downloading this audio.';
+        const jobFolder=String(job?.project_folder||'');
+        const jobChapter=Number(job?.current_chapter||0);
+        if(activeFolder!==productionPreviewRequestProjectFolder||
+            jobFolder!==productionPreviewRequestProjectFolder||
+            jobChapter!==productionPreviewRequestChapterNumber||
+            String(job?.current_chapter_id||'')!==productionPreviewRequestChapterId){
+          if($('productionPreviewStatus'))$('productionPreviewStatus').textContent='This preview belongs to a different project or saved chapter. Generate a fresh preview for the current selection before playback or saving.';
           return false;
         }
-        return preparePreviewPlayback(job,Number(duration),{profileName:name,preserveSummary:true});
+        return preparePreviewPlayback(job,Number(duration),{profileName:previewProfileName,preserveSummary:true});
       });
       if(completed?.state==='completed')await refreshJobs();
     });
@@ -8193,11 +8324,19 @@
       if(String(job.state||'').toLowerCase()!=='completed'||!voicePreviewValid||!lastVoicePreviewPath) throw new Error('Wait for the Production preview to complete and pass audio validation before saving it.');
       const projectFolder=String(window.ryuPremiumActiveProject?.folder||'');
       const chapterNumber=Number(lastVoicePreviewChapterNumber||0);
-      if(!projectFolder||projectFolder!==productionPreviewRequestProjectFolder||Number(job.current_chapter||0)!==chapterNumber) throw new Error('The Production preview no longer matches the active project and selected chapter. Generate it again.');
+      const selectedChapterNumber=Number(productionPreviewSelectedChapter||$('productionPreviewChapterSelect')?.value||0);
+      const selectedChapter=chapters.find(item=>Number(item.number)===selectedChapterNumber);
+      const selectedChapterId=String(selectedChapter?.chapter_id||selectedChapter?.id||'');
+      if(!projectFolder||projectFolder!==productionPreviewRequestProjectFolder||
+          String(job.project_folder||'')!==projectFolder||
+          Number(job.current_chapter||0)!==chapterNumber||
+          selectedChapterNumber!==chapterNumber||
+          productionPreviewRequestChapterNumber!==chapterNumber||
+          selectedChapterId!==productionPreviewRequestChapterId) throw new Error('The Production preview no longer matches the active project and selected saved chapter. Generate it again.');
       const baseName=(lastVoicePreviewProfileName||'Ryu Production Preview').replace(/[<>:"/\\\\|?*\\x00-\\x1f]+/g,'-').trim()||'Ryu Production Preview';
       const suffix='_Chapter_'+String(chapterNumber).padStart(2,'0')+(lastVoicePreviewChapterTitle?'_'+lastVoicePreviewChapterTitle:'');
       const suggestedName=(baseName+suffix+'_Preview').replace(/[<>:"/\\\\|?*\\x00-\\x1f]+/g,'-').trim().replace(/\\s+/g,'_').slice(0,100);
-      const result=await call('production.preview.save',{job_id:productionPreviewJobId,project_folder:projectFolder,chapter_number:chapterNumber,source_path:lastVoicePreviewPath,suggested_name:suggestedName});
+      const result=await call('production.preview.save',{job_id:productionPreviewJobId,project_folder:projectFolder,chapter_number:chapterNumber,chapter_id:productionPreviewRequestChapterId,source_path:lastVoicePreviewPath,suggested_name:suggestedName});
       if(result.cancelled){message('Production preview save cancelled.');return;}
       message('Production chapter preview saved to '+result.path);
     };
