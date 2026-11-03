@@ -1565,7 +1565,66 @@
     }, 12000);
     productionPreviewStop.click();
     record("stage5_production_preview_real_chapter_audio_playback_and_duration_controls", true,
-      "The frozen app generated Chapter Two only, returned measured M4A audio, applied saved Voice Only mode, and passed Play/Pause/Stop/Replay with all four duration controls available.");
+      "The frozen app generated Chapter Two only, returned measured M4A audio with a PCM WAV playback URL, applied saved Voice Only mode, and passed Play/Pause/Stop/Replay with all four duration controls available.");
+
+    // Verify additional real output targets rather than only cycling the
+    // duration buttons. The long saved Chapter Two fixture contains enough
+    // narration to exercise both the 30s performance target and 60s cap.
+    let previousDurationJobId = productionPreviewJobId;
+    for (const target of [
+      {label:"30s",seconds:30,button:durationControls[1]},
+      {label:"60s",seconds:60,button:durationControls[2]}
+    ]) {
+      target.button.click();
+      await waitFor("Production Preview " + target.label + " real duration selection", function () {
+        return target.button.classList.contains("active");
+      }, 5000);
+      productionPreviewStart.click();
+      let targetJobId = "";
+      await waitFor("Production Preview " + target.label + " job start", async function () {
+        const jobs = await invoke("job.list", {include_hidden:true});
+        const active = Array.isArray(jobs)
+          ? jobs.find(job => job.type === "production-preview" &&
+              Number(job.current_chapter || 0) === 2 &&
+              ["queued", "running"].includes(String(job.state || "").toLowerCase()) &&
+              String(job.job_id || "") !== previousDurationJobId)
+          : null;
+        if (!active) return false;
+        targetJobId = String(active.job_id || "");
+        return Boolean(targetJobId);
+      }, 20000);
+      let targetJob = null;
+      await waitFor("Production Preview " + target.label + " real audio completion", async function () {
+        const jobs = await invoke("job.list", {include_hidden:true});
+        targetJob = Array.isArray(jobs)
+          ? jobs.find(job => String(job.job_id || "") === targetJobId)
+          : null;
+        if (!targetJob) return false;
+        const state = String(targetJob.state || "").toLowerCase();
+        if (state === "failed" || state === "cancelled") {
+          throw new Error("Production Preview " + target.label + " ended " + state + ": " + String(targetJob.message || ""));
+        }
+        return state === "completed";
+      }, 360000);
+      const targetResult = targetJob.result || {};
+      const targetOutput = String(targetResult.output_path || targetJob.output_path || "");
+      const targetPlaybackUrl = String(targetResult.file_url || "").toLowerCase();
+      must(Number(targetResult.actual_duration_seconds || 0) > 0 &&
+        targetOutput.toLowerCase().endsWith(".m4a") &&
+        targetPlaybackUrl.startsWith("file:") && targetPlaybackUrl.endsWith(".wav") &&
+        targetResult.playback_format === "wav" &&
+        Math.abs(Number(targetResult.actual_duration_seconds) - target.seconds) <= 5,
+        "Production Preview " + target.label + " did not produce duration-matched M4A output and a WAV playback asset: " +
+          JSON.stringify(targetResult));
+      await waitFor("Production Preview " + target.label + " playback readiness", function () {
+        return document.querySelector("#productionPreviewStatus")?.textContent.includes("Preview ready") &&
+          document.querySelector("#productionPreviewPlay") && !document.querySelector("#productionPreviewPlay").disabled;
+      }, 20000);
+      record("stage5_production_preview_real_" + target.seconds + "_second_audio", true,
+        "The frozen app generated a measured " + Number(targetResult.actual_duration_seconds).toFixed(2) +
+          "s chapter-only M4A with separate PCM WAV playback for the " + target.label + " target.");
+      previousDurationJobId = targetJobId;
+    }
 
     // Exercise a real cancellation request against a second, longer target.
     // The chapter worker is deliberately started through the actual Production
