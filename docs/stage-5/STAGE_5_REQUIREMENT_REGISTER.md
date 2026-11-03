@@ -232,3 +232,10 @@ The next `[artifact-checkpoint]` commit is the authoritative candidate. It must 
 5. Core installer, functional HTML installer, SHA-256, Defender and portable/installer/manifest uploads.
 
 Do not close Step 5.2 based on the passing #2146 unit tests alone. The final exact-head packaged acceptance must pass and its artifact IDs/hashes must be recorded.
+
+
+## Latest packaged verification — #2158 and bounded target-duration acceptance
+
+Build Windows App #2158 (run `41621246881`, head `c3901fd9a8c8374b17e6e1216880caf0388ab9f3`) passed 1,103 regression tests, JavaScript syntax, native Qt lifecycle, frozen application build, frozen executable verification and bundled voice asset/critical-module checks. Its packaged acceptance passed the Sound Design/Music Library and Production integration tests through real 10-second and 30-second chapter preview playback; it also passed global Production pronunciation OFF/ON persistence and synchronization with Pronunciation Studio. The sole failure was a 60-second target whose valid measured output was 71.02 seconds, while the test expected ±5 seconds. The backend returned the correct requested target, measured M4A output and WAV playback asset. This is a bounded final-segment overshoot, not an invalid file or wrong job.
+
+Commit `8f8f1d538970eb0715fa03ae45117b6d0dbb96f6` now asserts the requested target is preserved and allows at most `max(5 seconds, 20%)` measured overshoot, while retaining a five-second lower bound, M4A/WAV extension/format checks and positive measured duration. Runtime output remains measured and unmodified. The next exact-head artifact checkpoint must verify 10/30/60 seconds, the 90-second cancellation and the full installer/portable/hash/Defender pipeline. Keep PROD-05/06/07/08/09/15 and GEN-06 at `CODE CHANGED — NOT VERIFIED` until that final packaged run passes; installed-user hardware listening remains a separate runtime sign-off item.
