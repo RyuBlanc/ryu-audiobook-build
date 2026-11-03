@@ -5848,6 +5848,67 @@ class PremiumV2Bridge(QObject):
         valid = actual.is_file() and actual.stat().st_size > 0
         success = valid and not summary.cancelled and not summary.packaging_failed and not summary.chapters_failed and summary.chapters_completed == summary.chapters_total
         state = load_state(project.folder)
+        current_project_job_id = str(state.get("generation_job_id") or "").strip()
+        callback_job_id = str(job_id or "").strip()
+        owns_project_state = not current_project_job_id or current_project_job_id == callback_job_id
+
+        if not owns_project_state:
+            # A late callback may finish after a newer generation has claimed
+            # this project. Keep the old job's terminal record, but never let it
+            # overwrite the newer project's status, completed chapters or output.
+            newer_job_id = current_project_job_id
+            if success:
+                self._job_update(
+                    job_id,
+                    state="completed",
+                    stage="Completed; project owned by newer generation",
+                    progress=100,
+                    message=(
+                        "This generation completed, but a newer job now owns the project. "
+                        "The older output was not attached to project state."
+                    ),
+                    output_path=None,
+                    result={
+                        "superseded": True,
+                        "superseded_by_job_id": newer_job_id,
+                        "chapters_total": summary.chapters_total,
+                        "chapters_completed": summary.chapters_completed,
+                        "chapters_failed": list(summary.chapters_failed or []),
+                        "voice_profile": voice_name,
+                    },
+                    error=None,
+                    recoverable=False,
+                )
+            else:
+                status = "cancelled" if summary.cancelled else "failed"
+                detail = summary.packaging_error or (
+                    "; ".join(str(v) for v in (summary.failure_details or {}).values())
+                    if summary.failure_details else "Generated output did not pass final validation."
+                )
+                current = self._jobs.get(job_id, {}).get("progress", 0)
+                self._job_update(
+                    job_id,
+                    state=status,
+                    stage="Generation " + status + " (superseded)",
+                    progress=min(98, int(current or 0)),
+                    message=(
+                        "A newer generation owns this project; the older job did not change "
+                        "project state. " + detail
+                    ),
+                    output_path=None,
+                    error={
+                        "code": status,
+                        "message": detail,
+                        "failed_chapters": list(summary.chapters_failed or []),
+                        "superseded": True,
+                        "superseded_by_job_id": newer_job_id,
+                    },
+                    recoverable=False,
+                )
+            with self._jobs_lock:
+                self._generators.pop(job_id, None)
+            return
+
         if success:
             state.update({"status": "completed", "output_path": str(actual), "voice_profile": voice_name,
                           "completed_chapters": list(summary.chapters_completed_numbers or []),
