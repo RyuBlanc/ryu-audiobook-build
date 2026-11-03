@@ -513,3 +513,37 @@ Run #2145 on exact candidate `46bfaf3bd8cd04b878e2136f7d0840e1b95fafbe`:
 - No application code was changed in response to this test failure.
 
 The next artifact checkpoint is the deciding verification for this correction. Require its test job to pass and its Windows build job to pass the packaged Sound Design/Music Library and Production Preview generation/playback/cancellation acceptance before closing Stage 5.2.
+
+
+## 36. #2146 AAC playback diagnosis and final Production Preview acceptance correction — 3 November 2026
+
+### Run history reconciled
+
+- #2141 (`5d31633`) passed the 1,100-test regression suite but failed in packaged Sound Design/Music Library acceptance when Production Preview could not reach playable/ready status.
+- #2142 (`e8940ef`) passed 1,101 tests and frozen app/voice checks, then failed because the packaged test checked a job-monitor chapter label before a preview job existed. The selector/status timing was corrected.
+- #2143 (`b896628`) passed 1,101 tests in 56.537 seconds; it was a regression-only run and the build job was skipped by the workflow's artifact-checkpoint policy.
+- #2144 (`a7a7137`) passed its 1,101-test job and frozen build checks, but packaged Production Preview did not become playable. Its status-node/ownership issues were corrected before the next attempt.
+- #2145 (`46bfaf3`) failed one regression only because a source contract still expected the superseded `activeFolder!==productionPreviewRequestProjectFolder` expression. The current native `project.get_active` and normalized ownership implementation is intentional; that stale test was corrected without changing runtime code.
+- #2146 (`991bd01`) passed 1,102 tests and all frozen app/voice checks. Packaged Sound Design/Music Library, metadata, and project-switch acceptance passed. The Production Preview backend then successfully generated Chapter Two M4A (measured 7.64s) but the UI player emitted `Playback error`; the result's `file_url` pointed to AAC/M4A and the embedded Qt WebEngine reported that no supported source could be found.
+
+### Actual cause and correction
+
+The failure was not the M4A encoder or the chapter worker. The generated M4A existed, had a valid measured duration and correct chapter/project identity, but the packaged HTML audio player did not have an AAC decoder available. The production save path correctly needs the M4A asset, so replacing the M4A output or weakening the playback acceptance would be wrong.
+
+- Commit `9cd64ba0c0bdab5b75c5e2471504ff0ff523fbbf`: `_preview_worker` now keeps `result.output_path` as the authoritative M4A and uses a per-job PCM WAV copy as the browser playback `file_url`. It runs FFmpeg to decode the M4A to stereo 44.1 kHz PCM, verifies the WAV file and ensures duration matches within 1.5 seconds. The WAV path is retained for playback and removed on cancellation/failure; `production.preview.save` continues to validate/copy the M4A output.
+- Commit `d050f726583352b054705b47581c03f61f6d103f`: packaged acceptance verifies separate M4A save output and WAV playback URL.
+- Commit `caaec6438da56e701a1ca2a27e47f5184b9b2e2b`: regression contract covers the output/playback split and PCM conversion.
+- Commit `573a7a5be4e22e86383d1ffe5c81556e446fa85c`: saved Chapter Two fixture now includes sufficient text for real 30/60-second duration targets.
+- Commit `24fd8f92226fae060b1ee074bad345edc80f36c6`: packaged acceptance now runs real 30- and 60-second preview generations in addition to the 10-second playback test; 90-second Chapter Three remains the live cancellation test.
+- Commit `e3470540f03fec7cc98037f8bb3f43964b4c37f5`: adjusts the source assertion to check the actual `_run([` FFmpeg helper invocation.
+- Commit `25d8af7deb79367581dfe577dda17625a265a3ad`: initializes the playback cleanup path before synthesis/conversion so error cleanup cannot throw when no playback copy exists.
+
+### No-cancellation workflow policy
+
+The current workflow has concurrency group `ryu-audiobook-windows-build-${{ github.ref }}-${{ github.run_id }}` and `cancel-in-progress: false`. Each run has a distinct concurrency key; a later push therefore does not supersede or cancel the prior pending run in the same branch. Earlier cancellations #2137–#2140 and others occurred before this isolation change. Future completed/failed runs remain independently auditable.
+
+### Final exact-head verification candidate
+
+The following `[artifact-checkpoint]` commit is the authoritative candidate. It must pass the full test job, JavaScript and Qt lifecycle checks, frozen Windows packaging, Stage 2 Sound Design/Music Library acceptance, Stage 5 Production preview M4A/WAV generation, duration matrix, Play/Pause/Stop/Replay, 90-second cancellation, installer, SHA-256, Defender and artifact uploads. The exact passing run ID, head SHA, test count, artifact IDs/sizes and SHA-256 values will be appended after verification.
+
+Stage 5.2 remains open until that exact-head packaged run succeeds. The still-open PROD-14 and GEN-01–GEN-05 rows remain in the later full-generation/job-history/recovery scope; they are not being marked complete by this preview step.
