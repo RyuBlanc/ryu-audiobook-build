@@ -196,3 +196,39 @@ The exact selected chapter was stored in `productionPreviewSelectedChapter`, but
 - #2143 corrected the idle selected-chapter status and passed 1,101 regressions in 56.537 seconds, JavaScript syntax, and the Qt lifecycle check. Its Windows package job was skipped because its commit lacked the `[artifact-checkpoint]` tag, not because of a failed test.
 - The next documentation-only `[artifact-checkpoint]` commit packages the exact #2143 source. Require a green exact-head Windows package and the real Production preview/playback/cancellation checks before changing any Stage 5.2 requirement status to accepted.
 - PROD-08/09/15 and GEN-06 remain `CODE CHANGED — NOT VERIFIED` until package acceptance and runtime matrix evidence are complete. PROD-14 and GEN-01–05 remain open for later steps; do not move these into Step 5.2 closeout.
+
+
+## Step 5.2 final packaged-playback correction — 3 November 2026
+
+Latest failure reviewed: Build Windows App #2146 (run `41612908403`, head `991bd0158784964b6d6c2b47288c93eb7adb4c6a`).
+
+- The regression job passed: 1,102 tests, frontend JavaScript syntax and isolated Qt lifecycle all successful.
+- Frozen app build, frozen verification and bundled voice asset/module verification passed.
+- Packaged Sound Design/Music Library, metadata and project-switch checks passed.
+- The Production chapter preview worker then completed successfully and returned a measured 7.64-second AAC/M4A for Chapter Two. The packaged UI remained in Playback error because the embedded Qt WebEngine HTMLAudioElement could not decode the AAC/M4A file URL.
+- This is a real packaged playback compatibility issue. It is not a synthesis, saved-chapter identity or M4A file-generation failure. The acceptance test was not weakened.
+
+### Corrective implementation
+
+- `9cd64ba0c0bdab5b75c5e2471504ff0ff523fbbf`: retain the validated M4A as `result.output_path` for Save As, and generate a job-owned PCM WAV playback copy for WebEngine. The conversion validates the WAV file and requires its measured duration to remain within 1.5 seconds of the M4A. The job fails closed if the playback copy cannot be created or verified. Cancellation/failure cleanup also removes the job-owned WAV.
+- `d050f726583352b054705b47581c03f61f6d103f`: packaged acceptance now requires separate M4A output and WAV playback URLs.
+- `caaec6438da56e701a1ca2a27e47f5184b9b2e2b`: source regression verifies the M4A/WAV split, FFmpeg PCM conversion and duration parity.
+- `573a7a5be4e22e86383d1ffe5c81556e446fa85c`: the saved Chapter Two fixture has enough narration to exercise real 30- and 60-second previews, as well as the existing 10-second preview and 90-second cancellation scenario.
+- `24fd8f92226fae060b1ee074bad345edc80f36c6`: packaged acceptance generates and validates real 30- and 60-second previews; the 90-second Chapter Three preview remains a real cancellation test.
+- `e3470540f03fec7cc98037f8bb3f43964b4c37f5`: corrects the new source-contract assertion for the FFmpeg helper.
+- `25d8af7deb79367581dfe577dda17625a265a3ad`: keeps the cleanup path non-null even if preview generation fails before the playback copy is created.
+
+### Run-cancellation policy
+
+The workflow currently uses the concurrency group `ryu-audiobook-windows-build-${{ github.ref }}-${{ github.run_id }}` with `cancel-in-progress: false`. The run ID makes each push independent, while the disabled cancellation avoids cancelling a running build. New source commits no longer supersede another pending Stage 5 run. The outstanding older cancellations were produced before this per-run isolation change.
+
+### Final exact-head gate
+
+The next `[artifact-checkpoint]` commit is the authoritative candidate. It must pass:
+1. All Python regression tests, JavaScript syntax validation and isolated Qt lifecycle regression.
+2. Frozen Windows app build, frozen app and bundled voice verification.
+3. Packaged Sound Design/Music Library, metadata and project-switch acceptance.
+4. Actual Production chapter M4A generation plus separate playable PCM WAV at 10/30/60 seconds; Play/Pause/Stop/Replay; 90-second preview cancellation.
+5. Core installer, functional HTML installer, SHA-256, Defender and portable/installer/manifest uploads.
+
+Do not close Step 5.2 based on the passing #2146 unit tests alone. The final exact-head packaged acceptance must pass and its artifact IDs/hashes must be recorded.
