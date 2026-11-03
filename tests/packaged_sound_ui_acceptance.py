@@ -16,7 +16,6 @@ import wave
 import zlib
 import winreg
 
-from app.tts.voice_profile import load_profiles
 
 
 _SETTINGS_PROJECT_KEY = r"Software\RyuBlanc\Ryu's Audiobook\project"
@@ -284,12 +283,10 @@ def _run(args: argparse.Namespace) -> int:
         "year": "2026",
         "genre": "Fantasy",
     }
-    narrator_profile = next(
-        (profile for profile in load_profiles() if profile.name == "Offline Character • Anime Hero"),
-        None,
-    )
-    if narrator_profile is None:
-        raise RuntimeError("The packaged Voice Studio catalogue did not expose its built-in Anime Hero profile.")
+    # Keep the fixture independent from heavyweight TTS/runtime imports. The
+    # selected name must still resolve through the frozen app's real voice.select
+    # bridge, which rejects names not present in its live voice catalogue.
+    narrator_profile_name = "Offline Character • Anime Hero"
     metadata_history = {
         "author": f"Historical Author {token}",
         "publisher": f"Historical Press {token}",
@@ -453,7 +450,7 @@ def _run(args: argparse.Namespace) -> int:
         "secondary_project_folder": str(secondary_project_folder.resolve()),
         "original_project_title": project_title,
         "metadata": metadata_expected,
-        "narrator_profile_name": narrator_profile.name,
+        "narrator_profile_name": narrator_profile_name,
         "metadata_history": metadata_history,
         "metadata_cover_path": str(metadata_cover_source.resolve()),
     }, ensure_ascii=True, indent=2), encoding="utf-8")

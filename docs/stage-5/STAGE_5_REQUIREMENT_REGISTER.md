@@ -57,3 +57,7 @@ A button, static assertion, job submission, file existence or build alone does n
 ## Step 5.1 interpretation correction
 
 The first implementation gated only Title, Author, Narrator, Language and Genre. On re-reading the supplied Step 5.1.1 list, all ten entries are under the heading "Required metadata fields"; the gate and tests now cover all ten, including Publisher, Series, Series Volume, Release Year and a real M4B-compatible project cover. No field has been downgraded to optional.
+
+## Step 5.1 narrator acceptance test isolation
+
+The packaged acceptance fixture names the deterministic built-in narrator profile `Offline Character • Anime Hero` without importing the heavyweight TTS provider module into the harness interpreter. The frozen application still performs real catalogue resolution and persistence through `voice.select`; an unknown or unavailable profile will fail the packaged test.

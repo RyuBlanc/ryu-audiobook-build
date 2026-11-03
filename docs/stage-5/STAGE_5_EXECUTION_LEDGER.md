@@ -133,3 +133,10 @@ The ten-field validator commit had over-escaped the Python NUL-character replace
 ## 15. #2096 packaged metadata acceptance failure and correction
 
 Run [#2096](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41543922208) passed the full regression suite, frozen application build, frozen EXE verification and bundled assets. Its packaged Sound Design acceptance exercised the metadata editor through the forced save failure and successful retry; all earlier packaged checks passed. The single final assertion failed because the immediate post-save cover check expected forward slashes in the Windows path. The restart assertion had already been corrected to normalize backslashes, but this earlier assertion had not. The saved cover is stored at the expected project-local `assets\\cover.png`; the test now normalizes the separator consistently and reports the exact mismatched metadata keys if another field ever differs.
+
+## 16. #2098 packaged narrator acceptance fixture dependency correction
+
+Run [#2098](https://github.com/RyuBlanc/ryu-audiobook-build/actions/runs/41550944891) passed the complete regression job (1,079 tests), JavaScript syntax validation, native Qt lifecycle check, frozen EXE build/self-test and bundled asset verification. Its packaged UI job stopped before launching the application because the acceptance Python script imported `app.tts.voice_profile`, which imports `imageio_ffmpeg`; the lightweight acceptance interpreter does not install that optional TTS dependency. This was an acceptance-harness dependency error, not an application or narrator-selection failure.
+
+The packaged fixture now uses the stable built-in Voice Studio catalogue name `Offline Character • Anime Hero` directly. The frozen application's real `voice.select` command remains the authority: it must resolve and save the profile through the installed profile catalogue before the read-only metadata field and restart persistence assertions can pass. No application runtime dependency was added to the acceptance environment.
+
