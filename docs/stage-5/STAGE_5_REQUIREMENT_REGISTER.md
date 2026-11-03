@@ -257,3 +257,16 @@ The previous #2158 failure (60-second preview measured 71.02 seconds) is separat
 Candidate source/test fix: `540da67492a5cd33a7881be2ec4559d1994a1412`. The #2162 full packaged run already demonstrated that the packaged 10/30/60-second chapter previews, Voice Only sound configuration, Playback controls and the 90-second cancellation path completed before the post-run state validator failed. The validator failure was caused by the test leaving the primary fixture in Voice Only instead of restoring its original enabled Chapter-Based configuration. The new test teardown restores that state through the Production UI and native bridge; no assertion or product behavior has been weakened.
 
 The authoritative next run is this matching-head `[artifact-checkpoint]`. It must pass 1) all regression tests and syntax/Qt checks, 2) frozen app and asset verification, 3) packaged Sound Design/Production Preview acceptance, 4) saved-state and second-process restart validation, and 5) installer/portable/manifest build, release hashes and Defender scan. PROD-05–09, PROD-15 and GEN-06 remain CODE CHANGED — NOT VERIFIED until the exact-head package run succeeds and outputs are recorded. PROD-14 and GEN-01–05 are explicitly Step 5.3 scope, not 5.2 exit blockers.
+
+
+## PROD-15 Save As acceptance closure addition — 3 November 2026
+
+A final evidence audit found that the packaged Production Preview test verified the Save button became enabled but did not click it. The backend Save route was already implemented and guarded by completed Production job ID, active project, chapter number, stable chapter ID, exact generated source path and temporary Preview folder; however, a button-enabled assertion alone does not prove the copied file is produced.
+
+The following acceptance coverage is now added:
+- `864f6b8397a8ed58882a195494c6534475dd1235`: a tightly bounded test-only Save As path in `_production_preview_save`. It is honored only when the packaged acceptance script, result marker and Save destination variables are all set; the destination is constrained to the marker's temporary parent. Ordinary desktop sessions always use the native Windows QFileDialog.
+- `d3a5f22ec4db0aa05e99629e713a629a34a639b8` and `75fc696ed6ec4f90e4866639f41e54a554b5ab97`: add a positive backend test proving a completed, correctly owned M4A job is copied byte-for-byte to the chosen Save As path, with returned file size/job/chapter identity.
+- `8ed009859ab4d006268a751684714854fafc89f2`: the frozen packaged UI acceptance clicks Save Production Preview and waits for the actual success toast.
+- `fdf1316b112b0fb0da6e9558cf4cc52db04639ba`: the Windows harness verifies that the saved output exists, is non-empty, has an M4A `ftyp` header and was reported as a passed packaged check.
+
+This is now a required part of the next exact-head package acceptance. Do not mark PROD-15 VERIFIED COMPLETE until that run passes the new Save As assertions along with the existing real chapter preview, playback, bounded 10/30/60 target checks and 90-second cancellation.
